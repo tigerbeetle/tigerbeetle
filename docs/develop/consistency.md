@@ -4,8 +4,8 @@ sidebar_position: 7
 
 # Consistency
 
-TigerBeetle is designed to guard against bugs not only in its [own
-code](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), but at the
+TigerBeetle is designed to guard against bugs not only in its
+[own code](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), but at the
 boundaries, in the application code which interfaces with TigerBeetle. This is exhibited by the
 client's API design, which may be surprising (see [Retries](#retries)) when contrasted with a more
 conventional database.
@@ -15,9 +15,9 @@ handling farther up the stack.
 
 ## Guarantees
 
-TigerBeetle provides strict serializability ([serializability +
-linearizability](http://www.bailis.org/blog/linearizability-versus-serializability/)) to each
-[client session](./client-sessions.md).
+TigerBeetle provides strict serializability
+([serializability + linearizability](http://www.bailis.org/blog/linearizability-versus-serializability/))
+to each [client session](./client-sessions.md).
 
 But consistency models can seem arcane. What specific guarantees does TigerBeetle provide to
 applications?
@@ -29,13 +29,13 @@ applications?
   meaning that read operations that happen after a given write operation will observe the effects of
   the write.
 - A client session observes writes in the order that they occur on the cluster.
-- A client session observes [`debits_posted`](../reference/accounts.md#debits_posted) and
-  [`credits_posted`](../reference/accounts.md#credits_posted) as monotonically increasing. That is,
-  a client session will never see `credits_posted` or `debits_posted` decrease.
+- A client session observes [`debits_posted`](../api-reference/accounts.md#debits_posted) and
+  [`credits_posted`](../api-reference/accounts.md#credits_posted) as monotonically increasing. That
+  is, a client session will never see `credits_posted` or `debits_posted` decrease.
 - A client session never observes uncommitted updates.
 - A client session never observes a broken invariant (e.g.
-  [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits)
-  or [`flags.linked`](../reference/transfers.md#flagslinked)).
+  [`flags.credits_must_not_exceed_debits`](../api-reference/accounts.md#flagscredits_must_not_exceed_debits)
+  or [`flags.linked`](../api-reference/transfers.md#flagslinked)).
 - Multiple client sessions may receive replies [out of order](#reply-order) relative to one another.
   For example, if two clients submit requests around the same time, the client whose request is
   committed first might receive the reply later.
@@ -49,9 +49,9 @@ applications?
 - Requests do not [time out](#retries). Clients will continuously retry requests until they receive
   a reply from the cluster. This is because in the case of a network partition, a lack of response
   from the cluster could either indicate that the request was dropped before it was processed or
-  that the reply was dropped after the request was processed. Note that individual [pending
-  transfers](./two-phase-transfers.md) within a request may have
-  [timeouts](../reference/transfers.md#timeout).
+  that the reply was dropped after the request was processed. Note that individual
+  [pending transfers](./two-phase-transfers.md) within a request may have
+  [timeouts](../api-reference/transfers.md#timeout).
 - Requests retried by their original client session receive identical replies.
 - Requests retried by a different client (same request body, different session) may receive
   [different replies](#consistency-with-foreign-databases).
@@ -62,13 +62,13 @@ applications?
   all of the events in a batch will succeed, or that all will fail. Events succeed or fail
   independently unless they are explicitly [linked](./client-requests.md#linked-events)
 
-#### [Events](../reference/operations/index.md)
+#### [Events](../api-reference/operations/index.md)
 
 - Once committed, an event will always be committed — the cluster's state never backtracks.
-- Within a cluster, object [timestamps are unique and strictly
-  increasing](./time.md#timestamps-are-totally-ordered). No two objects within the same cluster will
-  have the same timestamp. Furthermore, the order of the timestamps indicates the order in which the
-  objects were committed.
+- Within a cluster, object
+  [timestamps are unique and strictly increasing](./time.md#timestamps-are-totally-ordered). No two
+  objects within the same cluster will have the same timestamp. Furthermore, the order of the
+  timestamps indicates the order in which the objects were committed.
 - If a client session is terminated and restarts, it is guaranteed to see the effects of updates for
   which the corresponding reply was received prior to termination.
 - If a client session is terminated and restarts, it is _not_ guaranteed to see the effects of
@@ -76,24 +76,24 @@ applications?
   may occur at any point in the future, or never. Handling application crash recovery safely
   requires [using `id`s to idempotently retry events](#consistency-with-foreign-databases).
 
-#### [Accounts](../reference/accounts.md)
+#### [Accounts](../api-reference/accounts.md)
 
 - Accounts are immutable. They are never modified once they are successfully created (excluding
   balance fields, which are modified by transfers).
-- There is at most one `Account` with a particular [`id`](../reference/accounts.md#id).
-- The sum of all accounts' [`debits_pending`](../reference/accounts.md#debits_pending) equals the
-  sum of all accounts' [`credits_pending`](../reference/accounts.md#credits_pending).
-- The sum of all accounts' [`debits_posted`](../reference/accounts.md#debits_posted) equals the sum
-  of all accounts' [`credits_posted`](../reference/accounts.md#credits_posted).
+- There is at most one `Account` with a particular [`id`](../api-reference/accounts.md#id).
+- The sum of all accounts' [`debits_pending`](../api-reference/accounts.md#debits_pending) equals
+  the sum of all accounts' [`credits_pending`](../api-reference/accounts.md#credits_pending).
+- The sum of all accounts' [`debits_posted`](../api-reference/accounts.md#debits_posted) equals the
+  sum of all accounts' [`credits_posted`](../api-reference/accounts.md#credits_posted).
 
-#### [Transfers](../reference/transfers.md)
+#### [Transfers](../api-reference/transfers.md)
 
 - Transfers are immutable. They are never modified once they are successfully created.
-- There is at most one `Transfer` with a particular [`id`](../reference/transfers.md#id).
+- There is at most one `Transfer` with a particular [`id`](../api-reference/transfers.md#id).
 - A [pending transfer](./two-phase-transfers.md#reserve-funds-pending-transfer) resolves at most
   once.
-- Transfer [timeouts](../reference/transfers.md#timeout) are deterministic, driven by the [cluster's
-  timestamp](./time.md#why-tigerbeetle-manages-timestamps).
+- Transfer [timeouts](../api-reference/transfers.md#timeout) are deterministic, driven by the
+  [cluster's timestamp](./time.md#why-tigerbeetle-manages-timestamps).
 
 ### Reply Order
 
@@ -179,10 +179,10 @@ TigerBeetle objects may correspond to objects in a foreign data store (e.g. anot
 multiple data stores consistent (in sync) is subtle in the context of application process faults.
 
 Object creation events are idempotent, but only the first attempt will return
-[`.ok`](../reference/operations/create_transfers.md#ok), while all successive identical attempts
-return [`.exists`](../reference/operations/create_transfers.md#exists). The client may crash after
-creating the object, but before receiving the `.ok` reply. Because the session resets, neither that
-client nor any others will see the object's corresponding `.ok` result.
+[`.ok`](../api-reference/operations/create_transfers.md#ok), while all successive identical attempts
+return [`.exists`](../api-reference/operations/create_transfers.md#exists). The client may crash
+after creating the object, but before receiving the `.ok` reply. Because the session resets, neither
+that client nor any others will see the object's corresponding `.ok` result.
 
 Therefore, to recover to the correct state after a crash, an application that synchronizes updates
 between multiple data stores must treat `.exists` as equivalent to `.ok`.
@@ -194,8 +194,8 @@ Suppose that an application creates users within Postgres, and for each user a c
 
 This scenario depicts the typical case:
 
-1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and `U₁.account_exists =
-false`.
+1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and
+   `U₁.account_exists = false`.
 2. _Application_: Send "create account" request `A₁` to the cluster.
 3. _Cluster_: Create `A₁`; reply `ok`.
 4. _Application_: Receive reply `A₁: ok` from the cluster.
@@ -203,14 +203,14 @@ false`.
 
 But suppose the application crashes and restarts immediately after sending its request (step 2):
 
-1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and `U₁.account_exists =
-false`.
+1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and
+   `U₁.account_exists = false`.
 2. _Application_: Send "create account" request `A₁` to the cluster.
 3. _Application_: Crash. Restart.
 4. _Cluster_: Create `A₁`; reply `ok` — but the application session has reset, so this reply never
    reaches the application.
-5. _Application_: Send "create account" request `A₁` to the cluster. The request uses the same ID
-   as in step 1.
+5. _Application_: Send "create account" request `A₁` to the cluster. The request uses the same ID as
+   in step 1.
 6. _Cluster_: Create `A₁`; reply `exists`.
 7. _Application_: Receive reply `A₁: exists` from the cluster.
 8. _Application_: Set `U₁.account_exists = true`.

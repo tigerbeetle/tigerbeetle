@@ -4,17 +4,22 @@ sidebar_position: 2
 
 # Multi-Debit, Multi-Credit Transfers
 
-TigerBeetle is designed for maximum performance. In order to keep it lean, the database only supports simple transfers with a single debit and a single credit.
+TigerBeetle is designed for maximum performance. In order to keep it lean, the database only
+supports simple transfers with a single debit and a single credit.
 
-However, you'll probably run into cases where you want transactions with multiple debits and/or credits. For example, you might have a transfer where you want to extract fees and/or taxes.
+However, you'll probably run into cases where you want transactions with multiple debits and/or
+credits. For example, you might have a transfer where you want to extract fees and/or taxes.
 
 Read on to see how to implement one-to-many and many-to-many transfers!
 
-> Note that all of these examples use the [Linked Transfers flag (`flags.linked`)](../../reference/transfers.md#flagslinked) to ensure that all of the transfers succeed or fail together.
+> Note that all of these examples use the
+> [Linked Transfers flag (`flags.linked`)](../../api-reference/transfers.md#flagslinked) to ensure
+> that all of the transfers succeed or fail together.
 
 ## One-to-Many Transfers
 
-Transactions that involve multiple debits and a single credit OR a single debit and multiple credits are relatively straightforward.
+Transactions that involve multiple debits and a single credit OR a single debit and multiple credits
+are relatively straightforward.
 
 You can use multiple linked transfers as depicted below.
 
@@ -48,7 +53,8 @@ This example debits multiple accounts and credits a single account. It uses the 
 
 Transactions with multiple debits and multiple credits are a bit more involved (but you got this!).
 
-This is where the accounting concept of a Control Account comes in handy. We can use this as an intermediary account, as illustrated below.
+This is where the accounting concept of a Control Account comes in handy. We can use this as an
+intermediary account, as illustrated below.
 
 In this example, we'll use the following accounts:
 
@@ -64,10 +70,16 @@ In this example, we'll use the following accounts:
 |    USD |     `Control` |            `Y` |   1000 |           true |
 |    USD |     `Control` |            `Z` |     50 |          false |
 
-Here, we use two transfers to debit accounts `A` and `B` and credit the `Control` account, and another three transfers to credit accounts `X`, `Y`, and `Z`.
+Here, we use two transfers to debit accounts `A` and `B` and credit the `Control` account, and
+another three transfers to credit accounts `X`, `Y`, and `Z`.
 
-If you looked closely at this example, you may have noticed that we could have debited `B` and credited `Z` directly because the amounts happened to line up. That is true!
+If you looked closely at this example, you may have noticed that we could have debited `B` and
+credited `Z` directly because the amounts happened to line up. That is true!
 
-For a little more extreme performance, you _might_ consider implementing logic to circumvent the control account where possible, to reduce the number of transfers to implement a compound journal entry.
+For a little more extreme performance, you _might_ consider implementing logic to circumvent the
+control account where possible, to reduce the number of transfers to implement a compound journal
+entry.
 
-However, if you're just getting started, you can avoid premature optimizations (we've all been there!). You may find it easier to program these compound journal entries _always_ using a control account -- and you can then come back to squeeze this performance out later!
+However, if you're just getting started, you can avoid premature optimizations (we've all been
+there!). You may find it easier to program these compound journal entries _always_ using a control
+account -- and you can then come back to squeeze this performance out later!

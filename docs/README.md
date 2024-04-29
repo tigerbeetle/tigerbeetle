@@ -14,14 +14,12 @@ performance.
 
 ## Developing on TigerBeetle
 
-Read more about [Developing on TigerBeetle](./develop/README.md) to understand the
-data model, learn how to integrate TigerBeetle into your system, and see some advanced design
-patterns.
+Read more about [Developing on TigerBeetle](./develop/README.md) to understand the data model, learn
+how to integrate TigerBeetle into your system, and see some advanced design patterns.
 
 ## Client libraries
 
-We officially support the following libraries for communicating with a
-TigerBeetle cluster:
+We officially support the following libraries for communicating with a TigerBeetle cluster:
 
 - [.NET](/src/clients/dotnet/README.md)
 - [Go](/src/clients/go/README.md)
@@ -34,15 +32,15 @@ Within each client library README you will find links to sample code.
 
 To understand TigerBeetle's data model, see:
 
-- [Accounts](./reference/accounts.md)
-- [Transfers](./reference/transfers.md)
-- And [Operations](./reference/operations/index.md)
-  - [`create_accounts`](./reference/operations/create_accounts.md)
-  - [`create_transfers`](./reference/operations/create_transfers.md)
-  - [`lookup_accounts`](./reference/operations/lookup_accounts.md)
-  - [`lookup_transfers`](./reference/operations/lookup_transfers.md)
-  - [`get_account_balances`](./reference/operations/get_account_balances.md)
-  - [`get_account_transfers`](./reference/operations/get_account_transfers.md)
+- [Accounts](./api-reference/accounts.md)
+- [Transfers](./api-reference/transfers.md)
+- And [Operations](./api-reference/operations/index.md)
+  - [`create_accounts`](./api-reference/operations/create_accounts.md)
+  - [`create_transfers`](./api-reference/operations/create_transfers.md)
+  - [`lookup_accounts`](./api-reference/operations/lookup_accounts.md)
+  - [`lookup_transfers`](./api-reference/operations/lookup_transfers.md)
+  - [`get_account_balances`](./api-reference/operations/get_account_balances.md)
+  - [`get_account_transfers`](./api-reference/operations/get_account_transfers.md)
 
 ## Dive Deeper
 
@@ -54,7 +52,8 @@ Learn more about TigerBeetle's [mission, history](./about/README.md),
 
 - [Watch our talks, listen to our podcasts](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TALKS.md)
 - [Read HACKING.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/HACKING.md)
-- And explore internal READMEs within the [TigerBeetle src directory](https://github.com/tigerbeetle/tigerbeetle/tree/main/src)
+- And explore internal READMEs within the
+  [TigerBeetle src directory](https://github.com/tigerbeetle/tigerbeetle/tree/main/src)
 
 ## Community
 

@@ -9,20 +9,21 @@ as MySQL or an in-memory database such as Redis:
 
 - Strict consistency, CRCs and crash safety are not enough.
 
-- TigerBeetle **handles and recovers from Latent Sector Errors** (e.g. at least [0.031% of SSD disks
-  per year on average](https://www.usenix.org/system/files/fast20-maneas.pdf), and [1.4% of
-  Enterprise HDD disks per year on
-  average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf))
+- TigerBeetle **handles and recovers from Latent Sector Errors** (e.g. at least
+  [0.031% of SSD disks per year on average](https://www.usenix.org/system/files/fast20-maneas.pdf),
+  and
+  [1.4% of Enterprise HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf))
   **detects and repairs disk corruption or misdirected I/O where firmware reads/writes the wrong
-  sector** (e.g. at least [0.023% of SSD disks per year on
-  average](https://www.usenix.org/system/files/fast20-maneas.pdf), and [0.466% of Nearline HDD disks
-  per year on
-  average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)),
+  sector** (e.g. at least
+  [0.023% of SSD disks per year on average](https://www.usenix.org/system/files/fast20-maneas.pdf),
+  and
+  [0.466% of Nearline HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)),
   and **detects and repairs data tampering** (on a minority of the cluster, as if it were
   non-Byzantine corruption) with hash-chained cryptographic checksums.
 
-- TigerBeetle **uses Direct I/O by design** to sidestep [cache coherency bugs in the kernel page
-  cache](https://www.usenix.org/system/files/atc20-rebello.pdf) after an EIO fsync error.
+- TigerBeetle **uses Direct I/O by design** to sidestep
+  [cache coherency bugs in the kernel page cache](https://www.usenix.org/system/files/atc20-rebello.pdf)
+  after an EIO fsync error.
 
 - TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server
   because disk firmware can contain bugs and because single server systems fail.
@@ -37,18 +38,18 @@ as MySQL or an in-memory database such as Redis:
   split-brain associated with ad hoc manual failover systems.
 
 - TigerBeetle is “fault-aware” and **recovers from local storage failures in the context of the
-  global consensus protocol**, providing [more safety than replicated state machines such as
-  ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs). For example, TigerBeetle can
-  disentangle corruption in the middle of the committed journal (caused by bitrot) from torn writes
-  at the end of the journal (caused by a power failure) to uphold durability guarantees given for
-  committed data and maximize availability.
+  global consensus protocol**, providing
+  [more safety than replicated state machines such as ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs).
+  For example, TigerBeetle can disentangle corruption in the middle of the committed journal (caused
+  by bitrot) from torn writes at the end of the journal (caused by a power failure) to uphold
+  durability guarantees given for committed data and maximize availability.
 
 - TigerBeetle does not depend on synchronized system clocks, does not use leader leases, and
   **performs leader-based timestamping** so that your application can deal only with safe relative
   quantities of time with respect to transfer timeouts. To ensure that the leader's clock is within
   safe bounds of "true time", TigerBeetle combines all the clocks in the cluster to create a
-  fault-tolerant clock that we call ["cluster
-  time"](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/).
+  fault-tolerant clock that we call
+  ["cluster time"](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/).
 
 ## Fault Models
 
@@ -74,9 +75,10 @@ We adopt the following fault models with respect to storage, network, memory and
   Therefore, we do not depend on any sector atomicity guarantees from the disk.
 
 - The Linux kernel page cache is not reliable and may misrepresent the state of data on disk after
-  an EIO or latent sector error. See _[Can Applications Recover from fsync
-  Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)_ from the University of
-  Wisconsin – Madison presented at the 2020 USENIX Annual Technical Conference.
+  an EIO or latent sector error. See
+  _[Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)_
+  from the University of Wisconsin – Madison presented at the 2020 USENIX Annual Technical
+  Conference.
 
 - File system metadata (such as a file's size) is unreliable and may change at any time.
 
@@ -159,12 +161,12 @@ within a batch.
 ### Durability
 
 Up until 2018, traditional DBMS durability has focused on the Crash Consistency Model, however,
-Fsyncgate and [Protocol Aware
-Recovery](https://www.usenix.org/conference/fast18/presentation/alagappan) have shown that this
-model can lead to real data loss for users in the wild. TigerBeetle therefore adopts an explicit
-storage fault model, which we then verify and test with incredible levels of corruption, something
-which few distributed systems historically were designed to handle. Our emphasis on protecting
-Durability is what sets TigerBeetle apart, not only as a ledger but as a DBMS.
+Fsyncgate and
+[Protocol Aware Recovery](https://www.usenix.org/conference/fast18/presentation/alagappan) have
+shown that this model can lead to real data loss for users in the wild. TigerBeetle therefore adopts
+an explicit storage fault model, which we then verify and test with incredible levels of corruption,
+something which few distributed systems historically were designed to handle. Our emphasis on
+protecting Durability is what sets TigerBeetle apart, not only as a ledger but as a DBMS.
 
 However, absolute durability is impossible, because all hardware can ultimately fail. Data we write
 today might not be available tomorrow. TigerBeetle embraces limited disk reliability and maximizes
@@ -176,9 +178,9 @@ to get lost, and even in that case the system would safely halt.
 
 `io_uring` is a relatively new part of the Linux kernel (support for it was added in version 5.1,
 which was released in May 2019). Since then, many kernel exploits have been found related to
-`io_uring` and in 2023 [Google
-announced](https://security.googleblog.com/2023/06/learnings-from-kctf-vrps-42-linux.html) that they
-were disabling it in ChromeOS, for Android apps, and on Google production servers.
+`io_uring` and in 2023
+[Google announced](https://security.googleblog.com/2023/06/learnings-from-kctf-vrps-42-linux.html)
+that they were disabling it in ChromeOS, for Android apps, and on Google production servers.
 
 Google's post is primarily about how they secure operating systems and web servers that handle
 hostile user content. In the Google blog post, they specifically note:
@@ -188,8 +190,8 @@ hostile user content. In the Google blog post, they specifically note:
 As a financial system of record, TigerBeetle is a trusted component and it should be running in a
 trusted environment.
 
-Furthermore, TigerBeetle only uses 128-byte [`Account`s](../reference/accounts.md) and
-[`Transfer`s](../reference/transfers.md) with pure integer fields. TigerBeetle has no
+Furthermore, TigerBeetle only uses 128-byte [`Account`s](../api-reference/accounts.md) and
+[`Transfer`s](../api-reference/transfers.md) with pure integer fields. TigerBeetle has no
 (de)serialization and does not take user-generated strings, which significantly constrains the
 attack surface.
 

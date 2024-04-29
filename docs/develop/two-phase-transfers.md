@@ -10,14 +10,14 @@ A two-phase transfer moves funds in stages:
 2. Resolve funds ([post](#post-pending-transfer), [void](#void-pending-transfer), or
    [expire](#expire-pending-transfer))
 
-The name "two-phase transfer" is a reference to the [two-phase commit protocol for distributed
-transactions](https://en.wikipedia.org/wiki/Two-phase_commit_protocol).
+The name "two-phase transfer" is a reference to the
+[two-phase commit protocol for distributed transactions](https://en.wikipedia.org/wiki/Two-phase_commit_protocol).
 
 ## Reserve Funds (Pending Transfer)
 
-A pending transfer, denoted by [`flags.pending`](../reference/transfers.md#flagspending), reserves
-its `amount` in the debit/credit accounts'
-[`debits_pending`](../reference/accounts.md#debits_pending)/[`credits_pending`](../reference/accounts.md#credits_pending)
+A pending transfer, denoted by [`flags.pending`](../api-reference/transfers.md#flagspending),
+reserves its `amount` in the debit/credit accounts'
+[`debits_pending`](../api-reference/accounts.md#debits_pending)/[`credits_pending`](../api-reference/accounts.md#credits_pending)
 fields, respectively. Pending transfers leave the `debits_posted`/`credits_posted` unmodified.
 
 ## Resolve Funds
@@ -27,55 +27,56 @@ Pending transfers can be posted, voided, or they may time out.
 ### Post-Pending Transfer
 
 A post-pending transfer, denoted by
-[`flags.post_pending_transfer`](../reference/transfers.md#flagspost_pending_transfer), causes a
+[`flags.post_pending_transfer`](../api-reference/transfers.md#flagspost_pending_transfer), causes a
 pending transfer to "post", transferring some or all of the pending transfer's reserved amount to
 its destination.
 
-- If the posted [`amount`](../reference/transfers.md#amount) is 0, the full pending transfer's
+- If the posted [`amount`](../api-reference/transfers.md#amount) is 0, the full pending transfer's
   amount is posted.
-- If the posted [`amount`](../reference/transfers.md#amount) is nonzero, then only this amount is
-  posted, and the remainder is restored to its original accounts. It must be less than or equal to
-  the pending transfer's amount.
+- If the posted [`amount`](../api-reference/transfers.md#amount) is nonzero, then only this amount
+  is posted, and the remainder is restored to its original accounts. It must be less than or equal
+  to the pending transfer's amount.
 
 Additionally, when `flags.post_pending_transfer` is set:
 
-- [`pending_id`](../reference/transfers.md#pending_id) must reference a [pending
-  transfer](#reserve-funds-pending-transfer).
-- [`flags.void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer) must not be
-  set.
+- [`pending_id`](../api-reference/transfers.md#pending_id) must reference a
+  [pending transfer](#reserve-funds-pending-transfer).
+- [`flags.void_pending_transfer`](../api-reference/transfers.md#flagsvoid_pending_transfer) must not
+  be set.
 
 The following fields may either be zero or they must match the value of the pending transfer's
 field:
 
-- [`debit_account_id`](../reference/transfers.md#debit_account_id)
-- [`credit_account_id`](../reference/transfers.md#credit_account_id)
-- [`ledger`](../reference/transfers.md#ledger)
-- [`code`](../reference/transfers.md#code)
+- [`debit_account_id`](../api-reference/transfers.md#debit_account_id)
+- [`credit_account_id`](../api-reference/transfers.md#credit_account_id)
+- [`ledger`](../api-reference/transfers.md#ledger)
+- [`code`](../api-reference/transfers.md#code)
 
 ### Void-Pending Transfer
 
 A void-pending transfer, denoted by
-[`flags.void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer), restores the
-pending amount its original accounts. Additionally, when this field is set:
+[`flags.void_pending_transfer`](../api-reference/transfers.md#flagsvoid_pending_transfer), restores
+the pending amount its original accounts. Additionally, when this field is set:
 
-- [`pending_id`](../reference/transfers.md#pending_id) must reference a [pending
-  transfer](#reserve-funds-pending-transfer).
-- [`flags.post_pending_transfer`](../reference/transfers.md#flagspost_pending_transfer) must not be
-  set.
+- [`pending_id`](../api-reference/transfers.md#pending_id) must reference a
+  [pending transfer](#reserve-funds-pending-transfer).
+- [`flags.post_pending_transfer`](../api-reference/transfers.md#flagspost_pending_transfer) must not
+  be set.
 
 The following fields may either be zero or they must match the value of the pending transfer's
 field:
 
-- [`debit_account_id`](../reference/transfers.md#debit_account_id)
-- [`credit_account_id`](../reference/transfers.md#credit_account_id)
-- [`ledger`](../reference/transfers.md#ledger)
-- [`code`](../reference/transfers.md#code)
+- [`debit_account_id`](../api-reference/transfers.md#debit_account_id)
+- [`credit_account_id`](../api-reference/transfers.md#credit_account_id)
+- [`ledger`](../api-reference/transfers.md#ledger)
+- [`code`](../api-reference/transfers.md#code)
 
 ### Expire Pending Transfer
 
-A pending transfer may optionally be created with a [timeout](../reference/transfers.md#timeout). If
-the timeout interval passes before the transfer is either posted or voided, the transfer expires and
-the full amount is returned to the original account.
+A pending transfer may optionally be created with a
+[timeout](../api-reference/transfers.md#timeout). If the timeout interval passes before the transfer
+is either posted or voided, the transfer expires and the full amount is returned to the original
+account.
 
 Note that `timeout`s are given as intervals, specified in seconds, rather than as absolute
 timestamps. For more details on why, read the page about [Time in TigerBeetle](./time.md).
@@ -87,23 +88,24 @@ posted, etc.
 
 Attempting to resolve a pending transfer more than once will return the applicable error result:
 
-- [`pending_transfer_already_posted`](../reference/operations/create_transfers.md#pending_transfer_already_posted)
-- [`pending_transfer_already_voided`](../reference/operations/create_transfers.md#pending_transfer_already_voided)
-- [`pending_transfer_expired`](../reference/operations/create_transfers.md#pending_transfer_expired)
+- [`pending_transfer_already_posted`](../api-reference/operations/create_transfers.md#pending_transfer_already_posted)
+- [`pending_transfer_already_voided`](../api-reference/operations/create_transfers.md#pending_transfer_already_voided)
+- [`pending_transfer_expired`](../api-reference/operations/create_transfers.md#pending_transfer_expired)
 
 ## Interaction with Account Invariants
 
 The pending transfer's amount is reserved in a way that the second step in a two-phase transfer will
 never cause the accounts' configured balance invariants
-([`credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits) or
-[`debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits)) to
-be broken, whether the second step is a post or void.
+([`credits_must_not_exceed_debits`](../api-reference/accounts.md#flagscredits_must_not_exceed_debits)
+or
+[`debits_must_not_exceed_credits`](../api-reference/accounts.md#flagsdebits_must_not_exceed_credits))
+to be broken, whether the second step is a post or void.
 
 ### Pessimistic Pending Transfers
 
 If an account with
-[`debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits) has
-`credits_posted = 100` and `debits_posted = 70` and a pending transfer is started causing the
+[`debits_must_not_exceed_credits`](../api-reference/accounts.md#flagsdebits_must_not_exceed_credits)
+has `credits_posted = 100` and `debits_posted = 70` and a pending transfer is started causing the
 account to have `debits_pending = 50`, the _pending_ transfer will fail. It will not wait to get to
 _posted_ status to fail.
 
@@ -115,12 +117,12 @@ modifying the pending transfer. Instead you create a new transfer.
 The first transfer that is marked pending will always have its pending flag set.
 
 The second transfer will have a
-[`post_pending_transfer`](../reference/transfers.md#flagspost_pending_transfer) or
-[`void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer) flag set and a
-[`pending_id`](../reference/transfers.md#pending_id) field set to the
-[`id`](../reference/transfers.md#id) of the first transfer. The [`id`](../reference/transfers.md#id)
-of the second transfer will be unique, not the same [`id`](../reference/transfers.md#id) as the
-initial pending transfer.
+[`post_pending_transfer`](../api-reference/transfers.md#flagspost_pending_transfer) or
+[`void_pending_transfer`](../api-reference/transfers.md#flagsvoid_pending_transfer) flag set and a
+[`pending_id`](../api-reference/transfers.md#pending_id) field set to the
+[`id`](../api-reference/transfers.md#id) of the first transfer. The
+[`id`](../api-reference/transfers.md#id) of the second transfer will be unique, not the same
+[`id`](../api-reference/transfers.md#id) as the initial pending transfer.
 
 ## Examples
 
