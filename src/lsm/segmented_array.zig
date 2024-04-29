@@ -1253,7 +1253,11 @@ fn FuzzContextType(
                     context.array.search(math.maxInt(Key)),
                     .ascending,
                 );
-                try testing.expectEqual(iterator_end.next(), null);
+                try testing.expectEqual(
+                    iterator_end.next() == null,
+                    context.reference.items.len == 0 or
+                        key_from_value(&context.reference.getLast()) < math.maxInt(Key),
+                );
             }
         }
 
