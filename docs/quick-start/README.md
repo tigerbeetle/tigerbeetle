@@ -32,4 +32,4 @@ case.
 ## 3. Create Accounts and Transfers with the CLI
 
 When you have a cluster running, try creating some accounts and transfers
-[using the TigerBeetle CLI](./cli-repl.md).
+[using the TigerBeetle CLI](./repl.md).

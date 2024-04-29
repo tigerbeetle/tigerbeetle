@@ -97,7 +97,7 @@ tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
 ### Connect with the CLI
 
 Now you can connect to the running server with any client. For a quick start, try creating accounts
-and transfers [using the TigerBeetle CLI client](../cli-repl.md).
+and transfers [using the TigerBeetle CLI client](../repl.md).
 
 ## `error: SystemResources` on macOS
 
