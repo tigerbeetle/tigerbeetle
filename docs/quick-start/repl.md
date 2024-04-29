@@ -1,8 +1,9 @@
 ---
 sidebar_position: 6
+sidebar_label: REPL
 ---
 
-# Use the CLI REPL to Create Accounts and Transfers
+# Use the REPL to Create Accounts and Transfers
 
 Once you've got some TigerBeetle replicas running, let's connect to the replicas and do some
 accounting!
@@ -80,8 +81,8 @@ fields on the accounts.
 
 ## Next: Designing for TigerBeetle
 
-Now that you've created some accounts and transfers, you may want to dig into the [data
-model](../develop/data-modeling.md) to learn more about how to build with TigerBeetle.
+Now that you've created some accounts and transfers, you may want to dig into the
+[data model](../develop/data-modeling.md) to learn more about how to build with TigerBeetle.
 
 You can also take a look at the [Operations](../reference/operations/index.md) to see what else you
 can do with the REPL.

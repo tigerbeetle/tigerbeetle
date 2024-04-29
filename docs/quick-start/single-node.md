@@ -2,7 +2,7 @@
 sidebar_position: 2
 ---
 
-# Single-Node Cluster
+# Single-Node
 
 First, download a prebuilt copy of TigerBeetle.
 
