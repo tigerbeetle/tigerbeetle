@@ -237,11 +237,11 @@ comptime {
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
 /// possibly be uncommitted during a view change, and this must be constant for all replicas.
-pub const pipeline_prepare_queue_max = config.cluster.pipeline_prepare_queue_max;
+pub const pipeline_prepare_queue_max: u32 = config.cluster.pipeline_prepare_queue_max;
 
 /// The maximum number of Viewstamped Replication request messages that can be queued at a primary,
 /// waiting to prepare.
-pub const pipeline_request_queue_max = clients_max -| pipeline_prepare_queue_max;
+pub const pipeline_request_queue_max: u32 = clients_max -| pipeline_prepare_queue_max;
 
 comptime {
     // A prepare-queue capacity larger than clients_max is wasted.

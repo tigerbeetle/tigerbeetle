@@ -220,6 +220,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (replica_pools[0..i]) |*p| p.deinit(allocator);
                 pool.* = try MessagePool.init(allocator, .{ .replica = .{
                     .members_count = options.replica_count + options.standby_count,
+                    .pipeline_limit = options.client_count,
                 } });
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);
@@ -498,6 +499,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.allocator,
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
+                    .pipeline_limit = cluster.options.client_count,
                     .storage = &cluster.storages[replica_index],
                     .aof = &cluster.aofs[replica_index],
                     // TODO Test restarting with a higher storage limit.
