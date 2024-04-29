@@ -117,8 +117,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
             /// The manifest log tour iterates manifest blocks in reverse order.
             /// (To ensure that manifest compaction doesn't lead to missed blocks.)
             manifest_log: struct { iterator: ManifestBlockIterator = .init },
-            free_set: struct { index: usize = 0 },
-            client_sessions: struct { index: usize = 0 },
+            free_set: struct { index: u32 = 0 },
+            client_sessions: struct { index: u32 = 0 },
         },
 
         /// When tour == .init, tour_tables == .{}
@@ -470,7 +470,7 @@ fn ManifestBlockIteratorType(comptime ManifestLog: type) type {
         done,
         state: struct {
             /// The last-known index (within the manifest blocks) of the address/checksum.
-            index: usize,
+            index: u32,
             /// The address/checksum of the most-recently iterated manifest block.
             address: u64,
             checksum: u128,
@@ -481,10 +481,10 @@ fn ManifestBlockIteratorType(comptime ManifestLog: type) type {
             manifest_log: *const ManifestLog,
         ) ?vsr.BlockReference {
             // Don't scrub the trailing `blocks_closed`; they are not yet flushed to disk.
-            const log_block_count =
-                manifest_log.log_block_addresses.count - manifest_log.blocks_closed;
+            const log_block_count: u32 =
+                @intCast(manifest_log.log_block_addresses.count - manifest_log.blocks_closed);
 
-            const position: ?usize = switch (iterator.*) {
+            const position: ?u32 = switch (iterator.*) {
                 .done => null,
                 .init => if (log_block_count == 0) null else log_block_count - 1,
                 .state => |state| position: {
@@ -496,7 +496,7 @@ fn ManifestBlockIteratorType(comptime ManifestLog: type) type {
                     // - have shifted earlier in the list (due to manifest compaction), or
                     // - have been removed from the list (due to manifest compaction).
                     // Use the block's old position to find its current position.
-                    var position: usize = @min(state.index, log_block_count -| 1);
+                    var position: u32 = @min(state.index, log_block_count -| 1);
                     while (position > 0) : (position -= 1) {
                         if (manifest_log.log_block_addresses.get(position).? == state.address and
                             manifest_log.log_block_checksums.get(position).? == state.checksum)
