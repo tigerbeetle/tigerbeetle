@@ -1,5 +1,64 @@
 # TigerBeetle Changelog
 
+## 2024-04-29 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1883](https://github.com/tigerbeetle/tigerbeetle/pull/1883)
+
+  Move message allocation farther down into the `tigerbeetle start` code path.
+  `tigerbeetle format` is now faster, since it no longer allocates these messages.
+
+- [#1880](https://github.com/tigerbeetle/tigerbeetle/pull/1880)
+
+  Reduce the connection limit, which was unnecessarily high.
+
+### Features
+
+- [#1848](https://github.com/tigerbeetle/tigerbeetle/pull/1848)
+
+  Implement zig-zag merge join for merging index scans.
+  (Note that this functionality is not yet exposed to TigerBeetle's API.)
+
+- [#1882](https://github.com/tigerbeetle/tigerbeetle/pull/1882)
+
+  Print memory usage more accurately during `tigerbeetle start`.
+
+### Internals
+
+- [#1874](https://github.com/tigerbeetle/tigerbeetle/pull/1874)
+
+  Fix blob-size CI check with respect to shallow clones.
+
+- [#1870](https://github.com/tigerbeetle/tigerbeetle/pull/1870),
+  [#1869](https://github.com/tigerbeetle/tigerbeetle/pull/1869)
+
+  Add more fuzzers to CFO (Continuous Fuzzing Orchestrator).
+
+- [#1868](https://github.com/tigerbeetle/tigerbeetle/pull/1868),
+  [#1875](https://github.com/tigerbeetle/tigerbeetle/pull/1875)
+
+  Improve fuzzer performance.
+
+- [#1864](https://github.com/tigerbeetle/tigerbeetle/pull/1864)
+
+  On the devhub, show at most one failing seed per fuzzer.
+
+- [#1820](https://github.com/tigerbeetle/tigerbeetle/pull/1820),
+  [#1867](https://github.com/tigerbeetle/tigerbeetle/pull/1867),
+  [#1877](https://github.com/tigerbeetle/tigerbeetle/pull/1877),
+  [#1873](https://github.com/tigerbeetle/tigerbeetle/pull/1873),
+  [#1853](https://github.com/tigerbeetle/tigerbeetle/pull/1853),
+  [#1872](https://github.com/tigerbeetle/tigerbeetle/pull/1872),
+  [#1845](https://github.com/tigerbeetle/tigerbeetle/pull/1845),
+  [#1871](https://github.com/tigerbeetle/tigerbeetle/pull/1871)
+
+  Documentation improvements.
+
+### TigerTracks 🎧
+
+- [The Core](https://open.spotify.com/track/62DOxN9FeTsR0J0ccnBhMu?si=5b0a7b8974d54e4d)
+
 ## 2024-04-22 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
