@@ -494,7 +494,7 @@ pub fn ReplicaType(
         /// (syncing≠idle)
         sync_message_timeout: Timeout,
 
-        /// The number of ticks on an idle cluester before injecting a `pulse` operation.
+        /// The number of ticks on an idle cluster before injecting a `pulse` operation.
         /// (status=normal and primary and !constants.aof_recovery)
         pulse_timeout: Timeout,
 
