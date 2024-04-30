@@ -49,6 +49,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     // Run number is a monotonically incremented integer. Map it to a three-component version
     // number.
+    // If you change this, make sure to change the validation code in release_validate.zig!
     const release_triple = .{
         .major = 0,
         .minor = 15,
@@ -180,7 +181,10 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 );
             } else {
                 const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
-                try shell.exec("zip -9 {zip_path} {exe_name}", .{
+                try shell.exec("touch -d 1970-01-01T00:00:00Z {exe_name}", .{
+                    .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
+                });
+                try shell.exec("zip -9 -oX {zip_path} {exe_name}", .{
                     .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
                     .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
                 });
@@ -195,7 +199,10 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
         try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
         const zip_name = "tigerbeetle-universal-macos" ++ debug_suffix ++ ".zip";
-        try shell.exec("zip -9 {zip_path} {exe_name}", .{
+        try shell.exec("touch -d 1970-01-01T00:00:00Z {exe_name}", .{
+            .exe_name = "tigerbeetle",
+        });
+        try shell.exec("zip -9 -oX {zip_path} {exe_name}", .{
             .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
             .exe_name = "tigerbeetle",
         });

@@ -125,6 +125,50 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         assert(shell.file_exists(artifact));
     }
 
+    // Enable this once deterministic zip generation has been merged in and released.
+    // const raw_run_number = stdx.cut(stdx.cut(tag, ".").?.suffix, ".").?.suffix;
+
+    // // The +185 comes from how release.zig calculates the version number.
+    // const run_number = try std.fmt.allocPrint(
+    //     shell.arena.allocator(),
+    //     "{}",
+    //     .{try std.fmt.parseInt(u32, raw_run_number, 10) + 185},
+    // );
+
+    // const sha = try shell.exec_stdout("git rev-parse HEAD", .{});
+    // try shell.zig("build scripts -- release --build  --run-number={run_number} " ++
+    //     "--sha={sha} --language=zig", .{
+    //     .run_number = run_number,
+    //     .sha = sha,
+    // });
+    // for (artifacts) |artifact| {
+    //     // Zig only guarantees release builds to be deterministic.
+    //     if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
+
+    //     // TODO(Zig): Determinism is broken on Windows:
+    //     // https://github.com/ziglang/zig/issues/9432
+    //     if (std.mem.indexOf(u8, artifact, "-windows.zip") != null) continue;
+
+    //     const checksum_downloaded = try shell.exec_stdout("sha256sum {artifact}", .{
+    //         .artifact = artifact,
+    //     });
+
+    //     shell.popd();
+    //     const checksum_built = try shell.exec_stdout("sha256sum dist/tigerbeetle/{artifact}", .{
+    //         .artifact = artifact,
+    //     });
+    //     try shell.pushd_dir(tmp_dir.dir);
+
+    //     // Slice the output to supress the names.
+    //     if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
+    //         std.debug.panic("checksum mismatch - {s}: downloaded {s}, built {s}", .{
+    //             artifact,
+    //             checksum_downloaded[0..64],
+    //             checksum_built[0..64],
+    //         });
+    //     }
+    // }
+
     try shell.exec("unzip tigerbeetle-x86_64-linux.zip", .{});
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});
     assert(std.mem.indexOf(u8, version, tag) != null);
