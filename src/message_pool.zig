@@ -14,54 +14,76 @@ comptime {
     assert(constants.message_size_max % constants.sector_size == 0);
 }
 
-/// The number of full-sized messages allocated at initialization by the replica message pool.
-/// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
-pub const messages_max_replica = messages_max: {
-    var sum: usize = 0;
+pub const Options = union(vsr.ProcessType) {
+    replica: struct {
+        members_count: u8,
+    },
+    client,
 
-    sum += constants.journal_iops_read_max; // Journal reads
-    sum += constants.journal_iops_write_max; // Journal writes
-    sum += constants.client_replies_iops_read_max; // Client-reply reads
-    sum += constants.client_replies_iops_write_max; // Client-reply writes
-    sum += constants.grid_repair_reads_max; // Replica.grid_reads (Replica.BlockRead)
-    sum += 1; // Replica.loopback_queue
-    sum += constants.pipeline_prepare_queue_max; // Replica.Pipeline{Queue|Cache}
-    sum += constants.pipeline_request_queue_max; // Replica.Pipeline{Queue|Cache}
-    sum += 1; // Replica.commit_prepare
-    // Replica.do_view_change_from_all_replicas quorum:
-    // All other quorums are bitsets.
-    sum += constants.replicas_max;
-    sum += constants.connections_max; // Connection.recv_message
-    // Connection.send_queue:
-    sum += constants.connections_max * constants.connection_send_queue_max_replica;
-    sum += 1; // Handle bursts (e.g. Connection.parse_message)
-    // Handle Replica.commit_op's reply:
-    // (This is separate from the burst +1 because they may occur concurrently).
-    sum += 1;
+    /// The number of messages allocated at initialization by the message pool.
+    fn messages_max(options: *const Options) usize {
+        return switch (options.*) {
+            .client => messages_max: {
+                var sum: usize = 0;
 
-    break :messages_max sum;
+                sum += constants.replicas_max; // Connection.recv_message
+                // Connection.send_queue:
+                sum += constants.replicas_max * constants.connection_send_queue_max_client;
+                sum += 1; // Client.register_inflight
+                sum += 1; // Client.request_inflight
+                // Handle bursts.
+                // (e.g. Connection.parse_message(), or sending a ping when the send queue is full).
+                sum += 1;
+
+                // This conditions is necessary (but not sufficient) to prevent deadlocks.
+                assert(sum > 1);
+                break :messages_max sum;
+            },
+
+            // The number of full-sized messages allocated at initialization by the replica message
+            // pool. There must be enough messages to ensure that the replica can always progress,
+            // to avoid deadlock.
+            .replica => |*replica| messages_max: {
+                assert(replica.members_count > 0);
+                assert(replica.members_count <= constants.members_max);
+
+                var sum: usize = 0;
+
+                // The maximum number of simultaneous open connections on the server.
+                // -1 since we never connect to ourself.
+                const connections_max = replica.members_count + constants.clients_max - 1;
+
+                sum += constants.journal_iops_read_max; // Journal reads
+                sum += constants.journal_iops_write_max; // Journal writes
+                sum += constants.client_replies_iops_read_max; // Client-reply reads
+                sum += constants.client_replies_iops_write_max; // Client-reply writes
+                sum += constants.grid_repair_reads_max; // Replica.grid_reads (Replica.BlockRead)
+                sum += 1; // Replica.loopback_queue
+                sum += constants.pipeline_prepare_queue_max; // Replica.Pipeline{Queue|Cache}
+                sum += constants.pipeline_request_queue_max; // Replica.Pipeline{Queue|Cache}
+                sum += 1; // Replica.commit_prepare
+                // Replica.do_view_change_from_all_replicas quorum:
+                // All other quorums are bitsets.
+                //
+                // This should be set to the runtime replica_count, but we don't know that precisely
+                // yet, so we may guess high. (We can't differentiate between replicas and
+                // standbys.)
+                sum += @min(replica.members_count, constants.replicas_max);
+                sum += connections_max; // Connection.recv_message
+                // Connection.send_queue:
+                sum += connections_max * constants.connection_send_queue_max_replica;
+                sum += 1; // Handle bursts (e.g. Connection.parse_message)
+                // Handle Replica.commit_op's reply:
+                // (This is separate from the burst +1 because they may occur concurrently).
+                sum += 1;
+
+                // This conditions is necessary (but not sufficient) to prevent deadlocks.
+                assert(sum > constants.replicas_max);
+                break :messages_max sum;
+            },
+        };
+    }
 };
-
-/// The number of full-sized messages allocated at initialization by the client message pool.
-pub const messages_max_client = messages_max: {
-    var sum: usize = 0;
-
-    sum += constants.replicas_max; // Connection.recv_message
-    // Connection.send_queue:
-    sum += constants.replicas_max * constants.connection_send_queue_max_client;
-    sum += 1; // Client.register_inflight
-    sum += 1; // Client.request_inflight
-    // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
-    sum += 1;
-
-    break :messages_max sum;
-};
-
-comptime {
-    // These conditions are necessary (but not sufficient) to prevent deadlocks.
-    assert(messages_max_replica > constants.replicas_max);
-    assert(messages_max_client > 1);
-}
 
 /// A pool of reference-counted Messages, memory for which is allocated only once during
 /// initialization and reused thereafter. The messages_max values determine the size of this pool.
@@ -147,12 +169,9 @@ pub const MessagePool = struct {
 
     pub fn init(
         allocator: mem.Allocator,
-        process_type: vsr.ProcessType,
+        options: Options,
     ) error{OutOfMemory}!MessagePool {
-        return MessagePool.init_capacity(allocator, switch (process_type) {
-            .replica => messages_max_replica,
-            .client => messages_max_client,
-        });
+        return MessagePool.init_capacity(allocator, options.messages_max());
     }
 
     pub fn init_capacity(

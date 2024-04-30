@@ -106,12 +106,16 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             on_message_callback: *const fn (message_bus: *Self, message: *Message) void,
             options: Options,
         ) !Self {
-            // There must be enough connections for all replicas and at least one client.
-            // -1 since we don't need a connection to ourself.
-            assert(constants.connections_max > options.configuration.len - 1);
             assert(@as(vsr.ProcessType, process_id) == process_type);
 
-            const connections = try allocator.alloc(Connection, constants.connections_max);
+            const connections_max: u32 = switch (process_type) {
+                // The maximum number of connections that can be held open by the server at any
+                // time. -1 since we don't need a connection to ourself.
+                .replica => @intCast(options.configuration.len - 1 + constants.clients_max),
+                .client => @intCast(options.configuration.len),
+            };
+
+            const connections = try allocator.alloc(Connection, connections_max);
             errdefer allocator.free(connections);
             @memset(connections, .{});
 
@@ -155,7 +159,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             // Pre-allocate enough memory to hold all possible connections in the client map.
             if (process_type == .replica) {
-                try bus.process.clients.ensureTotalCapacity(allocator, constants.connections_max);
+                try bus.process.clients.ensureTotalCapacity(allocator, connections_max);
             }
 
             return bus;

@@ -218,7 +218,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             for (replica_pools, 0..) |*pool, i| {
                 errdefer for (replica_pools[0..i]) |*p| p.deinit(allocator);
-                pool.* = try MessagePool.init(allocator, .replica);
+                pool.* = try MessagePool.init(allocator, .{ .replica = .{
+                    .members_count = options.replica_count + options.standby_count,
+                } });
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);
 
@@ -469,7 +471,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var it = message_bus.pool.free_list;
                 while (it) |message| : (it = message.next) messages_in_pool += 1;
             }
-            assert(messages_in_pool == message_pool.messages_max_replica);
+            assert(messages_in_pool == message_bus.pool.messages_max);
         }
 
         fn replica_enable(cluster: *Self, replica_index: u8) void {
