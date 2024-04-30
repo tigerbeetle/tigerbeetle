@@ -464,8 +464,8 @@ pub fn ManifestLevelType(
 
             if (level.keys.len() == 0) return null;
 
-            // Ascending:  Find the first table where table.key_max ≤ iterator.key_min.
-            // Descending: Find the first table where table.key_max ≤ iterator.key_max.
+            // Ascending:  Find the first table where table.key_max ≥ iterator.key_min.
+            // Descending: Find the first table where table.key_max ≥ iterator.key_max.
             const target = level.keys.search(switch (direction) {
                 .ascending => key_min,
                 .descending => key_max,
