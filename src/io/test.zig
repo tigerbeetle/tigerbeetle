@@ -502,10 +502,10 @@ test "tick to wait" {
             self.received = true;
         }
 
-        // TODO: use os.send() instead when it gets fixed for windows
+        // TODO: use std.posix.send() instead when it gets fixed for windows
         fn os_send(sock: std.posix.socket_t, buf: []const u8, flags: u32) !usize {
             if (builtin.target.os.tag != .windows) {
-                return os.send(sock, buf, flags);
+                return std.posix.send(sock, buf, flags);
             }
 
             const rc = os.windows.sendto(sock, buf.ptr, buf.len, flags, null, 0);

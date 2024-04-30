@@ -22,7 +22,7 @@ pub const IO = struct {
         _ = entries;
         _ = flags;
 
-        const kq = try os.kqueue();
+        const kq = try std.posix.kqueue();
         assert(kq > -1);
         return IO{ .kq = kq };
     }
@@ -75,7 +75,7 @@ pub const IO = struct {
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
         var io_pending = self.io_pending.peek();
-        var events: [256]os.Kevent = undefined;
+        var events: [256]std.posix.Kevent = undefined;
 
         // Check timeouts and fill events with completions in io_pending
         // (they will be submitted through kevent).
@@ -86,7 +86,7 @@ pub const IO = struct {
         // Only call kevent() if we need to submit io events or if we need to wait for completions.
         if (change_events > 0 or self.completed.empty()) {
             // Zero timeouts for kevent() implies a non-blocking poll
-            var ts = std.mem.zeroes(os.timespec);
+            var ts = std.mem.zeroes(std.posix.timespec);
 
             // We need to wait (not poll) on kevent if there's nothing to submit or complete.
             // We should never wait indefinitely (timeout_ptr = null for kevent) given:
@@ -102,7 +102,7 @@ pub const IO = struct {
                 }
             }
 
-            const new_events = try os.kevent(
+            const new_events = try std.posix.kevent(
                 self.kq,
                 events[0..change_events],
                 events[0..events.len],
@@ -132,25 +132,25 @@ pub const IO = struct {
         }
     }
 
-    fn flush_io(_: *IO, events: []os.Kevent, io_pending_top: *?*Completion) usize {
+    fn flush_io(_: *IO, events: []std.posix.Kevent, io_pending_top: *?*Completion) usize {
         for (events, 0..) |*event, flushed| {
             const completion = io_pending_top.* orelse return flushed;
             io_pending_top.* = completion.next;
 
             const event_info = switch (completion.operation) {
-                .accept => |op| [2]c_int{ op.socket, os.system.EVFILT_READ },
-                .connect => |op| [2]c_int{ op.socket, os.system.EVFILT_WRITE },
-                .read => |op| [2]c_int{ op.fd, os.system.EVFILT_READ },
-                .write => |op| [2]c_int{ op.fd, os.system.EVFILT_WRITE },
-                .recv => |op| [2]c_int{ op.socket, os.system.EVFILT_READ },
-                .send => |op| [2]c_int{ op.socket, os.system.EVFILT_WRITE },
+                .accept => |op| [2]c_int{ op.socket, std.posix.system.EVFILT_READ },
+                .connect => |op| [2]c_int{ op.socket, std.posix.system.EVFILT_WRITE },
+                .read => |op| [2]c_int{ op.fd, std.posix.system.EVFILT_READ },
+                .write => |op| [2]c_int{ op.fd, std.posix.system.EVFILT_WRITE },
+                .recv => |op| [2]c_int{ op.socket, std.posix.system.EVFILT_READ },
+                .send => |op| [2]c_int{ op.socket, std.posix.system.EVFILT_WRITE },
                 else => @panic("invalid completion operation queued for io"),
             };
 
             event.* = .{
                 .ident = @as(u32, @intCast(event_info[0])),
                 .filter = @as(i16, @intCast(event_info[1])),
-                .flags = os.system.EV_ADD | os.system.EV_ENABLE | os.system.EV_ONESHOT,
+                .flags = std.posix.system.EV_ADD | std.posix.system.EV_ENABLE | std.posix.system.EV_ONESHOT,
                 .fflags = 0,
                 .data = 0,
                 .udata = @intFromPtr(completion),
@@ -319,7 +319,7 @@ pub const IO = struct {
                     );
                     errdefer std.posix.close(fd);
 
-                    // Darwin doesn't support os.MSG_NOSIGNAL to avoid getting SIGPIPE on socket send().
+                    // Darwin doesn't support std.posix.MSG_NOSIGNAL to avoid getting SIGPIPE on socket send().
                     // Instead, it uses the SO_NOSIGPIPE socket option which does the same for all send()s.
                     std.posix.setsockopt(
                         fd,
@@ -369,7 +369,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) CloseError!void {
-                    return switch (std.posix.errno(os.system.close(op.fd))) {
+                    return switch (std.posix.errno(std.posix.system.close(op.fd))) {
                         .SUCCESS => {},
                         .BADF => error.FileDescriptorInvalid,
                         .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
@@ -462,7 +462,7 @@ pub const IO = struct {
             struct {
                 fn do_operation(op: anytype) ReadError!usize {
                     while (true) {
-                        const rc = os.system.pread(
+                        const rc = std.posix.system.pread(
                             op.fd,
                             op.buf,
                             op.len,
@@ -519,7 +519,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) RecvError!usize {
-                    return os.recv(op.socket, op.buf[0..op.len], 0);
+                    return std.posix.recv(op.socket, op.buf[0..op.len], 0);
                 }
             },
         );
@@ -552,7 +552,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) SendError!usize {
-                    return os.send(op.socket, op.buf[0..op.len], 0);
+                    return std.posix.send(op.socket, op.buf[0..op.len], 0);
                 }
             },
         );
@@ -649,7 +649,7 @@ pub const IO = struct {
         const fd = try std.posix.socket(family, sock_type | std.posix.SOCK.NONBLOCK, protocol);
         errdefer self.close_socket(fd);
 
-        // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
+        // darwin doesn't support std.posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
         return fd;
     }
@@ -694,7 +694,7 @@ pub const IO = struct {
         var mode: std.posix.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
-        if (@hasDecl(std.posix.O, "LARGEFILE")) flags.LARGEFILE = true;
+        if (@hasField(std.posix.O, "LARGEFILE")) flags.LARGEFILE = true;
 
         switch (method) {
             .create => {
@@ -704,7 +704,7 @@ pub const IO = struct {
                 log.info("creating \"{s}\"...", .{relative_path});
             },
             .create_or_open => {
-                flags.CREATE = true;
+                flags.CREAT = true;
                 mode = 0o666;
                 log.info("opening or creating \"{s}\"...", .{relative_path});
             },
@@ -727,12 +727,12 @@ pub const IO = struct {
         // On darwin assume that Direct I/O is always supported.
         // Use F_NOCACHE to disable the page cache as O_DIRECT doesn't exist.
         if (direct_io != .direct_io_disabled) {
-            _ = try os.fcntl(fd, os.F.NOCACHE, 1);
+            _ = try std.posix.fcntl(fd, std.posix.F.NOCACHE, 1);
         }
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
-        os.flock(fd, os.LOCK.EX | os.LOCK.NB) catch |err| switch (err) {
+        std.posix.flock(fd, std.posix.LOCK.EX | std.posix.LOCK.NB) catch |err| switch (err) {
             error.WouldBlock => @panic("another process holds the data file lock"),
             else => return err,
         };
@@ -754,7 +754,7 @@ pub const IO = struct {
         try fs_sync(dir_fd);
 
         // TODO Document that `size` is now `data_file_size_min` from `main.zig`.
-        const stat = try os.fstat(fd);
+        const stat = try std.posix.fstat(fd);
         if (stat.size < size) @panic("data file inode size was truncated or corrupted");
 
         return fd;
@@ -763,7 +763,7 @@ pub const IO = struct {
     /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC instead.
     /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
     fn fs_sync(fd: std.posix.fd_t) !void {
-        _ = os.fcntl(fd, os.F.FULLFSYNC, 1) catch return std.posix.fsync(fd);
+        _ = std.posix.fcntl(fd, std.posix.F.FULLFSYNC, 1) catch return std.posix.fsync(fd);
     }
 
     /// Allocates a file contiguously using fallocate() if supported.
@@ -797,10 +797,10 @@ pub const IO = struct {
         };
 
         // Try to pre-allocate contiguous space and fall back to default non-contiguous.
-        var res = os.system.fcntl(fd, os.F.PREALLOCATE, @intFromPtr(&store));
+        var res = std.posix.system.fcntl(fd, std.posix.F.PREALLOCATE, @intFromPtr(&store));
         if (std.posix.errno(res) != .SUCCESS) {
             store.fst_flags = F_ALLOCATEALL;
-            res = os.system.fcntl(fd, os.F.PREALLOCATE, @intFromPtr(&store));
+            res = std.posix.system.fcntl(fd, std.posix.F.PREALLOCATE, @intFromPtr(&store));
         }
 
         switch (std.posix.errno(res)) {
@@ -819,7 +819,7 @@ pub const IO = struct {
         }
 
         // Now actually perform the allocation.
-        return os.ftruncate(fd, size) catch |err| switch (err) {
+        return std.posix.ftruncate(fd, size) catch |err| switch (err) {
             error.AccessDenied => error.PermissionDenied,
             else => |e| e,
         };

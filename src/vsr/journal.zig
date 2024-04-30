@@ -1038,7 +1038,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn recover_headers_callback(completion: *Storage.Read) void {
             const chunk_read: *Journal.Read = @fieldParentPtr("completion", completion);
             const journal = chunk_read.journal;
-            const replica: *Replica = @fieldParentPtr("journal", journal);
+            const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             assert(journal.status == .recovering);
             assert(chunk_read.destination_replica == null);
 
@@ -1114,7 +1114,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_prepare(journal: *Journal) void {
-            const replica: *Replica = @fieldParentPtr("journal", journal);
+            const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             assert(journal.status == .recovering);
             assert(journal.reads.available() > 0);
             assert(journal.dirty.count <= journal.faulty.count);
@@ -1161,7 +1161,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn recover_prepare_callback(completion: *Storage.Read) void {
             const read: *Journal.Read = @fieldParentPtr("completion", completion);
             const journal = read.journal;
-            const replica: *Replica = @fieldParentPtr("journal", journal);
+            const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
 
             assert(journal.status == .recovering);
             assert(journal.dirty.count <= journal.faulty.count);
@@ -1256,7 +1256,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// 3. is in the correct slot (op % slot_count)
         /// 4. has command=reserved or command=prepare
         fn recover_slots(journal: *Journal) void {
-            const replica: *Replica = @fieldParentPtr("journal", journal);
+            const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const log_view = replica.superblock.working.vsr_state.log_view;
             const view_change_headers = replica.superblock.working.vsr_headers();
 
@@ -1366,7 +1366,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// * there are no faults except for those between `op_checkpoint` and `op_max + 1`,
         ///   so that we can be sure that the maximum valid op is in fact the maximum.
         fn recover_torn_prepare(journal: *const Journal, cases: []const *const Case) ?Slot {
-            const replica: *Replica = @fieldParentPtr("journal", journal);
+            const replica: *const Replica = @alignCast(@fieldParentPtr("journal", journal));
 
             assert(journal.status == .recovering);
             assert(journal.dirty.count == slot_count);
@@ -1443,7 +1443,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_slot(journal: *Journal, slot: Slot, case: *const Case) void {
-            const replica: *Replica = @fieldParentPtr("journal", journal);
+            const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const cluster = replica.cluster;
 
             assert(journal.status == .recovering);
@@ -1545,7 +1545,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         /// Repair the redundant headers for slots with decision=fix, one sector at a time.
         fn recover_fix(journal: *Journal) void {
-            const replica: *Replica = @fieldParentPtr("journal", journal);
+            const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             assert(journal.status == .recovering);
             assert(journal.writes.executing() == 0);
             assert(journal.dirty.count >= journal.faulty.count);
@@ -1612,7 +1612,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.header_chunks_requested.count() == 0);
             assert(journal.header_chunks_recovered.count() == HeaderChunks.bit_length);
 
-            const replica: *Replica = @fieldParentPtr("journal", journal);
+            const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const callback = journal.status.recovering;
             journal.status = .recovered;
 

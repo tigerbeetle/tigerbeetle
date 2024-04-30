@@ -189,9 +189,9 @@ pub const Signal = struct {
         assert(self.accept_socket != IO.INVALID_SOCKET);
         self.send_buffer[0] = 0;
 
-        // TODO: use os.send() instead when it gets fixed for windows
+        // TODO: use std.posix.send() instead when it gets fixed for windows
         if (builtin.target.os.tag != .windows) {
-            _ = os.send(self.accept_socket, &self.send_buffer, 0) catch unreachable;
+            _ = std.posix.send(self.accept_socket, &self.send_buffer, 0) catch unreachable;
             return;
         }
 

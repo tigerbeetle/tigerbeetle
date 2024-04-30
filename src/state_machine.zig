@@ -2605,7 +2605,7 @@ fn check(test_table: []const u8) !void {
     // path.
     const builtin = @import("builtin");
     if (builtin.target.os.tag == .macos)
-        std.os.setrlimit(std.os.rlimit_resource.STACK, .{
+        std.posix.setrlimit(std.os.rlimit_resource.STACK, .{
             .cur = 16 * 1024 * 1024,
             .max = 16 * 1024 * 1024,
         }) catch @panic("unable to adjust stack limit");

@@ -43,7 +43,7 @@ pub fn main() !void {
     // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
     // in build.zig doesn't work.
     if (builtin.target.os.tag == .macos) {
-        os.setrlimit(os.rlimit_resource.STACK, .{
+        std.posix.setrlimit(std.posix.rlimit_resource.STACK, .{
             .cur = 16 * 1024 * 1024,
             .max = 16 * 1024 * 1024,
         }) catch @panic("unable to adjust stack limit");

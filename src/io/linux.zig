@@ -33,7 +33,7 @@ pub const IO = struct {
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
-        const uts = std.os.uname();
+        const uts = std.posix.uname();
         const version = try parse_dirty_semver(&uts.release);
         if (version.order(std.SemanticVersion{ .major = 5, .minor = 5, .patch = 0 }) == .lt) {
             @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
@@ -79,8 +79,8 @@ pub const IO = struct {
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
-        var current_ts: os.timespec = undefined;
-        os.clock_gettime(os.CLOCK.MONOTONIC, &current_ts) catch unreachable;
+        var current_ts: std.posix.timespec = undefined;
+        std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC, &current_ts) catch unreachable;
         // The absolute CLOCK_MONOTONIC time after which we may return from this function:
         const timeout_ts: os.linux.kernel_timespec = .{
             .tv_sec = current_ts.tv_sec,
@@ -95,7 +95,7 @@ pub const IO = struct {
                 break :blk self.ring.get_sqe() catch unreachable;
             };
             // Submit an absolute timeout that will be canceled if any other SQE completes first:
-            linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
+            timeout_sqe.prep_timeout(&timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
             timeout_sqe.user_data = 0;
             timeouts += 1;
 
@@ -258,8 +258,7 @@ pub const IO = struct {
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
                 .accept => |*op| {
-                    linux.io_uring_prep_accept(
-                        sqe,
+                    sqe.prep_accept(
                         op.socket,
                         &op.address,
                         &op.address_size,
@@ -267,11 +266,10 @@ pub const IO = struct {
                     );
                 },
                 .close => |op| {
-                    linux.io_uring_prep_close(sqe, op.fd);
+                    sqe.prep_close(op.fd);
                 },
                 .connect => |*op| {
-                    linux.io_uring_prep_connect(
-                        sqe,
+                    sqe.prep_connect(
                         op.socket,
                         &op.address.any,
                         op.address.getOsSockLen(),
@@ -287,18 +285,17 @@ pub const IO = struct {
                     );
                 },
                 .read => |op| {
-                    linux.io_uring_prep_read(
-                        sqe,
+                    sqe.prep_read(
                         op.fd,
                         op.buffer[0..buffer_limit(op.buffer.len)],
                         op.offset,
                     );
                 },
                 .recv => |op| {
-                    linux.io_uring_prep_recv(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
+                    sqe.prep_recv(op.socket, op.buffer, std.posix.MSG.NOSIGNAL);
                 },
                 .send => |op| {
-                    linux.io_uring_prep_send(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
+                    sqe.prep_send(op.socket, op.buffer, std.posix.MSG.NOSIGNAL);
                 },
                 .statx => |op| {
                     linux.io_uring_prep_statx(
@@ -311,11 +308,10 @@ pub const IO = struct {
                     );
                 },
                 .timeout => |*op| {
-                    linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
+                    sqe.prep_timeout(&op.timespec, 0, 0);
                 },
                 .write => |op| {
-                    linux.io_uring_prep_write(
-                        sqe,
+                    sqe.prep_write(
                         op.fd,
                         op.buffer[0..buffer_limit(op.buffer.len)],
                         op.offset,
@@ -1225,7 +1221,7 @@ pub const IO = struct {
         // This will avoid errors with handling large files on certain configurations
         // of 32bit kernels. In all other cases, it's a noop.
         // See: <https://github.com/torvalds/linux/blob/ab27740f76654ed58dd32ac0ba0031c18a6dea3b/fs/open.c#L1602>
-        if (@hasDecl(std.posix.O, "LARGEFILE")) flags.LARGEFILE = true;
+        if (@hasField(std.posix.O, "LARGEFILE")) flags.LARGEFILE = true;
 
         switch (kind) {
             .block_device => {
@@ -1311,7 +1307,7 @@ pub const IO = struct {
 
         {
             // Make sure we're getting the type of file descriptor we expect.
-            const stat = try os.fstat(fd);
+            const stat = try std.posix.fstat(fd);
             switch (kind) {
                 .file => assert(std.posix.S.ISREG(stat.mode)),
                 .block_device => assert(std.posix.S.ISBLK(stat.mode)),
@@ -1320,7 +1316,7 @@ pub const IO = struct {
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
-        os.flock(fd, os.LOCK.EX | os.LOCK.NB) catch |err| switch (err) {
+        std.posix.flock(fd, std.posix.LOCK.EX | std.posix.LOCK.NB) catch |err| switch (err) {
             error.WouldBlock => @panic("another process holds the data file lock"),
             else => return err,
         };
@@ -1364,7 +1360,7 @@ pub const IO = struct {
 
         switch (kind) {
             .file => {
-                if ((try os.fstat(fd)).size < size) {
+                if ((try std.posix.fstat(fd)).size < size) {
                     @panic("data file inode size was truncated or corrupted");
                 }
             },
@@ -1422,8 +1418,8 @@ pub const IO = struct {
                         );
                     }
                     // Reset position in the block device to compensate for read(2).
-                    try os.lseek_CUR(fd, -superblock_zone_size);
-                    assert(try os.lseek_CUR_get(fd) == 0);
+                    try std.posix.lseek_CUR(fd, -superblock_zone_size);
+                    assert(try std.posix.lseek_CUR_get(fd) == 0);
                 }
             },
         }
@@ -1438,7 +1434,7 @@ pub const IO = struct {
 
         while (true) {
             const res = stdx.fstatfs(dir_fd, &statfs);
-            switch (os.linux.getErrno(res)) {
+            switch (std.posix.errno(res)) {
                 .SUCCESS => {
                     return statfs.f_type == stdx.TmpfsMagic;
                 },
@@ -1451,7 +1447,7 @@ pub const IO = struct {
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
     fn fs_supports_direct_io(dir_fd: std.posix.fd_t) !bool {
-        if (!@hasDecl(std.os.O, "DIRECT")) return false;
+        if (!@hasField(std.posix.O, "DIRECT")) return false;
 
         const path = "fs_supports_direct_io";
         const dir = std.fs.Dir{ .fd = dir_fd };
@@ -1461,7 +1457,7 @@ pub const IO = struct {
 
         while (true) {
             const res = os.linux.openat(dir_fd, path, .{ .CLOEXEC = true, .ACCMODE = .RDONLY, .DIRECT = true }, 0);
-            switch (os.linux.getErrno(res)) {
+            switch (std.posix.errno(res)) {
                 .SUCCESS => {
                     std.posix.close(@intCast(res));
                     return true;
@@ -1482,7 +1478,7 @@ pub const IO = struct {
 
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);
-            switch (os.linux.getErrno(rc)) {
+            switch (std.posix.errno(rc)) {
                 .SUCCESS => return,
                 .BADF => return error.FileDescriptorInvalid,
                 .FBIG => return error.FileTooBig,
