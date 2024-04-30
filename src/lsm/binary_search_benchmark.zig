@@ -22,23 +22,12 @@ const kv_types = .{
 };
 
 const values_per_page = .{ 128, 256, 512, 1024, 2 * 1024, 4 * 1024, 8 * 1024 };
-const body_fmt = "K={:_>2}B V={:_>3}B N={:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns" ++
-    " CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}";
+const body_fmt = "K={:_>2}B V={:_>3}B N={:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns";
 
 test "benchmark: binary search" {
-    if (builtin.os.tag != .linux) {
-        // Benchmark uses perf_event_open and only runs on Linux.
-        return;
-    }
-
     log.info("Samples: {}", .{searches});
     log.info("WT: Wall time/search", .{});
     log.info("UT: utime time/search", .{});
-    log.info("CY: CPU cycles/search", .{});
-    log.info("IN: instructions/search", .{});
-    log.info("CR: cache references/search", .{});
-    log.info("CM: cache misses/search", .{});
-    log.info("BM: branch misses/search", .{});
 
     var seed: u64 = undefined;
     try std.os.getrandom(std.mem.asBytes(&seed));
@@ -115,11 +104,6 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
             "B",
             result.wall_time,
             result.utime,
-            result.cpu_cycles,
-            result.instructions,
-            result.cache_references,
-            result.cache_misses,
-            result.branch_misses,
         });
     }
 }
@@ -154,80 +138,26 @@ fn Value(comptime layout: Layout) type {
 const BenchmarkResult = struct {
     wall_time: u64, // nanoseconds
     utime: u64, // nanoseconds
-    cpu_cycles: usize,
-    instructions: usize,
-    cache_references: usize,
-    cache_misses: usize,
-    branch_misses: usize,
-};
-
-const PERF = std.os.linux.PERF;
-const perf_counters = [_]PERF.COUNT.HW{
-    PERF.COUNT.HW.CPU_CYCLES,
-    PERF.COUNT.HW.INSTRUCTIONS,
-    PERF.COUNT.HW.CACHE_REFERENCES,
-    PERF.COUNT.HW.CACHE_MISSES,
-    PERF.COUNT.HW.BRANCH_MISSES,
 };
 
 const Benchmark = struct {
     timer: std.time.Timer,
     rusage: std.os.rusage,
-    perf_fds: [perf_counters.len]std.os.fd_t,
 
     fn begin() !Benchmark {
-        var perf_fds = [1]std.os.fd_t{-1} ** perf_counters.len;
-        for (perf_counters, 0..) |counter, i| {
-            var attr: std.os.linux.perf_event_attr = .{
-                .type = PERF.TYPE.HARDWARE,
-                .config = @intFromEnum(counter),
-                .flags = .{
-                    .disabled = true,
-                    .exclude_kernel = true,
-                    .exclude_hv = true,
-                },
-            };
-            // TODO(Zig): Use `std.os.perf_event_open` once that doesn't get confused by
-            // `linkLibC()`.
-            const fd_or_err =
-                std.os.linux.perf_event_open(&attr, 0, -1, perf_fds[0], PERF.FLAG.FD_CLOEXEC);
-            if (std.os.errno(fd_or_err) != .SUCCESS) {
-                return error.PerfEventOpen;
-            }
-            perf_fds[i] = @as(std.os.fd_t, @intCast(fd_or_err));
-        }
-        const err = std.os.linux.ioctl(perf_fds[0], PERF.EVENT_IOC.ENABLE, PERF.IOC_FLAG_GROUP);
-        if (err == -1) return error.Unexpected;
-
-        // Start the wall clock after perf, since setup is slow.
         const timer = try std.time.Timer.start();
         return Benchmark{
             .timer = timer,
             // TODO pass std.os.linux.rusage.SELF once Zig is upgraded
             .rusage = std.os.getrusage(0),
-            .perf_fds = perf_fds,
         };
     }
 
     fn end(self: *Benchmark, samples: usize) !BenchmarkResult {
-        defer {
-            for (perf_counters, 0..) |_, i| {
-                std.os.close(self.perf_fds[i]);
-                self.perf_fds[i] = -1;
-            }
-        }
-
         const rusage = std.os.getrusage(0);
-        const err = std.os.linux.ioctl(self.perf_fds[0], PERF.EVENT_IOC.DISABLE, PERF.IOC_FLAG_GROUP);
-        if (err == -1) return error.Unexpected;
         return BenchmarkResult{
             .wall_time = self.timer.read() / samples,
             .utime = (timeval_to_ns(rusage.utime) - timeval_to_ns(self.rusage.utime)) / samples,
-            .cpu_cycles = (try readPerfFd(self.perf_fds[0])) / samples,
-            .instructions = (try readPerfFd(self.perf_fds[1])) / samples,
-            .cache_references = (try readPerfFd(self.perf_fds[2])) / samples,
-            .cache_misses = (try readPerfFd(self.perf_fds[3])) / samples,
-            .branch_misses = (try readPerfFd(self.perf_fds[4])) / samples,
         };
     }
 };
