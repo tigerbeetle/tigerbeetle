@@ -114,10 +114,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
         const Environment = @This();
 
-        // The tree should behave like a simple key-value data-structure.
-        // We'll compare it to a hash map.
-        const Model = std.hash_map.AutoHashMap(u64, Value);
-
         const Tree = @import("tree.zig").TreeType(Table, Storage);
         const Table = TableType(
             u64,
@@ -518,7 +514,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-            var model = Model.init(allocator);
+            var model = Model.init(table_usage);
             defer model.deinit();
 
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
@@ -540,22 +536,16 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                         if (c.checkpoint) env.checkpoint(c.op);
                     },
                     .put => |value| {
-                        if (table_usage == .secondary_index) {
-                            if (model.get(Value.key_from_value(&value))) |old_value| {
-                                // Not allowed to put a present key without removing the old value first.
-                                env.tree.remove(&old_value);
-                            }
-                        }
                         env.tree.put(&value);
-                        try model.put(Value.key_from_value(&value), value);
+                        try model.put(&value);
                     },
                     .remove => |value| {
-                        if (table_usage == .secondary_index and !model.contains((Value.key_from_value(&value)))) {
+                        if (table_usage == .secondary_index and !model.contains(&value)) {
                             // Not allowed to remove non-present keys
                         } else {
                             env.tree.remove(&value);
+                            model.remove(&value);
                         }
-                        _ = model.remove(Value.key_from_value(&value));
                     },
                     .get => |key| {
                         // Get account from lsm.
@@ -689,6 +679,55 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
     };
 }
+
+// The tree should behave like a simple key-value data-structure.
+// We'll compare it to a hash map.
+const Model = struct {
+    const Map = std.hash_map.AutoHashMap(u64, Value);
+
+    map: Map,
+    table_usage: TableUsage,
+
+    fn init(table_usage: TableUsage) Model {
+        return .{
+            .map = Map.init(allocator),
+            .table_usage = table_usage,
+        };
+    }
+
+    fn count(model: *const Model) usize {
+        return model.map.count();
+    }
+
+    fn contains(model: *Model, value: *const Value) bool {
+        return model.map.contains(Value.key_from_value(value));
+    }
+
+    fn get(model: *const Model, key: u64) ?Value {
+        return model.map.get(key);
+    }
+
+    fn iterator(model: *const Model) Map.Iterator {
+        return model.map.iterator();
+    }
+
+    fn put(model: *Model, value: *const Value) !void {
+        if (model.table_usage == .secondary_index) {
+            // Not allowed to put a present key without removing the old value first.
+            _ = model.map.remove(Value.key_from_value(value));
+        }
+        try model.map.put(Value.key_from_value(value), value.*);
+    }
+
+    fn remove(model: *Model, value: *const Value) void {
+        _ = model.map.remove(Value.key_from_value(value));
+    }
+
+    fn deinit(model: *Model) void {
+        model.map.deinit();
+        model.* = undefined;
+    }
+};
 
 fn random_id(random: std.rand.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
