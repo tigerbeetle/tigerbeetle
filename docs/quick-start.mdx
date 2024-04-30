@@ -1,0 +1,347 @@
+---
+sidebar_label: Quick Start
+sidebar_position: 2
+---
+
+import Tabs from "@theme/Tabs";
+import TabItem from "@theme/TabItem";
+
+# Quick Start
+
+This page will guide you through downloading TigerBeetle, setting up a single- or multi-node cluster, and creating some accounts and transfers using the REPL.
+
+## 1. Download TigerBeetle
+
+TigerBeetle is a single, small, statically-linked binary.
+
+<Tabs groupId="operating-systems">
+<TabItem value="macos-linux" label="macOS/Linux" default>
+
+Use the bootstrap script to easily download TigerBeetle:
+
+```shell
+git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && ./bootstrap.sh
+```
+
+Add `-build` as an argument to the bootstrap script to build from source.
+</TabItem>
+
+<TabItem value="windows" label="Windows">
+
+Use the bootstrap script to easily download TigerBeetle:
+
+```powershell
+git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && .\bootstrap.ps1
+```
+
+Add `-build` as an argument to the bootstrap script to build from source.
+</TabItem>
+
+<TabItem value="docker" label="Docker">
+
+The TigerBeetle Docker container is available from the [Github Container Registry](https://github.com/tigerbeetle/tigerbeetle/pkgs/container/tigerbeetle):
+
+```shell
+docker pull ghcr.io/tigerbeetle/tigerbeetle:latest
+```
+
+</TabItem>
+</Tabs>
+
+
+<details>
+<summary>Direct Download</summary>
+
+Instead of using the bootstrap script, you can download prebuilt binaries here:
+
+|               | Linux                            | Windows                          | MacOS                             |
+| :------------ | :------------------------------- | :------------------------------- | :-------------------------------- |
+| x86_64        |[tigerbeetle-x86_64-linux.zip]    |[tigerbeetle-x86_64-windows.zip]  | [tigerbeetle-universal-macos.zip] |
+| aarch64       |[tigerbeetle-aarch64-linux.zip]   |             N/A                  | [tigerbeetle-universal-macos.zip] |
+
+[tigerbeetle-aarch64-linux.zip]: https://github.com/tigerbeetle/tigerbeetle/releases/latest/download/tigerbeetle-aarch64-linux.zip
+[tigerbeetle-universal-macos.zip]: https://github.com/tigerbeetle/tigerbeetle/releases/latest/download/tigerbeetle-universal-macos.zip
+[tigerbeetle-x86_64-linux.zip]: https://github.com/tigerbeetle/tigerbeetle/releases/latest/download/tigerbeetle-x86_64-linux.zip
+[tigerbeetle-x86_64-windows.zip]: https://github.com/tigerbeetle/tigerbeetle/releases/latest/download/tigerbeetle-x86_64-windows.zip
+
+</details>
+
+## 2. Create the Data File
+
+Each TigerBeetle node uses a single data file to store its state. Create the data file using the `format` command:
+
+<Tabs groupId="operating-systems">
+<TabItem value="single-node" label="Single Node" default>
+
+```console
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
+```
+
+```console
+info(io): creating "0_0.tigerbeetle"...
+info(io): allocating 660.140625MiB...
+```
+
+</TabItem>
+
+<TabItem value="three-node" label="3-Node Cluster">
+
+```console
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
+```
+
+Note that the data file stores which replica in the cluster the file belongs to.
+
+</TabItem>
+
+<TabItem value="docker" label="Docker">
+
+```console
+docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
+    format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
+```
+
+```console
+info(io): creating "0_0.tigerbeetle"...
+info(io): allocating 660.140625MiB...
+```
+
+</TabItem>
+
+<TabItem value="docker-compose" label="3-Node Cluster with Docker Compose">
+
+
+```console
+docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
+docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
+docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
+```
+
+Note that the data file stores which replica in the cluster the file belongs to.
+
+</TabItem>
+</Tabs>
+
+## 3. Start Your Cluster
+
+Now we'll run the TigerBeetle server.
+
+<Tabs groupId="operating-systems">
+<TabItem value="single-node" label="Single Node" default>
+
+```console
+./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+```
+
+```console
+info(io): opening "0_0.tigerbeetle"...
+info(main): 0: cluster=0: listening on 127.0.0.1:3000
+```
+
+</TabItem>
+
+<TabItem value="three-node" label="3-Node Cluster">
+
+Start each server in a new terminal window:
+
+```console
+./tigerbeetle start --addresses=3000,3001,3002 0_0.tigerbeetle
+```
+
+```console
+./tigerbeetle start --addresses=3000,3001,3002 0_1.tigerbeetle
+```
+
+```console
+./tigerbeetle start --addresses=3000,3001,3002 0_2.tigerbeetle
+```
+
+TigerBeetle uses the `--replica` that's stored in the data file as an index into the `--addresses`
+provided.
+
+</TabItem>
+
+<TabItem value="docker" label="Docker">
+
+```console
+docker run -it -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
+    start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+```
+
+```console
+info(io): opening "0_0.tigerbeetle"...
+info(main): 0: cluster=0: listening on 0.0.0.0:3000
+```
+
+</TabItem>
+
+<TabItem value="docker-compose" label="3-Node Cluster with Docker Compose">
+
+
+Create a docker-compose.yml file:
+
+```docker-compose
+version: "3.7"
+
+##
+# Note: this example might only work with linux + using `network_mode:host` because of 2 reasons:
+#
+# 1. When specifying an internal docker network, other containers are only available using dns based routing:
+#    e.g. from tigerbeetle_0, the other replicas are available at `tigerbeetle_1:3002` and
+#    `tigerbeetle_2:3003` respectively.
+#
+# 2. Tigerbeetle performs some validation of the ip address provided in the `--addresses` parameter
+#    and won't let us specify a custom domain name.
+#
+# The workaround for now is to use `network_mode:host` in the containers instead of specifying our
+# own internal docker network
+##
+
+services:
+  tigerbeetle_0:
+    image: ghcr.io/tigerbeetle/tigerbeetle
+    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
+    network_mode: host
+    volumes:
+      - ./data:/data
+
+  tigerbeetle_1:
+    image: ghcr.io/tigerbeetle/tigerbeetle
+    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_1.tigerbeetle"
+    network_mode: host
+    volumes:
+      - ./data:/data
+
+  tigerbeetle_2:
+    image: ghcr.io/tigerbeetle/tigerbeetle
+    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_2.tigerbeetle"
+    network_mode: host
+    volumes:
+      - ./data:/data
+```
+
+And run it:
+
+```console
+docker-compose up
+```
+
+```console
+docker-compose up
+Starting tigerbeetle_0   ... done
+Starting tigerbeetle_2   ... done
+Recreating tigerbeetle_1 ... done
+Attaching to tigerbeetle_0, tigerbeetle_2, tigerbeetle_1
+tigerbeetle_1    | info(io): opening "0_1.tigerbeetle"...
+tigerbeetle_2    | info(io): opening "0_2.tigerbeetle"...
+tigerbeetle_0    | info(io): opening "0_0.tigerbeetle"...
+tigerbeetle_0    | info(main): 0: cluster=0: listening on 0.0.0.0:3001
+tigerbeetle_2    | info(main): 2: cluster=0: listening on 0.0.0.0:3003
+tigerbeetle_1    | info(main): 1: cluster=0: listening on 0.0.0.0:3002
+tigerbeetle_0    | info(message_bus): connected to replica 1
+tigerbeetle_0    | info(message_bus): connected to replica 2
+tigerbeetle_1    | info(message_bus): connected to replica 2
+tigerbeetle_1    | info(message_bus): connection from replica 0
+tigerbeetle_2    | info(message_bus): connection from replica 0
+tigerbeetle_2    | info(message_bus): connection from replica 1
+tigerbeetle_0    | info(clock): 0: system time is 83ns ahead
+tigerbeetle_2    | info(clock): 2: system time is 83ns ahead
+tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
+
+... and so on ...
+```
+
+</TabItem>
+
+</Tabs>
+
+## 4. Connect to the REPL
+
+Now that we have TigerBeetle running, we can connect to it via the REPL to create some accounts and transfers!
+
+```console
+./tigerbeetle repl --cluster=0 --addresses=3000
+```
+
+```console
+TigerBeetle Client
+  Hit enter after a semicolon to run a command.
+
+Examples:
+  create_accounts id=1 code=10 ledger=700 flags=linked | history,
+                  id=2 code=10 ledger=700;
+  create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
+  lookup_accounts id=1;
+  lookup_accounts id=1, id=2;
+```
+
+## 5. Create Accounts
+
+In the REPL, create two accounts on the same ledger using the command:
+
+```console
+create_accounts id=1 code=10 ledger=700,
+                id=2 code=10 ledger=700;
+```
+
+```console
+info(message_bus): connected to replica 0
+```
+
+## 6. Create a Transfer
+
+Now create a transfer of `10` (of some amount/currency) between the two accounts.
+
+```console
+create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
+```
+
+Now, the amount of `10` has been credited to account `2` and debited from account `1`.
+
+## 7. Look Up Accounts
+
+Let's query TigerBeetle for these two accounts to verify the transfer we made!
+
+```console
+lookup_accounts id=1, id=2;
+```
+
+```json
+{
+  "id": "1",
+  "user_data": "0",
+  "ledger": "700",
+  "code": "10",
+  "flags": [],
+  "debits_pending": "0",
+  "debits_posted": "10",
+  "credits_pending": "0",
+  "credits_posted": "0"
+}
+{
+  "id": "2",
+  "user_data": "0",
+  "ledger": "700",
+  "code": "10",
+  "flags": "",
+  "debits_pending": "0",
+  "debits_posted": "0",
+  "credits_pending": "0",
+  "credits_posted": "10"
+}
+```
+
+And indeed you can see that account `1` has `debits_posted` as `10` and account `2` has
+`credits_posted` as `10`. The `10` amount is fully accounted for!
+
+You can take a look at the [`Accounts` reference](../reference/accounts.md) to understand all of the
+fields on the accounts.
+
+## Next: Designing for TigerBeetle
+
+Now that you've created some accounts and transfers, you may want to dig into the [data model](../develop/data-modeling.md) to learn more about how to build with TigerBeetle.
+
+You can also take a look at the [Operations](../reference/operations/index.md) to see what else you
+can do with the REPL.
