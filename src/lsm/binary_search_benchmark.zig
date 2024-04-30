@@ -172,8 +172,8 @@ fn shuffled_index(comptime n: usize, rand: std.rand.Random) [n]usize {
 
 fn timeval_to_ns(tv: std.os.timeval) u64 {
     const ns_per_us = std.time.ns_per_s / std.time.us_per_s;
-    return @as(u64, @bitCast(tv.tv_sec)) * std.time.ns_per_s +
-        @as(u64, @bitCast(tv.tv_usec)) * ns_per_us;
+    return @as(u64, @intCast(tv.tv_sec)) * std.time.ns_per_s +
+        @as(u64, @intCast(tv.tv_usec)) * ns_per_us;
 }
 
 fn readPerfFd(fd: std.os.fd_t) !usize {
