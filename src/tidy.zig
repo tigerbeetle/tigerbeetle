@@ -148,14 +148,11 @@ const DeadDetector = struct {
     fn is_entry_point(file: FileName) bool {
         const entry_points: []const []const u8 = &.{
             "benchmark.zig",
-            "binary_search_benchmark.zig",
-            "ewah_benchmark.zig",
             "fuzz_tests.zig",
             "integration_tests.zig",
             "jni_tests.zig",
             "main.zig",
             "node.zig",
-            "segmented_array_benchmark.zig",
             "tb_client_header.zig",
             "unit_tests.zig",
             "vopr.zig",

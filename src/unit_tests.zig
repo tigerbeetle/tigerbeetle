@@ -1,6 +1,7 @@
 comptime {
     _ = @import("aof.zig");
     _ = @import("copyhound.zig");
+    _ = @import("ewah_benchmark.zig");
     _ = @import("ewah.zig");
     _ = @import("fifo.zig");
     _ = @import("flags.zig");
@@ -22,6 +23,7 @@ comptime {
     _ = @import("io/test.zig");
 
     _ = @import("lsm/binary_search.zig");
+    _ = @import("lsm/binary_search_benchmark.zig");
     _ = @import("lsm/cache_map.zig");
     _ = @import("lsm/composite_key.zig");
     _ = @import("lsm/forest.zig");
@@ -32,6 +34,7 @@ comptime {
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/node_pool.zig");
     _ = @import("lsm/segmented_array.zig");
+    _ = @import("lsm/segmented_array_benchmark.zig");
     _ = @import("lsm/set_associative_cache.zig");
     _ = @import("lsm/table.zig");
     _ = @import("lsm/table_memory.zig");
