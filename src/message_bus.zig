@@ -192,76 +192,76 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         } {
             const fd = try io.open_socket(
                 address.any.family,
-                os.SOCK.STREAM,
-                os.IPPROTO.TCP,
+                std.posix.SOCK.STREAM,
+                std.posix.IPPROTO.TCP,
             );
             errdefer io.close_socket(fd);
 
             const set = struct {
-                fn set(_fd: std.posix.socket_t, level: u32, option: u32, value: c_int) !void {
-                    try os.setsockopt(_fd, level, option, &mem.toBytes(value));
+                fn set(_fd: std.posix.socket_t, level: i32, option: u32, value: c_int) !void {
+                    try std.posix.setsockopt(_fd, level, option, &mem.toBytes(value));
                 }
             }.set;
 
             if (constants.tcp_rcvbuf > 0) rcvbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
-                    if (set(fd, os.SOL.SOCKET, os.SO.RCVBUFFORCE, constants.tcp_rcvbuf)) |_| {
+                    if (set(fd, std.posix.SOL.SOCKET, std.posix.SO.RCVBUFFORCE, constants.tcp_rcvbuf)) |_| {
                         break :rcvbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, os.SOL.SOCKET, os.SO.RCVBUF, constants.tcp_rcvbuf);
+                try set(fd, std.posix.SOL.SOCKET, std.posix.SO.RCVBUF, constants.tcp_rcvbuf);
             }
 
             if (tcp_sndbuf > 0) sndbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
-                    if (set(fd, os.SOL.SOCKET, os.SO.SNDBUFFORCE, tcp_sndbuf)) |_| {
+                    if (set(fd, std.posix.SOL.SOCKET, std.posix.SO.SNDBUFFORCE, tcp_sndbuf)) |_| {
                         break :sndbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, os.SOL.SOCKET, os.SO.SNDBUF, tcp_sndbuf);
+                try set(fd, std.posix.SOL.SOCKET, std.posix.SO.SNDBUF, tcp_sndbuf);
             }
 
             if (constants.tcp_keepalive) {
-                try set(fd, os.SOL.SOCKET, os.SO.KEEPALIVE, 1);
+                try set(fd, std.posix.SOL.SOCKET, std.posix.SO.KEEPALIVE, 1);
                 if (is_linux) {
-                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPIDLE, constants.tcp_keepidle);
-                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPINTVL, constants.tcp_keepintvl);
-                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPCNT, constants.tcp_keepcnt);
+                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.KEEPIDLE, constants.tcp_keepidle);
+                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.KEEPINTVL, constants.tcp_keepintvl);
+                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.KEEPCNT, constants.tcp_keepcnt);
                 }
             }
 
             if (constants.tcp_user_timeout_ms > 0) {
                 if (is_linux) {
-                    try set(fd, os.IPPROTO.TCP, os.TCP.USER_TIMEOUT, constants.tcp_user_timeout_ms);
+                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.USER_TIMEOUT, constants.tcp_user_timeout_ms);
                 }
             }
 
             // Set tcp no-delay
             if (constants.tcp_nodelay) {
                 if (is_linux) {
-                    try set(fd, os.IPPROTO.TCP, os.TCP.NODELAY, 1);
+                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.NODELAY, 1);
                 }
             }
 
-            try set(fd, os.SOL.SOCKET, os.SO.REUSEADDR, 1);
-            try os.bind(fd, &address.any, address.getOsSockLen());
+            try set(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, 1);
+            try std.posix.bind(fd, &address.any, address.getOsSockLen());
 
             // Resolve port 0 to an actual port picked by the OS.
             var address_resolved: std.net.Address = .{ .any = undefined };
-            var addrlen: os.socklen_t = @sizeOf(std.net.Address);
-            try os.getsockname(fd, &address_resolved.any, &addrlen);
+            var addrlen: std.posix.socklen_t = @sizeOf(std.net.Address);
+            try std.posix.getsockname(fd, &address_resolved.any, &addrlen);
             assert(address_resolved.getOsSockLen() == addrlen);
             assert(address_resolved.any.family == address.any.family);
 
-            try os.listen(fd, constants.tcp_backlog);
+            try std.posix.listen(fd, constants.tcp_backlog);
 
             return .{ .fd = fd, .address = address_resolved };
         }
@@ -501,7 +501,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // family for all other replicas:
                 const family = bus.configuration[0].any.family;
                 connection.fd =
-                    bus.io.open_socket(family, os.SOCK.STREAM, os.IPPROTO.TCP) catch return;
+                    bus.io.open_socket(family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;
@@ -680,7 +680,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         //
                         // TODO: Investigate differences between shutdown() on Linux vs Darwin.
                         // Especially how this interacts with our assumptions around pending I/O.
-                        os.shutdown(connection.fd, .both) catch |err| switch (err) {
+                        std.posix.shutdown(connection.fd, .both) catch |err| switch (err) {
                             error.SocketNotConnected => {
                                 // This should only happen if we for some reason decide to terminate
                                 // a connection while a connect operation is in progress.

@@ -208,10 +208,10 @@ fn run_fuzzers(
                         "{zig} {args}",
                         .{ .zig = shell.zig_exe.?, .args = args.items },
                     );
-                    _ = try std.os.fcntl(
+                    _ = try std.posix.fcntl(
                         child.stdin.?.handle,
                         std.os.F.SETFL,
-                        @as(u32, std.os.O.NONBLOCK),
+                        @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
                     );
                     fuzzer_or_null.* = .{ .seed = seed_record, .child = child };
                 }

@@ -107,7 +107,7 @@ fn main_single(cli_args: CliArgs) !void {
     const seed: usize = cli_args.positional.seed orelse seed: {
         // If no seed was given, use a random seed instead.
         var seed_random: u64 = undefined;
-        try std.os.getrandom(std.mem.asBytes(&seed_random));
+        try std.posix.getrandom(std.mem.asBytes(&seed_random));
         break :seed seed_random;
     };
     log.info("Fuzz seed = {}", .{seed});

@@ -162,24 +162,24 @@ test "accept/connect/send/receive" {
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 0);
             const kernel_backlog = 1;
-            const server = try io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const server = try io.open_socket(address.any.family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
             defer io.close_socket(server);
 
-            const client = try io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const client = try io.open_socket(address.any.family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
             defer io.close_socket(client);
 
-            try os.setsockopt(
+            try std.posix.setsockopt(
                 server,
-                os.SOL.SOCKET,
-                os.SO.REUSEADDR,
+                std.posix.SOL.SOCKET,
+                std.posix.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
-            try os.bind(server, &address.any, address.getOsSockLen());
-            try os.listen(server, kernel_backlog);
+            try std.posix.bind(server, &address.any, address.getOsSockLen());
+            try std.posix.listen(server, kernel_backlog);
 
             var client_address = std.net.Address.initIp4(undefined, undefined);
             var client_address_len = client_address.getOsSockLen();
-            try os.getsockname(server, &client_address.any, &client_address_len);
+            try std.posix.getsockname(server, &client_address.any, &client_address_len);
 
             var self: Context = .{
                 .io = &io,
@@ -384,24 +384,24 @@ test "tick to wait" {
             const kernel_backlog = 1;
 
             const server =
-                try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+                try self.io.open_socket(address.any.family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
             defer self.io.close_socket(server);
 
-            try os.setsockopt(
+            try std.posix.setsockopt(
                 server,
-                os.SOL.SOCKET,
-                os.SO.REUSEADDR,
+                std.posix.SOL.SOCKET,
+                std.posix.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
-            try os.bind(server, &address.any, address.getOsSockLen());
-            try os.listen(server, kernel_backlog);
+            try std.posix.bind(server, &address.any, address.getOsSockLen());
+            try std.posix.listen(server, kernel_backlog);
 
             var client_address = std.net.Address.initIp4(undefined, undefined);
             var client_address_len = client_address.getOsSockLen();
-            try os.getsockname(server, &client_address.any, &client_address_len);
+            try std.posix.getsockname(server, &client_address.any, &client_address_len);
 
             const client =
-                try self.io.open_socket(client_address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+                try self.io.open_socket(client_address.any.family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
             defer self.io.close_socket(client);
 
             // Start the accept
@@ -580,23 +580,23 @@ test "pipe data over socket" {
             };
             defer self.io.deinit();
 
-            self.server.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+            self.server.fd = try self.io.open_socket(std.posix.AF.INET, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
             defer self.io.close_socket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 0);
-            try os.setsockopt(
+            try std.posix.setsockopt(
                 self.server.fd,
-                os.SOL.SOCKET,
-                os.SO.REUSEADDR,
+                std.posix.SOL.SOCKET,
+                std.posix.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
 
-            try os.bind(self.server.fd, &address.any, address.getOsSockLen());
-            try os.listen(self.server.fd, 1);
+            try std.posix.bind(self.server.fd, &address.any, address.getOsSockLen());
+            try std.posix.listen(self.server.fd, 1);
 
             var client_address = std.net.Address.initIp4(undefined, undefined);
             var client_address_len = client_address.getOsSockLen();
-            try os.getsockname(self.server.fd, &client_address.any, &client_address_len);
+            try std.posix.getsockname(self.server.fd, &client_address.any, &client_address_len);
 
             self.io.accept(
                 *Context,
@@ -606,7 +606,7 @@ test "pipe data over socket" {
                 self.server.fd,
             );
 
-            self.tx.socket.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
+            self.tx.socket.fd = try self.io.open_socket(std.posix.AF.INET, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
             defer self.io.close_socket(self.tx.socket.fd);
 
             self.io.connect(

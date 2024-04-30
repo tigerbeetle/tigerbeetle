@@ -19,8 +19,8 @@ pub const StatsD = struct {
     pub fn init(allocator: std.mem.Allocator, io: *IO, address: std.net.Address) !StatsD {
         const socket = try io.open_socket(
             address.any.family,
-            std.os.SOCK.DGRAM,
-            std.os.IPPROTO.UDP,
+            std.posix.SOCK.DGRAM,
+            std.posix.IPPROTO.UDP,
         );
         errdefer io.close_socket(socket);
 
@@ -39,7 +39,7 @@ pub const StatsD = struct {
         }
 
         // 'Connect' the UDP socket, so we can just send() to it normally.
-        try std.std.posix.connect(socket, &address.any, address.getOsSockLen());
+        try std.posix.connect(socket, &address.any, address.getOsSockLen());
 
         return statsd;
     }

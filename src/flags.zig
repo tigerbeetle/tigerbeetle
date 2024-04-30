@@ -669,7 +669,7 @@ test "flags" {
         flags_exe: []const u8,
 
         fn init(gpa: std.mem.Allocator) !T {
-            // TODO: Avoid std.os.getenv() as it currently causes a linker error on windows.
+            // TODO: Avoid std.posix.getenv() as it currently causes a linker error on windows.
             // See: https://github.com/ziglang/zig/issues/8456
             const zig_exe = try std.process.getEnvVarOwned(gpa, "ZIG_EXE"); // Set by build.zig
             defer gpa.free(zig_exe);
@@ -686,7 +686,7 @@ test "flags" {
             { // Compile this file as an executable!
                 const this_file = try std.fs.cwd().realpath(@src().file, flags_exe_buf);
                 const argv = [_][]const u8{ zig_exe, "build-exe", this_file };
-                const exec_result = try std.ChildProcess.exec(.{
+                const exec_result = try std.ChildProcess.run(.{
                     .allocator = gpa,
                     .argv = &argv,
                     .cwd_dir = tmp_dir.dir,
@@ -736,7 +736,7 @@ test "flags" {
                 assert(argv[argv.len - 1].ptr == cli[cli.len - 1].ptr);
             }
 
-            const exec_result = try std.ChildProcess.exec(.{
+            const exec_result = try std.ChildProcess.run(.{
                 .allocator = t.gpa,
                 .argv = argv,
             });

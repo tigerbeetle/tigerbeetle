@@ -32,9 +32,9 @@ pub const Signal = struct {
     pub fn init(self: *Signal, io: *IO, on_signal_fn: *const fn (*Signal) void) !void {
         self.io = io;
         self.server_socket = std.posix.socket(
-            os.AF.INET,
-            os.SOCK.STREAM | os.SOCK.NONBLOCK,
-            os.IPPROTO.TCP,
+            std.posix.AF.INET,
+            std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK,
+            std.posix.IPPROTO.TCP,
         ) catch |err| {
             log.err("failed to create signal server socket: {}", .{err});
             return switch (err) {
@@ -48,7 +48,7 @@ pub const Signal = struct {
         // Windows requires that the socket is bound before listening
         if (builtin.target.os.tag == .windows) {
             const addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0); // zero port lets the OS choose
-            os.bind(self.server_socket, &addr.any, addr.getOsSockLen()) catch |err| {
+            std.posix.bind(self.server_socket, &addr.any, addr.getOsSockLen()) catch |err| {
                 log.err("failed to bind the server socket to a local random port: {}", .{err});
                 return switch (err) {
                     error.AccessDenied => unreachable,
@@ -65,7 +65,7 @@ pub const Signal = struct {
             };
         }
 
-        os.listen(self.server_socket, 1) catch |err| {
+        std.posix.listen(self.server_socket, 1) catch |err| {
             log.err("failed to listen on signal server socket: {}", .{err});
             return switch (err) {
                 error.AddressInUse => unreachable,
@@ -80,7 +80,7 @@ pub const Signal = struct {
 
         var addr = std.net.Address.initIp4(undefined, undefined);
         var addr_len = addr.getOsSockLen();
-        os.getsockname(self.server_socket, &addr.any, &addr_len) catch |err| {
+        std.posix.getsockname(self.server_socket, &addr.any, &addr_len) catch |err| {
             log.err("failed to get address of signal server socket: {}", .{err});
             return switch (err) {
                 error.SocketNotBound => unreachable,
@@ -92,9 +92,9 @@ pub const Signal = struct {
         };
 
         self.connect_socket = self.io.open_socket(
-            os.AF.INET,
-            os.SOCK.STREAM,
-            os.IPPROTO.TCP,
+            std.posix.AF.INET,
+            std.posix.SOCK.STREAM,
+            std.posix.IPPROTO.TCP,
         ) catch |err| {
             log.err("failed to create signal connect socket: {}", .{err});
             return error.Unexpected;

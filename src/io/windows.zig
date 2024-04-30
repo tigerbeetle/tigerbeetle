@@ -270,7 +270,7 @@ pub const IO = struct {
         }
     }
 
-    pub const AcceptError = os.AcceptError || os.SetSockOptError;
+    pub const AcceptError = std.posix.AcceptError || std.posix.SetSockOptError;
 
     pub fn accept(
         self: *IO,
@@ -305,9 +305,9 @@ pub const IO = struct {
                         INVALID_SOCKET => blk: {
                             // Create the socket that will be used for accept.
                             op.client_socket = ctx.io.open_socket(
-                                os.AF.INET,
-                                os.SOCK.STREAM,
-                                os.IPPROTO.TCP,
+                                std.posix.AF.INET,
+                                std.posix.SOCK.STREAM,
+                                std.posix.IPPROTO.TCP,
                             ) catch |err| switch (err) {
                                 error.AddressFamilyNotSupported, error.ProtocolNotSupported => unreachable,
                                 else => |e| return e,
@@ -390,7 +390,7 @@ pub const IO = struct {
         NoSpaceLeft,
     } || std.posix.UnexpectedError;
 
-    pub const ConnectError = os.ConnectError || error{FileDescriptorNotASocket};
+    pub const ConnectError = std.posix.ConnectError || error{FileDescriptorNotASocket};
 
     pub fn connect(
         self: *IO,
@@ -436,7 +436,7 @@ pub const IO = struct {
                         // ConnectEx requires the socket to be initially bound (INADDR_ANY)
                         const inaddr_any = std.mem.zeroes([4]u8);
                         const bind_addr = std.net.Address.initIp4(inaddr_any, 0);
-                        os.bind(
+                        std.posix.bind(
                             op.socket,
                             &bind_addr.any,
                             bind_addr.getOsSockLen(),
@@ -454,7 +454,7 @@ pub const IO = struct {
                         const LPFN_CONNECTEX = *const fn (
                             Socket: os.windows.ws2_32.SOCKET,
                             SockAddr: *const os.windows.ws2_32.sockaddr,
-                            SockLen: os.socklen_t,
+                            SockLen: std.posix.socklen_t,
                             SendBuf: ?*const anyopaque,
                             SendBufLen: os.windows.DWORD,
                             BytesSent: *os.windows.DWORD,
@@ -539,7 +539,7 @@ pub const IO = struct {
         );
     }
 
-    pub const SendError = os.SendError;
+    pub const SendError = std.posix.SendError;
 
     pub fn send(
         self: *IO,
@@ -639,7 +639,7 @@ pub const IO = struct {
         );
     }
 
-    pub const RecvError = os.RecvFromError;
+    pub const RecvError = std.posix.RecvFromError;
 
     pub fn recv(
         self: *IO,
@@ -786,7 +786,7 @@ pub const IO = struct {
                         error.BrokenPipe => unreachable,
                         error.ConnectionTimedOut => unreachable,
                         error.AccessDenied => error.InputOutput,
-                        error.NetNameDeleted => unreachable,
+                        error.SocketNotConnected => unreachable,
                         else => |e| e,
                     };
                 }
@@ -1177,14 +1177,14 @@ pub const IO = struct {
     }
 };
 
-// TODO: use os.getsockoptError when fixed for windows in stdlib
+// TODO: use std.posix.getsockoptError when fixed for windows in stdlib
 fn getsockoptError(socket: std.posix.socket_t) IO.ConnectError!void {
     var err_code: u32 = undefined;
     var size: i32 = @sizeOf(u32);
     const rc = os.windows.ws2_32.getsockopt(
         socket,
-        os.SOL.SOCKET,
-        os.SO.ERROR,
+        std.posix.SOL.SOCKET,
+        std.posix.SO.ERROR,
         std.mem.asBytes(&err_code),
         &size,
     );

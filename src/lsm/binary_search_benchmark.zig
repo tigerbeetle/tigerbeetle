@@ -30,7 +30,7 @@ test "benchmark: binary search" {
     log.info("UT: utime time/search", .{});
 
     var seed: u64 = undefined;
-    try std.os.getrandom(std.mem.asBytes(&seed));
+    try std.posix.getrandom(std.mem.asBytes(&seed));
     var prng = std.rand.DefaultPrng.init(seed);
 
     // Allocate on the heap just once.
@@ -203,7 +203,7 @@ fn timeval_to_ns(tv: std.os.timeval) u64 {
 
 fn readPerfFd(fd: std.posix.fd_t) !usize {
     var result: usize = 0;
-    const n = try std.std.posix.read(fd, std.mem.asBytes(&result));
+    const n = try std.posix.read(fd, std.mem.asBytes(&result));
     assert(n == @sizeOf(usize));
 
     return result;

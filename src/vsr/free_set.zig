@@ -835,7 +835,7 @@ test "FreeSet encode, decode, encode" {
 
     // Random.
     var seed: u64 = undefined;
-    try std.os.getrandom(mem.asBytes(&seed));
+    try std.posix.getrandom(mem.asBytes(&seed));
 
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
@@ -866,7 +866,7 @@ const TestPatternFill = enum { uniform_ones, uniform_zeros, literal };
 
 fn test_encode(patterns: []const TestPattern) !void {
     var seed: u64 = undefined;
-    try std.os.getrandom(mem.asBytes(&seed));
+    try std.posix.getrandom(mem.asBytes(&seed));
 
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();

@@ -2238,10 +2238,10 @@ fn ExpirePendingTransfersType(
         }
 
         inline fn value_next(context: *Context, value: *const Value) EvaluateNext {
-            const self: *ExpirePendingTransfers = @fieldParentPtr(
+            const self: *ExpirePendingTransfers = @alignCast(@fieldParentPtr(
                 "context",
                 context,
-            );
+            ));
             assert(self.phase == .running);
 
             const expires_at: u64 = value.field;

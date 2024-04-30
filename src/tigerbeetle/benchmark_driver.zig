@@ -81,7 +81,7 @@ fn format(allocator: std.mem.Allocator, options: struct {
     tigerbeetle: []const u8,
     data_file: []const u8,
 }) !void {
-    const format_result = try ChildProcess.exec(.{
+    const format_result = try ChildProcess.run(.{
         .allocator = allocator,
         .argv = &.{
             options.tigerbeetle,

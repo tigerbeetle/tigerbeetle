@@ -521,7 +521,7 @@ pub fn exec_raw(
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    return try std.ChildProcess.exec(.{
+    return try std.ChildProcess.run(.{
         .allocator = shell.arena.allocator(),
         .argv = argv.slice(),
         .cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer),

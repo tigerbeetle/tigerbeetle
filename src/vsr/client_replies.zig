@@ -229,7 +229,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         fn read_reply_callback(completion: *Storage.Read) void {
-            const read: *ClientReplies.Read = @fieldParentPtr("completion", completion);
+            const read: *ClientReplies.Read = @alignCast(@fieldParentPtr("completion", completion));
             const client_replies = read.client_replies;
             const header = read.header;
             const message = read.message;
@@ -483,7 +483,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         fn checkpoint_next_tick_callback(next_tick: *Storage.NextTick) void {
-            const client_replies: *ClientReplies = @fieldParentPtr("checkpoint_next_tick", next_tick);
+            const client_replies: *ClientReplies = @alignCast(@fieldParentPtr("checkpoint_next_tick", next_tick));
             client_replies.checkpoint_done();
         }
 

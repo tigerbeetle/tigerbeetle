@@ -287,7 +287,7 @@ pub const IO = struct {
         }
     }
 
-    pub const AcceptError = os.AcceptError || os.SetSockOptError;
+    pub const AcceptError = std.posix.AcceptError || std.posix.SetSockOptError;
 
     pub fn accept(
         self: *IO,
@@ -315,16 +315,16 @@ pub const IO = struct {
                         op.socket,
                         null,
                         null,
-                        os.SOCK.NONBLOCK | os.SOCK.CLOEXEC,
+                        std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
                     );
                     errdefer std.posix.close(fd);
 
                     // Darwin doesn't support os.MSG_NOSIGNAL to avoid getting SIGPIPE on socket send().
                     // Instead, it uses the SO_NOSIGPIPE socket option which does the same for all send()s.
-                    os.setsockopt(
+                    std.posix.setsockopt(
                         fd,
-                        os.SOL.SOCKET,
-                        os.SO.NOSIGPIPE,
+                        std.posix.SOL.SOCKET,
+                        std.posix.SO.NOSIGPIPE,
                         &mem.toBytes(@as(c_int, 1)),
                     ) catch |err| return switch (err) {
                         error.TimeoutTooBig => unreachable,
@@ -369,19 +369,19 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) CloseError!void {
-                    return switch (os.errno(os.system.close(op.fd))) {
+                    return switch (std.posix.errno(os.system.close(op.fd))) {
                         .SUCCESS => {},
                         .BADF => error.FileDescriptorInvalid,
                         .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
                         .IO => error.InputOutput,
-                        else => |errno| os.unexpectedErrno(errno),
+                        else => |errno| std.posix.unexpectedErrno(errno),
                     };
                 }
             },
         );
     }
 
-    pub const ConnectError = os.ConnectError;
+    pub const ConnectError = std.posix.ConnectError;
 
     pub fn connect(
         self: *IO,
@@ -411,7 +411,7 @@ pub const IO = struct {
                     // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
                     // Instead, check the socket error to see if has been connected successfully.
                     const result = switch (op.initiated) {
-                        true => os.getsockoptError(op.socket),
+                        true => std.posix.getsockoptError(op.socket),
                         else => std.posix.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
                     };
 
@@ -468,7 +468,7 @@ pub const IO = struct {
                             op.len,
                             @bitCast(op.offset),
                         );
-                        return switch (os.errno(rc)) {
+                        return switch (std.posix.errno(rc)) {
                             .SUCCESS => @intCast(rc),
                             .INTR => continue,
                             .AGAIN => error.WouldBlock,
@@ -484,7 +484,7 @@ pub const IO = struct {
                             .OVERFLOW => error.Unseekable,
                             .SPIPE => error.Unseekable,
                             .TIMEDOUT => error.ConnectionTimedOut,
-                            else => |err| os.unexpectedErrno(err),
+                            else => |err| std.posix.unexpectedErrno(err),
                         };
                     }
                 }
@@ -492,7 +492,7 @@ pub const IO = struct {
         );
     }
 
-    pub const RecvError = os.RecvFromError;
+    pub const RecvError = std.posix.RecvFromError;
 
     pub fn recv(
         self: *IO,
@@ -525,7 +525,7 @@ pub const IO = struct {
         );
     }
 
-    pub const SendError = os.SendError;
+    pub const SendError = std.posix.SendError;
 
     pub fn send(
         self: *IO,
@@ -646,11 +646,11 @@ pub const IO = struct {
 
     /// Creates a socket that can be used for async operations with the IO instance.
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !std.posix.socket_t {
-        const fd = try std.posix.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
+        const fd = try std.posix.socket(family, sock_type | std.posix.SOCK.NONBLOCK, protocol);
         errdefer self.close_socket(fd);
 
         // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
-        try os.setsockopt(fd, os.SOL.SOCKET, os.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+        try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
         return fd;
     }
 
@@ -662,7 +662,7 @@ pub const IO = struct {
 
     /// Opens a directory with read only access.
     pub fn open_dir(dir_path: []const u8) !std.posix.fd_t {
-        return os.open(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
+        return std.posix.open(dir_path, .{ .CLOEXEC = true, .ACCMODE = .RDONLY }, 0);
     }
 
     pub const INVALID_FILE: std.posix.fd_t = -1;
@@ -690,21 +690,21 @@ pub const IO = struct {
 
         // Opening with O_DSYNC is essential for both durability and correctness.
         // O_DSYNC enables us to omit fsync() calls in the data plane, since we sync to the disk on every write.
-        var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
-        var mode: os.mode_t = 0;
+        var flags: std.posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDWR, .DSYNC = true };
+        var mode: std.posix.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
-        if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
+        if (@hasDecl(std.posix.O, "LARGEFILE")) flags.LARGEFILE = true;
 
         switch (method) {
             .create => {
-                flags |= os.O.CREAT;
-                flags |= os.O.EXCL;
+                flags.CREAT = true;
+                flags.EXCL = true;
                 mode = 0o666;
                 log.info("creating \"{s}\"...", .{relative_path});
             },
             .create_or_open => {
-                flags |= os.O.CREAT;
+                flags.CREATE = true;
                 mode = 0o666;
                 log.info("opening or creating \"{s}\"...", .{relative_path});
             },
@@ -714,11 +714,11 @@ pub const IO = struct {
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert((flags & os.O.DSYNC) > 0);
+        assert(flags.DSYNC);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
-        const fd = try os.openat(dir_fd, relative_path, flags, mode);
+        const fd = try std.posix.openat(dir_fd, relative_path, flags, mode);
         // TODO Return a proper error message when the path exists or does not exist (init/start).
         errdefer std.posix.close(fd);
 
@@ -783,9 +783,9 @@ pub const IO = struct {
         const fstore_t = extern struct {
             fst_flags: c_uint,
             fst_posmode: c_int,
-            fst_offset: os.off_t,
-            fst_length: os.off_t,
-            fst_bytesalloc: os.off_t,
+            fst_offset: std.posix.off_t,
+            fst_length: std.posix.off_t,
+            fst_bytesalloc: std.posix.off_t,
         };
 
         var store = fstore_t{
@@ -798,12 +798,12 @@ pub const IO = struct {
 
         // Try to pre-allocate contiguous space and fall back to default non-contiguous.
         var res = os.system.fcntl(fd, os.F.PREALLOCATE, @intFromPtr(&store));
-        if (os.errno(res) != .SUCCESS) {
+        if (std.posix.errno(res) != .SUCCESS) {
             store.fst_flags = F_ALLOCATEALL;
             res = os.system.fcntl(fd, os.F.PREALLOCATE, @intFromPtr(&store));
         }
 
-        switch (os.errno(res)) {
+        switch (std.posix.errno(res)) {
             .SUCCESS => {},
             .ACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
             .BADF => return error.FileDescriptorInvalid,
@@ -815,7 +815,7 @@ pub const IO = struct {
             .OVERFLOW => return error.FileTooBig,
             .SRCH => unreachable, // F_SETOWN
             .OPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
-            else => |errno| return os.unexpectedErrno(errno),
+            else => |errno| return std.posix.unexpectedErrno(errno),
         }
 
         // Now actually perform the allocation.

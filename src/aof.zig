@@ -137,7 +137,7 @@ pub const AOF = struct {
         const fd = try IO.open_file(dir_fd, relative_path, 0, .create_or_open, .direct_io_required);
         errdefer std.posix.close(fd);
 
-        try os.lseek_END(fd, 0);
+        try std.posix.lseek_END(fd, 0);
 
         return AOF{ .fd = fd };
     }
