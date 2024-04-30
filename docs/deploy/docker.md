@@ -7,7 +7,7 @@ sidebar_position: 4
 TigerBeetle can be run using Docker. However, it is not recommended.
 
 TigerBeetle is distributed as a single, small, statically-linked binary. It
-should be easy to run direclty on the target machine. Using Docker as an
+should be easy to run directly on the target machine. Using Docker as an
 abstraction adds complexity while providing relatively little in this case.
 
 ## Image
