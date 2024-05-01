@@ -212,6 +212,6 @@ You can also read more about
 
 ## Next: Designing for TigerBeetle
 
-Now that you've created some accounts and transfers, you may want to dig into
-the [data model](./develop/data-modeling.md) to learn more about how to build
-with TigerBeetle.
+Now that you've created some accounts and transfers, you may want to read about
+[how TigerBeetle fits into your system architecture](./develop/system-architecture.md)
+and dig into the [data model](./develop/data-modeling.md).
