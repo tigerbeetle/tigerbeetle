@@ -165,6 +165,9 @@ And indeed you can see that account `1` has `debits_posted` as `10` and account
 You can take a look at the [`Accounts` reference](./reference/accounts.md) to
 understand all of the fields on the accounts.
 
+You can also take a look at the [Operations](./reference/operations/index.md) to
+see what else you can do with the REPL.
+
 ## Optional: Run a Multi-Node Cluster
 
 Up to this point, we have only shown you how to run a single-node TigerBeetle
@@ -187,15 +190,15 @@ Note that the data file stores which replica in the cluster the file belongs to.
 Start each server in a new terminal window:
 
 ```console
-./tigerbeetle start --addresses=3000,3001,3002 0_0.tigerbeetle
+./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_0.tigerbeetle
 ```
 
 ```console
-./tigerbeetle start --addresses=3000,3001,3002 0_1.tigerbeetle
+./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_1.tigerbeetle
 ```
 
 ```console
-./tigerbeetle start --addresses=3000,3001,3002 0_2.tigerbeetle
+./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_2.tigerbeetle
 ```
 
 TigerBeetle uses the `--replica` that's stored in the data file as an index into
@@ -204,11 +207,11 @@ the `--addresses` provided.
 You can connect to the REPL as described above try creating accounts and
 transfers in this cluster.
 
+You can also read more about
+[deploying TigerBeetle in production](./deploy/cluster.md).
+
 ## Next: Designing for TigerBeetle
 
 Now that you've created some accounts and transfers, you may want to dig into
 the [data model](./develop/data-modeling.md) to learn more about how to build
 with TigerBeetle.
-
-You can also take a look at the [Operations](./reference/operations/index.md) to
-see what else you can do with the REPL.

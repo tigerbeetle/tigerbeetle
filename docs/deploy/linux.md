@@ -12,5 +12,5 @@ for use with Linux systems that use systemd. The unit is configured to start a
 single-node cluster, so you may need to adjust it for other cluster
 configurations.
 
-See the [Quick Start](../quick-start.mdx) for an example of how to run a single-
+See the [Quick Start](../quick-start.md) for an example of how to run a single-
 vs multi-node cluster.

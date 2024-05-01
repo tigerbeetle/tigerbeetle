@@ -8,7 +8,9 @@ sidebar_position: 1
 TigerBeetle is a distributed financial accounting database designed for mission critical safety and
 performance.
 
-## [Quick Start](./quick-start.md)
+## Quick Start
+
+[./quick-start](./quick-start.md)
 
 ## Developing on TigerBeetle
 
