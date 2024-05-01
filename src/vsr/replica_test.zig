@@ -766,6 +766,10 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     t.replica(.R1).stop();
     t.replica(.R2).stop();
 
+    // Make sure there are no commit messages with commit=24 lingering in the network, which would
+    // cause the deadlock to occur after the view-change (during repair).
+    t.cluster.network.clear();
+
     t.replica(.R1).corrupt(.{ .wal_prepare = 22 });
     t.replica(.R2).corrupt(.{ .wal_prepare = 22 });
 

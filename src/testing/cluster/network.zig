@@ -136,6 +136,10 @@ pub const Network = struct {
         network.packet_simulator.tick();
     }
 
+    pub fn clear(network: *Network) void {
+        network.packet_simulator.clear();
+    }
+
     pub fn transition_to_liveness_mode(network: *Network, core: Core) void {
         assert(core.count() > 0);
 

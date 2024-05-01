@@ -191,6 +191,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             allocator.free(self.auto_partition_nodes);
         }
 
+        /// Drop all pending packets.
+        pub fn clear(self: *Self) void {
+            for (self.links) |*link| {
+                while (link.queue.peek()) |_| link.queue.remove().packet.deinit();
+            }
+        }
+
         pub fn link_filter(self: *Self, path: Path) *LinkFilter {
             return &self.links[self.path_index(path)].filter;
         }
