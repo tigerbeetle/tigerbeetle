@@ -5,15 +5,12 @@ sidebar_position: 1
 
 # TigerBeetle Docs
 
-TigerBeetle is a distributed financial accounting database designed
-for mission critical safety and performance.
+TigerBeetle is a distributed financial accounting database designed for mission critical safety and
+performance.
 
-## Getting Started
+## Quick Start
 
-Head over to [Getting Started](./getting-started/README.md) to
-[download](./getting-started/download.md) TigerBeetle, [run a
-cluster](./getting-started/single-binary.md), and try [creating accounts and transfers using the
-CLI](./getting-started/cli-repl.md).
+[./quick-start](./quick-start.md)
 
 ## Developing on TigerBeetle
 

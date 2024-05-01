@@ -1,10 +1,50 @@
 ---
-sidebar_position: 5
+sidebar_position: 4
 ---
 
-# Three-Node Cluster with Docker Compose
+# Docker
 
-First, provision the [data file](../about/internals/data_file.md) for each node:
+TigerBeetle can be run using Docker. However, it is not recommended.
+
+TigerBeetle is distributed as a single, small, statically-linked binary. It
+should be easy to run directly on the target machine. Using Docker as an
+abstraction adds complexity while providing relatively little in this case.
+
+## Image
+
+The Docker image is available from the Github Container Registry:
+
+<https://github.com/tigerbeetle/tigerbeetle/pkgs/container/tigerbeetle>
+
+## Format the Data File
+
+When using Docker, the data file must be mounted as a volume:
+
+```shell
+docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
+    format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
+```
+
+```console
+info(io): creating "0_0.tigerbeetle"...
+info(io): allocating 660.140625MiB...
+```
+
+## Run the Server
+
+```console
+docker run -it -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
+    start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+```
+
+```console
+info(io): opening "0_0.tigerbeetle"...
+info(main): 0: cluster=0: listening on 0.0.0.0:3000
+```
+
+## Run a Multi-Node Cluster Using Docker Compose
+
+Format the data file for each replica:
 
 ```console
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
@@ -12,7 +52,9 @@ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
 ```
 
-Then create a docker-compose.yml file:
+Note that the data file stores which replica in the cluster the file belongs to.
+
+Then, create a docker-compose.yml file:
 
 ```docker-compose
 version: "3.7"
@@ -85,15 +127,58 @@ tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
 ... and so on ...
 ```
 
-### Connect with the CLI
+## Troubleshooting
 
-Now you can connect to the running server with any client. For a quick start, try creating accounts
-and transfers [using the TigerBeetle CLI client](./cli-repl.md).
+### `exited with code 137`
 
-## `error: SystemResources` on macOS
+If you see this error without any logs from TigerBeetle, it is likely that the
+Linux OOMKiller is killing the process. If you are running Docker inside a
+virtual machine (such as is required on Docker or Podman for macOS), try
+increasing the virtual machine memory limit.
 
-If you get `error: SystemResources` when running TigerBeetle in Docker on macOS, you will need to
-add the `IPC_LOCK` capability.
+Alternatively, in a development environment, you can lower the size of the cache
+so TigerBeetle uses less memory. For example, set `--cache-grid=512MiB` when
+running `tigerbeetle start`.
+
+### Debugging panics
+
+If TigerBeetle panics and you can reproduce the panic, you can get a better
+stack trace by switching to a debug image (by using the `:debug` Docker image
+tag).
+
+```console
+docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle:debug \
+    start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+```
+
+### On MacOS
+
+#### `error: SystemResources`
+
+If you get `error: SystemResources` when running TigerBeetle in Docker on macOS,
+you will need to do one of the following:
+
+1. Run `docker run` with `--cap-add IPC_LOCK`
+2. Run `docker run` with `--ulimit memlock=-1:-1`
+3. Or modify the defaults in `$HOME/.docker/daemon.json` and restart the Docker
+   for Mac application:
+
+```json
+{
+  ... other settings ...
+  "default-ulimits": {
+    "memlock": {
+      "Hard": -1,
+      "Name": "memlock",
+      "Soft": -1
+    }
+  },
+  ... other settings ...
+}
+```
+
+If you are running TigerBeetle with Docker Compose, you will need to add the
+`IPC_LOCK` capability like this:
 
 ```yaml
 ... rest of docker-compose.yml ...
@@ -112,21 +197,3 @@ services:
 ```
 
 See https://github.com/tigerbeetle/tigerbeetle/issues/92 for discussion.
-
-## `exited with code 137`
-
-If you see this error without any logs from TigerBeetle, it is likely that the Linux OOMKiller is
-killing the process. If you are running Docker inside a virtual machine (such as is required on
-Docker or Podman for macOS), try increasing the virtual machine memory limit.
-
-Alternatively, in a development environment, you can lower the size of the cache so TigerBeetle uses
-less memory. For example, set `--cache-grid=512MiB` when running `tigerbeetle start`.
-
-## Debugging panics
-
-If TigerBeetle panics and you can reproduce the panic, you can get a better stack trace by switching
-to a debug image (by using the `:debug` Docker image tag).
-
-```bash
-ghcr.io/tigerbeetle/tigerbeetle:debug
-```
