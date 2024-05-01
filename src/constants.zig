@@ -52,9 +52,10 @@ comptime {
 
 /// The checkpoint interval is chosen to be the highest possible value that satisfies the
 /// constraints described below.
-pub const vsr_checkpoint_interval = journal_slot_count -
-    lsm_batch_multiple -
-    lsm_batch_multiple * stdx.div_ceil(pipeline_prepare_queue_max, lsm_batch_multiple);
+pub const vsr_checkpoint_interval = @divFloor(
+    journal_slot_count - (lsm_batch_multiple + lsm_batch_multiple * stdx.div_ceil(pipeline_prepare_queue_max, lsm_batch_multiple)),
+    2,
+);
 
 comptime {
     // Invariant: to guarantee durability, a log entry from a previous checkpoint can be overwritten
@@ -74,7 +75,7 @@ comptime {
     // - `pipeline_prepare_queue_max` (rounded up to the nearest batch multiple): This margin ensures
     //   that the entries prepared immediately following a checkpoint trigger never overwrite an entry
     //   from the previous WAL wrap until a quorum of replicas has reached that checkpoint.
-    assert(vsr_checkpoint_interval + lsm_batch_multiple + pipeline_prepare_queue_max <=
+    assert(2 * vsr_checkpoint_interval + lsm_batch_multiple + pipeline_prepare_queue_max <=
         journal_slot_count);
     assert(vsr_checkpoint_interval >= pipeline_prepare_queue_max);
     assert(vsr_checkpoint_interval >= lsm_batch_multiple);

@@ -714,10 +714,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     };
                 },
                 .sync_stage_changed => switch (replica.syncing) {
-                    .requesting_checkpoint => cluster.log_replica(
-                        .sync_commenced,
-                        replica.replica,
-                    ),
                     .idle => cluster.log_replica(.sync_completed, replica.replica),
                     else => {},
                 },
@@ -767,7 +763,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const role: u8 = role: {
                 if (cluster.replica_health[replica_index] == .down) break :role '#';
-                if (replica.syncing != .idle) break :role '~';
+                if (replica.syncing != .idle and replica.syncing != .stuck) break :role '~';
                 if (replica.standby()) break :role '|';
                 if (replica.primary_index(replica.view) == replica.replica) break :role '/';
                 break :role '\\';
