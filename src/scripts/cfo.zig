@@ -80,6 +80,12 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         return error.NotSupported;
     }
 
+    // Personal Access Token for <https://github.com/tigerbeetle/devhubdb>.
+    const token_option = shell.env_get_option("DEVHUBDB_PAT");
+    if (token_option == null) {
+        log.err("'DEVHUB_PAT' environmental variable is not set, will not upload results", .{});
+    }
+
     assert(try shell.exec_status_ok("git --version", .{}));
 
     const commit_sha: [40]u8 = commit_sha: {
@@ -95,7 +101,11 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         .budget_seconds = cli_args.budget_minutes * std.time.s_per_min,
         .hang_seconds = cli_args.hang_minutes * std.time.s_per_min,
     });
-    try upload_results(shell, gpa, seeds.items);
+    if (token_option) |token| {
+        try upload_results(shell, gpa, token, seeds.items);
+    } else {
+        log.info("skipping upload, no token", .{});
+    }
 }
 
 fn run_fuzzers(
@@ -229,12 +239,10 @@ fn run_fuzzers(
 fn upload_results(
     shell: *Shell,
     gpa: std.mem.Allocator,
+    token: []const u8,
     seeds_new: []const SeedRecord,
 ) !void {
     log.info("uploading {} seeds", .{seeds_new.len});
-
-    // Personal Access Token for <https://github.com/tigerbeetle/devhubdb>.
-    const token = try shell.env_get("DEVHUBDB_PAT");
 
     _ = try shell.cwd.deleteTree("./devhubdb");
     try shell.exec(

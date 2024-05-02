@@ -177,6 +177,10 @@ pub fn print(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) ![]cons
     return std.fmt.allocPrint(shell.arena.allocator(), fmt, fmt_args);
 }
 
+pub fn env_get_option(shell: *Shell, var_name: []const u8) ?[]const u8 {
+    return std.process.getEnvVarOwned(shell.arena.allocator(), var_name) catch null;
+}
+
 pub fn env_get(shell: *Shell, var_name: []const u8) ![]const u8 {
     errdefer {
         log.err("environment variable '{s}' not defined", .{var_name});
