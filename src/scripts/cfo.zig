@@ -88,15 +88,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     assert(try shell.exec_status_ok("git --version", .{}));
 
-    const commit_sha: [40]u8 = commit_sha: {
-        const commit_str = try shell.exec_stdout("git rev-parse HEAD", .{});
-        assert(commit_str.len == 40);
-        break :commit_sha commit_str[0..40].*;
-    };
-
     var seeds = std.ArrayList(SeedRecord).init(shell.arena.allocator());
     try run_fuzzers(shell, &seeds, .{
-        .commit = commit_sha,
         .concurrency = cli_args.concurrency orelse try std.Thread.getCpuCount(),
         .budget_seconds = cli_args.budget_minutes * std.time.s_per_min,
         .hang_seconds = cli_args.hang_minutes * std.time.s_per_min,
@@ -112,12 +105,18 @@ fn run_fuzzers(
     shell: *Shell,
     seeds: *std.ArrayList(SeedRecord),
     options: struct {
-        commit: [40]u8,
         concurrency: usize,
         budget_seconds: u64,
         hang_seconds: u64,
     },
 ) !void {
+    const commit_sha: [40]u8 = commit_sha: {
+        const commit_str = try shell.exec_stdout("git rev-parse HEAD", .{});
+        assert(commit_str.len == 40);
+        break :commit_sha commit_str[0..40].*;
+    };
+    const commit_str: []const u8 = &commit_sha;
+
     // Fuzz an independent clone of the repository, so that CFO and the fuzzer could be on
     // different branches (to fuzz PRs and releases).
     shell.project_root.deleteTree("working") catch {};
@@ -128,7 +127,6 @@ fn run_fuzzers(
 
     assert(try shell.dir_exists(".git"));
 
-    const commit_str: []const u8 = &options.commit;
     try shell.exec("git switch --detach {commit}", .{ .commit = commit_str });
 
     const commit_timestamp = commit_timestamp: {
@@ -139,7 +137,7 @@ fn run_fuzzers(
         break :commit_timestamp try std.fmt.parseInt(u64, timestamp, 10);
     };
 
-    log.info("fuzzing commit={s} timestamp={d}", .{ options.commit, commit_timestamp });
+    log.info("fuzzing commit={s} timestamp={d}", .{ commit_sha, commit_timestamp });
 
     const random = std.crypto.random;
 
@@ -175,7 +173,7 @@ fn run_fuzzers(
                     );
                     const seed_record = SeedRecord{
                         .commit_timestamp = commit_timestamp,
-                        .commit_sha = options.commit,
+                        .commit_sha = commit_sha,
                         .fuzzer = fuzzer,
                         .ok = false,
                         .seed = seed,
