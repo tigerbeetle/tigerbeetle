@@ -29,44 +29,24 @@ const FuzzOp = union(enum) {
 
 const Environment = struct {
     cache_map: TestCacheMap,
-    model: std.hash_map.AutoHashMap(Key, OpValue),
-
-    // For Scope support in the model.
-    scope_open: bool = false,
-    scope_model: std.hash_map.AutoHashMap(Key, OpValue),
-
-    // For compact support in the model.
-    compacts: u32 = 0,
+    model: Model,
 
     pub fn init(options: TestCacheMap.Options) !Environment {
         var cache_map = try TestCacheMap.init(allocator, options);
         errdefer cache_map.deinit(allocator);
 
-        var model = std.hash_map.AutoHashMap(Key, OpValue).init(allocator);
+        var model = Model.init();
         errdefer model.deinit();
-
-        var scope_model = std.hash_map.AutoHashMap(Key, OpValue).init(allocator);
-        errdefer scope_model.deinit();
 
         return Environment{
             .cache_map = cache_map,
             .model = model,
-            .scope_model = scope_model,
         };
     }
 
     pub fn deinit(self: *Environment) void {
-        self.scope_model.deinit();
         self.model.deinit();
         self.cache_map.deinit(allocator);
-    }
-
-    fn copy_hash_map(dst: anytype, src: anytype) !void {
-        dst.clearRetainingCapacity();
-        var it = src.iterator();
-        while (it.next()) |kv| {
-            try dst.putNoClobber(kv.key_ptr.*, kv.value_ptr.*);
-        }
     }
 
     pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
@@ -82,18 +62,15 @@ const Environment = struct {
             switch (fuzz_op) {
                 .compact => {
                     env.cache_map.compact();
-                    env.compacts += 1;
+                    env.model.compact();
                 },
                 .upsert => |value| {
                     env.cache_map.upsert(&value);
-                    try env.model.put(
-                        TestTable.key_from_value(&value),
-                        .{ .op = env.compacts, .value = value },
-                    );
+                    try env.model.upsert(&value);
                 },
                 .remove => |key| {
                     env.cache_map.remove(key);
-                    _ = env.model.remove(key);
+                    try env.model.remove(key);
                 },
                 .get => |key| {
                     // Get account from cache_map.
@@ -103,7 +80,7 @@ const Environment = struct {
                     const model_value = env.model.get(key);
                     if (model_value == null) {
                         assert(cache_map_value == null);
-                    } else if (env.compacts > model_value.?.op) {
+                    } else if (env.model.compacts > model_value.?.op) {
                         // .compact() support; if the entry has an op 1 or more compacts ago, it
                         // doesn't have to exist in the cache_map. It may still be served from the
                         // cache layer, however.
@@ -118,25 +95,15 @@ const Environment = struct {
                 .scope => |mode| switch (mode) {
                     .open => {
                         env.cache_map.scope_open();
-                        env.scope_open = true;
-
-                        // Copy env.model to env.scope_model, so we can easily revert later.
-                        try copy_hash_map(&env.scope_model, &env.model);
+                        env.model.scope_open();
                     },
                     .persist => {
                         env.cache_map.scope_close(.persist);
-                        env.scope_open = false;
-
-                        // To persist the scope, we don't need to do anything.
-                        env.scope_model.clearRetainingCapacity();
+                        try env.model.scope_close(.persist);
                     },
                     .discard => {
                         env.cache_map.scope_close(.discard);
-                        env.scope_open = false;
-
-                        // To revert the scope, we can just overwrite model with scope_model.
-                        try copy_hash_map(&env.model, &env.scope_model);
-                        env.scope_model.clearRetainingCapacity();
+                        try env.model.scope_close(.discard);
                     },
                 },
             }
@@ -165,7 +132,7 @@ const Environment = struct {
                 assert(std.meta.eql(kv.value_ptr.value, cache_map_value_unwraped.*));
             } else {
                 // .compact() support:
-                assert(env.compacts > kv.value_ptr.op);
+                assert(env.model.compacts > kv.value_ptr.op);
             }
 
             checked += 1;
@@ -193,7 +160,7 @@ const Environment = struct {
         var stash_iterator = env.cache_map.stash.keyIterator();
         while (stash_iterator.next()) |stash_value| {
             // Get account from model.
-            const model_value = env.model.getPtr(TestTable.key_from_value(stash_value));
+            const model_value = env.model.get(TestTable.key_from_value(stash_value));
 
             // Even if the stash has stale values, the key must still exist in the model.
             assert(model_value != null);
@@ -216,6 +183,92 @@ const Environment = struct {
             "Verified all items in the cache and stash exist and match the model.",
             .{},
         );
+    }
+};
+
+const Model = struct {
+    const Map = std.hash_map.AutoHashMap(Key, OpValue);
+    const UndoLog = std.ArrayList(struct {
+        key: Key,
+        value: ?OpValue,
+    });
+
+    map: Map,
+    undo_log: UndoLog,
+    scope_active: bool = false,
+    compacts: u32 = 0,
+
+    fn init() Model {
+        return .{
+            .map = Map.init(allocator),
+            .undo_log = UndoLog.init(allocator),
+        };
+    }
+
+    fn deinit(model: *Model) void {
+        model.undo_log.deinit();
+        model.map.deinit();
+        model.* = undefined;
+    }
+
+    fn get(model: *Model, key: Key) ?*OpValue {
+        return model.map.getPtr(key);
+    }
+
+    fn iterator(model: *Model) Map.Iterator {
+        return model.map.iterator();
+    }
+
+    fn upsert(model: *Model, value: *const Value) !void {
+        const key = TestTable.key_from_value(value);
+        const kv_old = try model.map.fetchPut(
+            key,
+            .{ .op = model.compacts, .value = value.* },
+        );
+        if (model.scope_active) {
+            try model.undo_log.append(.{
+                .key = key,
+                .value = if (kv_old) |kv| kv.value else null,
+            });
+        }
+    }
+
+    fn remove(model: *Model, key: Key) !void {
+        const kv_old = model.map.fetchRemove(key);
+        if (model.scope_active) {
+            try model.undo_log.append(.{
+                .key = key,
+                .value = if (kv_old) |kv| kv.value else null,
+            });
+        }
+    }
+
+    fn compact(model: *Model) void {
+        assert(!model.scope_active);
+        model.compacts += 1;
+    }
+
+    fn scope_open(model: *Model) void {
+        assert(!model.scope_active);
+        assert(model.undo_log.items.len == 0);
+        model.scope_active = true;
+    }
+
+    fn scope_close(model: *Model, mode: enum { persist, discard }) !void {
+        assert(model.scope_active);
+        model.scope_active = false;
+        defer assert(model.undo_log.items.len == 0);
+
+        switch (mode) {
+            .discard => while (model.undo_log.popOrNull()) |undo_entry| {
+                if (undo_entry.value) |value| {
+                    try model.map.put(undo_entry.key, value);
+                } else {
+                    _ = model.map.remove(undo_entry.key);
+                }
+            },
+            .persist => model.undo_log.clearRetainingCapacity(),
+        }
     }
 };
 
