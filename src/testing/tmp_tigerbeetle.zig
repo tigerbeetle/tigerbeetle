@@ -76,7 +76,7 @@ pub fn init(
             //     https://github.com/ziglang/zig/pull/15565
             .stderr_behavior = if (builtin.os.tag == .windows) .Inherit else .Ignore,
         },
-        "{tigerbeetle} start --cache-grid=512MiB --addresses=0 {data_file}",
+        "{tigerbeetle} start --development --addresses=0 {data_file}",
         .{ .tigerbeetle = tigerbeetle, .data_file = data_file },
     );
     errdefer {
