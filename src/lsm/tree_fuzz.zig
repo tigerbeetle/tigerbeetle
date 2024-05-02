@@ -645,9 +645,14 @@ const Model = struct {
     table_usage: TableUsage,
 
     fn init(table_usage: TableUsage) !Model {
+        const model_node_count = std.math.divCeil(
+            u32,
+            events_max * @sizeOf(Value),
+            NodePool.node_size,
+        ) catch unreachable;
         return .{
             .array = try Array.init(allocator),
-            .node_pool = try NodePool.init(allocator, 1_000),
+            .node_pool = try NodePool.init(allocator, model_node_count),
             .table_usage = table_usage,
         };
     }
