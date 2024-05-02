@@ -81,20 +81,25 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     }
 
     // Personal Access Token for <https://github.com/tigerbeetle/devhubdb>.
-    const token_option = shell.env_get_option("DEVHUBDB_PAT");
-    if (token_option == null) {
+    const devhub_token_option = shell.env_get_option("DEVHUBDB_PAT");
+    if (devhub_token_option == null) {
         log.err("'DEVHUB_PAT' environmental variable is not set, will not upload results", .{});
+    }
+
+    const gh_token_option = shell.env_get_option("GH_TOKEN");
+    if (gh_token_option == null) {
+        log.err("'GH_TOKEN' environmental variable is not set, will not fetch pull requests", .{});
     }
 
     assert(try shell.exec_status_ok("git --version", .{}));
 
     var seeds = std.ArrayList(SeedRecord).init(shell.arena.allocator());
-    try run_fuzzers(shell, &seeds, .{
+    try run_fuzzers(shell, &seeds, gh_token_option, .{
         .concurrency = cli_args.concurrency orelse try std.Thread.getCpuCount(),
         .budget_seconds = cli_args.budget_minutes * std.time.s_per_min,
         .hang_seconds = cli_args.hang_minutes * std.time.s_per_min,
     });
-    if (token_option) |token| {
+    if (devhub_token_option) |token| {
         try upload_results(shell, gpa, token, seeds.items);
     } else {
         log.info("skipping upload, no token", .{});
@@ -104,12 +109,15 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 fn run_fuzzers(
     shell: *Shell,
     seeds: *std.ArrayList(SeedRecord),
+    gh_token: ?[]const u8,
     options: struct {
         concurrency: usize,
         budget_seconds: u64,
         hang_seconds: u64,
     },
 ) !void {
+    _ = gh_token;
+
     const commit_sha: [40]u8 = commit_sha: {
         const commit_str = try shell.exec_stdout("git rev-parse HEAD", .{});
         assert(commit_str.len == 40);
