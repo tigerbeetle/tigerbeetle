@@ -64,19 +64,28 @@ async function mainSeeds() {
   const records = await (await fetch(dataUrl)).json();
   const fuzzersWithFailures = new Set();
   const tableDom = document.querySelector("#seeds>tbody");
+  let commit_previous = undefined;
+  let commit_count = 0;
+  const colors = ["#CCC", "#EEE"]
   for (const record of records) {
     if (record.ok) continue;
 
     if (fuzzersWithFailures.has(record.fuzzer)) continue;
     fuzzersWithFailures.add(record.fuzzer);
 
-    const rowDom = document.createElement("tr");
+    if (record.commit_sha != commit_previous) {
+      commit_previous = record.commit_sha;
+      commit_count += 1;
+    }
+
     const seedDuration = formatDuration(
       (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
     );
     const seedFreshness = formatDuration(
       Date.now() - (record.seed_timestamp_start * 1000),
     );
+    const rowDom = document.createElement("tr");
+    rowDom.style.setProperty("background", colors[commit_count % colors.length]);
     rowDom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}">
