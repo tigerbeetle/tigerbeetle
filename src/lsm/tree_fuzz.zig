@@ -106,11 +106,10 @@ const tree_options = .{
 // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
 // Every `FuzzOp.put` issues one remove and one put.
 const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
-const compacts_per_checkpoint = std.math.divCeil(
-    usize,
+const compacts_per_checkpoint = stdx.div_ceil(
     constants.journal_slot_count,
     constants.lsm_batch_multiple,
-) catch unreachable;
+);
 
 fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
@@ -645,9 +644,13 @@ const Model = struct {
     table_usage: TableUsage,
 
     fn init(table_usage: TableUsage) !Model {
+        const model_node_count = stdx.div_ceil(
+            events_max * @sizeOf(Value),
+            NodePool.node_size,
+        );
         return .{
             .array = try Array.init(allocator),
-            .node_pool = try NodePool.init(allocator, 1_000),
+            .node_pool = try NodePool.init(allocator, model_node_count),
             .table_usage = table_usage,
         };
     }
