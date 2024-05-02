@@ -6,19 +6,25 @@
 
 First, download a prebuilt copy of TigerBeetle.
 
-On macOS/Linux:
-
 ```console
-git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && ./bootstrap.sh
+# macOS
+curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+
+# Linux
+curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+
+# Windows
+powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .; .\tigerbeetle version"
 ```
 
-On Windows:
+Want to build from source locally?
 
 ```console
-git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && .\bootstrap.ps1
+git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
+./scripts/install_zig.sh # or .bat if you're on Windows.
+zig/zig build install
+./tigerbeetle version
 ```
-
-Want to build from source locally? Add `-build` as an argument to the bootstrap script.
 
 #### Running TigerBeetle
 
