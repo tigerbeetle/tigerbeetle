@@ -64,13 +64,13 @@ fn resolve_c_type(comptime Type: type) []const u8 {
     }
 }
 
-fn to_uppercase(comptime input: []const u8) []const u8 {
+fn to_uppercase(comptime input: []const u8) [input.len]u8 {
     comptime var output: [input.len]u8 = undefined;
     inline for (&output, 0..) |*char, i| {
         char.* = input[i];
         char.* -= 32 * @as(u8, @intFromBool(char.* >= 'a' and char.* <= 'z'));
     }
-    return &output;
+    return output;
 }
 
 fn emit_enum(
@@ -92,17 +92,18 @@ fn emit_enum(
         }
 
         if (!skip) {
+            const field_name = to_uppercase(field.name);
             if (@typeInfo(Type) == .Enum) {
                 try buffer.writer().print("    {s}_{s} = {},\n", .{
                     c_name[0..suffix_pos],
-                    to_uppercase(field.name),
+                    @as([]const u8, &field_name),
                     @intFromEnum(@field(Type, field.name)),
                 });
             } else {
                 // Packed structs.
                 try buffer.writer().print("    {s}_{s} = 1 << {},\n", .{
                     c_name[0..suffix_pos],
-                    to_uppercase(field.name),
+                    @as([]const u8, &field_name),
                     i,
                 });
             }

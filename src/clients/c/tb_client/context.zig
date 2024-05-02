@@ -1,19 +1,18 @@
 const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
-
 const Atomic = std.atomic.Atomic;
 
-const constants = @import("../../../constants.zig");
+const vsr = @import("vsr");
+const constants = vsr.constants;
 const log = std.log.scoped(.tb_client_context);
 
-const stdx = @import("../../../stdx.zig");
-const vsr = @import("../../../vsr.zig");
+const stdx = vsr.stdx;
 const Header = vsr.Header;
 
-const IO = @import("../../../io.zig").IO;
-const FIFO = @import("../../../fifo.zig").FIFO;
-const message_pool = @import("../../../message_pool.zig");
+const IO = vsr.io.IO;
+const FIFO = vsr.fifo.FIFO;
+const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;

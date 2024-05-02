@@ -5,7 +5,7 @@ const testing = std.testing;
 const mem = std.mem;
 
 const constants = @import("../../../constants.zig");
-const vsr = @import("../../../vsr.zig");
+const vsr = @import("vsr");
 const Header = vsr.Header;
 
 const IOPS = @import("../../../iops.zig").IOPS;

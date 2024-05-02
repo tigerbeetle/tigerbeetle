@@ -5,11 +5,11 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.storage);
 
-const stdx = @import("stdx.zig");
-const IO = @import("io.zig").IO;
-const FIFO = @import("fifo.zig").FIFO;
-const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
+const stdx = vsr.stdx;
+const IO = vsr.io.IO;
+const FIFO = vsr.fifo.FIFO;
+const constants = vsr.constants;
 
 pub const Storage = struct {
     /// See usage in Journal.write_sectors() for details.
