@@ -12,27 +12,33 @@ or multi-node cluster, and creating some accounts and transfers using the REPL.
 
 TigerBeetle is a single, small, statically-linked binary.
 
-### Bootstrap Script
+### Latest Release
 
-#### macOS / Linux
+```console
+# macOS
+curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
 
-```shell
-git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && ./bootstrap.sh
-```
+# Linux
+curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
 
-#### Windows
-
-```powershell
-git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && .\bootstrap.ps1
+# Windows
+powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .; .\tigerbeetle version"
 ```
 
 #### Build from Source
 
-Add `-build` as an argument to the bootstrap script to build from source.
+To build TigerBeetle from source, clone the repo, install Zig and run `zig build install`:
+
+```console
+git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
+./scripts/install_zig.sh # or .bat if you're on Windows.
+zig/zig build install
+./tigerbeetle version
+```
 
 #### Direct Download
 
-Instead of using the bootstrap script, you can download prebuilt binaries here:
+You can download prebuilt binaries here:
 
 |         | Linux                           | Windows                          | MacOS                             |
 | :------ | :------------------------------ | :------------------------------- | :-------------------------------- |

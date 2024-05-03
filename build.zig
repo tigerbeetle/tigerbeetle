@@ -1038,7 +1038,6 @@ const ShellcheckStep = struct {
         });
 
         try shell.exec("shellcheck {scripts}", .{ .scripts = scripts });
-        try shell.exec("shellcheck ./bootstrap.sh", .{});
     }
 };
 
