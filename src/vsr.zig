@@ -409,6 +409,16 @@ pub const Operation = enum(u8) {
     }
 };
 
+pub const RegisterRequest = extern struct {
+    reserved: [64]u8 = [_]u8{0} ** 64,
+
+    comptime {
+        assert(@sizeOf(RegisterRequest) == 64);
+        assert(@sizeOf(RegisterRequest) <= constants.message_body_size_max);
+        assert(stdx.no_padding(RegisterRequest));
+    }
+};
+
 pub const RegisterResult = extern struct {
     reserved: [64]u8 = [_]u8{0} ** 64,
 

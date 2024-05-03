@@ -508,6 +508,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // We will set parent, session, view and checksums only when sending for the first time:
             message.header.* = .{
+                .size = @sizeOf(Header) + @sizeOf(vsr.RegisterRequest),
                 .client = self.id,
                 .request = self.request_number,
                 .cluster = self.cluster,
@@ -516,6 +517,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .release = self.release,
             };
 
+            std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                message.body()[0..@sizeOf(vsr.RegisterRequest)],
+            ).* = .{};
             assert(self.request_number == 0);
             self.request_number += 1;
 

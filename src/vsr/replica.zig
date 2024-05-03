@@ -4251,7 +4251,6 @@ pub fn ReplicaType(
             assert(self.commit_prepare.? == prepare);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation == .register);
-            assert(prepare.header.size == @sizeOf(vsr.Header));
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
@@ -4260,7 +4259,21 @@ pub fn ReplicaType(
                 output_buffer[0..@sizeOf(vsr.RegisterResult)],
             );
 
-            result.* = .{};
+            if (prepare.header.size == @sizeOf(vsr.Header)) {
+                // Old clients don't send a RegisterRequest.
+                result.* = .{};
+            } else {
+                assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+
+                const register_request = std.mem.bytesAsValue(
+                    vsr.RegisterRequest,
+                    prepare.body()[0..@sizeOf(vsr.RegisterRequest)],
+                );
+                assert(stdx.zeroed(&register_request.reserved));
+
+                result.* = .{};
+            }
+
             return @sizeOf(vsr.RegisterResult);
         }
 
@@ -5773,7 +5786,7 @@ pub fn ReplicaType(
 
             switch (request.message.header.operation) {
                 .reserved, .root => unreachable,
-                .register => {},
+                .register => self.primary_prepare_register(request.message),
                 .reconfigure => self.primary_prepare_reconfiguration(request.message),
                 .upgrade => {
                     const upgrade_request = std.mem.bytesAsValue(
@@ -5869,6 +5882,25 @@ pub fn ReplicaType(
             // We expect `on_prepare()` to increment `self.op` to match the primary's latest prepare:
             // This is critical to ensure that pipelined prepares do not receive the same op number.
             assert(self.op == message.header.op);
+        }
+
+        fn primary_prepare_register(self: *Self, request: *Message.Request) void {
+            assert(self.primary());
+            assert(request.header.command == .request);
+            assert(request.header.operation == .register);
+            assert(request.header.request == 0);
+
+            if (request.header.size == @sizeOf(vsr.Header)) {
+                // Old clients don't send a RegisterRequest.
+            } else {
+                assert(request.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+
+                const register_request = std.mem.bytesAsValue(
+                    vsr.RegisterRequest,
+                    request.body()[0..@sizeOf(vsr.RegisterRequest)],
+                );
+                assert(stdx.zeroed(&register_request.reserved));
+            }
         }
 
         fn primary_prepare_reconfiguration(
