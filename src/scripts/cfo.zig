@@ -118,6 +118,7 @@ fn run_fuzzers(
         hang_seconds: u64,
     },
 ) !void {
+    const zig_exe = try shell.zig_exe_alloc(shell.arena.allocator());
     // Fuzz an independent clone of the repository, so that CFO and the fuzzer could be on
     // different branches (to fuzz PRs and releases).
     shell.project_root.deleteTree("working") catch {};
@@ -143,7 +144,7 @@ fn run_fuzzers(
 
     const random = std.crypto.random;
 
-    try shell.exec("../zig/zig build -Drelease build_fuzz", .{});
+    try shell.zig("build -Drelease build_fuzz", .{});
 
     const FuzzerChild = struct {
         child: std.ChildProcess,
@@ -186,8 +187,12 @@ fn run_fuzzers(
                     log.debug("will start '{s}'", .{command});
                     const child = try shell.spawn_options(
                         .{ .stdin_behavior = .Pipe },
-                        "../zig/zig build -Drelease fuzz -- --seed={seed} {fuzzer}",
-                        .{ .seed = try shell.print("{d}", .{seed}), .fuzzer = @tagName(fuzzer) },
+                        "{zig} build -Drelease fuzz -- --seed={seed} {fuzzer}",
+                        .{
+                            .zig = zig_exe,
+                            .seed = try shell.print("{d}", .{seed}),
+                            .fuzzer = @tagName(fuzzer),
+                        },
                     );
                     _ = try std.os.fcntl(
                         child.stdin.?.handle,

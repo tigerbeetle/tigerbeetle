@@ -596,12 +596,33 @@ pub fn spawn_options(
     return child;
 }
 
+pub fn zig_exe_alloc(shell: Shell, allocator: std.mem.Allocator) ![]const u8 {
+    _ = shell;
+
+    // ZIG_EXE is set in `build.zig`, so it is available when using the run step for `zig build
+    // scripts`.
+    // ZIG_EXE is already an absolute path, but zig/zig is not.
+    const zig_exe_default = comptime "zig/zig" ++ builtin.target.exeFileExt();
+
+    const zig_exe_env: ?[]u8 = std.process.getEnvVarOwned(
+        allocator,
+        "ZIG_EXE",
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        error.InvalidUtf8 => return err,
+        error.EnvironmentVariableNotFound => null,
+    };
+    defer if (zig_exe_env) |str| allocator.free(str);
+
+    const zig_exe = try std.fs.realpathAlloc(allocator, zig_exe_env orelse zig_exe_default);
+    errdefer allocator.free(zig_exe);
+
+    return zig_exe;
+}
+
 /// Runs the zig compiler.
 pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
-    const zig_exe = try shell.project_root.realpathAlloc(
-        shell.gpa,
-        comptime "zig/zig" ++ builtin.target.exeFileExt(),
-    );
+    const zig_exe = try shell.zig_exe_alloc(shell.gpa);
     defer shell.gpa.free(zig_exe);
 
     var argv = Argv.init(shell.gpa);

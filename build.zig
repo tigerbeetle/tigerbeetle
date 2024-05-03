@@ -504,6 +504,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = mode,
         });
         const scripts_run = b.addRunArtifact(scripts_exe);
+        scripts_run.setEnvironmentVariable("ZIG_EXE", b.zig_exe);
         if (b.args) |args| scripts_run.addArgs(args);
         const scripts_step = b.step("scripts", "Run automation scripts");
         scripts_step.dependOn(&scripts_run.step);
