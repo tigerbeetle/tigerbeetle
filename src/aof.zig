@@ -323,6 +323,12 @@ pub const AOFReplayClient = struct {
         );
         errdefer client.deinit(allocator);
 
+        client.register(register_callback, undefined);
+        while (client.request_inflight != null) {
+            client.tick();
+            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        }
+
         return Self{
             .io = io,
             .message_pool = message_pool,
@@ -378,6 +384,14 @@ pub const AOFReplayClient = struct {
                 try self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
             }
         }
+    }
+
+    fn register_callback(
+        user_data: u128,
+        result: *const vsr.RegisterResult,
+    ) void {
+        _ = user_data;
+        _ = result;
     }
 
     fn replay_callback(

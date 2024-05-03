@@ -358,6 +358,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 client.on_reply_context = cluster;
                 client.on_reply_callback = client_on_reply;
                 network.link(client.message_bus.process, &client.message_bus);
+                // TODO Move this up a level -- I think we could simplify/improve replica_test if
+                // this wasn't automatic.
+                client.register(register_callback, undefined);
             }
 
             return cluster;
@@ -634,7 +637,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// instead because:
         /// - Cluster needs access to the request
         /// - Cluster needs access to the reply message (not just the body)
-        /// - Cluster needs to know about command=register messages
         ///
         /// See `on_reply`.
         fn request_callback(
@@ -644,6 +646,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             _ = user_data;
             _ = operation;
+            _ = result;
+        }
+
+        /// See request_callback().
+        fn register_callback(
+            user_data: u128,
+            result: *const vsr.RegisterResult,
+        ) void {
+            _ = user_data;
             _ = result;
         }
 

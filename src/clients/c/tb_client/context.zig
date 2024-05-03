@@ -96,6 +96,7 @@ pub fn ContextType(
         io: IO,
         message_pool: MessagePool,
         client: Client,
+        registered: bool,
 
         completion_fn: tb_completion_t,
         implementation: ContextImplementation,
@@ -218,6 +219,9 @@ pub fn ContextType(
                 };
             };
 
+            context.registered = false;
+            context.client.register(client_register_callback, @intFromPtr(context));
+
             return context;
         }
 
@@ -235,6 +239,14 @@ pub fn ContextType(
                 self.allocator.free(self.packets);
                 self.allocator.destroy(self);
             }
+        }
+
+        fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
+            const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
+            _ = result;
+            self.registered = true;
+            // Some requests may have queued up while the client was registering.
+            self.signal.notify();
         }
 
         pub fn tick(self: *Context) void {
@@ -269,12 +281,22 @@ pub fn ContextType(
 
         fn on_signal(signal: *Signal) void {
             const self = @fieldParentPtr(Context, "signal", signal);
+
+            // Don't send any requests until registration completes.
+            if (!self.registered) {
+                assert(self.client.request_inflight != null);
+                assert(self.client.request_inflight.?.message.header.operation == .register);
+                return;
+            }
+
             while (self.submitted.pop()) |packet| {
                 self.request(packet);
             }
         }
 
         fn request(self: *Context, packet: *Packet) void {
+            assert(self.registered);
+
             // Get the size of each request structure in the packet.data:
             const event_size: usize = operation_event_size(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);

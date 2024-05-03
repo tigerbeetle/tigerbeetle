@@ -460,7 +460,6 @@ pub const Simulator = struct {
         assert(simulator.requests_sent == simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
         for (simulator.cluster.clients) |*client| {
-            assert(client.register_inflight == null);
             assert(client.request_inflight == null);
         }
 

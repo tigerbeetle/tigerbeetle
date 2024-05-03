@@ -179,13 +179,11 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     if (client.id == header_b.?.client) break client;
                 } else unreachable;
 
-                if (client.register_inflight == null and
-                    client.request_inflight == null)
-                {
+                if (client.request_inflight == null) {
                     return error.ReplicaTransitionedToInvalidState;
                 }
 
-                const request = client.register_inflight orelse client.request_inflight.?.message;
+                const request = client.request_inflight.?.message;
                 assert(request.header.client == header_b.?.client);
                 assert(request.header.checksum == header_b.?.request_checksum);
                 assert(request.header.request == header_b.?.request);

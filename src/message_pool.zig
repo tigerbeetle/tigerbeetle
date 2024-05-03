@@ -30,7 +30,6 @@ pub const Options = union(vsr.ProcessType) {
                 sum += constants.replicas_max; // Connection.recv_message
                 // Connection.send_queue:
                 sum += constants.replicas_max * constants.connection_send_queue_max_client;
-                sum += 1; // Client.register_inflight
                 sum += 1; // Client.request_inflight
                 // Handle bursts.
                 // (e.g. Connection.parse_message(), or sending a ping when the send queue is full).

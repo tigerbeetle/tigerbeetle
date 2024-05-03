@@ -53,7 +53,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         id: u128,
         cluster: u128,
         release: vsr.Release = vsr.Release.minimum,
-        request_number: u32 = 1,
+        request_number: u32 = 0,
         request_inflight: ?Request = null,
         message_pool: *MessagePool,
 
@@ -90,7 +90,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             defer self.release_message(reply.base());
 
             // Copy the request message's entire content including header into the reply.
-            const operation = inflight.message.header.operation.cast(Self.StateMachine);
+            const operation = inflight.message.header.operation;
             stdx.copy_disjoint(
                 .exact,
                 u8,
@@ -101,11 +101,47 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             // Similarly to the real client, release the request message before invoking the
             // callback. This necessitates a `copy_disjoint` above.
             self.release_message(inflight.message.base());
-            inflight.callback(
-                inflight.user_data,
-                operation,
-                reply.body(),
-            );
+
+            switch (inflight.callback) {
+                .request => |callback| {
+                    callback(inflight.user_data, operation.cast(Self.StateMachine), reply.body());
+                },
+                .register => |callback| {
+                    const result = vsr.RegisterResult{};
+                    callback(inflight.user_data, &result);
+                },
+            }
+        }
+
+        pub fn register(
+            self: *Self,
+            callback: Request.RegisterCallback,
+            user_data: u128,
+        ) void {
+            assert(self.request_inflight == null);
+            assert(self.request_number == 0);
+
+            const message = self.get_message().build(.request);
+            errdefer self.release_message(message.base());
+
+            // We will set parent, session, view and checksums only when sending for the first time:
+            message.header.* = .{
+                .client = self.id,
+                .request = self.request_number,
+                .cluster = self.cluster,
+                .command = .request,
+                .operation = .register,
+                .release = vsr.Release.minimum,
+            };
+
+            assert(self.request_number == 0);
+            self.request_number += 1;
+
+            self.request_inflight = .{
+                .message = message,
+                .user_data = user_data,
+                .callback = .{ .register = callback },
+            };
         }
 
         pub fn request(
@@ -158,7 +194,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             self.request_inflight = .{
                 .message = message,
                 .user_data = user_data,
-                .callback = callback,
+                .callback = .{ .request = callback },
             };
         }
 
