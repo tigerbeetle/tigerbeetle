@@ -1,5 +1,69 @@
 # TigerBeetle Changelog
 
+## 2024-05-06 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1906](https://github.com/tigerbeetle/tigerbeetle/pull/1906),
+  [#1904](https://github.com/tigerbeetle/tigerbeetle/pull/1904),
+  [#1903](https://github.com/tigerbeetle/tigerbeetle/pull/1903),
+  [#1901](https://github.com/tigerbeetle/tigerbeetle/pull/1901),
+  [#1899](https://github.com/tigerbeetle/tigerbeetle/pull/1899),
+  [#1886](https://github.com/tigerbeetle/tigerbeetle/pull/1886)
+
+  Fixes and performance improvements to fuzzers.
+
+- [#1897](https://github.com/tigerbeetle/tigerbeetle/pull/1897)
+
+  Reduces cache size for the `--development` flag, which was originally created to bypass direct
+  I/O requirements but can also aggregate other convenient options for non-production environments.
+
+- [#1895](https://github.com/tigerbeetle/tigerbeetle/pull/1895)
+
+  Reduction in memory footprint, calculating the maximum number of messages from runtime-known
+  configurations.
+
+### Features
+
+- [#1896](https://github.com/tigerbeetle/tigerbeetle/pull/1896)
+
+  Removes the `bootstrap.{sh,bat}` scripts, replacing them with a more transparent instruction for
+  downloading the binary release or building from source.
+
+- [#1890](https://github.com/tigerbeetle/tigerbeetle/pull/1890)
+
+  Nicely handles "illegal instruction" crashes, printing a friendly message when the CPU running a
+  binary release is too old and does not support some modern instructions such as AES-NI and AVX2.
+
+### Internals
+
+- [#1892](https://github.com/tigerbeetle/tigerbeetle/pull/1892)
+
+  Include micro-benchmarks as part of the unit tests, so there's no need for a special case in the
+  CI while we still compile and check them.
+
+- [#1902](https://github.com/tigerbeetle/tigerbeetle/pull/1902)
+
+  A TigerStyle addition on "why prefer a explicitly sized integer over `usize`".
+
+- [#1894](https://github.com/tigerbeetle/tigerbeetle/pull/1894)
+
+  Rename "Getting Started" to "Quick Start" for better organization and clarifications.
+
+- [#1900](https://github.com/tigerbeetle/tigerbeetle/pull/1900)
+
+  While TigerBeetle builds are deterministic, Zip files include a timestamp that makes the build
+  output non-deterministic! This PR sets an explicit timestamp for entirely reproducible releases.
+
+- [1909](https://github.com/tigerbeetle/tigerbeetle/pull/1909)
+
+  Extracts the zig compiler path into a `ZIG_EXE` environment variable, allowing easier sharing of
+  the same compiler across multiple git work trees.
+
+### TigerTracks 🎧
+
+- [Thank You](https://www.youtube.com/watch?v=1TO48Cnl66w)
+
 ## 2024-04-29 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
