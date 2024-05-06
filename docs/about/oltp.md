@@ -148,8 +148,7 @@ should be routed. The data plane must be as fast and efficient as possible, wher
 plane does not need to be touched as frequently.
 
 TigerBeetle is designed to be in the hot path of your system, processing every transaction in
-real-time. You can have a
-[stateless API service](../develop/client-requests.md#example-api-layer-architecture) construct and
+real-time. You can have a [stateless API service](../develop/system-architecture.md) construct and
 batch transfers to send to TigerBeetle.
 
 Metadata, such as account details or infrequently changed ledger details, can be stored in a general

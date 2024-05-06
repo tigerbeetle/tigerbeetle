@@ -147,8 +147,7 @@ protocol.
 
 However, financial consistency requires more than this. TigerBeetle exposes a double-entry
 accounting API to guarantee that money cannot be created or destroyed, but only transferred from one
-account to another. And transfer history is immutable. You can read more about our consistency
-guarantees [here](../develop/consistency.md).
+account to another. And transfer history is immutable.
 
 ### Isolation
 

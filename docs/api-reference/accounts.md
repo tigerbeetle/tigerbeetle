@@ -179,7 +179,7 @@ Constraints:
 
 - Type is 16-bit unsigned integer (2 bytes)
 - Some flags are mutually exclusive; see
-  [`flags_are_mutually_exclusive`](./operations/create_accounts.md#flags_are_mutually_exclusive).
+  [`flags_are_mutually_exclusive`](./requests/create_accounts.md#flags_are_mutually_exclusive).
 
 #### `flags.linked`
 
@@ -188,7 +188,7 @@ such that they will either succeed or fail together.
 
 The last account in a chain of linked accounts does **not** have this flag set.
 
-You can read more about [linked events](../develop/client-requests.md#linked-events).
+You can read more about [linked events](../requests/README.md#linked-events).
 
 #### `flags.debits_must_not_exceed_credits`
 
@@ -210,7 +210,7 @@ This cannot be set when `debits_must_not_exceed_credits` is also set.
 
 When set, the account will retain the history of balances at each transfer.
 
-Note that the [`get_account_balances`](./operations/get_account_balances.md) operation only works
+Note that the [`get_account_balances`](./requests/get_account_balances.md) operation only works
 for accounts with this flag set.
 
 ### `timestamp`

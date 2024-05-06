@@ -5,8 +5,8 @@ sidebar_position: 4
 # `AccountFilter`
 
 An `AccountFilter` is a record containing the filter parameters for querying
-the [account transfers](operations/get_account_transfers.md)
-and the [account historical balances](operations/get_account_balances.md).
+the [account transfers](./requests/get_account_transfers.md)
+and the [account historical balances](./requests/get_account_balances.md).
 
 ## Fields
 
@@ -43,7 +43,7 @@ Constraints:
 
 The maximum number of results that can be returned by this query.
 
-Limited by the [maximum message size](../develop/client-requests.md#batching-events).
+Limited by the [maximum message size](./requests/README.md#batching-events).
 
 Constraints:
 
