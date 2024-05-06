@@ -193,9 +193,9 @@ const Command = struct {
         var multiversion = try vsr.multiversioning.MultiVersion.init(
             allocator,
             &command.io,
-            "/home/federico/git/tigerbeetle/tigerbeetle-4/dist/tigerbeetle/tigerbeetle.exe",
+            command.self_exe_path,
         );
-        multiversion.read_from_pe(null);
+        multiversion.read_from_elf(null);
         if (multiversion.tick_until_ready()) {
             log_main.info("enabling automatic on-disk version detection.", .{});
             multiversion.on_timeout_read_from_elf_callback({});
@@ -384,6 +384,8 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     // possible.
     if (release.value < replica.release.value) {
         assert(replica.static_allocator.state == .init);
+        assert(replica.release.value == replica.releases_bundled.get(replica.releases_bundled.count() - 1).value);
+
         vsr.multiversioning.exec_release(
             replica.static_allocator.allocator(),
             replica.superblock.storage.io,
@@ -398,7 +400,14 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
         // enough.
         // FIXME: Pass this in as a enum rather.
         assert(replica.static_allocator.state == .static);
-        vsr.multiversioning.exec_self() catch unreachable;
+
+        // FIXME: replica.releases_bundled changes - this check needs to happen once at startup!
+        vsr.multiversioning.exec_self(
+            if (replica.release.value == replica.releases_bundled.get(replica.releases_bundled.count() - 1).value)
+                .self_exe_path
+            else
+                .argv_0,
+        ) catch unreachable;
     }
 
     // TODO(Multiversioning) Exec into the new release.

@@ -239,8 +239,10 @@ fn build_past_version_pack(shell: *Shell, comptime target: []const u8, debug: bo
 
         const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
         const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
+        _ = exe_name;
 
-        const past_binary = try std.fs.cwd().openFile("./dist/tigerbeetle-past-pack/" ++ exe_name, .{ .mode = .read_only });
+        // const past_binary = try std.fs.cwd().openFile("./dist/tigerbeetle-past-pack/" ++ exe_name, .{ .mode = .read_only });
+        const past_binary = try std.fs.cwd().openFile("/home/federico/git/tigerbeetle/tigerbeetle-5/tigerbeetle", .{ .mode = .read_only });
         defer past_binary.close();
         const past_binary_contents = try past_binary.readToEndAlloc(shell.arena.allocator(), 128 * 1024 * 1024);
 
@@ -287,16 +289,16 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
 
     const targets = .{
-        "aarch64-linux",
+        // "aarch64-linux",
         "x86_64-linux",
-        "x86_64-windows",
+        // "x86_64-windows",
     };
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`. MacOS is special cased below --- we use an extra step to merge x86 and arm binaries
     // into one.
     //TODO: use std.Target here
-    inline for (.{ true, false }) |debug| {
+    inline for (.{true}) |debug| {
         const debug_suffix = if (debug) "-debug" else "";
         inline for (targets) |target| {
             try shell.zig(

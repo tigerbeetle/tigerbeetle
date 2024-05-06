@@ -135,7 +135,7 @@ pub const MultiVersionMetadata = extern struct {
     // When slicing into the binary, checksum(section[past_offset..past_offset+past_size]) == past_checksum.
     // This is then validated when the binary is written to a memfd or similar.
     // `current_checksum` becomes a `past_checksum` when put in here by our release builder.
-    // Offsets are relative to the start of the `.tigerbeetle.multiversion.pack` section.
+    // Offsets are relative to the start of the `.tbmvp` section.
     pub const PastVersionPack = extern struct {
         count: u32 = 0,
 
@@ -171,10 +171,10 @@ pub const MultiVersionMetadata = extern struct {
     /// Used when extracting binaries from past releases to ensure a hash chain.
     current_checksum: u128,
 
-    /// The AEGIS128L checksum of the binary, if the `.tigerbeetle.multiversion.metadata` section
+    /// The AEGIS128L checksum of the binary, if the `.tbmvm` section
     /// were zero'd out.
     /// Used to validate that the binary itself is not corrupt. Putting this in requires a bit of
-    /// trickery: we inject a dummy `.tigerbeetle.multiversion.metadata` section of the correct
+    /// trickery: we inject a dummy `.tbmvm` section of the correct
     /// size, compute the hash, and then update it - so that we hash the final ELF headers.
     /// Used to ensure we don't try and exec into a corrupt binary.
     checksum_without_metadata: u128 = 0,
@@ -281,7 +281,7 @@ pub const MultiVersion = struct {
     }
 
     pub fn on_timeout_read_from_elf_callback(self: *MultiVersion, result: anyerror!void) void {
-        std.log.info("hello from here: r={!}", .{result});
+        // std.log.info("hello from here: r={!}", .{result});
         _ = result catch void;
 
         self.io.timeout(
@@ -460,14 +460,14 @@ pub const MultiVersion = struct {
         // try assert_or_error(index < string_buf.len, error.);
         const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast((&self.elf_string_buffer).ptr + shdr.sh_name)), 0);
 
-        if (std.mem.eql(u8, name, ".tigerbeetle.multiversion.pack")) {
+        if (std.mem.eql(u8, name, ".tbmvp")) {
             // Our pack must be the second-last section in the file.
             // FIXME: WTF
             // if (self.pack_offset != null) return self.handle_error(error.MultipleMultiversionPack);
             // if (self.stage.read_elf_section != self.elf_header.shnum - 2) return self.handle_error(error.InvalidMultiversionPack);
 
             self.pack_offset = @intCast(shdr.sh_offset);
-        } else if (std.mem.eql(u8, name, ".tigerbeetle.multiversion.metadata")) {
+        } else if (std.mem.eql(u8, name, ".tbmvm")) {
             // Our metadata must be the last section in the file.
             if (shdr.sh_size != @sizeOf(MultiVersionMetadata)) return self.handle_error(error.InvalidMultiversionMetadata);
             if (self.stage.read_elf_section != self.elf_header.shnum - 1) return self.handle_error(error.InvalidMultiversionMetadata);
@@ -683,23 +683,18 @@ pub const MultiVersion = struct {
     }
 };
 
-pub fn exec_release(allocator: std.mem.Allocator, io: *IO, release: Release) !noreturn {
+const BinaryPathEnum = enum { self_exe_path, argv_0 };
+pub fn exec_self(binary_path_from: BinaryPathEnum) !noreturn {
     return switch (builtin.target.os.tag) {
-        .linux => exec_release_elf(allocator, io, release),
-        else => @panic("exec_release unimplemented"),
-    };
-}
-
-pub fn exec_self() !noreturn {
-    return switch (builtin.target.os.tag) {
-        .linux, .macos => exec_self_posix(),
+        .linux, .macos => exec_self_posix(binary_path_from),
+        .windows => exec_self_windows(binary_path_from),
         else => @panic("exec_self unimplemented"),
     };
 }
 
 /// exec_release is called before a replica is fully open, and before we've transitioned to not
 /// allocating. Therefore, we can use standard `os.read` blocking syscalls.
-fn exec_release_elf(allocator: std.mem.Allocator, io: *IO, release: Release) !noreturn {
+pub fn exec_release(allocator: std.mem.Allocator, io: *IO, release: Release) !noreturn {
     var self_exe_path = try std.fs.selfExePathAlloc(allocator);
     defer allocator.free(self_exe_path);
 
@@ -723,8 +718,6 @@ fn exec_release_elf(allocator: std.mem.Allocator, io: *IO, release: Release) !no
     const binary_size = metadata.past.sizes[index];
     const binary_checksum = metadata.past.checksums[index];
 
-    const fd = open_memory_file("tigerbeetle-exec-release");
-
     // Explicit allocation ensures we're not in .static on our allocator yet.
     var buf = try allocator.alloc(u8, binary_size);
 
@@ -734,56 +727,91 @@ fn exec_release_elf(allocator: std.mem.Allocator, io: *IO, release: Release) !no
     const bytes_read = try os.read(file.handle, buf);
     assert(bytes_read == binary_size);
 
-    // We could use std.fs.copy_file here, but it's not public, and probably not worth the effort
-    // to vendor.
-    const bytes_written = try os.write(fd, buf);
-    assert(bytes_written == binary_size);
+    switch (builtin.target.os.tag) {
+        .linux => {
+            const fd = open_memory_file("tigerbeetle-exec-release");
 
-    const checksum_read = checksum(buf);
-    const checksum_expected = binary_checksum;
-    const checksum_written = blk: {
-        var buf_validate = try allocator.alloc(u8, binary_size);
-        try os.lseek_SET(fd, 0);
-        const bytes_read_checksum = try os.read(fd, buf_validate);
-        assert(bytes_read_checksum == binary_size);
-        break :blk checksum(buf_validate);
-    };
+            // We could use std.fs.copy_file here, but it's not public, and probably not worth the effort
+            // to vendor.
+            const bytes_written = try os.write(fd, buf);
+            assert(bytes_written == binary_size);
 
-    assert(checksum_read == checksum_expected);
-    assert(checksum_written == checksum_expected);
+            const checksum_read = checksum(buf);
+            const checksum_expected = binary_checksum;
+            const checksum_written = blk: {
+                var buf_validate = try allocator.alloc(u8, binary_size);
+                try os.lseek_SET(fd, 0);
+                const bytes_read_checksum = try os.read(fd, buf_validate);
+                assert(bytes_read_checksum == binary_size);
+                break :blk checksum(buf_validate);
+            };
 
-    // Hacky, just use argc_argv_poitner directly. This is platform specific in any case, and we'll
-    // want to have a verification function.
-    const argv_buf = try allocator.allocSentinel(?[*:0]const u8, os.argv.len, null);
-    for (os.argv, 0..) |arg, i| {
-        argv_buf[i] = arg;
+            assert(checksum_read == checksum_expected);
+            assert(checksum_written == checksum_expected);
+
+            // Hacky, just use argc_argv_poitner directly. This is platform specific in any case, and we'll
+            // want to have a verification function.
+            const argv_buf = try allocator.allocSentinel(?[*:0]const u8, os.argv.len, null);
+            for (os.argv, 0..) |arg, i| {
+                argv_buf[i] = arg;
+            }
+
+            // TODO: Do we want to pass env variables? Probably.
+            // FIXME: Pass in real exe path as argv[0]
+            const env = [_:null]?[*:0]u8{};
+
+            std.log.info("Executing release {}...\n", .{release});
+            if (execveat(fd, "", argv_buf, env[0..env.len], 0x1000) == 0) {
+                unreachable;
+            } else {
+                return error.ExecveatFailed;
+            }
+        },
+        .macos => {},
+        .windows => {},
+        else => @panic("exec_release unimplemented"),
     }
 
-    // TODO: Do we want to pass env variables? Probably.
-    const env = [_:null]?[*:0]u8{};
-
-    std.log.info("Executing release {}...\n", .{release});
-    if (execveat(fd, "", argv_buf, env[0..env.len], 0x1000) == 0) {
-        unreachable;
-    } else {
-        return error.ExecveatFailed;
-    }
+    unreachable;
 }
 
-fn exec_self_posix() !noreturn {
+fn exec_self_posix(binary_path_from: BinaryPathEnum) !noreturn {
     var self_binary_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var self_binary_path = try std.fs.selfExePath(&self_binary_buf);
+    var binary_path = switch (binary_path_from) {
+        .self_exe_path => blk: {
+            var path = try std.fs.selfExePath(&self_binary_buf);
+            self_binary_buf[path.len] = 0;
 
-    // TODO: Do we want to pass env variables? Probably.
+            break :blk self_binary_buf[0..path.len :0].ptr;
+        },
+        .argv_0 => std.os.argv[0],
+    };
+
+    // FIXME: Pass env variables (and args).
     const env = [_:null]?[*:0]u8{};
+    var args = [_:null]?[*:0]const u8{ "./tigerbeetle", "start", "--addresses=127.0.0.1:3002", "/tmp/0_0.tigerbeetle" };
 
-    self_binary_buf[self_binary_path.len] = 0;
-    var self_binary_path_zero: [*:0]const u8 = self_binary_buf[0..self_binary_path.len :0];
+    std.log.info("Re-executing {s}...\n", .{binary_path});
+    return std.os.execveZ(binary_path, args[0..args.len], env[0..env.len]);
+}
 
-    std.log.info("about to execveZ", .{});
-    return std.os.execveZ(self_binary_path_zero, env[0..env.len], env[0..env.len]);
+fn exec_self_windows(binary_path_from: BinaryPathEnum) !noreturn {
+    _ = binary_path_from;
+    @panic("todo");
+    // var self_binary_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    // var self_binary_path = try std.fs.selfExePath(&self_binary_buf);
 
-    // Either we returned an error above, or the new process exec'd.
+    // // TODO: Do we want to pass env variables? Probably.
+    // const env = [_:null]?[*:0]u8{};
+
+    // self_binary_buf[self_binary_path.len] = 0;
+    // var self_binary_path_zero: [*:0]const u8 = self_binary_buf[0..self_binary_path.len :0];
+
+    // if (std.os.getenvW("__TIGERBEETLE_MULTIVERSION_EXE_PATH")) |env_binary_path| {
+    //     _ = env_binary_path;
+    // } else {
+    //     return std.os.execveZ(self_binary_path_zero, env[0..env.len], env[0..env.len]);
+    // }
 }
 
 fn assert_or_error(condition: bool, err: anyerror) !void {

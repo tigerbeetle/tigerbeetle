@@ -209,6 +209,8 @@ pub fn GridType(comptime Storage: type) type {
             missing_blocks_max: usize,
             missing_tables_max: usize,
         }) !Grid {
+            var time = try std.time.Timer.start();
+            time.reset();
             const shard_count_limit: usize = @intCast(@divFloor(
                 options.superblock.storage_size_limit - vsr.superblock.data_file_size_min,
                 constants.block_size * FreeSet.shard_bits,
@@ -251,6 +253,8 @@ pub fn GridType(comptime Storage: type) type {
             }
             errdefer for (&read_iop_blocks) |block| allocator.free(block);
 
+            var t = time.read();
+            std.log.info("took {} to init grid", .{std.fmt.fmtDuration(t)});
             return Grid{
                 .superblock = options.superblock,
                 .free_set = free_set,
