@@ -16,7 +16,7 @@ facilitated by an entity called the _liquidity provider_.
 
 Distinct [`ledger`](../../api-reference/accounts.md#ledger) values denote different currencies (or
 other asset types). Transfers between pairs of accounts with different `ledger`s are
-[not permitted](../../api-reference/operations/create_transfers.md#accounts_must_have_the_same_ledger).
+[not permitted](../../api-reference/requests/create_transfers.md#accounts_must_have_the_same_ledger).
 
 Instead, currency exchange is implemented by creating two
 [atomically linked](../../api-reference/transfers.md#flagslinked) different-ledger transfers between
