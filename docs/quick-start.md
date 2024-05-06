@@ -5,8 +5,8 @@ sidebar_position: 2
 
 # Quick Start
 
-This page will guide you through downloading TigerBeetle, setting up a single-
-or multi-node cluster, and creating some accounts and transfers using the REPL.
+This page will guide you through downloading TigerBeetle, setting up a single- or multi-node
+cluster, and creating some accounts and transfers using the REPL.
 
 ## 1. Download TigerBeetle
 
@@ -56,13 +56,12 @@ You can download prebuilt binaries here:
 
 #### Docker
 
-You can find instructions on using TigerBeetle with Docker
-[here](./deploy/docker.md).
+You can find instructions on using TigerBeetle with Docker [here](./deploy/docker.md).
 
 ## 2. Create the Data File
 
-Each TigerBeetle node uses a single data file to store its state. Create the
-data file using the `format` command:
+Each TigerBeetle node uses a single data file to store its state. Create the data file using the
+`format` command:
 
 ```console
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
@@ -88,8 +87,8 @@ info(main): 0: cluster=0: listening on 127.0.0.1:3000
 
 ## 4. Connect to the REPL
 
-Now that we have TigerBeetle running, we can connect to it via the REPL to
-create some accounts and transfers!
+Now that we have TigerBeetle running, we can connect to it via the REPL to create some accounts and
+transfers!
 
 ```console
 ./tigerbeetle repl --cluster=0 --addresses=3000
@@ -122,15 +121,13 @@ info(message_bus): connected to replica 0
 
 ## 6. Create a Transfer
 
-Now create a transfer of `10` (of some amount/currency) between the two
-accounts.
+Now create a transfer of `10` (of some amount/currency) between the two accounts.
 
 ```console
 create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
 ```
 
-Now, the amount of `10` has been credited to account `2` and debited from
-account `1`.
+Now, the amount of `10` has been credited to account `2` and debited from account `1`.
 
 ## 7. Look Up Accounts
 
@@ -165,23 +162,21 @@ lookup_accounts id=1, id=2;
 }
 ```
 
-And indeed you can see that account `1` has `debits_posted` as `10` and account
-`2` has `credits_posted` as `10`. The `10` amount is fully accounted for!
+And indeed you can see that account `1` has `debits_posted` as `10` and account `2` has
+`credits_posted` as `10`. The `10` amount is fully accounted for!
 
-You can take a look at the [`Accounts` reference](./reference/accounts.md) to
-understand all of the fields on the accounts.
+You can take a look at the [`Accounts` reference](./api-reference/accounts.md) to understand all of
+the fields on the accounts.
 
-You can also take a look at the [Operations](./reference/operations/index.md) to
-see what else you can do with the REPL.
+You can also take a look at the [Operations](./api-reference/operations/index.md) to see what else
+you can do with the REPL.
 
 ## Optional: Run a Multi-Node Cluster
 
-Up to this point, we have only shown you how to run a single-node TigerBeetle
-cluster. In production, TigerBeetle is intended to be run with
-[6 nodes](./deploy/cluster.md).
+Up to this point, we have only shown you how to run a single-node TigerBeetle cluster. In
+production, TigerBeetle is intended to be run with [6 nodes](./deploy/cluster.md).
 
-Here, we will show you how to run a 3-node cluster (the idea is the same for 6
-nodes):
+Here, we will show you how to run a 3-node cluster (the idea is the same for 6 nodes):
 
 First, create the data files for each node:
 
@@ -207,17 +202,15 @@ Start each server in a new terminal window:
 ./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_2.tigerbeetle
 ```
 
-TigerBeetle uses the `--replica` that's stored in the data file as an index into
-the `--addresses` provided.
+TigerBeetle uses the `--replica` that's stored in the data file as an index into the `--addresses`
+provided.
 
-You can connect to the REPL as described above try creating accounts and
-transfers in this cluster.
+You can connect to the REPL as described above try creating accounts and transfers in this cluster.
 
-You can also read more about
-[deploying TigerBeetle in production](./deploy/cluster.md).
+You can also read more about [deploying TigerBeetle in production](./deploy/cluster.md).
 
 ## Next: Designing for TigerBeetle
 
 Now that you've created some accounts and transfers, you may want to read about
-[how TigerBeetle fits into your system architecture](./develop/system-architecture.md)
-and dig into the [data model](./develop/data-modeling.md).
+[how TigerBeetle fits into your system architecture](./develop/system-architecture.md) and dig into
+the [data model](./develop/data-modeling.md).

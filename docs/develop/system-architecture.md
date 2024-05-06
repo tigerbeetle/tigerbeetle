@@ -26,7 +26,7 @@ metadata that is updated less frequently.
 - Handle authentication and authorization
 - Create account records in both the general purpose database and TigerBeetle when users sign up
 - [Cache ledger metadata](#ledger-account-and-transfer-types)
-- [Batch transfers](./client-requests.md#batching-events)
+- [Batch transfers](../api-reference/requests/README.md#batching-events)
 - Apply exchange rates for [currency exchange](./recipes/currency-exchange.md) transactions
 
 **General Purpose (OLGP) Database**
@@ -41,7 +41,7 @@ metadata that is updated less frequently.
 - Track balances for accounts
 - Enforce balance limits
 - Enforce financial consistency through double-entry bookkeeping
-- Enforce [strict serializability](./consistency.md) of events
+- Enforce strict serializability of events
 - Optionally store pointers to records or entities in the general purpose database in the
   [`user_data`](./data-modeling.md#user_data) fields
 

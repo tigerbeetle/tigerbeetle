@@ -83,5 +83,5 @@ the fields on the accounts.
 Now that you've created some accounts and transfers, you may want to dig into the
 [data model](../develop/data-modeling.md) to learn more about how to build with TigerBeetle.
 
-You can also take a look at the [Operations](../api-reference/operations/index.md) to see what else
+You can also take a look at the [Request Types](../api-reference/requests/README.md) to see what else
 you can do with the REPL.
