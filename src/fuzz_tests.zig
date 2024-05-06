@@ -116,7 +116,7 @@ fn main_single(cli_args: CliArgs) !void {
     switch (cli_args.positional.fuzzer) {
         .smoke => unreachable,
         .canary => {
-            if (seed % 100 == 0) {
+            if (seed % 4 == 0) {
                 std.process.exit(1);
             }
         },
