@@ -501,7 +501,13 @@ pub fn StateMachineType(
             callback(self);
         }
 
-        pub fn input_valid(operation: Operation, input: []align(16) const u8) bool {
+        pub fn input_valid(
+            self: *const StateMachine,
+            operation: Operation,
+            input: []align(16) const u8,
+        ) bool {
+            _ = self;
+
             switch (operation) {
                 .pulse => {
                     if (input.len != 0) return false;
@@ -531,7 +537,7 @@ pub fn StateMachineType(
 
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
         pub fn prepare(self: *StateMachine, operation: Operation, input: []align(16) const u8) void {
-            assert(input_valid(operation, input));
+            assert(self.input_valid(operation, input));
 
             self.prepare_timestamp += switch (operation) {
                 .pulse => 0,
@@ -563,7 +569,7 @@ pub fn StateMachineType(
             _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
-            assert(input_valid(operation, input));
+            assert(self.input_valid(operation, input));
 
             tracer.start(
                 &self.tracer_slot,
@@ -1073,7 +1079,7 @@ pub fn StateMachineType(
         ) usize {
             _ = client;
             assert(op != 0);
-            assert(input_valid(operation, input));
+            assert(self.input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             maybe(self.scan_lookup_result_count != null);
@@ -3614,20 +3620,20 @@ test "get_account_balances: invalid filter" {
 }
 
 test "StateMachine: input_validate" {
-    const StateMachine = StateMachineType(
-        @import("testing/storage.zig").Storage,
-        global_constants.state_machine_config,
-    );
-    const Operation = StateMachine.Operation;
-
     const allocator = std.testing.allocator;
-    const input = try allocator.alignedAlloc(u8, 16, 2 * global_constants.message_body_size_max);
+    const input = try allocator.alignedAlloc(u8, 16, 2 * TestContext.message_body_size_max);
     defer allocator.free(input);
 
-    const Event = struct { operation: Operation, min: usize, max: usize, size: usize };
+    const Event = struct {
+        operation: TestContext.StateMachine.Operation,
+        min: usize,
+        max: usize,
+        size: usize,
+    };
+
     const events = comptime events: {
         var array: []const Event = &.{};
-        for (std.enums.values(Operation)) |operation| {
+        for (std.enums.values(TestContext.StateMachine.Operation)) |operation| {
             array = switch (operation) {
                 .pulse => array ++ [_]Event{.{
                     .operation = operation,
@@ -3638,25 +3644,25 @@ test "StateMachine: input_validate" {
                 .create_accounts => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
-                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
+                    .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(Account),
                 }},
                 .create_transfers => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
-                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
+                    .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
                     .size = @sizeOf(Transfer),
                 }},
                 .lookup_accounts => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
-                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
+                    .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(u128),
                 }},
                 .lookup_transfers => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
-                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
+                    .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
                     .size = @sizeOf(u128),
                 }},
                 .get_account_transfers => array ++ [_]Event{.{
@@ -3676,8 +3682,12 @@ test "StateMachine: input_validate" {
         break :events array;
     };
 
+    var context: TestContext = undefined;
+    try context.init(std.testing.allocator);
+    defer context.deinit(std.testing.allocator);
+
     for (events) |event| {
-        try std.testing.expect(StateMachine.input_valid(
+        try std.testing.expect(context.state_machine.input_valid(
             event.operation,
             input[0..0],
         ) == (event.min == 0));
@@ -3688,19 +3698,19 @@ test "StateMachine: input_validate" {
             continue;
         }
 
-        try std.testing.expect(StateMachine.input_valid(
+        try std.testing.expect(context.state_machine.input_valid(
             event.operation,
             input[0 .. 1 * event.size],
         ));
-        try std.testing.expect(StateMachine.input_valid(
+        try std.testing.expect(context.state_machine.input_valid(
             event.operation,
             input[0 .. event.max * event.size],
         ));
-        try std.testing.expect(!StateMachine.input_valid(
+        try std.testing.expect(!context.state_machine.input_valid(
             event.operation,
             input[0 .. (event.max + 1) * event.size],
         ));
-        try std.testing.expect(!StateMachine.input_valid(
+        try std.testing.expect(!context.state_machine.input_valid(
             event.operation,
             input[0 .. 3 * (event.size / 2)],
         ));

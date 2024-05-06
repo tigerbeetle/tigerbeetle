@@ -165,9 +165,11 @@ pub fn StateMachineType(
         }
 
         pub fn input_valid(
+            state_machine: *const StateMachine,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
+            _ = state_machine;
             _ = operation;
             _ = input;
             return true;

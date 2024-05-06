@@ -4865,7 +4865,7 @@ pub fn ReplicaType(
                 return true;
             }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
-                if (!StateMachine.input_valid(operation, message.body())) {
+                if (!self.state_machine.input_valid(operation, message.body())) {
                     log.err(
                         "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
                         .{
