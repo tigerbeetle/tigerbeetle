@@ -143,7 +143,7 @@ fn run_fuzzers(
 
     const random = std.crypto.random;
 
-    try shell.exec("../zig/zig build -Drelease build_fuzz", .{});
+    try shell.zig("build -Drelease build_fuzz", .{});
 
     const FuzzerChild = struct {
         child: std.ChildProcess,
@@ -186,8 +186,12 @@ fn run_fuzzers(
                     log.debug("will start '{s}'", .{command});
                     const child = try shell.spawn_options(
                         .{ .stdin_behavior = .Pipe },
-                        "../zig/zig build -Drelease fuzz -- --seed={seed} {fuzzer}",
-                        .{ .seed = try shell.print("{d}", .{seed}), .fuzzer = @tagName(fuzzer) },
+                        "{zig} build -Drelease fuzz -- --seed={seed} {fuzzer}",
+                        .{
+                            .zig = shell.zig_exe.?,
+                            .seed = try shell.print("{d}", .{seed}),
+                            .fuzzer = @tagName(fuzzer),
+                        },
                     );
                     _ = try std.os.fcntl(
                         child.stdin.?.handle,

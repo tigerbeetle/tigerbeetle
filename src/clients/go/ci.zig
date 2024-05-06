@@ -24,11 +24,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     //     <https://github.com/ziglang/zig/issues/15438>
     switch (builtin.os.tag) {
         .linux, .windows => {
-            const zig_exe = try shell.project_root.realpathAlloc(
-                shell.arena.allocator(),
-                comptime "zig/zig" ++ builtin.target.exeFileExt(),
-            );
-            const zig_cc = try shell.print("{s} cc", .{zig_exe});
+            const zig_cc = try shell.print("{s} cc", .{shell.zig_exe.?});
             try shell.env.put("CC", zig_cc);
         },
         .macos => {},
@@ -84,11 +80,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         shell.cwd,
         "main.go",
     );
-    const zig_exe = try shell.project_root.realpathAlloc(
-        shell.arena.allocator(),
-        comptime "zig/zig" ++ builtin.target.exeFileExt(),
-    );
-    const zig_cc = try shell.print("{s} cc", .{zig_exe});
+    const zig_cc = try shell.print("{s} cc", .{shell.zig_exe.?});
 
     try shell.env.put("CC", zig_cc);
     try shell.exec("go run main.go", .{});

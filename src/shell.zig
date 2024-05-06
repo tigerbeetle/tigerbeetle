@@ -51,6 +51,9 @@ env: std.process.EnvMap,
 /// True if the process is run in CI (the CI env var is set)
 ci: bool,
 
+/// Absolute path to the Zig binary.
+zig_exe: ?[]const u8,
+
 pub fn create(gpa: std.mem.Allocator) !*Shell {
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
@@ -78,6 +81,7 @@ pub fn create(gpa: std.mem.Allocator) !*Shell {
         .cwd_stack_count = 0,
         .env = env,
         .ci = ci,
+        .zig_exe = env.get("ZIG_EXE"),
     };
 
     return result;
@@ -598,16 +602,10 @@ pub fn spawn_options(
 
 /// Runs the zig compiler.
 pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
-    const zig_exe = try shell.project_root.realpathAlloc(
-        shell.gpa,
-        comptime "zig/zig" ++ builtin.target.exeFileExt(),
-    );
-    defer shell.gpa.free(zig_exe);
-
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
 
-    try argv.append_new_arg(zig_exe);
+    try argv.append_new_arg(shell.zig_exe.?);
     try expand_argv(&argv, cmd, cmd_args);
 
     // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
