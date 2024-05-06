@@ -499,19 +499,19 @@ test "zig_zag_merge: unit" {
                 @setEvalBranchQuota(2_000);
                 var array: [1000]Context.Value = undefined;
                 for (0..1000) |i| array[i] = @intCast(i + 1);
-                break :blk &array;
+                break :blk stdx.comptime_slice(&array, array.len);
             },
             // {10, 20, 30, ..., 1000}.
             comptime blk: {
                 var array: [100]Context.Value = undefined;
                 for (0..100) |i| array[i] = @intCast(10 * (i + 1));
-                break :blk &array;
+                break :blk stdx.comptime_slice(&array, array.len);
             },
             // {1, 10, 100, 1000, ..., 10 ^ 10}.
             comptime blk: {
                 var array: [10]Context.Value = undefined;
                 for (0..10) |i| array[i] = std.math.pow(Context.Value, 10, i);
-                break :blk &array;
+                break :blk stdx.comptime_slice(&array, array.len);
             },
         },
         &.{ 10, 100, 1000 },
@@ -524,13 +524,13 @@ test "zig_zag_merge: unit" {
             comptime blk: {
                 var array: [100]Context.Value = undefined;
                 for (0..100) |i| array[i] = @intCast(i + 1);
-                break :blk &array;
+                break :blk stdx.comptime_slice(&array, array.len);
             },
             // {100, 101, 102, ..., 199}.
             comptime blk: {
                 var array: [100]Context.Value = undefined;
                 for (0..100) |i| array[i] = @intCast(i + 100);
-                break :blk &array;
+                break :blk stdx.comptime_slice(&array, array.len);
             },
         },
         &.{100},
@@ -543,13 +543,13 @@ test "zig_zag_merge: unit" {
             comptime blk: {
                 var array: [100]Context.Value = undefined;
                 for (0..100) |i| array[i] = @intCast(i + 100);
-                break :blk &array;
+                break :blk stdx.comptime_slice(&array, array.len);
             },
             // {1, 2, 3, ..., 100}.
             comptime blk: {
                 var array: [100]Context.Value = undefined;
                 for (0..100) |i| array[i] = @intCast(i + 1);
-                break :blk &array;
+                break :blk stdx.comptime_slice(&array, array.len);
             },
         },
         &.{100},

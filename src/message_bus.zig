@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 const os = std.os;
+const posix = std.posix;
 
 const is_linux = builtin.target.os.tag == .linux;
 
@@ -53,7 +54,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             .replica => struct {
                 replica: u8,
                 /// The file descriptor for the process on which to accept connections.
-                accept_fd: std.posix.socket_t,
+                accept_fd: posix.socket_t,
                 /// Address the accept_fd is bound to, as reported by `getsockname`.
                 ///
                 /// This allows passing port 0 as an address for the OS to pick an open port for us
@@ -187,81 +188,82 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         }
 
         fn init_tcp(io: *IO, address: std.net.Address) !struct {
-            fd: std.posix.socket_t,
+            fd: posix.socket_t,
             address: std.net.Address,
         } {
             const fd = try io.open_socket(
                 address.any.family,
-                std.posix.SOCK.STREAM,
-                std.posix.IPPROTO.TCP,
+                posix.SOCK.STREAM,
+                posix.IPPROTO.TCP,
             );
             errdefer io.close_socket(fd);
 
             const set = struct {
-                fn set(_fd: std.posix.socket_t, level: i32, option: u32, value: c_int) !void {
-                    try std.posix.setsockopt(_fd, level, option, &mem.toBytes(value));
+                fn set(_fd: posix.socket_t, level: i32, option: u32, value: c_int) !void {
+                    try posix.setsockopt(_fd, level, option, &mem.toBytes(value));
                 }
             }.set;
 
             if (constants.tcp_rcvbuf > 0) rcvbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
-                    if (set(fd, std.posix.SOL.SOCKET, std.posix.SO.RCVBUFFORCE, constants.tcp_rcvbuf)) |_| {
+                    if (set(fd, posix.SOL.SOCKET, posix.SO.RCVBUFFORCE, constants.tcp_rcvbuf)) |_| {
                         break :rcvbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, std.posix.SOL.SOCKET, std.posix.SO.RCVBUF, constants.tcp_rcvbuf);
+                try set(fd, posix.SOL.SOCKET, posix.SO.RCVBUF, constants.tcp_rcvbuf);
             }
 
             if (tcp_sndbuf > 0) sndbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
-                    if (set(fd, std.posix.SOL.SOCKET, std.posix.SO.SNDBUFFORCE, tcp_sndbuf)) |_| {
+                    if (set(fd, posix.SOL.SOCKET, posix.SO.SNDBUFFORCE, tcp_sndbuf)) |_| {
                         break :sndbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, std.posix.SOL.SOCKET, std.posix.SO.SNDBUF, tcp_sndbuf);
+                try set(fd, posix.SOL.SOCKET, posix.SO.SNDBUF, tcp_sndbuf);
             }
 
             if (constants.tcp_keepalive) {
-                try set(fd, std.posix.SOL.SOCKET, std.posix.SO.KEEPALIVE, 1);
+                try set(fd, posix.SOL.SOCKET, posix.SO.KEEPALIVE, 1);
                 if (is_linux) {
-                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.KEEPIDLE, constants.tcp_keepidle);
-                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.KEEPINTVL, constants.tcp_keepintvl);
-                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.KEEPCNT, constants.tcp_keepcnt);
+                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPIDLE, constants.tcp_keepidle);
+                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPINTVL, constants.tcp_keepintvl);
+                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPCNT, constants.tcp_keepcnt);
                 }
             }
 
             if (constants.tcp_user_timeout_ms > 0) {
                 if (is_linux) {
-                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.USER_TIMEOUT, constants.tcp_user_timeout_ms);
+                    const timeout_ms = constants.tcp_user_timeout_ms;
+                    try set(fd, posix.IPPROTO.TCP, posix.TCP.USER_TIMEOUT, timeout_ms);
                 }
             }
 
             // Set tcp no-delay
             if (constants.tcp_nodelay) {
                 if (is_linux) {
-                    try set(fd, std.posix.IPPROTO.TCP, std.posix.TCP.NODELAY, 1);
+                    try set(fd, posix.IPPROTO.TCP, posix.TCP.NODELAY, 1);
                 }
             }
 
-            try set(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, 1);
-            try std.posix.bind(fd, &address.any, address.getOsSockLen());
+            try set(fd, posix.SOL.SOCKET, posix.SO.REUSEADDR, 1);
+            try posix.bind(fd, &address.any, address.getOsSockLen());
 
             // Resolve port 0 to an actual port picked by the OS.
             var address_resolved: std.net.Address = .{ .any = undefined };
-            var addrlen: std.posix.socklen_t = @sizeOf(std.net.Address);
-            try std.posix.getsockname(fd, &address_resolved.any, &addrlen);
+            var addrlen: posix.socklen_t = @sizeOf(std.net.Address);
+            try posix.getsockname(fd, &address_resolved.any, &addrlen);
             assert(address_resolved.getOsSockLen() == addrlen);
             assert(address_resolved.any.family == address.any.family);
 
-            try std.posix.listen(fd, constants.tcp_backlog);
+            try posix.listen(fd, constants.tcp_backlog);
 
             return .{ .fd = fd, .address = address_resolved };
         }
@@ -369,7 +371,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         fn on_accept(
             bus: *Self,
             completion: *IO.Completion,
-            result: IO.AcceptError!std.posix.socket_t,
+            result: IO.AcceptError!posix.socket_t,
         ) void {
             _ = completion;
 
@@ -459,7 +461,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// IO.INVALID_SOCKET instead of undefined here for safety to ensure an error if the
             /// invalid value is ever used, instead of potentially performing an action on an
             /// active fd.
-            fd: std.posix.socket_t = IO.INVALID_SOCKET,
+            fd: posix.socket_t = IO.INVALID_SOCKET,
 
             /// This completion is used for all recv operations.
             /// It is also used for the initial connect when establishing a replica connection.
@@ -501,7 +503,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // family for all other replicas:
                 const family = bus.configuration[0].any.family;
                 connection.fd =
-                    bus.io.open_socket(family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP) catch return;
+                    bus.io.open_socket(family, posix.SOCK.STREAM, posix.IPPROTO.TCP) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;
@@ -601,7 +603,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             /// Given a newly accepted fd, start receiving messages on it.
             /// Callbacks will be continuously re-registered until terminate() is called.
-            pub fn on_accept(connection: *Connection, bus: *Self, fd: std.posix.socket_t) void {
+            pub fn on_accept(connection: *Connection, bus: *Self, fd: posix.socket_t) void {
                 assert(connection.peer == .none);
                 assert(connection.state == .accepting);
                 assert(connection.fd == IO.INVALID_SOCKET);
@@ -680,7 +682,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         //
                         // TODO: Investigate differences between shutdown() on Linux vs Darwin.
                         // Especially how this interacts with our assumptions around pending I/O.
-                        std.posix.shutdown(connection.fd, .both) catch |err| switch (err) {
+                        posix.shutdown(connection.fd, .both) catch |err| switch (err) {
                             error.SocketNotConnected => {
                                 // This should only happen if we for some reason decide to terminate
                                 // a connection while a connect operation is in progress.

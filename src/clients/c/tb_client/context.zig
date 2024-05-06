@@ -1,9 +1,11 @@
 const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
-const Atomic = std.atomic.Atomic;
+const Atomic = std.atomic.Value;
 
-const vsr = @import("vsr");
+// When referenced from unit_test.zig, there is no vsr import module so use path.
+const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
+
 const constants = vsr.constants;
 const log = std.log.scoped(.tb_client_context);
 
@@ -242,7 +244,7 @@ pub fn ContextType(
         }
 
         pub fn deinit(self: *Context) void {
-            const is_shutdown = self.shutdown.swap(true, .Monotonic);
+            const is_shutdown = self.shutdown.swap(true, .monotonic);
             if (!is_shutdown) {
                 self.thread.join();
                 self.signal.deinit();
@@ -277,7 +279,7 @@ pub fn ContextType(
 
             while (true) {
                 // Keep running until shutdown:
-                const is_shutdown = self.shutdown.load(.Acquire);
+                const is_shutdown = self.shutdown.load(.acquire);
                 if (is_shutdown) {
                     // We need to drain all free packets, to ensure that all
                     // inflight requests have finished.
@@ -492,7 +494,7 @@ pub fn ContextType(
             const self = get_context(implementation);
 
             // During shutdown, no packet can be acquired by the application.
-            const is_shutdown = self.shutdown.load(.Acquire);
+            const is_shutdown = self.shutdown.load(.acquire);
             if (is_shutdown) {
                 return .shutdown;
             } else if (self.packets_free.pop()) |packet| {

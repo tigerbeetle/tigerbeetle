@@ -202,7 +202,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
-            const self: *Self = @alignCast(@fieldParentPtr("superblock_context", superblock_context));
+            const self: *Self =
+                @alignCast(@fieldParentPtr("superblock_context", superblock_context));
             assert(self.formatting);
             self.formatting = false;
         }

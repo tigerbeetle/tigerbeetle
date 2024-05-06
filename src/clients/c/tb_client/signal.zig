@@ -1,11 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const IO = @import("../../../io.zig").IO;
+
+const vsr = @import("../tb_client.zig").vsr;
+const IO = vsr.io.IO;
 
 const os = std.os;
 const assert = std.debug.assert;
-const Atomic = std.atomic.Atomic;
-
+const Atomic = std.atomic.Value;
 const log = std.log.scoped(.tb_client_signal);
 
 /// A Signal is a way to trigger a registered callback on a tigerbeetle IO instance
@@ -180,7 +181,7 @@ pub const Signal = struct {
     /// Schedules the on_signal callback to be invoked on the IO thread.
     /// Safe to call from multiple threads.
     pub fn notify(self: *Signal) void {
-        if (self.state.swap(.notified, .Release) == .waiting) {
+        if (self.state.swap(.notified, .release) == .waiting) {
             self.wake();
         }
     }
@@ -201,11 +202,11 @@ pub const Signal = struct {
     }
 
     fn wait(self: *Signal) void {
-        const state = self.state.compareAndSwap(
+        const state = self.state.cmpxchgStrong(
             .running,
             .waiting,
-            .Acquire,
-            .Acquire,
+            .acquire,
+            .acquire,
         ) orelse return self.io.recv(
             *Signal,
             self,
@@ -251,11 +252,11 @@ pub const Signal = struct {
     }
 
     fn on_signal(self: *Signal) void {
-        const state = self.state.compareAndSwap(
+        const state = self.state.cmpxchgStrong(
             .notified,
             .running,
-            .Acquire,
-            .Acquire,
+            .acquire,
+            .acquire,
         ) orelse {
             (self.on_signal_fn)(self);
             return self.wait();

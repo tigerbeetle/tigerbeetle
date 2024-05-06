@@ -615,7 +615,6 @@ fn go_client(
         lib.pie = true;
         lib.bundle_compiler_rt = true;
         lib.root_module.stack_protector = false;
-
         lib.root_module.addImport("vsr", vsr_module);
         lib.root_module.addOptions("vsr_options", options);
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);

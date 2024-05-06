@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 
 // TODO: Move this back to src/clients/dotnet when there's a better solution for main_pkg_path=src/
 const vsr = @import("vsr.zig");
+const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 
@@ -174,7 +175,7 @@ fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []
             .pascal => std.ascii.toUpper(output[0]),
         };
 
-        break :blk output[0..len];
+        break :blk stdx.comptime_slice(&output, len);
     };
 }
 

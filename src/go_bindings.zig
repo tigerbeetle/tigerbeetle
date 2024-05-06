@@ -2,6 +2,7 @@ const std = @import("std");
 
 // TODO: Move this back to src/clients/go when there's a better solution for main_pkg_path=src/
 const vsr = @import("vsr.zig");
+const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 
@@ -64,20 +65,20 @@ fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const 
             if (is_upper_case(word)) {
                 _ = std.ascii.upperString(output[len..], word);
             } else {
-                std.mem.copy(u8, output[len..], word);
+                @memcpy(output[len..][0..word.len], word);
                 output[len] = std.ascii.toUpper(output[len]);
             }
             len += word.len;
         }
 
-        break :blk output[0 .. min_len orelse len];
+        break :blk stdx.comptime_slice(&output, min_len orelse len);
     };
 }
 
 fn calculate_min_len(comptime type_info: anytype) comptime_int {
     comptime {
-        comptime var min_len: comptime_int = 0;
-        inline for (type_info.fields) |field| {
+        var min_len: comptime_int = 0;
+        for (type_info.fields) |field| {
             const field_len = to_pascal_case(field.name, null).len;
             if (field_len > min_len) {
                 min_len = field_len;

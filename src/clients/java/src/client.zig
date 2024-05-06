@@ -265,13 +265,13 @@ comptime {
         }
     };
 
-    @export(Exports.on_load, .{ .name = "JNI_OnLoad", .linkage = .Strong });
-    @export(Exports.on_unload, .{ .name = "JNI_OnUnload", .linkage = .Strong });
+    @export(Exports.on_load, .{ .name = "JNI_OnLoad", .linkage = .strong });
+    @export(Exports.on_unload, .{ .name = "JNI_OnUnload", .linkage = .strong });
 
-    @export(Exports.client_init, .{ .name = prefix ++ "clientInit", .linkage = .Strong });
-    @export(Exports.client_init_echo, .{ .name = prefix ++ "clientInitEcho", .linkage = .Strong });
-    @export(Exports.client_deinit, .{ .name = prefix ++ "clientDeinit", .linkage = .Strong });
-    @export(Exports.submit, .{ .name = prefix ++ "submit", .linkage = .Strong });
+    @export(Exports.client_init, .{ .name = prefix ++ "clientInit", .linkage = .strong });
+    @export(Exports.client_init_echo, .{ .name = prefix ++ "clientInitEcho", .linkage = .strong });
+    @export(Exports.client_deinit, .{ .name = prefix ++ "clientDeinit", .linkage = .strong });
+    @export(Exports.submit, .{ .name = prefix ++ "submit", .linkage = .strong });
 }
 
 /// Reflection helper and metadata cache.

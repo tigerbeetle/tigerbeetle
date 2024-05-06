@@ -733,3 +733,9 @@ pub fn EnumUnionType(
         .tag_type = Enum,
     } });
 }
+
+/// Creates a slice to a comptime slice without triggering
+/// `error: runtime value contains reference to comptime var`
+pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @TypeOf(slice[0]) {
+    return &@as([len]@TypeOf(slice[0]), slice[0..len].*);
+}

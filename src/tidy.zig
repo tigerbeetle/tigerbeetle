@@ -364,7 +364,6 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "clients/c/tb_client_header_test.zig",
     "clients/c/tb_client.zig",
     "clients/c/tb_client/context.zig",
     "clients/c/tb_client/signal.zig",

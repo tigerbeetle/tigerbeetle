@@ -1,8 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const tb = @import("../../tigerbeetle.zig");
 const tb_client = @import("tb_client.zig");
+const tb = tb_client.vsr.tigerbeetle;
 const c = @cImport(@cInclude("tb_client.h"));
 
 fn to_lowercase(comptime input: []const u8) []const u8 {
@@ -117,7 +117,7 @@ test "valid tb_client.h" {
                         }
 
                         // In C, pointers are opaque so we compare only the field sizes,
-                        comptime var c_field_type = @TypeOf(@field(@as(c_type, undefined), field.name));
+                        const c_field_type = @TypeOf(@field(@as(c_type, undefined), field.name));
                         switch (@typeInfo(c_field_type)) {
                             .Pointer => |info| {
                                 comptime assert(info.size == .C);

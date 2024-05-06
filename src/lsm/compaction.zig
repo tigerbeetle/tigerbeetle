@@ -279,7 +279,7 @@ pub fn CompactionType(
                 comptime _: []const u8,
                 _: std.fmt.FormatOptions,
                 writer: anytype,
-            ) std.os.WriteError!void {
+            ) !void {
                 return writer.print("Position{{ .index_block = {}, " ++
                     ".value_block = {}, .value_block_index = {} }}", .{
                     self.index_block,
@@ -1128,7 +1128,8 @@ pub fn CompactionType(
 
         fn blip_read_next_tick(next_tick: *Grid.NextTick) void {
             // TODO(zig): Address usage of @fieldParentPtr to optional fields.
-            const read: *?Beat.Read = @ptrCast(@as(*Beat.Read, @fieldParentPtr("next_tick", next_tick)));
+            const beat_read: *Beat.Read = @fieldParentPtr("next_tick", next_tick);
+            const read: *?Beat.Read = @ptrCast(beat_read);
             const beat: *Beat = @fieldParentPtr("read", read);
 
             const duration = read.*.?.timer.read();

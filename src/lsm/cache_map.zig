@@ -363,14 +363,23 @@ test "cache_map: unit" {
     defer cache_map.deinit(allocator);
 
     cache_map.upsert(&.{ .key = 1, .value = 1, .tombstone = false });
-    try testing.expectEqual(.{ .key = 1, .value = 1, .tombstone = false }, cache_map.get(1).?.*);
+    try testing.expectEqual(
+        TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
+        cache_map.get(1).?.*,
+    );
 
     // Test scope persisting
     cache_map.scope_open();
     cache_map.upsert(&.{ .key = 2, .value = 2, .tombstone = false });
-    try testing.expectEqual(.{ .key = 2, .value = 2, .tombstone = false }, cache_map.get(2).?.*);
+    try testing.expectEqual(
+        TestTable.Value{ .key = 2, .value = 2, .tombstone = false },
+        cache_map.get(2).?.*,
+    );
     cache_map.scope_close(.persist);
-    try testing.expectEqual(.{ .key = 2, .value = 2, .tombstone = false }, cache_map.get(2).?.*);
+    try testing.expectEqual(
+        TestTable.Value{ .key = 2, .value = 2, .tombstone = false },
+        cache_map.get(2).?.*,
+    );
 
     // Test scope discard on updates
     cache_map.scope_open();
@@ -378,18 +387,27 @@ test "cache_map: unit" {
     cache_map.upsert(&.{ .key = 2, .value = 222, .tombstone = false });
     cache_map.upsert(&.{ .key = 2, .value = 2222, .tombstone = false });
     try testing.expectEqual(
-        .{ .key = 2, .value = 2222, .tombstone = false },
+        TestTable.Value{ .key = 2, .value = 2222, .tombstone = false },
         cache_map.get(2).?.*,
     );
     cache_map.scope_close(.discard);
-    try testing.expectEqual(.{ .key = 2, .value = 2, .tombstone = false }, cache_map.get(2).?.*);
+    try testing.expectEqual(
+        TestTable.Value{ .key = 2, .value = 2, .tombstone = false },
+        cache_map.get(2).?.*,
+    );
 
     // Test scope discard on inserts
     cache_map.scope_open();
     cache_map.upsert(&.{ .key = 3, .value = 3, .tombstone = false });
-    try testing.expectEqual(.{ .key = 3, .value = 3, .tombstone = false }, cache_map.get(3).?.*);
+    try testing.expectEqual(
+        TestTable.Value{ .key = 3, .value = 3, .tombstone = false },
+        cache_map.get(3).?.*,
+    );
     cache_map.upsert(&.{ .key = 3, .value = 33, .tombstone = false });
-    try testing.expectEqual(.{ .key = 3, .value = 33, .tombstone = false }, cache_map.get(3).?.*);
+    try testing.expectEqual(
+        TestTable.Value{ .key = 3, .value = 33, .tombstone = false },
+        cache_map.get(3).?.*,
+    );
     cache_map.scope_close(.discard);
     assert(!cache_map.has(3));
     assert(cache_map.get(3) == null);
@@ -400,5 +418,8 @@ test "cache_map: unit" {
     assert(!cache_map.has(2));
     assert(cache_map.get(2) == null);
     cache_map.scope_close(.discard);
-    try testing.expectEqual(.{ .key = 2, .value = 2, .tombstone = false }, cache_map.get(2).?.*);
+    try testing.expectEqual(
+        TestTable.Value{ .key = 2, .value = 2, .tombstone = false },
+        cache_map.get(2).?.*,
+    );
 }

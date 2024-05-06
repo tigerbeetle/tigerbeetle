@@ -2655,7 +2655,7 @@ fn check(test_table: []const u8) !void {
 
             .tick => |ticks| {
                 assert(ticks.value != 0);
-                const interval_ns: u64 = std.math.absCast(ticks.value) *
+                const interval_ns: u64 = @abs(ticks.value) *
                     switch (ticks.unit) {
                     .seconds => std.time.ns_per_s,
                 };
