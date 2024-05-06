@@ -118,7 +118,6 @@ fn run_fuzzers(
         hang_seconds: u64,
     },
 ) !void {
-    const zig_exe = try shell.zig_exe_alloc(shell.arena.allocator());
     // Fuzz an independent clone of the repository, so that CFO and the fuzzer could be on
     // different branches (to fuzz PRs and releases).
     shell.project_root.deleteTree("working") catch {};
@@ -189,7 +188,7 @@ fn run_fuzzers(
                         .{ .stdin_behavior = .Pipe },
                         "{zig} build -Drelease fuzz -- --seed={seed} {fuzzer}",
                         .{
-                            .zig = zig_exe,
+                            .zig = shell.zig_exe.?,
                             .seed = try shell.print("{d}", .{seed}),
                             .fuzzer = @tagName(fuzzer),
                         },
