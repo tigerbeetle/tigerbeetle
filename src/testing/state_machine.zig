@@ -81,10 +81,10 @@ pub fn StateMachineType(
                     .id = 2,
                     .value = 3,
                 },
-                .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple,
-                    .id = config.lsm_batch_multiple,
-                    .value = config.lsm_batch_multiple,
+                .batch_value_count_max = .{
+                    .timestamp = 1,
+                    .id = 1,
+                    .value = 1,
                 },
                 .ignored = &[_][]const u8{},
                 .derived = .{},

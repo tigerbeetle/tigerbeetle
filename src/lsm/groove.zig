@@ -144,9 +144,9 @@ pub fn GrooveType(
     ///     An anonymous struct which maps each of the groove's trees to a stable, forest-unique,
     ///     tree identifier.
     ///
-    /// - value_count_max: { .field = usize }:
+    /// - batch_value_count_max: { .field = usize }:
     ///     An anonymous struct which contains, for each field of `Object`,
-    ///     the maximum number of values per table for the corresponding index tree.
+    ///     the maximum number of values per table per batch for the corresponding index tree.
     ///
     /// - ignored: [][]const u8:
     ///     An array of fields on the Object type that should not be given index trees
@@ -186,7 +186,8 @@ pub fn GrooveType(
             const IndexTree = IndexTreeType(
                 Storage,
                 field.type,
-                @field(groove_options.value_count_max, field.name),
+                @field(groove_options.batch_value_count_max, field.name) *
+                    constants.lsm_batch_multiple,
             );
             index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
@@ -228,7 +229,7 @@ pub fn GrooveType(
         const IndexTree = IndexTreeType(
             Storage,
             DerivedType,
-            @field(groove_options.value_count_max, field.name),
+            @field(groove_options.batch_value_count_max, field.name) * constants.lsm_batch_multiple,
         );
 
         index_fields = index_fields ++ [_]std.builtin.Type.StructField{
@@ -264,7 +265,7 @@ pub fn GrooveType(
             ObjectTreeHelpers(Object).sentinel_key,
             ObjectTreeHelpers(Object).tombstone,
             ObjectTreeHelpers(Object).tombstone_from_key,
-            groove_options.value_count_max.timestamp,
+            groove_options.batch_value_count_max.timestamp * constants.lsm_batch_multiple,
             .general,
         );
         break :blk TreeType(Table, Storage);
@@ -278,7 +279,7 @@ pub fn GrooveType(
             IdTreeValue.sentinel_key,
             IdTreeValue.tombstone,
             IdTreeValue.tombstone_from_key,
-            groove_options.value_count_max.id,
+            groove_options.batch_value_count_max.id * constants.lsm_batch_multiple,
             .general,
         );
         break :blk TreeType(Table, Storage);
@@ -1140,16 +1141,16 @@ test "Groove" {
                 .amount = 9,
             },
             // Doesn't matter for this test.
-            .value_count_max = .{
-                .timestamp = constants.lsm_batch_multiple,
-                .id = constants.lsm_batch_multiple,
-                .debit_account_id = constants.lsm_batch_multiple,
-                .credit_account_id = constants.lsm_batch_multiple,
-                .pending_id = constants.lsm_batch_multiple,
-                .timeout = constants.lsm_batch_multiple,
-                .ledger = constants.lsm_batch_multiple,
-                .code = constants.lsm_batch_multiple,
-                .amount = constants.lsm_batch_multiple,
+            .batch_value_count_max = .{
+                .timestamp = 1,
+                .id = 1,
+                .debit_account_id = 1,
+                .credit_account_id = 1,
+                .pending_id = 1,
+                .timeout = 1,
+                .ledger = 1,
+                .code = 1,
+                .amount = 1,
             },
             .ignored = [_][]const u8{ "user_data_128", "user_data_64", "user_data_32", "flags" },
             .derived = .{},

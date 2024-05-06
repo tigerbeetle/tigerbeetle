@@ -56,12 +56,12 @@ pub fn StateMachineType(
 
             /// The maximum number of objects within a batch, by operation.
             pub const batch_max = struct {
-                pub const create_accounts = operation_batch_max(.create_accounts);
-                pub const create_transfers = operation_batch_max(.create_transfers);
-                pub const lookup_accounts = operation_batch_max(.lookup_accounts);
-                pub const lookup_transfers = operation_batch_max(.lookup_transfers);
-                pub const get_account_transfers = operation_batch_max(.get_account_transfers);
-                pub const get_account_balances = operation_batch_max(.get_account_balances);
+                pub const create_accounts = operation_batch_max(.create_accounts, config.message_body_size_max);
+                pub const create_transfers = operation_batch_max(.create_transfers, config.message_body_size_max);
+                pub const lookup_accounts = operation_batch_max(.lookup_accounts, config.message_body_size_max);
+                pub const lookup_transfers = operation_batch_max(.lookup_transfers, config.message_body_size_max);
+                pub const get_account_transfers = operation_batch_max(.get_account_transfers, config.message_body_size_max);
+                pub const get_account_balances = operation_batch_max(.get_account_balances, config.message_body_size_max);
 
                 comptime {
                     assert(create_accounts > 0);
@@ -70,13 +70,6 @@ pub fn StateMachineType(
                     assert(lookup_transfers > 0);
                     assert(get_account_transfers > 0);
                     assert(get_account_balances > 0);
-                }
-
-                fn operation_batch_max(comptime operation: Operation) usize {
-                    return @divFloor(message_body_size_max, @max(
-                        @sizeOf(Event(operation)),
-                        @sizeOf(Result(operation)),
-                    ));
                 }
             };
 
@@ -175,25 +168,14 @@ pub fn StateMachineType(
             };
         }
 
+        const batch_value_count_max = batch_value_counts_limit(config.message_body_size_max);
+
         const AccountsGroove = GrooveType(
             Storage,
             Account,
             .{
                 .ids = constants.tree_ids.accounts,
-                .value_count_max = .{
-                    .id = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .code = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    // Transfers mutate the account balance for debits/credits pending/posted.
-                    // Each transfer modifies two accounts.
-                    .timestamp = config.lsm_batch_multiple * @as(usize, @max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
-                    )),
-                },
+                .batch_value_count_max = batch_value_count_max.accounts,
                 .ignored = &[_][]const u8{
                     "debits_posted",
                     "debits_pending",
@@ -211,20 +193,7 @@ pub fn StateMachineType(
             Transfer,
             .{
                 .ids = constants.tree_ids.transfers,
-                .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .debit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .credit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .amount = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .pending_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .expires_at = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                },
+                .batch_value_count_max = batch_value_count_max.transfers,
                 .ignored = &[_][]const u8{ "timeout", "flags" },
                 .derived = .{
                     .expires_at = struct {
@@ -244,13 +213,7 @@ pub fn StateMachineType(
             TransferPending,
             .{
                 .ids = constants.tree_ids.transfers_pending,
-                .value_count_max = .{
-                    // Objects are mutated when the pending transfer is posted/voided/expired.
-                    .timestamp = 2 *
-                        config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .status = 2 *
-                        config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                },
+                .batch_value_count_max = batch_value_count_max.transfers_pending,
                 .ignored = &[_][]const u8{"padding"},
                 .derived = .{},
             },
@@ -273,9 +236,7 @@ pub fn StateMachineType(
             AccountBalancesGrooveValue,
             .{
                 .ids = constants.tree_ids.account_balances,
-                .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                },
+                .batch_value_count_max = batch_value_count_max.account_balances,
                 .ignored = &[_][]const u8{
                     "dr_account_id",
                     "dr_debits_pending",
@@ -552,10 +513,7 @@ pub fn StateMachineType(
                 },
                 inline else => |comptime_operation| {
                     const event_size = @sizeOf(Event(comptime_operation));
-                    const batch_max = comptime constants.batch_max.operation_batch_max(
-                        comptime_operation,
-                    );
-
+                    const batch_max = comptime operation_batch_max(comptime_operation, config.message_body_size_max);
                     comptime assert(event_size > 0);
                     comptime assert(batch_max > 0);
 
@@ -1995,6 +1953,91 @@ pub fn StateMachineType(
                     .tree_options_index = .{},
                 },
             };
+        }
+
+        fn batch_value_counts_limit(batch_size_limit: u32) struct {
+            accounts: struct {
+                id: u32,
+                user_data_128: u32,
+                user_data_64: u32,
+                user_data_32: u32,
+                ledger: u32,
+                code: u32,
+                timestamp: u32,
+            },
+            transfers: struct {
+                timestamp: u32,
+                id: u32,
+                debit_account_id: u32,
+                credit_account_id: u32,
+                amount: u32,
+                pending_id: u32,
+                user_data_128: u32,
+                user_data_64: u32,
+                user_data_32: u32,
+                ledger: u32,
+                code: u32,
+                expires_at: u32,
+            },
+            transfers_pending: struct {
+                timestamp: u32,
+                status: u32,
+            },
+            account_balances: struct {
+                timestamp: u32,
+            },
+        } {
+            assert(batch_size_limit <= constants.message_body_size_max);
+
+            const batch_create_accounts = operation_batch_max(.create_accounts, batch_size_limit);
+            const batch_create_transfers = operation_batch_max(.create_transfers, batch_size_limit);
+            assert(batch_create_accounts > 0);
+            assert(batch_create_transfers > 0);
+
+            return .{
+                .accounts = .{
+                    .id = batch_create_accounts,
+                    .user_data_128 = batch_create_accounts,
+                    .user_data_64 = batch_create_accounts,
+                    .user_data_32 = batch_create_accounts,
+                    .ledger = batch_create_accounts,
+                    .code = batch_create_accounts,
+                    // Transfers mutate the account balance for debits/credits pending/posted.
+                    // Each transfer modifies two accounts.
+                    .timestamp = @max(batch_create_accounts, 2 * batch_create_transfers),
+                },
+                .transfers = .{
+                    .timestamp = batch_create_transfers,
+                    .id = batch_create_transfers,
+                    .debit_account_id = batch_create_transfers,
+                    .credit_account_id = batch_create_transfers,
+                    .amount = batch_create_transfers,
+                    .pending_id = batch_create_transfers,
+                    .user_data_128 = batch_create_transfers,
+                    .user_data_64 = batch_create_transfers,
+                    .user_data_32 = batch_create_transfers,
+                    .ledger = batch_create_transfers,
+                    .code = batch_create_transfers,
+                    .expires_at = batch_create_transfers,
+                },
+                .transfers_pending = .{
+                    // Objects are mutated when the pending transfer is posted/voided/expired.
+                    .timestamp = 2 * batch_create_transfers,
+                    .status = 2 * batch_create_transfers,
+                },
+                .account_balances = .{
+                    .timestamp = batch_create_transfers,
+                },
+            };
+        }
+
+        fn operation_batch_max(comptime operation: Operation, batch_size_limit: u32) u32 {
+            assert(batch_size_limit <= constants.message_body_size_max);
+
+            return @divFloor(batch_size_limit, @max(
+                @sizeOf(Event(operation)),
+                @sizeOf(Result(operation)),
+            ));
         }
     };
 }
@@ -3711,7 +3754,7 @@ test "StateMachine: Demuxer" {
 test "StateMachine: ref all decls" {
     const Storage = @import("storage.zig").Storage;
     const StateMachine = StateMachineType(Storage, .{
-        .message_body_size_max = 1000 * @sizeOf(Account),
+        .message_body_size_max = global_constants.message_body_size_max,
         .lsm_batch_multiple = 1,
         .vsr_operations_reserved = 128,
     });
