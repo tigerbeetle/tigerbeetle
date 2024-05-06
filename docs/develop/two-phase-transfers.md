@@ -88,9 +88,9 @@ posted, etc.
 
 Attempting to resolve a pending transfer more than once will return the applicable error result:
 
-- [`pending_transfer_already_posted`](../api-reference/operations/create_transfers.md#pending_transfer_already_posted)
-- [`pending_transfer_already_voided`](../api-reference/operations/create_transfers.md#pending_transfer_already_voided)
-- [`pending_transfer_expired`](../api-reference/operations/create_transfers.md#pending_transfer_expired)
+- [`pending_transfer_already_posted`](../api-reference/requests/create_transfers.md#pending_transfer_already_posted)
+- [`pending_transfer_already_voided`](../api-reference/requests/create_transfers.md#pending_transfer_already_voided)
+- [`pending_transfer_expired`](../api-reference/requests/create_transfers.md#pending_transfer_expired)
 
 ## Interaction with Account Invariants
 

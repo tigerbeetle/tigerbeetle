@@ -8,9 +8,9 @@ In some use cases, you may want to execute a transfer if and only if an account 
 certain balance.
 
 It would be unsafe to check an account's balance using the
-[`lookup_accounts`](../../api-reference/operations/lookup_accounts.md) and then perform the
-transfer, because these operations are not be atomic and the account's balance may change between
-the lookup and the transfer.
+[`lookup_accounts`](../../api-reference/requests/lookup_accounts.md) and then perform the transfer,
+because these requests are not be atomic and the account's balance may change between the lookup and
+the transfer.
 
 You can atomically run a check against an account's balance before executing a transfer by using a
 control or temporary account and linked transfers.
@@ -35,7 +35,7 @@ and out of the control account.
 ## Executing a Balance-Conditional Transfer
 
 The balance-conditional transfer consists of 3
-[linked transfers](../client-requests.md#linked-events).
+[linked transfers](../../api-reference/requests/README.md#linked-events).
 
 We will refer to two amounts:
 

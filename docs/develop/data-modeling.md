@@ -171,7 +171,7 @@ recommended for most applications.
 When selecting an `id` scheme:
 
 - Idempotency is particularly important (and difficult) in the context of
-  [application crash recovery](./consistency.md#consistency-with-foreign-databases).
+  [application crash recovery](./reliable-transaction-submission.md).
 - Be careful to [avoid `id` collisions](https://en.wikipedia.org/wiki/Birthday_problem).
 - An account and a transfer may share the same `id` (they belong to different "namespaces"), but
   this is not recommended because other systems (that you may later connect to TigerBeetle) may use

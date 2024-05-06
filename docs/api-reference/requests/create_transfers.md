@@ -337,9 +337,8 @@ A transfer with the same `id` already exists, but with a different [`code`](../t
 
 A transfer with the same `id` already exists, and is identical to the transfer in the request.
 
-To correctly recover from application crashes
-[many applications](../../develop/consistency.md#consistency-with-foreign-databases) should handle
-`exists` exactly as [`ok`](#ok).
+To correctly [recover from application crashes](../../develop/reliable-transaction-submission.md),
+many applications should handle `exists` exactly as [`ok`](#ok).
 
 ### `overflows_debits_pending`
 

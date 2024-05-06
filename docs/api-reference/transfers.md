@@ -285,7 +285,7 @@ Constraints:
 
 - Type is 16-bit unsigned integer (2 bytes)
 - Some flags are mutually exclusive; see
-  [`flags_are_mutually_exclusive`](./operations/create_transfers.md#flags_are_mutually_exclusive).
+  [`flags_are_mutually_exclusive`](./requests/create_transfers.md#flags_are_mutually_exclusive).
 
 #### `flags.linked`
 
@@ -294,7 +294,7 @@ that they will either succeed or fail together.
 
 The last transfer in a chain of linked transfers does **not** have this flag set.
 
-You can read more about [linked events](../develop/client-requests.md#linked-events).
+You can read more about [linked events](./requests/README.md.md#linked-events).
 
 ##### Examples
 
@@ -319,10 +319,10 @@ such that `debit_account.debits_pending + debit_account.debits_posted ≤ debit_
 If `amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
 
 If the highest amount transferable is `0`, returns
-[`exceeds_credits`](./operations/create_transfers.md#exceeds_credits).
+[`exceeds_credits`](./requests/create_transfers.md#exceeds_credits).
 
 Retrying a balancing transfer will return
-[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
+[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount)
 if the amount of the retry differs from the amount that was actually transferred.
 
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
@@ -344,10 +344,10 @@ such that `credit_account.credits_pending + credit_account.credits_posted ≤ cr
 If `amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
 
 If the highest amount transferable is `0`, returns
-[`exceeds_debits`](./operations/create_transfers.md#exceeds_debits).
+[`exceeds_debits`](./requests/create_transfers.md#exceeds_debits).
 
 Retrying a balancing transfer will return
-[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
+[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount)
 if the amount of the retry differs from the amount that was actually transferred.
 
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
