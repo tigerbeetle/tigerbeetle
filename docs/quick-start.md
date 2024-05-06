@@ -168,7 +168,7 @@ And indeed you can see that account `1` has `debits_posted` as `10` and account 
 You can take a look at the [`Accounts` reference](./api-reference/accounts.md) to understand all of
 the fields on the accounts.
 
-You can also take a look at the [Operations](./api-reference/operations/index.md) to see what else
+You can also take a look at the [Request Types](./api-reference/requests/README.md) to see what else
 you can do with the REPL.
 
 ## Optional: Run a Multi-Node Cluster
