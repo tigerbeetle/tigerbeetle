@@ -1661,8 +1661,7 @@ public class IntegrationTest {
             }
 
             this.process = new ProcessBuilder()
-                    .command(new String[] {exe, "start", "--addresses=0", "--cache-grid=512MiB",
-                            TB_FILE})
+                    .command(new String[] {exe, "start", "--addresses=0", "--development", TB_FILE})
                     .redirectOutput(Redirect.PIPE).redirectError(Redirect.INHERIT).start();
 
             final var stdout = process.getInputStream();
