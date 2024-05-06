@@ -39,6 +39,12 @@ Each request has a corresponding _event_ and _result_ type:
 | `get_account_transfers` | [`AccountFilter`](./get_account_transfers.md#Event) | [`Transfer`](./get_account_transfers.md#Result) or nothing      |
 | `get_account_balances`  | [`AccountFilter`](./get_account_balances.md#Event)  | [`AccountBalance`](./get_account_balances.md#Result) or nothing |
 
+### Idempotency
+
+Events that create objects are idempotent. The first event to create an object with a given `id`
+will receive the `ok` result. Subsequent events that attempt to create the same object will receive
+the `exists` result.
+
 ## Batching Events
 
 To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by batching many
@@ -110,3 +116,27 @@ After the chain of linked events has executed, the fact that they were linked wi
 save the association between Transfers or Accounts, it must be
 [encoded into the data model](../develop/data-modeling.md), for example by adding an ID to one of
 the [user data](../develop/data-modeling.md#user_data) fields.
+
+## Guarantees
+
+- A request executes within the cluster at most once.
+- Requests do not [time out](../sessions.md#retries). Clients will continuously retry requests until
+  they receive a reply from the cluster. This is because in the case of a network partition, a lack
+  of response from the cluster could either indicate that the request was dropped before it was
+  processed or that the reply was dropped after the request was processed. Note that individual
+  [pending transfers](../../develop/two-phase-transfers.md) within a request may have
+  [timeouts](../transfers.md#timeout).
+- Requests retried by their original client session receive identical replies.
+- Requests retried by a different client (same request body, different session) may receive
+  different replies.
+- Events within a request are executed in sequence. The effects of a given event are observable when
+  the next event within that request is applied.
+- Events within a request do not interleave with events from other requests.
+- All events within a request batch are committed, or none are. Note that this does not mean that
+  all of the events in a batch will succeed, or that all will fail. Events succeed or fail
+  independently unless they are explicitly [linked](#linked-events)
+- Once committed, an event will always be committed — the cluster's state never backtracks.
+- Within a cluster, object
+  [timestamps are unique and strictly increasing](../../develop/time.md#timestamps-are-totally-ordered).
+  No two objects within the same cluster will have the same timestamp. Furthermore, the order of the
+  timestamps indicates the order in which the objects were committed.

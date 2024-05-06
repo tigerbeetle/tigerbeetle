@@ -21,6 +21,17 @@ Accounts **cannot be deleted** after creation. This provides a strong guarantee 
 If an account is no longer in use, you may want to [zero out its
 balance](../develop/recipes/close-account.md).
 
+### Guarantees
+
+- Accounts are immutable. They are never modified once they are successfully created (excluding
+  balance fields, which are modified by transfers).
+- There is at most one `Account` with a particular [`id`](#id).
+- The sum of all accounts' [`debits_pending`](#debits_pending) equals
+  the sum of all accounts' [`credits_pending`](#credits_pending).
+- The sum of all accounts' [`debits_posted`](#debits_posted) equals the
+  sum of all accounts' [`credits_posted`](#credits_posted).
+
+
 ## Fields
 
 ### `id`

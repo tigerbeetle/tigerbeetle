@@ -19,6 +19,15 @@ Transfers](../develop/recipes/multi-debit-credit-transfers.md).
 
 Transfers _cannot be modified_ after creation.
 
+### Guarantees
+
+- Transfers are immutable. They are never modified once they are successfully created.
+- There is at most one `Transfer` with a particular [`id`](#id).
+- A [pending transfer](../develop/two-phase-transfers.md#reserve-funds-pending-transfer) resolves at most
+  once.
+- Transfer [timeouts](#timeout) are deterministic, driven by the
+  [cluster's timestamp](../develop/time.md#why-tigerbeetle-manages-timestamps).
+
 ## Modes
 
 Transfers can either be Single-Phase, where they are executed immediately, or Two-Phase, where
