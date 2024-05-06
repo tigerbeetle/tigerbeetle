@@ -136,10 +136,6 @@ pub const Network = struct {
         network.packet_simulator.tick();
     }
 
-    pub fn clear(network: *Network) void {
-        network.packet_simulator.clear();
-    }
-
     pub fn transition_to_liveness_mode(network: *Network, core: Core) void {
         assert(core.count() > 0);
 
@@ -202,6 +198,13 @@ pub const Network = struct {
     pub fn process_disable(network: *Network, process: Process) void {
         assert(network.buses_enabled.items[network.process_to_address(process)]);
         network.buses_enabled.items[network.process_to_address(process)] = false;
+    }
+
+    pub fn link_clear(network: *Network, path: Path) void {
+        network.packet_simulator.link_clear(.{
+            .source = network.process_to_address(path.source),
+            .target = network.process_to_address(path.target),
+        });
     }
 
     pub fn link_filter(network: *Network, path: Path) *LinkFilter {

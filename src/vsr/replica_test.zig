@@ -766,10 +766,6 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     t.replica(.R1).stop();
     t.replica(.R2).stop();
 
-    // Make sure there are no commit messages with commit=24 lingering in the network, which would
-    // cause the deadlock to occur after the view-change (during repair).
-    t.cluster.network.clear();
-
     t.replica(.R1).corrupt(.{ .wal_prepare = 22 });
     t.replica(.R2).corrupt(.{ .wal_prepare = 22 });
 
@@ -1627,6 +1623,13 @@ const TestReplicas = struct {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: crash replica", .{r});
             t.cluster.crash_replica(r);
+
+            // For simplicity, ensure that any packets that are in flight to this replica are
+            // discarded before it starts up again.
+            const paths = t.peer_paths(.__, .incoming);
+            for (paths.const_slice()) |path| {
+                t.cluster.network.link_clear(path);
+            }
         }
     }
 

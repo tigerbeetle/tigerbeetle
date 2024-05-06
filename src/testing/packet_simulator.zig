@@ -192,9 +192,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         }
 
         /// Drop all pending packets.
-        pub fn clear(self: *Self) void {
-            for (self.links) |*link| {
-                while (link.queue.peek()) |_| link.queue.remove().packet.deinit();
+        pub fn link_clear(self: *Self, path: Path) void {
+            const link = &self.links[self.path_index(path)];
+            while (link.queue.peek()) |_| {
+                link.queue.remove().packet.deinit();
             }
         }
 
