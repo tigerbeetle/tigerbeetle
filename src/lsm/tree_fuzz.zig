@@ -844,6 +844,8 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     try tracer.init(allocator);
     defer tracer.deinit(allocator);
 
+    if (fuzz_args.seed % 100 == 0) @panic("bad seed");
+
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
