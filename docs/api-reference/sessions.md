@@ -4,8 +4,8 @@ sidebar_position: 6
 
 # Client Sessions
 
-A _client session_ is a sequence of [requests](./client-requests.md) and replies sent between a
-client and a cluster.
+A _client session_ is a sequence of [requests](./requests.md) and replies sent between a client and
+a cluster.
 
 A client session may have **at most one in-flight request** — i.e. at most one unique request on the
 network for which a reply has not been received. This simplifies consistency and allows the cluster
@@ -14,8 +14,8 @@ application are queued by the client, to be dequeued and sent when their precedi
 a reply.
 
 Similar to other databases, TigerBeetle has a [hard limit](#eviction) on the number of concurrent
-client sessions. To maximize throughput, we encourage users to minimize the number of concurrent
-clients and [batch](./client-requests.md#batching-events) as many events as possible per request.
+client sessions. To maximize throughput, users are encouraged to minimize the number of concurrent
+clients and [batch](./requests.md#batching-events) as many events as possible per request.
 
 ## Lifecycle
 
@@ -54,8 +54,6 @@ to self-terminate, bubbling up to the application as an `session evicted` error.
 (TODO: Right now evicted clients panic — fix that so this is accurate.)
 
 If active clients are terminating with `session evicted` errors, it most likely indicates that the
-application is trying to run too many concurrent clients. For performance reasons, we recommend
-[batching](./client-requests.md#batching-events) as many events as possible into each request sent
-by each client. You may want to consult the [Example API Layer
-Architecture](./client-requests.md#example-api-layer-architecture) for one approach to increasing
-the utilization of each client.
+application is trying to run too many concurrent clients. For performance reasons, it is recommended
+to [batch](./requests.md#batching-events) as many events as possible into each request sent by each
+client.

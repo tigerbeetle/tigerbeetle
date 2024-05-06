@@ -39,12 +39,12 @@ Each request has a corresponding _event_ and _result_ type:
 | `get_account_transfers` | [`AccountFilter`](./get_account_transfers.md#Event) | [`Transfer`](./get_account_transfers.md#Result) or nothing      |
 | `get_account_balances`  | [`AccountFilter`](./get_account_balances.md#Event)  | [`AccountBalance`](./get_account_balances.md#Result) or nothing |
 
-## Batch Sizes
+## Batching Events
 
 To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by batching many
 events in each request.
 
-In the default configuration, the batch sizes for each request type are:
+In the default configuration, the maximum batch sizes for each request type are:
 
 | Request Type            | Request Batch Size (Events) | Reply Batch Size (Results) |
 | ----------------------- | --------------------------: | -------------------------: |
