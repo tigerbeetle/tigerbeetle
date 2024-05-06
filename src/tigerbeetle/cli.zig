@@ -44,7 +44,7 @@ const CliArgs = union(enum) {
     start: struct {
         addresses: []const u8,
         limit_storage: flags.ByteSize = .{ .value = constants.storage_size_limit_max },
-        limit_pipeline: ?u32 = null,
+        limit_pipeline_requests: ?u32 = null,
         cache_accounts: ?flags.ByteSize = null,
         cache_transfers: ?flags.ByteSize = null,
         cache_transfers_pending: ?flags.ByteSize = null,
@@ -91,7 +91,7 @@ const CliArgs = union(enum) {
     },
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
-    // --limit-pipeline
+    // --limit-pipeline-requests
     pub const help = fmt.comptimePrint(
         \\Usage:
         \\
@@ -197,7 +197,7 @@ const CliArgs = union(enum) {
 };
 
 const StartDefaults = struct {
-    limit_pipeline: u32,
+    limit_pipeline_requests: u32,
     cache_accounts: flags.ByteSize,
     cache_transfers: flags.ByteSize,
     cache_transfers_pending: flags.ByteSize,
@@ -206,7 +206,7 @@ const StartDefaults = struct {
 };
 
 const start_defaults_production = StartDefaults{
-    .limit_pipeline = constants.pipeline_request_queue_max,
+    .limit_pipeline_requests = constants.pipeline_request_queue_max,
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },
     .cache_transfers = .{ .value = constants.cache_transfers_size_default },
     .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
@@ -215,7 +215,7 @@ const start_defaults_production = StartDefaults{
 };
 
 const start_defaults_development = StartDefaults{
-    .limit_pipeline = 0,
+    .limit_pipeline_requests = 0,
     .cache_accounts = .{ .value = 0 },
     .cache_transfers = .{ .value = 0 },
     .cache_transfers_pending = .{ .value = 0 },
@@ -410,18 +410,18 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 );
             }
 
-            const pipeline_limit = start.limit_pipeline orelse defaults.limit_pipeline;
+            const pipeline_limit =
+                start.limit_pipeline_requests orelse defaults.limit_pipeline_requests;
             const pipeline_limit_min = 0;
-            const pipeline_limit_max =
-                constants.pipeline_prepare_queue_max + constants.pipeline_request_queue_max;
+            const pipeline_limit_max = constants.pipeline_request_queue_max;
             if (pipeline_limit > pipeline_limit_max) {
-                flags.fatal("--limit-pipeline: count {} exceeds maximum: {}", .{
+                flags.fatal("--limit-pipeline-requests: count {} exceeds maximum: {}", .{
                     pipeline_limit,
                     pipeline_limit_max,
                 });
             }
             if (pipeline_limit < pipeline_limit_min) {
-                flags.fatal("--limit-pipeline: count {} is below minimum: {}", .{
+                flags.fatal("--limit-pipeline-requests: count {} is below minimum: {}", .{
                     pipeline_limit,
                     pipeline_limit_min,
                 });

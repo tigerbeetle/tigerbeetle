@@ -292,6 +292,8 @@ const Command = struct {
         log_main.info("releases_bundled={any}", .{releases_bundled.*});
         log_main.info("git_commit={?s}", .{config.process.git_commit});
 
+        const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
@@ -316,7 +318,7 @@ const Command = struct {
             .message_bus_options = .{
                 .configuration = args.addresses,
                 .io = &command.io,
-                .clients_limit = args.pipeline_requests_limit,
+                .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
         }) catch |err| switch (err) {

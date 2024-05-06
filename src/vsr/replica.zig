@@ -179,14 +179,15 @@ pub fn ReplicaType(
         /// Invariant: replica < node_count
         replica: u8,
 
-        /// Runtime upper-bound number of prepares/requests in the pipeline.
+        /// Runtime upper-bound number of requests in the pipeline.
         /// Does not change after initialization.
         /// Invariants:
         /// - pipeline_request_queue_limit ≥ 0
         /// - pipeline_request_queue_limit ≤ pipeline_request_queue_max
         ///
-        /// The former invariant is critical since we don't guarantee that all replicas in a cluster
-        /// are started with the same `pipeline_request_queue_limit`.
+        /// The *total* runtime pipeline size is never less than the pipeline_prepare_queue_max.
+        /// This is critical since we don't guarantee that all replicas in a cluster are started
+        /// with the same `pipeline_request_queue_limit`.
         pipeline_request_queue_limit: u32,
 
         /// The minimum number of replicas required to form a replication quorum:
