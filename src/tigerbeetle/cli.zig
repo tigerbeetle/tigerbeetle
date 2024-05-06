@@ -206,7 +206,7 @@ const StartDefaults = struct {
 };
 
 const start_defaults_production = StartDefaults{
-    .limit_pipeline = constants.pipeline_prepare_queue_max + constants.pipeline_request_queue_max,
+    .limit_pipeline = constants.pipeline_request_queue_max,
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },
     .cache_transfers = .{ .value = constants.cache_transfers_size_default },
     .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
@@ -215,7 +215,7 @@ const start_defaults_production = StartDefaults{
 };
 
 const start_defaults_development = StartDefaults{
-    .limit_pipeline = constants.pipeline_prepare_queue_max,
+    .limit_pipeline = 0,
     .cache_accounts = .{ .value = 0 },
     .cache_transfers = .{ .value = 0 },
     .cache_transfers_pending = .{ .value = 0 },
@@ -243,7 +243,7 @@ pub const Command = union(enum) {
         cache_transfers_pending: u32,
         cache_account_balances: u32,
         storage_size_limit: u64,
-        pipeline_limit: u32,
+        pipeline_requests_limit: u32,
         cache_grid_blocks: u32,
         lsm_forest_node_count: u32,
         development: bool,
@@ -411,7 +411,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             }
 
             const pipeline_limit = start.limit_pipeline orelse defaults.limit_pipeline;
-            const pipeline_limit_min = constants.pipeline_prepare_queue_max;
+            const pipeline_limit_min = 0;
             const pipeline_limit_max =
                 constants.pipeline_prepare_queue_max + constants.pipeline_request_queue_max;
             if (pipeline_limit > pipeline_limit_max) {
@@ -464,7 +464,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .addresses = addresses,
                     .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
                     .storage_size_limit = storage_size_limit,
-                    .pipeline_limit = pipeline_limit,
+                    .pipeline_requests_limit = pipeline_limit,
                     .cache_accounts = parse_cache_size_to_count(
                         tigerbeetle.Account,
                         AccountsValuesCache,

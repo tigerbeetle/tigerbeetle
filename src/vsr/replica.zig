@@ -182,12 +182,12 @@ pub fn ReplicaType(
         /// Runtime upper-bound number of prepares/requests in the pipeline.
         /// Does not change after initialization.
         /// Invariants:
-        /// - pipeline_limit ≥ pipeline_prepare_queue_max
-        /// - pipeline_limit ≤ pipeline_prepare_queue_max + pipeline_request_queue_max
+        /// - pipeline_request_queue_limit ≥ 0
+        /// - pipeline_request_queue_limit ≤ pipeline_request_queue_max
         ///
         /// The former invariant is critical since we don't guarantee that all replicas in a cluster
-        /// are started with the same `pipeline_limit`.
-        pipeline_limit: u32,
+        /// are started with the same `pipeline_request_queue_limit`.
+        pipeline_request_queue_limit: u32,
 
         /// The minimum number of replicas required to form a replication quorum:
         quorum_replication: u8,
@@ -531,7 +531,7 @@ pub fn ReplicaType(
 
         const OpenOptions = struct {
             node_count: u8,
-            pipeline_limit: u32,
+            pipeline_requests_limit: u32,
             storage_size_limit: u64,
             storage: *Storage,
             message_pool: *MessagePool,
@@ -555,9 +555,8 @@ pub fn ReplicaType(
             assert(options.nonce != 0);
             assert(options.release.value > 0);
             assert(options.release.value >= options.release_client_min.value);
-            assert(options.pipeline_limit >= constants.pipeline_prepare_queue_max);
-            assert(options.pipeline_limit <=
-                constants.pipeline_prepare_queue_max + constants.pipeline_request_queue_max);
+            assert(options.pipeline_requests_limit >= 0);
+            assert(options.pipeline_requests_limit <= constants.pipeline_request_queue_max);
 
             self.static_allocator = StaticAllocator.init(parent_allocator);
             const allocator = self.static_allocator.allocator();
@@ -600,7 +599,7 @@ pub fn ReplicaType(
                 .replica_index = replica,
                 .replica_count = replica_count,
                 .standby_count = options.node_count - replica_count,
-                .pipeline_limit = options.pipeline_limit,
+                .pipeline_requests_limit = options.pipeline_requests_limit,
                 .storage = options.storage,
                 .aof = options.aof,
                 .nonce = options.nonce,
@@ -915,7 +914,7 @@ pub fn ReplicaType(
             replica_count: u8,
             standby_count: u8,
             replica_index: u8,
-            pipeline_limit: u32,
+            pipeline_requests_limit: u32,
             nonce: Nonce,
             time: Time,
             storage: *Storage,
@@ -1061,7 +1060,7 @@ pub fn ReplicaType(
                 .standby_count = standby_count,
                 .node_count = node_count,
                 .replica = replica_index,
-                .pipeline_limit = options.pipeline_limit,
+                .pipeline_request_queue_limit = options.pipeline_requests_limit,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .quorum_nack_prepare = quorum_nack_prepare,
@@ -1093,7 +1092,9 @@ pub fn ReplicaType(
                 .op = undefined,
                 .commit_min = self.superblock.working.vsr_state.checkpoint.header.op,
                 .commit_max = self.superblock.working.vsr_state.commit_max,
-                .pipeline = .{ .cache = .{ .capacity = options.pipeline_limit } },
+                .pipeline = .{ .cache = .{
+                    .capacity = constants.pipeline_prepare_queue_max + options.pipeline_requests_limit,
+                } },
                 .view_headers = vsr.Headers.ViewChangeArray.init_from_slice(
                     self.superblock.working.vsr_headers().command,
                     self.superblock.working.vsr_headers().slice,
@@ -6305,7 +6306,9 @@ pub fn ReplicaType(
             assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
 
-            var pipeline_queue = PipelineQueue{ .pipeline_limit = self.pipeline_limit };
+            var pipeline_queue = PipelineQueue{
+                .pipeline_request_queue_limit = self.pipeline_request_queue_limit,
+            };
             var op = self.commit_max + 1;
             var parent = self.journal.header_with_op(self.commit_max).?.checksum;
             while (op <= self.op) : (op += 1) {
@@ -7985,7 +7988,9 @@ pub fn ReplicaType(
                 self.upgrade_timeout.start();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
-                self.pipeline = .{ .queue = .{ .pipeline_limit = self.pipeline_limit } };
+                self.pipeline = .{ .queue = .{
+                    .pipeline_request_queue_limit = self.pipeline_request_queue_limit,
+                } };
             } else {
                 log.debug(
                     "{}: transition_to_normal_from_recovering_status: view={} backup",
@@ -10076,7 +10081,7 @@ const PipelineQueue = struct {
     const PrepareQueue = RingBuffer(Prepare, .{ .array = constants.pipeline_prepare_queue_max });
     const RequestQueue = RingBuffer(Request, .{ .array = constants.pipeline_request_queue_max });
 
-    pipeline_limit: u32,
+    pipeline_request_queue_limit: u32,
     /// Messages that are preparing (uncommitted, being written to the WAL (may already be written
     /// to the WAL) and replicated (may just be waiting for acks)).
     prepare_queue: PrepareQueue = PrepareQueue.init(),
@@ -10094,11 +10099,9 @@ const PipelineQueue = struct {
         assert(pipeline.request_queue.count <= constants.pipeline_request_queue_max);
         assert(pipeline.prepare_queue.count <= constants.pipeline_prepare_queue_max);
 
-        assert(pipeline.pipeline_limit >= constants.pipeline_prepare_queue_max);
-        assert(pipeline.pipeline_limit <=
-            constants.pipeline_request_queue_max + constants.pipeline_prepare_queue_max);
-        assert(pipeline.prepare_queue.count + pipeline.request_queue.count <=
-            pipeline.pipeline_limit);
+        assert(pipeline.pipeline_request_queue_limit >= 0);
+        assert(pipeline.pipeline_request_queue_limit <= constants.pipeline_request_queue_max);
+        assert(pipeline.request_queue.count <= pipeline.pipeline_request_queue_limit);
 
         assert(pipeline.request_queue.empty() or
             constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count or
@@ -10134,12 +10137,12 @@ const PipelineQueue = struct {
     }
 
     fn prepare_queue_capacity(pipeline: *const PipelineQueue) u32 {
-        assert(pipeline.pipeline_limit >= constants.pipeline_prepare_queue_max);
+        _ = pipeline;
         return constants.pipeline_prepare_queue_max;
     }
 
     fn request_queue_capacity(pipeline: *const PipelineQueue) u32 {
-        return pipeline.pipeline_limit - constants.pipeline_prepare_queue_max;
+        return pipeline.pipeline_request_queue_limit;
     }
 
     fn full(pipeline: PipelineQueue) bool {
@@ -10308,10 +10311,13 @@ const PipelineCache = struct {
     /// reused. However, the pipeline's prepare_ok quorums must not be reused, since the
     /// replicas that sent them may have swapped them out during a previous view change.
     fn init_from_queue(queue: *PipelineQueue) PipelineCache {
-        assert(queue.pipeline_limit > 0);
-        assert(queue.pipeline_limit <= prepares_max);
+        assert(queue.pipeline_request_queue_limit >= 0);
+        assert(queue.pipeline_request_queue_limit + constants.pipeline_prepare_queue_max <=
+            prepares_max);
 
-        var cache = PipelineCache{ .capacity = queue.pipeline_limit };
+        var cache = PipelineCache{
+            .capacity = constants.pipeline_prepare_queue_max + queue.pipeline_request_queue_limit,
+        };
         var prepares = queue.prepare_queue.iterator();
         while (prepares.next()) |prepare| {
             const prepare_evicted = cache.insert(prepare.message.ref());

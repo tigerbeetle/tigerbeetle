@@ -248,7 +248,7 @@ const Command = struct {
 
         var message_pool = try MessagePool.init(allocator, .{ .replica = .{
             .members_count = @intCast(args.addresses.len),
-            .pipeline_limit = args.pipeline_limit,
+            .pipeline_requests_limit = args.pipeline_requests_limit,
         } });
         defer message_pool.deinit(allocator);
 
@@ -299,7 +299,7 @@ const Command = struct {
             .release_client_min = release_client_min,
             .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
-            .pipeline_limit = args.pipeline_limit,
+            .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,
@@ -316,7 +316,7 @@ const Command = struct {
             .message_bus_options = .{
                 .configuration = args.addresses,
                 .io = &command.io,
-                .clients_limit = args.pipeline_limit,
+                .clients_limit = args.pipeline_requests_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
         }) catch |err| switch (err) {

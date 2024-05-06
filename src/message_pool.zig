@@ -17,7 +17,7 @@ comptime {
 pub const Options = union(vsr.ProcessType) {
     replica: struct {
         members_count: u8,
-        pipeline_limit: u32,
+        pipeline_requests_limit: u32,
     },
     client,
 
@@ -47,14 +47,16 @@ pub const Options = union(vsr.ProcessType) {
             .replica => |*replica| messages_max: {
                 assert(replica.members_count > 0);
                 assert(replica.members_count <= constants.members_max);
-                assert(replica.pipeline_limit > 0);
-                assert(replica.pipeline_limit <= constants.clients_max);
+                assert(replica.pipeline_requests_limit >= 0);
+                assert(replica.pipeline_requests_limit <= constants.pipeline_request_queue_max);
 
                 var sum: usize = 0;
 
+                const pipeline_limit =
+                    constants.pipeline_prepare_queue_max + replica.pipeline_requests_limit;
                 // The maximum number of simultaneous open connections on the server.
                 // -1 since we never connect to ourself.
-                const connections_max = replica.members_count + replica.pipeline_limit - 1;
+                const connections_max = replica.members_count + pipeline_limit - 1;
 
                 sum += constants.journal_iops_read_max; // Journal reads
                 sum += constants.journal_iops_write_max; // Journal writes
@@ -62,7 +64,7 @@ pub const Options = union(vsr.ProcessType) {
                 sum += constants.client_replies_iops_write_max; // Client-reply writes
                 sum += constants.grid_repair_reads_max; // Replica.grid_reads (Replica.BlockRead)
                 sum += 1; // Replica.loopback_queue
-                sum += replica.pipeline_limit; // Replica.Pipeline{Queue|Cache}
+                sum += pipeline_limit; // Replica.Pipeline{Queue|Cache}
                 sum += 1; // Replica.commit_prepare
                 // Replica.do_view_change_from_all_replicas quorum:
                 // All other quorums are bitsets.
