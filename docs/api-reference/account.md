@@ -210,7 +210,7 @@ This cannot be set when `debits_must_not_exceed_credits` is also set.
 
 When set, the account will retain the history of balances at each transfer.
 
-Note that the [`get_account_balances`](./requests/get_account-balance.md) operation only works
+Note that the [`get_account_balances`](./requests/get_account_balances.md) operation only works
 for accounts with this flag set.
 
 ### `timestamp`

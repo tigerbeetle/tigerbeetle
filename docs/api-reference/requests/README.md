@@ -21,7 +21,7 @@ event in the request.
 - [`lookup_transfers`](./lookup_transfers.md): fetch `Transfer`s by `id`
 - [`get_account_transfers`](./get_account_transfers.md): fetch `Transfer`s by `debit_account_id` or
   `credit_account_id`
-- [`get_account_balances`](./get_account-balance.md): fetch the historical account balance by the
+- [`get_account_balances`](./get_account_balances.md): fetch the historical account balance by the
   `Account`'s `id`.
 
 _More request types, including more powerful queries, are coming soon!_
@@ -37,7 +37,7 @@ Each request has a corresponding _event_ and _result_ type:
 | `lookup_accounts`       | [`Account.id`](./lookup_accounts.md#Event)          | [`Account`](./lookup_accounts.md#Result) or nothing             |
 | `lookup_transfers`      | [`Transfer.id`](./lookup_transfers.md#Event)        | [`Transfer`](./lookup_transfers.md#Result) or nothing           |
 | `get_account_transfers` | [`AccountFilter`](./get_account_transfers.md#Event) | [`Transfer`](./get_account_transfers.md#Result) or nothing      |
-| `get_account_balances`  | [`AccountFilter`](./get_account-balance.md#Event)  | [`AccountBalance`](./get_account-balance.md#Result) or nothing |
+| `get_account_balances`  | [`AccountFilter`](./get_account_balances.md#Event)  | [`AccountBalance`](./get_account_balances.md#Result) or nothing |
 
 ### Idempotency
 

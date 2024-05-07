@@ -39,7 +39,7 @@ To understand TigerBeetle's data model, see:
   - [`create_transfers`](./api-reference/requests/create_transfers.md)
   - [`lookup_accounts`](./api-reference/requests/lookup_accounts.md)
   - [`lookup_transfers`](./api-reference/requests/lookup_transfers.md)
-  - [`get_account_balances`](./api-reference/requests/get_account-balance.md)
+  - [`get_account_balances`](./api-reference/requests/get_account_balances.md)
   - [`get_account_transfers`](./api-reference/requests/get_account_transfers.md)
 
 ## Dive Deeper
