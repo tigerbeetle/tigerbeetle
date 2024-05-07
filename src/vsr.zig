@@ -270,6 +270,9 @@ pub const BlockReference = struct {
 
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
+    // Looking to make backwards incompatible changes here? Make sure to check release.zig for
+    // `release_triple_client_min`.
+
     reserved = 0,
 
     ping = 1,
@@ -312,6 +315,9 @@ pub const Command = enum(u8) {
 /// This type exists to avoid making the Header type dependant on the state
 /// machine used, which would cause awkward circular type dependencies.
 pub const Operation = enum(u8) {
+    // Looking to make backwards incompatible changes here? Make sure to check release.zig for
+    // `release_triple_client_min`.
+
     /// Operations reserved by VR protocol (for all state machines):
     /// The value 0 is reserved to prevent a spurious zero from being interpreted as an operation.
     reserved = 0,

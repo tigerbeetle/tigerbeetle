@@ -70,9 +70,15 @@ pub fn build(b: *std.Build) !void {
     options.addOption(?[40]u8, "git_commit", git_commit[0..40].*);
 
     options.addOption(
-        []const u8,
+        ?[]const u8,
         "release",
-        b.option([]const u8, "config-release", "Release triple.") orelse "0.0.1",
+        b.option([]const u8, "config-release", "Release triple."),
+    );
+
+    options.addOption(
+        ?[]const u8,
+        "release_client_min",
+        b.option([]const u8, "config-release-client-min", "Minimum client release triple."),
     );
 
     options.addOption(
