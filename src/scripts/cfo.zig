@@ -80,18 +80,21 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         return error.NotSupported;
     }
 
-    // Personal Access Token for <https://github.com/tigerbeetle/devhubdb>.
+    assert(try shell.exec_status_ok("git --version", .{}));
+
+    // Read-write token for <https://github.com/tigerbeetle/devhubdb>.
     const devhub_token_option = shell.env_get_option("DEVHUBDB_PAT");
     if (devhub_token_option == null) {
         log.err("'DEVHUB_PAT' environmental variable is not set, will not upload results", .{});
     }
 
+    // Readonly token for PR metadata of <https://github.com/tigerbeetle/tigerbeetle>.
     const gh_token_option = shell.env_get_option("GH_TOKEN");
     if (gh_token_option == null) {
         log.err("'GH_TOKEN' environmental variable is not set, will not fetch pull requests", .{});
+    } else {
+        assert(try shell.exec_status_ok("gh --version", .{}));
     }
-
-    assert(try shell.exec_status_ok("git --version", .{}));
 
     var seeds = std.ArrayList(SeedRecord).init(shell.arena.allocator());
     try run_fuzzers(shell, &seeds, gh_token_option, .{
@@ -238,17 +241,11 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
     shell.project_root.deleteTree("working") catch {};
 
     { // Main branch fuzzing.
-        const commit = try run_fuzzers_commit_info(shell);
-        log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
-
-        try shell.exec("git clone https://github.com/tigerbeetle/tigerbeetle working/main", .{});
+        try shell.cwd.makePath("./working/main");
         try shell.pushd("./working/main");
         defer shell.popd();
 
-        try shell.exec("git switch --detach {commit}", .{ .commit = @as([]const u8, &commit.sha) });
-        shell.zig("build -Drelease build_fuzz", .{}) catch |err| {
-            log.warn("failed to build: {}", .{err});
-        };
+        const commit = try run_fuzzers_prepare_repository(shell, .main_branch);
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             try working_directory.append("./working/main");
@@ -292,27 +289,14 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
             } else continue;
 
             const pr_directory = try shell.print("./working/{d}", .{pr.number});
-
-            try shell.exec(
-                "git clone https://github.com/tigerbeetle/tigerbeetle {directory}",
-                .{ .directory = pr_directory },
-            );
-
+            try shell.cwd.makePath(pr_directory);
             try shell.pushd(pr_directory);
             defer shell.popd();
 
-            try shell.exec(
-                "git fetch origin refs/pull/{pr_number}/head",
-                .{ .pr_number = pr.number },
+            const commit = try run_fuzzers_prepare_repository(
+                shell,
+                .{ .pull_request = pr.number },
             );
-            try shell.exec("git switch --detach FETCH_HEAD", .{});
-
-            const commit = try run_fuzzers_commit_info(shell);
-            log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
-
-            shell.zig("build -Drelease build_fuzz", .{}) catch |err| {
-                log.warn("failed to build: {}", .{err});
-            };
 
             var pr_fuzzers_count: u32 = 0;
             for (std.enums.values(Fuzzer)) |fuzzer| {
@@ -366,10 +350,49 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
     };
 }
 
-fn run_fuzzers_commit_info(shell: *Shell) !struct {
+const Commit = struct {
     sha: [40]u8,
     timestamp: u64,
-} {
+};
+
+// Clones the specified branch or pull request, builds the code and returns the commit that the
+// branch/PR resolves to.
+fn run_fuzzers_prepare_repository(shell: *Shell, target: union(enum) {
+    main_branch,
+    pull_request: u32,
+}) !Commit {
+    const commit = switch (target) {
+        .main_branch => commit: {
+            // NB: for the main branch, carefully checkout the commit of the CFO itself, and not
+            // just the current tip of the branch. This way, it is easier to atomically adjust
+            // fuzzers and CFO.
+            const commit = try run_fuzzers_commit_info(shell);
+            try shell.exec("git clone https://github.com/tigerbeetle/tigerbeetle .", .{});
+            try shell.exec(
+                "git switch --detach {commit}",
+                .{ .commit = @as([]const u8, &commit.sha) },
+            );
+            break :commit commit;
+        },
+        .pull_request => |pr_number| commit: {
+            try shell.exec(
+                "git fetch origin refs/pull/{pr_number}/head",
+                .{ .pr_number = pr_number },
+            );
+            try shell.exec("git switch --detach FETCH_HEAD", .{});
+            break :commit try run_fuzzers_commit_info(shell);
+        },
+    };
+    log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
+    // Strictly speaking, we don't need to build the code here, but doing this makes timing
+    // information on seeds more precise.
+    shell.zig("build -Drelease build_fuzz", .{}) catch |err| {
+        log.warn("failed to build: {}", .{err});
+    };
+    return commit;
+}
+
+fn run_fuzzers_commit_info(shell: *Shell) !Commit {
     const commit_sha: [40]u8 = commit_sha: {
         const commit_str = try shell.exec_stdout("git rev-parse HEAD", .{});
         assert(commit_str.len == 40);
@@ -471,8 +494,8 @@ const SeedRecord = struct {
     seed: u64 = 0,
     // The following fields are excluded from comparison:
     command: []const u8 = "",
-    // TODO: when all seeds in the db have a branch specified, remove this default.
-    branch: []const u8 = "",
+    // Branch is an GitHub URL. It only affects the UI, where the seeds are grouped by the branch.
+    branch: []const u8,
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
         inline for (comptime std.meta.fieldNames(SeedRecord)) |field_name| {

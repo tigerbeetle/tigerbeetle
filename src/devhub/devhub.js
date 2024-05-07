@@ -70,12 +70,8 @@ async function mainSeeds() {
   for (const record of records) {
     if (record.ok) continue;
 
-    let branch = record.branch;
-    if (!branch || branch.length == 0) {
-      branch = "https://github.com/tigerbeetle/tigerbeetle";
-    }
-    if (fuzzersWithFailures.has(branch + record.fuzzer)) continue;
-    fuzzersWithFailures.add(branch + record.fuzzer);
+    if (fuzzersWithFailures.has(record.branch + record.fuzzer)) continue;
+    fuzzersWithFailures.add(record.branch + record.fuzzer);
 
     if (record.commit_sha != commit_previous) {
       commit_previous = record.commit_sha;
