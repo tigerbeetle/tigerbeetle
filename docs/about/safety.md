@@ -189,8 +189,8 @@ hostile user content. In the Google blog post, they specifically note:
 As a financial system of record, TigerBeetle is a trusted component and it should be running in a
 trusted environment.
 
-Furthermore, TigerBeetle only uses 128-byte [`Account`s](../api-reference/accounts.md) and
-[`Transfer`s](../api-reference/transfers.md) with pure integer fields. TigerBeetle has no
+Furthermore, TigerBeetle only uses 128-byte [`Account`s](../api-reference/account.md) and
+[`Transfer`s](../api-reference/transfer.md) with pure integer fields. TigerBeetle has no
 (de)serialization and does not take user-generated strings, which significantly constrains the
 attack surface.
 

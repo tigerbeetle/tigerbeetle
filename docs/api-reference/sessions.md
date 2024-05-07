@@ -84,13 +84,13 @@ would be misleading. An error would imply that a request did not execute, when t
   meaning that read operations that happen after a given write operation will observe the effects of
   the write.
 - A client session observes writes in the order that they occur on the cluster.
-- A client session observes [`debits_posted`](./accounts.md#debits_posted) and
-  [`credits_posted`](./accounts.md#credits_posted) as monotonically increasing. That is, a client
+- A client session observes [`debits_posted`](./account.md#debits_posted) and
+  [`credits_posted`](./account.md#credits_posted) as monotonically increasing. That is, a client
   session will never see `credits_posted` or `debits_posted` decrease.
 - A client session never observes uncommitted updates.
 - A client session never observes a broken invariant (e.g.
-  [`flags.credits_must_not_exceed_debits`](./accounts.md#flagscredits_must_not_exceed_debits) or
-  [`flags.linked`](./transfers.md#flagslinked)).
+  [`flags.credits_must_not_exceed_debits`](./account.md#flagscredits_must_not_exceed_debits) or
+  [`flags.linked`](./transfer.md#flagslinked)).
 - Multiple client sessions may receive replies out of order relative to one another. For example, if
   two clients submit requests around the same time, the client whose request is committed first
   might receive the reply later.

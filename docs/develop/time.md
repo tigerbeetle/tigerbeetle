@@ -19,7 +19,7 @@ operations.
 TigerBeetle uses physical time in addition to the logical time provided by the consensus algorithm.
 Financial transactions require physical time for multiple reasons, including:
 
-- **Liquidity** - TigerBeetle supports [Two-Phase Transfers](./two-phase-transfers.md) that reserve
+- **Liquidity** - TigerBeetle supports [Two-Phase Transfers](./two-phase-transfer.md) that reserve
   funds and hold them in a pending state until they are posted, voided, or the transfer times out. A
   timeout is useful to ensure that the reserved funds are not held in limbo indefinitely.
 - **Compliance and Auditing** - For regulatory and security purposes, it is useful to have a
@@ -40,8 +40,8 @@ verify that the cluster is operating within acceptable error bounds.
 
 ## Why TigerBeetle Manages Timestamps
 
-Timestamps on [`Transfer`s](../api-reference/transfers.md#timestamp) and
-[`Account`s](../api-reference/accounts.md#timestamp) are **set by the primary node** in the
+Timestamps on [`Transfer`s](../api-reference/transfer.md#timestamp) and
+[`Account`s](../api-reference/account.md#timestamp) are **set by the primary node** in the
 TigerBeetle cluster when it receives the operation.
 
 The primary then propagates the operations to all replicas, including the timestamps it determined.
@@ -54,7 +54,7 @@ role as primary if they appear to be far off the rest of the cluster.
 This is why the `timestamp` field must be set to `0` when operations are submitted, and it is then
 set by the primary.
 
-Similarly, the [`Transfer.timeout`](../api-reference/transfers.md#timeout) is given as an interval
+Similarly, the [`Transfer.timeout`](../api-reference/transfer.md#timeout) is given as an interval
 in seconds, rather than as an absolute timestamp, because it is also managed by the primary. The
 `timeout` is calculated relative to the `timestamp` when the operation arrives at the primary.
 

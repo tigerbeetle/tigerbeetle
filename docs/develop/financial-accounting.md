@@ -124,7 +124,7 @@ bookkeeping systems use **debits and credits**.
 The two entries that give "double-entry bookkeeping" its name are the debit and the credit: every
 transaction has at least one debit and at least one credit. (Note that for efficiency's sake,
 TigerBeetle `Transfer`s consist of exactly one debit and one credit. These can be composed into more
-complex [multi-debit, multi-credit transfers](./recipes/multi-debit-credit-transfers.md).) Which
+complex [multi-debit, multi-credit transfers](./recipes/multi-debit-credit-transfer.md).) Which
 entry is the debit and which is the credit? The answer is easy once you understand that **accounting
 is a type system**. An account increases with a debit or credit according to its type.
 

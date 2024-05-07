@@ -2,12 +2,12 @@
 sidebar_position: 3
 ---
 
-# `AccountBalance`s
+# `AccountBalance`
 
-An `AccountBalance` is a record storing the [`Account`](./accounts.md)'s balance at a given point in
+An `AccountBalance` is a record storing the [`Account`](./account.md)'s balance at a given point in
 time.
 
-Only Accounts with the flag [`history`](./accounts.md#flagshistory) set retain
+Only Accounts with the flag [`history`](./account.md#flagshistory) set retain
 [historical balances](https://docs.tigerbeetle.com/api-reference/operations/get_account_balances).
 
 ## Fields
@@ -16,8 +16,8 @@ Only Accounts with the flag [`history`](./accounts.md#flagshistory) set retain
 
 This is the time the account balance was updated, as nanoseconds since UNIX epoch.
 
-The timestamp refers to the same [`Transfer.timestamp`](./transfers.md#timestamp) which changed the
-[`Account`](./accounts.md).
+The timestamp refers to the same [`Transfer.timestamp`](./transfer.md#timestamp) which changed the
+[`Account`](./account.md).
 
 The amounts refer to the account balance recorded _after_ the transfer execution.
 
@@ -27,7 +27,7 @@ Constraints:
 
 ### `debits_pending`
 
-Amount of [pending debits](./accounts.md#debits_pending).
+Amount of [pending debits](./account.md#debits_pending).
 
 Constraints:
 
@@ -35,7 +35,7 @@ Constraints:
 
 ### `debits_posted`
 
-Amount of [posted debits](./accounts.md#debits_posted).
+Amount of [posted debits](./account.md#debits_posted).
 
 Constraints:
 
@@ -43,7 +43,7 @@ Constraints:
 
 ### `credits_pending`
 
-Amount of [pending credits](./accounts.md#credits_pending).
+Amount of [pending credits](./account.md#credits_pending).
 
 Constraints:
 
@@ -51,7 +51,7 @@ Constraints:
 
 ### `credits_posted`
 
-Amount of [posted credits](./accounts.md#credits_posted).
+Amount of [posted credits](./account.md#credits_posted).
 
 Constraints:
 

@@ -15,13 +15,13 @@ event in the request.
 
 ## Request Types
 
-- [`create_accounts`](./create_accounts.md): create [`Account`s](../accounts.md)
-- [`create_transfers`](./create_transfers.md): create [`Transfer`s](../transfers.md)
+- [`create_accounts`](./create_accounts.md): create [`Account`s](../account.md)
+- [`create_transfers`](./create_transfers.md): create [`Transfer`s](../transfer.md)
 - [`lookup_accounts`](./lookup_accounts.md): fetch `Account`s by `id`
 - [`lookup_transfers`](./lookup_transfers.md): fetch `Transfer`s by `id`
 - [`get_account_transfers`](./get_account_transfers.md): fetch `Transfer`s by `debit_account_id` or
   `credit_account_id`
-- [`get_account_balances`](./get_account_balances.md): fetch the historical account balance by the
+- [`get_account_balances`](./get_account-balance.md): fetch the historical account balance by the
   `Account`'s `id`.
 
 _More request types, including more powerful queries, are coming soon!_
@@ -37,7 +37,7 @@ Each request has a corresponding _event_ and _result_ type:
 | `lookup_accounts`       | [`Account.id`](./lookup_accounts.md#Event)          | [`Account`](./lookup_accounts.md#Result) or nothing             |
 | `lookup_transfers`      | [`Transfer.id`](./lookup_transfers.md#Event)        | [`Transfer`](./lookup_transfers.md#Result) or nothing           |
 | `get_account_transfers` | [`AccountFilter`](./get_account_transfers.md#Event) | [`Transfer`](./get_account_transfers.md#Result) or nothing      |
-| `get_account_balances`  | [`AccountFilter`](./get_account_balances.md#Event)  | [`AccountBalance`](./get_account_balances.md#Result) or nothing |
+| `get_account_balances`  | [`AccountFilter`](./get_account-balance.md#Event)  | [`AccountBalance`](./get_account-balance.md#Result) or nothing |
 
 ### Idempotency
 
@@ -72,8 +72,8 @@ instances between multiple threads or tasks to have events batched transparently
 ## Linked Events
 
 Events within a request [succeed or fail](./create_transfers.md#result) independently unless they
-are explicitly linked using the `flags.linked` ([`Account.flags.linked`](../accounts.md#flagslinked)
-or [`Transfer.flags.linked`](../transfers.md#flagslinked)).
+are explicitly linked using the `flags.linked` ([`Account.flags.linked`](../account.md#flagslinked)
+or [`Transfer.flags.linked`](../transfer.md#flagslinked)).
 
 When the `linked` flag is specified, it links the outcome of a Transfer or Account creation with the
 outcome of the next one in the request. These chains of events will all succeed or fail together.
@@ -122,8 +122,8 @@ the [user data](../../develop/data-modeling.md#user_data) fields.
   they receive a reply from the cluster. This is because in the case of a network partition, a lack
   of response from the cluster could either indicate that the request was dropped before it was
   processed or that the reply was dropped after the request was processed. Note that individual
-  [pending transfers](../../develop/two-phase-transfers.md) within a request may have
-  [timeouts](../transfers.md#timeout).
+  [pending transfers](../../develop/two-phase-transfer.md) within a request may have
+  [timeouts](../transfer.md#timeout).
 - Requests retried by their original client session receive identical replies.
 - Requests retried by a different client (same request body, different session) may receive
   different replies.

@@ -1,10 +1,10 @@
 # `create_accounts`
 
-Create one or more [`Account`](../accounts.md)s.
+Create one or more [`Account`](../account.md)s.
 
 ## Event
 
-The account to create. See [`Account`](../accounts.md) for constraints.
+The account to create. See [`Account`](../account.md) for constraints.
 
 ## Result
 
@@ -21,26 +21,26 @@ result when the account was successfully created.
 ### `linked_event_failed`
 
 The account was not created.
-One or more of the accounts in the [linked chain](../accounts.md#flagslinked) is invalid, so the
+One or more of the accounts in the [linked chain](../account.md#flagslinked) is invalid, so the
 whole chain failed.
 
 ### `linked_event_chain_open`
 
 The account was not created.
-The [`Account.flags.linked`](../accounts.md#flagslinked) flag was set on the last event in the
+The [`Account.flags.linked`](../account.md#flagslinked) flag was set on the last event in the
 batch, which is not legal. (`flags.linked` indicates that the chain continues to the next
 operation).
 
 ### `timestamp_must_be_zero`
 
 The account was not created.
-The [`Account.timestamp`](../accounts.md#timestamp) is nonzero, but must be zero.
+The [`Account.timestamp`](../account.md#timestamp) is nonzero, but must be zero.
 The cluster is responsible for setting this field.
 
 ### `reserved_field`
 
 The account was not created.
-[`Account.reserved`](../accounts.md#reserved) is nonzero, but must be zero.
+[`Account.reserved`](../account.md#reserved) is nonzero, but must be zero.
 
 ### `reserved_flag`
 
@@ -50,88 +50,88 @@ The account was not created.
 ### `id_must_not_be_zero`
 
 The account was not created.
-[`Account.id`](../accounts.md#id) is zero, which is a reserved value.
+[`Account.id`](../account.md#id) is zero, which is a reserved value.
 
 ### `id_must_not_be_int_max`
 
 The account was not created.
-[`Account.id`](../accounts.md#id) is `2^128 - 1`, which is a reserved value.
+[`Account.id`](../account.md#id) is `2^128 - 1`, which is a reserved value.
 
 ### `flags_are_mutually_exclusive`
 
 The account was not created.
 An account cannot be created with the specified combination of
-[`Account.flags`](../accounts.md#flags).
+[`Account.flags`](../account.md#flags).
 
 The following flags are mutually exclusive:
 
-- [`Account.flags.debits_must_not_exceed_credits`](../accounts.md#flagsdebits_must_not_exceed_credits)
-- [`Account.flags.credits_must_not_exceed_debits`](../accounts.md#flagscredits_must_not_exceed_debits)
+- [`Account.flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits)
+- [`Account.flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits)
 
 ### `debits_pending_must_be_zero`
 
 The account was not created.
-[`Account.debits_pending`](../accounts.md#debits_pending) is nonzero, but must be zero.
+[`Account.debits_pending`](../account.md#debits_pending) is nonzero, but must be zero.
 
 An account's debits and credits are only modified by transfers.
 
 ### `debits_posted_must_be_zero`
 
 The account was not created.
-[`Account.debits_posted`](../accounts.md#debits_posted) is nonzero, but must be zero.
+[`Account.debits_posted`](../account.md#debits_posted) is nonzero, but must be zero.
 
 An account's debits and credits are only modified by transfers.
 
 ### `credits_pending_must_be_zero`
 
 The account was not created.
-[`Account.credits_pending`](../accounts.md#credits_pending) is nonzero, but must be zero.
+[`Account.credits_pending`](../account.md#credits_pending) is nonzero, but must be zero.
 
 An account's debits and credits are only modified by transfers.
 
 ### `credits_posted_must_be_zero`
 
 The account was not created.
-[`Account.credits_posted`](../accounts.md#credits_posted) is nonzero, but must be zero.
+[`Account.credits_posted`](../account.md#credits_posted) is nonzero, but must be zero.
 
 An account's debits and credits are only modified by transfers.
 
 ### `ledger_must_not_be_zero`
 
 The account was not created.
-[`Account.ledger`](../accounts.md#ledger) is zero, but must be nonzero.
+[`Account.ledger`](../account.md#ledger) is zero, but must be nonzero.
 
 ### `code_must_not_be_zero`
 
 The account was not created.
-[`Account.code`](../accounts.md#code) is zero, but must be nonzero.
+[`Account.code`](../account.md#code) is zero, but must be nonzero.
 
 ### `exists_with_different_flags`
 
-An account with the same `id` already exists, but with different [`flags`](../accounts.md#flags).
+An account with the same `id` already exists, but with different [`flags`](../account.md#flags).
 
 ### `exists_with_different_user_data_128`
 
 An account with the same `id` already exists, but with different
-[`user_data_128`](../accounts.md#user_data_128).
+[`user_data_128`](../account.md#user_data_128).
 
 ### `exists_with_different_user_data_64`
 
 An account with the same `id` already exists, but with different
-[`user_data_64`](../accounts.md#user_data_64).
+[`user_data_64`](../account.md#user_data_64).
 
 ### `exists_with_different_user_data_32`
 
 An account with the same `id` already exists, but with different
-[`user_data_32`](../accounts.md#user_data_32).
+[`user_data_32`](../account.md#user_data_32).
 
 ### `exists_with_different_ledger`
 
-An account with the same `id` already exists, but with different [`ledger`](../accounts.md#ledger).
+An account with the same `id` already exists, but with different [`ledger`](../account.md#ledger).
 
 ### `exists_with_different_code`
 
-An account with the same `id` already exists, but with different [`code`](../accounts.md#code).
+An account with the same `id` already exists, but with different [`code`](../account.md#code).
 
 ### `exists`
 

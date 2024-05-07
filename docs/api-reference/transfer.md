@@ -2,7 +2,7 @@
 sidebar_position: 2
 ---
 
-# `Transfer`s
+# `Transfer`
 
 A `transfer` is an immutable record of a financial transaction between
 two accounts.
@@ -13,7 +13,7 @@ the latter term is heavily overloaded in the context of databases.
 Note that transfers debit a single account and credit a single account on the same ledger. You can
 compose these into more complex transactions using the methods described in [Currency
 Exchange](../develop/recipes/currency-exchange.md) and [Multi-Debit, Multi-Credit
-Transfers](../develop/recipes/multi-debit-credit-transfers.md).
+Transfers](../develop/recipes/multi-debit-credit-transfer.md).
 
 ### Updates
 
@@ -23,7 +23,7 @@ Transfers _cannot be modified_ after creation.
 
 - Transfers are immutable. They are never modified once they are successfully created.
 - There is at most one `Transfer` with a particular [`id`](#id).
-- A [pending transfer](../develop/two-phase-transfers.md#reserve-funds-pending-transfer) resolves at most
+- A [pending transfer](../develop/two-phase-transfer.md#reserve-funds-pending-transfer) resolves at most
   once.
 - Transfer [timeouts](#timeout) are deterministic, driven by the
   [cluster's timestamp](../develop/time.md#why-tigerbeetle-manages-timestamps).
@@ -32,7 +32,7 @@ Transfers _cannot be modified_ after creation.
 
 Transfers can either be Single-Phase, where they are executed immediately, or Two-Phase, where
 they are first put in a Pending state and then either Posted or Voided. For more details on the
-latter, see the [Two-Phase Transfer guide](../develop/two-phase-transfers.md).
+latter, see the [Two-Phase Transfer guide](../develop/two-phase-transfer.md).
 
 Fields used by each mode of transfer:
 
@@ -154,7 +154,7 @@ If this transfer will post or void a pending transfer, `pending_id`
 references that pending transfer. If this is not a post or void
 transfer, it must be zero.
 
-See the section on [Two-Phase Transfers](../develop/two-phase-transfers.md) for more information on how the `pending_id` is used.
+See the section on [Two-Phase Transfers](../develop/two-phase-transfer.md) for more information on how the `pending_id` is used.
 
 Constraints:
 
@@ -302,15 +302,15 @@ You can read more about [linked events](./requests/README.md#linked-events).
 
 #### `flags.pending`
 
-Mark the transfer as a [pending transfer](../develop/two-phase-transfers.md#reserve-funds-pending-transfer).
+Mark the transfer as a [pending transfer](../develop/two-phase-transfer.md#reserve-funds-pending-transfer).
 
 #### `flags.post_pending_transfer`
 
-Mark the transfer as a [post-pending transfer](../develop/two-phase-transfers.md#post-pending-transfer).
+Mark the transfer as a [post-pending transfer](../develop/two-phase-transfer.md#post-pending-transfer).
 
 #### `flags.void_pending_transfer`
 
-Mark the transfer as a [void-pending transfer](../develop/two-phase-transfers.md#void-pending-transfer).
+Mark the transfer as a [void-pending transfer](../develop/two-phase-transfer.md#void-pending-transfer).
 
 #### `flags.balancing_debit`
 

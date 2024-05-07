@@ -21,9 +21,9 @@ control or temporary account and linked transfers.
 
 The account for whom you want to do the balance check must have one of these flags set:
 
-- [`flags.debits_must_not_exceed_credits`](../../api-reference/accounts.md#flagsdebits_must_not_exceed_credits)
+- [`flags.debits_must_not_exceed_credits`](../../api-reference/account.md#flagsdebits_must_not_exceed_credits)
   for accounts with [credit balances](../data-modeling.md#credit-balances)
-- [`flags.credits_must_not_exceed_debits`](../../api-reference/accounts.md#flagscredits_must_not_exceed_debits)
+- [`flags.credits_must_not_exceed_debits`](../../api-reference/account.md#flagscredits_must_not_exceed_debits)
   for accounts with [debit balances](../data-modeling.md#debit-balances)
 
 ### 2. Create a Control Account
@@ -48,16 +48,16 @@ We will refer to two amounts:
 
 | Transfer | Debit Account | Credit Account | Amount    | Flags                                                          |
 | -------- | ------------- | -------------- | --------- | -------------------------------------------------------------- |
-| 1        | Source        | Control        | Threshold | [`flags.linked`](../../api-reference/transfers.md#flagslinked) |
-| 2        | Control       | Source         | Threshold | [`flags.linked`](../../api-reference/transfers.md#flagslinked) |
+| 1        | Source        | Control        | Threshold | [`flags.linked`](../../api-reference/transfer.md#flagslinked) |
+| 2        | Control       | Source         | Threshold | [`flags.linked`](../../api-reference/transfer.md#flagslinked) |
 | 3        | Source        | Destination    | Transfer  | N/A                                                            |
 
 ### If the Source Account Has a Debit Balance
 
 | Transfer | Debit Account | Credit Account | Amount    | Flags                                                          |
 | -------- | ------------- | -------------- | --------- | -------------------------------------------------------------- |
-| 1        | Control       | Source         | Threshold | [`flags.linked`](../../api-reference/transfers.md#flagslinked) |
-| 2        | Source        | Control        | Threshold | [`flags.linked`](../../api-reference/transfers.md#flagslinked) |
+| 1        | Control       | Source         | Threshold | [`flags.linked`](../../api-reference/transfer.md#flagslinked) |
+| 2        | Source        | Control        | Threshold | [`flags.linked`](../../api-reference/transfer.md#flagslinked) |
 | 3        | Destination   | Source         | Transfer  | N/A                                                            |
 
 ### Understanding the Mechanism

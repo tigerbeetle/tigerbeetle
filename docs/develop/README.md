@@ -1,8 +1,8 @@
 # Developing Applications on TigerBeetle
 
 TigerBeetle is a domain-specific, [Online Transaction Processing (OLTP)](../about/oltp.md) database.
-It has a fixed schema consisting of [`Account`s](../api-reference/accounts.md) and
-[`Transfer`s](../api-reference/transfers.md). In return for this prescriptive design, it provides
+It has a fixed schema consisting of [`Account`s](../api-reference/account.md) and
+[`Transfer`s](../api-reference/transfer.md). In return for this prescriptive design, it provides
 excellent performance, integrated business logic, and powerful invariants.
 
 To help you get started building on TigerBeetle, here is a quick overview of the most important
@@ -10,8 +10,8 @@ concepts:
 
 ## Data Model Overview
 
-- [`Account`s](../api-reference/accounts.md) track balances for users or other entities.
-- [`Transfer`s](../api-reference/transfers.md) move funds between `Account`s.
+- [`Account`s](../api-reference/account.md) track balances for users or other entities.
+- [`Transfer`s](../api-reference/transfer.md) move funds between `Account`s.
 - Account balances and transfer amounts are represented as debits and credits. Double-entry
   bookkeeping ensures your accounting maintains consistency.
 - Accounts are partitioned into [Ledgers](./data-modeling.md#ledgers), which may represent different
@@ -19,7 +19,7 @@ concepts:
   on the same ledger can transact directly, but you can use atomically
   [linked transfers](../api-reference/requests/README.md#linked-events) to implement
   [cross-currency transactions](./recipes/currency-exchange.md).
-- TigerBeetle has first-class support for [two-phase transfers](./two-phase-transfers.md), which can
+- TigerBeetle has first-class support for [two-phase transfers](./two-phase-transfer.md), which can
   hold funds in a pending state and can be used to synchronize transfers with external systems.
 
 ## TigerBeetle in Your System Architecture
@@ -40,9 +40,9 @@ following pages:
 Depending on your use case, you may find these additional design patterns helpful:
 
 - [Currency Exchange](./recipes/currency-exchange.md)
-- [Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfers.md)
+- [Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfer.md)
 - [Closing Accounts](./recipes/close-account.md)
-- [Balance-Conditional Transfers](./recipes/balance-conditional-transfers.md)
+- [Balance-Conditional Transfers](./recipes/balance-conditional-transfer.md)
 
 ## Want Help Developing on TigerBeetle?
 

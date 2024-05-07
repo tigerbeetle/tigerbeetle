@@ -110,21 +110,21 @@ multiple round-trips from the application to the database.
 
 With TigerBeetle, these fields are already built into the schema and ready for you to use:
 
-- **Who**: the [`debit_account_id`](../api-reference/transfers.md#debit_account_id) and
-  [`credit_account_id`](../api-reference/transfers.md#credit_account_id) indicate which accounts are
+- **Who**: the [`debit_account_id`](../api-reference/transfer.md#debit_account_id) and
+  [`credit_account_id`](../api-reference/transfer.md#credit_account_id) indicate which accounts are
   transacting.
 - **What**: each asset or type of value in TigerBeetle is tracked on a separate
   [ledger](../develop/data-modeling.md#ledgers). The
-  [`ledger`](../api-reference/transfers.md#ledger) field indicates what is being transferred.
-- **When**: each transfer has a unique [`timestamp`](../api-reference/transfers.md#timestamp) for
+  [`ledger`](../api-reference/transfer.md#ledger) field indicates what is being transferred.
+- **When**: each transfer has a unique [`timestamp`](../api-reference/transfer.md#timestamp) for
   when it is processed by the cluster, but you can add another timestamp representing when the
   transaction happened in the real world in the
-  [`user_data_64`](../api-reference/transfers.md#user_data_64) field.
-- **Where**: the [`user_data_32`](../api-reference/transfers.md#user_data_32) can be used to store
+  [`user_data_64`](../api-reference/transfer.md#user_data_64) field.
+- **Where**: the [`user_data_32`](../api-reference/transfer.md#user_data_32) can be used to store
   the locale where the transfer occurred.
-- **Why**: the [`code`](../api-reference/transfers.md#code) field stores the reason a transfer
+- **Why**: the [`code`](../api-reference/transfer.md#code) field stores the reason a transfer
   occurred and should map to an enum or table of all the possible business events.
-- **How Much**: the [`amount`](../api-reference/transfers.md#amount) indicates how much of the asset
+- **How Much**: the [`amount`](../api-reference/transfer.md#amount) indicates how much of the asset
   or item is being transferred.
 
 For centuries, this information has been modeled as debits and credits, and double-entry bookkeeping

@@ -32,14 +32,14 @@ Within each client library README you will find links to sample code.
 
 To understand TigerBeetle's data model, see:
 
-- [Accounts](./api-reference/accounts.md)
-- [Transfers](./api-reference/transfers.md)
+- [Account](./api-reference/account.md)
+- [Transfer](./api-reference/transfer.md)
 - And [Requests](./api-reference/requests/README.md)
   - [`create_accounts`](./api-reference/requests/create_accounts.md)
   - [`create_transfers`](./api-reference/requests/create_transfers.md)
   - [`lookup_accounts`](./api-reference/requests/lookup_accounts.md)
   - [`lookup_transfers`](./api-reference/requests/lookup_transfers.md)
-  - [`get_account_balances`](./api-reference/requests/get_account_balances.md)
+  - [`get_account_balances`](./api-reference/requests/get_account-balance.md)
   - [`get_account_transfers`](./api-reference/requests/get_account_transfers.md)
 
 ## Dive Deeper

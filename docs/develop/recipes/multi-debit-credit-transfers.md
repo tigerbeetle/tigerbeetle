@@ -13,7 +13,7 @@ credits. For example, you might have a transfer where you want to extract fees a
 Read on to see how to implement one-to-many and many-to-many transfers!
 
 > Note that all of these examples use the
-> [Linked Transfers flag (`flags.linked`)](../../api-reference/transfers.md#flagslinked) to ensure
+> [Linked Transfers flag (`flags.linked`)](../../api-reference/transfer.md#flagslinked) to ensure
 > that all of the transfers succeed or fail together.
 
 ## One-to-Many Transfers

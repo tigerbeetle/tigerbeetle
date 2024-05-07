@@ -12,7 +12,7 @@ especially transfers -- reliably.
 
 ## The App or Browser Should Generate the ID
 
-[`Transfer`s](../api-reference/transfers.md#id) and [`Account`s](../api-reference/accounts.md#id)
+[`Transfer`s](../api-reference/transfer.md#id) and [`Account`s](../api-reference/account.md#id)
 carry an `id` field that is used as an idempotency key to ensure the same object is not created
 twice.
 

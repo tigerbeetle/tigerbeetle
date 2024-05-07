@@ -14,12 +14,12 @@ facilitated by an entity called the _liquidity provider_.
 
 ## Data Modeling
 
-Distinct [`ledger`](../../api-reference/accounts.md#ledger) values denote different currencies (or
+Distinct [`ledger`](../../api-reference/account.md#ledger) values denote different currencies (or
 other asset types). Transfers between pairs of accounts with different `ledger`s are
 [not permitted](../../api-reference/requests/create_transfers.md#accounts_must_have_the_same_ledger).
 
 Instead, currency exchange is implemented by creating two
-[atomically linked](../../api-reference/transfers.md#flagslinked) different-ledger transfers between
+[atomically linked](../../api-reference/transfer.md#flagslinked) different-ledger transfers between
 two pairs of same-ledger accounts.
 
 A simple currency exchange involves four accounts:

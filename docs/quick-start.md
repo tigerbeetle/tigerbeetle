@@ -165,7 +165,7 @@ lookup_accounts id=1, id=2;
 And indeed you can see that account `1` has `debits_posted` as `10` and account `2` has
 `credits_posted` as `10`. The `10` amount is fully accounted for!
 
-You can take a look at the [`Accounts` reference](./api-reference/accounts.md) to understand all of
+You can take a look at the [`Accounts` reference](./api-reference/account.md) to understand all of
 the fields on the accounts.
 
 You can also take a look at the [Request Types](./api-reference/requests/README.md) to see what else
