@@ -73,6 +73,48 @@ const Fuzzer = enum {
     vsr_journal_format,
     vsr_superblock_quorums,
     vsr_superblock,
+    vopr,
+    vopr_testing,
+
+    fn print_command(fuzzer: Fuzzer, shell: *Shell, seed: u64) ![]const u8 {
+        if (fuzzer == .vopr or fuzzer == .vopr_testing) {
+            const state_machine: []const u8 =
+                if (fuzzer == .vopr) "" else " -Dsimulator-state-machine=testing";
+            return try shell.print(
+                "./zig/zig build -Drelease{s} simulator_run -- {d}",
+                .{ state_machine, seed },
+            );
+        }
+        return try shell.print(
+            "./zig/zig build -Drelease fuzz -- --seed={d} {s}",
+            .{ seed, @tagName(fuzzer) },
+        );
+    }
+
+    fn spawn_command(fuzzer: Fuzzer, shell: *Shell, seed: u64) !std.ChildProcess {
+        if (fuzzer == .vopr or fuzzer == .vopr_testing) {
+            const state_machine: []const []const u8 =
+                if (fuzzer == .vopr) &.{} else &.{"-Dsimulator-state-machine=testing"};
+            return try shell.spawn_options(
+                .{ .stdin_behavior = .Pipe },
+                "{zig} build -Drelease {state_machine} simulator_run -- {seed}",
+                .{
+                    .zig = shell.zig_exe.?,
+                    .state_machine = state_machine,
+                    .seed = seed,
+                },
+            );
+        }
+        return try shell.spawn_options(
+            .{ .stdin_behavior = .Pipe },
+            "{zig} build -Drelease fuzz -- --seed={seed} {fuzzer}",
+            .{
+                .zig = shell.zig_exe.?,
+                .seed = seed,
+                .fuzzer = @tagName(fuzzer),
+            },
+        );
+    }
 };
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
@@ -166,21 +208,11 @@ fn run_fuzzers(
 
                     seed_record.seed = random.int(u64);
                     seed_record.seed_timestamp_start = @intCast(std.time.timestamp());
-                    seed_record.command = try shell.print(
-                        "./zig/zig build -Drelease fuzz -- --seed={d} {s}",
-                        .{ seed_record.seed, @tagName(seed_record.fuzzer) },
-                    );
+                    seed_record.command =
+                        try seed_record.fuzzer.print_command(shell, seed_record.seed);
 
                     log.debug("will start '{s}'", .{seed_record.command});
-                    const child = try shell.spawn_options(
-                        .{ .stdin_behavior = .Pipe },
-                        "{zig} build -Drelease fuzz -- --seed={seed} {fuzzer}",
-                        .{
-                            .zig = shell.zig_exe.?,
-                            .seed = try shell.print("{d}", .{seed_record.seed}),
-                            .fuzzer = @tagName(seed_record.fuzzer),
-                        },
-                    );
+                    const child = try seed_record.fuzzer.spawn_command(shell, seed_record.seed);
                     _ = try std.os.fcntl(
                         child.stdin.?.handle,
                         std.os.F.SETFD,
@@ -246,6 +278,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
         defer shell.popd();
 
         const commit = try run_fuzzers_prepare_repository(shell, .main_branch);
+        log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             try working_directory.append("./working/main");
@@ -297,6 +330,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
                 shell,
                 .{ .pull_request = pr.number },
             );
+            log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
 
             var pr_fuzzers_count: u32 = 0;
             for (std.enums.values(Fuzzer)) |fuzzer| {
@@ -382,12 +416,6 @@ fn run_fuzzers_prepare_repository(shell: *Shell, target: union(enum) {
             try shell.exec("git switch --detach FETCH_HEAD", .{});
             break :commit try run_fuzzers_commit_info(shell);
         },
-    };
-    log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
-    // Strictly speaking, we don't need to build the code here, but doing this makes timing
-    // information on seeds more precise.
-    shell.zig("build -Drelease build_fuzz", .{}) catch |err| {
-        log.warn("failed to build: {}", .{err});
     };
     return commit;
 }
