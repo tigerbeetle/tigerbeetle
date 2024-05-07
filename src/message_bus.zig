@@ -94,6 +94,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         pub const Options = struct {
             configuration: []const std.net.Address,
             io: *IO,
+            clients_limit: ?usize = null,
         };
 
         /// Initialize the MessageBus for the given cluster, configuration and
@@ -108,10 +109,15 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         ) !Self {
             assert(@as(vsr.ProcessType, process_id) == process_type);
 
+            switch (process_type) {
+                .replica => assert(options.clients_limit.? > 0),
+                .client => assert(options.clients_limit == null),
+            }
+
             const connections_max: u32 = switch (process_type) {
                 // The maximum number of connections that can be held open by the server at any
                 // time. -1 since we don't need a connection to ourself.
-                .replica => @intCast(options.configuration.len - 1 + constants.clients_max),
+                .replica => @intCast(options.configuration.len - 1 + options.clients_limit.?),
                 .client => @intCast(options.configuration.len),
             };
 
