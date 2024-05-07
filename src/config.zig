@@ -19,7 +19,8 @@ const BuildOptions = struct {
     tracer_backend: TracerBackend,
     hash_log_mode: HashLogMode,
     git_commit: ?[40]u8,
-    release: []const u8,
+    release: ?[]const u8,
+    release_client_min: ?[]const u8,
     config_aof_record: bool,
     config_aof_recovery: bool,
 };
@@ -47,6 +48,7 @@ const build_options: BuildOptions = blk: {
 fn launder_type(comptime T: type, comptime value: anytype) T {
     if (T == bool or
         T == []const u8 or
+        T == ?[]const u8 or
         T == ?[40]u8)
     {
         return value;
@@ -83,6 +85,7 @@ const ConfigProcess = struct {
     hash_log_mode: HashLogMode = .none,
     verify: bool,
     release: vsr.Release = vsr.Release.minimum,
+    release_client_min: vsr.Release = vsr.Release.minimum,
     git_commit: ?[40]u8 = null,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
@@ -305,18 +308,39 @@ pub const configs = struct {
             .test_min => test_min,
         };
 
-        const release_triple = vsr.ReleaseTriple.parse(build_options.release) catch {
-            @compileError("invalid release version");
-        };
+        if (build_options.release == null and build_options.release_client_min != null) {
+            @compileError("must set release if setting release_client_min");
+        }
+
+        if (build_options.release_client_min == null and build_options.release != null) {
+            @compileError("must set release_client_min if setting release");
+        }
+
+        const release = if (build_options.release) |release|
+            vsr.Release.from(vsr.ReleaseTriple.parse(release) catch {
+                @compileError("invalid release version");
+            })
+        else
+            vsr.Release.minimum;
+
+        const release_client_min = if (build_options.release_client_min) |release_client_min|
+            vsr.Release.from(vsr.ReleaseTriple.parse(release_client_min) catch {
+                @compileError("invalid release_client_min version");
+            })
+        else
+            vsr.Release.minimum;
 
         // TODO Use additional build options to overwrite other fields.
         base.process.log_level = build_options.config_log_level;
         base.process.tracer_backend = build_options.tracer_backend;
         base.process.hash_log_mode = build_options.hash_log_mode;
-        base.process.release = vsr.Release.from(release_triple);
+        base.process.release = release;
+        base.process.release_client_min = release_client_min;
         base.process.git_commit = build_options.git_commit;
         base.process.aof_record = build_options.config_aof_record;
         base.process.aof_recovery = build_options.config_aof_recovery;
+
+        assert(base.process.release.value >= base.process.release_client_min.value);
 
         break :current base;
     };

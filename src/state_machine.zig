@@ -336,6 +336,8 @@ pub fn StateMachineType(
             Storage,
         );
 
+        // Looking to make backwards incompatible changes here? Make sure to check release.zig for
+        // `release_triple_client_min`.
         pub const Operation = enum(u8) {
             /// Operations exported by TigerBeetle:
             pulse = config.vsr_operations_reserved + 0,

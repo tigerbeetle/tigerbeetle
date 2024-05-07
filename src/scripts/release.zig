@@ -36,6 +36,7 @@ pub const CliArgs = struct {
 
 const VersionInfo = struct {
     release_triple: []const u8,
+    release_triple_client_min: []const u8,
     sha: []const u8,
 };
 
@@ -56,11 +57,27 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         .patch = cli_args.run_number - 185,
     };
 
+    // The minimum client version allowed to connect. This has implications for backwards
+    // compatibility and the upgrade path for replicas and clients. If there's no overlap
+    // between a replica version and minimum client version - eg, replica 0.15.4 requires
+    // client 0.15.4 - it means that upgrading requires coordination with clients, which
+    // will be very inconvenient for operators.
+    const release_triple_client_min = .{
+        .major = 0,
+        .minor = 15,
+        .patch = 3,
+    };
+
     const version_info = VersionInfo{
         .release_triple = try std.fmt.allocPrint(
             shell.arena.allocator(),
             "{[major]}.{[minor]}.{[patch]}",
             release_triple,
+        ),
+        .release_triple_client_min = try std.fmt.allocPrint(
+            shell.arena.allocator(),
+            "{[major]}.{[minor]}.{[patch]}",
+            release_triple_client_min,
         ),
         .sha = cli_args.sha,
     };
@@ -162,11 +179,13 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Drelease={release}
                 \\    -Dgit-commit={commit}
                 \\    -Dconfig-release={release_triple}
+                \\    -Dconfig-release-client-min={release_triple_client_min}
             , .{
                 .target = target,
                 .release = if (debug) "false" else "true",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
+                .release_triple_client_min = info.release_triple_client_min,
             });
 
             const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
@@ -223,7 +242,11 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.zig(
         \\build dotnet_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
     try shell.exec(
         \\dotnet pack TigerBeetle --configuration Release
         \\/p:AssemblyVersion={release_triple} /p:Version={release_triple}
@@ -246,7 +269,11 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.zig(
         \\build go_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
 
     const files = try shell.exec_stdout("git ls-files", .{});
     var files_lines = std.mem.tokenize(u8, files, "\n");
@@ -296,7 +323,11 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.zig(
         \\build java_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
 
     try backup_create(shell.cwd, "pom.xml");
     defer backup_restore(shell.cwd, "pom.xml");
@@ -334,7 +365,11 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.zig(
         \\build node_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
 
     try backup_create(shell.cwd, "package.json");
     defer backup_restore(shell.cwd, "package.json");
