@@ -173,8 +173,6 @@ fn run_fuzzers(
 
     const random = std.crypto.random;
 
-    try shell.zig("build -Drelease build_fuzz", .{});
-
     const FuzzerChild = struct {
         child: std.ChildProcess,
         seed: SeedRecord,
@@ -242,7 +240,10 @@ fn run_fuzzers(
                 };
 
                 if (fuzzer_done or last_iteration) {
-                    log.debug("will reap '{s}'", .{fuzzer.seed.command});
+                    log.debug(
+                        "will reap '{s}'{s}",
+                        .{ fuzzer.seed.command, if (!fuzzer_done) " (timeout)" else "" },
+                    );
                     const term = try if (fuzzer_done) fuzzer.child.wait() else fuzzer.child.kill();
                     var seed_record = fuzzer.seed;
                     seed_record.ok = std.meta.eql(term, .{ .Exited = 0 });
@@ -279,6 +280,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
 
         const commit = try run_fuzzers_prepare_repository(shell, .main_branch);
         log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
+        run_fuzzers_build_all(shell);
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             try working_directory.append("./working/main");
@@ -331,6 +333,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
                 .{ .pull_request = pr.number },
             );
             log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
+            run_fuzzers_build_all(shell);
 
             var pr_fuzzers_count: u32 = 0;
             for (std.enums.values(Fuzzer)) |fuzzer| {
@@ -434,6 +437,18 @@ fn run_fuzzers_commit_info(shell: *Shell) !Commit {
         break :commit_timestamp try std.fmt.parseInt(u64, timestamp, 10);
     };
     return .{ .sha = commit_sha, .timestamp = commit_timestamp };
+}
+
+fn run_fuzzers_build_all(shell: *Shell) void {
+    shell.zig("build -Drelease build_fuzz", .{}) catch |err| {
+        log.err("'build -Drelease build_fuzz': {}", .{err});
+    };
+    shell.zig("build -Drelease simulator", .{}) catch |err| {
+        log.err("'build -Drelease simulator': {}", .{err});
+    };
+    shell.zig("build -Drelease simulator -Dsimulator-state-machine=testing", .{}) catch |err| {
+        log.err("'build -Drelease simulator -Dsimulator-state-machine=testing': {}", .{err});
+    };
 }
 
 fn upload_results(
