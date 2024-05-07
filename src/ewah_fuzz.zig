@@ -8,6 +8,8 @@ const ewah = @import("./ewah.zig");
 const fuzz = @import("./testing/fuzz.zig");
 
 pub fn main(args: fuzz.FuzzArgs) !void {
+    if (args.seed % 4 == 0) @panic("bad seed");
+
     const allocator = fuzz.allocator;
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
