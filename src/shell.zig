@@ -605,7 +605,7 @@ pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
 
-    try argv.append_new_arg(shell.zig_exe.?);
+    try argv.append_new_arg("{s}", .{shell.zig_exe.?});
     try expand_argv(&argv, cmd, cmd_args);
 
     // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
@@ -665,19 +665,24 @@ const Argv = struct {
         return argv.args.items;
     }
 
-    fn append_new_arg(argv: *Argv, arg: []const u8) !void {
-        const arg_owned = try argv.args.allocator.dupe(u8, arg);
+    fn append_new_arg(argv: *Argv, comptime arg_fmt: []const u8, arg: anytype) !void {
+        const arg_owned = try std.fmt.allocPrint(
+            argv.args.allocator,
+            arg_fmt,
+            arg,
+        );
         errdefer argv.args.allocator.free(arg_owned);
 
         try argv.args.append(arg_owned);
     }
 
-    fn extend_last_arg(argv: *Argv, arg: []const u8) !void {
+    fn extend_last_arg(argv: *Argv, comptime arg_fmt: []const u8, arg: anytype) !void {
         assert(argv.args.items.len > 0);
-        const arg_allocated = try std.fmt.allocPrint(argv.args.allocator, "{s}{s}", .{
-            argv.args.items[argv.args.items.len - 1],
-            arg,
-        });
+        const arg_allocated = try std.fmt.allocPrint(
+            argv.args.allocator,
+            "{s}" ++ arg_fmt,
+            .{argv.args.items[argv.args.items.len - 1]} ++ arg,
+        );
         argv.args.allocator.free(argv.args.items[argv.args.items.len - 1]);
         argv.args.items[argv.args.items.len - 1] = arg_allocated;
     }
@@ -719,9 +724,9 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
         if (pos_start != pos_end) {
             if (concat_right) {
                 assert(pos_start > 0 and cmd[pos_start - 1] == '}');
-                try argv.extend_last_arg(cmd[pos_start..pos_end]);
+                try argv.extend_last_arg("{s}", .{cmd[pos_start..pos_end]});
             } else {
-                try argv.append_new_arg(cmd[pos_start..pos_end]);
+                try argv.append_new_arg("{s}", .{cmd[pos_start..pos_end]});
             }
         }
 
@@ -754,16 +759,22 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
 
         const T = @TypeOf(arg_or_slice);
 
-        if (std.meta.Elem(T) == u8) {
+        if (@typeInfo(T) == .Int or @typeInfo(T) == .ComptimeInt) {
             if (concat_left) {
-                try argv.extend_last_arg(arg_or_slice);
+                try argv.extend_last_arg("{d}", .{arg_or_slice});
             } else {
-                try argv.append_new_arg(arg_or_slice);
+                try argv.append_new_arg("{d}", .{arg_or_slice});
+            }
+        } else if (std.meta.Elem(T) == u8) {
+            if (concat_left) {
+                try argv.extend_last_arg("{s}", .{arg_or_slice});
+            } else {
+                try argv.append_new_arg("{s}", .{arg_or_slice});
             }
         } else if (std.meta.Elem(T) == []const u8) {
             if (concat_left or concat_right) @compileError("Can't concatenate slices");
             for (arg_or_slice) |arg_part| {
-                try argv.append_new_arg(arg_part);
+                try argv.append_new_arg("{s}", .{arg_part});
             }
         } else {
             @compileError("Unsupported argument type");
@@ -811,6 +822,21 @@ test "shell: expand_argv" {
         .{ .version = @as([]const []const u8, &.{ "version", "--verbose" }) },
         snap(@src(),
             \\["zig","version","--verbose"]
+        ),
+    );
+
+    try T.check(
+        "git fetch origin refs/pull/{pr}/head",
+        .{ .pr = 92 },
+        snap(@src(),
+            \\["git","fetch","origin","refs/pull/92/head"]
+        ),
+    );
+    try T.check(
+        "gh pr checkout {pr}",
+        .{ .pr = @as(u32, 92) },
+        snap(@src(),
+            \\["gh","pr","checkout","92"]
         ),
     );
 }

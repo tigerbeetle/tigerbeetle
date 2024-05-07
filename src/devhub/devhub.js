@@ -70,8 +70,12 @@ async function mainSeeds() {
   for (const record of records) {
     if (record.ok) continue;
 
-    if (fuzzersWithFailures.has(record.fuzzer)) continue;
-    fuzzersWithFailures.add(record.fuzzer);
+    let branch = record.branch;
+    if (!branch || branch.length == 0) {
+      branch = "https://github.com/tigerbeetle/tigerbeetle";
+    }
+    if (fuzzersWithFailures.has(branch + record.fuzzer)) continue;
+    fuzzersWithFailures.add(branch + record.fuzzer);
 
     if (record.commit_sha != commit_previous) {
       commit_previous = record.commit_sha;
@@ -86,11 +90,19 @@ async function mainSeeds() {
     );
     const rowDom = document.createElement("tr");
     rowDom.style.setProperty("background", colors[commit_count % colors.length]);
+
+    const prPrefix = "https://github.com/tigerbeetle/tigerbeetle/pull/"
+    let prLink = ""
+    if (record.branch.startsWith(prPrefix)) {
+      const pr = record.branch.substring(prPrefix.length, record.branch.length);
+      prLink = `<a href="${record.branch}">#${pr}</a>`
+    }
     rowDom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}">
               ${record.commit_sha.substring(0, 7)}
             </a>
+            ${prLink}
           </td>
           <td>${record.fuzzer}</td>
           <td><code>${record.command}</code></td>
