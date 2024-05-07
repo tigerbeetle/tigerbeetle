@@ -122,7 +122,7 @@ the [user data](../../develop/data-modeling.md#user_data) fields.
   they receive a reply from the cluster. This is because in the case of a network partition, a lack
   of response from the cluster could either indicate that the request was dropped before it was
   processed or that the reply was dropped after the request was processed. Note that individual
-  [pending transfers](../../develop/two-phase-transfer.md) within a request may have
+  [pending transfers](../../develop/two-phase-transfers.md) within a request may have
   [timeouts](../transfer.md#timeout).
 - Requests retried by their original client session receive identical replies.
 - Requests retried by a different client (same request body, different session) may receive

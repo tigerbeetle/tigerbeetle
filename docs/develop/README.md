@@ -19,7 +19,7 @@ concepts:
   on the same ledger can transact directly, but you can use atomically
   [linked transfers](../api-reference/requests/README.md#linked-events) to implement
   [cross-currency transactions](./recipes/currency-exchange.md).
-- TigerBeetle has first-class support for [two-phase transfers](./two-phase-transfer.md), which can
+- TigerBeetle has first-class support for [two-phase transfers](./two-phase-transfers.md), which can
   hold funds in a pending state and can be used to synchronize transfers with external systems.
 
 ## TigerBeetle in Your System Architecture
@@ -40,9 +40,9 @@ following pages:
 Depending on your use case, you may find these additional design patterns helpful:
 
 - [Currency Exchange](./recipes/currency-exchange.md)
-- [Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfer.md)
+- [Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfers.md)
 - [Closing Accounts](./recipes/close-account.md)
-- [Balance-Conditional Transfers](./recipes/balance-conditional-transfer.md)
+- [Balance-Conditional Transfers](./recipes/balance-conditional-transfers.md)
 
 ## Want Help Developing on TigerBeetle?
 

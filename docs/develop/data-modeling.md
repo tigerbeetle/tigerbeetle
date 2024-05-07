@@ -73,7 +73,7 @@ to ensure that the balance cannot go negative.
 
 `Transfer`s in TigerBeetle debit a single account and credit a single account. You can read more
 about implementing compound transfers in
-[Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfer.md).
+[Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfers.md).
 
 ## Fractional Amounts and Asset Scale
 
