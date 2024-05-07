@@ -47,10 +47,7 @@ const account_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tb.Account),
 );
-const transfer_count_per_batch = @divExact(
-    constants.message_size_max - @sizeOf(vsr.Header),
-    @sizeOf(tb.Transfer),
-);
+const transfer_count_per_batch = 1;
 
 pub fn main(
     allocator: std.mem.Allocator,

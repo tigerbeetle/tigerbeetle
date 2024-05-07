@@ -494,24 +494,27 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             } else unreachable;
 
             var replica = &cluster.replicas[replica_index];
+            try replica.open_superblock(cluster.allocator, .{
+                // TODO Test restarting with a higher storage limit.
+                .storage_size_limit = cluster.options.storage_size_limit,
+                .storage = &cluster.storages[replica_index],
+                .release = options.release,
+                .release_client_min = release_client_min,
+                .releases_bundled = options.releases_bundled,
+                .release_execute = replica_release_execute_soon,
+                .test_context = cluster,
+            });
+
             try replica.open(
-                cluster.allocator,
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
                     .storage = &cluster.storages[replica_index],
                     .aof = &cluster.aofs[replica_index],
-                    // TODO Test restarting with a higher storage limit.
-                    .storage_size_limit = cluster.options.storage_size_limit,
                     .message_pool = &cluster.replica_pools[replica_index],
                     .nonce = options.nonce,
                     .time = .{ .time = &cluster.replica_times[replica_index] },
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
-                    .release = options.release,
-                    .release_client_min = release_client_min,
-                    .releases_bundled = options.releases_bundled,
-                    .release_execute = replica_release_execute_soon,
-                    .test_context = cluster,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);

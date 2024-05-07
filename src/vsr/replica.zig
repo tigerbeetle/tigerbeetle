@@ -519,17 +519,9 @@ pub fn ReplicaType(
 
         aof: *AOF,
 
-        const OpenOptions = struct {
-            node_count: u8,
+        const OpenSuperblockOptions = struct {
             storage_size_limit: u64,
             storage: *Storage,
-            message_pool: *MessagePool,
-            nonce: Nonce,
-            time: Time,
-            aof: *AOF,
-            state_machine_options: StateMachine.Options,
-            message_bus_options: MessageBus.Options,
-            grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
             release_client_min: vsr.Release,
             releases_bundled: []const vsr.Release,
@@ -537,17 +529,30 @@ pub fn ReplicaType(
             test_context: ?*anyopaque = null,
         };
 
-        /// Initializes and opens the provided replica using the options.
-        pub fn open(self: *Self, parent_allocator: std.mem.Allocator, options: OpenOptions) !void {
+        /// Split out from open(), so that it can be called with a minimum of CLI flags.
+        /// Opens the superblock, and sets all state to do with releases.
+        pub fn open_superblock(
+            self: *Self,
+            parent_allocator: std.mem.Allocator,
+            options: OpenSuperblockOptions,
+        ) !void {
             assert(options.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.storage_size_limit % constants.sector_size == 0);
-            assert(options.nonce != 0);
             assert(options.release.value > 0);
             assert(options.release.value >= options.release_client_min.value);
+            vsr.verify_release_list(options.releases_bundled, options.release);
 
             self.static_allocator = StaticAllocator.init(parent_allocator);
-            const allocator = self.static_allocator.allocator();
 
+            self.release = options.release;
+            self.release_client_min = options.release_client_min;
+            self.releases_bundled = vsr.ReleaseList.from_slice(
+                options.releases_bundled,
+            ) catch unreachable;
+            self.release_execute = options.release_execute;
+            self.test_context = options.test_context;
+
+            const allocator = self.static_allocator.allocator();
             self.superblock = try SuperBlock.init(
                 allocator,
                 .{
@@ -556,15 +561,42 @@ pub fn ReplicaType(
                 },
             );
 
-            // Once initialized, the replica is in charge of calling superblock.deinit().
-            var initialized = false;
-            errdefer if (!initialized) self.superblock.deinit(allocator);
+            errdefer self.superblock.deinit(allocator);
 
             // Open the superblock:
             self.opened = false;
             self.superblock.open(superblock_open_callback, &self.superblock_context);
             while (!self.opened) self.superblock.storage.tick();
             self.superblock.working.vsr_state.assert_internally_consistent();
+
+            const release_target = self.superblock.working.vsr_state.checkpoint.release;
+            assert(release_target.value >= self.superblock.working.release_format.value);
+            log.info("superblock release={}", .{release_target});
+            if (release_target.value != self.release.value) {
+                self.release_transition(@src());
+                return;
+            }
+        }
+
+        const OpenOptions = struct {
+            node_count: u8,
+            storage: *Storage,
+            message_pool: *MessagePool,
+            nonce: Nonce,
+            time: Time,
+            aof: *AOF,
+            state_machine_options: StateMachine.Options,
+            message_bus_options: MessageBus.Options,
+            grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
+        };
+
+        /// Initializes and opens the provided replica using the options. Requires the superblock
+        /// to have been opened by calling `open_superblock()` first.
+        pub fn open(self: *Self, options: OpenOptions) !void {
+            assert(options.nonce != 0);
+
+            // Must call open_superblock() first.
+            assert(self.opened);
 
             const replica_id = self.superblock.working.vsr_state.replica_id;
             const replica: u8 = for (self.superblock.working.vsr_state.members, 0..) |member, index| {
@@ -580,6 +612,8 @@ pub fn ReplicaType(
                 return error.NoAddress;
             }
 
+            const allocator = self.static_allocator.allocator();
+
             // Initialize the replica:
             try self.init(allocator, .{
                 .cluster = self.superblock.working.cluster,
@@ -594,24 +628,11 @@ pub fn ReplicaType(
                 .state_machine_options = options.state_machine_options,
                 .message_bus_options = options.message_bus_options,
                 .grid_cache_blocks_count = options.grid_cache_blocks_count,
-                .release = options.release,
-                .release_client_min = options.release_client_min,
-                .releases_bundled = options.releases_bundled,
-                .release_execute = options.release_execute,
-                .test_context = options.test_context,
             });
 
             // Disable all dynamic allocation from this point onwards.
             self.static_allocator.transition_from_init_to_static();
 
-            const release_target = self.superblock.working.vsr_state.checkpoint.release;
-            assert(release_target.value >= self.superblock.working.release_format.value);
-            if (release_target.value != self.release.value) {
-                self.release_transition(@src());
-                return;
-            }
-
-            initialized = true;
             errdefer self.deinit(allocator);
 
             self.opened = false;
@@ -908,11 +929,6 @@ pub fn ReplicaType(
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
             grid_cache_blocks_count: u32,
-            release: vsr.Release,
-            release_client_min: vsr.Release,
-            releases_bundled: []const vsr.Release,
-            release_execute: *const fn (replica: *Self, release: vsr.Release) void,
-            test_context: ?*anyopaque,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -954,8 +970,6 @@ pub fn ReplicaType(
 
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
-
-            vsr.verify_release_list(options.releases_bundled, options.release);
 
             self.time = options.time;
 
@@ -1049,13 +1063,11 @@ pub fn ReplicaType(
                 .quorum_view_change = quorum_view_change,
                 .quorum_nack_prepare = quorum_nack_prepare,
                 .quorum_majority = quorum_majority,
-                .release = options.release,
-                .release_client_min = options.release_client_min,
-                .releases_bundled = vsr.ReleaseList.from_slice(
-                    options.releases_bundled,
-                ) catch unreachable,
-                .release_execute = options.release_execute,
                 .nonce = options.nonce,
+                .release = self.release,
+                .release_client_min = self.release_client_min,
+                .releases_bundled = self.releases_bundled,
+                .release_execute = self.release_execute,
                 // Copy the (already-initialized) time back, to avoid regressing the monotonic
                 // clock guard.
                 .time = self.time,
@@ -1168,7 +1180,7 @@ pub fn ReplicaType(
                 },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
-                .test_context = options.test_context,
+                .test_context = self.test_context,
                 .aof = options.aof,
             };
 
@@ -8879,6 +8891,8 @@ pub fn ReplicaType(
             }
         }
 
+        /// release_transition might be called by `open_superblock`, before the replica state
+        /// has been fully `init()`'d.
         fn release_transition(self: *Self, source: SourceLocation) void {
             const release_target = self.superblock.working.vsr_state.checkpoint.release;
             assert(release_target.value != self.release.value);

@@ -292,13 +292,16 @@ const Command = struct {
         log_main.info("git_commit={?s}", .{config.process.git_commit});
 
         var replica: Replica = undefined;
-        replica.open(allocator, .{
-            .node_count = @intCast(args.addresses.len),
+        try replica.open_superblock(allocator, .{
+            .storage_size_limit = args.storage_size_limit,
+            .storage = &command.storage,
             .release = config.process.release,
             .release_client_min = release_client_min,
             .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
-            .storage_size_limit = args.storage_size_limit,
+        });
+        replica.open(.{
+            .node_count = @intCast(args.addresses.len),
             .storage = &command.storage,
             .aof = &aof,
             .message_pool = &message_pool,
@@ -421,8 +424,7 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
     } else {
-        log_main.err("{}: release_execute: release {} is not available; upgrade the binary", .{
-            replica.replica,
+        log_main.err("release_execute: release {} is not available; upgrade the binary", .{
             release,
         });
         @panic("release_execute: binary missing required version");
