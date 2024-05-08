@@ -1,6 +1,7 @@
 const std = @import("std");
-const tb = @import("../../tigerbeetle.zig");
-const tb_client = @import("tb_client.zig");
+const vsr = @import("vsr");
+const tb = vsr.tigerbeetle;
+const tb_client = vsr.tb_client;
 
 const type_mappings = .{
     .{ tb.AccountFlags, "TB_ACCOUNT_FLAGS" },

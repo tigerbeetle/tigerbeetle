@@ -19,11 +19,11 @@ const AccountFilter = tb.AccountFilter;
 const AccountFilterFlags = tb.AccountFilterFlags;
 const AccountBalance = tb.AccountBalance;
 
-const Storage = @import("../../../storage.zig").Storage;
-const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const vsr = @import("vsr");
+const Storage = vsr.storage.Storage;
+const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
-const constants = @import("../../../constants.zig");
-const vsr = @import("../../../vsr.zig");
+const constants = vsr.constants;
 
 pub const std_options = struct {
     // Since this is running in application space, log only critical messages to reduce noise.

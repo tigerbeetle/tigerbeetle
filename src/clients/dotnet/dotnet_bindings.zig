@@ -1,8 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const tb = @import("../../tigerbeetle.zig");
-const tb_client = @import("../c/tb_client.zig");
+// vsr module isn't available when we're not the entry point (unit_test) so use path instead.
+const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../vsr.zig");
+const tb = vsr.tigerbeetle;
+const tb_client = vsr.tb_client;
 
 const output_file = "src/clients/dotnet/TigerBeetle/Bindings.cs";
 

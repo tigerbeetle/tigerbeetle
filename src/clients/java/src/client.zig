@@ -11,7 +11,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const jni = @import("jni.zig");
-const tb = @import("../../c/tb_client.zig");
+const tb = @import("vsr").tb_client;
 
 const log = std.log.scoped(.tb_client_jni);
 const assert = std.debug.assert;
