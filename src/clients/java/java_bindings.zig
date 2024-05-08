@@ -1,7 +1,7 @@
 const std = @import("std");
 
 // vsr module isn't available when we're not the entry point (unit_test) so use path instead.
-const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../vsr.zig");
+const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 

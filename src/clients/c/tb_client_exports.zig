@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 // vsr module isn't available when we're not the entry point (unit_test) so use path instead.
-const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../vsr.zig");
+const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
 const tb = vsr.tb_client;
 
 comptime {
