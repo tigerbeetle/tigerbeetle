@@ -120,6 +120,20 @@ pub fn main() !void {
     const node_count = replica_count + standby_count;
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
+    const batch_size_limit_min = comptime batch_size_limit_min: {
+        var event_size_max: ?u32 = null;
+        for (std.enums.values(StateMachine.Operation)) |operation| {
+            const event_size = @sizeOf(StateMachine.Event(operation));
+            event_size_max = if (event_size_max) |m| @max(m, event_size) else event_size;
+        }
+        break :batch_size_limit_min event_size_max.?;
+    };
+    const batch_size_limit: u32 = if (random.boolean())
+        constants.message_body_size_max
+    else
+        batch_size_limit_min +
+            random.uintAtMost(u32, constants.message_body_size_max - batch_size_limit_min);
+
     const cluster_options = Cluster.Options{
         .cluster_id = cluster_id,
         .replica_count = replica_count,
@@ -171,11 +185,11 @@ pub fn main() !void {
         },
         .state_machine = switch (state_machine) {
             .testing => .{
-                .batch_size_limit = constants.message_body_size_max,
+                .batch_size_limit = batch_size_limit,
                 .lsm_forest_node_count = 4096,
             },
             .accounting => .{
-                .batch_size_limit = constants.message_body_size_max,
+                .batch_size_limit = batch_size_limit,
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = 2048,
                 .cache_entries_transfers = 2048,
@@ -186,6 +200,7 @@ pub fn main() !void {
     };
 
     const workload_options = StateMachine.Workload.Options.generate(random, .{
+        .batch_size_limit = batch_size_limit,
         .client_count = client_count,
         // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity private.
         // Also maybe make it dynamic (computed from the client_count instead of clients_max).
