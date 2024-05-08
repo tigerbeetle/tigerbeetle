@@ -142,23 +142,48 @@ const BenchmarkResult = struct {
 
 const Benchmark = struct {
     timer: std.time.Timer,
-    rusage: std.os.rusage,
+    utime_ns: u128,
 
     fn begin() !Benchmark {
         const timer = try std.time.Timer.start();
         return Benchmark{
             .timer = timer,
-            // TODO pass std.os.linux.rusage.SELF once Zig is upgraded
-            .rusage = std.os.getrusage(0),
+            .utime_ns = utime_nanos(),
         };
     }
 
     fn end(self: *Benchmark, samples: usize) !BenchmarkResult {
-        const rusage = std.os.getrusage(0);
+        const utime_now = utime_nanos();
         return BenchmarkResult{
             .wall_time = self.timer.read() / samples,
-            .utime = (timeval_to_ns(rusage.utime) - timeval_to_ns(self.rusage.utime)) / samples,
+            .utime = @intCast((utime_now - self.utime_ns) / samples),
         };
+    }
+
+    fn utime_nanos() u128 {
+        if (builtin.os.tag == .windows) {
+            var creation_time: std.os.windows.FILETIME = undefined;
+            var exit_time: std.os.windows.FILETIME = undefined;
+            var kernel_time: std.os.windows.FILETIME = undefined;
+            var user_time: std.os.windows.FILETIME = undefined;
+
+            if (std.os.windows.kernel32.GetProcessTimes(
+                std.os.windows.kernel32.GetCurrentProcess(),
+                &creation_time,
+                &exit_time,
+                &kernel_time,
+                &user_time,
+            ) == std.os.windows.FALSE) {
+                std.debug.panic("GetProcessTimes(): {}", .{std.os.windows.kernel32.GetLastError()});
+            }
+
+            const utime100ns = (@as(u64, user_time.dwHighDateTime) << 32) | user_time.dwLowDateTime;
+            return utime100ns * 100;
+        }
+
+        const utime_tv = std.os.system.getrusage(std.os.system.rusage.SELF).utime;
+        return (@as(u128, @intCast(utime_tv.tv_sec)) * std.time.ns_per_s) +
+            (@as(u32, @intCast(utime_tv.tv_usec)) * std.time.ns_per_us);
     }
 };
 
