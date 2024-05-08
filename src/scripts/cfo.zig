@@ -543,11 +543,12 @@ const SeedRecord = struct {
     branch: []const u8,
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
-        return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse
+        return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse // NB: reverse order.
             order_by_field(a.commit_sha, b.commit_sha) orelse
             order_by_field(a.fuzzer, b.fuzzer) orelse
             order_by_field(a.ok, b.ok) orelse
-            order_by_field(a.seed_timestamp_start, b.seed_timestamp_start) orelse
+            order_by_field(a.seed_duration(), b.seed_duration()) orelse // Coarse seed minimization.
+            order_by_field(a.seed_timestamp_start, b.seed_timestamp_start) orelse // Stability.
             order_by_field(a.seed_timestamp_end, b.seed_timestamp_end) orelse
             order_by_field(a.seed, b.seed) orelse
             .eq;
@@ -565,6 +566,10 @@ const SeedRecord = struct {
 
     fn less_than(_: void, a: SeedRecord, b: SeedRecord) bool {
         return a.order(b) == .lt;
+    }
+
+    fn seed_duration(record: SeedRecord) u64 {
+        return record.seed_timestamp_end - record.seed_timestamp_start;
     }
 
     // Merges two sets of seeds keeping the more interesting one. A direct way to write this would
