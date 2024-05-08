@@ -1240,6 +1240,7 @@ pub const Header = extern struct {
             release_too_high = 3,
             invalid_request_operation = 4,
             invalid_request_body = 5,
+            invalid_request_body_size = 6,
 
             comptime {
                 for (std.enums.values(Reason), 0..) |reason, index| {

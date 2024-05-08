@@ -77,6 +77,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// The request number of the next request.
         request_number: u32 = 0,
 
+        /// The maximum body size for `command=request` messages.
+        /// Set by the `register`'s reply.
+        batch_size_limit: ?u32 = null,
+
         /// The highest view number seen by the client in messages exchanged with the cluster.
         /// Used to locate the current primary, and provide more information to a partitioned primary.
         view: u32 = 0,
@@ -211,6 +215,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(self.request_inflight == null);
             assert(self.request_number > 0);
             assert(events.len <= constants.message_body_size_max);
+            assert(events.len <= self.batch_size_limit.?);
             assert(events.len % event_size == 0);
 
             const message = self.get_message().build(.request);
@@ -246,6 +251,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.command == .request);
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= constants.message_size_max);
+            assert(message.header.size <= @sizeOf(Header) + self.batch_size_limit.?);
             assert(message.header.operation.valid(StateMachine));
             assert(message.header.view == 0);
             assert(message.header.parent == 0);
@@ -426,15 +432,20 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             if (inflight_vsr_operation == .register) {
                 assert(inflight_request == 0);
+                assert(self.batch_size_limit == null);
                 assert(self.session == 0);
                 assert(reply.header.commit > 0);
                 assert(reply.header.size == @sizeOf(Header) + @sizeOf(vsr.RegisterResult));
-                self.session = reply.header.commit; // The commit number becomes the session number.
 
                 const result = std.mem.bytesAsValue(
                     vsr.RegisterResult,
                     reply.body()[0..@sizeOf(vsr.RegisterResult)],
                 );
+                assert(result.batch_size_limit > 0);
+                assert(result.batch_size_limit <= constants.message_body_size_max);
+
+                self.session = reply.header.commit; // The commit number becomes the session number.
+                self.batch_size_limit = result.batch_size_limit;
                 inflight.callback.register(inflight.user_data, result);
             } else {
                 // The message is the result of raw_request(), so invoke the user callback.
@@ -520,7 +531,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             std.mem.bytesAsValue(
                 vsr.RegisterRequest,
                 message.body()[0..@sizeOf(vsr.RegisterRequest)],
-            ).* = .{};
+            ).* = .{
+                .batch_size_limit = 0,
+            };
+
             assert(self.request_number == 0);
             self.request_number += 1;
 

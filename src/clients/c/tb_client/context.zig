@@ -96,7 +96,7 @@ pub fn ContextType(
         io: IO,
         message_pool: MessagePool,
         client: Client,
-        registered: bool,
+        batch_size_limit: ?u32,
 
         completion_fn: tb_completion_t,
         implementation: ContextImplementation,
@@ -219,7 +219,7 @@ pub fn ContextType(
                 };
             };
 
-            context.registered = false;
+            context.batch_size_limit = null;
             context.client.register(client_register_callback, @intFromPtr(context));
 
             return context;
@@ -243,8 +243,11 @@ pub fn ContextType(
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
-            _ = result;
-            self.registered = true;
+            assert(self.batch_size_limit == null);
+            assert(result.batch_size_limit > 0);
+            assert(result.batch_size_limit <= constants.message_body_size_max);
+
+            self.batch_size_limit = result.batch_size_limit;
             // Some requests may have queued up while the client was registering.
             self.signal.notify();
         }
@@ -283,7 +286,7 @@ pub fn ContextType(
             const self = @fieldParentPtr(Context, "signal", signal);
 
             // Don't send any requests until registration completes.
-            if (!self.registered) {
+            if (self.batch_size_limit == null) {
                 assert(self.client.request_inflight != null);
                 assert(self.client.request_inflight.?.message.header.operation == .register);
                 return;
@@ -295,8 +298,6 @@ pub fn ContextType(
         }
 
         fn request(self: *Context, packet: *Packet) void {
-            assert(self.registered);
-
             // Get the size of each request structure in the packet.data:
             const event_size: usize = operation_event_size(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
@@ -309,7 +310,7 @@ pub fn ContextType(
             }
 
             // Make sure the packet.data wouldn't overflow a message:
-            if (events.len > constants.message_body_size_max) {
+            if (events.len > self.batch_size_limit.?) {
                 return self.on_complete(packet, error.TooMuchData);
             }
 
@@ -330,7 +331,7 @@ pub fn ContextType(
 
                     // Check for pending packets of the same operation which can be batched.
                     if (root.operation != packet.operation) continue;
-                    if (root.batch_size + packet.data_size > constants.message_body_size_max) continue;
+                    if (root.batch_size + packet.data_size > self.batch_size_limit.?) continue;
 
                     root.batch_size += packet.data_size;
                     root.batch_tail.?.batch_next = packet;
