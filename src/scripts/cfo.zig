@@ -221,7 +221,7 @@ fn run_fuzzers(
                     try shell.pushd(working_directory);
                     defer shell.popd();
 
-                    assert(try shell.dir_exists(".git"));
+                    assert(try shell.dir_exists(".git") or shell.file_exists(".git"));
 
                     seed_record.seed = random.int(u64);
                     seed_record.seed_timestamp_start = @intCast(std.time.timestamp());
@@ -296,16 +296,22 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
     shell.project_root.deleteTree("working") catch {};
 
     { // Main branch fuzzing.
-        try shell.cwd.makePath("./working/main");
-        try shell.pushd("./working/main");
-        defer shell.popd();
+        const commit = if (gh_token == null)
+            // Fuzz in-place when no token is specified, as a convenient shortcut for local
+            // debugging.
+            try run_fuzzers_commit_info(shell)
+        else commit: {
+            try shell.cwd.makePath("./working/main");
+            try shell.pushd("./working/main");
+            defer shell.popd();
 
-        const commit = try run_fuzzers_prepare_repository(shell, .main_branch);
+            break :commit try run_fuzzers_prepare_repository(shell, .main_branch);
+        };
         log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
         run_fuzzers_build_all(shell);
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
-            try working_directory.append("./working/main");
+            try working_directory.append(if (gh_token == null) "." else "./working/main");
             try seed_record.append(.{
                 .commit_timestamp = commit.timestamp,
                 .commit_sha = commit.sha,
