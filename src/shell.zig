@@ -559,20 +559,12 @@ pub fn exec_raw(
     });
 }
 
-/// Spawns the process, piping its stdout and stderr.
-///
-/// The caller must `.kill()` and `.wait()` the child, to minimize the chance of process leak (
-/// sadly, child will still be leaked if the parent process is killed itself, because POSIX doesn't
-/// have nice APIs for structured concurrency).
-pub fn spawn(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !std.ChildProcess {
-    return try shell.spawn_options(.{}, cmd, cmd_args);
-}
-
-pub fn spawn_options(
+pub fn spawn(
     shell: Shell,
     options: struct {
         stdin_behavior: std.ChildProcess.StdIo = .Ignore,
-        stderr_behavior: std.ChildProcess.StdIo = .Pipe,
+        stdout_behavior: std.ChildProcess.StdIo = .Ignore,
+        stderr_behavior: std.ChildProcess.StdIo = .Ignore,
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -590,7 +582,7 @@ pub fn spawn_options(
     child.cwd = cwd_path;
     child.env_map = &shell.env;
     child.stdin_behavior = options.stdin_behavior;
-    child.stdout_behavior = .Pipe;
+    child.stdout_behavior = options.stdout_behavior;
     child.stderr_behavior = options.stderr_behavior;
 
     try child.spawn();
