@@ -12,16 +12,16 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
-const flags = @import("../flags.zig");
+const stdx = @import("stdx.zig");
+const flags = @import("flags.zig");
 const fatal = flags.fatal;
-const Shell = @import("../shell.zig");
+const Shell = @import("shell.zig");
 
-const cfo = @import("./cfo.zig");
-const ci = @import("./ci.zig");
-const release = @import("./release.zig");
-const devhub = @import("./devhub.zig");
-const changelog = @import("./changelog.zig");
+const cfo = @import("./scripts/cfo.zig");
+const ci = @import("./scripts/ci.zig");
+const release = @import("./scripts/release.zig");
+const devhub = @import("./scripts/devhub.zig");
+const changelog = @import("./scripts/changelog.zig");
 
 const CliArgs = union(enum) {
     cfo: cfo.CliArgs,

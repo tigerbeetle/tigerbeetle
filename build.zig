@@ -491,7 +491,7 @@ pub fn build(b: *std.Build) !void {
     { // Free-form automation: `zig build scripts -- ci --language=java`
         const scripts_exe = b.addExecutable(.{
             .name = "scripts",
-            .root_source_file = .{ .path = "src/scripts/main.zig" },
+            .root_source_file = .{ .path = "src/scripts.zig" },
             // .main_pkg_path = .{ .path = "src" },
             .target = target,
             .optimize = mode,
