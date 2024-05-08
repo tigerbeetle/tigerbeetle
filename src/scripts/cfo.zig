@@ -402,6 +402,14 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
         assert(weight_main_total == weight_pr_total);
     }
 
+    for (weight, seed_record.items) |*weight_ptr, seed| {
+        if (seed.fuzzer == .vopr or seed.fuzzer == .vopr_lite or
+            seed.fuzzer == .vopr_testing or seed.fuzzer == .vopr_testing_lite)
+        {
+            weight_ptr.* *= 2; // Bump relative priority of VOPR runs.
+        }
+    }
+
     return .{
         .working_directory = working_directory.items,
         .seed_record = seed_record.items,
