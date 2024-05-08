@@ -200,6 +200,48 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             if (self.request_timeout.fired()) self.on_request_timeout();
         }
 
+        /// Registers a session with the cluster for the client, if this has not yet been done.
+        pub fn register(self: *Self, callback: Request.RegisterCallback, user_data: u128) void {
+            assert(self.request_inflight == null);
+            assert(self.request_number == 0);
+
+            const message = self.get_message().build(.request);
+            errdefer self.release_message(message.base());
+
+            // We will set parent, session, view and checksums only when sending for the first time:
+            message.header.* = .{
+                .size = @sizeOf(Header) + @sizeOf(vsr.RegisterRequest),
+                .client = self.id,
+                .request = self.request_number,
+                .cluster = self.cluster,
+                .command = .request,
+                .operation = .register,
+                .release = self.release,
+            };
+
+            std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                message.body()[0..@sizeOf(vsr.RegisterRequest)],
+            ).* = .{
+                .batch_size_limit = 0,
+            };
+
+            assert(self.request_number == 0);
+            self.request_number += 1;
+
+            log.debug(
+                "{}: register: registering a session with the cluster user_data={}",
+                .{ self.id, user_data },
+            );
+
+            self.request_inflight = .{
+                .message = message,
+                .user_data = user_data,
+                .callback = .{ .register = callback },
+            };
+            self.send_request_for_the_first_time(message);
+        }
+
         /// Sends a request message with the operation and events payload to the replica.
         /// There must be no other request message currently inflight.
         pub fn request(
@@ -507,48 +549,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message.header.set_checksum();
 
             return message.ref();
-        }
-
-        /// Registers a session with the cluster for the client, if this has not yet been done.
-        pub fn register(self: *Self, callback: Request.RegisterCallback, user_data: u128) void {
-            assert(self.request_inflight == null);
-            assert(self.request_number == 0);
-
-            const message = self.get_message().build(.request);
-            errdefer self.release_message(message.base());
-
-            // We will set parent, session, view and checksums only when sending for the first time:
-            message.header.* = .{
-                .size = @sizeOf(Header) + @sizeOf(vsr.RegisterRequest),
-                .client = self.id,
-                .request = self.request_number,
-                .cluster = self.cluster,
-                .command = .request,
-                .operation = .register,
-                .release = self.release,
-            };
-
-            std.mem.bytesAsValue(
-                vsr.RegisterRequest,
-                message.body()[0..@sizeOf(vsr.RegisterRequest)],
-            ).* = .{
-                .batch_size_limit = 0,
-            };
-
-            assert(self.request_number == 0);
-            self.request_number += 1;
-
-            log.debug(
-                "{}: register: registering a session with the cluster user_data={}",
-                .{ self.id, user_data },
-            );
-
-            self.request_inflight = .{
-                .message = message,
-                .user_data = user_data,
-                .callback = .{ .register = callback },
-            };
-            self.send_request_for_the_first_time(message);
         }
 
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
