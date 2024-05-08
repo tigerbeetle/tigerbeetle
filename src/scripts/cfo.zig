@@ -75,14 +75,24 @@ const Fuzzer = enum {
     vsr_superblock,
     vopr,
     vopr_testing,
+    vopr_lite,
+    vopr_testing_lite,
 
     fn print_command(fuzzer: Fuzzer, shell: *Shell, seed: u64) ![]const u8 {
-        if (fuzzer == .vopr or fuzzer == .vopr_testing) {
-            const state_machine: []const u8 =
-                if (fuzzer == .vopr) "" else " -Dsimulator-state-machine=testing";
+        if (fuzzer == .vopr or fuzzer == .vopr_testing or
+            fuzzer == .vopr_lite or fuzzer == .vopr_testing_lite)
+        {
+            const state_machine: []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_lite)
+                ""
+            else
+                " -Dsimulator-state-machine=testing";
+            const lite: []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_testing)
+                ""
+            else
+                " --lite";
             return try shell.print(
-                "./zig/zig build -Drelease{s} simulator_run -- {d}",
-                .{ state_machine, seed },
+                "./zig/zig build -Drelease{s} simulator_run --{s} {d}",
+                .{ state_machine, lite, seed },
             );
         }
         return try shell.print(
@@ -92,15 +102,24 @@ const Fuzzer = enum {
     }
 
     fn spawn_command(fuzzer: Fuzzer, shell: *Shell, seed: u64) !std.ChildProcess {
-        if (fuzzer == .vopr or fuzzer == .vopr_testing) {
-            const state_machine: []const []const u8 =
-                if (fuzzer == .vopr) &.{} else &.{"-Dsimulator-state-machine=testing"};
+        if (fuzzer == .vopr or fuzzer == .vopr_testing or
+            fuzzer == .vopr_lite or fuzzer == .vopr_testing_lite)
+        {
+            const state_machine: []const []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_lite)
+                &.{}
+            else
+                &.{"-Dsimulator-state-machine=testing"};
+            const lite: []const []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_testing)
+                &.{}
+            else
+                &.{"--lite"};
             return try shell.spawn(
                 .{ .stdin_behavior = .Pipe },
-                "{zig} build -Drelease {state_machine} simulator_run -- {seed}",
+                "{zig} build -Drelease {state_machine} simulator_run -- {lite} {seed}",
                 .{
                     .zig = shell.zig_exe.?,
                     .state_machine = state_machine,
+                    .lite = lite,
                     .seed = seed,
                 },
             );
