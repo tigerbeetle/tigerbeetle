@@ -1491,7 +1491,10 @@ const TestContext = struct {
                 .faulty_client_replies = false,
                 .faulty_grid = false,
             },
-            .state_machine = .{ .lsm_forest_node_count = 4096 },
+            .state_machine = .{
+                .batch_size_limit = constants.message_body_size_max,
+                .lsm_forest_node_count = 4096,
+            },
         });
         errdefer cluster.deinit();
 

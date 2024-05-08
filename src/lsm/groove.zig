@@ -486,16 +486,17 @@ pub fn GrooveType(
             var objects_cache = try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
 
-                // In the worst case, each Map must be able to store the value_count_max (to
+                // In the worst case, each Map must be able to store the batch_value_count_limit (to
                 // contain either TableMutable or TableImmutable) as well as the maximum number of
                 // prefetches a bar may perform, excluding prefetches already accounted for by
-                // value_count_max.
-                .map_value_count_max = @as(u32, ObjectTree.Table.value_count_max) +
-                    (options.prefetch_entries_for_read_max * constants.lsm_batch_multiple),
+                // batch_value_count_limit.
+                .map_value_count_max = constants.lsm_batch_multiple *
+                    (options.tree_options_object.batch_value_count_limit +
+                    options.prefetch_entries_for_read_max),
 
                 // Scopes are limited to a single beat, so the maximum number of entries in a
                 // single scope is value_count_max / constants.lsm_batch_multiple.
-                .scope_value_count_max = @divExact(ObjectTree.Table.value_count_max, constants.lsm_batch_multiple),
+                .scope_value_count_max = options.tree_options_object.batch_value_count_limit,
 
                 .name = @typeName(Object),
             });

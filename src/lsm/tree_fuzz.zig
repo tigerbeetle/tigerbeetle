@@ -260,7 +260,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, .{
                 .id = 1,
                 .name = "Key.Value",
-            }, .{});
+            }, .{
+                .batch_value_count_limit = commit_entries_max,
+            });
             defer env.tree.deinit(allocator);
 
             env.change_state(.tree_init, .manifest_log_open);

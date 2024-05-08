@@ -307,6 +307,7 @@ const Command = struct {
             .nonce = nonce,
             .time = .{},
             .state_machine_options = .{
+                .batch_size_limit = constants.message_body_size_max,
                 .lsm_forest_node_count = args.lsm_forest_node_count,
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,

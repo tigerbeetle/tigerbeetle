@@ -80,6 +80,7 @@ const Environment = struct {
     // This is the smallest size that set_associative_cache will allow us.
     const cache_entries_max = 2048;
     const forest_options = StateMachine.forest_options(.{
+        .batch_size_limit = constants.message_body_size_max,
         .lsm_forest_node_count = node_count,
         .cache_entries_accounts = cache_entries_max,
         .cache_entries_transfers = cache_entries_max,

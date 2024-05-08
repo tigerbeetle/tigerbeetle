@@ -170,8 +170,12 @@ pub fn main() !void {
             .faulty_grid = replica_count > 2,
         },
         .state_machine = switch (state_machine) {
-            .testing => .{ .lsm_forest_node_count = 4096 },
+            .testing => .{
+                .batch_size_limit = constants.message_body_size_max,
+                .lsm_forest_node_count = 4096,
+            },
             .accounting => .{
+                .batch_size_limit = constants.message_body_size_max,
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = 2048,
                 .cache_entries_transfers = 2048,

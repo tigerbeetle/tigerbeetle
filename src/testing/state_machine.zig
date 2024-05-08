@@ -67,6 +67,7 @@ pub fn StateMachineType(
         }
 
         pub const Options = struct {
+            batch_size_limit: u32,
             lsm_forest_node_count: u32,
         };
 
@@ -117,9 +118,9 @@ pub fn StateMachineType(
                         .cache_entries_max = 2048,
                         .prefetch_entries_for_read_max = 0,
                         .prefetch_entries_for_update_max = 1,
-                        .tree_options_object = .{},
-                        .tree_options_id = .{},
-                        .tree_options_index = .{ .value = .{} },
+                        .tree_options_object = .{ .batch_value_count_limit = 1 },
+                        .tree_options_id = .{ .batch_value_count_limit = 1 },
+                        .tree_options_index = .{ .value = .{ .batch_value_count_limit = 1 } },
                     },
                 },
             );
@@ -287,6 +288,7 @@ fn WorkloadType(comptime StateMachine: type) type {
         const constants = StateMachine.constants;
 
         random: std.rand.Random,
+        options: Options,
         requests_sent: usize = 0,
         requests_delivered: usize = 0,
 
@@ -296,10 +298,10 @@ fn WorkloadType(comptime StateMachine: type) type {
             options: Options,
         ) !Workload {
             _ = allocator;
-            _ = options;
 
             return Workload{
                 .random = random,
+                .options = options,
             };
         }
 
@@ -325,7 +327,7 @@ fn WorkloadType(comptime StateMachine: type) type {
             workload.requests_sent += 1;
 
             // +1 for inclusive limit.
-            const size = workload.random.uintLessThan(usize, constants.message_body_size_max + 1);
+            const size = workload.random.uintAtMost(usize, workload.options.batch_size_limit);
             workload.random.bytes(body[0..size]);
 
             return .{
@@ -366,13 +368,18 @@ fn WorkloadType(comptime StateMachine: type) type {
         }
 
         pub const Options = struct {
+            batch_size_limit: u32,
+
             pub fn generate(random: std.rand.Random, options: struct {
+                batch_size_limit: u32,
                 client_count: usize,
                 in_flight_max: usize,
             }) Options {
                 _ = random;
-                _ = options;
-                return .{};
+
+                return .{
+                    .batch_size_limit = options.batch_size_limit,
+                };
             }
         };
     };
