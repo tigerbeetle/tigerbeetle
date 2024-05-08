@@ -210,10 +210,13 @@ fn run_fuzzers(
                         try seed_record.fuzzer.print_command(shell, seed_record.seed);
 
                     log.debug("will start '{s}'", .{seed_record.command});
+                    // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
+                    // on writing to child's stdin to detect if a child is dead in a non-blocking
+                    // manner.
                     const child = try seed_record.fuzzer.spawn_command(shell, seed_record.seed);
                     _ = try std.os.fcntl(
                         child.stdin.?.handle,
-                        std.os.F.SETFD,
+                        std.os.F.SETFL,
                         @as(u32, std.os.O.NONBLOCK),
                     );
                     fuzzer_or_null.* = .{ .seed = seed_record, .child = child };
