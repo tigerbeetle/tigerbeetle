@@ -67,9 +67,13 @@ pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
 
-const CliArgs = struct { positional: struct {
-    seed: ?[]const u8 = null,
-} };
+const CliArgs = struct {
+    // "lite" mode runs a small cluster and only looks for crashes.
+    lite: bool = false,
+    positional: struct {
+        seed: ?[]const u8 = null,
+    },
+};
 
 pub fn main() !void {
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
@@ -82,7 +86,6 @@ pub fn main() !void {
     defer args.deinit();
 
     const cli_args = flags.parse(&args, CliArgs);
-
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
@@ -108,8 +111,10 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
-    const standby_count = random.uintAtMost(u8, constants.standbys_max);
+    const replica_count =
+        if (cli_args.lite) 3 else 1 + random.uintLessThan(u8, constants.replicas_max);
+    const standby_count =
+        if (cli_args.lite) 0 else random.uintAtMost(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
@@ -297,9 +302,12 @@ pub fn main() !void {
             .{ simulator.options.requests_max, simulator.requests_replied },
         );
         simulator.cluster.log_cluster();
+        if (cli_args.lite) return;
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
+
+    if (cli_args.lite) return;
 
     simulator.transition_to_liveness_mode();
 
