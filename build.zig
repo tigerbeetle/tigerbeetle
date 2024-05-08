@@ -231,7 +231,6 @@ pub fn build(b: *std.Build) !void {
             .name = "tb_client_header",
             .root_source_file = .{ .path = "src/clients/c/tb_client_header.zig" },
             .target = target,
-            // .main_pkg_path = .{ .path = "src" },
         });
         tb_client_header.addModule("vsr", vsr_module);
         tb_client_header.addOptions("vsr_options", options);
@@ -471,7 +470,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = .{ .path = "src/fuzz_tests.zig" },
             .target = target,
             .optimize = mode,
-            // .main_pkg_path = .{ .path = "src" },
         });
         fuzz_exe.omit_frame_pointer = false;
         fuzz_exe.addOptions("vsr_options", options);
@@ -492,7 +490,6 @@ pub fn build(b: *std.Build) !void {
         const scripts_exe = b.addExecutable(.{
             .name = "scripts",
             .root_source_file = .{ .path = "src/scripts.zig" },
-            // .main_pkg_path = .{ .path = "src" },
             .target = target,
             .optimize = mode,
         });
@@ -593,7 +590,6 @@ fn go_client(
         .name = "go_bindings",
         .root_source_file = .{ .path = "src/clients/go/go_bindings.zig" },
         .target = target,
-        // .main_pkg_path = .{ .path = "src" },
     });
     bindings.addModule("vsr", vsr_module);
     bindings.addOptions("vsr_options", options);
@@ -618,7 +614,6 @@ fn go_client(
             .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
-            // .main_pkg_path = .{ .path = "src" },
         });
         lib.linkLibC();
         lib.pie = true;
@@ -659,7 +654,6 @@ fn java_client(
         .name = "java_bindings",
         .root_source_file = .{ .path = "src/clients/java/java_bindings.zig" },
         .target = target,
-        // .main_pkg_path = .{ .path = "src" },
     });
     bindings.addModule("vsr", vsr_module);
     bindings.addOptions("vsr_options", options);
@@ -674,7 +668,6 @@ fn java_client(
             .root_source_file = .{ .path = "src/clients/java/src/client.zig" },
             .target = cross_target,
             .optimize = mode,
-            // .main_pkg_path = .{ .path = "src" },
         });
         lib.linkLibC();
 
@@ -719,7 +712,6 @@ fn dotnet_client(
         .name = "dotnet_bindings",
         .root_source_file = .{ .path = "src/clients/dotnet/dotnet_bindings.zig" },
         .target = target,
-        // .main_pkg_path = .{ .path = "src" },
     });
     bindings.addModule("vsr", vsr_module);
     bindings.addOptions("vsr_options", options);
@@ -734,7 +726,6 @@ fn dotnet_client(
             .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
-            // .main_pkg_path = .{ .path = "src" },
         });
         lib.linkLibC();
 
@@ -777,7 +768,6 @@ fn node_client(
         .name = "node_bindings",
         .root_source_file = .{ .path = "src/clients/node/node_bindings.zig" },
         .target = target,
-        // .main_pkg_path = .{ .path = "src" },
     });
     bindings.addModule("vsr", vsr_module);
     bindings.addOptions("vsr_options", options);
@@ -827,7 +817,6 @@ fn node_client(
             .root_source_file = .{ .path = "src/clients/node/src/node.zig" },
             .target = cross_target,
             .optimize = mode,
-            // .main_pkg_path = .{ .path = "src" },
         });
         lib.linkLibC();
 
@@ -893,14 +882,12 @@ fn c_client(
             .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
-            // .main_pkg_path = .{ .path = "src" },
         });
         const static_lib = b_isolated.addStaticLibrary(.{
             .name = "tb_client",
             .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
-            // .main_pkg_path = .{ .path = "src" },
         });
 
         static_lib.bundle_compiler_rt = true;
@@ -948,7 +935,6 @@ fn c_client_sample(
         .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
         .target = target,
         .optimize = mode,
-        // .main_pkg_path = .{ .path = "src" },
     });
     static_lib.linkLibC();
     static_lib.pie = true;
