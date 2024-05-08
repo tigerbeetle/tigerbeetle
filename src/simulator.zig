@@ -190,6 +190,8 @@ pub fn main() !void {
             },
             .accounting => .{
                 .batch_size_limit = batch_size_limit,
+                .lsm_forest_compaction_block_count = random.uintAtMost(u32, 256) +
+                    StateMachine.Forest.Options.compaction_block_count_min,
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = 2048,
                 .cache_entries_transfers = 2048,

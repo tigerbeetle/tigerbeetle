@@ -204,6 +204,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             .max = tree_infos[tree_infos.len - 1].tree_id,
         };
 
+        pub const Options = struct {
+            node_count: u32,
+            compaction_block_count: u32,
+
+            pub const compaction_block_count_min: u32 = CompactionPipeline.block_count_min;
+        };
+
         progress: ?union(enum) {
             open: struct { callback: Callback },
             checkpoint: struct { callback: Callback },
@@ -228,16 +235,18 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub fn init(
             allocator: mem.Allocator,
             grid: *Grid,
-            node_count: u32,
+            options: Options,
             // (e.g.) .{ .transfers = .{ .cache_entries_max = 128, … }, .accounts = … }
             grooves_options: GroovesOptions,
         ) !Forest {
+            assert(options.compaction_block_count >= Options.compaction_block_count_min);
+
             // NodePool must be allocated to pass in a stable address for the Grooves.
             const node_pool = try allocator.create(NodePool);
             errdefer allocator.destroy(node_pool);
 
             // TODO: look into using lsm_table_size_max for the node_count.
-            node_pool.* = try NodePool.init(allocator, node_count);
+            node_pool.* = try NodePool.init(allocator, options.node_count);
             errdefer node_pool.deinit(allocator);
 
             var manifest_log = try ManifestLog.init(allocator, grid, .{
@@ -267,7 +276,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 grooves_initialized += 1;
             }
 
-            var compaction_pipeline = try CompactionPipeline.init(allocator, grid);
+            var compaction_pipeline =
+                try CompactionPipeline.init(allocator, grid, options.compaction_block_count);
             errdefer compaction_pipeline.deinit(allocator);
 
             const scan_buffer_pool = try ScanBufferPool.init(allocator);
@@ -796,6 +806,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             break :blk minimum_block_count;
         };
 
+        pub const block_count_min = block_count_bar_concurrent + minimum_block_count_beat;
+
         /// If you think of a pipeline diagram, a pipeline slot is a single instruction.
         const PipelineSlot = struct {
             pipeline: *CompactionPipeline,
@@ -843,18 +855,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         forest: ?*Forest = null,
         callback: ?*const fn (*Forest) void = null,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid) !CompactionPipeline {
-            // CompactionBlock has some metadata, but we only look at the Block for now which
-            // makes up the bulk.
-            const block_count = @divExact(
-                constants.compaction_block_memory,
-                constants.block_size,
-            );
-            log.debug("compaction_block_memory={} block_count={}", .{
-                constants.compaction_block_memory,
-                block_count,
-            });
-            assert(block_count >= block_count_bar_concurrent + minimum_block_count_beat);
+        pub fn init(allocator: mem.Allocator, grid: *Grid, block_count: u32) !CompactionPipeline {
+            log.debug("block_count={}", .{block_count});
+            assert(block_count >= block_count_min);
 
             var block_pool: CompactionBlockFIFO = .{
                 .name = "block_pool",

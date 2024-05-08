@@ -203,7 +203,15 @@ const Environment = struct {
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
 
-        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
+        env.forest = try Forest.init(allocator, &env.grid, .{
+            // TODO Test that the same sequence of events applied to forests with different
+            // compaction_blocks result in identical grids.
+            .compaction_blocks = @divExact(
+                constants.compaction_block_memory_default,
+                constants.block_size,
+            ),
+            .node_count = node_count
+        }, forest_options);
         env.change_state(.forest_init, .forest_open);
         env.forest.open(forest_open_callback);
 

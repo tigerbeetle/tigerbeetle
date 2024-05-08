@@ -112,7 +112,10 @@ pub fn StateMachineType(
             var forest = try Forest.init(
                 allocator,
                 grid,
-                options.lsm_forest_node_count,
+                .{
+                    .compaction_block_count = Forest.Options.compaction_block_count_min,
+                    .node_count = options.lsm_forest_node_count,
+                },
                 .{
                     .things = .{
                         .cache_entries_max = 2048,
