@@ -95,7 +95,7 @@ const Fuzzer = enum {
         if (fuzzer == .vopr or fuzzer == .vopr_testing) {
             const state_machine: []const []const u8 =
                 if (fuzzer == .vopr) &.{} else &.{"-Dsimulator-state-machine=testing"};
-            return try shell.spawn_options(
+            return try shell.spawn(
                 .{ .stdin_behavior = .Pipe },
                 "{zig} build -Drelease {state_machine} simulator_run -- {seed}",
                 .{
@@ -105,7 +105,7 @@ const Fuzzer = enum {
                 },
             );
         }
-        return try shell.spawn_options(
+        return try shell.spawn(
             .{ .stdin_behavior = .Pipe },
             "{zig} build -Drelease fuzz -- --seed={seed} {fuzzer}",
             .{

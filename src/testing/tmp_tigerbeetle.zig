@@ -69,9 +69,10 @@ pub fn init(
     );
 
     // Pass `--addresses=0` to let the OS pick a port for us.
-    var process = try shell.spawn_options(
+    var process = try shell.spawn(
         .{
             .stdin_behavior = .Pipe,
+            .stdout_behavior = .Pipe,
             // TODO(Zig): ignoring stderr is broken in 0.11, fixed in 0.12:
             //     https://github.com/ziglang/zig/pull/15565
             .stderr_behavior = if (builtin.os.tag == .windows) .Inherit else .Ignore,
