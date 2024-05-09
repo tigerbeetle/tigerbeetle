@@ -1,9 +1,9 @@
 # Hacking on TigerBeetle
 
-**Prerequisites:** The current beta version of TigerBeetle targets macOS and Linux and takes
-advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via
-[io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on macOS or on recent
-versions of Linux with an updated kernel.
+**Prerequisites:** TigerBeetle makes use of certain fairly new technologies, such as
+[io_uring](https://kernel.dk/io_uring.pdf) or advanced CPU instructions for cryptography. As such,
+it requires a fairly modern kernel (≥ 5.6) and CPU. While at the moment only Linux is supported for
+production deployments, TigerBeetle also works on Windows and MacOS.
 
 ## Setup
 
@@ -63,14 +63,7 @@ zig/zig build test
 To run a single test by name:
 
 ```console
-zig/zig build test:unit -- "name of test"
-```
-
-To run tests with code coverage (assuming `kcov` is installed on your system):
-
-```console
-COV=1 zig/zig build test
-open kcov-output/index.html
+zig/zig build test -- "name of test"
 ```
 
 The [Setup](#setup) step above will install Zig for you to the root of the `tigerbeetle` directory.
@@ -80,28 +73,13 @@ The [Setup](#setup) step above will install Zig for you to the root of the `tige
 To run TigerBeetle's long-running simulation, called *The VOPR*:
 
 ```console
-zig/zig build vopr
+zig/zig build simulator_run
 ```
 
-Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR
-Hub](/src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create
-GitHub issues as needed.
+To run the VOPR using a specific seed:
 
 ```console
-zig/zig build vopr -- --send
-```
-
-Run the VOPR using a specific seed. This will run in `Debug` mode by default but you can also
-include `--build-mode` to run in ReleaseSafe mode.
-
-```console
-zig/zig build vopr -- --seed=123 --build-mode=ReleaseSafe
-```
-
-To view all the available command line arguments simply use the `--help` flag.
-
-```console
-zig/zig build vopr -- --help
+zig/zig build simulator_run -- 123
 ```
 
 *The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames,

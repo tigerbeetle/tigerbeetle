@@ -65,17 +65,6 @@ that verify the correctness of the cluster's state. For example, TigerBeetle rep
 are designed to be byte-for-byte identical across caught-up nodes in the cluster. Some of the
 storage checkers verify that this is the case across simulations.
 
-## VOPR Hub
-
-At any given time, we have a server called the VOPR Hub running a set of simulations using the most
-recently committed code.
-
-Whenever a crash, assertion failure, or liveness bug is discovered, the VOPR Hub automatically opens
-a Github issue with the details.
-
-You can see all of the issues discovered by the VOPR Hub
-[here](https://github.com/tigerbeetle/tigerbeetle/issues?q=is%3Aissue+author%3Atigerbeetle-vopr+).
-
 ## Inspiration
 
 TigerBeetle's approach to DST was heavily inspired by the work of
