@@ -75,14 +75,24 @@ const Fuzzer = enum {
     vsr_superblock,
     vopr,
     vopr_testing,
+    vopr_lite,
+    vopr_testing_lite,
 
     fn print_command(fuzzer: Fuzzer, shell: *Shell, seed: u64) ![]const u8 {
-        if (fuzzer == .vopr or fuzzer == .vopr_testing) {
-            const state_machine: []const u8 =
-                if (fuzzer == .vopr) "" else " -Dsimulator-state-machine=testing";
+        if (fuzzer == .vopr or fuzzer == .vopr_testing or
+            fuzzer == .vopr_lite or fuzzer == .vopr_testing_lite)
+        {
+            const state_machine: []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_lite)
+                ""
+            else
+                " -Dsimulator-state-machine=testing";
+            const lite: []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_testing)
+                ""
+            else
+                " --lite";
             return try shell.print(
-                "./zig/zig build -Drelease{s} simulator_run -- {d}",
-                .{ state_machine, seed },
+                "./zig/zig build -Drelease{s} simulator_run --{s} {d}",
+                .{ state_machine, lite, seed },
             );
         }
         return try shell.print(
@@ -92,15 +102,24 @@ const Fuzzer = enum {
     }
 
     fn spawn_command(fuzzer: Fuzzer, shell: *Shell, seed: u64) !std.ChildProcess {
-        if (fuzzer == .vopr or fuzzer == .vopr_testing) {
-            const state_machine: []const []const u8 =
-                if (fuzzer == .vopr) &.{} else &.{"-Dsimulator-state-machine=testing"};
+        if (fuzzer == .vopr or fuzzer == .vopr_testing or
+            fuzzer == .vopr_lite or fuzzer == .vopr_testing_lite)
+        {
+            const state_machine: []const []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_lite)
+                &.{}
+            else
+                &.{"-Dsimulator-state-machine=testing"};
+            const lite: []const []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_testing)
+                &.{}
+            else
+                &.{"--lite"};
             return try shell.spawn(
                 .{ .stdin_behavior = .Pipe },
-                "{zig} build -Drelease {state_machine} simulator_run -- {seed}",
+                "{zig} build -Drelease {state_machine} simulator_run -- {lite} {seed}",
                 .{
                     .zig = shell.zig_exe.?,
                     .state_machine = state_machine,
+                    .lite = lite,
                     .seed = seed,
                 },
             );
@@ -202,7 +221,7 @@ fn run_fuzzers(
                     try shell.pushd(working_directory);
                     defer shell.popd();
 
-                    assert(try shell.dir_exists(".git"));
+                    assert(try shell.dir_exists(".git") or shell.file_exists(".git"));
 
                     seed_record.seed = random.int(u64);
                     seed_record.seed_timestamp_start = @intCast(std.time.timestamp());
@@ -277,16 +296,22 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
     shell.project_root.deleteTree("working") catch {};
 
     { // Main branch fuzzing.
-        try shell.cwd.makePath("./working/main");
-        try shell.pushd("./working/main");
-        defer shell.popd();
+        const commit = if (gh_token == null)
+            // Fuzz in-place when no token is specified, as a convenient shortcut for local
+            // debugging.
+            try run_fuzzers_commit_info(shell)
+        else commit: {
+            try shell.cwd.makePath("./working/main");
+            try shell.pushd("./working/main");
+            defer shell.popd();
 
-        const commit = try run_fuzzers_prepare_repository(shell, .main_branch);
+            break :commit try run_fuzzers_prepare_repository(shell, .main_branch);
+        };
         log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
         run_fuzzers_build_all(shell);
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
-            try working_directory.append("./working/main");
+            try working_directory.append(if (gh_token == null) "." else "./working/main");
             try seed_record.append(.{
                 .commit_timestamp = commit.timestamp,
                 .commit_sha = commit.sha,
@@ -381,6 +406,14 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
     }
     if (weight_main_total > 0 and weight_pr_total > 0) {
         assert(weight_main_total == weight_pr_total);
+    }
+
+    for (weight, seed_record.items) |*weight_ptr, seed| {
+        if (seed.fuzzer == .vopr or seed.fuzzer == .vopr_lite or
+            seed.fuzzer == .vopr_testing or seed.fuzzer == .vopr_testing_lite)
+        {
+            weight_ptr.* *= 2; // Bump relative priority of VOPR runs.
+        }
     }
 
     return .{

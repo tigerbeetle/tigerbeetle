@@ -7,6 +7,7 @@ const mem = std.mem;
 
 const tb = @import("tigerbeetle.zig");
 const constants = @import("constants.zig");
+const flags = @import("./flags.zig");
 const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
@@ -66,6 +67,14 @@ pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
 
+const CliArgs = struct {
+    // "lite" mode runs a small cluster and only looks for crashes.
+    lite: bool = false,
+    positional: struct {
+        seed: ?[]const u8 = null,
+    },
+};
+
 pub fn main() !void {
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
     log_buffer.unbuffered_writer = std.io.getStdErr().writer();
@@ -76,12 +85,11 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    // Skip argv[0] which is the name of this executable:
-    assert(args.skip());
+    const cli_args = flags.parse(&args, CliArgs);
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
-        const seed_argument = args.next() orelse break :seed_from_arg seed_random;
+        const seed_argument = cli_args.positional.seed orelse break :seed_from_arg seed_random;
         break :seed_from_arg parse_seed(seed_argument);
     };
 
@@ -103,8 +111,10 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
-    const standby_count = random.uintAtMost(u8, constants.standbys_max);
+    const replica_count =
+        if (cli_args.lite) 3 else 1 + random.uintLessThan(u8, constants.replicas_max);
+    const standby_count =
+        if (cli_args.lite) 0 else random.uintAtMost(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
@@ -292,9 +302,12 @@ pub fn main() !void {
             .{ simulator.options.requests_max, simulator.requests_replied },
         );
         simulator.cluster.log_cluster();
+        if (cli_args.lite) return;
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
+
+    if (cli_args.lite) return;
 
     simulator.transition_to_liveness_mode();
 

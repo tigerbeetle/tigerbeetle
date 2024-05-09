@@ -126,9 +126,24 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         if (std.mem.eql(u8, field.name, "positional")) {
             assert(@typeInfo(field.type) == .Struct);
             positional_fields = std.meta.fields(field.type);
+            var optional_tail = false;
             for (positional_fields) |positional_field| {
-                assert(default_value(positional_field) == null);
-                assert_valid_value_type(positional_field.type);
+                if (default_value(positional_field) == null) {
+                    if (optional_tail) @panic("optional positional arguments must be last");
+                } else {
+                    optional_tail = true;
+                }
+                switch (@typeInfo(positional_field.type)) {
+                    .Optional => |optional| {
+                        // optional flags should have a default
+                        assert(default_value(positional_field) != null);
+                        assert(default_value(positional_field).? == null);
+                        assert_valid_value_type(optional.child);
+                    },
+                    else => {
+                        assert_valid_value_type(positional_field.type);
+                    },
+                }
             }
         } else {
             fields[field_count] = field;
@@ -136,10 +151,15 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
             switch (@typeInfo(field.type)) {
                 .Bool => {
-                    assert(default_value(field).? == false); // boolean flags should have a default
+                    // boolean flags should have a default
+                    assert(default_value(field) != null);
+                    assert(default_value(field).? == false);
                 },
                 .Optional => |optional| {
-                    assert(default_value(field).? == null); // optional flags should have a default
+                    // optional flags should have a default
+                    assert(default_value(field) != null);
+                    assert(default_value(field).? == null);
+
                     assert_valid_value_type(optional.child);
                 },
                 else => {
@@ -224,9 +244,13 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     if (@hasField(Flags, "positional")) {
         assert(counts.positional <= positional_fields.len);
         inline for (positional_fields, 0..) |positional_field, positional_index| {
-            if (counts.positional == positional_index) {
+            if (positional_index >= counts.positional) {
                 const flag = comptime flag_name_positional(positional_field);
-                fatal("{s}: argument is required", .{flag});
+                if (default_value(positional_field)) |default| {
+                    @field(result.positional, positional_field.name) = default;
+                } else {
+                    fatal("{s}: argument is required", .{flag});
+                }
             }
         }
     }
@@ -549,6 +573,8 @@ pub usingnamespace if (@import("root") != @This()) struct {
         pos: struct { flag: bool = false, positional: struct {
             p1: []const u8,
             p2: []const u8,
+            p3: ?u32 = null,
+            p4: ?u32 = null,
         } },
         required: struct {
             foo: u8,
@@ -591,6 +617,8 @@ pub usingnamespace if (@import("root") != @This()) struct {
             .pos => |values| {
                 try out_stream.print("p1: {s}\n", .{values.positional.p1});
                 try out_stream.print("p2: {s}\n", .{values.positional.p2});
+                try out_stream.print("p3: {?}\n", .{values.positional.p3});
+                try out_stream.print("p4: {?}\n", .{values.positional.p4});
                 try out_stream.print("flag: {}\n", .{values.flag});
             },
             .required => |required| {
@@ -825,6 +853,28 @@ test "flags" {
         \\stdout:
         \\p1: y
         \\p2: y
+        \\p3: null
+        \\p4: null
+        \\flag: false
+        \\
+    ));
+
+    try t.check(&.{ "pos", "x", "y", "1" }, snap(@src(),
+        \\stdout:
+        \\p1: 1
+        \\p2: 1
+        \\p3: 1
+        \\p4: null
+        \\flag: false
+        \\
+    ));
+
+    try t.check(&.{ "pos", "x", "y", "1", "2" }, snap(@src(),
+        \\stdout:
+        \\p1: 2
+        \\p2: 2
+        \\p3: 2
+        \\p4: 2
         \\flag: false
         \\
     ));
@@ -846,7 +896,14 @@ test "flags" {
     try t.check(&.{ "pos", "x", "y", "z" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: unexpected argument: 'z'
+        \\error: <p3>: expected an integer value, but found 'z' (invalid digit)
+        \\
+    ));
+
+    try t.check(&.{ "pos", "x", "y", "1", "2", "3" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected argument: '3'
         \\
     ));
 
@@ -875,6 +932,8 @@ test "flags" {
         \\stdout:
         \\p1: y
         \\p2: y
+        \\p3: null
+        \\p4: null
         \\flag: true
         \\
     ));
