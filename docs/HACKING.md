@@ -5,68 +5,39 @@
 it requires a fairly modern kernel (≥ 5.6) and CPU. While at the moment only Linux is supported for
 production deployments, TigerBeetle also works on Windows and MacOS.
 
-## Setup
-
-First grab the sources and run the setup script:
+## Building
 
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle.git
 cd tigerbeetle
-scripts/install.sh
+./scripts/install_zig.sh # There's a .bat version for Windows.
+./zig/zig build -Drelease
+./tigerbeetle --version
 ```
 
-## Benchmark
+See the [Quick Start](./quick-start.md) for how to use a freshly-built TigerBeetle.
 
-With TigerBeetle installed, you are ready to benchmark!
+## Testing
+
+TigerBeetle has several layers of tests. The Zig unit tests can be run as:
 
 ```console
-./tigerbeetle benchmark
+./zig/zig build test
 ```
 
-See comments at the top of
-[/src/tigerbeetle/benchmark_load.zig](/src/tigerbeetle/benchmark_load.zig) for exactly what we're
-benchmarking.
-
-*If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
-
-## Running the Server
-
-Launch a TigerBeetle cluster on your local machine by running each of these commands in a new
-terminal tab:
+To run a single test, pass its name after `--`:
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
-
-./tigerbeetle start --addresses=3001,3002,3003 0_0.tigerbeetle
-./tigerbeetle start --addresses=3001,3002,3003 0_1.tigerbeetle
-./tigerbeetle start --addresses=3001,3002,3003 0_2.tigerbeetle
+./zig/zig build test -- parse_addresses
 ```
 
-Run the TigerBeetle binary to see all command line arguments:
+The entry point for various "minor" fuzzers is:
 
 ```console
-./tigerbeetle --help
+./zig/zig build fuzz -- smoke
 ```
 
-## Tests
-
-### Unit Tests
-
-To run the unit tests:
-
-```console
-zig/zig build test
-```
-
-To run a single test by name:
-
-```console
-zig/zig build test -- "name of test"
-```
-
-The [Setup](#setup) step above will install Zig for you to the root of the `tigerbeetle` directory.
+See [/src/fuzz_tests.zig](/src/fuzz_tests.zig) for the menu of available fuzzers.
 
 ### Simulation Tests
 
@@ -128,6 +99,51 @@ Everything is orchestrated by [ci.zig](/src/scripts/ci.zig) script:
 ```console
 ./zig/zig build scripts -- ci --language=go
 ```
+
+## Other Useful Commands
+
+Build & immediately run TigerBeetle:
+
+```console
+./zig/zig build run -- format ...
+```
+
+Quickly check if the code compiles without spending time to generate the binary:
+
+```console
+./zig/zig build check
+```
+
+Reformat the code according to style:
+
+```
+./zig/zig fmt .
+```
+
+Run lint checks:
+
+```
+./zig/zig build test -- tidy
+```
+
+Run macro benchmark:
+
+```
+./zig/zig build -Drelease run -- benchmark
+```
+
+See comments at the top of
+[/src/tigerbeetle/benchmark_load.zig](/src/tigerbeetle/benchmark_load.zig)
+for details of benchmarking.
+
+## Docs
+
+Developer-oriented documentation is at
+[/docs/about/internals/README.md](/docs/about/internals/README.md)
+
+## Getting In Touch
+
+Say hello in our [Slack](https://slack.tigerbeetle.com/invite)!
 
 ## Pull Requests
 
