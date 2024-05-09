@@ -9,8 +9,8 @@ for how you can map your application's requirements onto the data model.
 
 ## Accounts, Transfers, and Ledgers
 
-The TigerBeetle data model consists of [`Account`s](../api-reference/account.md),
-[`Transfer`s](../api-reference/transfer.md), and ledgers.
+The TigerBeetle data model consists of [`Account`s](../reference/account.md),
+[`Transfer`s](../reference/transfer.md), and ledgers.
 
 ### Ledgers
 
@@ -19,7 +19,7 @@ logical grouping. Only accounts on the same ledger can transact directly, but yo
 linked transfers to implement [currency exchange](./recipes/currency-exchange.md).
 
 Ledgers are only stored in TigerBeetle as a numeric identifier on the
-[account](../api-reference/account.md#ledger) and [transfer](../api-reference/transfer.md) data
+[account](../reference/account.md#ledger) and [transfer](../reference/transfer.md) data
 structures. You may want to store additional metadata about each ledger in a control plane
 [database](./system-architecture.md).
 
@@ -52,7 +52,7 @@ By convention, debit balances are used to represent:
 - Operator's Expenses
 
 To enforce a positive (non-negative) debit balance, use
-[`flags.credits_must_not_exceed_debits`](../api-reference/account.md#flagscredits_must_not_exceed_debits).
+[`flags.credits_must_not_exceed_debits`](../reference/account.md#flagscredits_must_not_exceed_debits).
 
 ### Credit Balances
 
@@ -65,7 +65,7 @@ By convention, credit balances are used to represent:
 - Operator's Income
 
 To enforce a positive (non-negative) credit balance, use
-[`flags.debits_must_not_exceed_credits`](../api-reference/account.md#flagsdebits_must_not_exceed_credits).
+[`flags.debits_must_not_exceed_credits`](../reference/account.md#flagsdebits_must_not_exceed_credits).
 For example, a customer account that is represented as an Operator's Liability would use this flag
 to ensure that the balance cannot go negative.
 
@@ -77,8 +77,8 @@ about implementing compound transfers in
 
 ## Fractional Amounts and Asset Scale
 
-To maximize precision and efficiency, [`Account`](../api-reference/account.md) debits/credits and
-[`Transfer`](../api-reference/transfer.md) amounts are unsigned 128-bit integers. However,
+To maximize precision and efficiency, [`Account`](../reference/account.md) debits/credits and
+[`Transfer`](../reference/transfer.md) amounts are unsigned 128-bit integers. However,
 currencies are often denominated in fractional amounts.
 
 To represent a fractional amount in TigerBeetle, **map the smallest useful unit of the fractional
@@ -122,7 +122,7 @@ to the new one.
 ## `user_data`
 
 `user_data_128`, `user_data_64` and `user_data_32` are the most flexible fields in the schema (for
-both [accounts](../api-reference/account.md) and [transfers](../api-reference/transfer.md)). Each
+both [accounts](../reference/account.md) and [transfers](../reference/transfer.md)). Each
 `user_data` field's contents are arbitrary, interpreted only by the application.
 
 Each `user_data` field is indexed for efficient point and range queries.
@@ -152,8 +152,8 @@ together. For example, for multiple transfers used for
 
 ## `id`
 
-The `id` field uniquely identifies each [`Account`](../api-reference/account.md#id) and
-[`Transfer`](../api-reference/transfer.md#id) within the cluster.
+The `id` field uniquely identifies each [`Account`](../reference/account.md#id) and
+[`Transfer`](../reference/transfer.md#id) within the cluster.
 
 The primary purpose of an `id` is to serve as an "idempotency key" — to avoid executing an event
 twice. For example, if a client creates a transfer but the server's reply is lost, the client (or
@@ -217,16 +217,16 @@ database. For example, if every user (within the application's database) has a s
 the identifier within the foreign database can be used as the `Account.id` within TigerBeetle.
 
 To reuse the foreign identifier, it must conform to TigerBeetle's `id`
-[constraints](../api-reference/account.md#id).
+[constraints](../reference/account.md#id).
 
 ## `code`
 
 The `code` identifier represents the "why" for an Account or Transfer.
 
-On an [`Account`](../api-reference/account.md#code), the `code` indicates the account type, such as
+On an [`Account`](../reference/account.md#code), the `code` indicates the account type, such as
 assets, liabilities, equity, income, or expenses, and subcategories within those classification.
 
-On a [`Transfer`](../api-reference/transfer.md#code), the `code` indicates why a given transfer is
+On a [`Transfer`](../reference/transfer.md#code), the `code` indicates why a given transfer is
 happening, such as a purchase, refund, currency exchange, etc.
 
 When you start building out your application on top of TigerBeetle, you may find it helpful to list

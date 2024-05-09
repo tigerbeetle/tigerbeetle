@@ -10,7 +10,7 @@ State sync is used when when a lagging replica's log no longer intersects with t
 log — [WAL repair](./vsr.md#protocol-repair-wal) cannot catch the replica up.
 
 (VRR refers to state sync as "state transfer", but we already have
-[transfers](../../api-reference/transfer.md) elsewhere.)
+[transfers](../../reference/transfer.md) elsewhere.)
 
 In the context of state sync, "state" refers to:
 

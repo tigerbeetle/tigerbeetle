@@ -1,8 +1,8 @@
 # Developing Applications on TigerBeetle
 
 TigerBeetle is a domain-specific, [Online Transaction Processing (OLTP)](../about/oltp.md) database.
-It has a fixed schema consisting of [`Account`s](../api-reference/account.md) and
-[`Transfer`s](../api-reference/transfer.md). In return for this prescriptive design, it provides
+It has a fixed schema consisting of [`Account`s](../reference/account.md) and
+[`Transfer`s](../reference/transfer.md). In return for this prescriptive design, it provides
 excellent performance, integrated business logic, and powerful invariants.
 
 To help you get started building on TigerBeetle, here is a quick overview of the most important
@@ -10,14 +10,14 @@ concepts:
 
 ## Data Model Overview
 
-- [`Account`s](../api-reference/account.md) track balances for users or other entities.
-- [`Transfer`s](../api-reference/transfer.md) move funds between `Account`s.
+- [`Account`s](../reference/account.md) track balances for users or other entities.
+- [`Transfer`s](../reference/transfer.md) move funds between `Account`s.
 - Account balances and transfer amounts are represented as debits and credits. Double-entry
   bookkeeping ensures your accounting maintains consistency.
 - Accounts are partitioned into [Ledgers](./data-modeling.md#ledgers), which may represent different
   currencies, assets, liabilities, etc. or they may be used to support multitenancy. Only accounts
   on the same ledger can transact directly, but you can use atomically
-  [linked transfers](../api-reference/requests/README.md#linked-events) to implement
+  [linked transfers](../reference/requests/README.md#linked-events) to implement
   [cross-currency transactions](./recipes/currency-exchange.md).
 - TigerBeetle has first-class support for [two-phase transfers](./two-phase-transfers.md), which can
   hold funds in a pending state and can be used to synchronize transfers with external systems.

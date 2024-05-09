@@ -26,7 +26,7 @@ metadata that is updated less frequently.
 - Handle authentication and authorization
 - Create account records in both the general purpose database and TigerBeetle when users sign up
 - [Cache ledger metadata](#ledger-account-and-transfer-types)
-- [Batch transfers](../api-reference/requests/README.md#batching-events)
+- [Batch transfers](../reference/requests/README.md#batching-events)
 - Apply exchange rates for [currency exchange](./recipes/currency-exchange.md) transactions
 
 **General Purpose (OLGP) Database**

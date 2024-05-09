@@ -8,7 +8,7 @@ An `AccountBalance` is a record storing the [`Account`](./account.md)'s balance 
 time.
 
 Only Accounts with the flag [`history`](./account.md#flagshistory) set retain
-[historical balances](https://docs.tigerbeetle.com/api-reference/operations/get_account_balances).
+[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
 
 ## Fields
 
