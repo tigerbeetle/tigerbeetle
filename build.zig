@@ -459,25 +459,6 @@ pub fn build(b: *std.Build) !void {
         run_step.dependOn(&run_cmd.step);
     }
 
-    {
-        const vopr = b.addExecutable(.{
-            .name = "vopr",
-            .root_source_file = .{ .path = "src/vopr.zig" },
-            .target = target,
-            .optimize = if (b.args != null) mode else .ReleaseSafe,
-        });
-        // Ensure that we get stack traces even in release builds.
-        vopr.omit_frame_pointer = false;
-        vopr.addOptions("vsr_options", options);
-        link_tracer_backend(vopr, git_clone_tracy, tracer_backend, target);
-
-        const run_cmd = b.addRunArtifact(vopr);
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const step = b.step("vopr", "Run the VOPR");
-        step.dependOn(&run_cmd.step);
-    }
-
     { // Fuzzers: zig build fuzz -- lsm_tree --seed=92 --events-max=100
         const fuzz_exe = b.addExecutable(.{
             .name = "fuzz",
