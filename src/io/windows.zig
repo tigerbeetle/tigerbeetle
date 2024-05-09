@@ -957,7 +957,11 @@ pub const IO = struct {
 
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
-    fn open_file_handle(relative_path: []const u8, method: enum { create, open }) !os.fd_t {
+    fn open_file_handle(
+        dir_handle: os.fd_t,
+        relative_path: []const u8,
+        method: enum { create, open },
+    ) !os.fd_t {
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL
@@ -977,31 +981,37 @@ pub const IO = struct {
         const shared_mode: os.windows.DWORD = 0;
 
         // O_RDWR
+        // Zig's mask seems wonky; according to
+        // https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile
+        // FILE_GENERIC_READ should include SYNCHRONIZE but it does not.
         var access_mask: os.windows.DWORD = 0;
+        access_mask |= os.windows.SYNCHRONIZE;
         access_mask |= os.windows.GENERIC_READ;
         access_mask |= os.windows.GENERIC_WRITE;
 
         // O_DIRECT | O_DSYNC
+        // NB: These are NtDll flags, not to be confused with the Win32 style flags that are
+        // similar but different (!).
         var attributes: os.windows.DWORD = 0;
-        attributes |= os.windows.FILE_FLAG_NO_BUFFERING;
-        attributes |= os.windows.FILE_FLAG_WRITE_THROUGH;
+        attributes |= os.windows.FILE_NO_INTERMEDIATE_BUFFERING;
+        attributes |= os.windows.FILE_WRITE_THROUGH;
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert((attributes & os.windows.FILE_FLAG_WRITE_THROUGH) > 0);
+        assert((attributes & os.windows.FILE_WRITE_THROUGH) > 0);
 
         // TODO: Add ReadFileEx/WriteFileEx support.
         // Not currently needed for O_DIRECT disk IO.
         // attributes |= os.windows.FILE_FLAG_OVERLAPPED;
-
-        const handle = os.windows.kernel32.CreateFileW(
-            path_w.span(),
-            access_mask,
-            shared_mode,
-            null, // no security attributes required
-            creation_disposition,
-            attributes,
-            null, // no existing template file
-        );
+        const handle = try windows_open_file(path_w.span(), .{
+            .access_mask = access_mask,
+            .dir = dir_handle,
+            .sa = null,
+            .share_access = shared_mode,
+            .creation = creation_disposition,
+            .io_mode = .blocking,
+            .filter = .file_only,
+            .follow_symlinks = true,
+        }, attributes);
 
         if (handle == os.windows.INVALID_HANDLE_VALUE) {
             return switch (os.windows.kernel32.GetLastError()) {
@@ -1038,10 +1048,10 @@ pub const IO = struct {
         _ = direct_io;
 
         const handle = switch (method) {
-            .open => try open_file_handle(relative_path, .open),
-            .create => try open_file_handle(relative_path, .create),
-            .create_or_open => open_file_handle(relative_path, .open) catch |err| switch (err) {
-                error.FileNotFound => try open_file_handle(relative_path, .create),
+            .open => try open_file_handle(dir_handle, relative_path, .open),
+            .create => try open_file_handle(dir_handle, relative_path, .create),
+            .create_or_open => open_file_handle(dir_handle, relative_path, .open) catch |err| switch (err) {
+                error.FileNotFound => try open_file_handle(dir_handle, relative_path, .create),
                 else => return err,
             },
         };
@@ -1083,7 +1093,6 @@ pub const IO = struct {
         // We have no way to open a directory with write access.
         //
         // try os.fsync(dir_handle);
-        _ = dir_handle;
 
         const file_size = try os.windows.GetFileSizeEx(handle);
         if (file_size < size) @panic("data file inode size was truncated or corrupted");
@@ -1210,4 +1219,109 @@ fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
         .WSAECONNRESET => error.ConnectionResetByPeer,
         else => |e| os.windows.unexpectedWSAError(e),
     };
+}
+
+// Vendor std.os.windows.OpenFile so we can set file attributes. Add it as a parameter after
+// `options`, so we don't have to vendor that struct too.
+pub fn windows_open_file(
+    sub_path_w: []const u16,
+    options: os.windows.OpenFileOptions,
+    file_flags: os.windows.ULONG,
+) os.windows.OpenError!os.windows.HANDLE {
+    if (std.mem.eql(u16, sub_path_w, &[_]u16{'.'}) and options.filter == .file_only) {
+        return error.IsDir;
+    }
+    if (std.mem.eql(u16, sub_path_w, &[_]u16{ '.', '.' }) and options.filter == .file_only) {
+        return error.IsDir;
+    }
+
+    var result: os.windows.HANDLE = undefined;
+
+    const path_len_bytes = std.math.cast(u16, sub_path_w.len * 2) orelse return error.NameTooLong;
+    var nt_name = os.windows.UNICODE_STRING{
+        .Length = path_len_bytes,
+        .MaximumLength = path_len_bytes,
+        .Buffer = @constCast(sub_path_w.ptr),
+    };
+    var attr = os.windows.OBJECT_ATTRIBUTES{
+        .Length = @sizeOf(os.windows.OBJECT_ATTRIBUTES),
+        .RootDirectory = if (std.fs.path.isAbsoluteWindowsWTF16(sub_path_w)) null else options.dir,
+        .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
+        .ObjectName = &nt_name,
+        .SecurityDescriptor = if (options.sa) |ptr| ptr.lpSecurityDescriptor else null,
+        .SecurityQualityOfService = null,
+    };
+    var io: os.windows.IO_STATUS_BLOCK = undefined;
+    const blocking_flag: os.windows.ULONG = if (options.io_mode == .blocking)
+        os.windows.FILE_SYNCHRONOUS_IO_NONALERT
+    else
+        0;
+    const file_or_dir_flag: os.windows.ULONG = switch (options.filter) {
+        .file_only => os.windows.FILE_NON_DIRECTORY_FILE,
+        .dir_only => os.windows.FILE_DIRECTORY_FILE,
+        .any => 0,
+    };
+    // If we're not following symlinks, we need to ensure we don't pass in any synchronization
+    // flags such as FILE_SYNCHRONOUS_IO_NONALERT.
+    const flags: os.windows.ULONG = if (options.follow_symlinks)
+        file_or_dir_flag | blocking_flag
+    else
+        file_or_dir_flag | os.windows.FILE_OPEN_REPARSE_POINT;
+
+    while (true) {
+        const rc = os.windows.ntdll.NtCreateFile(
+            &result,
+            options.access_mask,
+            &attr,
+            &io,
+            null,
+            os.windows.FILE_ATTRIBUTE_NORMAL,
+            options.share_access,
+            options.creation,
+            flags | file_flags,
+            null,
+            0,
+        );
+        switch (rc) {
+            .SUCCESS => {
+                if (std.io.is_async and options.io_mode == .evented) {
+                    _ = os.windows.CreateIoCompletionPort(
+                        result,
+                        std.event.Loop.instance.?.os_data.io_port,
+                        undefined,
+                        undefined,
+                    ) catch undefined;
+                }
+                return result;
+            },
+            .OBJECT_NAME_INVALID => unreachable,
+            .OBJECT_NAME_NOT_FOUND => return error.FileNotFound,
+            .OBJECT_PATH_NOT_FOUND => return error.FileNotFound,
+            .BAD_NETWORK_PATH => return error.NetworkNotFound, // \\server was not found
+            // \\server was found but \\server\share wasn't
+            .BAD_NETWORK_NAME => return error.NetworkNotFound,
+            .NO_MEDIA_IN_DEVICE => return error.NoDevice,
+            .INVALID_PARAMETER => unreachable,
+            .SHARING_VIOLATION => return error.AccessDenied,
+            .ACCESS_DENIED => return error.AccessDenied,
+            .PIPE_BUSY => return error.PipeBusy,
+            .OBJECT_PATH_SYNTAX_BAD => unreachable,
+            .OBJECT_NAME_COLLISION => return error.PathAlreadyExists,
+            .FILE_IS_A_DIRECTORY => return error.IsDir,
+            .NOT_A_DIRECTORY => return error.NotDir,
+            .USER_MAPPED_FILE => return error.AccessDenied,
+            .INVALID_HANDLE => unreachable,
+            .DELETE_PENDING => {
+                // This error means that there *was* a file in this location on
+                // the file system, but it was deleted. However, the OS is not
+                // finished with the deletion operation, and so this CreateFile
+                // call has failed. There is not really a sane way to handle
+                // this other than retrying the creation after the OS finishes
+                // the deletion.
+                std.time.sleep(std.time.ns_per_ms);
+                continue;
+            },
+            else => return os.windows.unexpectedStatus(rc),
+        }
+    }
 }
