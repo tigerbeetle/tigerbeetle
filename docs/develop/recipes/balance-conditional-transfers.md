@@ -8,9 +8,9 @@ In some use cases, you may want to execute a transfer if and only if an account 
 certain balance.
 
 It would be unsafe to check an account's balance using the
-[`lookup_accounts`](../../reference/operations/lookup_accounts.md) and then perform the transfer,
-because these operations are not be atomic and the account's balance may change between the lookup
-and the transfer.
+[`lookup_accounts`](../../reference/requests/lookup_accounts.md) and then perform the transfer,
+because these requests are not be atomic and the account's balance may change between the lookup and
+the transfer.
 
 You can atomically run a check against an account's balance before executing a transfer by using a
 control or temporary account and linked transfers.
@@ -21,9 +21,9 @@ control or temporary account and linked transfers.
 
 The account for whom you want to do the balance check must have one of these flags set:
 
-- [`flags.debits_must_not_exceed_credits`](../../reference/accounts.md#flagsdebits_must_not_exceed_credits)
+- [`flags.debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits)
   for accounts with [credit balances](../data-modeling.md#credit-balances)
-- [`flags.credits_must_not_exceed_debits`](../../reference/accounts.md#flagscredits_must_not_exceed_debits)
+- [`flags.credits_must_not_exceed_debits`](../../reference/account.md#flagscredits_must_not_exceed_debits)
   for accounts with [debit balances](../data-modeling.md#debit-balances)
 
 ### 2. Create a Control Account
@@ -35,7 +35,7 @@ and out of the control account.
 ## Executing a Balance-Conditional Transfer
 
 The balance-conditional transfer consists of 3
-[linked transfers](../client-requests.md#linked-events).
+[linked transfers](../../reference/requests/README.md#linked-events).
 
 We will refer to two amounts:
 
@@ -46,19 +46,19 @@ We will refer to two amounts:
 
 ### If the Source Account Has a Credit Balance
 
-| Transfer | Debit Account | Credit Account | Amount    | Flags                                                      |
-| -------- | ------------- | -------------- | --------- | ---------------------------------------------------------- |
-| 1        | Source        | Control        | Threshold | [`flags.linked`](../../reference/transfers.md#flagslinked) |
-| 2        | Control       | Source         | Threshold | [`flags.linked`](../../reference/transfers.md#flagslinked) |
-| 3        | Source        | Destination    | Transfer  | N/A                                                        |
+| Transfer | Debit Account | Credit Account | Amount    | Flags                                                          |
+| -------- | ------------- | -------------- | --------- | -------------------------------------------------------------- |
+| 1        | Source        | Control        | Threshold | [`flags.linked`](../../reference/transfer.md#flagslinked) |
+| 2        | Control       | Source         | Threshold | [`flags.linked`](../../reference/transfer.md#flagslinked) |
+| 3        | Source        | Destination    | Transfer  | N/A                                                            |
 
 ### If the Source Account Has a Debit Balance
 
-| Transfer | Debit Account | Credit Account | Amount    | Flags                                                      |
-| -------- | ------------- | -------------- | --------- | ---------------------------------------------------------- |
-| 1        | Control       | Source         | Threshold | [`flags.linked`](../../reference/transfers.md#flagslinked) |
-| 2        | Source        | Control        | Threshold | [`flags.linked`](../../reference/transfers.md#flagslinked) |
-| 3        | Destination   | Source         | Transfer  | N/A                                                        |
+| Transfer | Debit Account | Credit Account | Amount    | Flags                                                          |
+| -------- | ------------- | -------------- | --------- | -------------------------------------------------------------- |
+| 1        | Control       | Source         | Threshold | [`flags.linked`](../../reference/transfer.md#flagslinked) |
+| 2        | Source        | Control        | Threshold | [`flags.linked`](../../reference/transfer.md#flagslinked) |
+| 3        | Destination   | Source         | Transfer  | N/A                                                            |
 
 ### Understanding the Mechanism
 

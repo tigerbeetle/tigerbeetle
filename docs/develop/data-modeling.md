@@ -9,8 +9,8 @@ for how you can map your application's requirements onto the data model.
 
 ## Accounts, Transfers, and Ledgers
 
-The TigerBeetle data model consists of [`Account`s](../reference/accounts.md),
-[`Transfer`s](../reference/transfers.md), and ledgers.
+The TigerBeetle data model consists of [`Account`s](../reference/account.md),
+[`Transfer`s](../reference/transfer.md), and ledgers.
 
 ### Ledgers
 
@@ -19,7 +19,7 @@ logical grouping. Only accounts on the same ledger can transact directly, but yo
 linked transfers to implement [currency exchange](./recipes/currency-exchange.md).
 
 Ledgers are only stored in TigerBeetle as a numeric identifier on the
-[account](../reference/accounts.md#ledger) and [transfer](../reference/transfers.md) data
+[account](../reference/account.md#ledger) and [transfer](../reference/transfer.md) data
 structures. You may want to store additional metadata about each ledger in a control plane
 [database](./system-architecture.md).
 
@@ -52,7 +52,7 @@ By convention, debit balances are used to represent:
 - Operator's Expenses
 
 To enforce a positive (non-negative) debit balance, use
-[`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits).
+[`flags.credits_must_not_exceed_debits`](../reference/account.md#flagscredits_must_not_exceed_debits).
 
 ### Credit Balances
 
@@ -65,21 +65,21 @@ By convention, credit balances are used to represent:
 - Operator's Income
 
 To enforce a positive (non-negative) credit balance, use
-[`flags.debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits).
+[`flags.debits_must_not_exceed_credits`](../reference/account.md#flagsdebits_must_not_exceed_credits).
 For example, a customer account that is represented as an Operator's Liability would use this flag
 to ensure that the balance cannot go negative.
 
 ### Compound Transfers
 
 `Transfer`s in TigerBeetle debit a single account and credit a single account. You can read more
-about implementing compound transfers in [Multi-Debit, Multi-Credit
-Transfers](./recipes/multi-debit-credit-transfers.md).
+about implementing compound transfers in
+[Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfers.md).
 
 ## Fractional Amounts and Asset Scale
 
-To maximize precision and efficiency, [`Account`](../reference/accounts.md) debits/credits and
-[`Transfer`](../reference/transfers.md) amounts are unsigned 128-bit integers. However, currencies
-are often denominated in fractional amounts.
+To maximize precision and efficiency, [`Account`](../reference/account.md) debits/credits and
+[`Transfer`](../reference/transfer.md) amounts are unsigned 128-bit integers. However,
+currencies are often denominated in fractional amounts.
 
 To represent a fractional amount in TigerBeetle, **map the smallest useful unit of the fractional
 currency to 1**. Consider all amounts in TigerBeetle as a multiple of that unit.
@@ -116,13 +116,13 @@ For example, it might seem natural to use an asset scale of 2 for many currencie
 be wise to use a higher scale in case you ever need to represent smaller fractions of that asset.
 
 Accounts and transfers are immutable once created. In order to change the asset scale of a ledger,
-you would need to use a different `ledger` number and duplicate all the accounts on that ledger
-over to the new one.
+you would need to use a different `ledger` number and duplicate all the accounts on that ledger over
+to the new one.
 
 ## `user_data`
 
 `user_data_128`, `user_data_64` and `user_data_32` are the most flexible fields in the schema (for
-both [accounts](../reference/accounts.md) and [transfers](../reference/transfers.md)). Each
+both [accounts](../reference/account.md) and [transfers](../reference/transfer.md)). Each
 `user_data` field's contents are arbitrary, interpreted only by the application.
 
 Each `user_data` field is indexed for efficient point and range queries.
@@ -131,14 +131,14 @@ While the usage of each field is entirely up to you, one way of thinking about e
 is:
 
 - `user_data_128` - this might store the "who" and/or "what" of a transfer. For example, it could be
-  a pointer to a business entity stored within the [control
-  plane](https://en.wikipedia.org/wiki/Control_plane) database.
+  a pointer to a business entity stored within the
+  [control plane](https://en.wikipedia.org/wiki/Control_plane) database.
 - `user_data_64` - this might store a second timestamp for "when" the transaction originated in the
-  real world, rather than when the transfer was [timestamped by
-  TigerBeetle](./time.md#why-tigerbeetle-manages-timestamps). This can be used if you need to model
-  [bitemporality](https://en.wikipedia.org/wiki/Bitemporal_modeling). Alternatively, if you do not
-  need this to be used for a timestamp, you could use this field in place of the `user_data_128` to
-  store the "who"/"what".
+  real world, rather than when the transfer was
+  [timestamped by TigerBeetle](./time.md#why-tigerbeetle-manages-timestamps). This can be used if
+  you need to model [bitemporality](https://en.wikipedia.org/wiki/Bitemporal_modeling).
+  Alternatively, if you do not need this to be used for a timestamp, you could use this field in
+  place of the `user_data_128` to store the "who"/"what".
 - `user_data_32` - this might store the "where" of a transfer. For example, it could store the
   jurisdiction where the transaction originated in the real world. In certain cases, such as for
   cross-border remittances, it might not be enough to have the UTC timestamp and you may want to
@@ -147,13 +147,13 @@ is:
 (Note that the [`code`](#code) can be used to encode the "why" of a transfer.)
 
 Any of the `user_data` fields can be used as a group identifier for objects that will be queried
-together. For example, for multiple transfers used for [currency
-exchange](./recipes/currency-exchange.md).
+together. For example, for multiple transfers used for
+[currency exchange](./recipes/currency-exchange.md).
 
 ## `id`
 
-The `id` field uniquely identifies each [`Account`](../reference/accounts.md#id) and
-[`Transfer`](../reference/transfers.md#id) within the cluster.
+The `id` field uniquely identifies each [`Account`](../reference/account.md#id) and
+[`Transfer`](../reference/transfer.md#id) within the cluster.
 
 The primary purpose of an `id` is to serve as an "idempotency key" — to avoid executing an event
 twice. For example, if a client creates a transfer but the server's reply is lost, the client (or
@@ -162,16 +162,16 @@ application) will retry — the database must not transfer the money twice.
 Note that `id`s are unique per cluster -- not per ledger. You should attach a separate identifier in
 the [`user_data`](#user_data) field if you want to store a connection between multiple `Account`s or
 multiple `Transfer`s that are related to one another. For example, different currency `Account`s
-belonging to the same user or multiple `Transfer`s that are part of a [currency
-exchange](./recipes/currency-exchange.md).
+belonging to the same user or multiple `Transfer`s that are part of a
+[currency exchange](./recipes/currency-exchange.md).
 
 [TigerBeetle Time-Based Identifiers](#tigerbeetle-time-based-identifiers-recommended) are
 recommended for most applications.
 
 When selecting an `id` scheme:
 
-- Idempotency is particularly important (and difficult) in the context of [application crash
-  recovery](./consistency.md#consistency-with-foreign-databases).
+- Idempotency is particularly important (and difficult) in the context of
+  [application crash recovery](./reliable-transaction-submission.md).
 - Be careful to [avoid `id` collisions](https://en.wikipedia.org/wiki/Birthday_problem).
 - An account and a transfer may share the same `id` (they belong to different "namespaces"), but
   this is not recommended because other systems (that you may later connect to TigerBeetle) may use
@@ -217,16 +217,16 @@ database. For example, if every user (within the application's database) has a s
 the identifier within the foreign database can be used as the `Account.id` within TigerBeetle.
 
 To reuse the foreign identifier, it must conform to TigerBeetle's `id`
-[constraints](../reference/accounts.md#id).
+[constraints](../reference/account.md#id).
 
 ## `code`
 
 The `code` identifier represents the "why" for an Account or Transfer.
 
-On an [`Account`](../reference/accounts.md#code), the `code` indicates the account type, such as
+On an [`Account`](../reference/account.md#code), the `code` indicates the account type, such as
 assets, liabilities, equity, income, or expenses, and subcategories within those classification.
 
-On a [`Transfer`](../reference/transfers.md#code), the `code` indicates why a given transfer is
+On a [`Transfer`](../reference/transfer.md#code), the `code` indicates why a given transfer is
 happening, such as a purchase, refund, currency exchange, etc.
 
 When you start building out your application on top of TigerBeetle, you may find it helpful to list

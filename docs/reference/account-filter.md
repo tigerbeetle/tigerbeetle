@@ -2,17 +2,17 @@
 sidebar_position: 4
 ---
 
-# Account Filter
+# `AccountFilter`
 
 An `AccountFilter` is a record containing the filter parameters for querying
-the [account transfers](operations/get_account_transfers.md)
-and the [account historical balances](operations/get_account_balances.md).
+the [account transfers](./requests/get_account_transfers.md)
+and the [account historical balances](./requests/get_account_balances.md).
 
 ## Fields
 
 ### `account_id`
 
-The unique [identifier](accounts.md#id) of the account for which the results will be retrieved.
+The unique [identifier](account.md#id) of the account for which the results will be retrieved.
 
 Constraints:
 
@@ -21,7 +21,7 @@ Constraints:
 
 ### `timestamp_min`
 
-The minimum [`Transfer.timestamp`](transfers.md#timestamp) from which results will be returned, inclusive range.
+The minimum [`Transfer.timestamp`](transfer.md#timestamp) from which results will be returned, inclusive range.
 Optional; set to zero to disable the lower-bound filter.
 
 Constraints:
@@ -31,7 +31,7 @@ Constraints:
 
 ### `timestamp_max`
 
-The maximum [`Transfer.timestamp`](transfers.md#timestamp) from which results will be returned, inclusive range.
+The maximum [`Transfer.timestamp`](transfer.md#timestamp) from which results will be returned, inclusive range.
 Optional; set to zero to disable the upper-bound filter.
 
 Constraints:
@@ -43,7 +43,7 @@ Constraints:
 
 The maximum number of results that can be returned by this query.
 
-Limited by the [maximum message size](../develop/client-requests.md#batching-events).
+Limited by the [maximum message size](./requests/README.md#batching-events).
 
 Constraints:
 
@@ -60,12 +60,12 @@ Constraints:
 
 #### `flags.debits`
 
-Whether or not to include results where the field [`debit_account_id`](transfers.md#debit_account_id)
+Whether or not to include results where the field [`debit_account_id`](transfer.md#debit_account_id)
 matches the parameter [`account_id`](#account_id).
 
 #### `flags.credits`
 
-Whether or not to include results where the field [`credit_account_id`](transfers.md#credit_account_id)
+Whether or not to include results where the field [`credit_account_id`](transfer.md#credit_account_id)
 matches the parameter [`account_id`](#account_id).
 
 #### `flags.reversed`

@@ -4,11 +4,11 @@ Fetch one or more accounts by their `id`s.
 
 ## Event
 
-An [`id`](../accounts.md#id) belonging to a [`Account`](../accounts.md).
+An [`id`](../account.md#id) belonging to a [`Account`](../account.md).
 
 ## Result
 
-- If the account exists, return the [`Account`](../accounts.md).
+- If the account exists, return the [`Account`](../account.md).
 - If the account does not exist, return nothing.
 
 ## Client libraries

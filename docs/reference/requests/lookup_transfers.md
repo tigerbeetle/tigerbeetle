@@ -4,11 +4,11 @@ Fetch one or more transfers by their `id`s.
 
 ## Event
 
-An [`id`](../transfers.md#id) belonging to a [`Transfer`](../transfers.md).
+An [`id`](../transfer.md#id) belonging to a [`Transfer`](../transfer.md).
 
 ## Result
 
-- If the transfer exists, return the [`Transfer`](../transfers.md).
+- If the transfer exists, return the [`Transfer`](../transfer.md).
 - If the transfer does not exist, return nothing.
 
 ## Client libraries
