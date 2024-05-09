@@ -90,12 +90,12 @@ const Fuzzer = enum {
                 ""
             else
                 " --lite";
-            return try shell.print(
+            return try shell.fmt(
                 "./zig/zig build -Drelease{s} simulator_run --{s} {d}",
                 .{ state_machine, lite, seed },
             );
         }
-        return try shell.print(
+        return try shell.fmt(
             "./zig/zig build -Drelease fuzz -- --seed={d} {s}",
             .{ seed, @tagName(fuzzer) },
         );
@@ -351,7 +351,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
                 if (stdx.cut(label.name, "fuzz ") != null) break;
             } else continue;
 
-            const pr_directory = try shell.print("./working/{d}", .{pr.number});
+            const pr_directory = try shell.fmt("./working/{d}", .{pr.number});
             try shell.cwd.makePath(pr_directory);
             try shell.pushd(pr_directory);
             defer shell.popd();
@@ -380,7 +380,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
                         .commit_timestamp = commit.timestamp,
                         .commit_sha = commit.sha,
                         .fuzzer = fuzzer,
-                        .branch = try shell.print(
+                        .branch = try shell.fmt(
                             "https://github.com/tigerbeetle/tigerbeetle/pull/{d}",
                             .{pr.number},
                         ),

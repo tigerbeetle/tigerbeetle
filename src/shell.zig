@@ -107,19 +107,19 @@ const ansi = .{
 /// Prints formatted input to stderr.
 /// Newline symbol is appended automatically.
 /// ANSI colors are supported via `"{ansi-red}my colored text{ansi-reset}"` syntax.
-pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
+pub fn echo(shell: *Shell, comptime format: []const u8, format_args: anytype) void {
     _ = shell;
 
-    comptime var fmt_ansi: []const u8 = "";
+    comptime var format_ansi: []const u8 = "";
     comptime var pos: usize = 0;
     comptime var pos_start: usize = 0;
 
-    comptime next_pos: while (pos < fmt.len) {
-        if (fmt[pos] == '{') {
+    comptime next_pos: while (pos < format.len) {
+        if (format[pos] == '{') {
             for (std.meta.fieldNames(@TypeOf(ansi))) |field_name| {
                 const tag = "{ansi-" ++ field_name ++ "}";
-                if (std.mem.startsWith(u8, fmt[pos..], tag)) {
-                    fmt_ansi = fmt_ansi ++ fmt[pos_start..pos] ++ @field(ansi, field_name);
+                if (std.mem.startsWith(u8, format[pos..], tag)) {
+                    format_ansi = format_ansi ++ format[pos_start..pos] ++ @field(ansi, field_name);
                     pos += tag.len;
                     pos_start = pos;
                     continue :next_pos;
@@ -128,11 +128,11 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
         }
         pos += 1;
     };
-    comptime assert(pos == fmt.len);
+    comptime assert(pos == format.len);
 
-    fmt_ansi = fmt_ansi ++ fmt[pos_start..pos] ++ "\n";
+    format_ansi = format_ansi ++ format[pos_start..pos] ++ "\n";
 
-    std.debug.print(fmt_ansi, fmt_args);
+    std.debug.print(format_ansi, format_args);
 }
 
 /// Opens a logical, named section of the script.
@@ -177,8 +177,8 @@ const Section = struct {
 
 /// Convenience string formatting function which uses shell's arena and doesn't require
 /// freeing the resulting string.
-pub fn print(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) ![]const u8 {
-    return std.fmt.allocPrint(shell.arena.allocator(), fmt, fmt_args);
+pub fn fmt(shell: *Shell, comptime format: []const u8, format_args: anytype) ![]const u8 {
+    return std.fmt.allocPrint(shell.arena.allocator(), format, format_args);
 }
 
 pub fn env_get_option(shell: *Shell, var_name: []const u8) ?[]const u8 {
