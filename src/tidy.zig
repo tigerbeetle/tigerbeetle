@@ -153,9 +153,9 @@ const DeadDetector = struct {
             "jni_tests.zig",
             "main.zig",
             "node.zig",
+            "simulator.zig",
             "tb_client_header.zig",
             "unit_tests.zig",
-            "vopr.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;

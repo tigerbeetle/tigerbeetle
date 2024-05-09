@@ -917,7 +917,7 @@ fn parse_address(string: []const u8, port: u16) !std.net.Address {
     }
 }
 
-test "parse_addresses" {
+test parse_addresses {
     const vectors_positive = &[_]struct {
         raw: []const u8,
         addresses: []const std.net.Address,

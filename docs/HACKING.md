@@ -1,107 +1,56 @@
 # Hacking on TigerBeetle
 
-**Prerequisites:** The current beta version of TigerBeetle targets macOS and Linux and takes
-advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via
-[io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on macOS or on recent
-versions of Linux with an updated kernel.
+**Prerequisites:** TigerBeetle makes use of certain fairly new technologies, such as
+[io_uring](https://kernel.dk/io_uring.pdf) or advanced CPU instructions for cryptography. As such,
+it requires a fairly modern kernel (≥ 5.6) and CPU. While at the moment only Linux is supported for
+production deployments, TigerBeetle also works on Windows and MacOS.
 
-## Setup
-
-First grab the sources and run the setup script:
+## Building
 
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle.git
 cd tigerbeetle
-scripts/install.sh
+./scripts/install_zig.sh # There's a .bat version for Windows.
+./zig/zig build -Drelease
+./tigerbeetle --version
 ```
 
-## Benchmark
+See the [Quick Start](./quick-start.md) for how to use a freshly-built TigerBeetle.
 
-With TigerBeetle installed, you are ready to benchmark!
+## Testing
+
+TigerBeetle has several layers of tests. The Zig unit tests can be run as:
 
 ```console
-./tigerbeetle benchmark
+./zig/zig build test
 ```
 
-See comments at the top of
-[/src/tigerbeetle/benchmark_load.zig](/src/tigerbeetle/benchmark_load.zig) for exactly what we're
-benchmarking.
-
-*If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
-
-## Running the Server
-
-Launch a TigerBeetle cluster on your local machine by running each of these commands in a new
-terminal tab:
+To run a single test, pass its name after `--`:
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
-
-./tigerbeetle start --addresses=3001,3002,3003 0_0.tigerbeetle
-./tigerbeetle start --addresses=3001,3002,3003 0_1.tigerbeetle
-./tigerbeetle start --addresses=3001,3002,3003 0_2.tigerbeetle
+./zig/zig build test -- parse_addresses
 ```
 
-Run the TigerBeetle binary to see all command line arguments:
+The entry point for various "minor" fuzzers is:
 
 ```console
-./tigerbeetle --help
+./zig/zig build fuzz -- smoke
 ```
 
-## Tests
-
-### Unit Tests
-
-To run the unit tests:
-
-```console
-zig/zig build test
-```
-
-To run a single test by name:
-
-```console
-zig/zig build test:unit -- "name of test"
-```
-
-To run tests with code coverage (assuming `kcov` is installed on your system):
-
-```console
-COV=1 zig/zig build test
-open kcov-output/index.html
-```
-
-The [Setup](#setup) step above will install Zig for you to the root of the `tigerbeetle` directory.
+See [/src/fuzz_tests.zig](/src/fuzz_tests.zig) for the menu of available fuzzers.
 
 ### Simulation Tests
 
 To run TigerBeetle's long-running simulation, called *The VOPR*:
 
 ```console
-zig/zig build vopr
+zig/zig build simulator_run
 ```
 
-Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR
-Hub](/src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create
-GitHub issues as needed.
+To run the VOPR using a specific seed:
 
 ```console
-zig/zig build vopr -- --send
-```
-
-Run the VOPR using a specific seed. This will run in `Debug` mode by default but you can also
-include `--build-mode` to run in ReleaseSafe mode.
-
-```console
-zig/zig build vopr -- --seed=123 --build-mode=ReleaseSafe
-```
-
-To view all the available command line arguments simply use the `--help` flag.
-
-```console
-zig/zig build vopr -- --help
+zig/zig build simulator_run -- 123
 ```
 
 *The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames,
@@ -150,6 +99,51 @@ Everything is orchestrated by [ci.zig](/src/scripts/ci.zig) script:
 ```console
 ./zig/zig build scripts -- ci --language=go
 ```
+
+## Other Useful Commands
+
+Build & immediately run TigerBeetle:
+
+```console
+./zig/zig build run -- format ...
+```
+
+Quickly check if the code compiles without spending time to generate the binary:
+
+```console
+./zig/zig build check
+```
+
+Reformat the code according to style:
+
+```
+./zig/zig fmt .
+```
+
+Run lint checks:
+
+```
+./zig/zig build test -- tidy
+```
+
+Run macro benchmark:
+
+```
+./zig/zig build -Drelease run -- benchmark
+```
+
+See comments at the top of
+[/src/tigerbeetle/benchmark_load.zig](/src/tigerbeetle/benchmark_load.zig)
+for details of benchmarking.
+
+## Docs
+
+Developer-oriented documentation is at
+[/docs/about/internals/README.md](/docs/about/internals/README.md)
+
+## Getting In Touch
+
+Say hello in our [Slack](https://slack.tigerbeetle.com/invite)!
 
 ## Pull Requests
 
