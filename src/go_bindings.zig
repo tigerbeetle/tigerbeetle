@@ -1,7 +1,7 @@
 const std = @import("std");
 
-// vsr module isn't available when we're not the entry point (unit_test) so use path instead.
-const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
+// TODO: Move this back to src/clients/go when there's a better solution for main_pkg_path=src/
+const vsr = @import("vsr.zig");
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 

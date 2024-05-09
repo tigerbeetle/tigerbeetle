@@ -588,7 +588,7 @@ fn go_client(
 
     const bindings = b.addExecutable(.{
         .name = "go_bindings",
-        .root_source_file = .{ .path = "src/clients/go/go_bindings.zig" },
+        .root_source_file = .{ .path = "src/go_bindings.zig" },
         .target = target,
     });
     bindings.addModule("vsr", vsr_module);
@@ -611,7 +611,7 @@ fn go_client(
 
         const lib = b_isolated.addStaticLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .root_source_file = .{ .path = "src/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
         });
@@ -652,7 +652,7 @@ fn java_client(
 
     const bindings = b.addExecutable(.{
         .name = "java_bindings",
-        .root_source_file = .{ .path = "src/clients/java/java_bindings.zig" },
+        .root_source_file = .{ .path = "src/java_bindings.zig" },
         .target = target,
     });
     bindings.addModule("vsr", vsr_module);
@@ -710,7 +710,7 @@ fn dotnet_client(
 
     const bindings = b.addExecutable(.{
         .name = "dotnet_bindings",
-        .root_source_file = .{ .path = "src/clients/dotnet/dotnet_bindings.zig" },
+        .root_source_file = .{ .path = "src/dotnet_bindings.zig" },
         .target = target,
     });
     bindings.addModule("vsr", vsr_module);
@@ -723,7 +723,7 @@ fn dotnet_client(
 
         const lib = b_isolated.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .root_source_file = .{ .path = "src/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
         });
@@ -766,7 +766,7 @@ fn node_client(
 
     const bindings = b.addExecutable(.{
         .name = "node_bindings",
-        .root_source_file = .{ .path = "src/clients/node/node_bindings.zig" },
+        .root_source_file = .{ .path = "src/node_bindings.zig" },
         .target = target,
     });
     bindings.addModule("vsr", vsr_module);
@@ -879,13 +879,13 @@ fn c_client(
 
         const shared_lib = b_isolated.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .root_source_file = .{ .path = "src/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
         });
         const static_lib = b_isolated.addStaticLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .root_source_file = .{ .path = "src/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
         });
@@ -932,7 +932,7 @@ fn c_client_sample(
 
     const static_lib = b.addStaticLibrary(.{
         .name = "tb_client",
-        .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+        .root_source_file = .{ .path = "src/tb_client_exports.zig" },
         .target = target,
         .optimize = mode,
     });

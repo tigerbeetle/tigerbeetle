@@ -15,10 +15,10 @@ comptime {
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client/echo_client.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
-    _ = @import("clients/dotnet/dotnet_bindings.zig");
-    _ = @import("clients/go/go_bindings.zig");
-    _ = @import("clients/java/java_bindings.zig");
-    _ = @import("clients/node/node_bindings.zig");
+    _ = @import("dotnet_bindings.zig");
+    _ = @import("go_bindings.zig");
+    _ = @import("java_bindings.zig");
+    _ = @import("node_bindings.zig");
 
     _ = @import("io/test.zig");
 
