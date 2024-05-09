@@ -206,6 +206,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         pub const Options = struct {
             node_count: u32,
+            /// The amount of blocks allocated for compactions. Compactions will be deterministic
+            /// regardless of how much blocks you give them, but will run in fewer steps with more
+            /// memory.
             compaction_block_count: u32,
 
             pub const compaction_block_count_min: u32 = CompactionPipeline.block_count_min;

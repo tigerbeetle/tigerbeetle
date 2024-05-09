@@ -227,7 +227,10 @@ const start_defaults_production = StartDefaults{
     .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
     .cache_account_balances = .{ .value = constants.cache_account_balances_size_default },
     .cache_grid = .{ .value = constants.grid_cache_size_default },
-    .memory_lsm_compaction = .{ .value = constants.compaction_block_memory_default },
+    .memory_lsm_compaction = .{
+        // By default, add a few extra blocks for beat-scoped work.
+        .value = (lsm_compaction_block_count_min + 16) * constants.block_size,
+    },
 };
 
 const start_defaults_development = StartDefaults{
@@ -241,8 +244,8 @@ const start_defaults_development = StartDefaults{
     .memory_lsm_compaction = .{ .value = lsm_compaction_block_memory_min },
 };
 
-const lsm_compaction_block_memory_min =
-    constants.block_size * StateMachine.Forest.Options.compaction_block_count_min;
+const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
+const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
 pub const Command = union(enum) {
     pub const Format = struct {

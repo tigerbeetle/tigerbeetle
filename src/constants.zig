@@ -732,11 +732,7 @@ pub const aof_record = config.process.aof_record;
 /// replay our AOF.
 pub const aof_recovery = config.process.aof_recovery;
 
-/// The amount default of memory allocated for compactions. Compactions will be deterministic
-/// regardless of how much memory you give them, but will run in fewer steps with more memory.
-pub const compaction_block_memory_default = config.process.compaction_block_memory_default;
-
-/// The maximum size in bytes of the NodePool used for the LSM forest's manifests.
+/// The maximum number of bytes to use for compaction blocks.
 pub const compaction_block_memory_size_max = std.math.maxInt(u32) * block_size;
 
 /// Maximum number of tree scans that can be performed by a single query.
