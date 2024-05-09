@@ -530,8 +530,7 @@ const SeedRecord = struct {
         seed_count_max: u32 = 4,
     };
 
-    // NB: The order of fields is significant and defines comparison.
-    commit_timestamp: u64, // compared in inverse order
+    commit_timestamp: u64,
     commit_sha: [40]u8,
     fuzzer: Fuzzer,
     ok: bool = false,
@@ -544,32 +543,33 @@ const SeedRecord = struct {
     branch: []const u8,
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
-        inline for (comptime std.meta.fieldNames(SeedRecord)) |field_name| {
-            if (comptime std.mem.eql(u8, field_name, "command")) continue;
-            if (comptime std.mem.eql(u8, field_name, "branch")) continue;
+        return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse // NB: reverse order.
+            order_by_field(a.commit_sha, b.commit_sha) orelse
+            order_by_field(a.fuzzer, b.fuzzer) orelse
+            order_by_field(a.ok, b.ok) orelse
+            order_by_field(a.seed_duration(), b.seed_duration()) orelse // Coarse seed minimization.
+            order_by_field(a.seed_timestamp_start, b.seed_timestamp_start) orelse // Stability.
+            order_by_field(a.seed_timestamp_end, b.seed_timestamp_end) orelse
+            order_by_field(a.seed, b.seed) orelse
+            .eq;
+    }
 
-            const a_field = @field(a, field_name);
-            const b_field = @field(b, field_name);
-
-            const field_order = switch (@TypeOf(@field(a, field_name))) {
-                [40]u8 => std.mem.order(u8, &a_field, &b_field),
-                bool => std.math.order(@intFromBool(a_field), @intFromBool(b_field)),
-                Fuzzer => std.math.order(@intFromEnum(a_field), @intFromEnum(b_field)),
-                else => std.math.order(a_field, b_field),
-            };
-
-            if (field_order != .eq) {
-                if (comptime std.mem.eql(u8, field_name, "commit_timestamp")) {
-                    return field_order.invert();
-                }
-                return field_order;
-            }
-        }
-        return .eq;
+    fn order_by_field(lhs: anytype, rhs: @TypeOf(lhs)) ?std.math.Order {
+        const full_order = switch (@TypeOf(lhs)) {
+            [40]u8 => std.mem.order(u8, &lhs, &rhs),
+            bool => std.math.order(@intFromBool(lhs), @intFromBool(rhs)),
+            Fuzzer => std.math.order(@intFromEnum(lhs), @intFromEnum(rhs)),
+            else => std.math.order(lhs, rhs),
+        };
+        return if (full_order == .eq) null else full_order;
     }
 
     fn less_than(_: void, a: SeedRecord, b: SeedRecord) bool {
         return a.order(b) == .lt;
+    }
+
+    fn seed_duration(record: SeedRecord) u64 {
+        return record.seed_timestamp_end - record.seed_timestamp_start;
     }
 
     // Merges two sets of seeds keeping the more interesting one. A direct way to write this would
