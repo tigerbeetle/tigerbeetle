@@ -460,7 +460,13 @@ pub const Simulator = struct {
         assert(simulator.requests_sent == simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
         for (simulator.cluster.clients) |*client| {
-            assert(client.request_inflight == null);
+            if (client.request_inflight) |request| {
+                // Registration isn't counted by requests_sent, so an operation=register may still
+                // be in-flight. Any other requests should already be complete before done() is
+                // called.
+                assert(request.message.header.operation == .register);
+                return false;
+            }
         }
 
         // Even though there are no client requests in progress, the cluster may be upgrading.
