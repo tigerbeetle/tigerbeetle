@@ -117,10 +117,12 @@ func doTestClient(t *testing.T, client Client) {
 	}
 
 	t.Run("can create accounts", func(t *testing.T) {
+		t.Parallel()
 		createTwoAccounts(t)
 	})
 
 	t.Run("can lookup accounts", func(t *testing.T) {
+		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
 
 		results, err := client.LookupAccounts([]types.Uint128{
@@ -155,6 +157,7 @@ func doTestClient(t *testing.T, client Client) {
 	})
 
 	t.Run("can create a transfer", func(t *testing.T) {
+		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
 
 		results, err := client.CreateTransfers([]types.Transfer{
@@ -193,6 +196,7 @@ func doTestClient(t *testing.T, client Client) {
 	})
 
 	t.Run("can create linked transfers", func(t *testing.T) {
+		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
 
 		id := types.ID()
@@ -247,6 +251,7 @@ func doTestClient(t *testing.T, client Client) {
 	t.Run("can create concurrent transfers", func(t *testing.T) {
 		accountA, accountB := createTwoAccounts(t)
 
+		// NB: this test is _not_ parallel, so can use up all the concurrency.
 		const TRANSFERS_MAX = 1_000_000
 		concurrencyMax := make(chan struct{}, TIGERBEETLE_CONCURRENCY_MAX)
 
@@ -301,6 +306,7 @@ func doTestClient(t *testing.T, client Client) {
 	})
 
 	t.Run("can query transfers for an account", func(t *testing.T) {
+		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
 
 		// Create a new account:
