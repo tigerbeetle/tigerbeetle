@@ -31,7 +31,7 @@ func HexStringToUint128(value string) types.Uint128 {
 	return number
 }
 
-func WithClient(s testing.TB, withClient func(Client)) {
+func WithClient(t testing.TB, withClient func(Client)) {
 	var tigerbeetlePath string
 	if runtime.GOOS == "windows" {
 		tigerbeetlePath = "../../../tigerbeetle.exe"
@@ -54,44 +54,44 @@ func WithClient(s testing.TB, withClient func(Client)) {
 	tbInit.Stderr = &tbErr
 	if err := tbInit.Run(); err != nil {
 		fmt.Println(fmt.Sprint(err) + ": " + tbErr.String())
-		s.Fatal(err)
+		t.Fatal(err)
 	}
 
-	s.Cleanup(func() {
+	t.Cleanup(func() {
 		_ = os.Remove(fileName)
 	})
 
 	tbStart := exec.Command(tigerbeetlePath, "start", addressArg, cacheSizeArg, fileName)
 	if err := tbStart.Start(); err != nil {
-		s.Fatal(err)
+		t.Fatal(err)
 	}
 
-	s.Cleanup(func() {
+	t.Cleanup(func() {
 		if err := tbStart.Process.Kill(); err != nil {
-			s.Fatal(err)
+			t.Fatal(err)
 		}
 	})
 
 	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
 	client, err := NewClient(types.ToUint128(TIGERBEETLE_CLUSTER_ID), addresses, TIGERBEETLE_CONCURRENCY_MAX)
 	if err != nil {
-		s.Fatal(err)
+		t.Fatal(err)
 	}
 
-	s.Cleanup(func() {
+	t.Cleanup(func() {
 		client.Close()
 	})
 
 	withClient(client)
 }
 
-func TestClient(s *testing.T) {
-	WithClient(s, func(client Client) {
-		doTestClient(s, client)
+func TestClient(t *testing.T) {
+	WithClient(t, func(client Client) {
+		doTestClient(t, client)
 	})
 }
 
-func doTestClient(s *testing.T, client Client) {
+func doTestClient(t *testing.T, client Client) {
 	accountA := types.Account{
 		ID:     types.ID(),
 		Ledger: 1,
@@ -103,7 +103,7 @@ func doTestClient(s *testing.T, client Client) {
 		Code:   2,
 	}
 
-	s.Run("can create accounts", func(t *testing.T) {
+	t.Run("can create accounts", func(t *testing.T) {
 		results, err := client.CreateAccounts([]types.Account{
 			accountA,
 			accountB,
@@ -115,7 +115,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Empty(t, results)
 	})
 
-	s.Run("can lookup accounts", func(t *testing.T) {
+	t.Run("can lookup accounts", func(t *testing.T) {
 		results, err := client.LookupAccounts([]types.Uint128{
 			accountA.ID,
 			accountB.ID,
@@ -147,7 +147,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.NotEqual(t, uint64(0), accB.Timestamp)
 	})
 
-	s.Run("can create a transfer", func(t *testing.T) {
+	t.Run("can create a transfer", func(t *testing.T) {
 		results, err := client.CreateTransfers([]types.Transfer{
 			{
 				ID:              types.ID(),
@@ -183,7 +183,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, types.ToUint128(0), accountB.CreditsPosted)
 	})
 
-	s.Run("can create linked transfers", func(t *testing.T) {
+	t.Run("can create linked transfers", func(t *testing.T) {
 		id := types.ID()
 		transfer1 := types.Transfer{
 			ID:              id,
@@ -233,7 +233,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
 	})
 
-	s.Run("can create concurrent transfers", func(t *testing.T) {
+	t.Run("can create concurrent transfers", func(t *testing.T) {
 		const TRANSFERS_MAX = 1_000_000
 		concurrencyMax := make(chan struct{}, TIGERBEETLE_CONCURRENCY_MAX)
 
@@ -287,7 +287,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, TRANSFERS_MAX, big.NewInt(0).Sub(&accountBDebitsAfter, &accountBDebits).Int64())
 	})
 
-	s.Run("can query transfers for an account", func(t *testing.T) {
+	t.Run("can query transfers for an account", func(t *testing.T) {
 		// Create a new account:
 		accountC := types.Account{
 			ID:     types.ID(),
