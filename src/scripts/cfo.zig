@@ -96,8 +96,8 @@ const Fuzzer = enum {
             );
         }
         return try shell.fmt(
-            "./zig/zig build -Drelease fuzz -- --seed={d} {s}",
-            .{ seed, @tagName(fuzzer) },
+            "./zig/zig build -Drelease fuzz -- {s} {d} ",
+            .{ @tagName(fuzzer), seed },
         );
     }
 
@@ -126,11 +126,11 @@ const Fuzzer = enum {
         }
         return try shell.spawn(
             .{ .stdin_behavior = .Pipe },
-            "{zig} build -Drelease fuzz -- --seed={seed} {fuzzer}",
+            "{zig} build -Drelease fuzz -- {fuzzer} {seed}",
             .{
                 .zig = shell.zig_exe.?,
-                .seed = seed,
                 .fuzzer = @tagName(fuzzer),
+                .seed = seed,
             },
         );
     }
