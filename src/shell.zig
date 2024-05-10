@@ -46,6 +46,12 @@ cwd: std.fs.Dir,
 cwd_stack: [cwd_stack_max]std.fs.Dir,
 cwd_stack_count: usize,
 
+// Zig uses file-descriptor oriented APIs in the standard library, with the one exception being
+// ChildProcess's cwd, which is required to be a path, rather than a file descriptor. This buffer
+// is used to materialize the path to cwd when spawning a new process.
+//   <https://github.com/ziglang/zig/issues/5190>
+cwd_path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined,
+
 env: std.process.EnvMap,
 
 /// True if the process is run in CI (the CI env var is set)
@@ -107,19 +113,19 @@ const ansi = .{
 /// Prints formatted input to stderr.
 /// Newline symbol is appended automatically.
 /// ANSI colors are supported via `"{ansi-red}my colored text{ansi-reset}"` syntax.
-pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
+pub fn echo(shell: *Shell, comptime format: []const u8, format_args: anytype) void {
     _ = shell;
 
-    comptime var fmt_ansi: []const u8 = "";
+    comptime var format_ansi: []const u8 = "";
     comptime var pos: usize = 0;
     comptime var pos_start: usize = 0;
 
-    comptime next_pos: while (pos < fmt.len) {
-        if (fmt[pos] == '{') {
+    comptime next_pos: while (pos < format.len) {
+        if (format[pos] == '{') {
             for (std.meta.fieldNames(@TypeOf(ansi))) |field_name| {
                 const tag = "{ansi-" ++ field_name ++ "}";
-                if (std.mem.startsWith(u8, fmt[pos..], tag)) {
-                    fmt_ansi = fmt_ansi ++ fmt[pos_start..pos] ++ @field(ansi, field_name);
+                if (std.mem.startsWith(u8, format[pos..], tag)) {
+                    format_ansi = format_ansi ++ format[pos_start..pos] ++ @field(ansi, field_name);
                     pos += tag.len;
                     pos_start = pos;
                     continue :next_pos;
@@ -128,11 +134,11 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
         }
         pos += 1;
     };
-    comptime assert(pos == fmt.len);
+    comptime assert(pos == format.len);
 
-    fmt_ansi = fmt_ansi ++ fmt[pos_start..pos] ++ "\n";
+    format_ansi = format_ansi ++ format[pos_start..pos] ++ "\n";
 
-    std.debug.print(fmt_ansi, fmt_args);
+    std.debug.print(format_ansi, format_args);
 }
 
 /// Opens a logical, named section of the script.
@@ -177,8 +183,8 @@ const Section = struct {
 
 /// Convenience string formatting function which uses shell's arena and doesn't require
 /// freeing the resulting string.
-pub fn print(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) ![]const u8 {
-    return std.fmt.allocPrint(shell.arena.allocator(), fmt, fmt_args);
+pub fn fmt(shell: *Shell, comptime format: []const u8, format_args: anytype) ![]const u8 {
+    return std.fmt.allocPrint(shell.arena.allocator(), format, format_args);
 }
 
 pub fn env_get_option(shell: *Shell, var_name: []const u8) ?[]const u8 {
@@ -356,29 +362,20 @@ pub fn copy_path(
 ///     .branches = &.{"main", "feature"},
 /// })
 /// ```
-pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
+pub fn exec(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     return exec_options(shell, .{ .echo = true }, cmd, cmd_args);
 }
 
 pub fn exec_options(
-    shell: Shell,
+    shell: *Shell,
     options: struct { echo: bool },
     comptime cmd: []const u8,
     cmd_args: anytype,
 ) !void {
-    var argv = Argv.init(shell.gpa);
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    try expand_argv(&argv, cmd, cmd_args);
-
-    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
-    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    const cwd_path = try shell.cwd.realpath(".", &buffer);
-
-    var child = std.ChildProcess.init(argv.slice(), shell.gpa);
-    child.cwd = cwd_path;
-    child.env_map = &shell.env;
-    child.stdin_behavior = .Ignore;
+    var child = try shell.create_process(argv.slice());
 
     if (options.echo) {
         child.stdout_behavior = .Inherit;
@@ -424,25 +421,12 @@ pub fn exec_options(
 /// One intended use-case is sanity-checking that an executable is present, by running
 /// `my-tool --version`.
 pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !bool {
-    var argv = Argv.init(shell.gpa);
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    try expand_argv(&argv, cmd, cmd_args);
-
-    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
-    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    const cwd_path = try shell.cwd.realpath(".", &buffer);
-
-    const res = std.ChildProcess.exec(.{
-        .allocator = shell.gpa,
-        .argv = argv.slice(),
-        .cwd = cwd_path,
-        .env_map = &shell.env,
-    }) catch return false;
-    defer shell.gpa.free(res.stderr);
-    defer shell.gpa.free(res.stdout);
-
-    return switch (res.term) {
+    var child = try shell.create_process(argv.slice());
+    const term = try child.spawnAndWait();
+    return switch (term) {
         .Exited => |code| code == 0,
         else => false,
     };
@@ -466,21 +450,13 @@ pub fn exec_stdout_options(
     comptime cmd: []const u8,
     cmd_args: anytype,
 ) ![]const u8 {
-    var argv = Argv.init(shell.gpa);
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    try expand_argv(&argv, cmd, cmd_args);
-
-    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
-    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    const cwd_path = try shell.cwd.realpath(".", &buffer);
-
-    var child = std.ChildProcess.init(argv.slice(), shell.arena.allocator());
+    var child = try shell.create_process(argv.slice());
     child.stdin_behavior = if (options.stdin_slice == null) .Ignore else .Pipe;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
-    child.cwd = cwd_path;
-    child.env_map = &shell.env;
 
     var stdout = std.ArrayList(u8).init(shell.gpa);
     var stderr = std.ArrayList(u8).init(shell.gpa);
@@ -542,25 +518,19 @@ pub fn exec_raw(
     comptime cmd: []const u8,
     cmd_args: anytype,
 ) !std.ChildProcess.ExecResult {
-    var argv = Argv.init(shell.gpa);
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
-
-    try expand_argv(&argv, cmd, cmd_args);
-
-    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
-    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    const cwd_path = try shell.cwd.realpath(".", &buffer);
 
     return try std.ChildProcess.exec(.{
         .allocator = shell.arena.allocator(),
         .argv = argv.slice(),
-        .cwd = cwd_path,
+        .cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer),
         .env_map = &shell.env,
     });
 }
 
 pub fn spawn(
-    shell: Shell,
+    shell: *Shell,
     options: struct {
         stdin_behavior: std.ChildProcess.StdIo = .Ignore,
         stdout_behavior: std.ChildProcess.StdIo = .Ignore,
@@ -569,45 +539,28 @@ pub fn spawn(
     comptime cmd: []const u8,
     cmd_args: anytype,
 ) !std.ChildProcess {
-    var argv = Argv.init(shell.gpa);
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    try expand_argv(&argv, cmd, cmd_args);
-
-    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
-    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    const cwd_path = try shell.cwd.realpath(".", &buffer);
-
-    var child = std.ChildProcess.init(argv.slice(), shell.gpa);
-    child.cwd = cwd_path;
-    child.env_map = &shell.env;
+    var child = try shell.create_process(argv.slice());
     child.stdin_behavior = options.stdin_behavior;
     child.stdout_behavior = options.stdout_behavior;
     child.stderr_behavior = options.stderr_behavior;
 
     try child.spawn();
 
-    // XXX: child.argv is undefined when we return. This is fine though, as it is only used during
-    // `spawn`.
     return child;
 }
 
 /// Runs the zig compiler.
-pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
+pub fn zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
 
     try argv.append_new_arg("{s}", .{shell.zig_exe.?});
     try expand_argv(&argv, cmd, cmd_args);
 
-    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
-    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    const cwd_path = try shell.cwd.realpath(".", &buffer);
-
-    var child = std.ChildProcess.init(argv.slice(), shell.gpa);
-    child.cwd = cwd_path;
-    child.env_map = &shell.env;
-    child.stdin_behavior = .Ignore;
+    var child = try shell.create_process(argv.slice());
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
@@ -618,6 +571,16 @@ pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
         .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
         else => return error.CommandFailed,
     }
+}
+
+fn create_process(shell: *Shell, argv: []const []const u8) !std.ChildProcess {
+    var child = std.ChildProcess.init(argv, shell.gpa);
+    child.cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
+    child.env_map = &shell.env;
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
+    return child;
 }
 
 /// If we inherit `stdout` to show the output to the user, it's also helpful to echo the command
@@ -646,6 +609,13 @@ const Argv = struct {
 
     fn init(gpa: std.mem.Allocator) Argv {
         return Argv{ .args = std.ArrayList([]const u8).init(gpa) };
+    }
+
+    fn expand(gpa: std.mem.Allocator, comptime cmd: []const u8, cmd_args: anytype) !Argv {
+        var result = Argv.init(gpa);
+        errdefer result.deinit();
+        try expand_argv(&result, cmd, cmd_args);
+        return result;
     }
 
     fn deinit(argv: *Argv) void {

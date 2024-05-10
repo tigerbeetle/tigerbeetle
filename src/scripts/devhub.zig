@@ -151,7 +151,7 @@ fn upload_nyrkio(shell: *Shell, batch: *const MetricBatch) !void {
         \\    -d {payload}
     , .{
         .content_type = "Content-type: application/json",
-        .authorization = try shell.print("Authorization: Bearer {s}", .{token}),
+        .authorization = try shell.fmt("Authorization: Bearer {s}", .{token}),
         .payload = payload,
     });
 }

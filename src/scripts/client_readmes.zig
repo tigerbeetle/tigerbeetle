@@ -35,7 +35,7 @@ pub fn test_freshness(
         inline else => |l| @field(LanguageDocs, @tagName(l)),
     };
 
-    const walkthrough_path = try shell.print(
+    const walkthrough_path = try shell.fmt(
         "./samples/walkthrough/{s}{s}.{s}",
         .{ docs.test_source_path, docs.test_file_name, docs.extension },
     );
@@ -68,7 +68,7 @@ pub fn test_freshness(
         ctx.buffer.clearRetainingCapacity();
         try readme_sample(&ctx, sample);
 
-        const sample_readme = try shell.print("samples/{s}/README.md", .{sample.directory});
+        const sample_readme = try shell.fmt("samples/{s}/README.md", .{sample.directory});
         const update = try shell.file_ensure_content(sample_readme, ctx.buffer.items);
         updated_any = updated_any or (update == .updated);
     }
@@ -452,7 +452,7 @@ fn readme_sample(ctx: *Context, sample: Sample) !void {
 
     {
         ctx.header(2, "Setup");
-        ctx.paragraph(try ctx.shell.print(
+        ctx.paragraph(try ctx.shell.fmt(
             \\First, clone this repo and `cd` into `tigerbeetle/src/clients/{s}/samples/{s}`.
         , .{ ctx.docs.directory, sample.directory }));
 
@@ -495,7 +495,7 @@ const Context = struct {
     walkthrough: []const u8,
 
     fn sample_exists(ctx: *Context, sample: @TypeOf(samples[0])) !bool {
-        const sample_directory = try ctx.shell.print("samples/{s}/", .{sample.directory});
+        const sample_directory = try ctx.shell.fmt("samples/{s}/", .{sample.directory});
         return try ctx.shell.dir_exists(sample_directory);
     }
 
@@ -507,9 +507,9 @@ const Context = struct {
     fn read_section(ctx: *Context, section_name: []const u8) []const u8 {
         var section_content = std.ArrayList(u8).init(ctx.arena);
         const section_start =
-            ctx.shell.print("section:{s}\n", .{section_name}) catch @panic("OOM");
+            ctx.shell.fmt("section:{s}\n", .{section_name}) catch @panic("OOM");
         const section_end =
-            ctx.shell.print("endsection:{s}\n", .{section_name}) catch @panic("OOM");
+            ctx.shell.fmt("endsection:{s}\n", .{section_name}) catch @panic("OOM");
 
         var text = ctx.walkthrough;
         for (0..10) |_| {
