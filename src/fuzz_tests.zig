@@ -43,10 +43,10 @@ const Fuzzers = .{
 const FuzzersEnum = std.meta.FieldEnum(@TypeOf(Fuzzers));
 
 const CliArgs = struct {
-    seed: ?u64 = null,
     events_max: ?usize = null,
     positional: struct {
         fuzzer: FuzzersEnum,
+        seed: ?u64 = null,
     },
 };
 
@@ -58,7 +58,7 @@ pub fn main() !void {
 
     switch (cli_args.positional.fuzzer) {
         .smoke => {
-            assert(cli_args.seed == null);
+            assert(cli_args.positional.seed == null);
             assert(cli_args.events_max == null);
             try main_smoke();
         },
@@ -104,7 +104,7 @@ fn main_smoke() !void {
 fn main_single(cli_args: CliArgs) !void {
     assert(cli_args.positional.fuzzer != .smoke);
 
-    const seed: usize = cli_args.seed orelse seed: {
+    const seed: usize = cli_args.positional.seed orelse seed: {
         // If no seed was given, use a random seed instead.
         var seed_random: u64 = undefined;
         try std.os.getrandom(std.mem.asBytes(&seed_random));

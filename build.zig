@@ -464,7 +464,7 @@ pub fn build(b: *std.Build) !void {
         run_step.dependOn(&run_cmd.step);
     }
 
-    { // Fuzzers: zig build fuzz -- lsm_tree --seed=92 --events-max=100
+    { // Fuzzers: zig build fuzz -- --events-max=100 lsm_tree 123
         const fuzz_exe = b.addExecutable(.{
             .name = "fuzz",
             .root_source_file = .{ .path = "src/fuzz_tests.zig" },

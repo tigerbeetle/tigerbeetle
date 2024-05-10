@@ -78,61 +78,19 @@ const Fuzzer = enum {
     vopr_lite,
     vopr_testing_lite,
 
-    fn print_command(fuzzer: Fuzzer, shell: *Shell, seed: u64) ![]const u8 {
-        if (fuzzer == .vopr or fuzzer == .vopr_testing or
-            fuzzer == .vopr_lite or fuzzer == .vopr_testing_lite)
-        {
-            const state_machine: []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_lite)
-                ""
-            else
-                " -Dsimulator-state-machine=testing";
-            const lite: []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_testing)
-                ""
-            else
-                " --lite";
-            return try shell.fmt(
-                "./zig/zig build -Drelease{s} simulator_run --{s} {d}",
-                .{ state_machine, lite, seed },
-            );
-        }
-        return try shell.fmt(
-            "./zig/zig build -Drelease fuzz -- --seed={d} {s}",
-            .{ seed, @tagName(fuzzer) },
-        );
-    }
-
-    fn spawn_command(fuzzer: Fuzzer, shell: *Shell, seed: u64) !std.ChildProcess {
-        if (fuzzer == .vopr or fuzzer == .vopr_testing or
-            fuzzer == .vopr_lite or fuzzer == .vopr_testing_lite)
-        {
-            const state_machine: []const []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_lite)
-                &.{}
-            else
-                &.{"-Dsimulator-state-machine=testing"};
-            const lite: []const []const u8 = if (fuzzer == .vopr or fuzzer == .vopr_testing)
-                &.{}
-            else
-                &.{"--lite"};
-            return try shell.spawn(
-                .{ .stdin_behavior = .Pipe },
-                "{zig} build -Drelease {state_machine} simulator_run -- {lite} {seed}",
-                .{
-                    .zig = shell.zig_exe.?,
-                    .state_machine = state_machine,
-                    .lite = lite,
-                    .seed = seed,
-                },
-            );
-        }
-        return try shell.spawn(
-            .{ .stdin_behavior = .Pipe },
-            "{zig} build -Drelease fuzz -- --seed={seed} {fuzzer}",
-            .{
-                .zig = shell.zig_exe.?,
-                .seed = seed,
-                .fuzzer = @tagName(fuzzer),
+    fn fill_args(fuzzer: Fuzzer, accumulator: *std.ArrayList([]const u8)) !void {
+        switch (fuzzer) {
+            .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
+                if (f == .vopr_testing or f == .vopr_testing_lite) {
+                    try accumulator.append("-Dsimulator-state-machine=testing");
+                }
+                try accumulator.appendSlice(&.{ "simulator_run", "--" });
+                if (f == .vopr_lite or f == .vopr_testing_lite) {
+                    try accumulator.append("--lite");
+                }
             },
-        );
+            else => |f| try accumulator.appendSlice(&.{ "fuzz", "--", @tagName(f) }),
+        }
     }
 };
 
@@ -206,6 +164,7 @@ fn run_fuzzers(
         }
     };
 
+    var args = std.ArrayList([]const u8).init(shell.arena.allocator());
     const total_budget_seconds = options.budget_seconds + options.hang_seconds;
     for (0..total_budget_seconds) |second| {
         const last_iteration = second == total_budget_seconds - 1;
@@ -225,14 +184,30 @@ fn run_fuzzers(
 
                     seed_record.seed = random.int(u64);
                     seed_record.seed_timestamp_start = @intCast(std.time.timestamp());
-                    seed_record.command =
-                        try seed_record.fuzzer.print_command(shell, seed_record.seed);
+
+                    args.clearRetainingCapacity();
+                    try args.appendSlice(&.{ "build", "-Drelease" });
+                    try seed_record.fuzzer.fill_args(&args);
+                    try args.append(try shell.fmt("{d}", .{seed_record.seed}));
+
+                    var command = std.ArrayList(u8).init(shell.arena.allocator());
+                    try command.appendSlice("./zig/zig");
+                    for (args.items) |arg| {
+                        try command.append(' ');
+                        try command.appendSlice(arg);
+                    }
+
+                    seed_record.command = command.items;
 
                     log.debug("will start '{s}'", .{seed_record.command});
                     // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
                     // on writing to child's stdin to detect if a child is dead in a non-blocking
                     // manner.
-                    const child = try seed_record.fuzzer.spawn_command(shell, seed_record.seed);
+                    const child = try shell.spawn(
+                        .{ .stdin_behavior = .Pipe },
+                        "{zig} {args}",
+                        .{ .zig = shell.zig_exe.?, .args = args.items },
+                    );
                     _ = try std.os.fcntl(
                         child.stdin.?.handle,
                         std.os.F.SETFL,
