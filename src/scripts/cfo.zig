@@ -423,6 +423,7 @@ fn run_fuzzers_prepare_repository(shell: *Shell, target: union(enum) {
             break :commit commit;
         },
         .pull_request => |pr_number| commit: {
+            try shell.exec("git clone https://github.com/tigerbeetle/tigerbeetle .", .{});
             try shell.exec(
                 "git fetch origin refs/pull/{pr_number}/head",
                 .{ .pr_number = pr_number },
