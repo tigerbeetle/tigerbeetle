@@ -33,6 +33,8 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
+var replica_release_execute_args: ?std.process.ArgIterator = null;
+
 pub const std_options = struct {
     pub const log_level: std.log.Level = constants.log_level;
     pub const logFn = constants.log;
@@ -58,6 +60,11 @@ pub fn main() !void {
 
     var arg_iterator = try std.process.argsWithAllocator(allocator);
     defer arg_iterator.deinit();
+
+    // Store a copy of the arg iterator, so it can be used later to determine the
+    // binary path. Only strictly needed on Windows.
+    replica_release_execute_args = arg_iterator;
+    defer replica_release_execute_args = null;
 
     var command = try cli.parse_args(allocator, &arg_iterator);
     defer command.deinit(allocator);
@@ -186,13 +193,26 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
+        // Ensure that this code is only ever built as minimum or 0.15.3.
+        comptime assert(
+            config.process.release.value == vsr.Release.minimum.value or
+                config.process.release.value == vsr.Release.from(.{
+                .major = 0,
+                .minor = 15,
+                .patch = 3,
+            }).value,
+        );
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
             .release = config.process.release,
             // TODO Where should this be set?
             .release_client_min = config.process.release,
-            .releases_bundled = &[_]vsr.Release{config.process.release},
+            .releases_bundled = &[_]vsr.Release{
+                config.process.release,
+                vsr.Release{ .value = config.process.release.value + 1 },
+            },
             .release_execute = replica_release_execute,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
@@ -348,8 +368,84 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
         @panic("release_execute: binary missing required version");
     }
 
-    // TODO(Multiversioning) Exec into the new release.
-    unreachable;
+    // This is a custom build for the epoch of multiversioning. The binary_path will always be
+    // argv[0] since this binary would never have been executed by a user directly, and our caller
+    // will provide an absolute path there.
+    var binary_path = replica_release_execute_args.?.next().?;
+    assert(std.fs.path.isAbsolute(binary_path));
+
+    switch (builtin.os.tag) {
+        .macos, .linux => {
+            // We can pass through our env and args as-is to exec. We have to manipulate the types
+            // here somewhat: they're cast in start.zig and we can't access `argc_argv_ptr`
+            // directly.
+            // process.zig does the same trick in execve().
+            const cast_args: [*:null]const ?[*:0]const u8 = @ptrCast(std.os.argv.ptr);
+            const cast_envp: [*:null]const ?[*:0]const u8 = @ptrCast(std.os.environ.ptr);
+
+            std.log.info("replica_release_execute: executing '{s}'...\n", .{binary_path});
+            const err = std.os.execveZ(binary_path, cast_args, cast_envp);
+            std.debug.panic("execveZ failed: {}", .{err});
+        },
+        .windows => {
+            // Includes the null byte, that utf8ToUtf16LeWithNull needs.
+            var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+            var fixed_allocator = std.heap.FixedBufferAllocator.init(&buffer);
+            const allocator = fixed_allocator.allocator();
+
+            const binary_path_w = std.unicode.utf8ToUtf16LeWithNull(allocator, binary_path) catch
+                unreachable;
+            defer allocator.free(binary_path_w);
+
+            // "The Unicode version of this function, CreateProcessW, can modify the contents of
+            // this string. Therefore, this parameter cannot be a pointer to read-only memory (such
+            // as a const variable or a literal string). If this parameter is a constant string,
+            // the function may cause an access violation."
+            //
+            // That said, with how CreateProcessW is called, this should _never_ happen, since its
+            // both provided a full lpApplicationName, and because GetCommandLineW actually points
+            // to a copy of memory from the PEB.
+            const cmd_line_w = os.windows.kernel32.GetCommandLineW();
+
+            var lp_startup_info = std.mem.zeroes(std.os.windows.STARTUPINFOW);
+            lp_startup_info.cb = @sizeOf(std.os.windows.STARTUPINFOW);
+
+            var lp_process_information: std.os.windows.PROCESS_INFORMATION = undefined;
+
+            // Unlike on Linux / macOS which use `exec` for multiversion binaries, Windows has to
+            // use CreateProcess. This is a problem, because it's a race between the parent
+            // process exiting and the new process starting. Work around this by deinit'ing
+            // Replica and storage before continuing.
+            // We don't need to clean up all resources here, since the process will be terminated
+            // in any case; only the ones that would block a new process from starting up.
+            const storage = replica.superblock.storage;
+            const fd = storage.fd;
+            replica.deinit(replica.static_allocator.parent_allocator);
+            storage.deinit();
+
+            // FD is managed by Command, normally. Shut it down explicitly.
+            os.close(fd);
+
+            // If bInheritHandles is FALSE, and dwFlags inside STARTUPINFOW doesn't have
+            // STARTF_USESTDHANDLES set, the stdin/stdout/stderr handles of the parent will
+            // be passed through to the child.
+            std.log.info("replica_release_execute: executing '{s}'...\n", .{binary_path});
+            std.os.windows.CreateProcessW(
+                binary_path_w,
+                cmd_line_w,
+                null,
+                null,
+                std.os.windows.FALSE,
+                std.os.windows.CREATE_UNICODE_ENVIRONMENT,
+                null,
+                null,
+                &lp_startup_info,
+                &lp_process_information,
+            ) catch |err| std.debug.panic("CreateProcessW failed: {}", .{err});
+            os.exit(0);
+        },
+        else => @panic("unsupported platform"),
+    }
 }
 
 fn print_value(
