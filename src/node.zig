@@ -2,11 +2,11 @@ const std = @import("std");
 const assert = std.debug.assert;
 const allocator = std.heap.c_allocator;
 
-const c = @import("c.zig");
-const translate = @import("translate.zig");
+const c = @import("clients/node/src/c.zig");
+const translate = @import("clients/node/src/translate.zig");
 const tb = struct {
-    pub usingnamespace @import("../../../tigerbeetle.zig");
-    pub usingnamespace @import("../../c/tb_client.zig");
+    pub usingnamespace @import("tigerbeetle.zig");
+    pub usingnamespace @import("clients/c/tb_client.zig");
 };
 
 const Account = tb.Account;
@@ -19,7 +19,7 @@ const AccountFilter = tb.AccountFilter;
 const AccountFilterFlags = tb.AccountFilterFlags;
 const AccountBalance = tb.AccountBalance;
 
-const vsr = @import("vsr");
+const vsr = @import("vsr.zig");
 const Storage = vsr.storage.Storage;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;

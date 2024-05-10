@@ -814,7 +814,7 @@ fn node_client(
 
         const lib = b_isolated.addSharedLibrary(.{
             .name = "tb_nodeclient",
-            .root_source_file = .{ .path = "src/clients/node/src/node.zig" },
+            .root_source_file = .{ .path = "src/node.zig" },
             .target = cross_target,
             .optimize = mode,
         });
