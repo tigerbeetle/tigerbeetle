@@ -292,6 +292,10 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
 
+    for (0..simulator.cluster.clients.len) |client_index| {
+        simulator.cluster.register(client_index);
+    }
+
     // Safety: replicas crash and restart; at any given point in time arbitrarily many replicas may
     // be crashed, but each replica restarts eventually. The cluster must process all requests
     // without split-brain.
