@@ -201,12 +201,16 @@ pub const IO = struct {
                 buf: [*]u8,
                 len: u32,
                 offset: u64,
+                overlapped: Overlapped,
+                pending: bool,
             },
             write: struct {
                 fd: os.fd_t,
                 buf: [*]const u8,
                 len: u32,
                 offset: u64,
+                overlapped: Overlapped,
+                pending: bool,
             },
             close: struct {
                 fd: os.fd_t,
@@ -740,6 +744,51 @@ pub const IO = struct {
         );
     }
 
+    fn do_file_io(ctx: Completion.Context, op: anytype, comptime overlapped_fn: anytype) !usize {
+        var transferred: os.windows.DWORD = undefined;
+        const rc = blk: {
+            // Poll result if already started.
+            if (op.pending) break :blk os.windows.kernel32.GetOverlappedResult(
+                op.fd,
+                &op.overlapped.raw,
+                &transferred,
+                os.windows.FALSE, // Don't wait here.
+            );
+
+            // Start the operation.
+            op.pending = true;
+            op.overlapped = .{
+                .raw = .{
+                    .Internal = 0,
+                    .InternalHigh = 0,
+                    .DUMMYUNIONNAME = .{
+                        .DUMMYSTRUCTNAME = .{
+                            .Offset = @truncate(op.offset),
+                            .OffsetHigh = @truncate(op.offset >> 32),
+                        },
+                    },
+                    .hEvent = null,
+                },
+                .completion = ctx.completion,
+            };
+            break :blk overlapped_fn(op.fd, op.buf, op.len, &transferred, &op.overlapped.raw);
+        };
+
+        // Operation completed successfully.
+        if (rc != os.windows.FALSE) {
+            return transferred;
+        }
+
+        return switch (os.windows.kernel32.GetLastError()) {
+            .IO_PENDING => error.WouldBlock,
+            .INVALID_USER_BUFFER, .NOT_ENOUGH_MEMORY => error.SystemResources,
+            .NOT_ENOUGH_QUOTA => error.SystemResources,
+            .OPERATION_ABORTED => unreachable, // overlapped_fn() doesn't get cancelled.
+            .HANDLE_EOF => unreachable,
+            else => |err| return os.windows.unexpectedError(err),
+        };
+    }
+
     pub const ReadError = error{
         WouldBlock,
         NotOpenForReading,
@@ -776,19 +825,12 @@ pub const IO = struct {
                 .buf = buffer.ptr,
                 .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
+                .overlapped = undefined,
+                .pending = false,
             },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) ReadError!usize {
-                    // Do a synchronous read for now.
-                    _ = ctx;
-                    return os.pread(op.fd, op.buf[0..op.len], op.offset) catch |err| switch (err) {
-                        error.OperationAborted => unreachable,
-                        error.BrokenPipe => unreachable,
-                        error.ConnectionTimedOut => unreachable,
-                        error.AccessDenied => error.InputOutput,
-                        error.NetNameDeleted => unreachable,
-                        else => |e| e,
-                    };
+                    return do_file_io(ctx, op, os.windows.kernel32.ReadFile);
                 }
             },
         );
@@ -820,12 +862,12 @@ pub const IO = struct {
                 .buf = buffer.ptr,
                 .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
+                .overlapped = undefined,
+                .pending = false,
             },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) WriteError!usize {
-                    // Do a synchronous write for now.
-                    _ = ctx;
-                    return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
+                    return do_file_io(ctx, op, os.windows.kernel32.WriteFile);
                 }
             },
         );
@@ -934,19 +976,21 @@ pub const IO = struct {
         );
         errdefer os.closeSocket(socket);
 
-        const socket_iocp = try os.windows.CreateIoCompletionPort(socket, self.iocp, 0, 0);
-        assert(socket_iocp == self.iocp);
+        try self.register_handle(@ptrCast(socket));
+
+        return socket;
+    }
+
+    fn register_handle(self: *IO, handle: os.windows.HANDLE) !void {
+        const iocp_handle = try os.windows.CreateIoCompletionPort(handle, self.iocp, 0, 0);
+        assert(iocp_handle == self.iocp);
 
         // Ensure that synchronous IO completion doesn't queue an unneeded overlapped
-        // and that the event for the socket (WaitForSingleObject) doesn't need to be set.
+        // and that the event for the handle (WaitForSingleObject) doesn't need to be set.
         var mode: os.windows.BYTE = 0;
         mode |= os.windows.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
         mode |= os.windows.FILE_SKIP_SET_EVENT_ON_HANDLE;
-
-        const handle: os.windows.HANDLE = @ptrCast(socket);
         try os.windows.SetFileCompletionNotificationModes(handle, mode);
-
-        return socket;
     }
 
     /// Opens a directory with read only access.
@@ -958,11 +1002,13 @@ pub const IO = struct {
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
     fn open_file_handle(
+        self: ?*IO,
         dir_handle: os.fd_t,
         relative_path: []const u8,
         method: enum { create, open },
     ) !os.fd_t {
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
+        _ = dir_handle;
 
         // FILE_CREATE = O_CREAT | O_EXCL
         var creation_disposition: os.windows.DWORD = 0;
@@ -999,19 +1045,20 @@ pub const IO = struct {
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
         assert((attributes & os.windows.FILE_WRITE_THROUGH) > 0);
 
-        // TODO: Add ReadFileEx/WriteFileEx support.
-        // Not currently needed for O_DIRECT disk IO.
-        // attributes |= os.windows.FILE_FLAG_OVERLAPPED;
-        const handle = try windows_open_file(path_w.span(), .{
-            .access_mask = access_mask,
-            .dir = dir_handle,
-            .sa = null,
-            .share_access = shared_mode,
-            .creation = creation_disposition,
-            .io_mode = .blocking,
-            .filter = .file_only,
-            .follow_symlinks = true,
-        }, attributes);
+        // Add overlapped IO support if the IO instance was provided.
+        if (self != null) {
+            attributes |= os.windows.FILE_FLAG_OVERLAPPED;
+        }
+
+        const handle = os.windows.kernel32.CreateFileW(
+            path_w.span(),
+            access_mask,
+            shared_mode,
+            null, // no security attributes required
+            creation_disposition,
+            attributes,
+            null, // no existing template file
+        );
 
         if (handle == os.windows.INVALID_HANDLE_VALUE) {
             return switch (os.windows.kernel32.GetLastError()) {
@@ -1022,6 +1069,13 @@ pub const IO = struct {
                     return os.windows.unexpectedError(err);
                 },
             };
+        }
+
+        errdefer os.windows.CloseHandle(handle);
+
+        // Register the file with the IO handle (if provided) for overlapped operations.
+        if (self) |io| {
+            try io.register_handle(handle);
         }
 
         return handle;
@@ -1036,6 +1090,7 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
+        self: ?*IO,
         dir_handle: os.fd_t,
         relative_path: []const u8,
         size: u64,
@@ -1048,10 +1103,10 @@ pub const IO = struct {
         _ = direct_io;
 
         const handle = switch (method) {
-            .open => try open_file_handle(dir_handle, relative_path, .open),
-            .create => try open_file_handle(dir_handle, relative_path, .create),
-            .create_or_open => open_file_handle(dir_handle, relative_path, .open) catch |err| switch (err) {
-                error.FileNotFound => try open_file_handle(dir_handle, relative_path, .create),
+            .open => try open_file_handle(self, dir_handle, relative_path, .open),
+            .create => try open_file_handle(self, dir_handle, relative_path, .create),
+            .create_or_open => open_file_handle(self, dir_handle, relative_path, .open) catch |err| switch (err) {
+                error.FileNotFound => try open_file_handle(self, dir_handle, relative_path, .create),
                 else => return err,
             },
         };
@@ -1219,109 +1274,4 @@ fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
         .WSAECONNRESET => error.ConnectionResetByPeer,
         else => |e| os.windows.unexpectedWSAError(e),
     };
-}
-
-// Vendor std.os.windows.OpenFile so we can set file attributes. Add it as a parameter after
-// `options`, so we don't have to vendor that struct too.
-pub fn windows_open_file(
-    sub_path_w: []const u16,
-    options: os.windows.OpenFileOptions,
-    file_flags: os.windows.ULONG,
-) os.windows.OpenError!os.windows.HANDLE {
-    if (std.mem.eql(u16, sub_path_w, &[_]u16{'.'}) and options.filter == .file_only) {
-        return error.IsDir;
-    }
-    if (std.mem.eql(u16, sub_path_w, &[_]u16{ '.', '.' }) and options.filter == .file_only) {
-        return error.IsDir;
-    }
-
-    var result: os.windows.HANDLE = undefined;
-
-    const path_len_bytes = std.math.cast(u16, sub_path_w.len * 2) orelse return error.NameTooLong;
-    var nt_name = os.windows.UNICODE_STRING{
-        .Length = path_len_bytes,
-        .MaximumLength = path_len_bytes,
-        .Buffer = @constCast(sub_path_w.ptr),
-    };
-    var attr = os.windows.OBJECT_ATTRIBUTES{
-        .Length = @sizeOf(os.windows.OBJECT_ATTRIBUTES),
-        .RootDirectory = if (std.fs.path.isAbsoluteWindowsWTF16(sub_path_w)) null else options.dir,
-        .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
-        .ObjectName = &nt_name,
-        .SecurityDescriptor = if (options.sa) |ptr| ptr.lpSecurityDescriptor else null,
-        .SecurityQualityOfService = null,
-    };
-    var io: os.windows.IO_STATUS_BLOCK = undefined;
-    const blocking_flag: os.windows.ULONG = if (options.io_mode == .blocking)
-        os.windows.FILE_SYNCHRONOUS_IO_NONALERT
-    else
-        0;
-    const file_or_dir_flag: os.windows.ULONG = switch (options.filter) {
-        .file_only => os.windows.FILE_NON_DIRECTORY_FILE,
-        .dir_only => os.windows.FILE_DIRECTORY_FILE,
-        .any => 0,
-    };
-    // If we're not following symlinks, we need to ensure we don't pass in any synchronization
-    // flags such as FILE_SYNCHRONOUS_IO_NONALERT.
-    const flags: os.windows.ULONG = if (options.follow_symlinks)
-        file_or_dir_flag | blocking_flag
-    else
-        file_or_dir_flag | os.windows.FILE_OPEN_REPARSE_POINT;
-
-    while (true) {
-        const rc = os.windows.ntdll.NtCreateFile(
-            &result,
-            options.access_mask,
-            &attr,
-            &io,
-            null,
-            os.windows.FILE_ATTRIBUTE_NORMAL,
-            options.share_access,
-            options.creation,
-            flags | file_flags,
-            null,
-            0,
-        );
-        switch (rc) {
-            .SUCCESS => {
-                if (std.io.is_async and options.io_mode == .evented) {
-                    _ = os.windows.CreateIoCompletionPort(
-                        result,
-                        std.event.Loop.instance.?.os_data.io_port,
-                        undefined,
-                        undefined,
-                    ) catch undefined;
-                }
-                return result;
-            },
-            .OBJECT_NAME_INVALID => unreachable,
-            .OBJECT_NAME_NOT_FOUND => return error.FileNotFound,
-            .OBJECT_PATH_NOT_FOUND => return error.FileNotFound,
-            .BAD_NETWORK_PATH => return error.NetworkNotFound, // \\server was not found
-            // \\server was found but \\server\share wasn't
-            .BAD_NETWORK_NAME => return error.NetworkNotFound,
-            .NO_MEDIA_IN_DEVICE => return error.NoDevice,
-            .INVALID_PARAMETER => unreachable,
-            .SHARING_VIOLATION => return error.AccessDenied,
-            .ACCESS_DENIED => return error.AccessDenied,
-            .PIPE_BUSY => return error.PipeBusy,
-            .OBJECT_PATH_SYNTAX_BAD => unreachable,
-            .OBJECT_NAME_COLLISION => return error.PathAlreadyExists,
-            .FILE_IS_A_DIRECTORY => return error.IsDir,
-            .NOT_A_DIRECTORY => return error.NotDir,
-            .USER_MAPPED_FILE => return error.AccessDenied,
-            .INVALID_HANDLE => unreachable,
-            .DELETE_PENDING => {
-                // This error means that there *was* a file in this location on
-                // the file system, but it was deleted. However, the OS is not
-                // finished with the deletion operation, and so this CreateFile
-                // call has failed. There is not really a sane way to handle
-                // this other than retrying the creation after the OS finishes
-                // the deletion.
-                std.time.sleep(std.time.ns_per_ms);
-                continue;
-            },
-            else => return os.windows.unexpectedStatus(rc),
-        }
-    }
 }
