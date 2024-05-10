@@ -922,9 +922,6 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             defer assert(block_pool_count_start - self.block_pool.count >=
                 minimum_block_count_beat);
 
-            const source_index_block_a = self.block_pool.pop().?;
-            const source_index_block_b = self.block_pool.pop().?;
-
             // Split the remaining blocks equally, with the remainder going to the target pool.
             // TODO: Splitting equally is definitely not the best way!
             // TODO: If level_b is 0, level_a needs no memory at all.
@@ -944,8 +941,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             });
 
             return .{
-                .source_index_block_a = source_index_block_a,
-                .source_index_block_b = source_index_block_b,
+                .source_index_block_a = self.block_pool.pop().?,
+                .source_index_block_b = self.block_pool.pop().?,
                 .source_value_blocks = .{
                     CompactionHelper.BlockFIFO.init(&self.block_pool, equal_split_count),
                     CompactionHelper.BlockFIFO.init(&self.block_pool, equal_split_count),
