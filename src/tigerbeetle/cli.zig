@@ -218,7 +218,8 @@ const StartDefaults = struct {
 };
 
 const start_defaults_production = StartDefaults{
-    .limit_pipeline_requests = constants.pipeline_request_queue_max,
+    .limit_pipeline_requests = @divExact(constants.clients_max, 2) -
+        constants.pipeline_prepare_queue_max,
     .limit_request = .{ .value = constants.message_size_max },
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },
     .cache_transfers = .{ .value = constants.cache_transfers_size_default },
