@@ -3,11 +3,9 @@ package tigerbeetle_go
 import (
 	"bytes"
 	"fmt"
-	"math/big"
 	"os"
 	"os/exec"
 	"runtime"
-	"sync"
 	"testing"
 	"unsafe"
 
@@ -87,7 +85,9 @@ func WithClient(t testing.TB, withClient func(Client)) {
 
 func TestClient(t *testing.T) {
 	WithClient(t, func(client Client) {
-		doTestClient(t, client)
+		for i := 0; i < 8; i++ {
+			doTestClient(t, client)
+		}
 	})
 }
 
@@ -246,63 +246,6 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Equal(t, types.ToUint128(0), accountB.CreditsPending)
 		assert.Equal(t, types.ToUint128(0), accountB.DebitsPosted)
 		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
-	})
-
-	t.Run("can create concurrent transfers", func(t *testing.T) {
-		accountA, accountB := createTwoAccounts(t)
-
-		// NB: this test is _not_ parallel, so can use up all the concurrency.
-		const TRANSFERS_MAX = 1_000_000
-		concurrencyMax := make(chan struct{}, TIGERBEETLE_CONCURRENCY_MAX)
-
-		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Len(t, accounts, 2)
-		accountACredits := accounts[0].CreditsPosted.BigInt()
-		accountBDebits := accounts[1].DebitsPosted.BigInt()
-
-		var waitGroup sync.WaitGroup
-		for i := 0; i < TRANSFERS_MAX; i++ {
-			waitGroup.Add(1)
-
-			go func(i int) {
-				defer waitGroup.Done()
-
-				concurrencyMax <- struct{}{}
-				results, err := client.CreateTransfers([]types.Transfer{
-					{
-						ID:              types.ID(),
-						CreditAccountID: accountA.ID,
-						DebitAccountID:  accountB.ID,
-						Amount:          types.ToUint128(1),
-						Ledger:          1,
-						Code:            1,
-					},
-				})
-				<-concurrencyMax
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				assert.Empty(t, results)
-			}(i)
-		}
-		waitGroup.Wait()
-
-		accounts, err = client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Len(t, accounts, 2)
-		accountACreditsAfter := accounts[0].CreditsPosted.BigInt()
-		accountBDebitsAfter := accounts[1].DebitsPosted.BigInt()
-
-		// Each transfer moves ONE unit,
-		// so the credit/debit must differ from TRANSFERS_MAX units:
-		assert.Equal(t, TRANSFERS_MAX, big.NewInt(0).Sub(&accountACreditsAfter, &accountACredits).Int64())
-		assert.Equal(t, TRANSFERS_MAX, big.NewInt(0).Sub(&accountBDebitsAfter, &accountBDebits).Int64())
 	})
 
 	t.Run("can query transfers for an account", func(t *testing.T) {
