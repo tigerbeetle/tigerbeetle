@@ -93,12 +93,12 @@ func TestClient(s *testing.T) {
 
 func doTestClient(s *testing.T, client Client) {
 	accountA := types.Account{
-		ID:     HexStringToUint128("a"),
+		ID:     types.ID(),
 		Ledger: 1,
 		Code:   1,
 	}
 	accountB := types.Account{
-		ID:     HexStringToUint128("b"),
+		ID:     types.ID(),
 		Ledger: 1,
 		Code:   2,
 	}
@@ -150,7 +150,7 @@ func doTestClient(s *testing.T, client Client) {
 	s.Run("can create a transfer", func(t *testing.T) {
 		results, err := client.CreateTransfers([]types.Transfer{
 			{
-				ID:              HexStringToUint128("a"),
+				ID:              types.ID(),
 				CreditAccountID: accountA.ID,
 				DebitAccountID:  accountB.ID,
 				Amount:          types.ToUint128(100),
@@ -184,8 +184,9 @@ func doTestClient(s *testing.T, client Client) {
 	})
 
 	s.Run("can create linked transfers", func(t *testing.T) {
+		id := types.ID()
 		transfer1 := types.Transfer{
-			ID:              HexStringToUint128("d"),
+			ID:              id,
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
 			Amount:          types.ToUint128(50),
@@ -194,7 +195,7 @@ func doTestClient(s *testing.T, client Client) {
 			Ledger:          1,
 		}
 		transfer2 := types.Transfer{
-			ID:              HexStringToUint128("d"),
+			ID:              id,
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
 			Amount:          types.ToUint128(50),
@@ -254,7 +255,7 @@ func doTestClient(s *testing.T, client Client) {
 				concurrencyMax <- struct{}{}
 				results, err := client.CreateTransfers([]types.Transfer{
 					{
-						ID:              types.ToUint128(uint64(TRANSFERS_MAX + i)),
+						ID:              types.ID(),
 						CreditAccountID: accountA.ID,
 						DebitAccountID:  accountB.ID,
 						Amount:          types.ToUint128(1),
@@ -289,7 +290,7 @@ func doTestClient(s *testing.T, client Client) {
 	s.Run("can query transfers for an account", func(t *testing.T) {
 		// Create a new account:
 		accountC := types.Account{
-			ID:     HexStringToUint128("c"),
+			ID:     types.ID(),
 			Ledger: 1,
 			Code:   1,
 			Flags: types.AccountFlags{
@@ -305,7 +306,7 @@ func doTestClient(s *testing.T, client Client) {
 		// Create transfers where the new account is either the debit or credit account:
 		transfers_created := make([]types.Transfer, 10)
 		for i := 0; i < 10; i++ {
-			transfer_id := types.ToUint128(uint64(i) + 10_000)
+			transfer_id := types.ID()
 
 			// Swap debit and credit accounts:
 			if i%2 == 0 {
