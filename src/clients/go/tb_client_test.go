@@ -92,18 +92,18 @@ func TestClient(t *testing.T) {
 }
 
 func doTestClient(t *testing.T, client Client) {
-	accountA := types.Account{
-		ID:     types.ID(),
-		Ledger: 1,
-		Code:   1,
-	}
-	accountB := types.Account{
-		ID:     types.ID(),
-		Ledger: 1,
-		Code:   2,
-	}
+	createTwoAccounts := func (t *testing.T) (types.Account, types.Account) {
+		accountA := types.Account{
+			ID:     types.ID(),
+			Ledger: 1,
+			Code:   1,
+		}
+		accountB := types.Account{
+			ID:     types.ID(),
+			Ledger: 1,
+			Code:   2,
+		}
 
-	t.Run("can create accounts", func(t *testing.T) {
 		results, err := client.CreateAccounts([]types.Account{
 			accountA,
 			accountB,
@@ -111,11 +111,18 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		assert.Empty(t, results)
+
+		return accountA, accountB
+	}
+
+	t.Run("can create accounts", func(t *testing.T) {
+		createTwoAccounts(t)
 	})
 
 	t.Run("can lookup accounts", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		results, err := client.LookupAccounts([]types.Uint128{
 			accountA.ID,
 			accountB.ID,
@@ -148,6 +155,8 @@ func doTestClient(t *testing.T, client Client) {
 	})
 
 	t.Run("can create a transfer", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		results, err := client.CreateTransfers([]types.Transfer{
 			{
 				ID:              types.ID(),
@@ -184,6 +193,8 @@ func doTestClient(t *testing.T, client Client) {
 	})
 
 	t.Run("can create linked transfers", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		id := types.ID()
 		transfer1 := types.Transfer{
 			ID:              id,
@@ -221,7 +232,7 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, accounts, 2)
 
 		accountA = accounts[0]
-		assert.Equal(t, types.ToUint128(100), accountA.CreditsPosted)
+		assert.Equal(t, types.ToUint128(0), accountA.CreditsPosted)
 		assert.Equal(t, types.ToUint128(0), accountA.CreditsPending)
 		assert.Equal(t, types.ToUint128(0), accountA.DebitsPosted)
 		assert.Equal(t, types.ToUint128(0), accountA.DebitsPending)
@@ -229,11 +240,13 @@ func doTestClient(t *testing.T, client Client) {
 		accountB = accounts[1]
 		assert.Equal(t, types.ToUint128(0), accountB.CreditsPosted)
 		assert.Equal(t, types.ToUint128(0), accountB.CreditsPending)
-		assert.Equal(t, types.ToUint128(100), accountB.DebitsPosted)
+		assert.Equal(t, types.ToUint128(0), accountB.DebitsPosted)
 		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
 	})
 
 	t.Run("can create concurrent transfers", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		const TRANSFERS_MAX = 1_000_000
 		concurrencyMax := make(chan struct{}, TIGERBEETLE_CONCURRENCY_MAX)
 
@@ -288,6 +301,8 @@ func doTestClient(t *testing.T, client Client) {
 	})
 
 	t.Run("can query transfers for an account", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		// Create a new account:
 		accountC := types.Account{
 			ID:     types.ID(),
