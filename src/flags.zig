@@ -207,21 +207,23 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
         if (@hasField(Flags, "positional")) {
             counts.positional += 1;
-            inline for (positional_fields, 0..) |positional_field, positional_index| {
-                const flag = comptime flag_name_positional(positional_field);
+            switch (counts.positional - 1) {
+                inline 0...positional_fields.len - 1 => |positional_index| {
+                    const positional_field = positional_fields[positional_index];
+                    const flag = comptime flag_name_positional(positional_field);
 
-                if (arg.len == 0) fatal("{s}: empty argument", .{flag});
-                // Prevent ambiguity between a flag and positional argument value. We could add
-                // support for bare ` -- ` as a disambiguation mechanism once we have a real
-                // use-case.
-                if (arg[0] == '-') fatal("unexpected argument: '{s}'", .{arg});
-                parsed_positional = true;
+                    if (arg.len == 0) fatal("{s}: empty argument", .{flag});
+                    // Prevent ambiguity between a flag and positional argument value. We could add
+                    // support for bare ` -- ` as a disambiguation mechanism once we have a real
+                    // use-case.
+                    if (arg[0] == '-') fatal("unexpected argument: '{s}'", .{arg});
+                    parsed_positional = true;
 
-                @field(result.positional, positional_field.name) =
-                    parse_value(positional_field.type, flag, arg);
-                if (positional_index + 1 == counts.positional) {
+                    @field(result.positional, positional_field.name) =
+                        parse_value(positional_field.type, flag, arg);
                     continue :next_arg;
-                }
+                },
+                else => {}, // Fall-through to the unexpected argument error.
             }
         }
 
@@ -851,7 +853,7 @@ test "flags" {
 
     try t.check(&.{ "pos", "x", "y" }, snap(@src(),
         \\stdout:
-        \\p1: y
+        \\p1: x
         \\p2: y
         \\p3: null
         \\p4: null
@@ -861,8 +863,8 @@ test "flags" {
 
     try t.check(&.{ "pos", "x", "y", "1" }, snap(@src(),
         \\stdout:
-        \\p1: 1
-        \\p2: 1
+        \\p1: x
+        \\p2: y
         \\p3: 1
         \\p4: null
         \\flag: false
@@ -871,9 +873,9 @@ test "flags" {
 
     try t.check(&.{ "pos", "x", "y", "1", "2" }, snap(@src(),
         \\stdout:
-        \\p1: 2
-        \\p2: 2
-        \\p3: 2
+        \\p1: x
+        \\p2: y
+        \\p3: 1
         \\p4: 2
         \\flag: false
         \\
@@ -930,7 +932,7 @@ test "flags" {
 
     try t.check(&.{ "pos", "--flag", "x", "y" }, snap(@src(),
         \\stdout:
-        \\p1: y
+        \\p1: x
         \\p2: y
         \\p3: null
         \\p4: null
