@@ -1,6 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const tb = @import("tb_client.zig");
+
+// TODO: Move this back to src/clients/c when there's a better solution for main_pkg_path=src/
+const vsr = @import("vsr.zig");
+const tb = vsr.tb_client;
 
 comptime {
     if (!builtin.link_libc) {

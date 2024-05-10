@@ -1,6 +1,9 @@
 const std = @import("std");
-const tb = @import("../../tigerbeetle.zig");
-const tb_client = @import("../c/tb_client.zig");
+
+// TODO: Move this back to src/clients/java when there's a better solution for main_pkg_path=src/
+const vsr = @import("vsr.zig");
+const tb = vsr.tigerbeetle;
+const tb_client = vsr.tb_client;
 
 const trait = std.meta.trait;
 const assert = std.debug.assert;
