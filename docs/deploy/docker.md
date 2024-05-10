@@ -137,7 +137,7 @@ virtual machine (such as is required on Docker or Podman for macOS), try
 increasing the virtual machine memory limit.
 
 Alternatively, in a development environment, you can lower the size of the cache
-so TigerBeetle uses less memory. For example, set `--cache-grid=512MiB` when
+so TigerBeetle uses less memory. For example, set `--cache-grid=256MiB` when
 running `tigerbeetle start`.
 
 ### Debugging panics
