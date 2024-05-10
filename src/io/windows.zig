@@ -849,7 +849,9 @@ pub const IO = struct {
             .INVALID_USER_BUFFER, .NOT_ENOUGH_MEMORY => error.SystemResources,
             .NOT_ENOUGH_QUOTA => error.SystemResources,
             .OPERATION_ABORTED => unreachable, // overlapped_fn() doesn't get cancelled.
-            .HANDLE_EOF => unreachable,
+            // ReadFile and WriteFile don't allow partial IO (acting more like readAll/writeAll)
+            // so assume the offset is correct and simulate partial IO by returning 0 bytes moved.
+            .HANDLE_EOF => return 0,
             else => |err| return os.windows.unexpectedError(err),
         };
     }
