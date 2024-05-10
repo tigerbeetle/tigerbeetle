@@ -153,9 +153,9 @@ Here are a few key pages you might be interested in:
 - Usage
   - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
 - Reference
-  - [Accounts](https://docs.tigerbeetle.com/reference/accounts)
-  - [Transfers](https://docs.tigerbeetle.com/reference/transfers)
-  - [Operations](https://docs.tigerbeetle.com/reference/operations)
+  - [Account](https://docs.tigerbeetle.com/reference/account)
+  - [Transfer](https://docs.tigerbeetle.com/reference/transfer)
+  - [Requests](https://docs.tigerbeetle.com/reference/requests)
 
 ## Clients
 

@@ -9,32 +9,32 @@ public interface TransferFlags {
     int NONE = (int) 0;
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagslinked">linked</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagslinked">linked</a>
      */
     int LINKED = (int) (1 << 0);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagspending">pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagspending">pending</a>
      */
     int PENDING = (int) (1 << 1);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagspost_pending_transfer">post_pending_transfer</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagspost_pending_transfer">post_pending_transfer</a>
      */
     int POST_PENDING_TRANSFER = (int) (1 << 2);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsvoid_pending_transfer">void_pending_transfer</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsvoid_pending_transfer">void_pending_transfer</a>
      */
     int VOID_PENDING_TRANSFER = (int) (1 << 3);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsbalancing_debit">balancing_debit</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_debit">balancing_debit</a>
      */
     int BALANCING_DEBIT = (int) (1 << 4);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsbalancing_credit">balancing_credit</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_credit">balancing_credit</a>
      */
     int BALANCING_CREDIT = (int) (1 << 5);
 

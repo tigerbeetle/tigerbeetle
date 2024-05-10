@@ -102,7 +102,7 @@ The following are valid addresses:
 ## Creating Accounts
 
 See details for account fields in the [Accounts
-reference](https://docs.tigerbeetle.com/reference/accounts).
+reference](https://docs.tigerbeetle.com/reference/account).
 
 ```cs
 var accounts = new[] {
@@ -132,7 +132,7 @@ See the class [UInt128Extensions](/src/clients/dotnet/TigerBeetle/UInt128Extensi
 
 The account flags value is a bitfield. See details for
 these flags in the [Accounts
-reference](https://docs.tigerbeetle.com/reference/accounts#flags).
+reference](https://docs.tigerbeetle.com/reference/account#flags).
 
 To toggle behavior for an account, combine enum values stored in the
 `AccountFlags` object with bitwise-or:
@@ -164,7 +164,7 @@ error code and the index of the account in the request
 batch.
 
 See all error conditions in the [create_accounts
-reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
+reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```cs
 var account2 = new Account { /* ... account values ... */ };
@@ -199,7 +199,7 @@ accounts = client.LookupAccounts(new UInt128[] { 137, 138 });
 This creates a journal entry between two accounts.
 
 See details for transfer fields in the [Transfers
-reference](https://docs.tigerbeetle.com/reference/transfers).
+reference](https://docs.tigerbeetle.com/reference/transfer).
 
 ```cs
 var transfers = new[] {
@@ -231,7 +231,7 @@ failed. The error object contains an error code and the index of the
 transfer in the request batch.
 
 See all error conditions in the [create_transfers
-reference](https://docs.tigerbeetle.com/reference/operations/create_transfers).
+reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```cs
 foreach (var error in createTransfersError)
@@ -288,7 +288,7 @@ multiple jobs from the queue rather than just one.
 
 The transfer `flags` value is a bitfield. See details for these flags in
 the [Transfers
-reference](https://docs.tigerbeetle.com/reference/transfers#flags).
+reference](https://docs.tigerbeetle.com/reference/transfer#flags).
 
 To toggle behavior for an account, combine enum values stored in the
 `TransferFlags` object with bitwise-or:
@@ -407,8 +407,8 @@ Fetches the point-in-time balances of a given account, allowing basic filter and
 pagination capabilities.
 
 Only accounts created with the flag
-[`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
-[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
+[`history`](https://docs.tigerbeetle.com/reference/account#flagshistory) set retain
+[historical balances](https://docs.tigerbeetle.com/reference/requests/get_account_balances).
 
 The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.

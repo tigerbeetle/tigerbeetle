@@ -62,44 +62,44 @@ const type_mappings = .{
     .{ tb.AccountFlags, TypeMapping{
         .name = "AccountFlags",
         .private_fields = &.{"padding"},
-        .docs_link = "reference/accounts#flags",
+        .docs_link = "reference/account#flags",
     } },
     .{ tb.TransferFlags, TypeMapping{
         .name = "TransferFlags",
         .private_fields = &.{"padding"},
-        .docs_link = "reference/transfers#flags",
+        .docs_link = "reference/transfer#flags",
     } },
     .{ tb.AccountFilterFlags, TypeMapping{
         .name = "AccountFilterFlags",
         .private_fields = &.{"padding"},
         .visibility = .public,
-        .docs_link = "reference/account_filter#flags",
+        .docs_link = "reference/account-filter#flags",
     } },
     .{ tb.Account, TypeMapping{
         .name = "AccountBatch",
         .private_fields = &.{"reserved"},
         .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
-        .docs_link = "reference/accounts#",
+        .docs_link = "reference/account#",
     } },
     .{ tb.AccountBalance, TypeMapping{
         .name = "AccountBalanceBatch",
         .private_fields = &.{"reserved"},
         .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
-        .docs_link = "reference/account_balances#",
+        .docs_link = "reference/account-balances#",
     } },
     .{ tb.Transfer, TypeMapping{
         .name = "TransferBatch",
         .private_fields = &.{"reserved"},
         .readonly_fields = &.{"timestamp"},
-        .docs_link = "reference/transfers#",
+        .docs_link = "reference/transfer#",
     } },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
-        .docs_link = "reference/operations/create_accounts#",
+        .docs_link = "reference/requests/create_accounts#",
     } },
     .{ tb.CreateTransferResult, TypeMapping{
         .name = "CreateTransferResult",
-        .docs_link = "reference/operations/create_transfers#",
+        .docs_link = "reference/requests/create_transfers#",
     } },
     .{ tb.CreateAccountsResult, TypeMapping{
         .name = "CreateAccountResultBatch",
