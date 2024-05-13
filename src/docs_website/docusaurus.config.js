@@ -60,10 +60,12 @@ const config = {
         searchPagePath: 'search',
       },
       navbar: {
+        // Note there is custom CSS to make the title use italics
         title: 'TigerBeetle Docs',
         logo: {
           alt: 'TigerBeetle Logo',
           src: 'img/logo.svg',
+          srcDark: 'img/logo-white.svg',
         },
         items: [
           {
@@ -75,28 +77,36 @@ const config = {
       },
       footer: {
         style: 'dark',
+        logo: {
+          alt: 'TigerBeetle Logo',
+          src: 'img/logo-with-text-white.svg',
+          href: 'https://tigerbeetle.com/'
+        },
         links: [
           {
-            title: 'Community',
-            items: [
-              {
-                label: 'Twitter',
-                href: 'https://twitter.com/tigerbeetledb',
-              },
-              {
-                label: 'GitHub',
-                href: 'https://github.com/tigerbeetle/tigerbeetle',
-              },
-              {
-                label: 'LinkedIn',
-                href: 'https://linkedin.com/company/tigerbeetle',
-              },
-              {
-                label: 'Slack',
-                href: 'https://slack.tigerbeetle.com/invite',
-              },
-            ],
+            label: 'GitHub',
+            href: 'https://github.com/tigerbeetle/tigerbeetle',
           },
+          {
+            label: 'Slack',
+            href: 'https://slack.tigerbeetle.com/invite',
+          },
+          {
+            label: 'Newsletter',
+            href: 'https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle'
+          },
+          {
+            label: '𝕏',
+            href: 'https://twitter.com/tigerbeetledb',
+          },
+          {
+            label: 'LinkedIn',
+            href: 'https://linkedin.com/company/tigerbeetle',
+          },
+          {
+            label: 'YouTube',
+            href: 'https://www.youtube.com/@tigerbeetledb',
+          }
         ],
         copyright: `Copyright © ${new Date().getFullYear()} TigerBeetle, Inc. All rights reserved.`,
       },

@@ -35,7 +35,7 @@ pub fn test_freshness(
         inline else => |l| @field(LanguageDocs, @tagName(l)),
     };
 
-    const walkthrough_path = try shell.print(
+    const walkthrough_path = try shell.fmt(
         "./samples/walkthrough/{s}{s}.{s}",
         .{ docs.test_source_path, docs.test_file_name, docs.extension },
     );
@@ -68,7 +68,7 @@ pub fn test_freshness(
         ctx.buffer.clearRetainingCapacity();
         try readme_sample(&ctx, sample);
 
-        const sample_readme = try shell.print("samples/{s}/README.md", .{sample.directory});
+        const sample_readme = try shell.fmt("samples/{s}/README.md", .{sample.directory});
         const update = try shell.file_ensure_content(sample_readme, ctx.buffer.items);
         updated_any = updated_any or (update == .updated);
     }
@@ -194,7 +194,7 @@ fn readme_root(ctx: *Context) !void {
         ctx.header(2, "Creating Accounts");
         ctx.paragraph(
             \\See details for account fields in the [Accounts
-            \\reference](https://docs.tigerbeetle.com/reference/accounts).
+            \\reference](https://docs.tigerbeetle.com/reference/account).
         );
         ctx.code_section("create-accounts");
         ctx.paragraph(ctx.docs.create_accounts_documentation);
@@ -203,7 +203,7 @@ fn readme_root(ctx: *Context) !void {
         ctx.paragraph(
             \\The account flags value is a bitfield. See details for
             \\these flags in the [Accounts
-            \\reference](https://docs.tigerbeetle.com/reference/accounts#flags).
+            \\reference](https://docs.tigerbeetle.com/reference/account#flags).
         );
         ctx.paragraph(ctx.docs.account_flags_documentation);
 
@@ -223,7 +223,7 @@ fn readme_root(ctx: *Context) !void {
             \\batch.
             \\
             \\See all error conditions in the [create_accounts
-            \\reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
+            \\reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
         );
 
         ctx.code_section("create-accounts-errors");
@@ -252,7 +252,7 @@ fn readme_root(ctx: *Context) !void {
             \\This creates a journal entry between two accounts.
             \\
             \\See details for transfer fields in the [Transfers
-            \\reference](https://docs.tigerbeetle.com/reference/transfers).
+            \\reference](https://docs.tigerbeetle.com/reference/transfer).
         );
         ctx.code_section("create-transfers");
 
@@ -265,7 +265,7 @@ fn readme_root(ctx: *Context) !void {
             \\transfer in the request batch.
             \\
             \\See all error conditions in the [create_transfers
-            \\reference](https://docs.tigerbeetle.com/reference/operations/create_transfers).
+            \\reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
         );
         ctx.code_section("create-transfers-errors");
 
@@ -305,7 +305,7 @@ fn readme_root(ctx: *Context) !void {
         ctx.paragraph(
             \\The transfer `flags` value is a bitfield. See details for these flags in
             \\the [Transfers
-            \\reference](https://docs.tigerbeetle.com/reference/transfers#flags).
+            \\reference](https://docs.tigerbeetle.com/reference/transfer#flags).
         );
         ctx.paragraph(ctx.docs.transfer_flags_documentation);
         ctx.paragraph("For example, to link `transfer0` and `transfer1`:");
@@ -383,8 +383,8 @@ fn readme_root(ctx: *Context) !void {
             \\pagination capabilities.
             \\
             \\Only accounts created with the flag
-            \\[`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
-            \\[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
+            \\[`history`](https://docs.tigerbeetle.com/reference/account#flagshistory) set retain
+            \\[historical balances](https://docs.tigerbeetle.com/reference/requests/get_account_balances).
             \\
             \\The balances in the response are sorted by `timestamp` in chronological or
             \\reverse-chronological order.
@@ -452,7 +452,7 @@ fn readme_sample(ctx: *Context, sample: Sample) !void {
 
     {
         ctx.header(2, "Setup");
-        ctx.paragraph(try ctx.shell.print(
+        ctx.paragraph(try ctx.shell.fmt(
             \\First, clone this repo and `cd` into `tigerbeetle/src/clients/{s}/samples/{s}`.
         , .{ ctx.docs.directory, sample.directory }));
 
@@ -495,7 +495,7 @@ const Context = struct {
     walkthrough: []const u8,
 
     fn sample_exists(ctx: *Context, sample: @TypeOf(samples[0])) !bool {
-        const sample_directory = try ctx.shell.print("samples/{s}/", .{sample.directory});
+        const sample_directory = try ctx.shell.fmt("samples/{s}/", .{sample.directory});
         return try ctx.shell.dir_exists(sample_directory);
     }
 
@@ -507,9 +507,9 @@ const Context = struct {
     fn read_section(ctx: *Context, section_name: []const u8) []const u8 {
         var section_content = std.ArrayList(u8).init(ctx.arena);
         const section_start =
-            ctx.shell.print("section:{s}\n", .{section_name}) catch @panic("OOM");
+            ctx.shell.fmt("section:{s}\n", .{section_name}) catch @panic("OOM");
         const section_end =
-            ctx.shell.print("endsection:{s}\n", .{section_name}) catch @panic("OOM");
+            ctx.shell.fmt("endsection:{s}\n", .{section_name}) catch @panic("OOM");
 
         var text = ctx.walkthrough;
         for (0..10) |_| {

@@ -34,6 +34,7 @@ const CliArgs = union(enum) {
         // Experimental: standbys don't have a concrete practical use-case yet.
         standby: ?u8 = null,
         replica_count: u8,
+        development: bool = false,
 
         positional: struct {
             path: [:0]const u8,
@@ -43,15 +44,15 @@ const CliArgs = union(enum) {
     start: struct {
         addresses: []const u8,
         limit_storage: flags.ByteSize = .{ .value = constants.storage_size_limit_max },
-        cache_accounts: flags.ByteSize = .{ .value = constants.cache_accounts_size_default },
-        cache_transfers: flags.ByteSize = .{ .value = constants.cache_transfers_size_default },
-        cache_transfers_pending: flags.ByteSize =
-            .{ .value = constants.cache_transfers_pending_size_default },
-        cache_account_balances: flags.ByteSize =
-            .{ .value = constants.cache_account_balances_size_default },
-        cache_grid: flags.ByteSize = .{ .value = constants.grid_cache_size_default },
+        limit_pipeline_requests: ?u32 = null,
+        cache_accounts: ?flags.ByteSize = null,
+        cache_transfers: ?flags.ByteSize = null,
+        cache_transfers_pending: ?flags.ByteSize = null,
+        cache_account_balances: ?flags.ByteSize = null,
+        cache_grid: ?flags.ByteSize = null,
         memory_lsm_manifest: flags.ByteSize =
             .{ .value = constants.lsm_manifest_memory_size_default },
+        development: bool = false,
 
         positional: struct {
             path: [:0]const u8,
@@ -89,14 +90,8 @@ const CliArgs = union(enum) {
         seed: ?u64 = null,
     },
 
-    // Internal: used for multiversion binary debugging.
-    multiversionvalidate: struct {
-        positional: struct {
-            path: [:0]const u8,
-        },
-    },
-
-    // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage
+    // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
+    // --limit-pipeline-requests
     pub const help = fmt.comptimePrint(
         \\Usage:
         \\
@@ -162,6 +157,13 @@ const CliArgs = union(enum) {
         \\  --verbose
         \\        Print compile-time configuration along with the build version.
         \\
+        \\  --development
+        \\        Allow the replica to format/start even when Direct IO is unavailable.
+        \\        Additionally, use smaller cache sizes by default.
+        \\
+        \\        For safety, production replicas should always enforce Direct IO -- this flag should only be
+        \\        used for testing and development. It should not be used for production or benchmarks.
+        \\
         \\Examples:
         \\
         \\  tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
@@ -194,7 +196,42 @@ const CliArgs = union(enum) {
     });
 };
 
+const StartDefaults = struct {
+    limit_pipeline_requests: u32,
+    cache_accounts: flags.ByteSize,
+    cache_transfers: flags.ByteSize,
+    cache_transfers_pending: flags.ByteSize,
+    cache_account_balances: flags.ByteSize,
+    cache_grid: flags.ByteSize,
+};
+
+const start_defaults_production = StartDefaults{
+    .limit_pipeline_requests = constants.pipeline_request_queue_max,
+    .cache_accounts = .{ .value = constants.cache_accounts_size_default },
+    .cache_transfers = .{ .value = constants.cache_transfers_size_default },
+    .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
+    .cache_account_balances = .{ .value = constants.cache_account_balances_size_default },
+    .cache_grid = .{ .value = constants.grid_cache_size_default },
+};
+
+const start_defaults_development = StartDefaults{
+    .limit_pipeline_requests = 0,
+    .cache_accounts = .{ .value = 0 },
+    .cache_transfers = .{ .value = 0 },
+    .cache_transfers_pending = .{ .value = 0 },
+    .cache_account_balances = .{ .value = 0 },
+    .cache_grid = .{ .value = constants.block_size * Grid.Cache.value_count_max_multiple },
+};
+
 pub const Command = union(enum) {
+    pub const Format = struct {
+        cluster: u128,
+        replica: u8,
+        replica_count: u8,
+        development: bool,
+        path: [:0]const u8,
+    };
+
     pub const Start = struct {
         addresses: []const net.Address,
         // true when the value of `--addresses` is exactly `0`. Used to enable "magic zero" mode for
@@ -206,8 +243,10 @@ pub const Command = union(enum) {
         cache_transfers_pending: u32,
         cache_account_balances: u32,
         storage_size_limit: u64,
+        pipeline_requests_limit: u32,
         cache_grid_blocks: u32,
         lsm_forest_node_count: u32,
+        development: bool,
         path: [:0]const u8,
     };
 
@@ -242,12 +281,7 @@ pub const Command = union(enum) {
         seed: ?u64 = null,
     };
 
-    format: struct {
-        cluster: u128,
-        replica: u8,
-        replica_count: u8,
-        path: [:0]const u8,
-    },
+    format: Format,
     start: Start,
     version: struct {
         verbose: bool,
@@ -333,6 +367,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cluster = format.cluster, // just an ID, any value is allowed
                     .replica = replica,
                     .replica_count = format.replica_count,
+                    .development = format.development,
                     .path = format.positional.path,
                 },
             };
@@ -345,6 +380,8 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const AccountBalancesValuesCache = groove_config.account_balances.ObjectsCache.Cache;
 
             const addresses = parse_addresses(allocator, start.addresses);
+            const defaults =
+                if (start.development) start_defaults_development else start_defaults_production;
 
             const storage_size_limit = start.limit_storage.bytes();
             const storage_size_limit_min = data_file_size_min;
@@ -372,6 +409,23 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                         @divExact(constants.sector_size, 1024),
                     },
                 );
+            }
+
+            const pipeline_limit =
+                start.limit_pipeline_requests orelse defaults.limit_pipeline_requests;
+            const pipeline_limit_min = 0;
+            const pipeline_limit_max = constants.pipeline_request_queue_max;
+            if (pipeline_limit > pipeline_limit_max) {
+                flags.fatal("--limit-pipeline-requests: count {} exceeds maximum: {}", .{
+                    pipeline_limit,
+                    pipeline_limit_max,
+                });
+            }
+            if (pipeline_limit < pipeline_limit_min) {
+                flags.fatal("--limit-pipeline-requests: count {} is below minimum: {}", .{
+                    pipeline_limit,
+                    pipeline_limit_min,
+                });
             }
 
             const lsm_manifest_memory = start.memory_lsm_manifest.bytes();
@@ -411,32 +465,34 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .addresses = addresses,
                     .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
                     .storage_size_limit = storage_size_limit,
+                    .pipeline_requests_limit = pipeline_limit,
                     .cache_accounts = parse_cache_size_to_count(
                         tigerbeetle.Account,
                         AccountsValuesCache,
-                        start.cache_accounts,
+                        start.cache_accounts orelse defaults.cache_accounts,
                     ),
                     .cache_transfers = parse_cache_size_to_count(
                         tigerbeetle.Transfer,
                         TransfersValuesCache,
-                        start.cache_transfers,
+                        start.cache_transfers orelse defaults.cache_transfers,
                     ),
                     .cache_transfers_pending = parse_cache_size_to_count(
                         StateMachine.TransferPending,
                         TransfersPendingValuesCache,
-                        start.cache_transfers_pending,
+                        start.cache_transfers_pending orelse defaults.cache_transfers_pending,
                     ),
                     .cache_account_balances = parse_cache_size_to_count(
                         StateMachine.AccountBalancesGrooveValue,
                         AccountBalancesValuesCache,
-                        start.cache_account_balances,
+                        start.cache_account_balances orelse defaults.cache_account_balances,
                     ),
                     .cache_grid_blocks = parse_cache_size_to_count(
                         [constants.block_size]u8,
                         Grid.Cache,
-                        start.cache_grid,
+                        start.cache_grid orelse defaults.cache_grid,
                     ),
                     .lsm_forest_node_count = lsm_forest_node_count,
+                    .development = start.development,
                     .path = start.positional.path,
                 },
             };

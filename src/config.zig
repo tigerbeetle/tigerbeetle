@@ -19,7 +19,8 @@ const BuildOptions = struct {
     tracer_backend: TracerBackend,
     hash_log_mode: HashLogMode,
     git_commit: ?[40]u8,
-    release: []const u8,
+    release: ?[]const u8,
+    release_client_min: ?[]const u8,
     config_aof_record: bool,
     config_aof_recovery: bool,
 };
@@ -47,6 +48,7 @@ const build_options: BuildOptions = blk: {
 fn launder_type(comptime T: type, comptime value: anytype) T {
     if (T == bool or
         T == []const u8 or
+        T == ?[]const u8 or
         T == ?[40]u8)
     {
         return value;
@@ -76,12 +78,14 @@ pub const Config = struct {
 /// - Replica configs can change between restarts.
 ///
 /// Fields are documented within constants.zig.
+// TODO: Some of these could be runtime parameters (e.g. grid_scrubber_cycle_ms).
 const ConfigProcess = struct {
     log_level: std.log.Level = .info,
     tracer_backend: TracerBackend = .none,
     hash_log_mode: HashLogMode = .none,
     verify: bool,
     release: vsr.Release = vsr.Release.minimum,
+    release_client_min: vsr.Release = vsr.Release.minimum,
     git_commit: ?[40]u8 = null,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
@@ -103,7 +107,6 @@ const ConfigProcess = struct {
     tcp_keepcnt: c_int = 3,
     tcp_nodelay: bool = true,
     direct_io: bool,
-    direct_io_required: bool,
     journal_iops_read_max: usize = 8,
     journal_iops_write_max: usize = 8,
     client_replies_iops_read_max: usize = 1,
@@ -125,6 +128,10 @@ const ConfigProcess = struct {
     grid_missing_blocks_max: usize = 30,
     grid_missing_tables_max: usize = 3,
     aof_record: bool = false,
+    grid_scrubber_reads_max: usize = 1,
+    grid_scrubber_cycle_ms: usize = std.time.ms_per_day * 90,
+    grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
+    grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
     compaction_block_memory: usize = 256 * 1024 * 1024,
 };
@@ -218,7 +225,6 @@ pub const configs = struct {
     pub const default_production = Config{
         .process = .{
             .direct_io = true,
-            .direct_io_required = true,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
@@ -236,7 +242,6 @@ pub const configs = struct {
     pub const default_development = Config{
         .process = .{
             .direct_io = true,
-            .direct_io_required = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
@@ -252,7 +257,6 @@ pub const configs = struct {
         .process = .{
             .storage_size_limit_max = 200 * 1024 * 1024,
             .direct_io = false,
-            .direct_io_required = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 2048,
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
@@ -261,6 +265,8 @@ pub const configs = struct {
             .grid_repair_reads_max = 4,
             .grid_missing_blocks_max = 3,
             .grid_missing_tables_max = 2,
+            .grid_scrubber_reads_max = 2,
+            .grid_scrubber_cycle_ms = std.time.ms_per_hour,
             .verify = true,
             .compaction_block_memory = 16 * 1024 * 1024,
         },
@@ -302,18 +308,39 @@ pub const configs = struct {
             .test_min => test_min,
         };
 
-        const release_triple = vsr.ReleaseTriple.parse(build_options.release) catch {
-            @compileError("invalid release version");
-        };
+        if (build_options.release == null and build_options.release_client_min != null) {
+            @compileError("must set release if setting release_client_min");
+        }
+
+        if (build_options.release_client_min == null and build_options.release != null) {
+            @compileError("must set release_client_min if setting release");
+        }
+
+        const release = if (build_options.release) |release|
+            vsr.Release.from(vsr.ReleaseTriple.parse(release) catch {
+                @compileError("invalid release version");
+            })
+        else
+            vsr.Release.minimum;
+
+        const release_client_min = if (build_options.release_client_min) |release_client_min|
+            vsr.Release.from(vsr.ReleaseTriple.parse(release_client_min) catch {
+                @compileError("invalid release_client_min version");
+            })
+        else
+            vsr.Release.minimum;
 
         // TODO Use additional build options to overwrite other fields.
         base.process.log_level = build_options.config_log_level;
         base.process.tracer_backend = build_options.tracer_backend;
         base.process.hash_log_mode = build_options.hash_log_mode;
-        base.process.release = vsr.Release.from(release_triple);
+        base.process.release = release;
+        base.process.release_client_min = release_client_min;
         base.process.git_commit = build_options.git_commit;
         base.process.aof_record = build_options.config_aof_record;
         base.process.aof_recovery = build_options.config_aof_recovery;
+
+        assert(base.process.release.value >= base.process.release_client_min.value);
 
         break :current base;
     };

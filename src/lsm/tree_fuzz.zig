@@ -34,6 +34,7 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
+const SortedSegmentedArray = @import("./segmented_array.zig").SortedSegmentedArray;
 
 const CompactionHelperType = @import("compaction.zig").CompactionHelperType;
 const CompactionHelper = CompactionHelperType(Grid);
@@ -68,6 +69,12 @@ const Value = packed struct(u128) {
 
 const FuzzOpTag = std.meta.Tag(FuzzOp);
 const FuzzOp = union(enum) {
+    const Scan = struct {
+        min: u64,
+        max: u64,
+        direction: Direction,
+    };
+
     compact: struct {
         op: u64,
         checkpoint: bool,
@@ -75,11 +82,7 @@ const FuzzOp = union(enum) {
     put: Value,
     remove: Value,
     get: u64,
-    scan: struct {
-        min: u64,
-        max: u64,
-        direction: Direction,
-    },
+    scan: Scan,
 };
 
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
@@ -93,6 +96,7 @@ const replica = 4;
 const replica_count = 6;
 const node_count = 1024;
 const scan_results_max = 4096;
+const events_max = 10_000_000;
 const tree_options = .{
     // This is the smallest size that set_associative_cache will allow us.
     .cache_entries_max = 2048,
@@ -102,11 +106,10 @@ const tree_options = .{
 // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
 // Every `FuzzOp.put` issues one remove and one put.
 const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
-const compacts_per_checkpoint = std.math.divCeil(
-    usize,
+const compacts_per_checkpoint = stdx.div_ceil(
     constants.journal_slot_count,
     constants.lsm_batch_multiple,
-) catch unreachable;
+);
 
 fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
@@ -157,6 +160,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         scan_buffer: ScanBuffer,
         scan_results: []Value,
         scan_results_count: u32,
+        scan_results_model: []Value,
         compaction_exhausted: bool = false,
 
         block_pool: CompactionHelper.CompactionBlockFIFO,
@@ -199,6 +203,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.scan_results = try allocator.alloc(Value, scan_results_max);
             env.scan_results_count = 0;
             defer allocator.free(env.scan_results);
+
+            env.scan_results_model = try allocator.alloc(Value, scan_results_max);
+            defer allocator.free(env.scan_results_model);
 
             // TODO: Pull out these constants. 3 is block_count_bar_single, 8 is
             // minimum_block_count_beat.
@@ -512,9 +519,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-            // The tree should behave like a simple key-value data-structure.
-            // We'll compare it to a hash map.
-            var model = std.hash_map.AutoHashMap(u64, Value).init(allocator);
+            var model = try Model.init(table_usage);
             defer model.deinit();
 
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
@@ -537,21 +542,30 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     },
                     .put => |value| {
                         if (table_usage == .secondary_index) {
-                            if (model.get(Value.key_from_value(&value))) |old_value| {
-                                // Not allowed to put a present key without removing the old value first.
-                                env.tree.remove(&old_value);
+                            // Secondary index requires that the key implies the value (typically
+                            // key ≡ value), and that there are no updates.
+                            const canonical_value: Value = .{
+                                .id = value.id,
+                                .value = 0,
+                                .tombstone = value.tombstone,
+                            };
+                            if (model.contains(&canonical_value)) {
+                                env.tree.remove(&canonical_value);
                             }
+                            env.tree.put(&canonical_value);
+                            try model.put(&canonical_value);
+                        } else {
+                            env.tree.put(&value);
+                            try model.put(&value);
                         }
-                        env.tree.put(&value);
-                        try model.put(Value.key_from_value(&value), value);
                     },
                     .remove => |value| {
-                        if (table_usage == .secondary_index and !model.contains((Value.key_from_value(&value)))) {
+                        if (table_usage == .secondary_index and !model.contains(&value)) {
                             // Not allowed to remove non-present keys
                         } else {
                             env.tree.remove(&value);
+                            model.remove(&value);
                         }
-                        _ = model.remove(Value.key_from_value(&value));
                     },
                     .get => |key| {
                         // Get account from lsm.
@@ -562,135 +576,175 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                         if (model_value == null) {
                             assert(tree_value == null);
                         } else {
-                            switch (table_usage) {
-                                .general => {
-                                    assert(std.mem.eql(
-                                        u8,
-                                        std.mem.asBytes(&model_value.?),
-                                        std.mem.asBytes(&tree_value.?),
-                                    ));
-                                },
-                                .secondary_index => {
-                                    // secondary_index only preserves keys - may return old values
-                                    assert(std.mem.eql(
-                                        u8,
-                                        std.mem.asBytes(&Value.key_from_value(&model_value.?)),
-                                        std.mem.asBytes(&Value.key_from_value(&tree_value.?)),
-                                    ));
-                                },
-                            }
+                            assert(stdx.equal_bytes(Value, &model_value.?, &tree_value.?));
                         }
                     },
-                    .scan => |scan_range| {
-                        assert(scan_range.min <= scan_range.max);
-
-                        const tree_values = env.scan(
-                            scan_range.min,
-                            scan_range.max,
-                            scan_range.direction,
-                        );
-
-                        // Asserting the positive space:
-                        // all keys found by the scan must exist in our model.
-                        var tree_value_last: ?Value = null;
-                        for (tree_values) |tree_value| {
-
-                            // Asserting boundaries.
-                            assert(scan_range.min <= Table.key_from_value(&tree_value));
-                            assert(Table.key_from_value(&tree_value) <= scan_range.max);
-
-                            // Asserting direction.
-                            if (tree_value_last) |value_last| {
-                                switch (scan_range.direction) {
-                                    .ascending => assert(Table.key_from_value(&tree_value) >
-                                        Table.key_from_value(&value_last)),
-                                    .descending => assert(Table.key_from_value(&tree_value) <
-                                        Table.key_from_value(&value_last)),
-                                }
-                            }
-                            tree_value_last = tree_value;
-
-                            // Compare result to model.
-                            if (model.get(Table.key_from_value(&tree_value))) |model_value| {
-                                switch (table_usage) {
-                                    .general => {
-                                        assert(std.mem.eql(
-                                            u8,
-                                            std.mem.asBytes(&model_value),
-                                            std.mem.asBytes(&tree_value),
-                                        ));
-                                    },
-                                    .secondary_index => {
-                                        // secondary_index only preserves keys - may return old values
-                                        assert(Table.key_from_value(&model_value) ==
-                                            Table.key_from_value(&tree_value));
-                                    },
-                                }
-                            } else {
-                                assert(Table.tombstone(&tree_value));
-                            }
-                        }
-
-                        // Asserting the negative space:
-                        // All keys existing in our model must be checked against the scan range.
-                        if (scan_range.direction == .descending) std.mem.sort(
-                            Value,
-                            tree_values,
-                            {},
-                            struct {
-                                fn sort(_: void, a: Value, b: Value) bool {
-                                    return Table.key_from_value(&a) <
-                                        Table.key_from_value(&b);
-                                }
-                            }.sort,
-                        );
-
-                        var it = model.iterator();
-                        while (it.next()) |entry| {
-                            const model_value_key = Value.key_from_value(entry.value_ptr);
-                            const value_maybe = binary_search.binary_search_values(
-                                u64,
-                                Value,
-                                Table.key_from_value,
-                                tree_values,
-                                model_value_key,
-                                .{},
-                            );
-
-                            if (model_value_key >= scan_range.min and
-                                model_value_key <= scan_range.max)
-                            {
-                                // Must be found:
-                                if (value_maybe == null) {
-                                    // Or our buffer has exceeded, in this case the key should
-                                    // be less than the first element or greater than the last element,
-                                    // depending on the scan direction.
-                                    assert(tree_values.len == scan_results_max);
-                                    switch (scan_range.direction) {
-                                        .ascending => assert(
-                                            Table.key_from_value(&tree_values[tree_values.len - 1]) <
-                                                model_value_key,
-                                        ),
-                                        .descending => assert(
-                                            model_value_key <
-                                                Table.key_from_value(&tree_values[0]),
-                                        ),
-                                    }
-                                }
-                            } else {
-                                // Must not be found:
-                                if (value_maybe) |value| {
-                                    // Or it's a tombstone.
-                                    assert(Table.tombstone(value));
-                                }
-                            }
-                        }
-                    },
+                    .scan => |scan_range| try env.apply_scan(&model, scan_range),
                 }
             }
         }
+
+        fn apply_scan(env: *Environment, model: *const Model, scan_range: FuzzOp.Scan) !void {
+            assert(scan_range.min <= scan_range.max);
+
+            const tree_values = env.scan(
+                scan_range.min,
+                scan_range.max,
+                scan_range.direction,
+            );
+
+            const model_values = model.scan(
+                scan_range.min,
+                scan_range.max,
+                scan_range.direction,
+                env.scan_results_model,
+            );
+
+            // Unlike the model, the tree can return some amount of tombstones in the result set.
+            // They must be filtered out before comparison!
+            var tombstone_count: usize = 0;
+            for (tree_values, 0..) |tree_value, index| {
+                assert(scan_range.min <= Table.key_from_value(&tree_value));
+                assert(Table.key_from_value(&tree_value) <= scan_range.max);
+                if (Table.tombstone(&tree_value)) {
+                    tombstone_count += 1;
+                } else {
+                    if (tombstone_count > 0) {
+                        tree_values[index - tombstone_count] = tree_value;
+                    }
+                }
+            }
+
+            const tombstone_evicted = (model_values.len + tombstone_count) -| scan_results_max;
+            try testing.expectEqualSlices(
+                Value,
+                tree_values[0 .. tree_values.len - tombstone_count],
+                model_values[0 .. model_values.len - tombstone_evicted],
+            );
+            assert(tree_values.len >= model_values.len);
+        }
     };
 }
+
+// A tree is a sorted set. The ideal model would have been an in-memory B-tree, but there isn't
+// one in Zig's standard library. Use a SortedSegmentedArray instead which is essentially a stunted
+// B-tree one-level deep.
+const Model = struct {
+    const Array = SortedSegmentedArray(
+        Value,
+        NodePool,
+        events_max,
+        u64,
+        Value.key_from_value,
+        .{ .verify = false },
+    );
+
+    array: Array,
+    node_pool: NodePool,
+    table_usage: TableUsage,
+
+    fn init(table_usage: TableUsage) !Model {
+        const model_node_count = stdx.div_ceil(
+            events_max * @sizeOf(Value),
+            NodePool.node_size,
+        );
+        return .{
+            .array = try Array.init(allocator),
+            .node_pool = try NodePool.init(allocator, model_node_count),
+            .table_usage = table_usage,
+        };
+    }
+
+    fn count(model: *const Model) u32 {
+        return model.array.len();
+    }
+
+    fn contains(model: *Model, value: *const Value) bool {
+        return model.get(Value.key_from_value(value)) != null;
+    }
+
+    fn get(model: *const Model, key: u64) ?Value {
+        const cursor = model.array.search(key);
+        if (cursor.node == model.array.node_count) return null;
+        if (cursor.relative_index == model.array.node_elements(cursor.node).len) return null;
+        const cursor_element = model.array.element_at_cursor(cursor);
+        if (Value.key_from_value(&cursor_element) == key) {
+            return cursor_element;
+        } else {
+            return null;
+        }
+    }
+
+    fn scan(
+        model: *const Model,
+        key_min: u64,
+        key_max: u64,
+        direction: Direction,
+        result: []Value,
+    ) []Value {
+        var result_count: usize = 0;
+        switch (direction) {
+            .ascending => {
+                const cursor = model.array.search(key_min);
+                var it = model.array.iterator_from_cursor(cursor, .ascending);
+                while (it.next()) |element| {
+                    const element_key = Value.key_from_value(element);
+                    if (element_key <= key_max) {
+                        assert(element_key >= key_min);
+                        result[result_count] = element.*;
+                        result_count += 1;
+                        if (result_count == result.len) break;
+                    } else {
+                        break;
+                    }
+                }
+            },
+            .descending => {
+                const cursor = model.array.search(key_max);
+                var it = model.array.iterator_from_cursor(cursor, .descending);
+                while (it.next()) |element| {
+                    const element_key = Value.key_from_value(element);
+                    if (element_key >= key_min) {
+                        if (element_key <= key_max) {
+                            result[result_count] = element.*;
+                            result_count += 1;
+                            if (result_count == result.len) break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            },
+        }
+        return result[0..result_count];
+    }
+
+    fn put(model: *Model, value: *const Value) !void {
+        model.remove(value);
+        _ = model.array.insert_element(&model.node_pool, value.*);
+    }
+
+    fn remove(model: *Model, value: *const Value) void {
+        const key = Value.key_from_value(value);
+        const cursor = model.array.search(key);
+        if (cursor.node == model.array.node_count) return;
+        if (cursor.relative_index == model.array.node_elements(cursor.node).len) return;
+
+        if (Value.key_from_value(&model.array.element_at_cursor(cursor)) == key) {
+            model.array.remove_elements(
+                &model.node_pool,
+                model.array.absolute_index_for_cursor(cursor),
+                1,
+            );
+        }
+    }
+
+    fn deinit(model: *Model) void {
+        model.array.deinit(allocator, &model.node_pool);
+        model.node_pool.deinit(allocator);
+        model.* = undefined;
+    }
+};
 
 fn random_id(random: std.rand.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
@@ -817,7 +871,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     };
 
     const fuzz_op_count = @min(
-        fuzz_args.events_max orelse @as(usize, 1E7),
+        fuzz_args.events_max orelse events_max,
         fuzz.random_int_exponential(random, usize, 1E6),
     );
 

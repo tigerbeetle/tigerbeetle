@@ -2,14 +2,17 @@ const std = @import("std");
 const assert = std.debug.assert;
 const ewah = @import("ewah.zig").ewah(usize);
 
+const log = std.log;
+
 const BitSetConfig = struct {
     words: usize,
     run_length_e: usize,
     literals_length_e: usize,
 };
 
-const samples = 100;
-const repeats: usize = 100_000;
+// Bump these up if you want to use this as a real benchmark rather than as a test.
+const samples = 10;
+const repeats: usize = 1_000;
 
 // Explanation of fields:
 // - "n": Number of randomly generate bitsets to test.
@@ -28,9 +31,7 @@ const configs = [_]BitSetConfig{
 
 var prng = std.rand.DefaultPrng.init(42);
 
-pub fn main() !void {
-    const stdout = std.io.getStdOut().writer();
-
+test "benchmark: ewah" {
     for (configs) |config| {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
@@ -90,9 +91,8 @@ pub fn main() !void {
             total_compressed += @as(f64, @floatFromInt(bitset_lengths[i]));
         }
 
-        try stdout.print(
+        log.info(
             \\Words={:_>3} E(Run)={:_>3} E(Literal)={:_>3} EncTime={:_>6}ns DecTime={:_>6}ns Ratio={d:_>6.2}
-            \\
         , .{
             config.words,
             config.run_length_e,

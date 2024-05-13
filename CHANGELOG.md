@@ -1,5 +1,238 @@
 # TigerBeetle Changelog
 
+## 2024-05-06 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1906](https://github.com/tigerbeetle/tigerbeetle/pull/1906),
+  [#1904](https://github.com/tigerbeetle/tigerbeetle/pull/1904),
+  [#1903](https://github.com/tigerbeetle/tigerbeetle/pull/1903),
+  [#1901](https://github.com/tigerbeetle/tigerbeetle/pull/1901),
+  [#1899](https://github.com/tigerbeetle/tigerbeetle/pull/1899),
+  [#1886](https://github.com/tigerbeetle/tigerbeetle/pull/1886)
+
+  Fixes and performance improvements to fuzzers.
+
+- [#1897](https://github.com/tigerbeetle/tigerbeetle/pull/1897)
+
+  Reduces cache size for the `--development` flag, which was originally created to bypass direct
+  I/O requirements but can also aggregate other convenient options for non-production environments.
+
+- [#1895](https://github.com/tigerbeetle/tigerbeetle/pull/1895)
+
+  Reduction in memory footprint, calculating the maximum number of messages from runtime-known
+  configurations.
+
+### Features
+
+- [#1896](https://github.com/tigerbeetle/tigerbeetle/pull/1896)
+
+  Removes the `bootstrap.{sh,bat}` scripts, replacing them with a more transparent instruction for
+  downloading the binary release or building from source.
+
+- [#1890](https://github.com/tigerbeetle/tigerbeetle/pull/1890)
+
+  Nicely handles "illegal instruction" crashes, printing a friendly message when the CPU running a
+  binary release is too old and does not support some modern instructions such as AES-NI and AVX2.
+
+### Internals
+
+- [#1892](https://github.com/tigerbeetle/tigerbeetle/pull/1892)
+
+  Include micro-benchmarks as part of the unit tests, so there's no need for a special case in the
+  CI while we still compile and check them.
+
+- [#1902](https://github.com/tigerbeetle/tigerbeetle/pull/1902)
+
+  A TigerStyle addition on "why prefer a explicitly sized integer over `usize`".
+
+- [#1894](https://github.com/tigerbeetle/tigerbeetle/pull/1894)
+
+  Rename "Getting Started" to "Quick Start" for better organization and clarifications.
+
+- [#1900](https://github.com/tigerbeetle/tigerbeetle/pull/1900)
+
+  While TigerBeetle builds are deterministic, Zip files include a timestamp that makes the build
+  output non-deterministic! This PR sets an explicit timestamp for entirely reproducible releases.
+
+- [1909](https://github.com/tigerbeetle/tigerbeetle/pull/1909)
+
+  Extracts the zig compiler path into a `ZIG_EXE` environment variable, allowing easier sharing of
+  the same compiler across multiple git work trees.
+
+### TigerTracks 🎧
+
+- [Thank You](https://www.youtube.com/watch?v=1TO48Cnl66w)
+
+## 2024-04-29 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1883](https://github.com/tigerbeetle/tigerbeetle/pull/1883)
+
+  Move message allocation farther down into the `tigerbeetle start` code path.
+  `tigerbeetle format` is now faster, since it no longer allocates these messages.
+
+- [#1880](https://github.com/tigerbeetle/tigerbeetle/pull/1880)
+
+  Reduce the connection limit, which was unnecessarily high.
+
+### Features
+
+- [#1848](https://github.com/tigerbeetle/tigerbeetle/pull/1848)
+
+  Implement zig-zag merge join for merging index scans.
+  (Note that this functionality is not yet exposed to TigerBeetle's API.)
+
+- [#1882](https://github.com/tigerbeetle/tigerbeetle/pull/1882)
+
+  Print memory usage more accurately during `tigerbeetle start`.
+
+### Internals
+
+- [#1874](https://github.com/tigerbeetle/tigerbeetle/pull/1874)
+
+  Fix blob-size CI check with respect to shallow clones.
+
+- [#1870](https://github.com/tigerbeetle/tigerbeetle/pull/1870),
+  [#1869](https://github.com/tigerbeetle/tigerbeetle/pull/1869)
+
+  Add more fuzzers to CFO (Continuous Fuzzing Orchestrator).
+
+- [#1868](https://github.com/tigerbeetle/tigerbeetle/pull/1868),
+  [#1875](https://github.com/tigerbeetle/tigerbeetle/pull/1875)
+
+  Improve fuzzer performance.
+
+- [#1864](https://github.com/tigerbeetle/tigerbeetle/pull/1864)
+
+  On the devhub, show at most one failing seed per fuzzer.
+
+- [#1820](https://github.com/tigerbeetle/tigerbeetle/pull/1820),
+  [#1867](https://github.com/tigerbeetle/tigerbeetle/pull/1867),
+  [#1877](https://github.com/tigerbeetle/tigerbeetle/pull/1877),
+  [#1873](https://github.com/tigerbeetle/tigerbeetle/pull/1873),
+  [#1853](https://github.com/tigerbeetle/tigerbeetle/pull/1853),
+  [#1872](https://github.com/tigerbeetle/tigerbeetle/pull/1872),
+  [#1845](https://github.com/tigerbeetle/tigerbeetle/pull/1845),
+  [#1871](https://github.com/tigerbeetle/tigerbeetle/pull/1871)
+
+  Documentation improvements.
+
+### TigerTracks 🎧
+
+- [The Core](https://open.spotify.com/track/62DOxN9FeTsR0J0ccnBhMu?si=5b0a7b8974d54e4d)
+
+## 2024-04-22 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1851](https://github.com/tigerbeetle/tigerbeetle/pull/1851)
+
+  Implement grid scrubbing --- a background job that periodically reads the entire data file,
+  verifies its correctness and repairs any corrupted blocks.
+
+- [#1855](https://github.com/tigerbeetle/tigerbeetle/pull/1855),
+  [#1854](https://github.com/tigerbeetle/tigerbeetle/pull/1854).
+
+  Turn on continuous fuzzing and integrate it with
+  [devhub](https://tigerbeetle.github.io/tigerbeetle/).
+
+### Internals
+
+- [#1849](https://github.com/tigerbeetle/tigerbeetle/pull/1849)
+
+  Improve navigation on the docs website.
+
+### TigerTracks 🎧
+
+A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
+
+- [TigerBeetle](https://open.spotify.com/track/66pxevn7ImjMDozcs1TE3Q?si=dfbbf7b80179481e)
+
+## 2024-04-15 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1810](https://github.com/tigerbeetle/tigerbeetle/pull/1810)
+
+  Incrementally recompute the number values to compact in the storage engine. This smooths out I/O
+  latency, giving a nice bump to transaction throughput under load.
+
+### Features
+
+- [#1843](https://github.com/tigerbeetle/tigerbeetle/pull/1843)
+
+  Add `--development` flag to `format` and `start` commands in production binaries to downgrade
+  lack of Direct I/O support from a hard error to a warning.
+
+  TigerBeetle uses Direct I/O for certain safety guarantees, but this feature is not available on
+  all development environments due to varying file systems. This serves as a compromise between
+  providing a separate development release binary and strictly requiring Direct I/O to be present.
+
+### Internals
+
+- [#1833](https://github.com/tigerbeetle/tigerbeetle/pull/1833)
+
+  Add fixed upper bound to loop in the StorageChecker.
+
+- [#1836](https://github.com/tigerbeetle/tigerbeetle/pull/1836)
+
+  Orchestrate continuous fuzzing of tigerbeetle components straight from the build system! This
+  gives us some flexibility on configuring our set of machines which test and report errors.
+
+- [#1842](https://github.com/tigerbeetle/tigerbeetle/pull/1842),
+  [#1844](https://github.com/tigerbeetle/tigerbeetle/pull/1844),
+  [#1832](https://github.com/tigerbeetle/tigerbeetle/pull/1832)
+
+  Styling updates and fixes.
+
+### TigerTracks 🎧
+
+- [CHERRY PEPSI](https://www.youtube.com/watch?v=D5Avlh980k4)
+
+
+## 2024-04-08 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1821](https://github.com/tigerbeetle/tigerbeetle/pull/1821)
+
+  Fix a case the VOPR found where a replica recovers into `recovering_head` unexpectedly.
+
+### Features
+
+- [#1565](https://github.com/tigerbeetle/tigerbeetle/pull/1565)
+
+  Improve CLI errors around sizing by providing human readable (1057MiB vs 1108344832) values.
+
+- [#1818](https://github.com/tigerbeetle/tigerbeetle/pull/1818),
+  [#1831](https://github.com/tigerbeetle/tigerbeetle/pull/1831),
+  [#1829](https://github.com/tigerbeetle/tigerbeetle/pull/1829),
+  [#1817](https://github.com/tigerbeetle/tigerbeetle/pull/1817),
+  [#1826](https://github.com/tigerbeetle/tigerbeetle/pull/1826),
+  [#1825](https://github.com/tigerbeetle/tigerbeetle/pull/1825)
+
+  Documentation improvements.
+
+### Internals
+
+- [#1806](https://github.com/tigerbeetle/tigerbeetle/pull/1806)
+
+  Additional LSM compaction comments and assertions.
+
+- [#1824](https://github.com/tigerbeetle/tigerbeetle/pull/1824)
+
+  Clarify some scan internals and add additional assertions.
+
+- [#1828](https://github.com/tigerbeetle/tigerbeetle/pull/1828)
+
+  Some of our comments had duplicate words - thanks @divdeploy for for noticing!
+
+### TigerTracks 🎧
+
+- [All The Small Things](https://www.youtube.com/watch?v=Sn0gVjPrUj0)
+
 ## 2024-04-01 (Placeholder: no release yet)
 
 ### Safety And Performance

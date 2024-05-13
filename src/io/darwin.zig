@@ -8,6 +8,7 @@ const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
+const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
     kq: os.fd_t,
@@ -678,6 +679,7 @@ pub const IO = struct {
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open },
+        direct_io: DirectIO,
     ) !os.fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
@@ -723,7 +725,7 @@ pub const IO = struct {
 
         // On darwin assume that Direct I/O is always supported.
         // Use F_NOCACHE to disable the page cache as O_DIRECT doesn't exist.
-        if (constants.direct_io) {
+        if (direct_io != .direct_io_disabled) {
             _ = try os.fcntl(fd, os.F.NOCACHE, 1);
         }
 

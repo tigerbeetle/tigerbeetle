@@ -12,6 +12,7 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const buffer_limit = @import("../io.zig").buffer_limit;
+const DirectIO = @import("../io.zig").DirectIO;
 const parse_dirty_semver = stdx.parse_dirty_semver;
 
 pub const IO = struct {
@@ -1000,6 +1001,7 @@ pub const IO = struct {
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open },
+        direct_io: DirectIO,
     ) !os.fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
@@ -1045,7 +1047,7 @@ pub const IO = struct {
 
         switch (kind) {
             .block_device => {
-                if (constants.direct_io) {
+                if (direct_io != .direct_io_disabled) {
                     // Block devices should always support Direct IO.
                     flags |= os.O.DIRECT;
                     // Use O_EXCL when opening as a block device to obtain an advisory exclusive
@@ -1079,15 +1081,22 @@ pub const IO = struct {
                 // here (see below) but being able to benchmark production workloads
                 // on tmpfs is very useful for removing
                 // disk speed from the equation.
-                if (constants.direct_io and !dir_on_tmpfs) {
+                if (direct_io != .direct_io_disabled and !dir_on_tmpfs) {
                     direct_io_supported = try fs_supports_direct_io(dir_fd);
                     if (direct_io_supported) {
                         flags |= os.O.DIRECT;
-                    } else if (!constants.direct_io_required) {
-                        log.warn("file system does not support Direct I/O", .{});
+                    } else if (direct_io == .direct_io_optional) {
+                        log.warn("This file system does not support Direct I/O.", .{});
                     } else {
+                        assert(direct_io == .direct_io_required);
                         // We require Direct I/O for safety to handle fsync failure correctly, and
                         // therefore panic in production if it is not supported.
+                        log.err("This file system does not support Direct I/O.", .{});
+                        log.err("TigerBeetle uses Direct I/O to bypass the kernel page cache, " ++
+                            "to ensure that data is durable when writes complete.", .{});
+                        log.err("If this is a production replica, Direct I/O is required.", .{});
+                        log.err("If this is a development/testing replica, " ++
+                            "re-run with --development set to bypass this error.", .{});
                         @panic("file system does not support Direct I/O");
                     }
                 }

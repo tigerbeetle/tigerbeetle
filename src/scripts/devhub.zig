@@ -90,21 +90,34 @@ fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
     try shell.pushd("./devhubdb");
     defer shell.popd();
 
-    {
-        const file = try shell.cwd.openFile("./devhub/data.json", .{
-            .mode = .write_only,
-        });
-        defer file.close();
+    for (0..32) |_| {
+        try shell.exec("git fetch origin", .{});
+        try shell.exec("git reset --hard origin/main", .{});
 
-        try file.seekFromEnd(0);
-        try std.json.stringify(batch, .{}, file.writer());
-        try file.writeAll("\n");
+        {
+            const file = try shell.cwd.openFile("./devhub/data.json", .{
+                .mode = .write_only,
+            });
+            defer file.close();
+
+            try file.seekFromEnd(0);
+            try std.json.stringify(batch, .{}, file.writer());
+            try file.writeAll("\n");
+        }
+
+        try shell.exec("git add ./devhub/data.json", .{});
+        try shell.git_env_setup();
+        try shell.exec("git commit -m 📈", .{});
+        if (shell.exec("git push", .{})) {
+            log.info("metrics uploaded", .{});
+            break;
+        } else |_| {
+            log.info("conflict, retrying", .{});
+        }
+    } else {
+        log.err("can't push new data to devhub", .{});
+        return error.CanNotPush;
     }
-
-    try shell.exec("git add ./devhub/data.json", .{});
-    try shell.git_env_setup();
-    try shell.exec("git commit -m 📈", .{});
-    try shell.exec("git push", .{});
 }
 
 const Metric = struct {
@@ -138,7 +151,7 @@ fn upload_nyrkio(shell: *Shell, batch: *const MetricBatch) !void {
         \\    -d {payload}
     , .{
         .content_type = "Content-type: application/json",
-        .authorization = try shell.print("Authorization: Bearer {s}", .{token}),
+        .authorization = try shell.fmt("Authorization: Bearer {s}", .{token}),
         .payload = payload,
     });
 }

@@ -14,6 +14,7 @@ pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
 pub const state_machine = @import("state_machine.zig");
 pub const storage = @import("storage.zig");
+pub const tb_client = @import("clients/c/tb_client.zig");
 pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
 pub const tracer = @import("tracer.zig");
@@ -57,6 +58,8 @@ pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
 pub const FreeSet = @import("vsr/free_set.zig").FreeSet;
 pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").CheckpointTrailerType;
+pub const GridScrubberType = @import("vsr/grid_scrubber.zig").GridScrubberType;
+pub const CountingAllocator = @import("counting_allocator.zig");
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
@@ -171,6 +174,9 @@ pub const BlockReference = struct {
 
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
+    // Looking to make backwards incompatible changes here? Make sure to check release.zig for
+    // `release_triple_client_min`.
+
     reserved = 0,
 
     ping = 1,
@@ -213,6 +219,9 @@ pub const Command = enum(u8) {
 /// This type exists to avoid making the Header type dependant on the state
 /// machine used, which would cause awkward circular type dependencies.
 pub const Operation = enum(u8) {
+    // Looking to make backwards incompatible changes here? Make sure to check release.zig for
+    // `release_triple_client_min`.
+
     /// Operations reserved by VR protocol (for all state machines):
     /// The value 0 is reserved to prevent a spurious zero from being interpreted as an operation.
     reserved = 0,
@@ -812,7 +821,7 @@ fn parse_address(string: []const u8, port: u16) !std.net.Address {
     }
 }
 
-test "parse_addresses" {
+test parse_addresses {
     const vectors_positive = &[_]struct {
         raw: []const u8,
         addresses: []const std.net.Address,
@@ -1239,7 +1248,7 @@ const ViewChangeHeadersSlice = struct {
     /// - When these are DVC headers for a log_view=V, we must be in view_change status working to
     ///   transition to a view beyond V. So we will never prepare anything else as part of view V.
     /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
-    ///   more ops), but those ops will laways be part of the log_view. If they were prepared during
+    ///   more ops), but those ops will always be part of the log_view. If they were prepared during
     ///   a view prior to the log_view, they would already be part of the headers.
     pub fn view_for_op(headers: ViewChangeHeadersSlice, op: u64, log_view: u32) ViewRange {
         const header_newest = &headers.slice[0];

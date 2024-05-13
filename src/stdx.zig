@@ -60,7 +60,7 @@ pub inline fn copy_left(
     if (!disjoint_slices(T, T, target, source)) {
         assert(@intFromPtr(target.ptr) < @intFromPtr(source.ptr));
     }
-    std.mem.copy(T, target, source);
+    std.mem.copyForwards(T, target, source);
 }
 
 test "copy_left" {
@@ -110,7 +110,7 @@ pub inline fn copy_disjoint(
     }
 
     assert(disjoint_slices(T, T, target, source));
-    std.mem.copy(T, target, source);
+    @memcpy(target[0..source.len], source);
 }
 
 pub inline fn disjoint_slices(comptime A: type, comptime B: type, a: []const A, b: []const B) bool {

@@ -262,7 +262,16 @@ pub const Storage = struct {
         assert(storage.size == origin.size);
 
         storage.ticks = origin.ticks;
-        stdx.copy_disjoint(.exact, u8, storage.memory, origin.memory);
+
+        var it = origin.memory_written.iterator(.{});
+        while (it.next()) |sector| {
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                storage.memory[sector * constants.sector_size ..][0..constants.sector_size],
+                origin.memory[sector * constants.sector_size ..][0..constants.sector_size],
+            );
+        }
         storage.memory_written.toggleSet(storage.memory_written);
         storage.memory_written.toggleSet(origin.memory_written);
         storage.faults.toggleSet(storage.faults);

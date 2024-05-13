@@ -122,7 +122,7 @@ pub fn CompactionHelperType(comptime Grid: type) type {
             read: Grid.Read = undefined,
             write: Grid.Write = undefined,
 
-            stage: enum { free, pending, ready, ioing } = .free,
+            stage: enum { free, pending, ready, ioing, standalone } = .free,
             next: ?*CompactionBlock = null,
         };
 
@@ -315,10 +315,10 @@ pub fn CompactionType(
             /// Number of beats we should aim to finish this compaction in. It might be fewer, but
             /// it'll never be more.
             beats_max: ?u64,
+            beats_finished: u64 = 0,
             /// The total number of source values for this compaction.
             /// This is fixed for the duration of the compaction.
             compaction_tables_value_count: u64,
-            value_count_per_beat: u64 = 0,
 
             // The total number of source values processed by this compaction across the bar. Must
             // equal compaction_tables_value_count by bar_apply_to_manifest(). Tracked
@@ -396,6 +396,7 @@ pub fn CompactionType(
             };
 
             grid_reservation: Grid.Reservation,
+            value_count_per_beat: u64,
 
             // TODO: This is now always 0 / 1 so get rid of it and just use index_read_done?
             index_blocks_read_b: usize = 0,
@@ -725,26 +726,21 @@ pub fn CompactionType(
             const bar = &compaction.bar.?;
             assert(!bar.move_table);
 
-            assert(bar.value_count_per_beat == 0);
+            assert(bar.beats_max == null);
 
-            // TODO: Move this calculation into beat_grid_reserve, and subtract the values we've
-            // already done from it.
-            // This way we self correct our pacing and better spread the work out....
-            bar.value_count_per_beat = stdx.div_ceil(bar.compaction_tables_value_count, beats_max);
-            assert(bar.value_count_per_beat > 0);
-
+            bar.beats_max = beats_max;
             bar.target_index_blocks = target_index_blocks;
             assert(target_index_blocks.count > 0);
 
             // TODO: Actually, assert this is only non-null when level_b == 0, otherwise it should
             // be null!
+            assert(source_a_immutable_block.stage == .free);
+            source_a_immutable_block.stage = .standalone;
             bar.source_a_immutable_block = source_a_immutable_block;
 
-            log.debug("bar_setup_budget({s}): bar.compaction_tables_value_count={} " ++
-                "bar.value_count_per_beat={}", .{
+            log.debug("bar_setup_budget({s}): bar.compaction_tables_value_count={}", .{
                 compaction.tree_config.name,
                 bar.compaction_tables_value_count,
-                bar.value_count_per_beat,
             });
         }
 
@@ -766,13 +762,26 @@ pub fn CompactionType(
             // If we're move_table, only the manifest is being updated, *not* the grid.
             assert(!bar.move_table);
 
-            assert(bar.value_count_per_beat > 0);
+            assert(bar.beats_max != null);
+
+            // Calculate how many values we have to compact each beat, to self-correct our pacing.
+            // Pacing will have imperfections due to rounding up to fill target value blocks and
+            // immutable table filtering duplicate values.
+            const beats_remaining = bar.beats_max.? - bar.beats_finished;
+            const value_count_per_beat = stdx.div_ceil(
+                bar.compaction_tables_value_count - bar.source_values_merge_count,
+                beats_remaining,
+            );
+            assert(bar.compaction_tables_value_count > bar.source_values_merge_count);
+            assert(beats_remaining > 0);
+            assert(bar.source_values_merge_count + value_count_per_beat * beats_remaining >=
+                bar.compaction_tables_value_count);
 
             // The +1 is for imperfections in pacing our immutable table, which might cause us
             // to overshoot by a single block (limited to 1 due to how the immutable table values
             // are consumed.)
             const value_blocks_per_beat = stdx.div_ceil(
-                bar.value_count_per_beat,
+                value_count_per_beat,
                 Table.layout.block_value_count_max,
             ) + 1;
 
@@ -788,15 +797,18 @@ pub fn CompactionType(
             // (actually, we want to still panic but with something nicer like vsr.fail)
             const grid_reservation = compaction.grid.reserve(total_blocks_per_beat).?;
             log.debug("beat_grid_reserve({s}): total_blocks_per_beat={} " ++
-                "index_blocks_per_beat={} value_blocks_per_beat={}", .{
+                "index_blocks_per_beat={} value_blocks_per_beat={} " ++
+                "beat.value_count_per_beat={} ", .{
                 compaction.tree_config.name,
                 total_blocks_per_beat,
                 index_blocks_per_beat,
                 value_blocks_per_beat,
+                value_count_per_beat,
             });
 
             compaction.beat = .{
                 .grid_reservation = grid_reservation,
+                .value_count_per_beat = value_count_per_beat,
             };
         }
 
@@ -809,6 +821,12 @@ pub fn CompactionType(
             assert(blocks.source_value_blocks[0].count > 0);
             assert(blocks.source_value_blocks[1].count > 0);
             assert(blocks.target_value_blocks.count > 0);
+
+            assert(blocks.source_index_block_a.stage == .free);
+            assert(blocks.source_index_block_b.stage == .free);
+
+            blocks.source_index_block_a.stage = .standalone;
+            blocks.source_index_block_b.stage = .standalone;
 
             compaction.beat.?.blocks = blocks;
         }
@@ -1166,8 +1184,11 @@ pub fn CompactionType(
             while (true) {
                 // Set the index block if needed.
                 if (bar.table_builder.state == .no_blocks) {
-                    if (target_index_blocks.ready.count == @divExact(target_index_blocks.count, 2))
+                    if (target_index_blocks.ready.count ==
+                        @divExact(target_index_blocks.count, 2))
+                    {
                         break;
+                    }
 
                     const index_block = target_index_blocks.free_to_pending().?.block;
                     // TODO: We don't need to zero the whole block; just the part of the padding
@@ -1178,8 +1199,11 @@ pub fn CompactionType(
 
                 // Set the value block if needed.
                 if (bar.table_builder.state == .index_block) {
-                    if (target_value_blocks.ready.count == @divExact(target_value_blocks.count, 2))
+                    if (target_value_blocks.ready.count ==
+                        @divExact(target_value_blocks.count, 2))
+                    {
                         break;
+                    }
 
                     const value_block = target_value_blocks.free_to_pending().?.block;
                     // TODO: We don't need to zero the whole block; just the part of the padding
@@ -1251,8 +1275,9 @@ pub fn CompactionType(
 
                 // Sanity check. If our sources are exhausted but our values processed sum doesn't
                 // match the total values we had to process we have a bug somewhere.
-                if (source_a_exhausted and source_b_exhausted)
+                if (source_a_exhausted and source_b_exhausted) {
                     assert(bar.source_values_merge_count == bar.compaction_tables_value_count);
+                }
 
                 // beat.source_values_processed can overrun, but we can never do more work for a
                 // bar than what we know we have.
@@ -1268,14 +1293,14 @@ pub fn CompactionType(
                 // a full value block.
                 source_exhausted_bar = bar.source_values_merge_count ==
                     bar.compaction_tables_value_count;
-                source_exhausted_beat = beat.source_values_processed >= bar.value_count_per_beat;
+                source_exhausted_beat = beat.source_values_processed >= beat.value_count_per_beat;
 
                 log.debug("blip_merge({s}): beat.source_values_processed={} " ++
-                    "bar.value_count_per_beat={}. (source_exhausted_bar={}, " ++
+                    "beat.value_count_per_beat={}. (source_exhausted_bar={}, " ++
                     "source_exhausted_beat={})", .{
                     compaction.tree_config.name,
                     beat.source_values_processed,
-                    bar.value_count_per_beat,
+                    beat.value_count_per_beat,
                     source_exhausted_bar,
                     source_exhausted_beat,
                 });
@@ -1352,8 +1377,9 @@ pub fn CompactionType(
 
                 beat.source_a_values = bar.source_a_immutable_values.?;
                 if (bar.source_a_immutable_values.?.len == 0) {
-                    if (!updated_fill_count)
+                    if (!updated_fill_count) {
                         bar.source_a_values_consumed_for_fill = 0;
+                    }
                     return .exhausted;
                 }
 
@@ -1819,6 +1845,12 @@ pub fn CompactionType(
 
             const blocks = &compaction.beat.?.blocks.?;
 
+            assert(blocks.source_index_block_a.stage == .standalone);
+            assert(blocks.source_index_block_b.stage == .standalone);
+
+            blocks.source_index_block_a.stage = .free;
+            blocks.source_index_block_b.stage = .free;
+
             block_pool.push(blocks.source_index_block_a);
             block_pool.push(blocks.source_index_block_b);
 
@@ -1855,6 +1887,7 @@ pub fn CompactionType(
             compaction.grid.forfeit(beat.grid_reservation);
 
             // Our beat is done!
+            bar.beats_finished += 1;
             compaction.beat = null;
         }
 
@@ -1874,6 +1907,8 @@ pub fn CompactionType(
                 bar.target_index_blocks.?.deinit(block_pool);
                 bar.target_index_blocks = null;
 
+                assert(bar.source_a_immutable_block.?.stage == .standalone);
+                bar.source_a_immutable_block.?.stage = .free;
                 block_pool.push(bar.source_a_immutable_block.?);
                 bar.source_a_immutable_block = null;
             }
@@ -1910,9 +1945,15 @@ pub fn CompactionType(
             // TODO: Can we assert target_values_merge_count > 0 here?
             assert(bar.target_values_merge_count == bar.target_values_write_count);
 
+            // Assert we've finished within the number of beats we were allocated.
+            // TODO(metric): Track the delta between target and actual.
+            if (!bar.move_table)
+                assert(bar.beats_finished <= bar.beats_max.?);
+
             // Mark the immutable table as flushed, if we were compacting into level 0.
-            if (compaction.level_b == 0 and bar.table_info_a.immutable.len == 0)
+            if (compaction.level_b == 0 and bar.table_info_a.immutable.len == 0) {
                 bar.tree.table_immutable.mutability.immutable.flushed = true;
+            }
 
             // Each compaction's manifest updates are deferred to the end of the last
             // bar to ensure:
@@ -1932,8 +1973,9 @@ pub fn CompactionType(
                 // references to modify the ManifestLevel in-place.
                 switch (bar.table_info_a) {
                     .immutable => {
-                        if (bar.table_info_a.immutable.len == 0)
+                        if (bar.table_info_a.immutable.len == 0) {
                             manifest_removed_value_count = bar.tree.table_immutable.count();
+                        }
                     },
                     .disk => |table_info| {
                         manifest_removed_value_count += table_info.table_info.value_count;

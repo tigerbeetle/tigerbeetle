@@ -6,26 +6,32 @@
 
 First, download a prebuilt copy of TigerBeetle.
 
-On macOS/Linux:
-
 ```console
-git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && ./bootstrap.sh
+# macOS
+curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+
+# Linux
+curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+
+# Windows
+powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .; .\tigerbeetle version"
 ```
 
-On Windows:
+Want to build from source locally?
 
 ```console
-git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && .\bootstrap.ps1
+git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
+./scripts/install_zig.sh # or .bat if you're on Windows.
+zig/zig build install
+./tigerbeetle version
 ```
-
-Want to build from source locally? Add `-build` as an argument to the bootstrap script.
 
 #### Running TigerBeetle
 
 Then create the TigerBeetle data file.
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 --development 0_0.tigerbeetle
 ```
 ```console
 info(io): creating "0_0.tigerbeetle"...
@@ -35,7 +41,7 @@ info(io): allocating 660.140625MiB...
 And start the replica.
 
 ```console
-./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+./tigerbeetle start --addresses=3000 --development 0_0.tigerbeetle
 ```
 ```console
 info(io): opening "0_0.tigerbeetle"...
@@ -114,9 +120,8 @@ and account `2` has `credits_posted` as `10`. The `10` amount is fully
 accounted for!
 
 For further reading:
-
-* [Run a single-node cluster](https://docs.tigerbeetle.com/quick-start/single-binary)
-* [Run a three-node cluster](https://docs.tigerbeetle.com/quick-start/single-binary-three)
+* [Run a single-node cluster](https://docs.tigerbeetle.com/getting-started/single-binary)
+* [Run a three-node cluster](https://docs.tigerbeetle.com/getting-started/single-binary-three)
 
 ## Next Steps
 
@@ -148,9 +153,9 @@ Here are a few key pages you might be interested in:
 - Usage
   - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
 - Reference
-  - [Accounts](https://docs.tigerbeetle.com/reference/accounts)
-  - [Transfers](https://docs.tigerbeetle.com/reference/transfers)
-  - [Operations](https://docs.tigerbeetle.com/reference/operations)
+  - [Account](https://docs.tigerbeetle.com/reference/account)
+  - [Transfer](https://docs.tigerbeetle.com/reference/transfer)
+  - [Requests](https://docs.tigerbeetle.com/reference/requests)
 
 ## Clients
 

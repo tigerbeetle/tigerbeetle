@@ -1355,6 +1355,67 @@ test "Cluster: upgrade: state-sync to new release" {
     try expectEqual(t.replica(.R2).commit(), t.replica(.R_).commit());
 }
 
+test "Cluster: scrub: background scrubber, fully corrupt grid" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    const a0_free_set = &t.cluster.replicas[a0.replicas.get(0)].grid.free_set;
+    const b2_free_set = &t.cluster.replicas[b2.replicas.get(0)].grid.free_set;
+    const b2_storage = &t.cluster.storages[b2.replicas.get(0)];
+
+    // Corrupt B2's entire grid.
+    // Note that we intentionally do *not* shut down B2 for this – the intent is to test the
+    // scrubber, without leaning on Grid.read_block()'s `from_local_or_global_storage`.
+    {
+        var address: u64 = 1;
+        while (address <= Storage.grid_blocks_max) : (address += 1) {
+            b2.corrupt(.{ .grid_block = address });
+        }
+    }
+
+    // Disable new read/write faults so that we can use `storage.faults` to track repairs.
+    // (That is, as the scrubber runs, the number of faults will monotonically decrease.)
+    b2_storage.options.read_fault_probability = 0;
+    b2_storage.options.write_fault_probability = 0;
+
+    // Tick until B2's grid repair stops making progress.
+    {
+        var faults_before = b2_storage.faults.count();
+        while (true) {
+            t.run();
+
+            var faults_after = b2_storage.faults.count();
+            assert(faults_after <= faults_before);
+            if (faults_after == faults_before) break;
+
+            faults_before = faults_after;
+        }
+    }
+
+    // Verify that B2 repaired all blocks.
+    var address: u64 = 1;
+    while (address <= Storage.grid_blocks_max) : (address += 1) {
+        if (a0_free_set.is_free(address)) {
+            assert(b2_free_set.is_free(address));
+            assert(b2_storage.area_faulty(.{ .grid = .{ .address = address } }));
+        } else {
+            assert(!b2_free_set.is_free(address));
+            assert(!b2_storage.area_faulty(.{ .grid = .{ .address = address } }));
+        }
+    }
+
+    try TestReplicas.expect_equal_grid(a0, b2);
+    try TestReplicas.expect_equal_grid(b1, b2);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
@@ -1562,6 +1623,13 @@ const TestReplicas = struct {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: crash replica", .{r});
             t.cluster.crash_replica(r);
+
+            // For simplicity, ensure that any packets that are in flight to this replica are
+            // discarded before it starts up again.
+            const paths = t.peer_paths(.__, .incoming);
+            for (paths.const_slice()) |path| {
+                t.cluster.network.link_clear(path);
+            }
         }
     }
 
@@ -1916,6 +1984,32 @@ const TestReplicas = struct {
             maybe(replica.superblock.staging.vsr_state.sync_op_max > 0);
 
             try t.cluster.storage_checker.replica_sync(&replica.superblock);
+        }
+    }
+
+    fn expect_equal_grid(want: TestReplicas, got: TestReplicas) !void {
+        assert(want.replicas.count() == 1);
+        assert(got.replicas.count() > 0);
+
+        const want_replica: *const Cluster.Replica = &want.cluster.replicas[want.replicas.get(0)];
+
+        for (got.replicas.const_slice()) |replica_index| {
+            const got_replica: *const Cluster.Replica = &got.cluster.replicas[replica_index];
+
+            var address: u64 = 1;
+            while (address <= Storage.grid_blocks_max) : (address += 1) {
+                const address_free = want_replica.grid.free_set.is_free(address);
+                assert(address_free == got_replica.grid.free_set.is_free(address));
+                if (address_free) continue;
+
+                const block_want = want_replica.superblock.storage.grid_block(address).?;
+                const block_got = got_replica.superblock.storage.grid_block(address).?;
+
+                try expectEqual(
+                    std.mem.bytesToValue(vsr.Header, block_want[0..@sizeOf(vsr.Header)]),
+                    std.mem.bytesToValue(vsr.Header, block_got[0..@sizeOf(vsr.Header)]),
+                );
+            }
         }
     }
 };

@@ -11,4 +11,7 @@ pub const ScanState = enum {
 
     /// The scan is attempting to load data from storage.
     buffering,
+
+    /// The scan was aborted and will not yield any more values.
+    aborted,
 };

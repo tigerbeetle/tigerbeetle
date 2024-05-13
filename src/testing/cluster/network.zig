@@ -200,6 +200,13 @@ pub const Network = struct {
         network.buses_enabled.items[network.process_to_address(process)] = false;
     }
 
+    pub fn link_clear(network: *Network, path: Path) void {
+        network.packet_simulator.link_clear(.{
+            .source = network.process_to_address(path.source),
+            .target = network.process_to_address(path.target),
+        });
+    }
+
     pub fn link_filter(network: *Network, path: Path) *LinkFilter {
         return network.packet_simulator.link_filter(.{
             .source = network.process_to_address(path.source),

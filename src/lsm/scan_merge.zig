@@ -7,28 +7,48 @@ const constants = @import("../constants.zig");
 const ScanState = @import("scan_state.zig").ScanState;
 const Direction = @import("../direction.zig").Direction;
 const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
+const ZigZagMergeIteratorType = @import("zig_zag_merge.zig").ZigZagMergeIteratorType;
 const ScanType = @import("scan_builder.zig").ScanType;
 
 /// Union ∪ operation over an array of non-specialized `Scan` instances.
 /// At a high level, this is an ordered iterator over the set-union of the timestamps of
 /// each of the component Scans.
-pub fn ScanMergeUnionType(
+pub fn ScanMergeUnionType(comptime Groove: type, comptime Storage: type) type {
+    return ScanMergeType(Groove, Storage, .merge_union);
+}
+
+/// Intersection ∩ operation over an array of non-specialized `Scan` instances.
+pub fn ScanMergeIntersectionType(comptime Groove: type, comptime Storage: type) type {
+    return ScanMergeType(Groove, Storage, .merge_intersection);
+}
+
+/// Difference (minus) operation over two non-specialized `Scan` instances.
+pub fn ScanMergeDifferenceType(comptime Groove: type, comptime Storage: type) type {
+    return ScanMergeType(Groove, Storage, .merge_intersection);
+}
+
+fn ScanMergeType(
     comptime Groove: type,
     comptime Storage: type,
+    comptime merge: enum {
+        merge_union,
+        merge_intersection,
+        merge_difference,
+    },
 ) type {
     return struct {
-        const ScanMergeUnion = @This();
+        const ScanMerge = @This();
         const Scan = ScanType(Groove, Storage);
 
-        pub const Callback = *const fn (context: *Scan.Context, self: *ScanMergeUnion) void;
+        pub const Callback = *const fn (context: *Scan.Context, self: *ScanMerge) void;
 
-        /// Adapts the `Scan` interface into a KWayMerge peek/pop stream.
-        const KWayMergeScanStream = struct {
+        /// Adapts the `Scan` interface into a peek/pop stream required by the merge iterator.
+        const MergeScanStream = struct {
             scan: *Scan,
             current: ?u64 = null,
 
-            pub fn peek(
-                self: *KWayMergeScanStream,
+            fn peek(
+                self: *MergeScanStream,
             ) error{ Empty, Drained }!u64 {
                 if (self.current == null) {
                     self.current = self.scan.next() catch |err| switch (err) {
@@ -38,25 +58,56 @@ pub fn ScanMergeUnionType(
                 return self.current orelse error.Empty;
             }
 
-            pub fn pop(
-                self: *KWayMergeScanStream,
-            ) u64 {
+            fn pop(self: *MergeScanStream) u64 {
                 assert(self.current != null);
                 defer self.current = null;
 
                 return self.current.?;
             }
+
+            fn probe(self: *MergeScanStream, timestamp: u64) void {
+                if (self.current != null and
+                    switch (self.scan.direction()) {
+                    .ascending => self.current.? >= timestamp,
+                    .descending => self.current.? <= timestamp,
+                }) {
+                    // The scan may be in a key ahead of the probe key.
+                    // E.g. `WHERE P AND (A OR B) ORDER BY ASC`:
+                    //  - `P` yields key 2, which is the probe key;
+                    //  - `A` yields key 1;
+                    //  - `B` yields key 10
+                    //  - `KWayMerge(A,B)` yields key 1 and it is probed with key 2 from `P`;
+                    //  - `A` needs to move to a key >= 2;
+                    //  - `B` is already positioned at key >= 2, no probing is required;
+                    assert(self.scan.state() == .seeking);
+                    return;
+                }
+
+                self.current = null;
+                self.scan.probe(timestamp);
+            }
         };
 
         const KWayMergeIterator = KWayMergeIteratorType(
-            ScanMergeUnion,
+            ScanMerge,
             u64,
             u64,
-            merge_key_from_value,
+            key_from_value,
             constants.lsm_scans_max,
             merge_stream_peek,
             merge_stream_pop,
             merge_stream_precedence,
+        );
+
+        const ZigZagMergeIterator = ZigZagMergeIteratorType(
+            ScanMerge,
+            u64,
+            u64,
+            key_from_value,
+            constants.lsm_scans_max,
+            merge_stream_peek,
+            merge_stream_pop,
+            merge_stream_probe,
         );
 
         direction: Direction,
@@ -85,30 +136,35 @@ pub fn ScanMergeUnionType(
                 callback: Callback,
                 pending_count: u32,
             },
+
+            /// The scan was aborted and will not yield any more values.
+            aborted,
         },
-        streams: stdx.BoundedArray(KWayMergeScanStream, constants.lsm_scans_max),
+        streams: stdx.BoundedArray(MergeScanStream, constants.lsm_scans_max),
 
-        merge_iterator: ?KWayMergeIterator,
+        merge_iterator: ?switch (merge) {
+            .merge_union => KWayMergeIterator,
+            .merge_intersection => ZigZagMergeIterator,
+            .merge_difference => stdx.unimplemented("merge_difference"),
+        },
 
-        pub fn init(
-            scans: []const *Scan,
-        ) ScanMergeUnion {
+        pub fn init(scans: []const *Scan) ScanMerge {
             assert(scans.len > 0);
             assert(scans.len <= constants.lsm_scans_max);
 
-            const direction_first = scans[0].timestamp_direction().?;
+            const direction_first = scans[0].direction();
             const snapshot_first = scans[0].snapshot();
 
             if (scans.len > 1) for (scans[1..]) |scan| {
-                // Union merge can be applied only in scans that yield sorted timestamps.
-                // All inner scans must have the same direction.
-                assert(scan.timestamp_direction().? == direction_first);
+                // Merge can be applied only in scans that yield timestamps sorted in the
+                // same direction.
+                assert(scan.direction() == direction_first);
 
-                // All inner scans must have the same snapshot.
+                // All scans must have the same snapshot.
                 assert(scan.snapshot() == snapshot_first);
             };
 
-            var self = ScanMergeUnion{
+            var self = ScanMerge{
                 .direction = direction_first,
                 .snapshot = snapshot_first,
                 .state = .idle,
@@ -128,7 +184,7 @@ pub fn ScanMergeUnionType(
             return self;
         }
 
-        pub fn read(self: *ScanMergeUnion, context: *Scan.Context, callback: Callback) void {
+        pub fn read(self: *ScanMerge, context: *Scan.Context, callback: Callback) void {
             assert(self.state == .idle or self.state == .needs_data);
             assert(self.streams.count() > 0);
 
@@ -146,13 +202,12 @@ pub fn ScanMergeUnionType(
                     .idle => assert(state_before == .idle),
                     .seeking => continue,
                     .needs_data => assert(state_before == .needs_data),
-                    .buffering => unreachable,
+                    .buffering, .aborted => unreachable,
                 }
 
                 self.state.buffering.pending_count += 1;
                 stream.scan.read(&self.scan_context);
             }
-
             assert(self.state.buffering.pending_count > 0);
         }
 
@@ -160,7 +215,7 @@ pub fn ScanMergeUnionType(
         /// iterator has no more values to iterate.
         /// May return `error.ReadAgain` if the scan needs to be loaded, in this case
         /// call `read()` and resume the iteration after the read callback.
-        pub fn next(self: *ScanMergeUnion) error{ReadAgain}!?u64 {
+        pub fn next(self: *ScanMerge) error{ReadAgain}!?u64 {
             switch (self.state) {
                 .idle => {
                     assert(self.merge_iterator == null);
@@ -173,12 +228,45 @@ pub fn ScanMergeUnionType(
                     },
                 },
                 .needs_data => return error.ReadAgain,
+                .buffering, .aborted => unreachable,
+            }
+        }
+
+        pub fn probe(self: *ScanMerge, timestamp: u64) void {
+            switch (self.state) {
+                .idle, .seeking, .needs_data => {
+                    // Forwards the `probe` call to the underlying streams,
+                    // leaving the merge state unchanged.
+                    // That is, `probe` changes the range key_min/key_max of the scan, but the key
+                    // may have already been buffered, so the state can be preserved since fetching
+                    // data from storage is not always required after a `probe`.
+                    for (self.streams.slice()) |*stream| {
+                        stream.probe(timestamp);
+                    }
+
+                    if (self.merge_iterator) |*merge_iterator| {
+                        // It's not expected to probe a scan that already produced a key equals
+                        // or ahead the probe.
+                        assert(merge_iterator.key_popped == null or
+                            switch (self.direction) {
+                            .ascending => merge_iterator.key_popped.? < timestamp,
+                            .descending => merge_iterator.key_popped.? > timestamp,
+                        });
+
+                        // Once the underlying streams have been changed, the merge iterator needs
+                        // to reset its state, otherwise it may have dirty keys buffered.
+                        merge_iterator.reset();
+                    } else {
+                        assert(self.state == .idle);
+                    }
+                },
                 .buffering => unreachable,
+                .aborted => return,
             }
         }
 
         fn scan_read_callback(context: *Scan.Context, scan: *Scan) void {
-            const self: *ScanMergeUnion = @fieldParentPtr(ScanMergeUnion, "scan_context", context);
+            const self: *ScanMerge = @fieldParentPtr(ScanMerge, "scan_context", context);
             assert(self.state == .buffering);
             assert(self.state.buffering.pending_count > 0);
             assert(self.state.buffering.pending_count <= self.streams.count());
@@ -198,22 +286,30 @@ pub fn ScanMergeUnionType(
                 self.state = .seeking;
 
                 if (self.merge_iterator == null) {
-                    self.merge_iterator = KWayMergeIterator.init(
-                        self,
-                        @intCast(self.streams.count()),
-                        self.direction,
-                    );
+                    self.merge_iterator = switch (merge) {
+                        .merge_union => KWayMergeIterator.init(
+                            self,
+                            @intCast(self.streams.count()),
+                            self.direction,
+                        ),
+                        .merge_intersection => ZigZagMergeIterator.init(
+                            self,
+                            @intCast(self.streams.count()),
+                            self.direction,
+                        ),
+                        .merge_difference => unreachable,
+                    };
                 }
                 callback(context_outer, self);
             }
         }
 
-        inline fn merge_key_from_value(value: *const u64) u64 {
+        inline fn key_from_value(value: *const u64) u64 {
             return value.*;
         }
 
         fn merge_stream_peek(
-            self: *ScanMergeUnion,
+            self: *ScanMerge,
             stream_index: u32,
         ) error{ Empty, Drained }!u64 {
             assert(stream_index < self.streams.count());
@@ -223,7 +319,7 @@ pub fn ScanMergeUnionType(
         }
 
         fn merge_stream_pop(
-            self: *ScanMergeUnion,
+            self: *ScanMerge,
             stream_index: u32,
         ) u64 {
             assert(stream_index < self.streams.count());
@@ -232,21 +328,20 @@ pub fn ScanMergeUnionType(
             return stream.pop();
         }
 
-        fn merge_stream_precedence(self: *const ScanMergeUnion, a: u32, b: u32) bool {
+        fn merge_stream_precedence(self: *const ScanMerge, a: u32, b: u32) bool {
             _ = self;
             return a < b;
         }
+
+        fn merge_stream_probe(
+            self: *ScanMerge,
+            stream_index: u32,
+            timestamp: u64,
+        ) void {
+            assert(stream_index < self.streams.count());
+
+            var stream = &self.streams.slice()[stream_index];
+            stream.probe(timestamp);
+        }
     };
-}
-
-/// Intersection ∩ operation over an array of non-specialized `Scan` instances.
-pub fn ScanMergeIntersectionType(comptime Groove: type, comptime Storage: type) type {
-    // TODO: Implement intersection logic.
-    return ScanMergeUnionType(Groove, Storage);
-}
-
-/// Difference (minus) operation over two non-specialized `Scan` instances.
-pub fn ScanMergeDifferenceType(comptime Groove: type, comptime Storage: type) type {
-    // TODO: Implement difference logic.
-    return ScanMergeUnionType(Groove, Storage);
 }

@@ -103,6 +103,8 @@ Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code fore
   principle so that violations are detected sooner rather than later. Where a loop cannot terminate
   (e.g. an event loop), this must be asserted.
 
+- Use explicitly-sized types like `u32` for everything, avoid architecture-specific `usize`.
+
 - **Assertions detect programmer errors. Unlike operating errors, which are expected and which must
   be handled, assertion failures are unexpected. The only correct way to handle corrupt code is to
   crash. Assertions downgrade catastrophic correctness bugs into liveness bugs. Assertions are a
@@ -369,6 +371,9 @@ Beyond these rules:
   "measure". Use it up. Never go beyond. Nothing should be hidden by a horizontal scrollbar. Let
   your editor help you by setting a column ruler. To wrap a function signature, call or data
   structure, add a trailing comma, close your eyes and let `zig fmt` do the rest.
+
+- Add braces to the `if` statement unless it fits on a single line for consistency and defense in
+  depth against "goto fail;" bugs.
 
 ### Dependencies
 

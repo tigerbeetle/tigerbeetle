@@ -39,7 +39,6 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
-const BlockReference = vsr.BlockReference;
 
 pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
     .superblock_copies = constants.superblock_copies,

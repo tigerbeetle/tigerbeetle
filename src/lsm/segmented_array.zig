@@ -1255,6 +1255,21 @@ fn FuzzContextType(
                 );
                 try testing.expectEqual(iterator_end.next(), null);
             }
+
+            {
+                // 0 is not symmetric with maxInt, because `array.search` doesn't take direction
+                // into account.
+                var iterator_start = context.array.iterator_from_cursor(
+                    context.array.search(0),
+                    .descending,
+                );
+                if (context.reference.items.len == 0) {
+                    try testing.expectEqual(iterator_start.next(), null);
+                } else {
+                    try testing.expect(iterator_start.next() != null);
+                    try testing.expectEqual(iterator_start.next(), null);
+                }
+            }
         }
 
         fn reference_index(context: *const Self, key: Key) u32 {

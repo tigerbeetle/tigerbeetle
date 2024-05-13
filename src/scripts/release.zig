@@ -37,6 +37,7 @@ pub const CliArgs = struct {
 
 const VersionInfo = struct {
     release_triple: []const u8,
+    release_triple_client_min: []const u8,
     sha: []const u8,
 };
 
@@ -50,10 +51,22 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     // Run number is a monotonically incremented integer. Map it to a three-component version
     // number.
+    // If you change this, make sure to change the validation code in release_validate.zig!
     const release_triple = .{
         .major = 0,
         .minor = 15,
         .patch = cli_args.run_number - 185,
+    };
+
+    // The minimum client version allowed to connect. This has implications for backwards
+    // compatibility and the upgrade path for replicas and clients. If there's no overlap
+    // between a replica version and minimum client version - eg, replica 0.15.4 requires
+    // client 0.15.4 - it means that upgrading requires coordination with clients, which
+    // will be very inconvenient for operators.
+    const release_triple_client_min = .{
+        .major = 0,
+        .minor = 15,
+        .patch = 3,
     };
 
     const version_info = VersionInfo{
@@ -61,6 +74,11 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             shell.arena.allocator(),
             "{[major]}.{[minor]}.{[patch]}",
             release_triple,
+        ),
+        .release_triple_client_min = try std.fmt.allocPrint(
+            shell.arena.allocator(),
+            "{[major]}.{[minor]}.{[patch]}",
+            release_triple_client_min,
         ),
         .sha = cli_args.sha,
     };
@@ -307,11 +325,13 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Drelease={release}
                 \\    -Dgit-commit={commit}
                 \\    -Dconfig-release={release_triple}
+                \\    -Dconfig-release-client-min={release_triple_client_min}
             , .{
                 .target = target,
                 .release = if (debug) "false" else "true",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
+                .release_triple_client_min = info.release_triple_client_min,
             });
 
             const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
@@ -479,8 +499,11 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
         try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
         const zip_name = "tigerbeetle-universal-macos" ++ debug_suffix ++ ".zip";
-        try shell.exec("zip -9 {zip_path} {exe_name}", .{
-            .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
+        try shell.exec("touch -d 1970-01-01T00:00:00Z {exe_name}", .{
+            .exe_name = "tigerbeetle",
+        });
+        try shell.exec("zip -9 -oX {zip_path} {exe_name}", .{
+            .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
             .exe_name = "tigerbeetle",
         });
     }
@@ -500,7 +523,11 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.zig(
         \\build dotnet_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
     try shell.exec(
         \\dotnet pack TigerBeetle --configuration Release
         \\/p:AssemblyVersion={release_triple} /p:Version={release_triple}
@@ -508,9 +535,9 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try Shell.copy_path(
         shell.cwd,
-        try shell.print("TigerBeetle/bin/Release/tigerbeetle.{s}.nupkg", .{info.release_triple}),
+        try shell.fmt("TigerBeetle/bin/Release/tigerbeetle.{s}.nupkg", .{info.release_triple}),
         dist_dir,
-        try shell.print("tigerbeetle.{s}.nupkg", .{info.release_triple}),
+        try shell.fmt("tigerbeetle.{s}.nupkg", .{info.release_triple}),
     );
 }
 
@@ -523,7 +550,11 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.zig(
         \\build go_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
 
     const files = try shell.exec_stdout("git ls-files", .{});
     var files_lines = std.mem.tokenize(u8, files, "\n");
@@ -546,11 +577,12 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     //         2 = aarch64 for mac and linux
     assert(copied_count == 5);
 
-    const readme = try shell.print(
+    const readme = try shell.fmt(
         \\# tigerbeetle-go
         \\This repo has been automatically generated from
         \\[tigerbeetle/tigerbeetle@{[sha]s}](https://github.com/tigerbeetle/tigerbeetle/commit/{[sha]s})
         \\to keep binary blobs out of the monorepo.
+        \\
         \\Please see
         \\<https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/go>
         \\for documentation and contributions.
@@ -572,7 +604,11 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.zig(
         \\build java_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
 
     try backup_create(shell.cwd, "pom.xml");
     defer backup_restore(shell.cwd, "pom.xml");
@@ -590,9 +626,9 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try Shell.copy_path(
         shell.cwd,
-        try shell.print("target/tigerbeetle-java-{s}.jar", .{info.release_triple}),
+        try shell.fmt("target/tigerbeetle-java-{s}.jar", .{info.release_triple}),
         dist_dir,
-        try shell.print("tigerbeetle-java-{s}.jar", .{info.release_triple}),
+        try shell.fmt("tigerbeetle-java-{s}.jar", .{info.release_triple}),
     );
 }
 
@@ -610,7 +646,11 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.zig(
         \\build node_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
 
     try backup_create(shell.cwd, "package.json");
     defer backup_restore(shell.cwd, "package.json");
@@ -627,9 +667,9 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try Shell.copy_path(
         shell.cwd,
-        try shell.print("tigerbeetle-node-{s}.tgz", .{info.release_triple}),
+        try shell.fmt("tigerbeetle-node-{s}.tgz", .{info.release_triple}),
         dist_dir,
-        try shell.print("tigerbeetle-node-{s}.tgz", .{info.release_triple}),
+        try shell.fmt("tigerbeetle-node-{s}.tgz", .{info.release_triple}),
     );
 }
 
@@ -652,7 +692,7 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             1024 * 1024,
         );
 
-        const notes = try shell.print(
+        const notes = try shell.fmt(
             \\{[release_triple]s}
             \\
             \\**NOTE**: You must run the same version of server and client. We do
@@ -777,7 +817,7 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
         \\    {package}
     , .{
         .nuget_key = nuget_key,
-        .package = try shell.print("dist/dotnet/tigerbeetle.{s}.nupkg", .{info.release_triple}),
+        .package = try shell.fmt("dist/dotnet/tigerbeetle.{s}.nupkg", .{info.release_triple}),
     });
 }
 
@@ -823,7 +863,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
 
     try shell.git_env_setup();
     try shell.exec("git commit --message {message}", .{
-        .message = try shell.print(
+        .message = try shell.fmt(
             "Autogenerated commit from tigerbeetle/tigerbeetle@{s}",
             .{info.sha},
         ),
@@ -890,7 +930,7 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     // to the .npmrc file (that is, node config file itself supports env variables).
     _ = try shell.env_get("NODE_AUTH_TOKEN");
     try shell.exec("npm publish {package}", .{
-        .package = try shell.print("dist/node/tigerbeetle-node-{s}.tgz", .{info.release_triple}),
+        .package = try shell.fmt("dist/node/tigerbeetle-node-{s}.tgz", .{info.release_triple}),
     });
 }
 
@@ -923,7 +963,7 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             });
             try shell.project_root.rename(
                 "tigerbeetle",
-                try shell.print("tigerbeetle-{s}", .{docker_arch}),
+                try shell.fmt("tigerbeetle-{s}", .{docker_arch}),
             );
         }
         try shell.exec(
@@ -1005,7 +1045,7 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
     // that the latest commit message on the docs repo points to the latest tigerbeetle
     // release.
     try shell.exec("git commit --allow-empty --message {message}", .{
-        .message = try shell.print(
+        .message = try shell.fmt(
             "Autogenerated commit from tigerbeetle/tigerbeetle@{s}",
             .{info.sha},
         ),

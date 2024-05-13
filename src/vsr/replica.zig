@@ -126,6 +126,7 @@ pub fn ReplicaType(
     comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
+    const GridScrubber = vsr.GridScrubberType(StateMachine.Forest);
 
     return struct {
         const Self = @This();
@@ -177,6 +178,17 @@ pub fn ReplicaType(
         ///
         /// Invariant: replica < node_count
         replica: u8,
+
+        /// Runtime upper-bound number of requests in the pipeline.
+        /// Does not change after initialization.
+        /// Invariants:
+        /// - pipeline_request_queue_limit ≥ 0
+        /// - pipeline_request_queue_limit ≤ pipeline_request_queue_max
+        ///
+        /// The *total* runtime pipeline size is never less than the pipeline_prepare_queue_max.
+        /// This is critical since we don't guarantee that all replicas in a cluster are started
+        /// with the same `pipeline_request_queue_limit`.
+        pipeline_request_queue_limit: u32,
 
         /// The minimum number of replicas required to form a replication quorum:
         quorum_replication: u8,
@@ -269,6 +281,7 @@ pub fn ReplicaType(
         grid_repair_tables: IOPS(RepairTable, constants.grid_missing_tables_max) = .{},
         grid_repair_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_repair_write_blocks: [constants.grid_repair_writes_max]BlockPtr,
+        grid_scrubber: GridScrubber,
 
         opened: bool,
 
@@ -485,11 +498,14 @@ pub fn ReplicaType(
         /// (always running)
         grid_repair_message_timeout: Timeout,
 
+        /// (always running)
+        grid_scrub_timeout: Timeout,
+
         /// The number of ticks before sending a sync message (message types depend on syncing).
         /// (syncing≠idle)
         sync_message_timeout: Timeout,
 
-        /// The number of ticks on an idle cluester before injecting a `pulse` operation.
+        /// The number of ticks on an idle cluster before injecting a `pulse` operation.
         /// (status=normal and primary and !constants.aof_recovery)
         pulse_timeout: Timeout,
 
@@ -516,6 +532,7 @@ pub fn ReplicaType(
 
         const OpenOptions = struct {
             node_count: u8,
+            pipeline_requests_limit: u32,
             storage_size_limit: u64,
             storage: *Storage,
             message_pool: *MessagePool,
@@ -540,6 +557,8 @@ pub fn ReplicaType(
             assert(options.nonce != 0);
             assert(options.release.value > 0);
             assert(options.release.value >= options.release_client_min.value);
+            assert(options.pipeline_requests_limit >= 0);
+            assert(options.pipeline_requests_limit <= constants.pipeline_request_queue_max);
 
             self.static_allocator = StaticAllocator.init(parent_allocator);
             const allocator = self.static_allocator.allocator();
@@ -582,6 +601,7 @@ pub fn ReplicaType(
                 .replica_index = replica,
                 .replica_count = replica_count,
                 .standby_count = options.node_count - replica_count,
+                .pipeline_requests_limit = options.pipeline_requests_limit,
                 .storage = options.storage,
                 .aof = options.aof,
                 .nonce = options.nonce,
@@ -629,7 +649,7 @@ pub fn ReplicaType(
             // the last record in WAL. As a special case, during  the first open the last (and the
             // only) record in WAL is the root prepare.
             //
-            // Otherwise, the head is recovered from the superblock. When transitioninig to a
+            // Otherwise, the head is recovered from the superblock. When transitioning to a
             // view_change, replicas encode the current head into vsr_headers.
             //
             // It is a possibility that the head can't be recovered from the local data.
@@ -897,6 +917,7 @@ pub fn ReplicaType(
             replica_count: u8,
             standby_count: u8,
             replica_index: u8,
+            pipeline_requests_limit: u32,
             nonce: Nonce,
             time: Time,
             storage: *Storage,
@@ -1028,6 +1049,13 @@ pub fn ReplicaType(
             );
             errdefer self.state_machine.deinit(allocator);
 
+            self.grid_scrubber = try GridScrubber.init(
+                allocator,
+                &self.state_machine.forest,
+                &self.client_sessions_checkpoint,
+            );
+            errdefer self.grid_scrubber.deinit(allocator);
+
             self.* = Self{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
@@ -1035,6 +1063,7 @@ pub fn ReplicaType(
                 .standby_count = standby_count,
                 .node_count = node_count,
                 .replica = replica_index,
+                .pipeline_request_queue_limit = options.pipeline_requests_limit,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .quorum_nack_prepare = quorum_nack_prepare,
@@ -1057,13 +1086,16 @@ pub fn ReplicaType(
                 .superblock = self.superblock,
                 .grid = self.grid,
                 .grid_repair_write_blocks = self.grid_repair_write_blocks,
+                .grid_scrubber = self.grid_scrubber,
                 .opened = self.opened,
                 .view = self.superblock.working.vsr_state.view,
                 .log_view = self.superblock.working.vsr_state.log_view,
                 .op = undefined,
                 .commit_min = self.superblock.working.vsr_state.checkpoint.header.op,
                 .commit_max = self.superblock.working.vsr_state.commit_max,
-                .pipeline = .{ .cache = .{} },
+                .pipeline = .{ .cache = .{
+                    .capacity = constants.pipeline_prepare_queue_max + options.pipeline_requests_limit,
+                } },
                 .view_headers = vsr.Headers.ViewChangeArray.init_from_slice(
                     self.superblock.working.vsr_headers().command,
                     self.superblock.working.vsr_headers().slice,
@@ -1133,6 +1165,11 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
+                .grid_scrub_timeout = Timeout{
+                    .name = "grid_scrub_timeout",
+                    .id = replica_index,
+                    .after = 50, // (`after` will be adjusted at runtime to tune the scrubber pace.)
+                },
                 .sync_message_timeout = Timeout{
                     .name = "sync_message_timeout",
                     .id = replica_index,
@@ -1173,6 +1210,7 @@ pub fn ReplicaType(
 
             self.static_allocator.transition_from_static_to_deinit();
 
+            self.grid_scrubber.deinit(allocator);
             self.client_replies.deinit();
             self.client_sessions_checkpoint.deinit(allocator);
             self.client_sessions.deinit(allocator);
@@ -1236,9 +1274,10 @@ pub fn ReplicaType(
             self.repair_timeout.tick();
             self.repair_sync_timeout.tick();
             self.grid_repair_message_timeout.tick();
+            self.upgrade_timeout.tick();
             self.sync_message_timeout.tick();
             self.pulse_timeout.tick();
-            self.upgrade_timeout.tick();
+            self.grid_scrub_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
@@ -1253,6 +1292,7 @@ pub fn ReplicaType(
             if (self.repair_timeout.fired()) self.on_repair_timeout();
             if (self.repair_sync_timeout.fired()) self.on_repair_sync_timeout();
             if (self.grid_repair_message_timeout.fired()) self.on_grid_repair_message_timeout();
+            if (self.grid_scrub_timeout.fired()) self.on_grid_scrub_timeout();
             if (self.sync_message_timeout.fired()) self.on_sync_message_timeout();
             if (self.pulse_timeout.fired()) self.on_pulse_timeout();
             if (self.upgrade_timeout.fired()) self.on_upgrade_timeout();
@@ -3025,6 +3065,48 @@ pub fn ReplicaType(
             }
         }
 
+        fn on_grid_scrub_timeout(self: *Self) void {
+            assert(self.grid_scrub_timeout.ticking);
+            self.grid_scrub_timeout.reset();
+
+            if (!self.state_machine_opened) return;
+            if (self.syncing != .idle) return;
+            if (self.sync_tables != null) return;
+            assert(self.grid.callback != .cancel);
+
+            self.grid_scrub_timeout.after = std.math.clamp(
+                @divFloor(
+                    constants.grid_scrubber_cycle_ticks,
+                    @max(1, self.grid.free_set.count_acquired()),
+                ) * constants.grid_scrubber_reads_max,
+                constants.grid_scrubber_interval_ticks_min,
+                constants.grid_scrubber_interval_ticks_max,
+            );
+
+            while (self.grid.blocks_missing.enqueue_blocks_available() > 0) {
+                const fault = self.grid_scrubber.read_fault() orelse break;
+                assert(!self.grid.free_set.is_free(fault.block_address));
+
+                log.debug("{}: on_grid_scrub_timeout: fault found: " ++
+                    "block_address={} block_checksum={x:0>32} block_type={s}", .{
+                    self.replica,
+                    fault.block_address,
+                    fault.block_checksum,
+                    @tagName(fault.block_type),
+                });
+
+                self.grid.blocks_missing.enqueue_block(
+                    fault.block_address,
+                    fault.block_checksum,
+                );
+            }
+
+            for (0..constants.grid_scrubber_reads_max + 1) |_| {
+                const scrub_next = self.grid_scrubber.read_next();
+                if (!scrub_next) break;
+            } else unreachable;
+        }
+
         fn on_sync_message_timeout(self: *Self) void {
             assert(!self.solo());
             assert(self.syncing != .idle);
@@ -3433,6 +3515,7 @@ pub fn ReplicaType(
                         // parallel (as much possible) rather than in sequence.
                         self.send_commit();
                     }
+                    self.grid_scrubber.checkpoint();
                     self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
                     self.client_sessions_checkpoint.checkpoint(commit_op_checkpoint_client_sessions_callback);
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
@@ -5463,6 +5546,14 @@ pub fn ReplicaType(
         fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
 
+            // Immediately after recovery, any faulty non-reserved prepares must be within our
+            // current checkpoint. See recovery case @M.
+            for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
+                if (self.journal.faulty.bit(.{ .index = slot })) {
+                    assert(header.operation == .reserved or self.op_checkpoint() <= header.op);
+                }
+            }
+
             // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt or
             // if the replica restarts after state sync updates superblock.
             if (self.op < self.op_checkpoint()) return false;
@@ -5573,7 +5664,7 @@ pub fn ReplicaType(
         /// Safety condition: repairing an old op must not overwrite a newer op from the next wrap.
         ///
         /// Availability condition: each committed op must be present either in a quorum of WALs or
-        /// it in a quorum of checkpoints.
+        /// in a quorum of checkpoints.
         ///
         /// If op=trigger+1 is committed, the corresponding checkpoint is durably present on
         /// a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
@@ -6220,7 +6311,9 @@ pub fn ReplicaType(
             assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
 
-            var pipeline_queue = PipelineQueue{};
+            var pipeline_queue = PipelineQueue{
+                .pipeline_request_queue_limit = self.pipeline_request_queue_limit,
+            };
             var op = self.commit_max + 1;
             var parent = self.journal.header_with_op(self.commit_max).?.checksum;
             while (op <= self.op) : (op += 1) {
@@ -7836,6 +7929,7 @@ pub fn ReplicaType(
             self.repair_sync_timeout.stop();
             self.upgrade_timeout.stop();
             self.grid_repair_message_timeout.start();
+            self.grid_scrub_timeout.start();
             self.pulse_timeout.stop();
 
             if (self.pipeline == .queue) {
@@ -7894,11 +7988,14 @@ pub fn ReplicaType(
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
-                self.pipeline = .{ .queue = .{} };
+                self.pipeline = .{ .queue = .{
+                    .pipeline_request_queue_limit = self.pipeline_request_queue_limit,
+                } };
             } else {
                 log.debug(
                     "{}: transition_to_normal_from_recovering_status: view={} backup",
@@ -7926,6 +8023,7 @@ pub fn ReplicaType(
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.grid_scrub_timeout.start();
             }
         }
 
@@ -7980,6 +8078,7 @@ pub fn ReplicaType(
             self.repair_timeout.start();
             self.repair_sync_timeout.start();
             self.grid_repair_message_timeout.start();
+            self.grid_scrub_timeout.start();
         }
 
         fn transition_to_normal_from_view_change_status(self: *Self, view_new: u32) void {
@@ -8028,6 +8127,7 @@ pub fn ReplicaType(
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
@@ -8071,6 +8171,7 @@ pub fn ReplicaType(
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.grid_scrub_timeout.start();
             }
 
             self.heartbeat_timestamp = 0;
@@ -8155,6 +8256,7 @@ pub fn ReplicaType(
             self.primary_abdicate_timeout.stop();
             self.pulse_timeout.stop();
             self.grid_repair_message_timeout.start();
+            self.grid_scrub_timeout.start();
             self.upgrade_timeout.stop();
 
             if (self.primary_index(self.view) == self.replica) {
@@ -8486,6 +8588,8 @@ pub fn ReplicaType(
                 self.message_bus.unref(grid_read.message);
                 self.grid_reads.release(grid_read);
             }
+
+            self.grid_scrubber.cancel();
 
             var grid_repair_writes = self.grid_repair_writes.iterate();
             while (grid_repair_writes.next()) |write| self.grid_repair_writes.release(write);
@@ -9982,6 +10086,7 @@ const PipelineQueue = struct {
     const PrepareQueue = RingBuffer(Prepare, .{ .array = constants.pipeline_prepare_queue_max });
     const RequestQueue = RingBuffer(Request, .{ .array = constants.pipeline_request_queue_max });
 
+    pipeline_request_queue_limit: u32,
     /// Messages that are preparing (uncommitted, being written to the WAL (may already be written
     /// to the WAL) and replicated (may just be waiting for acks)).
     prepare_queue: PrepareQueue = PrepareQueue.init(),
@@ -9998,6 +10103,10 @@ const PipelineQueue = struct {
     fn verify(pipeline: PipelineQueue) void {
         assert(pipeline.request_queue.count <= constants.pipeline_request_queue_max);
         assert(pipeline.prepare_queue.count <= constants.pipeline_prepare_queue_max);
+
+        assert(pipeline.pipeline_request_queue_limit >= 0);
+        assert(pipeline.pipeline_request_queue_limit <= constants.pipeline_request_queue_max);
+        assert(pipeline.request_queue.count <= pipeline.pipeline_request_queue_limit);
 
         assert(pipeline.request_queue.empty() or
             constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count or
@@ -10032,9 +10141,18 @@ const PipelineQueue = struct {
         }
     }
 
+    fn prepare_queue_capacity(pipeline: *const PipelineQueue) u32 {
+        _ = pipeline;
+        return constants.pipeline_prepare_queue_max;
+    }
+
+    fn request_queue_capacity(pipeline: *const PipelineQueue) u32 {
+        return pipeline.pipeline_request_queue_limit;
+    }
+
     fn full(pipeline: PipelineQueue) bool {
-        if (pipeline.prepare_queue.full()) {
-            return pipeline.request_queue.full();
+        if (pipeline.prepare_queue.count == pipeline.prepare_queue_capacity()) {
+            return pipeline.request_queue.count == pipeline.request_queue_capacity();
         } else {
             assert(pipeline.request_queue.empty() or
                 pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
@@ -10143,6 +10261,7 @@ const PipelineQueue = struct {
     }
 
     fn push_request(pipeline: *PipelineQueue, request: Request) void {
+        assert(pipeline.request_queue.count < pipeline.request_queue_capacity());
         assert(request.message.header.command == .request);
         pipeline.assert_request_queue(request);
 
@@ -10158,6 +10277,7 @@ const PipelineQueue = struct {
     }
 
     fn push_prepare(pipeline: *PipelineQueue, message: *Message.Prepare) void {
+        assert(pipeline.prepare_queue.count < pipeline.prepare_queue_capacity());
         assert(message.header.command == .prepare);
         assert(message.header.operation != .reserved);
         if (pipeline.prepare_queue.tail()) |tail| {
@@ -10183,6 +10303,9 @@ const PipelineCache = struct {
         constants.pipeline_prepare_queue_max +
         constants.pipeline_request_queue_max;
 
+    capacity: u32,
+
+    // Invariant: prepares[capacity..] == null
     prepares: [prepares_max]?*Message.Prepare =
         [_]?*Message.Prepare{null} ** prepares_max,
 
@@ -10193,7 +10316,13 @@ const PipelineCache = struct {
     /// reused. However, the pipeline's prepare_ok quorums must not be reused, since the
     /// replicas that sent them may have swapped them out during a previous view change.
     fn init_from_queue(queue: *PipelineQueue) PipelineCache {
-        var cache = PipelineCache{};
+        assert(queue.pipeline_request_queue_limit >= 0);
+        assert(queue.pipeline_request_queue_limit + constants.pipeline_prepare_queue_max <=
+            prepares_max);
+
+        var cache = PipelineCache{
+            .capacity = constants.pipeline_prepare_queue_max + queue.pipeline_request_queue_limit,
+        };
         var prepares = queue.prepare_queue.iterator();
         while (prepares.next()) |prepare| {
             const prepare_evicted = cache.insert(prepare.message.ref());
@@ -10213,7 +10342,9 @@ const PipelineCache = struct {
     }
 
     fn empty(pipeline: *const PipelineCache) bool {
-        for (pipeline.prepares) |*entry| {
+        for (pipeline.prepares[pipeline.capacity..]) |*entry| assert(entry.* == null);
+
+        for (pipeline.prepares[0..pipeline.capacity]) |*entry| {
             if (entry) |_| return true;
         }
         return false;
@@ -10223,7 +10354,7 @@ const PipelineCache = struct {
         assert(header.command == .prepare);
         assert(header.operation != .reserved);
 
-        const slot = header.op % prepares_max;
+        const slot = header.op % pipeline.capacity;
         const prepare = pipeline.prepares[slot] orelse return false;
         return prepare.header.op == header.op and prepare.header.checksum == header.checksum;
     }
@@ -10235,7 +10366,7 @@ const PipelineCache = struct {
         op: u64,
         checksum: u128,
     ) ?*Message.Prepare {
-        const slot = op % prepares_max;
+        const slot = op % pipeline.capacity;
         const prepare = pipeline.prepares[slot] orelse return null;
         if (prepare.header.op != op) return null;
         if (prepare.header.checksum != checksum) return null;
@@ -10247,7 +10378,7 @@ const PipelineCache = struct {
         assert(prepare.header.command == .prepare);
         assert(prepare.header.operation != .reserved);
 
-        const slot = prepare.header.op % prepares_max;
+        const slot = prepare.header.op % pipeline.capacity;
         const prepare_evicted = pipeline.prepares[slot];
         pipeline.prepares[slot] = prepare;
         return prepare_evicted;

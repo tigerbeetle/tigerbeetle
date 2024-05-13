@@ -32,8 +32,7 @@ find pages -type f | xargs -I {} sed -i "s@/src/clients/@$repo/blob/main/src/cli
 
 for page in $(ls pages/*.md); do
     if ! [[ "$page" == "pages/README.md" ]] && \
-       ! [[ "$page" == "pages/FAQ.md" ]] && \
-       ! [[ "$page" == "pages/installation.md" ]]; then
+       ! [[ "$page" == "pages/quick-start.md" ]]; then
         rm "$page"
     fi
 done

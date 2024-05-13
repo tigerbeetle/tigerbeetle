@@ -11,7 +11,7 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const Direction = @import("../direction.zig").Direction;
 
-/// A TableDataIterator iterates a table's data blocks in ascending key order.
+/// A TableDataIterator iterates a table's data blocks in ascending or descending key order.
 pub fn TableDataIteratorType(comptime Storage: type) type {
     return struct {
         const TableDataIterator = @This();

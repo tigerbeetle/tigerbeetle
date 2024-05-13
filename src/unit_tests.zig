@@ -1,6 +1,7 @@
 comptime {
     _ = @import("aof.zig");
     _ = @import("copyhound.zig");
+    _ = @import("ewah_benchmark.zig");
     _ = @import("ewah.zig");
     _ = @import("fifo.zig");
     _ = @import("flags.zig");
@@ -14,21 +15,26 @@ comptime {
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client/echo_client.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
-    _ = @import("clients/dotnet/dotnet_bindings.zig");
-    _ = @import("clients/go/go_bindings.zig");
-    _ = @import("clients/java/java_bindings.zig");
-    _ = @import("clients/node/node_bindings.zig");
+    _ = @import("dotnet_bindings.zig");
+    _ = @import("go_bindings.zig");
+    _ = @import("java_bindings.zig");
+    _ = @import("node_bindings.zig");
+
+    _ = @import("io/test.zig");
 
     _ = @import("lsm/binary_search.zig");
+    _ = @import("lsm/binary_search_benchmark.zig");
     _ = @import("lsm/cache_map.zig");
     _ = @import("lsm/composite_key.zig");
     _ = @import("lsm/forest.zig");
     _ = @import("lsm/forest_table_iterator.zig");
     _ = @import("lsm/groove.zig");
     _ = @import("lsm/k_way_merge.zig");
+    _ = @import("lsm/zig_zag_merge.zig");
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/node_pool.zig");
     _ = @import("lsm/segmented_array.zig");
+    _ = @import("lsm/segmented_array_benchmark.zig");
     _ = @import("lsm/set_associative_cache.zig");
     _ = @import("lsm/table.zig");
     _ = @import("lsm/table_memory.zig");
@@ -50,6 +56,7 @@ comptime {
     _ = @import("vsr/clock.zig");
     _ = @import("vsr/checksum.zig");
     _ = @import("vsr/grid_blocks_missing.zig");
+    _ = @import("vsr/grid_scrubber.zig");
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
     _ = @import("vsr/replica_format.zig");
@@ -60,4 +67,5 @@ comptime {
     _ = @import("vsr/sync.zig");
 
     _ = @import("scripts/release.zig");
+    _ = @import("scripts/cfo.zig");
 }

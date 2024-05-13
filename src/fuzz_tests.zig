@@ -34,6 +34,8 @@ const Fuzzers = .{
     .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
     .vsr_superblock_quorums = @import("./vsr/superblock_quorums_fuzz.zig"),
+    // A fuzzer that intentionally fails, to test fuzzing infrastructure itself
+    .canary = {},
     // Quickly run all fuzzers as a smoke test
     .smoke = {},
 };
@@ -41,10 +43,10 @@ const Fuzzers = .{
 const FuzzersEnum = std.meta.FieldEnum(@TypeOf(Fuzzers));
 
 const CliArgs = struct {
-    seed: ?u64 = null,
     events_max: ?usize = null,
     positional: struct {
         fuzzer: FuzzersEnum,
+        seed: ?u64 = null,
     },
 };
 
@@ -56,7 +58,7 @@ pub fn main() !void {
 
     switch (cli_args.positional.fuzzer) {
         .smoke => {
-            assert(cli_args.seed == null);
+            assert(cli_args.positional.seed == null);
             assert(cli_args.events_max == null);
             try main_smoke();
         },
@@ -69,6 +71,7 @@ fn main_smoke() !void {
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
         const events_max = switch (fuzzer) {
             .smoke => continue,
+            .canary => continue,
 
             .lsm_cache_map => 20_000,
             .lsm_forest => 10_000,
@@ -101,7 +104,7 @@ fn main_smoke() !void {
 fn main_single(cli_args: CliArgs) !void {
     assert(cli_args.positional.fuzzer != .smoke);
 
-    const seed: usize = cli_args.seed orelse seed: {
+    const seed: usize = cli_args.positional.seed orelse seed: {
         // If no seed was given, use a random seed instead.
         var seed_random: u64 = undefined;
         try std.os.getrandom(std.mem.asBytes(&seed_random));
@@ -112,6 +115,11 @@ fn main_single(cli_args: CliArgs) !void {
     var timer = try std.time.Timer.start();
     switch (cli_args.positional.fuzzer) {
         .smoke => unreachable,
+        .canary => {
+            if (seed % 100 == 0) {
+                std.process.exit(1);
+            }
+        },
         inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(
             .{ .seed = seed, .events_max = cli_args.events_max },
         ),

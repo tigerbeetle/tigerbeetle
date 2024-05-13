@@ -70,9 +70,15 @@ pub fn build(b: *std.Build) !void {
     options.addOption(?[40]u8, "git_commit", git_commit[0..40].*);
 
     options.addOption(
-        []const u8,
+        ?[]const u8,
         "release",
-        b.option([]const u8, "config-release", "Release triple.") orelse "0.0.1",
+        b.option([]const u8, "config-release", "Release triple."),
+    );
+
+    options.addOption(
+        ?[]const u8,
+        "release_client_min",
+        b.option([]const u8, "config-release-client-min", "Minimum client release triple."),
     );
 
     options.addOption(
@@ -225,9 +231,8 @@ pub fn build(b: *std.Build) !void {
             .name = "tb_client_header",
             .root_source_file = .{ .path = "src/clients/c/tb_client_header.zig" },
             .target = target,
-            .main_pkg_path = .{ .path = "src" },
         });
-
+        tb_client_header.addModule("vsr", vsr_module);
         tb_client_header.addOptions("vsr_options", options);
         break :blk b.addRunArtifact(tb_client_header);
     };
@@ -287,6 +292,7 @@ pub fn build(b: *std.Build) !void {
             mode,
             &.{ &install_step.step, &tb_client_header_generate.step },
             target,
+            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -296,6 +302,7 @@ pub fn build(b: *std.Build) !void {
             mode,
             &.{&install_step.step},
             target,
+            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -305,6 +312,7 @@ pub fn build(b: *std.Build) !void {
             mode,
             &.{&install_step.step},
             target,
+            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -314,6 +322,7 @@ pub fn build(b: *std.Build) !void {
             mode,
             &.{&install_step.step},
             target,
+            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -322,6 +331,7 @@ pub fn build(b: *std.Build) !void {
             b,
             mode,
             &.{ &install_step.step, &tb_client_header_generate.step },
+            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -331,6 +341,7 @@ pub fn build(b: *std.Build) !void {
             mode,
             target,
             &.{ &install_step.step, &tb_client_header_generate.step },
+            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -453,32 +464,12 @@ pub fn build(b: *std.Build) !void {
         run_step.dependOn(&run_cmd.step);
     }
 
-    {
-        const vopr = b.addExecutable(.{
-            .name = "vopr",
-            .root_source_file = .{ .path = "src/vopr.zig" },
-            .target = target,
-            .optimize = if (b.args != null) mode else .ReleaseSafe,
-        });
-        // Ensure that we get stack traces even in release builds.
-        vopr.omit_frame_pointer = false;
-        vopr.addOptions("vsr_options", options);
-        link_tracer_backend(vopr, git_clone_tracy, tracer_backend, target);
-
-        const run_cmd = b.addRunArtifact(vopr);
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const step = b.step("vopr", "Run the VOPR");
-        step.dependOn(&run_cmd.step);
-    }
-
-    { // Fuzzers: zig build fuzz -- lsm_tree --seed=92 --events-max=100
+    { // Fuzzers: zig build fuzz -- --events-max=100 lsm_tree 123
         const fuzz_exe = b.addExecutable(.{
             .name = "fuzz",
             .root_source_file = .{ .path = "src/fuzz_tests.zig" },
             .target = target,
             .optimize = mode,
-            .main_pkg_path = .{ .path = "src" },
         });
         fuzz_exe.omit_frame_pointer = false;
         fuzz_exe.addOptions("vsr_options", options);
@@ -495,52 +486,15 @@ pub fn build(b: *std.Build) !void {
         fuzz_build_step.dependOn(&fuzz_install_step.step);
     }
 
-    inline for (.{
-        .{
-            .name = "benchmark_ewah",
-            .file = "src/ewah_benchmark.zig",
-            .description = "EWAH codec",
-        },
-        .{
-            .name = "benchmark_binary_search",
-            .file = "src/lsm/binary_search_benchmark.zig",
-            .description = "Array search",
-        },
-        .{
-            .name = "benchmark_segmented_array",
-            .file = "src/lsm/segmented_array_benchmark.zig",
-            .description = "SegmentedArray search",
-        },
-    }) |benchmark| {
-        const exe = b.addExecutable(.{
-            .name = benchmark.name,
-            .root_source_file = .{ .path = benchmark.file },
-            .target = target,
-            .optimize = .ReleaseSafe,
-            .main_pkg_path = .{ .path = "src" },
-        });
-        exe.addOptions("vsr_options", options);
-        link_tracer_backend(exe, git_clone_tracy, tracer_backend, target);
-
-        const build_step = b.step(
-            "build_" ++ benchmark.name,
-            "Build " ++ benchmark.description ++ " benchmark",
-        );
-        build_step.dependOn(&exe.step);
-
-        const run_cmd = b.addRunArtifact(exe);
-        const step = b.step(benchmark.name, "Benchmark " ++ benchmark.description);
-        step.dependOn(&run_cmd.step);
-    }
-
     { // Free-form automation: `zig build scripts -- ci --language=java`
         const scripts_exe = b.addExecutable(.{
             .name = "scripts",
-            .root_source_file = .{ .path = "src/scripts/main.zig" },
+            .root_source_file = .{ .path = "src/scripts.zig" },
             .target = target,
-            .main_pkg_path = .{ .path = "src" },
+            .optimize = mode,
         });
         const scripts_run = b.addRunArtifact(scripts_exe);
+        scripts_run.setEnvironmentVariable("ZIG_EXE", b.zig_exe);
         if (b.args) |args| scripts_run.addArgs(args);
         const scripts_step = b.step("scripts", "Run automation scripts");
         scripts_step.dependOn(&scripts_run.step);
@@ -617,6 +571,7 @@ fn go_client(
     mode: Mode,
     dependencies: []const *std.Build.Step,
     target: CrossTarget,
+    vsr_module: *std.Build.Module,
     options: *std.Build.OptionsStep,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -635,10 +590,10 @@ fn go_client(
 
     const bindings = b.addExecutable(.{
         .name = "go_bindings",
-        .root_source_file = .{ .path = "src/clients/go/go_bindings.zig" },
+        .root_source_file = .{ .path = "src/go_bindings.zig" },
         .target = target,
-        .main_pkg_path = .{ .path = "src" },
     });
+    bindings.addModule("vsr", vsr_module);
     bindings.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
@@ -658,16 +613,16 @@ fn go_client(
 
         const lib = b_isolated.addStaticLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .root_source_file = .{ .path = "src/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
-            .main_pkg_path = .{ .path = "src" },
         });
         lib.linkLibC();
         lib.pie = true;
         lib.bundle_compiler_rt = true;
         lib.stack_protector = false;
 
+        lib.addModule("vsr", vsr_module);
         lib.addOptions("vsr_options", options);
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
@@ -686,6 +641,7 @@ fn java_client(
     mode: Mode,
     dependencies: []const *std.Build.Step,
     target: CrossTarget,
+    vsr_module: *std.Build.Module,
     options: *std.Build.OptionsStep,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -698,10 +654,10 @@ fn java_client(
 
     const bindings = b.addExecutable(.{
         .name = "java_bindings",
-        .root_source_file = .{ .path = "src/clients/java/java_bindings.zig" },
+        .root_source_file = .{ .path = "src/java_bindings.zig" },
         .target = target,
-        .main_pkg_path = .{ .path = "src" },
     });
+    bindings.addModule("vsr", vsr_module);
     bindings.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
@@ -714,7 +670,6 @@ fn java_client(
             .root_source_file = .{ .path = "src/clients/java/src/client.zig" },
             .target = cross_target,
             .optimize = mode,
-            .main_pkg_path = .{ .path = "src" },
         });
         lib.linkLibC();
 
@@ -723,6 +678,7 @@ fn java_client(
             lib.linkSystemLibrary("advapi32");
         }
 
+        lib.addModule("vsr", vsr_module);
         lib.addOptions("vsr_options", options);
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
@@ -743,6 +699,7 @@ fn dotnet_client(
     mode: Mode,
     dependencies: []const *std.Build.Step,
     target: CrossTarget,
+    vsr_module: *std.Build.Module,
     options: *std.Build.OptionsStep,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -755,10 +712,10 @@ fn dotnet_client(
 
     const bindings = b.addExecutable(.{
         .name = "dotnet_bindings",
-        .root_source_file = .{ .path = "src/clients/dotnet/dotnet_bindings.zig" },
+        .root_source_file = .{ .path = "src/dotnet_bindings.zig" },
         .target = target,
-        .main_pkg_path = .{ .path = "src" },
     });
+    bindings.addModule("vsr", vsr_module);
     bindings.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
@@ -768,10 +725,9 @@ fn dotnet_client(
 
         const lib = b_isolated.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .root_source_file = .{ .path = "src/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
-            .main_pkg_path = .{ .path = "src" },
         });
         lib.linkLibC();
 
@@ -780,6 +736,7 @@ fn dotnet_client(
             lib.linkSystemLibrary("advapi32");
         }
 
+        lib.addModule("vsr", vsr_module);
         lib.addOptions("vsr_options", options);
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
@@ -799,6 +756,7 @@ fn node_client(
     mode: Mode,
     dependencies: []const *std.Build.Step,
     target: CrossTarget,
+    vsr_module: *std.Build.Module,
     options: *std.Build.OptionsStep,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -810,10 +768,10 @@ fn node_client(
 
     const bindings = b.addExecutable(.{
         .name = "node_bindings",
-        .root_source_file = .{ .path = "src/clients/node/node_bindings.zig" },
+        .root_source_file = .{ .path = "src/node_bindings.zig" },
         .target = target,
-        .main_pkg_path = .{ .path = "src" },
     });
+    bindings.addModule("vsr", vsr_module);
     bindings.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
@@ -858,10 +816,9 @@ fn node_client(
 
         const lib = b_isolated.addSharedLibrary(.{
             .name = "tb_nodeclient",
-            .root_source_file = .{ .path = "src/clients/node/src/node.zig" },
+            .root_source_file = .{ .path = "src/node.zig" },
             .target = cross_target,
             .optimize = mode,
-            .main_pkg_path = .{ .path = "src" },
         });
         lib.linkLibC();
 
@@ -878,6 +835,7 @@ fn node_client(
             lib.linkSystemLibrary("node");
         }
 
+        lib.addModule("vsr", vsr_module);
         lib.addOptions("vsr_options", options);
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
@@ -898,6 +856,7 @@ fn c_client(
     b: *std.Build,
     mode: Mode,
     dependencies: []const *std.Build.Step,
+    vsr_module: *std.Build.Module,
     options: *std.Build.OptionsStep,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -922,17 +881,15 @@ fn c_client(
 
         const shared_lib = b_isolated.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .root_source_file = .{ .path = "src/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
-            .main_pkg_path = .{ .path = "src" },
         });
         const static_lib = b_isolated.addStaticLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .root_source_file = .{ .path = "src/tb_client_exports.zig" },
             .target = cross_target,
             .optimize = mode,
-            .main_pkg_path = .{ .path = "src" },
         });
 
         static_lib.bundle_compiler_rt = true;
@@ -946,6 +903,7 @@ fn c_client(
                 lib.linkSystemLibrary("advapi32");
             }
 
+            lib.addModule("vsr", vsr_module);
             lib.addOptions("vsr_options", options);
             link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
@@ -964,6 +922,7 @@ fn c_client_sample(
     mode: Mode,
     target: CrossTarget,
     dependencies: []const *std.Build.Step,
+    vsr_module: *std.Build.Module,
     options: *std.Build.OptionsStep,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -975,14 +934,14 @@ fn c_client_sample(
 
     const static_lib = b.addStaticLibrary(.{
         .name = "tb_client",
-        .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+        .root_source_file = .{ .path = "src/tb_client_exports.zig" },
         .target = target,
         .optimize = mode,
-        .main_pkg_path = .{ .path = "src" },
     });
     static_lib.linkLibC();
     static_lib.pie = true;
     static_lib.bundle_compiler_rt = true;
+    static_lib.addModule("vsr", vsr_module);
     static_lib.addOptions("vsr_options", options);
     link_tracer_backend(static_lib, git_clone_tracy, tracer_backend, target);
     c_sample_build.dependOn(&static_lib.step);
@@ -1077,7 +1036,6 @@ const ShellcheckStep = struct {
         });
 
         try shell.exec("shellcheck {scripts}", .{ .scripts = scripts });
-        try shell.exec("shellcheck ./bootstrap.sh", .{});
     }
 };
 

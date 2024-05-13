@@ -245,9 +245,9 @@ fn generate_events(
         }
 
         if (random.uintAtMost(usize, compacts_per_checkpoint) == 0) {
-            try events.append(.compact);
-        } else {
             try events.append(.checkpoint);
+        } else {
+            try events.append(.compact);
         }
     }
     log.info("event_count = {d}", .{events.items.len});

@@ -148,17 +148,20 @@ const DeadDetector = struct {
     fn is_entry_point(file: FileName) bool {
         const entry_points: []const []const u8 = &.{
             "benchmark.zig",
-            "binary_search_benchmark.zig",
-            "ewah_benchmark.zig",
             "fuzz_tests.zig",
             "integration_tests.zig",
             "jni_tests.zig",
             "main.zig",
             "node.zig",
-            "segmented_array_benchmark.zig",
+            "simulator.zig",
             "tb_client_header.zig",
             "unit_tests.zig",
-            "vopr.zig",
+            "scripts.zig",
+            "tb_client_exports.zig",
+            "dotnet_bindings.zig",
+            "go_bindings.zig",
+            "node_bindings.zig",
+            "java_bindings.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -217,6 +220,11 @@ test "tidy no large blobs" {
     //
     // Zig's std doesn't provide a cross platform abstraction for piping two commands together, so
     // we begrudgingly pass the data through this intermediary process.
+    const shallow = try shell.exec_stdout("git rev-parse --is-shallow-repository", .{});
+    if (!std.mem.eql(u8, shallow, "false")) {
+        return error.ShallowRepository;
+    }
+
     const MiB = 1024 * 1024;
     const rev_list = try shell.exec_stdout_options(
         .{ .max_output_bytes = 50 * MiB },
@@ -260,10 +268,11 @@ test "tidy extensions" {
     });
 
     const exceptions = std.ComptimeStringMap(void, .{
-        .{".editorconfig"}, .{".gitattributes"}, .{".gitignore"},             .{".nojekyll"},
-        .{"CNAME"},         .{"Dockerfile"},     .{"exclude-pmd.properties"}, .{"favicon.ico"},
-        .{"favicon.png"},   .{"LICENSE"},        .{"logo.svg"},               .{"module-info.test"},
-        .{"index.html"},
+        .{".editorconfig"},          .{".gitattributes"},   .{".gitignore"},
+        .{".nojekyll"},              .{"CNAME"},            .{"Dockerfile"},
+        .{"exclude-pmd.properties"}, .{"favicon.ico"},      .{"favicon.png"},
+        .{"LICENSE"},                .{"module-info.test"}, .{"index.html"},
+        .{"logo.svg"},               .{"logo-white.svg"},   .{"logo-with-text-white.svg"},
     });
 
     const allocator = std.testing.allocator;
@@ -350,7 +359,7 @@ fn has_link(line: []const u8) bool {
 
 /// If a line is a `\\` string literal, extract its value.
 fn parse_multiline_string(line: []const u8) ?[]const u8 {
-    const cut = stdx.cut(line, "\\") orelse return null;
+    const cut = stdx.cut(line, "\\\\") orelse return null;
     for (cut.prefix) |c| if (c != ' ') return null;
     return cut.suffix;
 }
@@ -362,20 +371,19 @@ const naughty_list = [_][]const u8{
     "clients/c/tb_client/signal.zig",
     "clients/c/test.zig",
     "clients/dotnet/docs.zig",
-    "clients/dotnet/dotnet_bindings.zig",
-    "clients/go/go_bindings.zig",
+    "dotnet_bindings.zig",
+    "go_bindings.zig",
     "clients/java/docs.zig",
-    "clients/java/java_bindings.zig",
+    "java_bindings.zig",
     "clients/java/src/client.zig",
     "clients/java/src/jni_tests.zig",
-    "clients/node/node_bindings.zig",
-    "clients/node/src/node.zig",
+    "node_bindings.zig",
+    "node.zig",
     "clients/node/src/translate.zig",
     "config.zig",
     "constants.zig",
     "io/benchmark.zig",
     "io/darwin.zig",
-    "io/test.zig",
     "io/windows.zig",
     "lsm/binary_search.zig",
     "lsm/binary_search_benchmark.zig",

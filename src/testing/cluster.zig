@@ -216,9 +216,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var replica_pools = try allocator.alloc(MessagePool, node_count);
             errdefer allocator.free(replica_pools);
 
+            const pipeline_requests_limit =
+                options.client_count -| constants.pipeline_prepare_queue_max;
+
             for (replica_pools, 0..) |*pool, i| {
                 errdefer for (replica_pools[0..i]) |*p| p.deinit(allocator);
-                pool.* = try MessagePool.init(allocator, .replica);
+                pool.* = try MessagePool.init(allocator, .{ .replica = .{
+                    .members_count = options.replica_count + options.standby_count,
+                    .pipeline_requests_limit = pipeline_requests_limit,
+                } });
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);
 
@@ -469,7 +475,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var it = message_bus.pool.free_list;
                 while (it) |message| : (it = message.next) messages_in_pool += 1;
             }
-            assert(messages_in_pool == message_pool.messages_max_replica);
+            assert(messages_in_pool == message_bus.pool.messages_max);
         }
 
         fn replica_enable(cluster: *Self, replica_index: u8) void {
@@ -491,11 +497,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 }
             } else unreachable;
 
+            const pipeline_requests_limit =
+                cluster.options.client_count -| constants.pipeline_prepare_queue_max;
+
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
+                    .pipeline_requests_limit = pipeline_requests_limit,
                     .storage = &cluster.storages[replica_index],
                     .aof = &cluster.aofs[replica_index],
                     // TODO Test restarting with a higher storage limit.

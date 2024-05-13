@@ -37,14 +37,17 @@ pub const std_options = struct {
 };
 
 pub fn main() !void {
+    try SigIllHandler.register();
+
     // TODO(zig): Zig defaults to 16MB stack size on Linux, but not yet on mac as of 0.11.
     // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
     // in build.zig doesn't work.
-    if (builtin.target.os.tag == .macos)
+    if (builtin.target.os.tag == .macos) {
         os.setrlimit(os.rlimit_resource.STACK, .{
             .cur = 16 * 1024 * 1024,
             .max = 16 * 1024 * 1024,
         }) catch @panic("unable to adjust stack limit");
+    }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -61,13 +64,13 @@ pub fn main() !void {
     defer command.deinit(allocator);
 
     switch (command) {
-        .format => |*args| try Command.format(allocator, .{
+        .format => |*args| try Command.format(allocator, args, .{
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
-        }, args.path),
-        .start => |*args| try Command.start(&arena, args),
+        }),
+        .start => |*args| try Command.start(arena.allocator(), args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
@@ -75,19 +78,88 @@ pub fn main() !void {
     }
 }
 
+const SigIllHandler = struct {
+    var original_posix_sigill_handler: ?*const fn (
+        i32,
+        *const os.siginfo_t,
+        ?*const anyopaque,
+    ) callconv(.C) void = null;
+
+    fn handle_sigill_windows(
+        info: *std.os.windows.EXCEPTION_POINTERS,
+    ) callconv(std.os.windows.WINAPI) c_long {
+        if (info.ExceptionRecord.ExceptionCode == std.os.windows.EXCEPTION_ILLEGAL_INSTRUCTION) {
+            display_message();
+        }
+        return std.os.windows.EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    fn handle_sigill_posix(
+        sig: i32,
+        info: *const os.siginfo_t,
+        ctx_ptr: ?*const anyopaque,
+    ) callconv(.C) noreturn {
+        display_message();
+        original_posix_sigill_handler.?(sig, info, ctx_ptr);
+        unreachable;
+    }
+
+    fn display_message() void {
+        std.log.err("", .{});
+        std.log.err("TigerBeetle's binary releases are compiled targeting modern CPU", .{});
+        std.log.err("instructions such as NEON / AES on ARM and x86_64_v3 / AES-NI on", .{});
+        std.log.err("x86-64.", .{});
+        std.log.err("", .{});
+        std.log.err("These instructions can be unsupported on older processors, leading to", .{});
+        std.log.err("\"illegal instruction\" panics.", .{});
+        std.log.err("", .{});
+        std.log.err("If you'd like to try TigerBeetle on an older processor, you can", .{});
+        std.log.err("compile from source with the changes detailed at", .{});
+        std.log.err("https://github.com/tigerbeetle/tigerbeetle/issues/1592", .{});
+        std.log.err("", .{});
+    }
+
+    fn register() !void {
+        switch (builtin.os.tag) {
+            .windows => {
+                // The 1 indicates this will run first, before Zig's built in handler. Internally,
+                // it returns EXCEPTION_CONTINUE_SEARCH so that Zig's handler is called next.
+                _ = std.os.windows.kernel32.AddVectoredExceptionHandler(1, handle_sigill_windows);
+            },
+            .linux, .macos => {
+                // For Linux / macOS, save the original signal handler so it can be called by this
+                // new handler once the log message has been printed.
+                assert(original_posix_sigill_handler == null);
+                var act = os.Sigaction{
+                    .handler = .{ .sigaction = handle_sigill_posix },
+                    .mask = os.empty_sigset,
+                    .flags = (os.SA.SIGINFO | os.SA.RESTART | os.SA.RESETHAND),
+                };
+
+                var oact: os.Sigaction = undefined;
+
+                try os.sigaction(os.SIG.ILL, &act, &oact);
+                original_posix_sigill_handler = oact.handler.sigaction.?;
+            },
+            else => unreachable,
+        }
+    }
+};
+
 const Command = struct {
     dir_fd: os.fd_t,
     fd: os.fd_t,
     io: IO,
     storage: Storage,
-    message_pool: MessagePool,
     self_exe_path: []const u8,
 
     fn init(
         command: *Command,
-        allocator: mem.Allocator,
         path: [:0]const u8,
-        must_create: bool,
+        options: struct {
+            must_create: bool,
+            development: bool,
+        },
     ) !void {
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
         // TODO Handle physical volumes where there is no directory to fsync.
@@ -95,8 +167,21 @@ const Command = struct {
         command.dir_fd = try IO.open_dir(dirname);
         errdefer os.close(command.dir_fd);
 
+        const direct_io: vsr.io.DirectIO = if (!constants.direct_io)
+            .direct_io_disabled
+        else if (options.development)
+            .direct_io_optional
+        else
+            .direct_io_required;
+
         const basename = std.fs.path.basename(path);
-        command.fd = try IO.open_file(command.dir_fd, basename, data_file_size_min, if (must_create) .create else .open);
+        command.fd = try IO.open_file(
+            command.dir_fd,
+            basename,
+            data_file_size_min,
+            if (options.must_create) .create else .open,
+            direct_io,
+        );
         errdefer os.close(command.fd);
 
         command.io = try IO.init(128, 0);
@@ -105,26 +190,29 @@ const Command = struct {
         command.storage = try Storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
 
-        command.message_pool = try MessagePool.init(allocator, .replica);
-        errdefer command.message_pool.deinit(allocator);
-
         command.self_exe_path = try std.fs.selfExePathAlloc(allocator);
         errdefer allocator.free(command.self_exe_path);
     }
 
-    fn deinit(command: *Command, allocator: mem.Allocator) void {
+    fn deinit(command: *Command) void {
         allocator.free(command.self_exe_path);
-        command.message_pool.deinit(allocator);
         command.storage.deinit();
         command.io.deinit();
         os.close(command.fd);
         os.close(command.dir_fd);
     }
 
-    pub fn format(allocator: mem.Allocator, options: SuperBlock.FormatOptions, path: [:0]const u8) !void {
+    pub fn format(
+        allocator: mem.Allocator,
+        args: *const cli.Command.Format,
+        options: SuperBlock.FormatOptions,
+    ) !void {
         var command: Command = undefined;
-        try command.init(allocator, path, true);
-        defer command.deinit(allocator);
+        try command.init(args.path, .{
+            .must_create = true,
+            .development = args.development,
+        });
+        defer command.deinit();
 
         var superblock = try SuperBlock.init(
             allocator,
@@ -144,11 +232,13 @@ const Command = struct {
         });
     }
 
-    pub fn start(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Start) !void {
+    pub fn start(base_allocator: std.mem.Allocator, args: *const cli.Command.Start) !void {
+        var counting_allocator = vsr.CountingAllocator.init(base_allocator);
+
         var traced_allocator = if (constants.tracer_backend == .tracy)
-            tracer.TracyAllocator("tracy").init(arena.allocator())
+            tracer.TracyAllocator("tracy").init(counting_allocator.allocator())
         else
-            arena;
+            &counting_allocator;
 
         // TODO Panic if the data file's size is larger that args.storage_size_limit.
         // (Here or in Replica.open()?).
@@ -156,8 +246,17 @@ const Command = struct {
         const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
-        try command.init(allocator, args.path, false);
-        defer command.deinit(allocator);
+        try command.init(args.path, .{
+            .must_create = false,
+            .development = args.development,
+        });
+        defer command.deinit();
+
+        var message_pool = try MessagePool.init(allocator, .{ .replica = .{
+            .members_count = @intCast(args.addresses.len),
+            .pipeline_requests_limit = args.pipeline_requests_limit,
+        } });
+        defer message_pool.deinit(allocator);
 
         var aof: AOFType = undefined;
         if (constants.aof_record) {
@@ -218,25 +317,27 @@ const Command = struct {
         // startup and the code above.
         assert(multiversion.metadata.current_version == config.process.release.value);
 
-        // TODO Where should this be set?
-        const release_client_min = config.process.release;
+        const releases_bundled = &[_]vsr.Release{config.process.release};
 
         log_main.info("release={}", .{config.process.release});
-        log_main.info("release_client_min={}", .{release_client_min});
-        log_main.info("releases_bundled={any}", .{multiversion.releases_bundled.const_slice()});
+        log_main.info("release_client_min={}", .{config.process.release_client_min});
+        log_main.info("releases_bundled={any}", .{releases_bundled.*});
         log_main.info("git_commit={?s}", .{config.process.git_commit});
+
+        const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
             .release = config.process.release,
-            .release_client_min = release_client_min,
+            .release_client_min = config.process.release_client_min,
             .releases_bundled = &multiversion.releases_bundled,
             .release_execute = replica_release_execute,
+            .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,
-            .message_pool = &command.message_pool,
+            .message_pool = &message_pool,
             .nonce = nonce,
             .time = .{},
             .state_machine_options = .{
@@ -249,6 +350,7 @@ const Command = struct {
             .message_bus_options = .{
                 .configuration = args.addresses,
                 .io = &command.io,
+                .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
             .multiversion = &multiversion,
@@ -257,22 +359,11 @@ const Command = struct {
             else => |e| return e,
         };
 
-        // Calculate how many bytes are allocated inside `arena`.
-        // TODO This does not account for the fact that any allocations will be rounded up to the nearest page by `std.heap.page_allocator`.
-        var allocation_count: usize = 0;
-        var allocation_size: usize = 0;
-        {
-            var node_maybe = arena.state.buffer_list.first;
-            while (node_maybe) |node| {
-                allocation_count += 1;
-                allocation_size += node.data;
-                node_maybe = node.next;
-            }
-        }
-        log_main.info("{}: Allocated {}MiB in {} regions during replica init", .{
+        // Note that this does not account for the fact that any allocations will be rounded up to
+        // the nearest page by `std.heap.page_allocator`.
+        log_main.info("{}: Allocated {}MiB during replica init", .{
             replica.replica,
-            @divFloor(allocation_size, 1024 * 1024),
-            allocation_count,
+            @divFloor(counting_allocator.size, 1024 * 1024),
         });
         log_main.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
             replica.replica,

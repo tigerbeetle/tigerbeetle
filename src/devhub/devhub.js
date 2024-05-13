@@ -7,19 +7,12 @@
 // - `deno fmt` for style
 // - no TypeScript, no build step
 
-async function main() {
-  const batches = await fetchData();
-  const series = batchesToSeries(batches);
-  plotSeries(series, document.querySelector("#charts"));
-
-  const releaseManager = getReleaseManager();
-  for (const week of ["previous", "current", "next"]) {
-    document.querySelector(`#release-${week}`).textContent =
-      releaseManager[week];
-  }
-}
-
-window.onload = main;
+window.onload = () =>
+  Promise.all([
+    mainReleaseRotation(),
+    mainMetrics(),
+    mainSeeds(),
+  ]);
 
 function assert(condition) {
   if (!condition) {
@@ -28,32 +21,105 @@ function assert(condition) {
   }
 }
 
-function getReleaseManager() {
-  const week = getWeek(new Date());
-  const candidates = [
-    "batiati",
-    "cb22",
-    "kprotty",
-    "matklad",
-    "sentientwaffle",
-  ];
-  candidates.sort();
+function mainReleaseRotation() {
+  const releaseManager = getReleaseManager();
+  for (const week of ["previous", "current", "next"]) {
+    document.querySelector(`#release-${week}`).textContent =
+      releaseManager[week];
+  }
 
-  return {
-    previous: candidates[week % candidates.length],
-    current: candidates[(week + 1) % candidates.length],
-    next: candidates[(week + 2) % candidates.length],
-  };
+  function getReleaseManager() {
+    const week = getWeek(new Date());
+    const candidates = [
+      "batiati",
+      "cb22",
+      "kprotty",
+      "matklad",
+      "sentientwaffle",
+    ];
+    candidates.sort();
+
+    return {
+      previous: candidates[week % candidates.length],
+      current: candidates[(week + 1) % candidates.length],
+      next: candidates[(week + 2) % candidates.length],
+    };
+  }
 }
 
-const dataUrl =
-  "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
-
-async function fetchData() {
+async function mainMetrics() {
+  const dataUrl =
+    "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
   const data = await (await fetch(dataUrl)).text();
-  return data.split("\n")
+  const batches = data.split("\n")
     .filter((it) => it.length > 0)
     .map((it) => JSON.parse(it));
+  const series = batchesToSeries(batches);
+  plotSeries(series, document.querySelector("#charts"));
+}
+
+async function mainSeeds() {
+  const dataUrl =
+    "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
+  const records = await (await fetch(dataUrl)).json();
+  const fuzzersWithFailures = new Set();
+  const tableDom = document.querySelector("#seeds>tbody");
+  let commit_previous = undefined;
+  let commit_count = 0;
+  const colors = ["#CCC", "#EEE"];
+  for (const record of records) {
+    if (record.ok && !pullRequestNumber(record)) continue;
+
+    if (fuzzersWithFailures.has(record.branch + record.fuzzer)) continue;
+    fuzzersWithFailures.add(record.branch + record.fuzzer);
+
+    if (record.commit_sha != commit_previous) {
+      commit_previous = record.commit_sha;
+      commit_count += 1;
+    }
+
+    const seedDuration = formatDuration(
+      (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
+    );
+    const seedFreshness = formatDuration(
+      Date.now() - (record.seed_timestamp_start * 1000),
+    );
+    const rowDom = document.createElement("tr");
+
+    rowDom.style.setProperty(
+      "background",
+      record.ok ? "#CF0" : colors[commit_count % colors.length],
+    );
+
+    const prLink = pullRequestNumber(record)
+      ? `<a href="${record.branch}">#${pullRequestNumber(record)}</a>`
+      : "";
+    rowDom.innerHTML = `
+          <td>
+            <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}">
+              ${record.commit_sha.substring(0, 7)}
+            </a>
+            ${prLink}
+          </td>
+          <td>${record.fuzzer}</td>
+          <td><code>${record.command}</code></td>
+          <td><time>${seedDuration}</time></td>
+          <td><time>${seedFreshness} ago</time></td>
+      `;
+    tableDom.appendChild(rowDom);
+  }
+}
+
+function pullRequestNumber(record) {
+  const prPrefix = "https://github.com/tigerbeetle/tigerbeetle/pull/";
+  if (record.branch.startsWith(prPrefix)) {
+    const prNumber = record.branch.substring(
+      prPrefix.length,
+      record.branch.length,
+    );
+    return parseInt(prNumber, 10);
+  }
+  return undefined;
 }
 
 // The input data is array of runs, where a single run contains many measurements (eg, file size,
@@ -208,11 +274,15 @@ function formatDuration(durationInMilliseconds) {
   if (minutes > 0) {
     parts.push(`${minutes}m`);
   }
-  if (seconds > 0 || parts.length === 0) {
-    parts.push(`${seconds}s`);
-  }
-  if (milliseconds > 0) {
-    parts.push(`${milliseconds}ms`);
+  if (days == 0) {
+    if (seconds > 0 || parts.length === 0) {
+      parts.push(`${seconds}s`);
+    }
+    if (hours == 0 && minutes == 0) {
+      if (milliseconds > 0) {
+        parts.push(`${milliseconds}ms`);
+      }
+    }
   }
 
   return parts.join(" ");
