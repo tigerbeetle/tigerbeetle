@@ -174,7 +174,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         const debug_suffix = if (debug) "-debug" else "";
         inline for (targets) |target| {
             try shell.zig(
-                \\build install
+                \\build
                 \\    -Dtarget={target}
                 \\    -Drelease={release}
                 \\    -Dgit-commit={commit}

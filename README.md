@@ -22,7 +22,7 @@ Want to build from source locally?
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
 ./scripts/install_zig.sh # or .bat if you're on Windows.
-zig/zig build install
+zig/zig build
 ./tigerbeetle version
 ```
 
@@ -179,7 +179,8 @@ First grab the sources and run the setup script:
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle.git
 cd tigerbeetle
-scripts/install.sh
+./scripts/install_zig.sh
+./zig/zig build -Drelease -Dconfig=production
 ```
 
 With TigerBeetle installed, you are ready to benchmark!
