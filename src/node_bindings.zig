@@ -26,33 +26,33 @@ const type_mappings = .{
     .{ tb.AccountFlags, TypeMapping{
         .name = "AccountFlags",
         .hidden_fields = &.{"padding"},
-        .docs_link = "reference/accounts#flags",
+        .docs_link = "reference/account#flags",
     } },
     .{ tb.TransferFlags, TypeMapping{
         .name = "TransferFlags",
         .hidden_fields = &.{"padding"},
-        .docs_link = "reference/transfers#flags",
+        .docs_link = "reference/transfer#flags",
     } },
     .{ tb.AccountFilterFlags, TypeMapping{
         .name = "AccountFilterFlags",
         .hidden_fields = &.{"padding"},
-        .docs_link = "reference/account_filter#flags",
+        .docs_link = "reference/account-filter#flags",
     } },
     .{ tb.Account, TypeMapping{
         .name = "Account",
-        .docs_link = "reference/accounts/#",
+        .docs_link = "reference/account/#",
     } },
     .{ tb.Transfer, TypeMapping{
         .name = "Transfer",
-        .docs_link = "reference/transfers/#",
+        .docs_link = "reference/transfer/#",
     } },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountError",
-        .docs_link = "reference/operations/create_accounts#",
+        .docs_link = "reference/requests/create_accounts#",
     } },
     .{ tb.CreateTransferResult, TypeMapping{
         .name = "CreateTransferError",
-        .docs_link = "reference/operations/create_transfers#",
+        .docs_link = "reference/requests/create_transfers#",
     } },
     .{ tb.CreateAccountsResult, TypeMapping{
         .name = "CreateAccountsError",
@@ -63,12 +63,12 @@ const type_mappings = .{
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilter",
         .hidden_fields = &.{"reserved"},
-        .docs_link = "reference/account_filter#",
+        .docs_link = "reference/account-filter#",
     } },
     .{ tb.AccountBalance, TypeMapping{
         .name = "AccountBalance",
         .hidden_fields = &.{"reserved"},
-        .docs_link = "reference/account_balances#",
+        .docs_link = "reference/account-balances#",
     } },
     .{ tb_client.tb_operation_t, TypeMapping{
         .name = "Operation",

@@ -9,22 +9,22 @@ public interface AccountFlags {
     int NONE = (int) 0;
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts#flagslinked">linked</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account#flagslinked">linked</a>
      */
     int LINKED = (int) (1 << 0);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts#flagsdebits_must_not_exceed_credits">debits_must_not_exceed_credits</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account#flagsdebits_must_not_exceed_credits">debits_must_not_exceed_credits</a>
      */
     int DEBITS_MUST_NOT_EXCEED_CREDITS = (int) (1 << 1);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts#flagscredits_must_not_exceed_debits">credits_must_not_exceed_debits</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account#flagscredits_must_not_exceed_debits">credits_must_not_exceed_debits</a>
      */
     int CREDITS_MUST_NOT_EXCEED_DEBITS = (int) (1 << 2);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts#flagshistory">history</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account#flagshistory">history</a>
      */
     int HISTORY = (int) (1 << 3);
 

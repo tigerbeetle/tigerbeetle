@@ -14,22 +14,22 @@ public enum AccountFlags : ushort
     None = 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#flagslinked
+    /// https://docs.tigerbeetle.com/reference/account#flagslinked
     /// </summary>
     Linked = 1 << 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#flagsdebits_must_not_exceed_credits
+    /// https://docs.tigerbeetle.com/reference/account#flagsdebits_must_not_exceed_credits
     /// </summary>
     DebitsMustNotExceedCredits = 1 << 1,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#flagscredits_must_not_exceed_debits
+    /// https://docs.tigerbeetle.com/reference/account#flagscredits_must_not_exceed_debits
     /// </summary>
     CreditsMustNotExceedDebits = 1 << 2,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#flagshistory
+    /// https://docs.tigerbeetle.com/reference/account#flagshistory
     /// </summary>
     History = 1 << 3,
 
@@ -41,32 +41,32 @@ public enum TransferFlags : ushort
     None = 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#flagslinked
+    /// https://docs.tigerbeetle.com/reference/transfer#flagslinked
     /// </summary>
     Linked = 1 << 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#flagspending
+    /// https://docs.tigerbeetle.com/reference/transfer#flagspending
     /// </summary>
     Pending = 1 << 1,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#flagspost_pending_transfer
+    /// https://docs.tigerbeetle.com/reference/transfer#flagspost_pending_transfer
     /// </summary>
     PostPendingTransfer = 1 << 2,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#flagsvoid_pending_transfer
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsvoid_pending_transfer
     /// </summary>
     VoidPendingTransfer = 1 << 3,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#flagsbalancing_debit
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_debit
     /// </summary>
     BalancingDebit = 1 << 4,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#flagsbalancing_credit
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_credit
     /// </summary>
     BalancingCredit = 1 << 5,
 
@@ -78,17 +78,17 @@ public enum AccountFilterFlags : uint
     None = 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#flagsdebits
+    /// https://docs.tigerbeetle.com/reference/account-filter#flagsdebits
     /// </summary>
     Debits = 1 << 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#flagscredits
+    /// https://docs.tigerbeetle.com/reference/account-filter#flagscredits
     /// </summary>
     Credits = 1 << 1,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#flagsreversed
+    /// https://docs.tigerbeetle.com/reference/account-filter#flagsreversed
     /// </summary>
     Reversed = 1 << 2,
 
@@ -126,67 +126,67 @@ public struct Account
     private ulong timestamp;
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#id
+    /// https://docs.tigerbeetle.com/reference/account#id
     /// </summary>
     public UInt128 Id { get => id; set => id = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#debits_pending
+    /// https://docs.tigerbeetle.com/reference/account#debits_pending
     /// </summary>
     public UInt128 DebitsPending { get => debitsPending; internal set => debitsPending = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#debits_posted
+    /// https://docs.tigerbeetle.com/reference/account#debits_posted
     /// </summary>
     public UInt128 DebitsPosted { get => debitsPosted; internal set => debitsPosted = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#credits_pending
+    /// https://docs.tigerbeetle.com/reference/account#credits_pending
     /// </summary>
     public UInt128 CreditsPending { get => creditsPending; internal set => creditsPending = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#credits_posted
+    /// https://docs.tigerbeetle.com/reference/account#credits_posted
     /// </summary>
     public UInt128 CreditsPosted { get => creditsPosted; internal set => creditsPosted = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#user_data_128
+    /// https://docs.tigerbeetle.com/reference/account#user_data_128
     /// </summary>
     public UInt128 UserData128 { get => userData128; set => userData128 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#user_data_64
+    /// https://docs.tigerbeetle.com/reference/account#user_data_64
     /// </summary>
     public ulong UserData64 { get => userData64; set => userData64 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#user_data_32
+    /// https://docs.tigerbeetle.com/reference/account#user_data_32
     /// </summary>
     public uint UserData32 { get => userData32; set => userData32 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#reserved
+    /// https://docs.tigerbeetle.com/reference/account#reserved
     /// </summary>
     internal uint Reserved { get => reserved; set => reserved = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#ledger
+    /// https://docs.tigerbeetle.com/reference/account#ledger
     /// </summary>
     public uint Ledger { get => ledger; set => ledger = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#code
+    /// https://docs.tigerbeetle.com/reference/account#code
     /// </summary>
     public ushort Code { get => code; set => code = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#flags
+    /// https://docs.tigerbeetle.com/reference/account#flags
     /// </summary>
     public AccountFlags Flags { get => flags; set => flags = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts#timestamp
+    /// https://docs.tigerbeetle.com/reference/account#timestamp
     /// </summary>
     public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
 
@@ -224,67 +224,67 @@ public struct Transfer
     private ulong timestamp;
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#id
+    /// https://docs.tigerbeetle.com/reference/transfer#id
     /// </summary>
     public UInt128 Id { get => id; set => id = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#debit_account_id
+    /// https://docs.tigerbeetle.com/reference/transfer#debit_account_id
     /// </summary>
     public UInt128 DebitAccountId { get => debitAccountId; set => debitAccountId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#credit_account_id
+    /// https://docs.tigerbeetle.com/reference/transfer#credit_account_id
     /// </summary>
     public UInt128 CreditAccountId { get => creditAccountId; set => creditAccountId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#amount
+    /// https://docs.tigerbeetle.com/reference/transfer#amount
     /// </summary>
     public UInt128 Amount { get => amount; set => amount = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#pending_id
+    /// https://docs.tigerbeetle.com/reference/transfer#pending_id
     /// </summary>
     public UInt128 PendingId { get => pendingId; set => pendingId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#user_data_128
+    /// https://docs.tigerbeetle.com/reference/transfer#user_data_128
     /// </summary>
     public UInt128 UserData128 { get => userData128; set => userData128 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#user_data_64
+    /// https://docs.tigerbeetle.com/reference/transfer#user_data_64
     /// </summary>
     public ulong UserData64 { get => userData64; set => userData64 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#user_data_32
+    /// https://docs.tigerbeetle.com/reference/transfer#user_data_32
     /// </summary>
     public uint UserData32 { get => userData32; set => userData32 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#timeout
+    /// https://docs.tigerbeetle.com/reference/transfer#timeout
     /// </summary>
     public uint Timeout { get => timeout; set => timeout = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#ledger
+    /// https://docs.tigerbeetle.com/reference/transfer#ledger
     /// </summary>
     public uint Ledger { get => ledger; set => ledger = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#code
+    /// https://docs.tigerbeetle.com/reference/transfer#code
     /// </summary>
     public ushort Code { get => code; set => code = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#flags
+    /// https://docs.tigerbeetle.com/reference/transfer#flags
     /// </summary>
     public TransferFlags Flags { get => flags; set => flags = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers#timestamp
+    /// https://docs.tigerbeetle.com/reference/transfer#timestamp
     /// </summary>
     public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
 
@@ -293,112 +293,112 @@ public struct Transfer
 public enum CreateAccountResult : uint
 {
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#ok
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#ok
     /// </summary>
     Ok = 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#linked_event_failed
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_failed
     /// </summary>
     LinkedEventFailed = 1,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#linked_event_chain_open
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_chain_open
     /// </summary>
     LinkedEventChainOpen = 2,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#timestamp_must_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero
     /// </summary>
     TimestampMustBeZero = 3,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_field
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field
     /// </summary>
     ReservedField = 4,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_flag
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_flag
     /// </summary>
     ReservedFlag = 5,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#id_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#id_must_not_be_zero
     /// </summary>
     IdMustNotBeZero = 6,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#id_must_not_be_int_max
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#id_must_not_be_int_max
     /// </summary>
     IdMustNotBeIntMax = 7,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#flags_are_mutually_exclusive
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#flags_are_mutually_exclusive
     /// </summary>
     FlagsAreMutuallyExclusive = 8,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_pending_must_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#debits_pending_must_be_zero
     /// </summary>
     DebitsPendingMustBeZero = 9,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_posted_must_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#debits_posted_must_be_zero
     /// </summary>
     DebitsPostedMustBeZero = 10,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_pending_must_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#credits_pending_must_be_zero
     /// </summary>
     CreditsPendingMustBeZero = 11,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_posted_must_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#credits_posted_must_be_zero
     /// </summary>
     CreditsPostedMustBeZero = 12,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#ledger_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#ledger_must_not_be_zero
     /// </summary>
     LedgerMustNotBeZero = 13,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#code_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#code_must_not_be_zero
     /// </summary>
     CodeMustNotBeZero = 14,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_flags
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_flags
     /// </summary>
     ExistsWithDifferentFlags = 15,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data_128
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_128
     /// </summary>
     ExistsWithDifferentUserData128 = 16,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data_64
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_64
     /// </summary>
     ExistsWithDifferentUserData64 = 17,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data_32
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_32
     /// </summary>
     ExistsWithDifferentUserData32 = 18,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_ledger
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_ledger
     /// </summary>
     ExistsWithDifferentLedger = 19,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_code
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_code
     /// </summary>
     ExistsWithDifferentCode = 20,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_accounts#exists
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists
     /// </summary>
     Exists = 21,
 
@@ -407,282 +407,282 @@ public enum CreateAccountResult : uint
 public enum CreateTransferResult : uint
 {
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#ok
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#ok
     /// </summary>
     Ok = 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#linked_event_failed
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_failed
     /// </summary>
     LinkedEventFailed = 1,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#linked_event_chain_open
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_chain_open
     /// </summary>
     LinkedEventChainOpen = 2,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#timestamp_must_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#timestamp_must_be_zero
     /// </summary>
     TimestampMustBeZero = 3,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#reserved_flag
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#reserved_flag
     /// </summary>
     ReservedFlag = 4,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#id_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#id_must_not_be_zero
     /// </summary>
     IdMustNotBeZero = 5,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#id_must_not_be_int_max
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#id_must_not_be_int_max
     /// </summary>
     IdMustNotBeIntMax = 6,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#flags_are_mutually_exclusive
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#flags_are_mutually_exclusive
     /// </summary>
     FlagsAreMutuallyExclusive = 7,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_id_must_not_be_zero
     /// </summary>
     DebitAccountIdMustNotBeZero = 8,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_int_max
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_id_must_not_be_int_max
     /// </summary>
     DebitAccountIdMustNotBeIntMax = 9,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_id_must_not_be_zero
     /// </summary>
     CreditAccountIdMustNotBeZero = 10,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_int_max
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_id_must_not_be_int_max
     /// </summary>
     CreditAccountIdMustNotBeIntMax = 11,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_be_different
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#accounts_must_be_different
     /// </summary>
     AccountsMustBeDifferent = 12,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_id_must_be_zero
     /// </summary>
     PendingIdMustBeZero = 13,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_id_must_not_be_zero
     /// </summary>
     PendingIdMustNotBeZero = 14,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_int_max
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_id_must_not_be_int_max
     /// </summary>
     PendingIdMustNotBeIntMax = 15,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_different
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_id_must_be_different
     /// </summary>
     PendingIdMustBeDifferent = 16,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#timeout_reserved_for_pending_transfer
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#timeout_reserved_for_pending_transfer
     /// </summary>
     TimeoutReservedForPendingTransfer = 17,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#amount_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#amount_must_not_be_zero
     /// </summary>
     AmountMustNotBeZero = 18,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#ledger_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#ledger_must_not_be_zero
     /// </summary>
     LedgerMustNotBeZero = 19,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#code_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#code_must_not_be_zero
     /// </summary>
     CodeMustNotBeZero = 20,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_not_found
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_not_found
     /// </summary>
     DebitAccountNotFound = 21,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_not_found
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_not_found
     /// </summary>
     CreditAccountNotFound = 22,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_have_the_same_ledger
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#accounts_must_have_the_same_ledger
     /// </summary>
     AccountsMustHaveTheSameLedger = 23,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#transfer_must_have_the_same_ledger_as_accounts
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#transfer_must_have_the_same_ledger_as_accounts
     /// </summary>
     TransferMustHaveTheSameLedgerAsAccounts = 24,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_found
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_not_found
     /// </summary>
     PendingTransferNotFound = 25,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_pending
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_not_pending
     /// </summary>
     PendingTransferNotPending = 26,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_debit_account_id
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_has_different_debit_account_id
     /// </summary>
     PendingTransferHasDifferentDebitAccountId = 27,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_credit_account_id
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_has_different_credit_account_id
     /// </summary>
     PendingTransferHasDifferentCreditAccountId = 28,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_ledger
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_has_different_ledger
     /// </summary>
     PendingTransferHasDifferentLedger = 29,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_code
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_has_different_code
     /// </summary>
     PendingTransferHasDifferentCode = 30,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_pending_transfer_amount
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_pending_transfer_amount
     /// </summary>
     ExceedsPendingTransferAmount = 31,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_amount
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_has_different_amount
     /// </summary>
     PendingTransferHasDifferentAmount = 32,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_posted
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_already_posted
     /// </summary>
     PendingTransferAlreadyPosted = 33,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_voided
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_already_voided
     /// </summary>
     PendingTransferAlreadyVoided = 34,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_expired
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#pending_transfer_expired
     /// </summary>
     PendingTransferExpired = 35,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_flags
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_flags
     /// </summary>
     ExistsWithDifferentFlags = 36,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_debit_account_id
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_debit_account_id
     /// </summary>
     ExistsWithDifferentDebitAccountId = 37,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_credit_account_id
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_credit_account_id
     /// </summary>
     ExistsWithDifferentCreditAccountId = 38,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_amount
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_amount
     /// </summary>
     ExistsWithDifferentAmount = 39,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_pending_id
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id
     /// </summary>
     ExistsWithDifferentPendingId = 40,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data_128
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_128
     /// </summary>
     ExistsWithDifferentUserData128 = 41,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data_64
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_64
     /// </summary>
     ExistsWithDifferentUserData64 = 42,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data_32
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_32
     /// </summary>
     ExistsWithDifferentUserData32 = 43,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_timeout
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout
     /// </summary>
     ExistsWithDifferentTimeout = 44,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_code
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_code
     /// </summary>
     ExistsWithDifferentCode = 45,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists
     /// </summary>
     Exists = 46,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_debits_pending
     /// </summary>
     OverflowsDebitsPending = 47,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_credits_pending
     /// </summary>
     OverflowsCreditsPending = 48,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_debits_posted
     /// </summary>
     OverflowsDebitsPosted = 49,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_credits_posted
     /// </summary>
     OverflowsCreditsPosted = 50,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_debits
     /// </summary>
     OverflowsDebits = 51,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_credits
     /// </summary>
     OverflowsCredits = 52,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_timeout
     /// </summary>
     OverflowsTimeout = 53,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_credits
     /// </summary>
     ExceedsCredits = 54,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits
     /// </summary>
     ExceedsDebits = 55,
 
@@ -763,32 +763,32 @@ public struct AccountFilter
     private ReservedData reserved;
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#account_id
+    /// https://docs.tigerbeetle.com/reference/account-filter#account_id
     /// </summary>
     public UInt128 AccountId { get => accountId; set => accountId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#timestamp_min
+    /// https://docs.tigerbeetle.com/reference/account-filter#timestamp_min
     /// </summary>
     public ulong TimestampMin { get => timestampMin; set => timestampMin = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#timestamp_max
+    /// https://docs.tigerbeetle.com/reference/account-filter#timestamp_max
     /// </summary>
     public ulong TimestampMax { get => timestampMax; set => timestampMax = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#limit
+    /// https://docs.tigerbeetle.com/reference/account-filter#limit
     /// </summary>
     public uint Limit { get => limit; set => limit = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#flags
+    /// https://docs.tigerbeetle.com/reference/account-filter#flags
     /// </summary>
     public AccountFilterFlags Flags { get => flags; set => flags = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_filter#reserved
+    /// https://docs.tigerbeetle.com/reference/account-filter#reserved
     /// </summary>
     internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
 
@@ -839,32 +839,32 @@ public struct AccountBalance
     private ReservedData reserved;
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_balances#debits_pending
+    /// https://docs.tigerbeetle.com/reference/account-balances#debits_pending
     /// </summary>
     public UInt128 DebitsPending { get => debitsPending; set => debitsPending = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_balances#debits_posted
+    /// https://docs.tigerbeetle.com/reference/account-balances#debits_posted
     /// </summary>
     public UInt128 DebitsPosted { get => debitsPosted; set => debitsPosted = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_balances#credits_pending
+    /// https://docs.tigerbeetle.com/reference/account-balances#credits_pending
     /// </summary>
     public UInt128 CreditsPending { get => creditsPending; set => creditsPending = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_balances#credits_posted
+    /// https://docs.tigerbeetle.com/reference/account-balances#credits_posted
     /// </summary>
     public UInt128 CreditsPosted { get => creditsPosted; set => creditsPosted = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_balances#timestamp
+    /// https://docs.tigerbeetle.com/reference/account-balances#timestamp
     /// </summary>
     public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account_balances#reserved
+    /// https://docs.tigerbeetle.com/reference/account-balances#reserved
     /// </summary>
     internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
 

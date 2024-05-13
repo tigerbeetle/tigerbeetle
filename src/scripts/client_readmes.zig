@@ -194,7 +194,7 @@ fn readme_root(ctx: *Context) !void {
         ctx.header(2, "Creating Accounts");
         ctx.paragraph(
             \\See details for account fields in the [Accounts
-            \\reference](https://docs.tigerbeetle.com/reference/accounts).
+            \\reference](https://docs.tigerbeetle.com/reference/account).
         );
         ctx.code_section("create-accounts");
         ctx.paragraph(ctx.docs.create_accounts_documentation);
@@ -203,7 +203,7 @@ fn readme_root(ctx: *Context) !void {
         ctx.paragraph(
             \\The account flags value is a bitfield. See details for
             \\these flags in the [Accounts
-            \\reference](https://docs.tigerbeetle.com/reference/accounts#flags).
+            \\reference](https://docs.tigerbeetle.com/reference/account#flags).
         );
         ctx.paragraph(ctx.docs.account_flags_documentation);
 
@@ -223,7 +223,7 @@ fn readme_root(ctx: *Context) !void {
             \\batch.
             \\
             \\See all error conditions in the [create_accounts
-            \\reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
+            \\reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
         );
 
         ctx.code_section("create-accounts-errors");
@@ -252,7 +252,7 @@ fn readme_root(ctx: *Context) !void {
             \\This creates a journal entry between two accounts.
             \\
             \\See details for transfer fields in the [Transfers
-            \\reference](https://docs.tigerbeetle.com/reference/transfers).
+            \\reference](https://docs.tigerbeetle.com/reference/transfer).
         );
         ctx.code_section("create-transfers");
 
@@ -265,7 +265,7 @@ fn readme_root(ctx: *Context) !void {
             \\transfer in the request batch.
             \\
             \\See all error conditions in the [create_transfers
-            \\reference](https://docs.tigerbeetle.com/reference/operations/create_transfers).
+            \\reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
         );
         ctx.code_section("create-transfers-errors");
 
@@ -305,7 +305,7 @@ fn readme_root(ctx: *Context) !void {
         ctx.paragraph(
             \\The transfer `flags` value is a bitfield. See details for these flags in
             \\the [Transfers
-            \\reference](https://docs.tigerbeetle.com/reference/transfers#flags).
+            \\reference](https://docs.tigerbeetle.com/reference/transfer#flags).
         );
         ctx.paragraph(ctx.docs.transfer_flags_documentation);
         ctx.paragraph("For example, to link `transfer0` and `transfer1`:");
@@ -383,8 +383,8 @@ fn readme_root(ctx: *Context) !void {
             \\pagination capabilities.
             \\
             \\Only accounts created with the flag
-            \\[`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
-            \\[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
+            \\[`history`](https://docs.tigerbeetle.com/reference/account#flagshistory) set retain
+            \\[historical balances](https://docs.tigerbeetle.com/reference/requests/get_account_balances).
             \\
             \\The balances in the response are sorted by `timestamp` in chronological or
             \\reverse-chronological order.
