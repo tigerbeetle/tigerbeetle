@@ -1623,6 +1623,13 @@ const TestReplicas = struct {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: crash replica", .{r});
             t.cluster.crash_replica(r);
+
+            // For simplicity, ensure that any packets that are in flight to this replica are
+            // discarded before it starts up again.
+            const paths = t.peer_paths(.__, .incoming);
+            for (paths.const_slice()) |path| {
+                t.cluster.network.link_clear(path);
+            }
         }
     }
 
