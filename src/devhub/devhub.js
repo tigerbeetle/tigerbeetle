@@ -66,9 +66,9 @@ async function mainSeeds() {
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
   let commit_count = 0;
-  const colors = ["#CCC", "#EEE"]
+  const colors = ["#CCC", "#EEE"];
   for (const record of records) {
-    if (record.ok) continue;
+    if (record.ok && !pullRequestNumber(record)) continue;
 
     if (fuzzersWithFailures.has(record.branch + record.fuzzer)) continue;
     fuzzersWithFailures.add(record.branch + record.fuzzer);
@@ -85,14 +85,15 @@ async function mainSeeds() {
       Date.now() - (record.seed_timestamp_start * 1000),
     );
     const rowDom = document.createElement("tr");
-    rowDom.style.setProperty("background", colors[commit_count % colors.length]);
 
-    const prPrefix = "https://github.com/tigerbeetle/tigerbeetle/pull/"
-    let prLink = ""
-    if (record.branch.startsWith(prPrefix)) {
-      const pr = record.branch.substring(prPrefix.length, record.branch.length);
-      prLink = `<a href="${record.branch}">#${pr}</a>`
-    }
+    rowDom.style.setProperty(
+      "background",
+      record.ok ? "#CF0" : colors[commit_count % colors.length],
+    );
+
+    const prLink = pullRequestNumber(record)
+      ? `<a href="${record.branch}">#${pullRequestNumber(record)}</a>`
+      : "";
     rowDom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}">
@@ -107,6 +108,18 @@ async function mainSeeds() {
       `;
     tableDom.appendChild(rowDom);
   }
+}
+
+function pullRequestNumber(record) {
+  const prPrefix = "https://github.com/tigerbeetle/tigerbeetle/pull/";
+  if (record.branch.startsWith(prPrefix)) {
+    const prNumber = record.branch.substring(
+      prPrefix.length,
+      record.branch.length,
+    );
+    return parseInt(prNumber, 10);
+  }
+  return undefined;
 }
 
 // The input data is array of runs, where a single run contains many measurements (eg, file size,
