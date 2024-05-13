@@ -159,10 +159,6 @@ pub fn StateMachineType(
             callback(state_machine);
         }
 
-        pub fn pulse_reset(state_machine: *StateMachine) void {
-            _ = state_machine;
-        }
-
         pub fn pulse(state_machine: *const StateMachine) bool {
             _ = state_machine;
             return false;

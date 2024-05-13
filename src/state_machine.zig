@@ -586,10 +586,6 @@ pub fn StateMachineType(
             };
         }
 
-        pub fn pulse_reset(self: *StateMachine) void {
-            self.expire_pending_transfers.reset();
-        }
-
         pub fn pulse(self: *const StateMachine) bool {
             assert(!global_constants.aof_recovery);
             assert(self.expire_pending_transfers.pulse_next_timestamp >=
