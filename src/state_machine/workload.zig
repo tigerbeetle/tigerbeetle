@@ -751,7 +751,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                             // The transfer was delivered; it must exist.
                             assert(result != null);
                         } else {
-                            for (self.transfers_delivered_recently.items) |delivered| {
+                            var it = self.transfers_delivered_recently.iterator();
+                            while (it.next()) |delivered| {
                                 if (transfer_index >= delivered.min and
                                     transfer_index <= delivered.max)
                                 {
