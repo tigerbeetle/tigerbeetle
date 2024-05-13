@@ -173,6 +173,13 @@ pub fn main(
         .id_order = cli_args.id_order,
     };
 
+    benchmark.client.register(Benchmark.register_callback, @intCast(@intFromPtr(&benchmark)));
+    while (!benchmark.done) {
+        benchmark.client.tick();
+        try benchmark.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    }
+    benchmark.done = false;
+
     benchmark.create_accounts();
 
     while (!benchmark.done) {
@@ -497,6 +504,17 @@ const Benchmark = struct {
         b.callback = null;
 
         callback(b, operation, result);
+    }
+
+    fn register_callback(
+        user_data: u128,
+        result: *const vsr.RegisterResult,
+    ) void {
+        _ = result;
+
+        const b: *Benchmark = @ptrFromInt(@as(usize, @intCast(user_data)));
+        assert(!b.done);
+        b.done = true;
     }
 };
 
