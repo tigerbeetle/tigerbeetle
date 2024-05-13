@@ -230,6 +230,7 @@ pub const MultiVersion = struct {
     pack_offset: ?u32 = null,
     metadata: MultiVersionMetadata = undefined,
     releases_bundled: ReleaseList = .{},
+    releases_bundled_new: ReleaseList = .{},
 
     /// Used for validation, to know what to zero.
     metadata_offset: u32 = undefined,
@@ -256,10 +257,6 @@ pub const MultiVersion = struct {
         const read_buffer = try allocator.alloc(u8, 2048);
         const elf_string_buffer = try allocator.alloc(u8, 1024);
 
-        // // openSelfExe is a thing, but don't use it for now because we might want our event loop to handle opening
-        // // in future. (can open() block?)
-        // var exe_path = try std.fs.selfExePathAlloc(allocator);
-
         return MultiVersion{
             .read_buffer = read_buffer,
             .elf_string_buffer = elf_string_buffer,
@@ -281,7 +278,6 @@ pub const MultiVersion = struct {
     }
 
     pub fn on_timeout_read_from_elf_callback(self: *MultiVersion, result: anyerror!void) void {
-        // std.log.info("hello from here: r={!}", .{result});
         _ = result catch void;
 
         self.io.timeout(
@@ -330,11 +326,19 @@ pub const MultiVersion = struct {
     /// The below methods can all be called while a Replica is running normally. They need to
     /// follow all standard conventions - no dynamic memory allocation (not that it would be
     /// allowed!), no blocking syscalls, and use our event loop.
+    pub fn read_from_binary(self: *MultiVersion, callback: ?Callback) void {
+        switch (builtin.target.os.tag) {
+            .linux => self.read_from_elf(callback),
+            .macos => self.read_from_macho(callback),
+            .windows => self.read_from_pe(callback),
+            else => @panic("read_from_binary unimplemented"),
+        }
+    }
+
     pub fn read_from_elf(self: *MultiVersion, callback: ?Callback) void {
         self.callback = callback;
 
-        // Can opening a file block?
-        // Yes, it can. Fix this and add openat() to Linux io_uring.
+        // TODO: open() can block. Fix this and add openat() to io.
         self.file = std.fs.openFileAbsolute(self.exe_path, .{ .mode = .read_only }) catch return self.handle_error(error.FileOpenError);
 
         self.read_from_elf_header();
@@ -496,40 +500,10 @@ pub const MultiVersion = struct {
         }
     }
 
-    fn on_read_multiversion_metadata(self: *MultiVersion, completion: *IO.Completion, result: MultiVersionError!usize) void {
-        const read_bytes = result catch |e| return self.handle_error(e);
-
-        _ = completion;
-        assert(self.stage == .read_multiversion_metadata);
-        assert(read_bytes == @sizeOf(MultiVersionMetadata)); // FIXME: Shouldn't be an assertion failure.
-
-        // try assert_or_error(@sizeOf(MultiVersionMetadata) == try os.read(file.handle, &mvm_buf), error.InvalidMetadataRead);
-
-        // try assert_or_error(pack_offset != null, error.InvalidMultiversionPack);
-
-        // assert(self.pack_offset != null);
-        self.metadata = MultiVersionMetadata.from_bytes(self.read_buffer[0..read_bytes]) catch |e| return self.handle_error(e);
-
-        // Update the releases_bundled list.
-        self.releases_bundled.clear();
-        for (self.metadata.past.versions[0..self.metadata.past.count]) |version| {
-            self.releases_bundled.append_assume_capacity(Release{ .value = version });
-        }
-
-        self.releases_bundled.append_assume_capacity(Release{ .value = self.metadata.current_version });
-        self.stage = .ready;
-        self.file.?.close();
-
-        if (self.callback) |callback| {
-            callback(self, {});
-        }
-    }
-
     pub fn read_from_macho(self: *MultiVersion, callback: ?Callback) void {
         self.callback = callback;
 
-        // Can opening a file block?
-        // Yes, it can. Fix this and add openat() to Linux io_uring.
+        // TODO: open() can block. Fix this and add openat() to io.
         self.file = std.fs.openFileAbsolute(self.exe_path, .{ .mode = .read_only }) catch return self.handle_error(error.FileOpenError);
 
         // Everything we need to read our metadata lies within the first 2048 bytes of our universal binary!
@@ -604,11 +578,9 @@ pub const MultiVersion = struct {
     pub fn read_from_pe(self: *MultiVersion, callback: ?Callback) void {
         self.callback = callback;
 
-        // Can opening a file block?
-        // Yes, it can. Fix this and add openat() to Linux io_uring.
+        // TODO: open() can block. Fix this and add openat() to io.
         self.file = std.fs.openFileAbsolute(self.exe_path, .{ .mode = .read_only }) catch return self.handle_error(error.FileOpenError);
 
-        // Everything we need to read our metadata lies within the first 2048 bytes of our universal binary!
         self.stage = .read_pe_header;
         self.io.read(
             *MultiVersion,
@@ -622,7 +594,6 @@ pub const MultiVersion = struct {
     }
 
     fn on_read_from_pe_header(self: *MultiVersion, completion: *IO.Completion, result: IO.ReadError!usize) void {
-        std.log.info("read pe header?", .{});
         _ = completion;
         const read_bytes = result catch |e| return self.handle_error(e);
         _ = read_bytes;
@@ -654,6 +625,40 @@ pub const MultiVersion = struct {
             self.read_buffer[0..@sizeOf(MultiVersionMetadata)],
             self.metadata_offset,
         );
+    }
+
+    fn on_read_multiversion_metadata(self: *MultiVersion, completion: *IO.Completion, result: MultiVersionError!usize) void {
+        const read_bytes = result catch |e| return self.handle_error(e);
+
+        _ = completion;
+        assert(self.stage == .read_multiversion_metadata);
+        assert(read_bytes == @sizeOf(MultiVersionMetadata)); // FIXME: Shouldn't be an assertion failure.
+
+        // try assert_or_error(@sizeOf(MultiVersionMetadata) == try os.read(file.handle, &mvm_buf), error.InvalidMetadataRead);
+
+        // try assert_or_error(pack_offset != null, error.InvalidMultiversionPack);
+
+        // assert(self.pack_offset != null);
+        self.metadata = MultiVersionMetadata.from_bytes(self.read_buffer[0..read_bytes]) catch |e| return self.handle_error(e);
+
+        // Potentially update the releases_bundled list.
+        self.releases_bundled_new.clear();
+        for (self.metadata.past.versions[0..self.metadata.past.count]) |version| {
+            self.releases_bundled_new.append_assume_capacity(Release{ .value = version });
+        }
+        self.releases_bundled_new.append_assume_capacity(Release{ .value = self.metadata.current_version });
+
+        // if releases_bundled_new != releases_bundled
+        // take full file checksum then
+        self.releases_bundled = self.releases_bundled_new;
+        self.releases_bundled_new.clear();
+
+        self.stage = .ready;
+        self.file.?.close();
+
+        if (self.callback) |callback| {
+            callback(self, {});
+        }
     }
 
     fn handle_error(self: *MultiVersion, result: anyerror) void {
@@ -692,8 +697,8 @@ pub fn exec_self(binary_path_from: BinaryPathEnum) !noreturn {
     };
 }
 
-/// exec_release is called before a replica is fully open, and before we've transitioned to not
-/// allocating. Therefore, we can use standard `os.read` blocking syscalls.
+/// exec_release is called before a replica is fully open, and before it has transitioned to not
+/// allocating. Therefore, standard `os.read` blocking syscalls are available.
 pub fn exec_release(allocator: std.mem.Allocator, io: *IO, release: Release) !noreturn {
     var self_exe_path = try std.fs.selfExePathAlloc(allocator);
     defer allocator.free(self_exe_path);
@@ -797,21 +802,8 @@ fn exec_self_posix(binary_path_from: BinaryPathEnum) !noreturn {
 
 fn exec_self_windows(binary_path_from: BinaryPathEnum) !noreturn {
     _ = binary_path_from;
+    std.log.info("New binary detected - please re-run TigerBeetle.", .{});
     @panic("todo");
-    // var self_binary_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    // var self_binary_path = try std.fs.selfExePath(&self_binary_buf);
-
-    // // TODO: Do we want to pass env variables? Probably.
-    // const env = [_:null]?[*:0]u8{};
-
-    // self_binary_buf[self_binary_path.len] = 0;
-    // var self_binary_path_zero: [*:0]const u8 = self_binary_buf[0..self_binary_path.len :0];
-
-    // if (std.os.getenvW("__TIGERBEETLE_MULTIVERSION_EXE_PATH")) |env_binary_path| {
-    //     _ = env_binary_path;
-    // } else {
-    //     return std.os.execveZ(self_binary_path_zero, env[0..env.len], env[0..env.len]);
-    // }
 }
 
 fn assert_or_error(condition: bool, err: anyerror) !void {

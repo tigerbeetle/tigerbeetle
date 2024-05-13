@@ -195,10 +195,15 @@ const Command = struct {
             &command.io,
             command.self_exe_path,
         );
-        multiversion.read_from_elf(null);
+
+        multiversion.read_from_binary(null);
         if (multiversion.tick_until_ready()) {
-            log_main.info("enabling automatic on-disk version detection.", .{});
-            multiversion.on_timeout_read_from_elf_callback({});
+            if (builtin.target.os.tag == .linux) {
+                log_main.info("enabling automatic on-disk version detection.", .{});
+                multiversion.on_timeout_read_from_elf_callback({});
+            } else {
+                log_main.warn("automatic on-disk version detection is only supported on linux. restart tigerbeetle after replacing the binary to upgrade it.", .{});
+            }
         } else |err| {
             _ = err catch void;
             log_main.warn("automatic on-disk version detection disabled. restart tigerbeetle after replacing the binary to upgrade it.", .{});
