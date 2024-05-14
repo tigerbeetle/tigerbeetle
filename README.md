@@ -172,23 +172,6 @@ Here are a few key pages you might be interested in:
 * [Subscribe to our monthly newsletter for the backstory on recent database changes.](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
 * [Check out past and upcoming talks.](/docs/TALKS.md)
 
-## Benchmarks
-
-First grab the sources and run the setup script:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle.git
-cd tigerbeetle
-./scripts/install_zig.sh
-./zig/zig build -Drelease -Dconfig=production
-```
-
-With TigerBeetle installed, you are ready to benchmark!
-
-```console
-./tigerbeetle benchmark
-```
-
 ## Contributing
 
 Read [docs/HACKING.md](docs/HACKING.md).
