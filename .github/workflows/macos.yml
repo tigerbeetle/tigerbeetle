@@ -19,7 +19,6 @@ jobs:
           fetch-depth: 2147483647
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build test
-      - run: ./scripts/install.sh
 
   c_sample:
     strategy:

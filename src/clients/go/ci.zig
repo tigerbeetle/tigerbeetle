@@ -32,7 +32,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 
     // Building the server before running the integrated tests:
-    try shell.zig("build install -Drelease -Dconfig=production", .{});
+    try shell.zig("build -Drelease -Dconfig=production", .{});
     try shell.exec("go test", .{});
     {
         log.info("testing `types` package helpers", .{});

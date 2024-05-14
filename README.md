@@ -22,7 +22,7 @@ Want to build from source locally?
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
 ./scripts/install_zig.sh # or .bat if you're on Windows.
-zig/zig build install
+zig/zig build
 ./tigerbeetle version
 ```
 
@@ -171,22 +171,6 @@ Here are a few key pages you might be interested in:
 * [Follow us on Twitter](https://twitter.com/TigerBeetleDB), [YouTube](https://www.youtube.com/@tigerbeetledb), and [Twitch](https://www.twitch.tv/tigerbeetle).
 * [Subscribe to our monthly newsletter for the backstory on recent database changes.](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
 * [Check out past and upcoming talks.](/docs/TALKS.md)
-
-## Benchmarks
-
-First grab the sources and run the setup script:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle.git
-cd tigerbeetle
-scripts/install.sh
-```
-
-With TigerBeetle installed, you are ready to benchmark!
-
-```console
-./tigerbeetle benchmark
-```
 
 ## Contributing
 

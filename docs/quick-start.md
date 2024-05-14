@@ -27,12 +27,12 @@ powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.co
 
 #### Build from Source
 
-To build TigerBeetle from source, clone the repo, install Zig and run `zig build install`:
+To build TigerBeetle from source, clone the repo, install Zig and run `zig build`:
 
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
 ./scripts/install_zig.sh # or .bat if you're on Windows.
-zig/zig build install
+zig/zig build
 ./tigerbeetle version
 ```
 
