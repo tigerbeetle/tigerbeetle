@@ -327,10 +327,13 @@ pub const StorageChecker = struct {
                 .checksum = superblock.working.vsr_state.checkpoint.free_set_last_block_checksum,
             };
 
+            const free_set_block_count =
+                stdx.div_ceil(free_set_size, constants.block_size - @sizeOf(vsr.Header));
+
             var free_set_cursor: usize = free_set_size;
-            while (free_set_block) |free_set_reference| {
-                const block = superblock.storage.grid_block(free_set_reference.address).?;
-                assert(schema.header_from_block(block).checksum == free_set_reference.checksum);
+            for (0..free_set_block_count) |_| {
+                const block = superblock.storage.grid_block(free_set_block.?.address).?;
+                assert(schema.header_from_block(block).checksum == free_set_block.?.checksum);
 
                 const encoded_words = schema.TrailerNode.body(block);
                 free_set_cursor -= encoded_words.len;
@@ -343,6 +346,7 @@ pub const StorageChecker = struct {
 
                 free_set_block = schema.TrailerNode.previous(block);
             }
+            assert(free_set_block == null);
             assert(free_set_cursor == 0);
         }
         assert(vsr.checksum(checker.free_set_buffer[0..free_set_size]) ==
