@@ -1,5 +1,77 @@
 # TigerBeetle Changelog
 
+## 2024-05-13 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+- [#1918](https://github.com/tigerbeetle/tigerbeetle/pull/1918),
+  [#1916](https://github.com/tigerbeetle/tigerbeetle/pull/1916),
+  [#1913](https://github.com/tigerbeetle/tigerbeetle/pull/1913),
+  [#1921](https://github.com/tigerbeetle/tigerbeetle/pull/1921),
+  [#1922](https://github.com/tigerbeetle/tigerbeetle/pull/1922),
+  [#1920](https://github.com/tigerbeetle/tigerbeetle/pull/1920),
+  [#1945](https://github.com/tigerbeetle/tigerbeetle/pull/1945),
+  [#1941](https://github.com/tigerbeetle/tigerbeetle/pull/1941),
+  [#1934](https://github.com/tigerbeetle/tigerbeetle/pull/1934),
+  [#1927](https://github.com/tigerbeetle/tigerbeetle/pull/1927)
+
+  Lots of CFO enhancements - the CFO can now do simple minimization, fuzz PRs and orchestrate the
+  VOPR directly. See the output on our [devhub](https://tigerbeetle.github.io/tigerbeetle/)!
+
+- [#1948](https://github.com/tigerbeetle/tigerbeetle/pull/1948),
+  [#1929](https://github.com/tigerbeetle/tigerbeetle/pull/1929),
+  [#1924](https://github.com/tigerbeetle/tigerbeetle/pull/1924)
+
+  Fix a bug in the VOPR, add simple minimization, and remove the voprhub code. Previously, the
+  voprhub is what took care of running the VOPR. Now, it's handled by the CFO and treated much
+  the same as other fuzzers.
+
+- [#1947](https://github.com/tigerbeetle/tigerbeetle/pull/1947)
+
+  Prevent time-travel in our replica test code.
+
+- [#1943](https://github.com/tigerbeetle/tigerbeetle/pull/1943)
+
+  Fix a fuzzer bug around checkpoint / commit ratios.
+
+### Features
+
+- [#1898](https://github.com/tigerbeetle/tigerbeetle/pull/1898)
+
+  Add the ability to limit the VSR pipeline size at runtime to save memory.
+
+### Internals
+- [#1925](https://github.com/tigerbeetle/tigerbeetle/pull/1925)
+
+  Fix path handling on Windows by switching to `NtCreateFile`. Before, TigerBeetle would silently
+  treat all paths as relative on Windows.
+
+- [#1917](https://github.com/tigerbeetle/tigerbeetle/pull/1917)
+
+  In preparation for multiversion binaries, make `release_client_min` a parameter, set by
+  `release.zig`. This allows us to ensure backwards compatibility with older clients.
+
+- [#1827](https://github.com/tigerbeetle/tigerbeetle/pull/1827)
+
+  Add some additional asserts around block lifetimes in compaction.
+
+- [#1939](https://github.com/tigerbeetle/tigerbeetle/pull/1939)
+
+  Fix parsing of multiple CLI positional fields.
+
+- [#1923](https://github.com/tigerbeetle/tigerbeetle/pull/1923)
+
+  Remove `main_pkg_path = src/` early, to help us be compatible with Zig 0.12.
+
+- [#1937](https://github.com/tigerbeetle/tigerbeetle/pull/1937),
+  [#1912](https://github.com/tigerbeetle/tigerbeetle/pull/1912),
+  [#1852](https://github.com/tigerbeetle/tigerbeetle/pull/1852)
+
+  Docs organization and link fixes.
+
+### TigerTracks 🎧
+
+- [Thank You (Not So Bad)](https://www.youtube.com/watch?v=fQWNeIiFf_s)
+
 ## 2024-05-06 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
