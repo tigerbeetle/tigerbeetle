@@ -62,16 +62,36 @@ async function mainSeeds() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
   const records = await (await fetch(dataUrl)).json();
+
+  // Filtering:
+  // - By default, show one seed per fuzzer per commit and exclude successes for the main branch.
+  // - Clicking on the fuzzer cell in the table shows all seeds for this fuzzer/commit pair.
+  // - "show all" link (in the .html) disables filtering completely.
+  const query = new URLSearchParams(document.location.search);
+  const query_fuzzer = query.get("fuzzer");
+  const query_commit = query.get("commit");
+  const query_all = query.get("all") !== null;
   const fuzzersWithFailures = new Set();
+
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
   let commit_count = 0;
   const colors = ["#CCC", "#EEE"];
-  for (const record of records) {
-    if (record.ok && !pullRequestNumber(record)) continue;
 
-    if (fuzzersWithFailures.has(record.branch + record.fuzzer)) continue;
-    fuzzersWithFailures.add(record.branch + record.fuzzer);
+  for (const record of records) {
+    let include = undefined;
+    if (query_all) {
+      include = true;
+    } else if (query_fuzzer) {
+      include = record.fuzzer == query_fuzzer &&
+        record.commit_sha == query_commit;
+    } else {
+      include = (!record.ok || pullRequestNumber(record) !== undefined) &&
+        !fuzzersWithFailures.has(record.branch + record.fuzzer);
+      fuzzersWithFailures.add(record.branch + record.fuzzer);
+    }
+
+    if (!include) continue;
 
     if (record.commit_sha != commit_previous) {
       commit_previous = record.commit_sha;
@@ -101,7 +121,7 @@ async function mainSeeds() {
             </a>
             ${prLink}
           </td>
-          <td>${record.fuzzer}</td>
+          <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
           <td><code>${record.command}</code></td>
           <td><time>${seedDuration}</time></td>
           <td><time>${seedFreshness} ago</time></td>
