@@ -70,6 +70,8 @@ const cluster_id = 0;
 const CliArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
+    ticks_max_requests: u32 = 40_000_000,
+    ticks_max_convergence: u32 = 10_000_000,
     positional: struct {
         seed: ?[]const u8 = null,
     },
@@ -274,10 +276,9 @@ pub fn main() !void {
     // Safety: replicas crash and restart; at any given point in time arbitrarily many replicas may
     // be crashed, but each replica restarts eventually. The cluster must process all requests
     // without split-brain.
-    const ticks_max_requests = 40_000_000;
     var tick_total: u64 = 0;
     var tick: u64 = 0;
-    while (tick < ticks_max_requests) : (tick += 1) {
+    while (tick < cli_args.ticks_max_requests) : (tick += 1) {
         const requests_replied_old = simulator.requests_replied;
         simulator.tick();
         tick_total += 1;
@@ -313,9 +314,8 @@ pub fn main() !void {
 
     // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
     // crashed or partitioned permanently. The core should converge to the same state.
-    const ticks_max_convergence = 10_000_000;
     tick = 0;
-    while (tick < ticks_max_convergence) : (tick += 1) {
+    while (tick < cli_args.ticks_max_convergence) : (tick += 1) {
         simulator.tick();
         tick_total += 1;
         if (simulator.done()) {
