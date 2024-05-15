@@ -45,13 +45,19 @@ const PendingTransfer = struct {
 
 const PendingExpiry = struct {
     transfer_id: u128,
+    transfer_timestamp: u64,
     expires_at: u64,
 };
 
 const PendingExpiryQueue = PriorityQueue(PendingExpiry, void, struct {
-    /// Order by ascending timestamp.
+    /// Order by ascending expiration date and then by transfer's timestamp.
     fn compare(_: void, a: PendingExpiry, b: PendingExpiry) std.math.Order {
-        return std.math.order(a.expires_at, b.expires_at);
+        const order = switch (std.math.order(a.expires_at, b.expires_at)) {
+            .eq => std.math.order(a.transfer_timestamp, b.transfer_timestamp),
+            else => |order| order,
+        };
+        assert(order != .eq);
+        return order;
     }
 }.compare);
 
@@ -355,6 +361,7 @@ pub const AccountingAuditor = struct {
                         });
                         self.pending_expiries.add(.{
                             .transfer_id = transfer.id,
+                            .transfer_timestamp = transfer_timestamp,
                             .expires_at = transfer_timestamp + transfer.timeout_ns(),
                         }) catch unreachable;
                         // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
