@@ -37,6 +37,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     const batch_p99_ms = try get_measurement(benchmark_result, "batch latency p99", "ms");
     const query_p99_ms = try get_measurement(benchmark_result, "query latency p99", "ms");
     const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
+    const datafile_bytes = try get_measurement(benchmark_result, "datafile", "bytes");
 
     const batch = MetricBatch{
         .timestamp = commit_timestamp,
@@ -52,6 +53,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             .{ .name = "batch p99", .value = batch_p99_ms, .unit = "ms" },
             .{ .name = "query p99", .value = query_p99_ms, .unit = "ms" },
             .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
+            .{ .name = "datafile", .value = datafile_bytes, .unit = "bytes" },
         },
     };
 
