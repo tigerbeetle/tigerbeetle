@@ -63,6 +63,11 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
 
     const addresses = args.addresses orelse &.{tigerbeetle_process.?.address};
     try benchmark_load.main(allocator, addresses, args);
+
+    if (data_file_created) {
+        const stat = try std.fs.cwd().statFile(data_file);
+        try std.io.getStdOut().writer().print("datafile = {} bytes\n", .{stat.size});
+    }
 }
 
 fn format(allocator: std.mem.Allocator, options: struct {
