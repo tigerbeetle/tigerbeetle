@@ -95,4 +95,4 @@ of around 65,000 transactions per second[^2].
 
 OLTP workloads are massively increasing and we need a system designed from the ground up for extreme
 write contention. Since we know we need a new database for this purpose, we can now think about what
-the perfect schema and language is for OLTP: Debit / Credit.
+the perfect schema and language is for OLTP: [Debit / Credit](./debit-credit.md).
