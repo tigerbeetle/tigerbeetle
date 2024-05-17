@@ -136,4 +136,4 @@ TigerBeetle's high-performance implementation of it built for OLTP in the 21st c
 
 So far, we've seen why we need a new database designed for OLTP and how debit / credit provides the
 perfect data model for it. Next, we can look at the relationship and separation of concerns between
-OLTP and general purpose databases.
+[OLTP and general purpose databases](./system-architecture.md).

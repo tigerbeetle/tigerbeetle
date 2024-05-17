@@ -91,7 +91,7 @@ of around 65,000 transactions per second[^2].
     Visa.
     [_A deep dive on Solana, a high performance blockchain network_](https://usa.visa.com/solutions/crypto/deep-dive-on-solana.html). 2023.
 
-## Next Up: Debit / Credit is the Schema for OLTP
+## Next: Debit / Credit is the Schema for OLTP
 
 OLTP workloads are massively increasing and we need a system designed from the ground up for extreme
 write contention. Since we know we need a new database for this purpose, we can now think about what
