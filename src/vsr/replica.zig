@@ -7880,8 +7880,6 @@ pub fn ReplicaType(
             assert(self.view_durable_updating());
             assert(self.log_view > self.log_view_durable());
 
-            self.state_machine.pulse_reset();
-
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();
         }
