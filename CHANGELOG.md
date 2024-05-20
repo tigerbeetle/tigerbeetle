@@ -1,5 +1,35 @@
 # TigerBeetle Changelog
 
+## 2024-05-20 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1938](https://github.com/tigerbeetle/tigerbeetle/pull/1938)
+
+  Ease restriction which guarded against unnecessary pulses.
+
+### Internals
+
+- [#1949](https://github.com/tigerbeetle/tigerbeetle/pull/1949),
+  [#1964](https://github.com/tigerbeetle/tigerbeetle/pull/1964)
+
+  Docs fixes and cleanup.
+
+- [#1957](https://github.com/tigerbeetle/tigerbeetle/pull/1957)
+
+  Fix determinism bug in test workload checker.
+
+- [#1955](https://github.com/tigerbeetle/tigerbeetle/pull/1955)
+
+  Expose `ticks_max` as runtime CLI argument.
+
+- [#1956](https://github.com/tigerbeetle/tigerbeetle/pull/1956),
+  [#1959](https://github.com/tigerbeetle/tigerbeetle/pull/1959),
+  [#1960](https://github.com/tigerbeetle/tigerbeetle/pull/1960),
+  [#1963](https://github.com/tigerbeetle/tigerbeetle/pull/1963)
+
+  Devhub/benchmark improvements.
+
 ## 2024-05-13 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
