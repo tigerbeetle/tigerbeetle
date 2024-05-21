@@ -380,6 +380,7 @@ const Inspector = struct {
 
             try print_struct(output, &label_buffer, header.*);
         }
+        try print_reply_body(output, reply);
     }
 
     fn inspect_grid(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
@@ -814,40 +815,54 @@ fn format_tree_id(tree_id: u16) []const u8 {
     }
 }
 
-fn print_prepare_body(output: anytype, prepare: []const u8) !void {
-    const operation_events = comptime result: {
-        const OperationEvent = struct { operation: vsr.Operation, Event: type };
-
-        var list: []const OperationEvent = &[_]OperationEvent{
-            .{ .operation = .reserved, .Event = extern struct {} },
-            .{ .operation = .root, .Event = extern struct {} },
-            .{ .operation = .register, .Event = extern struct {} },
-            .{ .operation = .reconfigure, .Event = vsr.ReconfigurationRequest },
-            .{ .operation = .pulse, .Event = extern struct {} },
-            .{ .operation = .upgrade, .Event = vsr.UpgradeRequest },
-        };
-
-        for (std.enums.values(StateMachine.Operation)) |operation| {
-            if (operation == .pulse) continue;
-            list = list ++ [_]OperationEvent{.{
-                .operation = vsr.Operation.from(StateMachine, operation),
-                .Event = StateMachine.Event(operation),
-            }};
-        }
-        break :result list;
+const operation_schemas = list: {
+    const OperationSchema = struct {
+        operation: vsr.Operation,
+        Event: type,
+        Result: type,
     };
 
+    var list: []const OperationSchema = &[_]OperationSchema{};
+
+    for (&[_]struct { vsr.Operation, type, type }{
+        .{ .reserved, extern struct {}, extern struct {} },
+        .{ .root, extern struct {}, extern struct {} },
+        // TODO vsr.RegisterRequest once that is merged.
+        .{ .register, extern struct {}, vsr.RegisterResult },
+        .{ .reconfigure, vsr.ReconfigurationRequest, vsr.ReconfigurationResult },
+        .{ .pulse, extern struct {}, extern struct {} },
+        .{ .upgrade, vsr.UpgradeRequest, extern struct {} },
+    }) |operation_schema| {
+        list = list ++ [_]OperationSchema{.{
+            .operation = operation_schema[0],
+            .Event = operation_schema[1],
+            .Result = operation_schema[2],
+        }};
+    }
+
+    for (std.enums.values(StateMachine.Operation)) |operation| {
+        if (operation == .pulse) continue;
+        list = list ++ [_]OperationSchema{.{
+            .operation = vsr.Operation.from(StateMachine, operation),
+            .Event = StateMachine.Event(operation),
+            .Result = StateMachine.Result(operation),
+        }};
+    }
+    break :list list;
+};
+
+fn print_prepare_body(output: anytype, prepare: []const u8) !void {
     const header = std.mem.bytesAsValue(vsr.Header.Prepare, prepare[0..@sizeOf(vsr.Header)]);
-    inline for (operation_events) |operation_event| {
-        if (header.operation == operation_event.operation) {
-            const event_size = @sizeOf(operation_event.Event);
+    inline for (operation_schemas) |operation_schema| {
+        if (operation_schema.operation == header.operation) {
+            const event_size = @sizeOf(operation_schema.Event);
             const body_size = header.size - @sizeOf(vsr.Header);
             if (body_size == 0) {
                 try output.print("(no body)\n", .{});
             } else if (event_size != 0 and body_size % event_size == 0) {
                 var label_buffer: [128]u8 = undefined;
                 for (std.mem.bytesAsSlice(
-                    operation_event.Event,
+                    operation_schema.Event,
                     prepare[@sizeOf(vsr.Header)..header.size],
                 ), 0..) |event, i| {
                     var label_stream = std.io.fixedBufferStream(&label_buffer);
@@ -858,6 +873,37 @@ fn print_prepare_body(output: anytype, prepare: []const u8) !void {
                 try output.print(
                     "error: unexpected body size={}, @sizeOf(Event)={}\n",
                     .{ header.size, event_size },
+                );
+            }
+            return;
+        }
+    } else {
+        try output.print("error: unimplemented operation={s}\n", .{@tagName(header.operation)});
+    }
+}
+
+fn print_reply_body(output: anytype, reply: []const u8) !void {
+    const header = std.mem.bytesAsValue(vsr.Header.Reply, reply[0..@sizeOf(vsr.Header)]);
+    inline for (operation_schemas) |operation_schema| {
+        if (operation_schema.operation == header.operation) {
+            const result_size = @sizeOf(operation_schema.Result);
+            const body_size = header.size - @sizeOf(vsr.Header);
+            if (body_size == 0) {
+                try output.print("(no body)\n", .{});
+            } else if (result_size != 0 and body_size % result_size == 0) {
+                var label_buffer: [128]u8 = undefined;
+                for (std.mem.bytesAsSlice(
+                    operation_schema.Result,
+                    reply[@sizeOf(vsr.Header)..header.size],
+                ), 0..) |result, i| {
+                    var label_stream = std.io.fixedBufferStream(&label_buffer);
+                    try label_stream.writer().print("results[{}]: ", .{i});
+                    try print_struct(output, label_stream.getWritten(), result);
+                }
+            } else {
+                try output.print(
+                    "error: unexpected body size={}, @sizeOf(Result)={}\n",
+                    .{ header.size, result_size },
                 );
             }
             return;
