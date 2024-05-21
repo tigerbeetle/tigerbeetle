@@ -384,14 +384,7 @@ const Inspector = struct {
     }
 
     fn inspect_grid(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
-        const superblock_buffer = try inspector.read_buffer(
-            .superblock,
-            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
-            @sizeOf(SuperBlockHeader),
-        );
-        defer inspector.allocator.free(superblock_buffer);
-
-        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+        const superblock = try inspector.read_superblock(superblock_copy);
         const free_set_size = superblock.vsr_state.checkpoint.free_set_size;
         const free_set_buffer =
             try inspector.allocator.alignedAlloc(u8, @alignOf(vsr.FreeSet.Word), free_set_size);
@@ -482,14 +475,7 @@ const Inspector = struct {
     }
 
     fn inspect_manifest(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
-        const superblock_buffer = try inspector.read_buffer(
-            .superblock,
-            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
-            @sizeOf(SuperBlockHeader),
-        );
-        defer inspector.allocator.free(superblock_buffer);
-
-        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+        const superblock = try inspector.read_superblock(superblock_copy);
         var manifest_block_address = superblock.vsr_state.checkpoint.manifest_newest_address;
         var manifest_block_checksum = superblock.vsr_state.checkpoint.manifest_newest_checksum;
         for (0..superblock.vsr_state.checkpoint.manifest_block_count) |i| {
@@ -558,6 +544,18 @@ const Inspector = struct {
         return buffer[0..size];
     }
 
+    fn read_superblock(inspector: *Inspector, superblock_copy: u8) !SuperBlockHeader {
+        const superblock_buffer = try inspector.read_buffer(
+            .superblock,
+            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
+            @sizeOf(SuperBlockHeader),
+        );
+        defer inspector.allocator.free(superblock_buffer);
+
+        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+        return superblock.*;
+    }
+
     fn read_block(inspector: *Inspector, address: u64, checksum: ?u128) !BlockPtrConst {
         const buffer = try inspector.read_buffer(
             .grid,
@@ -601,15 +599,7 @@ const Inspector = struct {
     };
 
     fn read_client_sessions(inspector: *Inspector, superblock_copy: u8) !ClientSessions {
-        // TODO Extract out .read_superblock(copy). Be sure to check `copy`.
-        const superblock_buffer = try inspector.read_buffer(
-            .superblock,
-            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
-            @sizeOf(SuperBlockHeader),
-        );
-        defer inspector.allocator.free(superblock_buffer);
-
-        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+        const superblock = try inspector.read_superblock(superblock_copy);
         const block = try inspector.read_block(
             superblock.vsr_state.checkpoint.client_sessions_last_block_address,
             superblock.vsr_state.checkpoint.client_sessions_last_block_checksum,
