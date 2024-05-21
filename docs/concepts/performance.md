@@ -99,8 +99,8 @@ in the Linux kernel, to batch system calls. Requests to read or write from the n
 batched before being sent to and from the kernel. This massively improves performance by minimizing
 the switching costs between TigerBeetle and the kernel.
 
-## Next: Safety
+## Next: High Availability
 
 As you can tell, TigerBeetle is highly optimized to provide the performance you need to handle your
-business's peak traffic and your traffic for the next decades. The one thing we care even more about
-than performance, however, is [safety](./safety.md).
+business's peak traffic and your traffic for the next decades. It also comes fully-equipped to run a
+multi-server cluster for [high availability](./availability.md).
