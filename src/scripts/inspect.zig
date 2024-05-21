@@ -1,5 +1,4 @@
 //! Decode a TigerBeetle data file without running a replica or modifying the data file.
-// TODO Client sessions, client replies
 // TODO List tables (index blocks) by tree_id/level
 
 const std = @import("std");
@@ -29,6 +28,10 @@ pub const CliArgs = union(enum) {
         slot: ?usize = null,
         positional: struct { path: []const u8 },
     },
+    replies: struct {
+        superblock_copy: u8 = 0,
+        positional: struct { path: []const u8 },
+    },
     grid: struct {
         block: ?u64 = null,
         superblock_copy: u8 = 0,
@@ -56,7 +59,7 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         .superblock => try inspector.inspect_superblock(stdout),
         .wal => |args| {
             if (args.slot) |slot| {
-                if (slot > constants.journal_slot_count) {
+                if (slot >= constants.journal_slot_count) {
                     log.err("--slot: slot exceeds {}", .{constants.journal_slot_count - 1});
                     return error.InvalidSlot;
                 }
@@ -64,6 +67,9 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             } else {
                 try inspector.inspect_wal(stdout);
             }
+        },
+        .replies => |args| {
+            try inspector.inspect_replies(stdout, args.superblock_copy);
         },
         .grid => |args| {
             if (args.superblock_copy >= constants.superblock_copies) {
@@ -298,6 +304,51 @@ const Inspector = struct {
         }
     }
 
+    fn inspect_replies(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
+        const superblock_buffer = try inspector.read_buffer(
+            .superblock,
+            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
+            @sizeOf(SuperBlockHeader),
+        );
+        defer inspector.allocator.free(superblock_buffer);
+
+        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+        const block = inspector.read_block(
+            superblock.vsr_state.checkpoint.client_sessions_last_block_address,
+            superblock.vsr_state.checkpoint.client_sessions_last_block_checksum,
+        ) catch {
+            try output.writeAll("error: client sessions block not found");
+            return;
+        };
+        defer inspector.allocator.free(block);
+
+        const block_header = schema.header_from_block(block);
+        assert(block_header.size ==
+            @sizeOf(vsr.Header) + superblock.vsr_state.checkpoint.client_sessions_size);
+        assert(vsr.checksum(block[@sizeOf(vsr.Header)..block_header.size]) ==
+            superblock.vsr_state.checkpoint.client_sessions_checksum);
+
+        const Entries = extern struct {
+            headers: [constants.clients_max]vsr.Header,
+            sessions: [constants.clients_max]u64,
+        };
+        assert(@sizeOf(Entries) == block_header.size - @sizeOf(vsr.Header));
+
+        const entries =
+            std.mem.bytesAsValue(Entries, block[@sizeOf(vsr.Header)..][0..@sizeOf(Entries)]);
+
+        var label_buffer: [64]u8 = undefined;
+        for (&entries.headers, entries.sessions, 0..) |*header, session, i| {
+            var label_stream = std.io.fixedBufferStream(&label_buffer);
+            try label_stream.writer().print("{}.header", .{i});
+            try print_struct(output, label_stream.getWritten(), header.*);
+
+            label_stream.reset();
+            try label_stream.writer().print("{}.session", .{i});
+            try print_struct(output, label_stream.getWritten(), session);
+        }
+    }
+
     fn inspect_grid(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
         const superblock_buffer = try inspector.read_buffer(
             .superblock,
@@ -417,7 +468,7 @@ const Inspector = struct {
                 manifest_block_address,
                 manifest_block_checksum,
             ) catch {
-                try output.writeAll("(not found)");
+                try output.writeAll("error: manifest block not found");
                 break;
             };
             defer inspector.allocator.free(block);

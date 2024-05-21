@@ -74,6 +74,9 @@ const CliArgs = union(enum) {
         \\  wal --slot=<slot>
         \\        Inspect the WAL header/prepare in the given slot.
         \\
+        \\  replies
+        \\        Inspect the client reply headers and session numbers.
+        \\
         \\  grid [--superblock-copy=<copy>]
         \\        Inspect the free set.
         \\        If `superblock-copy` is set, use the trailer referenced by that superblock copy.
