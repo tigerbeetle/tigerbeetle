@@ -108,6 +108,8 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
 }
 
 fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
+    @setEvalBranchQuota(5000);
+
     if (Flags == void) {
         if (args.next()) |arg| {
             fatal("unexpected argument: '{s}'", .{arg});
