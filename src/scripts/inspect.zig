@@ -29,6 +29,7 @@ pub const CliArgs = union(enum) {
         positional: struct { path: []const u8 },
     },
     replies: struct {
+        slot: ?usize = null,
         superblock_copy: u8 = 0,
         positional: struct { path: []const u8 },
     },
@@ -69,7 +70,15 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             }
         },
         .replies => |args| {
-            try inspector.inspect_replies(stdout, args.superblock_copy);
+            if (args.slot) |slot| {
+                if (slot >= constants.clients_max) {
+                    log.err("--slot: slot exceeds {}", .{constants.clients_max - 1});
+                    return error.InvalidSlot;
+                }
+                try inspector.inspect_replies_slot(stdout, args.superblock_copy, slot);
+            } else {
+                try inspector.inspect_replies(stdout, args.superblock_copy);
+            }
         },
         .grid => |args| {
             if (args.superblock_copy >= constants.superblock_copies) {
@@ -227,8 +236,8 @@ const Inspector = struct {
             const wal_prepare_body_valid =
                 wal_prepare.valid_checksum() and
                 wal_prepare.valid_checksum_body(
-                    prepare_buffer[@sizeOf(vsr.Header)..wal_prepare.size],
-                );
+                prepare_buffer[@sizeOf(vsr.Header)..wal_prepare.size],
+            );
 
             const header_pair = [_]*const vsr.Header.Prepare{ wal_header, wal_prepare };
 
@@ -280,8 +289,8 @@ const Inspector = struct {
         const prepare_body_valid =
             prepare_header.valid_checksum() and
             prepare_header.valid_checksum_body(
-                prepare_buffer[@sizeOf(vsr.Header)..prepare_header.size],
-            );
+            prepare_buffer[@sizeOf(vsr.Header)..prepare_header.size],
+        );
 
         const copies: [2]*const vsr.Header.Prepare = .{ &headers[slot], prepare_header };
 
@@ -305,47 +314,71 @@ const Inspector = struct {
     }
 
     fn inspect_replies(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
-        const superblock_buffer = try inspector.read_buffer(
-            .superblock,
-            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
-            @sizeOf(SuperBlockHeader),
-        );
-        defer inspector.allocator.free(superblock_buffer);
-
-        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
-        const block = inspector.read_block(
-            superblock.vsr_state.checkpoint.client_sessions_last_block_address,
-            superblock.vsr_state.checkpoint.client_sessions_last_block_checksum,
-        ) catch {
-            try output.writeAll("error: client sessions block not found");
-            return;
-        };
-        defer inspector.allocator.free(block);
-
-        const block_header = schema.header_from_block(block);
-        assert(block_header.size ==
-            @sizeOf(vsr.Header) + superblock.vsr_state.checkpoint.client_sessions_size);
-        assert(vsr.checksum(block[@sizeOf(vsr.Header)..block_header.size]) ==
-            superblock.vsr_state.checkpoint.client_sessions_checksum);
-
-        const Entries = extern struct {
-            headers: [constants.clients_max]vsr.Header,
-            sessions: [constants.clients_max]u64,
-        };
-        assert(@sizeOf(Entries) == block_header.size - @sizeOf(vsr.Header));
-
-        const entries =
-            std.mem.bytesAsValue(Entries, block[@sizeOf(vsr.Header)..][0..@sizeOf(Entries)]);
+        const entries = try inspector.read_client_sessions(superblock_copy);
 
         var label_buffer: [64]u8 = undefined;
-        for (&entries.headers, entries.sessions, 0..) |*header, session, i| {
-            var label_stream = std.io.fixedBufferStream(&label_buffer);
-            try label_stream.writer().print("{}.header", .{i});
-            try print_struct(output, label_stream.getWritten(), header.*);
+        for (&entries.headers, entries.sessions, 0..) |*session_header, session, slot| {
+            const reply_sector = try inspector.read_buffer(
+                .client_replies,
+                constants.message_size_max * slot,
+                constants.sector_size,
+            );
+            defer inspector.allocator.free(reply_sector);
 
-            label_stream.reset();
-            try label_stream.writer().print("{}.session", .{i});
-            try print_struct(output, label_stream.getWritten(), session);
+            const reply_header =
+                std.mem.bytesAsValue(vsr.Header.Reply, reply_sector[0..@sizeOf(vsr.Header)]);
+            const copies: [2]*const vsr.Header.Reply = .{ session_header, reply_header };
+            var group_by = GroupByType(2){};
+            for (copies) |h| group_by.compare(std.mem.asBytes(h));
+
+            // The session doesn't include the group diff labels since it is only stored in the
+            // client sessions, not the replies.
+            try output.print("{:_>2}     session={}\n", .{ slot, session });
+
+            for (group_by.groups()) |group| {
+                const header_index = group.findFirstSet().?;
+                const header = copies[header_index];
+                const header_mark: u8 = if (header.valid_checksum()) '|' else 'X';
+
+                var label_stream = std.io.fixedBufferStream(&label_buffer);
+                try label_stream.writer().print("{:_>2}: ", .{slot});
+                try label_stream.writer().writeByte(if (group.isSet(0)) header_mark else ' ');
+                try label_stream.writer().writeByte(if (group.isSet(1)) header_mark else ' ');
+                try label_stream.writer().writeAll(" header");
+                try print_struct(output, label_stream.getWritten(), header.*);
+            }
+        }
+    }
+
+    fn inspect_replies_slot(
+        inspector: *Inspector,
+        output: anytype,
+        superblock_copy: u8,
+        slot: usize,
+    ) !void {
+        assert(slot < constants.clients_max);
+
+        const entries = try inspector.read_client_sessions(superblock_copy);
+        const reply = try inspector.read_buffer(
+            .client_replies,
+            constants.message_size_max * slot,
+            constants.message_size_max,
+        );
+        defer inspector.allocator.free(reply);
+
+        const reply_header = std.mem.bytesAsValue(vsr.Header.Reply, reply[0..@sizeOf(vsr.Header)]);
+        const copies: [2]*const vsr.Header.Reply = .{ &entries.headers[slot], reply_header };
+        var group_by = GroupByType(2){};
+        for (copies) |h| group_by.compare(std.mem.asBytes(h));
+
+        var label_buffer: [2]u8 = undefined;
+        for (group_by.groups()) |group| {
+            const header = copies[group.findFirstSet().?];
+            const header_mark: u8 = if (header.valid_checksum()) '|' else 'X';
+            label_buffer[0] = if (group.isSet(0)) header_mark else ' ';
+            label_buffer[1] = if (group.isSet(1)) header_mark else ' ';
+
+            try print_struct(output, &label_buffer, header.*);
         }
     }
 
@@ -560,6 +593,42 @@ const Inspector = struct {
         }
         return buffer;
     }
+
+    const ClientSessions = extern struct {
+        headers: [constants.clients_max]vsr.Header.Reply,
+        sessions: [constants.clients_max]u64,
+    };
+
+    fn read_client_sessions(inspector: *Inspector, superblock_copy: u8) !ClientSessions {
+        // TODO Extract out .read_superblock(copy). Be sure to check `copy`.
+        const superblock_buffer = try inspector.read_buffer(
+            .superblock,
+            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
+            @sizeOf(SuperBlockHeader),
+        );
+        defer inspector.allocator.free(superblock_buffer);
+
+        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+        const block = try inspector.read_block(
+            superblock.vsr_state.checkpoint.client_sessions_last_block_address,
+            superblock.vsr_state.checkpoint.client_sessions_last_block_checksum,
+        );
+        defer inspector.allocator.free(block);
+
+        const block_header = schema.header_from_block(block);
+        assert(block_header.size ==
+            @sizeOf(vsr.Header) + superblock.vsr_state.checkpoint.client_sessions_size);
+        assert(vsr.checksum(block[@sizeOf(vsr.Header)..block_header.size]) ==
+            superblock.vsr_state.checkpoint.client_sessions_checksum);
+
+        assert(@sizeOf(ClientSessions) == block_header.size - @sizeOf(vsr.Header));
+
+        const entries = std.mem.bytesAsValue(
+            ClientSessions,
+            block[@sizeOf(vsr.Header)..][0..@sizeOf(ClientSessions)],
+        );
+        return entries.*;
+    }
 };
 
 fn print_struct(
@@ -747,20 +816,15 @@ fn format_tree_id(tree_id: u16) []const u8 {
 
 fn print_prepare_body(output: anytype, prepare: []const u8) !void {
     const operation_events = comptime result: {
-        const OperationEvent = struct {
-            operation: vsr.Operation,
-            Event: type,
-            min: usize,
-            max: usize,
-        };
+        const OperationEvent = struct { operation: vsr.Operation, Event: type };
 
         var list: []const OperationEvent = &[_]OperationEvent{
-            .{ .operation = .reserved, .Event = extern struct {}, .min = 1, .max = 1 },
-            .{ .operation = .root, .Event = extern struct {}, .min = 1, .max = 1 },
-            .{ .operation = .register, .Event = extern struct {}, .min = 1, .max = 1 },
-            .{ .operation = .reconfigure, .Event = vsr.ReconfigurationRequest, .min = 1, .max = 1 },
-            .{ .operation = .pulse, .Event = extern struct {}, .min = 1, .max = 1 },
-            .{ .operation = .upgrade, .Event = vsr.UpgradeRequest, .min = 1, .max = 1 },
+            .{ .operation = .reserved, .Event = extern struct {} },
+            .{ .operation = .root, .Event = extern struct {} },
+            .{ .operation = .register, .Event = extern struct {} },
+            .{ .operation = .reconfigure, .Event = vsr.ReconfigurationRequest },
+            .{ .operation = .pulse, .Event = extern struct {} },
+            .{ .operation = .upgrade, .Event = vsr.UpgradeRequest },
         };
 
         for (std.enums.values(StateMachine.Operation)) |operation| {
@@ -768,8 +832,6 @@ fn print_prepare_body(output: anytype, prepare: []const u8) !void {
             list = list ++ [_]OperationEvent{.{
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .Event = StateMachine.Event(operation),
-                .min = 0,
-                .max = @field(StateMachine.constants.batch_max, @tagName(operation)),
             }};
         }
         break :result list;
@@ -780,23 +842,17 @@ fn print_prepare_body(output: anytype, prepare: []const u8) !void {
         if (header.operation == operation_event.operation) {
             const event_size = @sizeOf(operation_event.Event);
             const body_size = header.size - @sizeOf(vsr.Header);
-            if ((event_size == 0 and body_size == 0) or
-                (event_size != 0 and body_size % event_size == 0))
-            {
-                if (body_size == 0) {
-                    try output.print("(no body)\n", .{});
-                } else {
-                    if (event_size == 0) unreachable;
-
-                    var label_buffer: [128]u8 = undefined;
-                    for (std.mem.bytesAsSlice(
-                        operation_event.Event,
-                        prepare[@sizeOf(vsr.Header)..header.size],
-                    ), 0..) |event, i| {
-                        var label_stream = std.io.fixedBufferStream(&label_buffer);
-                        try label_stream.writer().print("events[{}]: ", .{i});
-                        try print_struct(output, label_stream.getWritten(), event);
-                    }
+            if (body_size == 0) {
+                try output.print("(no body)\n", .{});
+            } else if (event_size != 0 and body_size % event_size == 0) {
+                var label_buffer: [128]u8 = undefined;
+                for (std.mem.bytesAsSlice(
+                    operation_event.Event,
+                    prepare[@sizeOf(vsr.Header)..header.size],
+                ), 0..) |event, i| {
+                    var label_stream = std.io.fixedBufferStream(&label_buffer);
+                    try label_stream.writer().print("events[{}]: ", .{i});
+                    try print_struct(output, label_stream.getWritten(), event);
                 }
             } else {
                 try output.print(
