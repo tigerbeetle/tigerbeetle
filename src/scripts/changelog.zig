@@ -17,6 +17,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     const merges = try shell.exec_stdout(
         \\git log --merges --first-parent origin/release..origin/main
     , .{});
+    try shell.project_root.makePath("./zig-cache");
     try shell.project_root.writeFile("./zig-cache/merges.txt", merges);
     log.info("merged PRs: ./zig-cache/merges.txt", .{});
 
