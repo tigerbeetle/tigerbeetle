@@ -232,7 +232,7 @@ const Inspector = struct {
                 try label_stream.writer().writeByte(' ');
                 try label_stream.writer().writeAll(field.name);
 
-                try print_struct(output, label_stream.getWritten(), @field(header, field.name));
+                try print_struct(output, label_stream.getWritten(), &@field(header, field.name));
             }
         }
     }
@@ -277,7 +277,7 @@ const Inspector = struct {
                 try label_stream.writer().writeByte(if (group.isSet(1)) mark else ' ');
                 try label_stream.writer().print("{:_>4}: ", .{slot});
 
-                try print_struct(output, label_stream.getWritten(), .{
+                try print_struct(output, label_stream.getWritten(), &.{
                     "checksum=",  header.checksum,
                     "release=",   header.release,
                     "view=",      header.view,
@@ -324,7 +324,7 @@ const Inspector = struct {
             label_buffer[0] = if (group.isSet(0)) header_mark else ' ';
             label_buffer[1] = if (group.isSet(1)) header_mark else ' ';
 
-            try print_struct(output, &label_buffer, header.*);
+            try print_struct(output, &label_buffer, header);
         }
         try print_prepare_body(output, prepare_buffer);
 
@@ -365,7 +365,7 @@ const Inspector = struct {
                 try label_stream.writer().writeByte(if (group.isSet(0)) header_mark else ' ');
                 try label_stream.writer().writeByte(if (group.isSet(1)) header_mark else ' ');
                 try label_stream.writer().writeAll(" header");
-                try print_struct(output, label_stream.getWritten(), header.*);
+                try print_struct(output, label_stream.getWritten(), header);
             }
         }
     }
@@ -398,7 +398,7 @@ const Inspector = struct {
             label_buffer[0] = if (group.isSet(0)) header_mark else ' ';
             label_buffer[1] = if (group.isSet(1)) header_mark else ' ';
 
-            try print_struct(output, &label_buffer, header.*);
+            try print_struct(output, &label_buffer, header);
         }
         try print_reply_body(output, reply);
     }
@@ -738,14 +738,16 @@ fn print_struct(
     label: []const u8,
     value: anytype,
 ) !void {
-    const Type = @TypeOf(value);
+    comptime assert(@typeInfo(@TypeOf(value)) == .Pointer);
+    comptime assert(@typeInfo(@TypeOf(value)).Pointer.size == .One);
 
+    const Type = @typeInfo(@TypeOf(value)).Pointer.child;
     // Print structs *without* a custom format() function.
     if (@typeInfo(Type) == .Struct and !comptime std.meta.trait.hasFn("format")(Type)) {
         if (@typeInfo(Type).Struct.is_tuple) {
             try output.writeAll(label);
             // Print tuples as a single line.
-            inline for (std.meta.fields(@TypeOf(value)), 0..) |field, i| {
+            inline for (std.meta.fields(Type), 0..) |field, i| {
                 if (@typeInfo(field.type) == .Pointer and
                     @typeInfo(@typeInfo(field.type).Pointer.child) == .Array)
                 {
@@ -753,17 +755,17 @@ fn print_struct(
                     try output.writeAll(@field(value, field.name));
                 } else {
                     try print_value(output, @field(value, field.name));
-                    if (i != std.meta.fields(@TypeOf(value)).len) try output.writeAll(" ");
+                    if (i != std.meta.fields(Type).len) try output.writeAll(" ");
                 }
             }
             try output.writeAll("\n");
             return;
         } else {
             var label_buffer: [1024]u8 = undefined;
-            inline for (std.meta.fields(@TypeOf(value))) |field| {
+            inline for (std.meta.fields(Type)) |field| {
                 var label_stream = std.io.fixedBufferStream(&label_buffer);
                 try label_stream.writer().print("{s}.{s}", .{ label, field.name });
-                try print_struct(output, label_stream.getWritten(), @field(value, field.name));
+                try print_struct(output, label_stream.getWritten(), &@field(value, field.name));
             }
             return;
         }
@@ -777,14 +779,14 @@ fn print_struct(
         break :Element null;
     }) |Element| {
         if (Element == u8) {
-            if (stdx.zeroed(&value)) {
+            if (stdx.zeroed(value)) {
                 return output.print("{s}=[{}]u8{{0}}\n", .{ label, value.len });
             } else {
                 return output.print("{s}=[{}]u8{{nonzero}}\n", .{ label, value.len });
             }
         } else {
             var label_buffer: [1024]u8 = undefined;
-            for (value[0..], 0..) |item, index| {
+            for (value[0..], 0..) |*item, index| {
                 var label_stream = std.io.fixedBufferStream(&label_buffer);
                 try label_stream.writer().print("{s}[{}]", .{ label, index });
                 try print_struct(output, label_stream.getWritten(), item);
@@ -794,7 +796,7 @@ fn print_struct(
     }
 
     try output.print("{s}=", .{label});
-    try print_value(output, value);
+    try print_value(output, value.*);
     try output.writeAll("\n");
 }
 
@@ -825,7 +827,7 @@ fn print_value(output: anytype, value: anytype) !void {
 
 fn print_block(writer: anytype, block: BlockPtrConst) !void {
     const header = schema.header_from_block(block);
-    try print_struct(writer, "header", header.*);
+    try print_struct(writer, "header", header);
 
     inline for (.{
         .{ .block_type = .free_set, .Schema = schema.TrailerNode },
@@ -835,7 +837,7 @@ fn print_block(writer: anytype, block: BlockPtrConst) !void {
         .{ .block_type = .data, .Schema = schema.TableData },
     }) |pair| {
         if (header.block_type == pair.block_type) {
-            try print_struct(writer, "header.metadata", pair.Schema.metadata(block).*);
+            try print_struct(writer, "header.metadata", pair.Schema.metadata(block));
             break;
         }
     } else {
@@ -884,9 +886,9 @@ fn print_block(writer: anytype, block: BlockPtrConst) !void {
             const data_bytes = data.block_values_used_bytes(block);
             inline for (StateMachine.Forest.tree_infos) |tree_info| {
                 if (metadata.tree_id == tree_info.tree_id) {
-                    for (std.mem.bytesAsSlice(tree_info.Tree.Table.Value, data_bytes)) |value| {
+                    for (std.mem.bytesAsSlice(tree_info.Tree.Table.Value, data_bytes)) |*value| {
                         if (comptime is_composite_key(tree_info.Tree.Table.Value)) {
-                            try print_struct(writer, " ", .{ value.field, value.timestamp });
+                            try print_struct(writer, " ", &.{ value.field, value.timestamp });
                         } else {
                             try print_struct(writer, " ", value);
                         }
@@ -981,7 +983,7 @@ fn print_prepare_body(output: anytype, prepare: []const u8) !void {
                 for (std.mem.bytesAsSlice(
                     operation_schema.Event,
                     prepare[@sizeOf(vsr.Header)..header.size],
-                ), 0..) |event, i| {
+                ), 0..) |*event, i| {
                     var label_stream = std.io.fixedBufferStream(&label_buffer);
                     try label_stream.writer().print("events[{}]: ", .{i});
                     try print_struct(output, label_stream.getWritten(), event);
@@ -1012,7 +1014,7 @@ fn print_reply_body(output: anytype, reply: []const u8) !void {
                 for (std.mem.bytesAsSlice(
                     operation_schema.Result,
                     reply[@sizeOf(vsr.Header)..header.size],
-                ), 0..) |result, i| {
+                ), 0..) |*result, i| {
                     var label_stream = std.io.fixedBufferStream(&label_buffer);
                     try label_stream.writer().print("results[{}]: ", .{i});
                     try print_struct(output, label_stream.getWritten(), result);
