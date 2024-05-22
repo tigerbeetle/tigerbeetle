@@ -61,7 +61,7 @@ pub fn ManifestLevelType(
             );
 
             // The tables are ordered by (key_max,snapshot_min),
-            // fields are declared from the least siginificant to the most significant:
+            // fields are declared from the least significant to the most significant:
 
             snapshot_min: u64,
             key_max: Key,
