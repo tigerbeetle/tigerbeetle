@@ -47,7 +47,7 @@ const CliArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
-        \\  zig build scripts -- inspect <superblock|wal|replies|grid|manifest> <path>
+        \\  zig build scripts -- inspect <superblock|wal|replies|grid|manifest|tables> <path>
         \\
         \\  zig build scripts -- release --run-number=<run> --sha=<commit>
         \\
@@ -57,6 +57,9 @@ const CliArgs = union(enum) {
         \\        Print this help message and exit.
         \\
         \\Options (inspect):
+        \\
+        \\  When `superblock-copy` is set, use the trailer referenced by that superblock copy.
+        \\  Otherwise, copy=0 will be used by default.
         \\
         \\  superblock
         \\        Inspect the superblock header copies.
@@ -77,23 +80,14 @@ const CliArgs = union(enum) {
         \\  replies [--superblock-copy=<copy>]
         \\        Inspect the client reply headers and session numbers.
         \\
-        \\        If `superblock-copy` is set, use the trailer referenced by that superblock copy.
-        \\        Otherwise, copy=0 will be used by default.
-        \\
         \\  replies --slot=<slot> [--superblock-copy=<copy>]
         \\        Inspect a particular client reply.
         \\        "||" denotes that the client session header and reply header match.
         \\        "| " is the client session header.
         \\        " |" is the client reply's header.
         \\
-        \\        If `superblock-copy` is set, use the trailer referenced by that superblock copy.
-        \\        Otherwise, copy=0 will be used by default.
-        \\
         \\  grid [--superblock-copy=<copy>]
         \\        Inspect the free set.
-        \\
-        \\        If `superblock-copy` is set, use the trailer referenced by that superblock copy.
-        \\        Otherwise, copy=0 will be used by default.
         \\
         \\  grid --block=<address>
         \\        Inspect the block at the given address.
@@ -101,8 +95,8 @@ const CliArgs = union(enum) {
         \\  manifest [--superblock-copy=<copy>]
         \\        Inspect the LSM manifest.
         \\
-        \\        If `superblock-copy` is set, use the trailer referenced by that superblock copy.
-        \\        Otherwise, copy=0 will be used by default.
+        \\  tables --tree=<integer> [--level=<integer>] [--superblock-copy=<copy>]
+        \\        List the tables matching the given tree/level.
         \\
         \\Options (release):
         \\

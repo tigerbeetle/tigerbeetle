@@ -1,5 +1,5 @@
 //! Decode a TigerBeetle data file without running a replica or modifying the data file.
-// TODO List tables (index blocks) by tree_id/level
+//! This tool adheres to the "be liberal in what you accept" side of Postel's Law.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -40,6 +40,13 @@ pub const CliArgs = union(enum) {
     },
     manifest: struct {
         superblock_copy: u8 = 0,
+        positional: struct { path: []const u8 },
+    },
+    tables: struct {
+        superblock_copy: u8 = 0,
+        // TODO Additionally allow the tree to be passed in as a string tree name instead.
+        tree: u16,
+        level: ?u6 = null,
         positional: struct { path: []const u8 },
     },
 };
@@ -105,6 +112,12 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             }
 
             try inspector.inspect_manifest(stdout, args.superblock_copy);
+        },
+        .tables => |args| {
+            try inspector.inspect_tables(stdout, args.superblock_copy, .{
+                .tree_id = args.tree,
+                .level = args.level,
+            });
         },
     }
 
@@ -524,6 +537,97 @@ const Inspector = struct {
         }
     }
 
+    fn inspect_tables(inspector: *Inspector, output: anytype, superblock_copy: u8, filter: struct {
+        tree_id: u16,
+        level: ?u6,
+    }) !void {
+        var tables_latest =
+            std.AutoHashMap(u128, ?schema.ManifestNode.TableInfo).init(inspector.allocator);
+        defer tables_latest.deinit();
+
+        // Construct a set of all active tables.
+        const superblock = try inspector.read_superblock(superblock_copy);
+        var manifest_block_address = superblock.vsr_state.checkpoint.manifest_newest_address;
+        var manifest_block_checksum = superblock.vsr_state.checkpoint.manifest_newest_checksum;
+        for (0..superblock.vsr_state.checkpoint.manifest_block_count) |_| {
+            const block = try inspector.read_block(manifest_block_address, manifest_block_checksum);
+            defer inspector.allocator.free(block);
+
+            const manifest_node = schema.ManifestNode.from(block);
+            const tables = manifest_node.tables_const(block);
+            for (0..tables.len) |i| {
+                const table_info = &tables[tables.len - i - 1];
+                const table_latest = try tables_latest.getOrPut(table_info.checksum);
+                if (!table_latest.found_existing) {
+                    if (table_info.label.event == .remove) {
+                        table_latest.value_ptr.* = null;
+                    } else {
+                        table_latest.value_ptr.* = table_info.*;
+                    }
+                }
+            }
+
+            const manifest_metadata = schema.ManifestNode.metadata(block);
+            manifest_block_address = manifest_metadata.previous_manifest_block_address;
+            manifest_block_checksum = manifest_metadata.previous_manifest_block_checksum;
+        }
+
+        var tables_filtered =
+            std.ArrayList(schema.ManifestNode.TableInfo).init(inspector.allocator);
+        defer tables_filtered.deinit();
+
+        // Construct a list of only the tables matching the `filter`.
+        var tables_latest_iterator = tables_latest.iterator();
+        while (tables_latest_iterator.next()) |table_or_null| {
+            const table = table_or_null.value_ptr.* orelse continue;
+            if (table.tree_id != filter.tree_id) continue;
+            if (filter.level) |level| {
+                if (table.label.level != level) continue;
+            }
+            try tables_filtered.append(table);
+        }
+
+        // Order the tables in a predictable way, since the manifest log can shuffle them around.
+        std.mem.sortUnstable(schema.ManifestNode.TableInfo, tables_filtered.items, {}, struct {
+            fn less_than(
+                _: void,
+                table_a: schema.ManifestNode.TableInfo,
+                table_b: schema.ManifestNode.TableInfo,
+            ) bool {
+                for ([_]std.math.Order{
+                    std.math.order(table_a.tree_id, table_b.tree_id),
+                    std.math.order(table_a.label.level, table_b.label.level),
+                    std.math.order(
+                        std.mem.bytesAsValue(u256, &table_a.key_min).*,
+                        std.mem.bytesAsValue(u256, &table_b.key_min).*,
+                    ),
+                    std.math.order(
+                        std.mem.bytesAsValue(u256, &table_a.key_max).*,
+                        std.mem.bytesAsValue(u256, &table_b.key_max).*,
+                    ),
+                    std.math.order(table_a.snapshot_min, table_b.snapshot_min),
+                    std.math.order(table_a.snapshot_max, table_b.snapshot_max),
+                    std.math.order(table_a.checksum, table_b.checksum),
+                }) |order| {
+                    if (order != .eq) return order == .lt;
+                }
+                // This *should* be unreachable, especially given the checksum comparison.
+                return false;
+            }
+        }.less_than);
+
+        inline for (StateMachine.Forest.tree_infos) |tree_info| {
+            if (tree_info.tree_id == filter.tree_id) {
+                for (tables_filtered.items) |*table| {
+                    try print_table_info(output, tree_info, table);
+                }
+                break;
+            }
+        } else {
+            try output.print("error: unknown tree_id={}\n", .{filter.tree_id});
+        }
+    }
+
     fn read_buffer(
         inspector: *Inspector,
         zone: vsr.Zone,
@@ -901,6 +1005,60 @@ fn print_reply_body(output: anytype, reply: []const u8) !void {
     } else {
         try output.print("error: unimplemented operation={s}\n", .{@tagName(header.operation)});
     }
+}
+
+fn print_table_info(
+    output: anytype,
+    comptime tree_info: anytype,
+    table: *const schema.ManifestNode.TableInfo,
+) !void {
+    try output.print("{c} T={s} L={}", .{
+        @as(u8, switch (table.label.event) {
+            .insert => 'I',
+            .update => 'U',
+            // These shouldn't be hit, but included just for completeness' sake:
+            .remove => 'R',
+            else => '?',
+        }),
+        format_tree_id(table.tree_id),
+        table.label.level,
+    });
+
+    const Key = tree_info.Tree.Table.Key;
+    const Value = tree_info.Tree.Table.Value;
+    const key_min = std.mem.bytesAsValue(Key, table.key_min[0..@sizeOf(Key)]).*;
+    const key_max = std.mem.bytesAsValue(Key, table.key_max[0..@sizeOf(Key)]).*;
+
+    if (comptime is_composite_key(Value)) {
+        const f: Value = undefined;
+        const Field = @TypeOf(f.field);
+        const key_min_timestamp: u64 = @truncate(key_min & std.math.maxInt(u64));
+        const key_max_timestamp: u64 = @truncate(key_max & std.math.maxInt(u64));
+        const key_min_field: Field = @intCast(key_min >> 64);
+        const key_max_field: Field = @intCast(key_max >> 64);
+
+        try output.print(" K={:_>6}:{}..{:_>6}:{}", .{
+            key_min_field,
+            key_min_timestamp,
+            key_max_field,
+            key_max_timestamp,
+        });
+    } else {
+        try output.print(" K={}..{}", .{ key_min, key_max });
+    }
+
+    if (table.snapshot_max == std.math.maxInt(u64)) {
+        try output.print(" S={}..max", .{table.snapshot_min});
+    } else {
+        try output.print(" S={}..{}", .{ table.snapshot_min, table.snapshot_max });
+    }
+
+    try output.print(" V={:_>6}/{} C={x:0>32} A={}\n", .{
+        table.value_count,
+        tree_info.Tree.Table.value_count_max,
+        table.checksum,
+        table.address,
+    });
 }
 
 fn GroupByType(comptime count_max: usize) type {
