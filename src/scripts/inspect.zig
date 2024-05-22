@@ -34,6 +34,10 @@ pub const CliArgs = union(enum) {
         superblock_copy: u8 = 0,
         positional: struct { path: []const u8 },
     },
+    manifest: struct {
+        superblock_copy: u8 = 0,
+        positional: struct { path: []const u8 },
+    },
 };
 
 pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
@@ -75,6 +79,17 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             } else {
                 try inspector.inspect_grid(stdout, args.superblock_copy);
             }
+        },
+        .manifest => |args| {
+            if (args.superblock_copy >= constants.superblock_copies) {
+                log.err(
+                    "--superblock-copy: copy exceeds {}",
+                    .{constants.superblock_copies - 1},
+                );
+                return error.InvalidSuperblockCopy;
+            }
+
+            try inspector.inspect_manifest(stdout, args.superblock_copy);
         },
     }
 
@@ -379,6 +394,63 @@ const Inspector = struct {
         if (header.address != address) log.err("misdirected block", .{});
 
         try print_block(output, block);
+    }
+
+    fn inspect_manifest(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
+        const superblock_buffer = try inspector.read_buffer(
+            .superblock,
+            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
+            @sizeOf(SuperBlockHeader),
+        );
+        defer inspector.allocator.free(superblock_buffer);
+
+        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+        var manifest_block_address = superblock.vsr_state.checkpoint.manifest_newest_address;
+        var manifest_block_checksum = superblock.vsr_state.checkpoint.manifest_newest_checksum;
+        for (0..superblock.vsr_state.checkpoint.manifest_block_count) |i| {
+            try output.print(
+                "manifest_log.blocks[{}]: address={} checksum={x:0>32} ",
+                .{ i, manifest_block_address, manifest_block_checksum },
+            );
+
+            const block = inspector.read_block(
+                manifest_block_address,
+                manifest_block_checksum,
+            ) catch {
+                try output.writeAll("(not found)");
+                break;
+            };
+            defer inspector.allocator.free(block);
+
+            var entry_counts = std.enums.EnumArray(
+                schema.ManifestNode.Event,
+                [constants.lsm_levels]usize,
+            ).initDefault([_]usize{0} ** constants.lsm_levels, .{});
+
+            const manifest_node = schema.ManifestNode.from(block);
+            for (manifest_node.tables_const(block)) |*table_info| {
+                entry_counts.getPtr(table_info.label.event)[table_info.label.level] += 1;
+            }
+
+            try output.print(
+                "entries={}/{}",
+                .{ manifest_node.entry_count, schema.ManifestNode.entry_count_max },
+            );
+
+            for (std.enums.values(schema.ManifestNode.Event)) |event| {
+                if (event == .reserved) continue;
+                try output.print(" {s}=", .{@tagName(event)});
+                for (0..constants.lsm_levels) |level| {
+                    if (level != 0) try output.writeAll(",");
+                    try output.print("{}", .{entry_counts.get(event)[level]});
+                }
+            }
+            try output.writeAll("\n");
+
+            const manifest_metadata = schema.ManifestNode.metadata(block);
+            manifest_block_address = manifest_metadata.previous_manifest_block_address;
+            manifest_block_checksum = manifest_metadata.previous_manifest_block_checksum;
+        }
     }
 
     fn read_buffer(
