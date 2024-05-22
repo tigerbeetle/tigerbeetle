@@ -23,6 +23,7 @@ const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const kcov = @import("./scripts/kcov.zig");
 const changelog = @import("./scripts/changelog.zig");
+const inspect = @import("./scripts/inspect.zig");
 
 const CliArgs = union(enum) {
     cfo: cfo.CliArgs,
@@ -31,6 +32,7 @@ const CliArgs = union(enum) {
     devhub: devhub.CliArgs,
     kcov: kcov.CliArgs,
     changelog: void,
+    inspect: inspect.CliArgs,
 
     pub const help =
         \\Usage:
@@ -45,12 +47,22 @@ const CliArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
+        \\  zig build scripts -- inspect <superblock> <path>
+        \\
         \\  zig build scripts -- release --run-number=<run> --sha=<commit>
         \\
         \\Options:
         \\
         \\  -h, --help
         \\        Print this help message and exit.
+        \\
+        \\Options (inspect):
+        \\
+        \\  superblock
+        \\        Inspect the superblock header copies.
+        \\        In the left column of the output, "|" denotes which copies have a particular value.
+        \\        "||||" means that all four superblock copies are in agreement.
+        \\        "| | " means that the value matches in copies 0/2, but differs from copies 1/3.
         \\
         \\Options (release):
         \\
@@ -91,5 +103,6 @@ pub fn main() !void {
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
         .kcov => |args_kcov| try kcov.main(shell, gpa, args_kcov),
         .changelog => try changelog.main(shell, gpa),
+        .inspect => |args_inspect| try inspect.main(gpa, args_inspect),
     }
 }

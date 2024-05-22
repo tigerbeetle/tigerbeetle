@@ -30,6 +30,7 @@ pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .groove = @import("lsm/groove.zig"),
     .forest = @import("lsm/forest.zig"),
+    .schema = @import("lsm/schema.zig"),
 };
 pub const testing = .{
     .cluster = @import("testing/cluster.zig"),
