@@ -47,7 +47,7 @@ const CliArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
-        \\  zig build scripts -- inspect <superblock|wal> <path>
+        \\  zig build scripts -- inspect <superblock|wal|grid> <path>
         \\
         \\  zig build scripts -- release --run-number=<run> --sha=<commit>
         \\
@@ -73,6 +73,14 @@ const CliArgs = union(enum) {
         \\
         \\  wal --slot=<slot>
         \\        Inspect the WAL header/prepare in the given slot.
+        \\
+        \\  grid [--superblock-copy=<copy>]
+        \\        Inspect the free set.
+        \\        If `superblock-copy` is set, use the trailer referenced by that superblock copy.
+        \\        Otherwise, copy=0 will be used by default.
+        \\
+        \\  grid --block=<address>
+        \\        Inspect the block at the given address.
         \\
         \\Options (release):
         \\

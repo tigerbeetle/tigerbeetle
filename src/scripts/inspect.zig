@@ -15,6 +15,11 @@ const Storage = @import("../storage.zig").Storage;
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
 const SuperBlock = vsr.SuperBlockType(Storage);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
+const Grid = vsr.GridType(Storage);
+const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
+const allocate_block = @import("../vsr/grid.zig").allocate_block;
+const is_composite_key = @import("../lsm/composite_key.zig").is_composite_key;
 
 pub const CliArgs = union(enum) {
     superblock: struct {
@@ -22,6 +27,11 @@ pub const CliArgs = union(enum) {
     },
     wal: struct {
         slot: ?usize = null,
+        positional: struct { path: []const u8 },
+    },
+    grid: struct {
+        block: ?u64 = null,
+        superblock_copy: u8 = 0,
         positional: struct { path: []const u8 },
     },
 };
@@ -49,6 +59,21 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
                 try inspector.inspect_wal_slot(stdout, slot);
             } else {
                 try inspector.inspect_wal(stdout);
+            }
+        },
+        .grid => |args| {
+            if (args.superblock_copy >= constants.superblock_copies) {
+                log.err(
+                    "--superblock-copy: copy exceeds {}",
+                    .{constants.superblock_copies - 1},
+                );
+                return error.InvalidSuperblockCopy;
+            }
+
+            if (args.block) |address| {
+                try inspector.inspect_grid_block(stdout, address);
+            } else {
+                try inspector.inspect_grid(stdout, args.superblock_copy);
             }
         },
     }
@@ -258,6 +283,104 @@ const Inspector = struct {
         }
     }
 
+    fn inspect_grid(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
+        const superblock_buffer = try inspector.read_buffer(
+            .superblock,
+            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
+            @sizeOf(SuperBlockHeader),
+        );
+        defer inspector.allocator.free(superblock_buffer);
+
+        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+        const free_set_size = superblock.vsr_state.checkpoint.free_set_size;
+        const free_set_buffer =
+            try inspector.allocator.alignedAlloc(u8, @alignOf(vsr.FreeSet.Word), free_set_size);
+        defer inspector.allocator.free(free_set_buffer);
+
+        var free_set_references = std.ArrayList(vsr.BlockReference).init(inspector.allocator);
+        defer free_set_references.deinit();
+
+        var free_set_addresses = std.ArrayList(u64).init(inspector.allocator);
+        defer free_set_addresses.deinit();
+
+        {
+            var free_set_block: ?vsr.BlockReference = .{
+                .address = superblock.vsr_state.checkpoint.free_set_last_block_address,
+                .checksum = superblock.vsr_state.checkpoint.free_set_last_block_checksum,
+            };
+
+            var free_set_cursor: usize = free_set_size;
+            while (free_set_block) |free_set_reference| {
+                const block = try inspector.read_block(
+                    free_set_reference.address,
+                    free_set_reference.checksum,
+                );
+                defer inspector.allocator.free(block);
+
+                const encoded_words = schema.TrailerNode.body(block);
+                free_set_cursor -= encoded_words.len;
+                stdx.copy_disjoint(.inexact, u8, free_set_buffer[free_set_cursor..], encoded_words);
+
+                try free_set_references.append(free_set_reference);
+                try free_set_addresses.append(free_set_reference.address);
+                free_set_block = schema.TrailerNode.previous(block);
+            }
+            assert(free_set_cursor == 0);
+        }
+
+        // This is not exact, but is an overestimate:
+        const free_set_blocks_max =
+            @divFloor(constants.storage_size_limit_max, constants.block_size);
+        var free_set = try vsr.FreeSet.init(inspector.allocator, free_set_blocks_max);
+        defer free_set.deinit(inspector.allocator);
+        free_set.open(.{
+            .encoded = &.{free_set_buffer},
+            .block_addresses = free_set_addresses.items,
+        });
+
+        const free_set_address_max = free_set.highest_address_acquired() orelse 0;
+        const free_set_compression_ratio =
+            @as(f64, @floatFromInt(stdx.div_ceil(free_set_address_max, 8))) /
+            @as(f64, @floatFromInt(superblock.vsr_state.checkpoint.free_set_size));
+
+        try output.print(
+            \\free_set.blocks_free={}
+            \\free_set.blocks_acquired={}
+            \\free_set.blocks_released={}
+            \\free_set.highest_address_acquired={?}
+            \\free_set.size={}
+            \\free_set.compression_ratio={d:0.4}
+            \\
+        ,
+            .{
+                free_set.count_free(),
+                free_set.count_acquired(),
+                free_set.count_released(),
+                free_set.highest_address_acquired(),
+                std.fmt.fmtIntSizeBin(superblock.vsr_state.checkpoint.free_set_size),
+                free_set_compression_ratio,
+            },
+        );
+
+        for (free_set_references.items, 0..) |reference, i| {
+            try output.print(
+                "free_set_trailer.blocks[{}]: address={} checksum={x:0>32}\n",
+                .{ i, reference.address, reference.checksum },
+            );
+        }
+    }
+
+    fn inspect_grid_block(inspector: *Inspector, output: anytype, address: u64) !void {
+        const block = try inspector.read_block(address, null);
+        defer inspector.allocator.free(block);
+
+        // If this is an unexpected (but valid) block, log an error but keep going.
+        const header = schema.header_from_block(block);
+        if (header.address != address) log.err("misdirected block", .{});
+
+        try print_block(output, block);
+    }
+
     fn read_buffer(
         inspector: *Inspector,
         zone: vsr.Zone,
@@ -278,6 +401,42 @@ const Inspector = struct {
         return buffer[0..size];
     }
 
+    fn read_block(inspector: *Inspector, address: u64, checksum: ?u128) !BlockPtrConst {
+        const buffer = try inspector.read_buffer(
+            .grid,
+            (address - 1) * constants.block_size,
+            constants.block_size,
+        );
+        errdefer inspector.allocator.free(buffer);
+
+        const header = std.mem.bytesAsValue(vsr.Header.Block, buffer[0..@sizeOf(vsr.Header)]);
+        if (!header.valid_checksum()) {
+            log.err(
+                "read_block: invalid block address={} checksum={?x:0>32} (bad checksum)",
+                .{ address, checksum },
+            );
+            return error.InvalidChecksum;
+        }
+
+        if (!header.valid_checksum_body(buffer[@sizeOf(vsr.Header)..header.size])) {
+            log.err(
+                "read_block: invalid block address={} checksum={?x:0>32} (bad checksum_body)",
+                .{ address, checksum },
+            );
+            return error.InvalidChecksumBody;
+        }
+
+        if (checksum) |checksum_| {
+            if (header.checksum != checksum_) {
+                log.err(
+                    "read_block: invalid block address={} checksum={?x:0>32} (wrong block)",
+                    .{ address, checksum },
+                );
+                return error.WrongBlock;
+            }
+        }
+        return buffer;
+    }
 };
 
 fn print_struct(
@@ -368,6 +527,99 @@ fn print_value(output: anytype, value: anytype) !void {
         }
     }
     try output.print("{}", .{value});
+}
+
+fn print_block(writer: anytype, block: BlockPtrConst) !void {
+    const header = schema.header_from_block(block);
+    try print_struct(writer, "header", header.*);
+
+    inline for (.{
+        .{ .block_type = .free_set, .Schema = schema.TrailerNode },
+        .{ .block_type = .client_sessions, .Schema = schema.TrailerNode },
+        .{ .block_type = .manifest, .Schema = schema.ManifestNode },
+        .{ .block_type = .index, .Schema = schema.TableIndex },
+        .{ .block_type = .data, .Schema = schema.TableData },
+    }) |pair| {
+        if (header.block_type == pair.block_type) {
+            try print_struct(writer, "header.metadata", pair.Schema.metadata(block).*);
+            break;
+        }
+    } else {
+        try writer.print("header.metadata: unknown block type\n", .{});
+    }
+
+    switch (header.block_type) {
+        .manifest => {
+            const manifest_node = schema.ManifestNode.from(block);
+            for (manifest_node.tables_const(block), 0..) |*table_info, entry_index| {
+                try writer.print(
+                    "entry[{:_>4}]: {s} level={} address={} checksum={x:0>32} " ++
+                        "tree_id={s} key={:0>64}..{:0>64} snapshot={}..{} values={}\n",
+                    .{
+                        entry_index,
+                        @tagName(table_info.label.event),
+                        table_info.label.level,
+                        table_info.address,
+                        table_info.checksum,
+                        format_tree_id(table_info.tree_id),
+                        std.fmt.fmtSliceHexLower(&table_info.key_min),
+                        std.fmt.fmtSliceHexLower(&table_info.key_max),
+                        table_info.snapshot_min,
+                        table_info.snapshot_max,
+                        table_info.value_count,
+                    },
+                );
+            }
+        },
+        .index => {
+            const index = schema.TableIndex.from(block);
+            for (
+                index.data_addresses_used(block),
+                index.data_checksums_used(block),
+                0..,
+            ) |data_address, data_checksum, i| {
+                try writer.print(
+                    "data_blocks[{:_>3}]: address={} checksum={x:0>32}\n",
+                    .{ i, data_address, data_checksum.value },
+                );
+            }
+        },
+        .data => {
+            const data = schema.TableData.from(block);
+            const metadata = data.block_metadata(block);
+            const data_bytes = data.block_values_used_bytes(block);
+            inline for (StateMachine.Forest.tree_infos) |tree_info| {
+                if (metadata.tree_id == tree_info.tree_id) {
+                    for (std.mem.bytesAsSlice(tree_info.Tree.Table.Value, data_bytes)) |value| {
+                        if (comptime is_composite_key(tree_info.Tree.Table.Value)) {
+                            try print_struct(writer, " ", .{ value.field, value.timestamp });
+                        } else {
+                            try print_struct(writer, " ", value);
+                        }
+                    }
+                    break;
+                }
+            } else {
+                try writer.print("body: unknown tree id\n", .{});
+            }
+        },
+        else => {
+            try writer.print(
+                "body: unimplemented for block_type={s}\n",
+                .{@tagName(header.block_type)},
+            );
+        },
+    }
+}
+
+fn format_tree_id(tree_id: u16) []const u8 {
+    inline for (StateMachine.Forest.tree_infos) |tree_info| {
+        if (tree_info.tree_id == tree_id) {
+            return tree_info.tree_name;
+        }
+    } else {
+        return "(unknown)";
+    }
 }
 
 fn print_prepare_body(output: anytype, prepare: []const u8) !void {
