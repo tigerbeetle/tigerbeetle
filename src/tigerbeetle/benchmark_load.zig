@@ -4,17 +4,7 @@
 //!
 //! It uses a single client to 1) create `account_count` accounts then 2)
 //! generate `transfer_count` transfers between random different
-//! accounts. It does not attempt to create more than
-//! `transfer_count_per_second` transfers per second, however it may reach
-//! less than this rate since it will wait at least as long as it takes
-//! for the cluster to respond before creating more transfers. It does not
-//! validate that the transfers succeed.
-
-const account_count_default: usize = 10_000;
-const transfer_count_default: usize = 10_000_000;
-const query_count_default: usize = 100;
-const transfer_count_per_second_default: usize = 1_000_000;
-
+//! accounts. It does not validate that the transfers succeed.
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
@@ -47,10 +37,6 @@ const account_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tb.Account),
 );
-const transfer_count_per_batch = @divExact(
-    constants.message_size_max - @sizeOf(vsr.Header),
-    @sizeOf(tb.Transfer),
-);
 
 pub fn main(
     allocator: std.mem.Allocator,
@@ -73,11 +59,6 @@ pub fn main(
     if (cli_args.account_count < 2) flags.fatal(
         "--account-count: need at least two accounts, got {}",
         .{cli_args.account_count},
-    );
-
-    const transfer_arrival_rate_ns = @divTrunc(
-        std.time.ns_per_s,
-        cli_args.transfer_count_per_second,
     );
 
     const client_id = std.crypto.random.int(u128);
@@ -115,7 +96,10 @@ pub fn main(
     defer allocator.free(query_latency_histogram);
 
     var batch_transfers =
-        try std.ArrayListUnmanaged(tb.Transfer).initCapacity(allocator, transfer_count_per_batch);
+        try std.ArrayListUnmanaged(tb.Transfer).initCapacity(
+        allocator,
+        cli_args.transfer_batch_size,
+    );
     defer batch_transfers.deinit(allocator);
 
     var statsd_opt: ?StatsD = null;
@@ -160,8 +144,8 @@ pub fn main(
         .batch_start_ns = 0,
         .transfer_count = cli_args.transfer_count,
         .transfer_pending = cli_args.transfer_pending,
-        .transfer_count_per_second = cli_args.transfer_count_per_second,
-        .transfer_arrival_rate_ns = transfer_arrival_rate_ns,
+        .transfer_batch_size = cli_args.transfer_batch_size,
+        .transfer_batch_delay_us = cli_args.transfer_batch_delay_us,
         .batch_index = 0,
         .transfers_sent = 0,
         .transfer_index = 0,
@@ -201,8 +185,8 @@ const Benchmark = struct {
     transfers_sent: usize,
     transfer_count: usize,
     transfer_pending: bool,
-    transfer_count_per_second: usize,
-    transfer_arrival_rate_ns: usize,
+    transfer_batch_size: usize,
+    transfer_batch_delay_us: usize,
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
@@ -287,14 +271,11 @@ const Benchmark = struct {
 
         b.batch_transfers.clearRetainingCapacity();
 
-        // Busy-wait for at least one transfer to be available.
-        while (b.transfer_next_arrival_ns >= b.timer.read()) {}
         b.batch_start_ns = b.timer.read();
 
         // Fill batch.
         while (b.transfer_index < b.transfer_count and
-            b.batch_transfers.items.len < transfer_count_per_batch and
-            b.transfer_next_arrival_ns < b.batch_start_ns)
+            b.batch_transfers.items.len < b.batch_transfers.capacity)
         {
             const debit_account_index = random.uintLessThan(u64, b.account_count);
             var credit_account_index = random.uintLessThan(u64, b.account_count);
@@ -326,8 +307,6 @@ const Benchmark = struct {
             });
 
             b.transfer_index += 1;
-            b.transfer_next_arrival_ns +=
-                random_int_exponential(random, u64, b.transfer_arrival_rate_ns);
         }
 
         assert(b.batch_transfers.items.len > 0);
@@ -378,6 +357,7 @@ const Benchmark = struct {
             statsd.gauge("benchmark.completed", b.transfers_sent) catch {};
         }
 
+        std.time.sleep(b.transfer_batch_delay_us * std.time.ns_per_us);
         b.create_transfers();
     }
 
@@ -389,8 +369,11 @@ const Benchmark = struct {
             b.batch_index,
             @as(f64, @floatFromInt(total_ns)) / std.time.ns_per_s,
         }) catch unreachable;
-        stdout.print("load offered = {} tx/s\n", .{
-            b.transfer_count_per_second,
+        stdout.print("transfer batch size = {} txs\n", .{
+            b.transfer_batch_size,
+        }) catch unreachable;
+        stdout.print("transfer batch delay = {} us\n", .{
+            b.transfer_batch_delay_us,
         }) catch unreachable;
         stdout.print("load accepted = {} tx/s\n", .{
             @divTrunc(
@@ -420,7 +403,10 @@ const Benchmark = struct {
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
             .timestamp_min = 0,
             .timestamp_max = 0,
-            .limit = transfer_count_per_batch,
+            .limit = @divExact(
+                constants.message_size_max - @sizeOf(vsr.Header),
+                @sizeOf(tb.Transfer),
+            ),
             .flags = .{
                 .credits = true,
                 .debits = true,
