@@ -1399,7 +1399,7 @@ pub const Header = extern struct {
 
 // Verify each Command's header type.
 comptime {
-    @setEvalBranchQuota(20000);
+    @setEvalBranchQuota(20_000);
 
     for (std.enums.values(Command)) |command| {
         const CommandHeader = Header.Type(command);
