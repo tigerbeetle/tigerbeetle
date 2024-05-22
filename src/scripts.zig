@@ -47,7 +47,7 @@ const CliArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
-        \\  zig build scripts -- inspect <superblock> <path>
+        \\  zig build scripts -- inspect <superblock|wal> <path>
         \\
         \\  zig build scripts -- release --run-number=<run> --sha=<commit>
         \\
@@ -63,6 +63,16 @@ const CliArgs = union(enum) {
         \\        In the left column of the output, "|" denotes which copies have a particular value.
         \\        "||||" means that all four superblock copies are in agreement.
         \\        "| | " means that the value matches in copies 0/2, but differs from copies 1/3.
+        \\
+        \\  wal
+        \\        Inspect the WAL headers and prepares.
+        \\        In the left column of the output, "|" denotes which set of headers has each value.
+        \\        "||" denotes that the prepare and the redundant header match.
+        \\        "| " is the redundant header.
+        \\        " |" is the prepare's header.
+        \\
+        \\  wal --slot=<slot>
+        \\        Inspect the WAL header/prepare in the given slot.
         \\
         \\Options (release):
         \\

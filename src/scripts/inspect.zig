@@ -20,6 +20,10 @@ pub const CliArgs = union(enum) {
     superblock: struct {
         positional: struct { path: []const u8 },
     },
+    wal: struct {
+        slot: ?usize = null,
+        positional: struct { path: []const u8 },
+    },
 };
 
 pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
@@ -36,6 +40,17 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     switch (cli_args) {
         .superblock => try inspector.inspect_superblock(stdout),
+        .wal => |args| {
+            if (args.slot) |slot| {
+                if (slot > constants.journal_slot_count) {
+                    log.err("--slot: slot exceeds {}", .{constants.journal_slot_count - 1});
+                    return error.InvalidSlot;
+                }
+                try inspector.inspect_wal_slot(stdout, slot);
+            } else {
+                try inspector.inspect_wal(stdout);
+            }
+        },
     }
 
     try stdout_buffer.flush();
@@ -144,6 +159,102 @@ const Inspector = struct {
 
                 try print_struct(output, label_stream.getWritten(), @field(header, field.name));
             }
+        }
+    }
+
+    fn inspect_wal(inspector: *Inspector, output: anytype) !void {
+        const headers_buffer =
+            try inspector.read_buffer(.wal_headers, 0, constants.journal_size_headers);
+        defer inspector.allocator.free(headers_buffer);
+
+        for (std.mem.bytesAsSlice(vsr.Header.Prepare, headers_buffer), 0..) |*wal_header, slot| {
+            const offset = slot * constants.message_size_max;
+            const prepare_buffer =
+                try inspector.read_buffer(.wal_prepares, offset, constants.message_size_max);
+            defer inspector.allocator.free(prepare_buffer);
+
+            const wal_prepare = std.mem.bytesAsValue(
+                vsr.Header.Prepare,
+                prepare_buffer[0..@sizeOf(vsr.Header)],
+            );
+
+            const wal_prepare_body_valid =
+                wal_prepare.valid_checksum() and
+                wal_prepare.valid_checksum_body(
+                    prepare_buffer[@sizeOf(vsr.Header)..wal_prepare.size],
+                );
+
+            const header_pair = [_]*const vsr.Header.Prepare{ wal_header, wal_prepare };
+
+            var group_by = GroupByType(2){};
+            group_by.compare(std.mem.asBytes(wal_header));
+            group_by.compare(std.mem.asBytes(wal_prepare));
+
+            var label_buffer: [64]u8 = undefined;
+            for (group_by.groups()) |group| {
+                const header = header_pair[group.findFirstSet().?];
+                const header_valid = header.valid_checksum() and
+                    (!group.isSet(1) or wal_prepare_body_valid);
+
+                const mark: u8 = if (header_valid) '|' else 'X';
+                var label_stream = std.io.fixedBufferStream(&label_buffer);
+                try label_stream.writer().writeByte(if (group.isSet(0)) mark else ' ');
+                try label_stream.writer().writeByte(if (group.isSet(1)) mark else ' ');
+                try label_stream.writer().print("{:_>4}: ", .{slot});
+
+                try print_struct(output, label_stream.getWritten(), .{
+                    "checksum=",  header.checksum,
+                    "release=",   header.release,
+                    "view=",      header.view,
+                    "op=",        header.op,
+                    "operation=", header.operation,
+                });
+            }
+        }
+    }
+
+    fn inspect_wal_slot(inspector: *Inspector, output: anytype, slot: usize) !void {
+        assert(slot <= constants.journal_slot_count);
+
+        const headers_buffer =
+            try inspector.read_buffer(.wal_headers, 0, constants.journal_size_headers);
+        defer inspector.allocator.free(headers_buffer);
+
+        const prepare_buffer = try inspector.read_buffer(
+            .wal_prepares,
+            slot * constants.message_size_max,
+            constants.message_size_max,
+        );
+        defer inspector.allocator.free(prepare_buffer);
+
+        const headers = std.mem.bytesAsSlice(vsr.Header.Prepare, headers_buffer);
+        const prepare_header =
+            std.mem.bytesAsValue(vsr.Header.Prepare, prepare_buffer[0..@sizeOf(vsr.Header)]);
+
+        const prepare_body_valid =
+            prepare_header.valid_checksum() and
+            prepare_header.valid_checksum_body(
+                prepare_buffer[@sizeOf(vsr.Header)..prepare_header.size],
+            );
+
+        const copies: [2]*const vsr.Header.Prepare = .{ &headers[slot], prepare_header };
+
+        var group_by = GroupByType(2){};
+        for (copies) |h| group_by.compare(std.mem.asBytes(h));
+
+        var label_buffer: [2]u8 = undefined;
+        for (group_by.groups()) |group| {
+            const header = copies[group.findFirstSet().?];
+            const header_mark: u8 = if (header.valid_checksum()) '|' else 'X';
+            label_buffer[0] = if (group.isSet(0)) header_mark else ' ';
+            label_buffer[1] = if (group.isSet(1)) header_mark else ' ';
+
+            try print_struct(output, &label_buffer, header.*);
+        }
+        try print_prepare_body(output, prepare_buffer);
+
+        if (!prepare_body_valid) {
+            try output.writeAll("error: invalid prepare body!");
         }
     }
 
@@ -257,6 +368,72 @@ fn print_value(output: anytype, value: anytype) !void {
         }
     }
     try output.print("{}", .{value});
+}
+
+fn print_prepare_body(output: anytype, prepare: []const u8) !void {
+    const operation_events = comptime result: {
+        const OperationEvent = struct {
+            operation: vsr.Operation,
+            Event: type,
+            min: usize,
+            max: usize,
+        };
+
+        var list: []const OperationEvent = &[_]OperationEvent{
+            .{ .operation = .reserved, .Event = extern struct {}, .min = 1, .max = 1 },
+            .{ .operation = .root, .Event = extern struct {}, .min = 1, .max = 1 },
+            .{ .operation = .register, .Event = extern struct {}, .min = 1, .max = 1 },
+            .{ .operation = .reconfigure, .Event = vsr.ReconfigurationRequest, .min = 1, .max = 1 },
+            .{ .operation = .pulse, .Event = extern struct {}, .min = 1, .max = 1 },
+            .{ .operation = .upgrade, .Event = vsr.UpgradeRequest, .min = 1, .max = 1 },
+        };
+
+        for (std.enums.values(StateMachine.Operation)) |operation| {
+            if (operation == .pulse) continue;
+            list = list ++ [_]OperationEvent{.{
+                .operation = vsr.Operation.from(StateMachine, operation),
+                .Event = StateMachine.Event(operation),
+                .min = 0,
+                .max = @field(StateMachine.constants.batch_max, @tagName(operation)),
+            }};
+        }
+        break :result list;
+    };
+
+    const header = std.mem.bytesAsValue(vsr.Header.Prepare, prepare[0..@sizeOf(vsr.Header)]);
+    inline for (operation_events) |operation_event| {
+        if (header.operation == operation_event.operation) {
+            const event_size = @sizeOf(operation_event.Event);
+            const body_size = header.size - @sizeOf(vsr.Header);
+            if ((event_size == 0 and body_size == 0) or
+                (event_size != 0 and body_size % event_size == 0))
+            {
+                if (body_size == 0) {
+                    try output.print("(no body)\n", .{});
+                } else {
+                    if (event_size == 0) unreachable;
+
+                    var label_buffer: [128]u8 = undefined;
+                    for (std.mem.bytesAsSlice(
+                        operation_event.Event,
+                        prepare[@sizeOf(vsr.Header)..header.size],
+                    ), 0..) |event, i| {
+                        var label_stream = std.io.fixedBufferStream(&label_buffer);
+                        try label_stream.writer().print("events[{}]: ", .{i});
+                        try print_struct(output, label_stream.getWritten(), event);
+                    }
+                }
+            } else {
+                try output.print(
+                    "error: unexpected body size={}, @sizeOf(Event)={}\n",
+                    .{ header.size, event_size },
+                );
+            }
+            return;
+        }
+    } else {
+        try output.print("error: unimplemented operation={s}\n", .{@tagName(header.operation)});
+    }
 }
 
 fn GroupByType(comptime count_max: usize) type {
