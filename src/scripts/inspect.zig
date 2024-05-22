@@ -44,8 +44,7 @@ pub const CliArgs = union(enum) {
     },
     tables: struct {
         superblock_copy: u8 = 0,
-        // TODO Additionally allow the tree to be passed in as a string tree name instead.
-        tree: u16,
+        tree: []const u8,
         level: ?u6 = null,
         positional: struct { path: []const u8 },
     },
@@ -55,6 +54,7 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
 
     const stdout = stdout_buffer.writer();
+    const stderr = std.io.getStdErr().writer();
 
     const path = switch (cli_args) {
         inline else => |args| args.positional.path,
@@ -68,8 +68,11 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         .wal => |args| {
             if (args.slot) |slot| {
                 if (slot >= constants.journal_slot_count) {
-                    log.err("--slot: slot exceeds {}", .{constants.journal_slot_count - 1});
-                    return error.InvalidSlot;
+                    try stderr.print(
+                        "--slot: slot exceeds {}\n",
+                        .{constants.journal_slot_count - 1},
+                    );
+                    std.os.exit(1);
                 }
                 try inspector.inspect_wal_slot(stdout, slot);
             } else {
@@ -79,8 +82,8 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         .replies => |args| {
             if (args.slot) |slot| {
                 if (slot >= constants.clients_max) {
-                    log.err("--slot: slot exceeds {}", .{constants.clients_max - 1});
-                    return error.InvalidSlot;
+                    try stderr.print("--slot: slot exceeds {}\n", .{constants.clients_max - 1});
+                    std.os.exit(1);
                 }
                 try inspector.inspect_replies_slot(stdout, args.superblock_copy, slot);
             } else {
@@ -89,11 +92,11 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         },
         .grid => |args| {
             if (args.superblock_copy >= constants.superblock_copies) {
-                log.err(
-                    "--superblock-copy: copy exceeds {}",
+                try stderr.print(
+                    "--superblock-copy: copy exceeds {}\n",
                     .{constants.superblock_copies - 1},
                 );
-                return error.InvalidSuperblockCopy;
+                std.os.exit(1);
             }
 
             if (args.block) |address| {
@@ -104,18 +107,22 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         },
         .manifest => |args| {
             if (args.superblock_copy >= constants.superblock_copies) {
-                log.err(
-                    "--superblock-copy: copy exceeds {}",
+                try stderr.print(
+                    "--superblock-copy: copy exceeds {}\n",
                     .{constants.superblock_copies - 1},
                 );
-                return error.InvalidSuperblockCopy;
+                std.os.exit(1);
             }
 
             try inspector.inspect_manifest(stdout, args.superblock_copy);
         },
         .tables => |args| {
+            const tree_id = parse_tree_id(args.tree) orelse {
+                try stderr.print("--tree: invalid tree name/id: {s}\n", .{args.tree});
+                std.os.exit(1);
+            };
             try inspector.inspect_tables(stdout, args.superblock_copy, .{
-                .tree_id = args.tree,
+                .tree_id = tree_id,
                 .level = args.level,
             });
         },
@@ -907,6 +914,22 @@ fn format_tree_id(tree_id: u16) []const u8 {
     } else {
         return "(unknown)";
     }
+}
+
+fn parse_tree_id(tree_label: []const u8) ?u16 {
+    const tree_label_integer = std.fmt.parseInt(u16, tree_label, 10) catch null;
+    inline for (StateMachine.Forest.tree_infos) |tree_info| {
+        if (std.mem.eql(u8, tree_info.tree_name, tree_label)) {
+            return tree_info.tree_id;
+        }
+
+        if (tree_label_integer) |tree_id| {
+            if (tree_info.tree_id == tree_id) {
+                return tree_id;
+            }
+        }
+    }
+    return null;
 }
 
 const operation_schemas = list: {

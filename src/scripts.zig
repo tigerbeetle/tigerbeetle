@@ -95,8 +95,9 @@ const CliArgs = union(enum) {
         \\  manifest [--superblock-copy=<copy>]
         \\        Inspect the LSM manifest.
         \\
-        \\  tables --tree=<integer> [--level=<integer>] [--superblock-copy=<copy>]
+        \\  tables --tree=<name|id> [--level=<integer>] [--superblock-copy=<copy>]
         \\        List the tables matching the given tree/level.
+        \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
         \\
         \\Options (release):
         \\
