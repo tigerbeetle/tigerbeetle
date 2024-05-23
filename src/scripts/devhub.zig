@@ -38,6 +38,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
     const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
     const datafile_bytes = try get_measurement(benchmark_result, "datafile", "bytes");
+    const datafile_empty_bytes = try get_measurement(benchmark_result, "datafile empty", "bytes");
 
     const batch = MetricBatch{
         .timestamp = commit_timestamp,
@@ -54,6 +55,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             .{ .name = "query p100", .value = query_p100_ms, .unit = "ms" },
             .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
             .{ .name = "datafile", .value = datafile_bytes, .unit = "bytes" },
+            .{ .name = "datafile empty", .value = datafile_empty_bytes, .unit = "bytes" },
         },
     };
 
