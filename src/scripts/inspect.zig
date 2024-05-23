@@ -7,6 +7,7 @@ const log = std.log.scoped(.inspect);
 
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
+const fatal = vsr.flags.fatal;
 const schema = vsr.lsm.schema;
 const constants = vsr.constants;
 const tb = @import("../tigerbeetle.zig");
@@ -54,7 +55,6 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
 
     const stdout = stdout_buffer.writer();
-    const stderr = std.io.getStdErr().writer();
 
     const path = switch (cli_args) {
         inline else => |args| args.positional.path,
@@ -68,11 +68,10 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         .wal => |args| {
             if (args.slot) |slot| {
                 if (slot >= constants.journal_slot_count) {
-                    try stderr.print(
-                        "--slot: slot exceeds {}\n",
+                    return fatal(
+                        "--slot: slot exceeds {}",
                         .{constants.journal_slot_count - 1},
                     );
-                    std.os.exit(1);
                 }
                 try inspector.inspect_wal_slot(stdout, slot);
             } else {
@@ -82,8 +81,7 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         .replies => |args| {
             if (args.slot) |slot| {
                 if (slot >= constants.clients_max) {
-                    try stderr.print("--slot: slot exceeds {}\n", .{constants.clients_max - 1});
-                    std.os.exit(1);
+                    return fatal("--slot: slot exceeds {}", .{constants.clients_max - 1});
                 }
                 try inspector.inspect_replies_slot(stdout, args.superblock_copy, slot);
             } else {
@@ -92,11 +90,10 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         },
         .grid => |args| {
             if (args.superblock_copy >= constants.superblock_copies) {
-                try stderr.print(
+                return fatal(
                     "--superblock-copy: copy exceeds {}\n",
                     .{constants.superblock_copies - 1},
                 );
-                std.os.exit(1);
             }
 
             if (args.block) |address| {
@@ -107,19 +104,17 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         },
         .manifest => |args| {
             if (args.superblock_copy >= constants.superblock_copies) {
-                try stderr.print(
+                return fatal(
                     "--superblock-copy: copy exceeds {}\n",
                     .{constants.superblock_copies - 1},
                 );
-                std.os.exit(1);
             }
 
             try inspector.inspect_manifest(stdout, args.superblock_copy);
         },
         .tables => |args| {
             const tree_id = parse_tree_id(args.tree) orelse {
-                try stderr.print("--tree: invalid tree name/id: {s}\n", .{args.tree});
-                std.os.exit(1);
+                return fatal("--tree: invalid tree name/id: {s}\n", .{args.tree});
             };
             try inspector.inspect_tables(stdout, args.superblock_copy, .{
                 .tree_id = tree_id,
