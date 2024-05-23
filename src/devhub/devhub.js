@@ -51,11 +51,15 @@ async function mainMetrics() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
   const data = await (await fetch(dataUrl)).text();
+  const maxBatches = 200;
   const batches = data.split("\n")
     .filter((it) => it.length > 0)
-    .map((it) => JSON.parse(it));
+    .map((it) => JSON.parse(it))
+    .slice(-1 * maxBatches)
+    .reverse();
+
   const series = batchesToSeries(batches);
-  plotSeries(series, document.querySelector("#charts"));
+  plotSeries(series, document.querySelector("#charts"), batches.length);
 }
 
 async function mainSeeds() {
@@ -150,11 +154,11 @@ function pullRequestNumber(record) {
 //
 // This doesn't depend on particular plotting library though.
 function batchesToSeries(batches) {
-  const result = new Map();
-  for (const batch of batches) {
+  const results = new Map();
+  for (const [index, batch] of batches.entries()) {
     for (const metric of batch.metrics) {
-      if (!result.has(metric.name)) {
-        result.set(metric.name, {
+      if (!results.has(metric.name)) {
+        results.set(metric.name, {
           name: metric.name,
           unit: undefined,
           value: [],
@@ -163,7 +167,7 @@ function batchesToSeries(batches) {
         });
       }
 
-      const series = result.get(metric.name);
+      const series = results.get(metric.name);
       assert(series.name == metric.name);
 
       if (series.unit) {
@@ -172,17 +176,21 @@ function batchesToSeries(batches) {
         series.unit = metric.unit;
       }
 
-      series.value.push(metric.value);
+      // Even though our x-axis is time, we want to spread things out evenly by batch, rather than
+      // group according to time. Apex charts is much quicker when given an x value, even though it
+      // isn't strictly needed.
+      series.value.push([batches.length - index, metric.value]);
       series.git_commit.push(batch.attributes.git_commit);
       series.timestamp.push(batch.timestamp);
     }
   }
-  return result.values();
+
+  return results;
 }
 
 // Plot time series using <https://apexcharts.com>.
-function plotSeries(seriesList, rootNode) {
-  for (const series of seriesList) {
+function plotSeries(seriesList, rootNode, batchCount) {
+  for (const series of seriesList.values()) {
     let options = {
       title: {
         text: series.name,
@@ -190,6 +198,9 @@ function plotSeries(seriesList, rootNode) {
       chart: {
         type: "line",
         height: "400px",
+        animations: {
+          enabled: false,
+        },
         events: {
           dataPointSelection: (event, chartContext, { dataPointIndex }) => {
             window.open(
@@ -207,9 +218,18 @@ function plotSeries(seriesList, rootNode) {
         data: series.value,
       }],
       xaxis: {
-        categories: series.timestamp.map((timestamp) =>
-          new Date(timestamp * 1000).toLocaleDateString()
-        ),
+        categories: Array(series.value[series.value.length - 1][0]).fill("")
+          .concat(
+            series.timestamp.map((timestamp) =>
+              new Date(timestamp * 1000).toLocaleDateString()
+            ).reverse(),
+          ),
+        min: 0,
+        max: batchCount,
+        tickAmount: 15,
+        axisTicks: {
+          show: false,
+        },
         tooltip: {
           enabled: false,
         },

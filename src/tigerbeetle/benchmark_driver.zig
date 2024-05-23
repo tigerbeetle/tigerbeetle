@@ -47,12 +47,14 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
         }
     };
 
+    var maybe_stat_empty: ?std.fs.File.Stat = null;
     if (args.addresses == null) {
         const me = try std.fs.selfExePathAlloc(allocator);
         defer allocator.free(me);
 
         try format(allocator, .{ .tigerbeetle = me, .data_file = data_file });
         data_file_created = true;
+        maybe_stat_empty = try std.fs.cwd().statFile(data_file);
 
         tigerbeetle_process = try start(allocator, .{
             .tigerbeetle = me,
@@ -66,6 +68,11 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
 
     if (data_file_created) {
         const stat = try std.fs.cwd().statFile(data_file);
+        if (maybe_stat_empty) |stat_empty| {
+            try std.io.getStdOut().writer().print("\ndatafile empty = {} bytes\n", .{
+                stat_empty.size,
+            });
+        }
         try std.io.getStdOut().writer().print("datafile = {} bytes\n", .{stat.size});
     }
 }
