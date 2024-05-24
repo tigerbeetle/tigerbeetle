@@ -95,7 +95,15 @@ pub fn SetAssociativeCacheType(
         /// We don't require `value_count_max` in `init` to be a power of 2, but we do require
         /// it to be a multiple of `value_count_max_multiple`. The calculation below
         /// follows from a multiple which will satisfy all asserts.
-        pub const value_count_max_multiple = layout.cache_line_size * layout.ways * layout.clock_bits;
+        pub const value_count_max_multiple: u64 = @max(
+            // `values`:
+            @divExact(
+                @max(@sizeOf(Value), layout.cache_line_size),
+                @min(@sizeOf(Value), layout.cache_line_size),
+            ) * layout.ways,
+            @divExact(layout.cache_line_size * 8, layout.clock_bits), // `counts`
+            @divExact(layout.cache_line_size * 8 * layout.ways, clock_hand_bits), // `clocks`
+        );
 
         name: []const u8,
         sets: u64,
