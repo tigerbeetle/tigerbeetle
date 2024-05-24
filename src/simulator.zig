@@ -191,10 +191,10 @@ pub fn main() !void {
             .accounting => .{
                 .batch_size_limit = batch_size_limit,
                 .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = 2048,
-                .cache_entries_transfers = 2048,
-                .cache_entries_posted = 2048,
-                .cache_entries_account_balances = 2048,
+                .cache_entries_accounts = 256,
+                .cache_entries_transfers = 256,
+                .cache_entries_posted = 256,
+                .cache_entries_account_balances = 256,
             },
         },
     };

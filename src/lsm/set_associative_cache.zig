@@ -8,6 +8,7 @@ const meta = std.meta;
 
 const constants = @import("../constants.zig");
 const div_ceil = @import("../stdx.zig").div_ceil;
+const maybe = @import("../stdx.zig").maybe;
 const verify = constants.verify;
 
 const tracer = @import("../tracer.zig");
@@ -102,7 +103,6 @@ pub fn SetAssociativeCacheType(
                 @min(@sizeOf(Value), layout.cache_line_size),
             ) * layout.ways,
             @divExact(layout.cache_line_size * 8, layout.clock_bits), // `counts`
-            @divExact(layout.cache_line_size * 8 * layout.ways, clock_hand_bits), // `clocks`
         );
 
         name: []const u8,
@@ -159,9 +159,12 @@ pub fn SetAssociativeCacheType(
             assert(counts_size >= layout.cache_line_size);
             assert(counts_size % layout.cache_line_size == 0);
 
+            // Each clock hand is guaranteed (by comptime asserts) to not span multiple cache lines.
+            // But in order to shrink the lower-bound cache size, we do not require that `clocks`
+            // itself is a multiple of the cache line size.
             const clocks_size = @divExact(sets * clock_hand_bits, 8);
-            assert(clocks_size >= layout.cache_line_size);
-            assert(clocks_size % layout.cache_line_size == 0);
+            maybe(clocks_size >= layout.cache_line_size);
+            maybe(clocks_size % layout.cache_line_size == 0);
 
             assert(value_count_max % value_count_max_multiple == 0);
 
@@ -178,7 +181,7 @@ pub fn SetAssociativeCacheType(
             const counts = try allocator.alloc(u64, @divExact(counts_size, @sizeOf(u64)));
             errdefer allocator.free(counts);
 
-            const clocks = try allocator.alloc(u64, @divExact(clocks_size, @sizeOf(u64)));
+            const clocks = try allocator.alloc(u64, div_ceil(clocks_size, @sizeOf(u64)));
             errdefer allocator.free(clocks);
 
             // Explicitly allocated so that get / get_index can be `*const Self`.
