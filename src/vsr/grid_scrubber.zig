@@ -18,8 +18,6 @@
 //! and try to repair the block from another replica, only to discover that the copy of the block on
 //! the remote replica's disk is *also* faulty.
 //!
-//! TODO Start replicas scrubbing from distinct/random offsets in the tour to farther minimize risk
-//! of cluster data loss. (Right now replicas will often have identical scrubbing schedules.)
 //! TODO Accelerate scrubbing rate (at runtime) if faults are detected frequently.
 const std = @import("std");
 const assert = std.debug.assert;
@@ -45,7 +43,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
     return struct {
         const GridScrubber = @This();
         const Grid = GridType(Forest.Storage);
-        const ForestTableIterator = ForestTableIteratorType(Forest);
+        const WrappingForestTableIterator = WrappingForestTableIteratorType(Forest);
         const SuperBlock = vsr.SuperBlockType(Forest.Storage);
         const ManifestBlockIterator = ManifestBlockIteratorType(Forest.ManifestLog);
         const CheckpointTrailer = vsr.CheckpointTrailerType(Forest.Storage);
@@ -98,11 +96,12 @@ pub fn GridScrubberType(comptime Forest: type) type {
         reads_done: FIFO(Read) = .{ .name = "grid_scrubber_reads_done" },
 
         /// Track the progress through the grid.
-        /// - On an idle replica (i.e. not committing), a full tour from "init" to "done" scrubs
-        ///   every acquired block in the grid.
-        /// - On a non-idle replica, a full tour from "init" to "done" scrubs all blocks that
-        ///   survived the entire span of the tour, but may not scrub blocks that were added during
-        ///   the tour.
+        ///
+        /// Every full tour...
+        /// - ...on an idle replica (i.e. not committing) scrubs every acquired block in the grid.
+        /// - ...on a non-idle replica scrubs all blocks that survived the entire span of the tour
+        ///   without moving to a different level, but may not scrub blocks that were added during
+        ///   the tour or which moved.
         tour: union(enum) {
             init,
             done,
@@ -123,7 +122,10 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
         /// When tour == .init, tour_tables == .{}
         /// When tour == .done, tour_tables.next() == null.
-        tour_tables: ForestTableIterator,
+        tour_tables: ?WrappingForestTableIterator,
+        /// The "offset" within the LSM from which scrubber table iteration cycles begin/end.
+        /// This varies between replicas to minimize risk of data loss.
+        tour_tables_origin: ?WrappingForestTableIterator.Origin,
 
         /// Contains a table index block when tour=table_data.
         tour_index_block: BlockPtr,
@@ -144,7 +146,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 .forest = forest,
                 .client_sessions_checkpoint = client_sessions_checkpoint,
                 .tour = .init,
-                .tour_tables = .{},
+                .tour_tables = null,
+                .tour_tables_origin = null,
                 .tour_index_block = tour_index_block,
                 .tour_blocks_scrubbed_count = 0,
             };
@@ -156,6 +159,71 @@ pub fn GridScrubberType(comptime Forest: type) type {
             scrubber.* = undefined;
         }
 
+        pub fn open(scrubber: *GridScrubber, random: std.rand.Random) void {
+            // Compute the tour origin exactly once.
+            if (scrubber.tour_tables_origin) |_| {
+                return;
+            }
+
+            // Each replica's scrub origin is chosen independently.
+            // This reduces the chance that the same block across multiple replicas can bitrot
+            // without being discovered and repaired by a scrubber.
+            //
+            // To accomplish this, try to select an origin uniformly across all blocks:
+            // - Bias towards levels with more tables.
+            // - Bias towards trees with larger Values (since their tables have more blocks).
+            // - (Though, for ease of implementation, the origin is always at the beginning of a
+            //   tree's level, never in the middle.)
+            assert(scrubber.tour == .init);
+
+            const tree_count = Forest.tree_infos.len;
+
+            var weights: [tree_count][constants.lsm_levels]u64 = undefined;
+            var weights_sum: u64 = 0;
+            for (0..constants.lsm_levels) |level| {
+                inline for (Forest.tree_infos, 0..) |tree_info, tree_index| {
+                    const tree_id = comptime Forest.tree_id_cast(tree_info.tree_id);
+                    const tree = scrubber.forest.tree_for_id_const(tree_id);
+                    const levels = &tree.manifest.levels;
+                    weights[tree_index][level] =
+                        levels[level].tables.len() * @sizeOf(tree_info.Tree.Table.Value);
+                    weights_sum += levels[level].tables.len();
+                }
+            }
+
+            scrubber.tour_tables_origin = origin: {
+                if (weights_sum == 0) {
+                    break :origin .{
+                        .level = 0,
+                        .tree_id = Forest.tree_infos[0].tree_id,
+                    };
+                }
+
+                var origin_offset = random.uintLessThan(u64, weights_sum);
+                for (0..constants.lsm_levels) |level| {
+                    inline for (Forest.tree_infos, 0..) |tree_info, tree_index| {
+                        if (origin_offset >= weights[tree_index][level]) {
+                            origin_offset -= weights[tree_index][level];
+                        } else {
+                            break :origin .{
+                                .level = @intCast(level),
+                                .tree_id = tree_info.tree_id,
+                            };
+                        }
+                    }
+                }
+                unreachable;
+            };
+
+            scrubber.tour_tables = WrappingForestTableIterator.init(scrubber.tour_tables_origin.?);
+
+            log.debug("{}: open: tour_tables_origin.level={} tour_tables_origin.tree_id={}", .{
+                scrubber.superblock.replica_index.?,
+                scrubber.tour_tables_origin.?.level,
+                scrubber.tour_tables_origin.?.tree_id,
+            });
+        }
+
         pub fn cancel(scrubber: *GridScrubber) void {
             for ([_]FIFO(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
                 var reads_iterator = reads_fifo.peek();
@@ -165,8 +233,10 @@ pub fn GridScrubberType(comptime Forest: type) type {
             }
 
             scrubber.tour = .init;
-            scrubber.tour_tables = .{};
             scrubber.tour_blocks_scrubbed_count = 0;
+            if (scrubber.tour_tables_origin) |tour_tables_origin| {
+                scrubber.tour_tables = WrappingForestTableIterator.init(tour_tables_origin);
+            }
         }
 
         /// Cancel queued reads to blocks that will be released by the imminent checkpoint.
@@ -322,6 +392,10 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         fn tour_next(scrubber: *GridScrubber) ?BlockId {
+            assert(scrubber.superblock.opened);
+            assert(scrubber.forest.manifest_log.opened);
+            assert(scrubber.tour_tables_origin != null);
+
             const tour = &scrubber.tour;
             if (tour.* == .init) {
                 tour.* = .table_index;
@@ -365,7 +439,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             }
 
             if (tour.* == .table_index) {
-                if (scrubber.tour_tables.next(scrubber.forest)) |table_info| {
+                if (scrubber.tour_tables.?.next(scrubber.forest)) |table_info| {
                     if (Forest.Storage == TestStorage) {
                         scrubber.superblock.storage.verify_table(
                             table_info.address,
@@ -450,10 +524,60 @@ pub fn GridScrubberType(comptime Forest: type) type {
             // Wrap around to the next cycle.
             assert(tour.* == .done);
             tour.* = .init;
-            scrubber.tour_tables = .{};
+            scrubber.tour_tables = WrappingForestTableIterator.init(scrubber.tour_tables_origin.?);
             scrubber.tour_blocks_scrubbed_count = 0;
 
             return null;
+        }
+    };
+}
+
+fn WrappingForestTableIteratorType(comptime Forest: type) type {
+    return struct {
+        const WrappingForestTableIterator = @This();
+        const ForestTableIterator = ForestTableIteratorType(Forest);
+
+        origin: Origin,
+        tables: ForestTableIterator,
+        wrapped: bool,
+
+        pub const Origin = struct {
+            level: u6,
+            tree_id: u16,
+        };
+
+        pub fn init(origin: Origin) WrappingForestTableIterator {
+            return .{
+                .origin = origin,
+                .tables = .{
+                    .level = origin.level,
+                    .tree_id = origin.tree_id,
+                },
+                .wrapped = false,
+            };
+        }
+
+        pub fn next(
+            iterator: *WrappingForestTableIterator,
+            forest: *const Forest,
+        ) ?schema.ManifestNode.TableInfo {
+            const table = iterator.tables.next(forest) orelse {
+                if (iterator.wrapped) {
+                    return null;
+                } else {
+                    iterator.wrapped = true;
+                    iterator.tables = .{};
+                    return iterator.tables.next(forest);
+                }
+            };
+
+            if (iterator.wrapped and
+                iterator.origin.level <= table.label.level and
+                iterator.origin.tree_id <= table.tree_id)
+            {
+                return null;
+            }
+            return table;
         }
     };
 }
