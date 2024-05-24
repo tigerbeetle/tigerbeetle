@@ -97,10 +97,6 @@ const replica_count = 6;
 const node_count = 1024;
 const scan_results_max = 4096;
 const events_max = 10_000_000;
-const tree_options = .{
-    // This is the smallest size that set_associative_cache will allow us.
-    .cache_entries_max = 2048,
-};
 
 // We must call compact after every 'batch'.
 // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
