@@ -355,7 +355,7 @@ test "cache_map: unit" {
     const allocator = testing.allocator;
 
     var cache_map = try TestCacheMap.init(allocator, .{
-        .cache_value_count_max = 2048,
+        .cache_value_count_max = TestCacheMap.Cache.value_count_max_multiple,
         .scope_value_count_max = 32,
         .map_value_count_max = 32,
         .name = "test map",

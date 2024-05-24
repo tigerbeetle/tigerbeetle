@@ -109,13 +109,15 @@ pub fn StateMachineType(
         callback: ?*const fn (state_machine: *StateMachine) void = null,
 
         pub fn init(allocator: std.mem.Allocator, grid: *Grid, options: Options) !StateMachine {
+            const things_cache_entries_max =
+                ThingGroove.ObjectsCache.Cache.value_count_max_multiple;
             var forest = try Forest.init(
                 allocator,
                 grid,
                 options.lsm_forest_node_count,
                 .{
                     .things = .{
-                        .cache_entries_max = 2048,
+                        .cache_entries_max = things_cache_entries_max,
                         .prefetch_entries_for_read_max = 0,
                         .prefetch_entries_for_update_max = 1,
                         .tree_options_object = .{ .batch_value_count_limit = 1 },
