@@ -232,10 +232,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 }
             }
 
-            scrubber.tour = .init;
-            scrubber.tour_blocks_scrubbed_count = 0;
-            if (scrubber.tour_tables_origin) |tour_tables_origin| {
-                scrubber.tour_tables = WrappingForestTableIterator.init(tour_tables_origin);
+            if (scrubber.tour == .table_data) {
+                // Skip scrubbing the table data; the table may not exist when state sync finishes.
+                scrubber.tour = .table_index;
             }
         }
 
