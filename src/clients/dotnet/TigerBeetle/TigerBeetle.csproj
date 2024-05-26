@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <Import Project="TigerBeetle.props" />
   <PropertyGroup>
-    <TargetFrameworks>net7.0</TargetFrameworks>
+    <TargetFrameworks>net7.0;net8.0</TargetFrameworks>
     <Platforms>AnyCPU</Platforms>
     <LangVersion>10</LangVersion>
     <Nullable>enable</Nullable>
