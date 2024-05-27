@@ -1,5 +1,34 @@
 # TigerBeetle Changelog
 
+## 2024-05-27
+
+### Features
+
+- [#1975](https://github.com/tigerbeetle/tigerbeetle/pull/1975)
+
+      Build our .NET client for .NET 8, the current LTS version. Thanks @woksin!
+
+### Internals
+
+- [#1971](https://github.com/tigerbeetle/tigerbeetle/pull/1971)
+
+      Document recovery case `@L` in VSR.
+
+- [#1965](https://github.com/tigerbeetle/tigerbeetle/pull/1965)
+
+      We implicitly supported underscores in numerical CLI flags. Add tests to make this explicit.
+
+- [#1974](https://github.com/tigerbeetle/tigerbeetle/pull/1974),
+  [#1970](https://github.com/tigerbeetle/tigerbeetle/pull/1970)
+
+      Add the size of an empty data file to [devhub](https://tigerbeetle.github.io/tigerbeetle/),
+      tweak the benchmark to always generate the same sized batches, and speed up loading the
+      devhub itself.
+
+### TigerTracks 🎧
+
+- [Fight Song](https://www.youtube.com/watch?v=xo1VInw-SKc)
+
 ## 2024-05-20 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
