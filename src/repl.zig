@@ -622,6 +622,13 @@ pub fn ReplType(comptime MessageBus: type) type {
             );
             repl.client = &client;
 
+            client.register(register_callback, @intCast(@intFromPtr(&repl)));
+            while (!repl.event_loop_done) {
+                repl.client.tick();
+                try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            }
+            repl.event_loop_done = false;
+
             if (statements.len > 0) {
                 var statements_iterator = std.mem.split(u8, statements, ";");
                 while (statements_iterator.next()) |statement_string| {
@@ -686,6 +693,18 @@ pub fn ReplType(comptime MessageBus: type) type {
                 repl.client.tick();
                 try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
             }
+        }
+
+        fn register_callback(
+            user_data: u128,
+            result: *const vsr.RegisterResult,
+        ) void {
+            _ = result;
+
+            const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
+            assert(!repl.event_loop_done);
+
+            repl.event_loop_done = true;
         }
 
         fn send(
