@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Buffers.Binary;
 
 namespace TigerBeetle;
 
@@ -33,7 +34,27 @@ public static class UInt128Extensions
     {
         unsafe
         {
-            return new Guid(new ReadOnlySpan<byte>(&value, SIZE));
+            var bytes = new Span<byte>(&value, SIZE);
+
+            // The GUID type layout in dotnet is
+            // 4 byte int (typically little endian but can be big endian depending on cpu)
+            // 2 byte short (typically little endian but can be big endian depending on cpu)
+            // 2 byte short (typically little endian but can be big endian depending on cpu)
+            // 8 bytes stored as-is
+            if (BitConverter.IsLittleEndian)
+            {
+                Swap(bytes, 0, 3);
+                Swap(bytes,  1,2);
+                Swap(bytes, 4, 5);
+                Swap(bytes, 6, 7);
+            }
+            
+            return new Guid(bytes);
+        }
+
+        void Swap(Span<byte> array, int sourceIndex, int destinationIndex)
+        {
+            (array[sourceIndex], array[destinationIndex]) = (array[destinationIndex], array[sourceIndex]);
         }
     }
 
@@ -42,12 +63,26 @@ public static class UInt128Extensions
         unsafe
         {
             UInt128 ret = UInt128.Zero;
-
+            Span<byte> bytes = new Span<byte>(&ret, SIZE);
+            
             // Passing a fixed 16-byte span, there's no possibility
             // of returning false.
-            _ = value.TryWriteBytes(new Span<byte>(&ret, SIZE));
+            _ = value.TryWriteBytes(bytes);
 
-            return ret;
+            if (BitConverter.IsLittleEndian)
+            {
+                Swap(bytes, 0, 3);
+                Swap(bytes,  1,2);
+                Swap(bytes, 4, 5);
+                Swap(bytes, 6, 7);
+            }
+		
+		    return ret;
+
+            void Swap(Span<byte> array, int sourceIndex, int destinationIndex)
+            {
+                (array[sourceIndex], array[destinationIndex]) = (array[destinationIndex], array[sourceIndex]);
+            }
         }
     }
 
