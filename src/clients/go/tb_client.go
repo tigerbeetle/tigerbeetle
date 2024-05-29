@@ -29,6 +29,7 @@ extern __declspec(dllexport) void onGoPacketCompletion(
 import "C"
 import (
 	e "errors"
+	"runtime"
 	"strings"
 	"unsafe"
 
@@ -175,6 +176,13 @@ func (c *c_client) doRequest(
 		ready:  make(chan struct{}),
 	}
 
+	pinner := &runtime.Pinner{}
+	defer pinner.Unpin()
+
+	pinner.Pin(&req)
+	pinner.Pin(data)
+	pinner.Pin(result)
+
 	switch acquire_status := C.tb_client_acquire_packet(c.tb_client, &req.packet); acquire_status {
 	case C.TB_PACKET_ACQUIRE_CONCURRENCY_MAX_EXCEEDED:
 		return 0, errors.ErrConcurrencyExceeded{}
@@ -185,9 +193,6 @@ func (c *c_client) doRequest(
 			panic("tb_client_acquire_packet(): returned null packet")
 		}
 	}
-
-	// Release the packet for other goroutines to use.
-	defer C.tb_client_release_packet(c.tb_client, req.packet)
 
 	req.packet.user_data = unsafe.Pointer(&req)
 	req.packet.operation = C.uint8_t(op)
@@ -205,6 +210,13 @@ func (c *c_client) doRequest(
 	<-req.ready
 	status := C.TB_PACKET_STATUS(req.packet.status)
 	wrote := int(req.packet.data_size)
+
+	// Release the packet for other goroutines to use.
+	p := req.packet
+	req.packet.user_data = nil
+	req.packet.data = nil
+	req.packet = nil
+	C.tb_client_release_packet(c.tb_client, p)
 
 	// Handle packet error
 	if status != C.TB_PACKET_OK {
