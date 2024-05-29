@@ -4,13 +4,13 @@ sidebar_position: 6
 
 # Production Ready
 
-TigerBeetle is ready for production use on Linux as from version 0.15.3, which provides protocol and
+TigerBeetle is ready for production use on Linux as of version 0.15.3, which provides protocol and
 storage stability, and a forward upgrade path, without requiring data migration.
 
-TigerBeetle releases are tested in a deterministic simulator, to apply model checking techniques but
+TigerBeetle releases are tested in a deterministic simulator to apply model checking techniques but
 on the actual code. For example, fault injection simulates network partitions, packet loss, crashes,
 and even high levels of disk corruption, while time is accelerated in the simulated world by a
-factor of up to seven hundred times, to find bugs faster.
+factor of up to seven hundred times to find bugs faster.
 
 Beyond this level of testing, TigerBeetle follows NASA's Power of Ten Rules for Safety-Critical
 Code, with 6000+ assertions to verify correctness at runtime, so that as far as possible,
