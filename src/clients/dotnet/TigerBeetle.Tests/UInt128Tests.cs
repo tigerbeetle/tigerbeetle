@@ -109,12 +109,26 @@ public class UInt128Tests
     [TestMethod]
     public void LittleEndian()
     {
-        var expected = new byte[16] { 86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        var expected = new byte[16] {86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        Span<byte> expectedGuidBytes = new byte[16];
+        expected.CopyTo(expectedGuidBytes);
+        if (BitConverter.IsLittleEndian)
+        {
+            Swap(expectedGuidBytes, 0, 3);
+            Swap(expectedGuidBytes, 1, 2);
+            Swap(expectedGuidBytes, 4, 5);
+            Swap(expectedGuidBytes, 6, 7);
+        }
 
         Assert.IsTrue(expected.SequenceEqual(expected.ToUInt128().ToArray()));
         Assert.IsTrue(expected.SequenceEqual(BigInteger.Parse("123456", NumberStyles.HexNumber).ToUInt128().ToArray()));
-        Assert.IsTrue(expected.SequenceEqual(new Guid(expected).ToUInt128().ToArray()));
+        Assert.IsTrue(expected.SequenceEqual(new Guid(expectedGuidBytes).ToUInt128().ToArray()));
         Assert.IsTrue(expected.SequenceEqual(new UInt128(0, 0x123456).ToArray()));
+
+        void Swap(Span<byte> array, int sourceIndex, int destinationIndex)
+        {
+            (array[sourceIndex], array[destinationIndex]) = (array[destinationIndex], array[sourceIndex]);
+        }
     }
 
     [TestMethod]

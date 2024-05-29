@@ -36,19 +36,29 @@ public static class UInt128Extensions
         {
             var bytes = new Span<byte>(&value, SIZE);
 
-            // The GUID type layout in dotnet is
+            // The GUID type byte layout in dotnet is
             // 4 byte int (typically little endian but can be big endian depending on cpu)
             // 2 byte short (typically little endian but can be big endian depending on cpu)
             // 2 byte short (typically little endian but can be big endian depending on cpu)
             // 8 bytes stored as-is
+            // i.e. the raw bytes you provide in a constructor might be rearranged, and reading
+            // the raw bytes of a GUID out on the other side might not give you what you put in.
+            // Secondly, even though the bytes might be rearranged internally, externally, the GUID 
+            // behaves as if the bytes weren't rearranged i.e., Guid.ToString will print the bytes
+            // as you provided them, and not as they are laid out in memory.
+            //
+            // What this means is that when treating a GUID as a dumb container for 16 bytes, you
+            // must rearrange the bytes going in and out yourself, otherwise the meaning of the GUID
+            // changes between the time it's written and when it's read. Guid.ToString and libraries 
+            // like EF Core and Npgsql take care of this for you.
             if (BitConverter.IsLittleEndian)
             {
                 Swap(bytes, 0, 3);
-                Swap(bytes,  1,2);
+                Swap(bytes, 1, 2);
                 Swap(bytes, 4, 5);
                 Swap(bytes, 6, 7);
             }
-            
+
             return new Guid(bytes);
         }
 
@@ -64,7 +74,7 @@ public static class UInt128Extensions
         {
             UInt128 ret = UInt128.Zero;
             Span<byte> bytes = new Span<byte>(&ret, SIZE);
-            
+
             // Passing a fixed 16-byte span, there's no possibility
             // of returning false.
             _ = value.TryWriteBytes(bytes);
@@ -72,12 +82,12 @@ public static class UInt128Extensions
             if (BitConverter.IsLittleEndian)
             {
                 Swap(bytes, 0, 3);
-                Swap(bytes,  1,2);
+                Swap(bytes, 1, 2);
                 Swap(bytes, 4, 5);
                 Swap(bytes, 6, 7);
             }
-		
-		    return ret;
+
+            return ret;
 
             void Swap(Span<byte> array, int sourceIndex, int destinationIndex)
             {
