@@ -18,7 +18,6 @@ pub const state_machine = @import("state_machine.zig");
 pub const storage = @import("storage.zig");
 pub const tb_client = @import("clients/c/tb_client.zig");
 pub const tigerbeetle = @import("tigerbeetle.zig");
-pub const tb_client = @import("clients/c/tb_client.zig");
 pub const time = @import("time.zig");
 pub const tracer = @import("tracer.zig");
 pub const stdx = @import("stdx.zig");

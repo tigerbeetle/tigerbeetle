@@ -1012,7 +1012,6 @@ pub const IO = struct {
             .sa = null,
             .share_access = shared_mode,
             .creation = creation_disposition,
-            .io_mode = .blocking,
             .filter = .file_only,
             .follow_symlinks = true,
         }, attributes);
@@ -1256,10 +1255,7 @@ pub fn windows_open_file(
         .SecurityQualityOfService = null,
     };
     var io: os.windows.IO_STATUS_BLOCK = undefined;
-    const blocking_flag: os.windows.ULONG = if (options.io_mode == .blocking)
-        os.windows.FILE_SYNCHRONOUS_IO_NONALERT
-    else
-        0;
+    const blocking_flag: os.windows.ULONG = os.windows.FILE_SYNCHRONOUS_IO_NONALERT;
     const file_or_dir_flag: os.windows.ULONG = switch (options.filter) {
         .file_only => os.windows.FILE_NON_DIRECTORY_FILE,
         .dir_only => os.windows.FILE_DIRECTORY_FILE,
@@ -1287,17 +1283,7 @@ pub fn windows_open_file(
             0,
         );
         switch (rc) {
-            .SUCCESS => {
-                if (std.io.is_async and options.io_mode == .evented) {
-                    _ = os.windows.CreateIoCompletionPort(
-                        result,
-                        std.event.Loop.instance.?.os_data.io_port,
-                        undefined,
-                        undefined,
-                    ) catch undefined;
-                }
-                return result;
-            },
+            .SUCCESS => return result,
             .OBJECT_NAME_INVALID => unreachable,
             .OBJECT_NAME_NOT_FOUND => return error.FileNotFound,
             .OBJECT_PATH_NOT_FOUND => return error.FileNotFound,
