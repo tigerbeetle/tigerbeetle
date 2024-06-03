@@ -168,7 +168,13 @@ const CliArgs = union(enum) {
         \\
         \\  --development
         \\        Allow the replica to format/start even when Direct IO is unavailable.
-        \\        Additionally, use smaller cache sizes by default.
+        \\        Additionally, use smaller cache sizes and batch size by default.
+        \\
+        \\        Since this shrinks the batch size, note that:
+        \\        * All replicas should use the same batch size. That is, if any replica in the cluster has
+        \\          "--development", then all replicas should have "--development".
+        \\        * It is always possible to increase the batch size by restarting without "--development".
+        \\        * Shrinking the batch size of an existing cluster is possible, but not recommended.
         \\
         \\        For safety, production replicas should always enforce Direct IO -- this flag should only be
         \\        used for testing and development. It should not be used for production or benchmarks.

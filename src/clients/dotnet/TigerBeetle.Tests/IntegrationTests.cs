@@ -1618,7 +1618,7 @@ internal class TBServer : IDisposable
 
         process = new Process();
         process.StartInfo.FileName = TB_SERVER;
-        process.StartInfo.Arguments = $"start --addresses=0 ./{dataFile}";
+        process.StartInfo.Arguments = $"start --addresses=0 --development ./{dataFile}";
         process.StartInfo.RedirectStandardInput = true;
         process.StartInfo.RedirectStandardOutput = true;
         process.Start();

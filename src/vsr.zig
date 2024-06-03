@@ -414,10 +414,10 @@ pub const RegisterRequest = extern struct {
     /// When command=prepare, batch_size_limit > 0 and batch_size_limit ≤ message_body_size_max.
     /// (Note that this does *not* include the `@sizeOf(Header)`.)
     batch_size_limit: u32,
-    reserved: [60]u8 = [_]u8{0} ** 60,
+    reserved: [252]u8 = [_]u8{0} ** 252,
 
     comptime {
-        assert(@sizeOf(RegisterRequest) == 64);
+        assert(@sizeOf(RegisterRequest) == 256);
         assert(@sizeOf(RegisterRequest) <= constants.message_body_size_max);
         assert(stdx.no_padding(RegisterRequest));
     }

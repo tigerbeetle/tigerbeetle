@@ -1652,7 +1652,7 @@ public class IntegrationTest {
             }
 
             final var format = Runtime.getRuntime().exec(new String[] {exe, "format", "--cluster=0",
-                    "--replica=0", "--replica-count=1", TB_FILE});
+                    "--replica=0", "--replica-count=1", "--development", TB_FILE});
             if (format.waitFor() != 0) {
                 final var reader =
                         new BufferedReader(new InputStreamReader(format.getErrorStream()));
