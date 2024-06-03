@@ -31,7 +31,7 @@ func HexStringToUint128(value string) types.Uint128 {
 	return number
 }
 
-func WithClient(s testing.TB, withClient func(Client)) {
+func WithClient(t testing.TB, withClient func(Client)) {
 	var tigerbeetlePath string
 	if runtime.GOOS == "windows" {
 		tigerbeetlePath = "../../../tigerbeetle.exe"
@@ -54,56 +54,56 @@ func WithClient(s testing.TB, withClient func(Client)) {
 	tbInit.Stderr = &tbErr
 	if err := tbInit.Run(); err != nil {
 		fmt.Println(fmt.Sprint(err) + ": " + tbErr.String())
-		s.Fatal(err)
+		t.Fatal(err)
 	}
 
-	s.Cleanup(func() {
+	t.Cleanup(func() {
 		_ = os.Remove(fileName)
 	})
 
 	tbStart := exec.Command(tigerbeetlePath, "start", addressArg, cacheSizeArg, fileName)
 	if err := tbStart.Start(); err != nil {
-		s.Fatal(err)
+		t.Fatal(err)
 	}
 
-	s.Cleanup(func() {
+	t.Cleanup(func() {
 		if err := tbStart.Process.Kill(); err != nil {
-			s.Fatal(err)
+			t.Fatal(err)
 		}
 	})
 
 	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
 	client, err := NewClient(types.ToUint128(TIGERBEETLE_CLUSTER_ID), addresses, TIGERBEETLE_CONCURRENCY_MAX)
 	if err != nil {
-		s.Fatal(err)
+		t.Fatal(err)
 	}
 
-	s.Cleanup(func() {
+	t.Cleanup(func() {
 		client.Close()
 	})
 
 	withClient(client)
 }
 
-func TestClient(s *testing.T) {
-	WithClient(s, func(client Client) {
-		doTestClient(s, client)
+func TestClient(t *testing.T) {
+	WithClient(t, func(client Client) {
+		doTestClient(t, client)
 	})
 }
 
-func doTestClient(s *testing.T, client Client) {
-	accountA := types.Account{
-		ID:     HexStringToUint128("a"),
-		Ledger: 1,
-		Code:   1,
-	}
-	accountB := types.Account{
-		ID:     HexStringToUint128("b"),
-		Ledger: 1,
-		Code:   2,
-	}
+func doTestClient(t *testing.T, client Client) {
+	createTwoAccounts := func (t *testing.T) (types.Account, types.Account) {
+		accountA := types.Account{
+			ID:     types.ID(),
+			Ledger: 1,
+			Code:   1,
+		}
+		accountB := types.Account{
+			ID:     types.ID(),
+			Ledger: 1,
+			Code:   2,
+		}
 
-	s.Run("can create accounts", func(t *testing.T) {
 		results, err := client.CreateAccounts([]types.Account{
 			accountA,
 			accountB,
@@ -111,11 +111,18 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		assert.Empty(t, results)
+
+		return accountA, accountB
+	}
+
+	t.Run("can create accounts", func(t *testing.T) {
+		createTwoAccounts(t)
 	})
 
-	s.Run("can lookup accounts", func(t *testing.T) {
+	t.Run("can lookup accounts", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		results, err := client.LookupAccounts([]types.Uint128{
 			accountA.ID,
 			accountB.ID,
@@ -147,10 +154,12 @@ func doTestClient(s *testing.T, client Client) {
 		assert.NotEqual(t, uint64(0), accB.Timestamp)
 	})
 
-	s.Run("can create a transfer", func(t *testing.T) {
+	t.Run("can create a transfer", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		results, err := client.CreateTransfers([]types.Transfer{
 			{
-				ID:              HexStringToUint128("a"),
+				ID:              types.ID(),
 				CreditAccountID: accountA.ID,
 				DebitAccountID:  accountB.ID,
 				Amount:          types.ToUint128(100),
@@ -183,9 +192,12 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, types.ToUint128(0), accountB.CreditsPosted)
 	})
 
-	s.Run("can create linked transfers", func(t *testing.T) {
+	t.Run("can create linked transfers", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
+		id := types.ID()
 		transfer1 := types.Transfer{
-			ID:              HexStringToUint128("d"),
+			ID:              id,
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
 			Amount:          types.ToUint128(50),
@@ -194,7 +206,7 @@ func doTestClient(s *testing.T, client Client) {
 			Ledger:          1,
 		}
 		transfer2 := types.Transfer{
-			ID:              HexStringToUint128("d"),
+			ID:              id,
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
 			Amount:          types.ToUint128(50),
@@ -220,7 +232,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Len(t, accounts, 2)
 
 		accountA = accounts[0]
-		assert.Equal(t, types.ToUint128(100), accountA.CreditsPosted)
+		assert.Equal(t, types.ToUint128(0), accountA.CreditsPosted)
 		assert.Equal(t, types.ToUint128(0), accountA.CreditsPending)
 		assert.Equal(t, types.ToUint128(0), accountA.DebitsPosted)
 		assert.Equal(t, types.ToUint128(0), accountA.DebitsPending)
@@ -228,11 +240,13 @@ func doTestClient(s *testing.T, client Client) {
 		accountB = accounts[1]
 		assert.Equal(t, types.ToUint128(0), accountB.CreditsPosted)
 		assert.Equal(t, types.ToUint128(0), accountB.CreditsPending)
-		assert.Equal(t, types.ToUint128(100), accountB.DebitsPosted)
+		assert.Equal(t, types.ToUint128(0), accountB.DebitsPosted)
 		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
 	})
 
-	s.Run("can create concurrent transfers", func(t *testing.T) {
+	t.Run("can create concurrent transfers", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		const TRANSFERS_MAX = 1_000_000
 		concurrencyMax := make(chan struct{}, TIGERBEETLE_CONCURRENCY_MAX)
 
@@ -254,7 +268,7 @@ func doTestClient(s *testing.T, client Client) {
 				concurrencyMax <- struct{}{}
 				results, err := client.CreateTransfers([]types.Transfer{
 					{
-						ID:              types.ToUint128(uint64(TRANSFERS_MAX + i)),
+						ID:              types.ID(),
 						CreditAccountID: accountA.ID,
 						DebitAccountID:  accountB.ID,
 						Amount:          types.ToUint128(1),
@@ -286,10 +300,12 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, TRANSFERS_MAX, big.NewInt(0).Sub(&accountBDebitsAfter, &accountBDebits).Int64())
 	})
 
-	s.Run("can query transfers for an account", func(t *testing.T) {
+	t.Run("can query transfers for an account", func(t *testing.T) {
+		accountA, accountB := createTwoAccounts(t)
+
 		// Create a new account:
 		accountC := types.Account{
-			ID:     HexStringToUint128("c"),
+			ID:     types.ID(),
 			Ledger: 1,
 			Code:   1,
 			Flags: types.AccountFlags{
@@ -305,7 +321,7 @@ func doTestClient(s *testing.T, client Client) {
 		// Create transfers where the new account is either the debit or credit account:
 		transfers_created := make([]types.Transfer, 10)
 		for i := 0; i < 10; i++ {
-			transfer_id := types.ToUint128(uint64(i) + 10_000)
+			transfer_id := types.ID()
 
 			// Swap debit and credit accounts:
 			if i%2 == 0 {
