@@ -205,52 +205,53 @@ fn build_macos_universal_binary(shell: *Shell, dst: []const u8, binaries: []cons
 /// Builds a multi-version pack for the `target` specified, returns the metadata and writes the
 /// output pack to `pack_dst`.
 fn build_past_version_pack(shell: *Shell, comptime target: []const u8, debug: bool, pack_dst: []const u8) !multiversioning.MultiVersionMetadata.PastVersionPack {
+    _ = debug;
     var section = try shell.open_section("build multiversion pack");
     defer section.close();
 
     try shell.project_root.deleteTree("dist/tigerbeetle-past-pack");
 
-    // Downloads and extract the last published release of TigerBeetle.
-    if (std.mem.indexOf(u8, target, "-macos") == null) {
-        // Standard non-macOS targets.
-        try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-{target}{debug}.zip", .{
-            .target = target,
-            .debug = if (debug) "-debug" else "",
-        });
-        try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-{target}{debug}.zip", .{
-            .target = target,
-            .debug = if (debug) "-debug" else "",
-        });
-    } else {
-        // For macOS, download the universal binary and split it up.
-        try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-universal-macos{debug}.zip", .{
-            .debug = if (debug) "-debug" else "",
-        });
-        try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-universal-macos{debug}.zip", .{
-            .debug = if (debug) "-debug" else "",
-        });
-        if (std.mem.eql(u8, target, "aarch64-macos")) {
-            try shell.exec("{llvm_lipo} -thin arm64 -output dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{
-                .llvm_lipo = "llvm-lipo",
-            });
-            try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
-        } else if (std.mem.eql(u8, target, "x86_64-macos")) {
-            try shell.exec("{llvm_lipo} -thin x86_64 -output dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{
-                .llvm_lipo = "llvm-lipo",
-            });
-            try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
-        }
-    }
+    // // Downloads and extract the last published release of TigerBeetle.
+    // if (std.mem.indexOf(u8, target, "-macos") == null) {
+    //     // Standard non-macOS targets.
+    //     try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-{target}{debug}.zip", .{
+    //         .target = target,
+    //         .debug = if (debug) "-debug" else "",
+    //     });
+    //     try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-{target}{debug}.zip", .{
+    //         .target = target,
+    //         .debug = if (debug) "-debug" else "",
+    //     });
+    // } else {
+    //     // For macOS, download the universal binary and split it up.
+    //     try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-universal-macos{debug}.zip", .{
+    //         .debug = if (debug) "-debug" else "",
+    //     });
+    //     try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-universal-macos{debug}.zip", .{
+    //         .debug = if (debug) "-debug" else "",
+    //     });
+    //     if (std.mem.eql(u8, target, "aarch64-macos")) {
+    //         try shell.exec("{llvm_lipo} -thin arm64 -output dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{
+    //             .llvm_lipo = "llvm-lipo",
+    //         });
+    //         try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
+    //     } else if (std.mem.eql(u8, target, "x86_64-macos")) {
+    //         try shell.exec("{llvm_lipo} -thin x86_64 -output dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{
+    //             .llvm_lipo = "llvm-lipo",
+    //         });
+    //         try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
+    //     }
+    // }
 
     // TODO: This code should be removed once the first multi-version release is bootstrapped!
     const multiversion_epoch = "0.15.3";
-    const is_multiversion_epoch = std.mem.eql(
-        u8,
-        try shell.exec_stdout("gh release view --json tagName --template {template}", .{
-            .template = "{{.tagName}}", // Static, but shell.zig is not happy with '{'.
-        }),
-        multiversion_epoch,
-    );
+    const is_multiversion_epoch = true; //std.mem.eql(
+    //     u8,
+    //     try shell.exec_stdout("gh release view --json tagName --template {template}", .{
+    //         .template = "{{.tagName}}", // Static, but shell.zig is not happy with '{'.
+    //     }),
+    //     multiversion_epoch,
+    // );
 
     if (is_multiversion_epoch) {
         log.info("past release is multiversion epoch ({s})", .{multiversion_epoch});
@@ -408,7 +409,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
 
             const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
             try shell.exec("zip -9 {zip_path} {exe_name}", .{
-                .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
+                .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
                 .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
             });
         }
@@ -424,11 +425,13 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Drelease={release}
                 \\    -Dgit-commit={commit}
                 \\    -Dconfig-release={release_triple}
+                \\    -Dconfig-release-client-min={release_triple_client_min}
             , .{
                 .target = target,
                 .release = if (debug) "false" else "true",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
+                .release_triple_client_min = info.release_triple_client_min,
             });
 
             try Shell.copy_path(

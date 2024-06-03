@@ -535,9 +535,6 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 },
             };
         },
-        .multiversionvalidate => |multiversion_validate| {
-            return Command{ .multiversion_validate = multiversion_validate.positional.path };
-        },
     }
 }
 

@@ -155,6 +155,7 @@ const Command = struct {
 
     fn init(
         command: *Command,
+        allocator: mem.Allocator,
         path: [:0]const u8,
         options: struct {
             must_create: bool,
@@ -194,7 +195,7 @@ const Command = struct {
         errdefer allocator.free(command.self_exe_path);
     }
 
-    fn deinit(command: *Command) void {
+    fn deinit(command: *Command, allocator: mem.Allocator) void {
         allocator.free(command.self_exe_path);
         command.storage.deinit();
         command.io.deinit();
@@ -208,11 +209,11 @@ const Command = struct {
         options: SuperBlock.FormatOptions,
     ) !void {
         var command: Command = undefined;
-        try command.init(args.path, .{
+        try command.init(allocator, args.path, .{
             .must_create = true,
             .development = args.development,
         });
-        defer command.deinit();
+        defer command.deinit(allocator);
 
         var superblock = try SuperBlock.init(
             allocator,
@@ -246,11 +247,11 @@ const Command = struct {
         const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
-        try command.init(args.path, .{
+        try command.init(allocator, args.path, .{
             .must_create = false,
             .development = args.development,
         });
-        defer command.deinit();
+        defer command.deinit(allocator);
 
         var message_pool = try MessagePool.init(allocator, .{ .replica = .{
             .members_count = @intCast(args.addresses.len),

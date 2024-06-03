@@ -181,6 +181,10 @@ pub const MultiVersionMetadata = extern struct {
 
     past: PastVersionPack = .{},
 
+    /// Normally version upgrades are allowed to skip to the latest. This is a list of releases
+    /// which will be visited and upgraded through to reach the final version.
+    unskippable_versions: [constants.vsr_releases_max]u32 = std.mem.zeroes([constants.vsr_releases_max]u32),
+
     /// Covers MultiVersionMetadata[0..@sizeOf(MultiVersionMetadata) - @sizeOf(u128)].
     checksum_metadata: u128 = undefined,
 
