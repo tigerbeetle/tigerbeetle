@@ -3161,7 +3161,15 @@ pub fn ReplicaType(
                 //   progress, it needs to start preparing more upgrades.
                 const release_next = self.release_for_next_checkpoint();
                 if (release_next == null or release_next.?.value != upgrade_release.value) {
-                    self.send_request_upgrade_to_self();
+                    if (self.solo() and self.view_durable_updating()) {
+                        // Solo replica just after recovering is still updating its view and ignores
+                        // requests, postpone until the next timer expiry.
+                        log.debug("{}: on_upgrade_timeout: ignoring (still persisting view)", .{
+                            self.replica,
+                        });
+                    } else {
+                        self.send_request_upgrade_to_self();
+                    }
                 } else {
                     // (Don't send an upgrade to ourself if we are already ready to upgrade and just
                     // waiting on the last commit + checkpoint before we restart.)
@@ -7883,8 +7891,6 @@ pub fn ReplicaType(
             // SVs will be sent out after the view_durable update completes.
             assert(self.view_durable_updating());
             assert(self.log_view > self.log_view_durable());
-
-            self.state_machine.pulse_reset();
 
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();

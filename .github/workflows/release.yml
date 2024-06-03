@@ -19,11 +19,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version:
-            7.0.x
+            8.0.x
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.18'
+          go-version: '1.21'
 
       - uses: actions/setup-java@v4
         with:

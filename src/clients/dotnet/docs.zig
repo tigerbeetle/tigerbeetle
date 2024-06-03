@@ -20,7 +20,7 @@ pub const DotnetDocs = Docs{
     ,
 
     .prerequisites =
-    \\* .NET >= 7.0.
+    \\* .NET >= 8.0.
     \\
     \\And if you do not already have NuGet.org as a package
     \\source, make sure to add it:

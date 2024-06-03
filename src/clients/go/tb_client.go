@@ -29,6 +29,7 @@ extern __declspec(dllexport) void onGoPacketCompletion(
 import "C"
 import (
 	e "errors"
+	"runtime"
 	"strings"
 	"unsafe"
 
@@ -189,6 +190,11 @@ func (c *c_client) doRequest(
 	// Release the packet for other goroutines to use.
 	defer C.tb_client_release_packet(c.tb_client, req.packet)
 
+	pinner := new(runtime.Pinner)
+	pinner.Pin(&req)
+	pinner.Pin(data)
+	pinner.Pin(result)
+
 	req.packet.user_data = unsafe.Pointer(&req)
 	req.packet.operation = C.uint8_t(op)
 	req.packet.status = C.TB_PACKET_OK
@@ -203,6 +209,7 @@ func (c *c_client) doRequest(
 
 	// Wait for the request to complete.
 	<-req.ready
+	pinner.Unpin()
 	status := C.TB_PACKET_STATUS(req.packet.status)
 	wrote := int(req.packet.data_size)
 

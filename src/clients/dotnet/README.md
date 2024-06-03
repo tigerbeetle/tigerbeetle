@@ -11,7 +11,7 @@ The TigerBeetle client for .NET.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* .NET >= 7.0.
+* .NET >= 8.0.
 
 And if you do not already have NuGet.org as a package
 source, make sure to add it:

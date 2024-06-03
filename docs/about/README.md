@@ -95,7 +95,7 @@ Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs).
 
 ### TigerBeetle - Into Production
 
-You can read more about TigerBeetle's [production readiness](./production-readiness.md).
+TigerBeetle is [production-ready](./production-ready.md). 
 
 ## References
 

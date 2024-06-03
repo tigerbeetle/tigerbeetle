@@ -586,10 +586,6 @@ pub fn StateMachineType(
             };
         }
 
-        pub fn pulse_reset(self: *StateMachine) void {
-            self.expire_pending_transfers.reset();
-        }
-
         pub fn pulse(self: *const StateMachine) bool {
             assert(!global_constants.aof_recovery);
             assert(self.expire_pending_transfers.pulse_next_timestamp >=
@@ -1053,7 +1049,7 @@ pub fn StateMachineType(
             const self: *StateMachine = ScanLookup.parent(.expire_pending_transfers, scan_lookup);
             assert(self.scan_lookup_result_count == null);
 
-            self.expire_pending_transfers.finish(scan_lookup.state);
+            self.expire_pending_transfers.finish(scan_lookup.state, results);
             self.scan_lookup_result_count = @intCast(results.len);
 
             self.scan_lookup = .null;
@@ -2065,6 +2061,7 @@ fn ExpirePendingTransfersType(
         /// - When `== timestamp_max`, there are no pending transfers to expire.
         /// - Otherwise, this is the timestamp of the next pending transfer expiry.
         pulse_next_timestamp: u64 = TimestampRange.timestamp_min,
+        value_next_expired_at: ?u64 = null,
 
         fn reset(self: *ExpirePendingTransfers) void {
             assert(self.phase == .idle);
@@ -2084,12 +2081,12 @@ fn ExpirePendingTransfersType(
             assert(self.phase == .idle);
             assert(filter.expires_at_max >= TimestampRange.timestamp_min and
                 filter.expires_at_max <= TimestampRange.timestamp_max);
-            assert(self.pulse_next_timestamp == TimestampRange.timestamp_min or
-                self.pulse_next_timestamp == TimestampRange.timestamp_max or
-                self.pulse_next_timestamp < filter.expires_at_max);
+            maybe(filter.expires_at_max != TimestampRange.timestamp_min and
+                filter.expires_at_max != TimestampRange.timestamp_max and
+                self.pulse_next_timestamp > filter.expires_at_max);
 
             self.* = .{
-                .pulse_next_timestamp = TimestampRange.timestamp_max,
+                .pulse_next_timestamp = self.pulse_next_timestamp,
                 .phase = .{ .running = .{
                     .expires_at_max = filter.expires_at_max,
                     .scan = ScanRange.init(
@@ -2112,22 +2109,39 @@ fn ExpirePendingTransfersType(
             return &self.phase.running.scan;
         }
 
-        fn finish(self: *ExpirePendingTransfers, status: ScanLookupStatus) void {
+        fn finish(
+            self: *ExpirePendingTransfers,
+            status: ScanLookupStatus,
+            results: []const Transfer,
+        ) void {
             assert(self.phase == .running);
+            if (self.phase.running.expires_at_max != TimestampRange.timestamp_min and
+                self.phase.running.expires_at_max != TimestampRange.timestamp_max and
+                self.pulse_next_timestamp > self.phase.running.expires_at_max)
+            {
+                assert(results.len == 0);
+            }
+
             switch (status) {
                 .scan_finished => {
-                    if (self.pulse_next_timestamp <= self.phase.running.expires_at_max) {
+                    if (self.value_next_expired_at == null or
+                        self.value_next_expired_at.? <= self.phase.running.expires_at_max)
+                    {
                         // There are no more unexpired transfers left to expire in the next pulse.
                         self.pulse_next_timestamp = TimestampRange.timestamp_max;
+                    } else {
+                        self.pulse_next_timestamp = self.value_next_expired_at.?;
                     }
                 },
                 .buffer_finished => {
                     // There are more transfers to expire than a single batch.
-                    assert(self.pulse_next_timestamp <= self.phase.running.expires_at_max);
+                    assert(self.value_next_expired_at != null);
+                    self.pulse_next_timestamp = self.value_next_expired_at.?;
                 },
                 else => unreachable,
             }
             self.phase = .idle;
+            self.value_next_expired_at = null;
         }
 
         inline fn value_next(context: *Context, value: *const Value) EvaluateNext {
@@ -2140,10 +2154,10 @@ fn ExpirePendingTransfersType(
 
             const expires_at: u64 = value.field;
 
-            assert(self.pulse_next_timestamp == TimestampRange.timestamp_max or
-                self.pulse_next_timestamp <= expires_at);
+            assert(self.value_next_expired_at == null or
+                self.value_next_expired_at.? <= expires_at);
 
-            self.pulse_next_timestamp = expires_at;
+            self.value_next_expired_at = expires_at;
 
             return if (expires_at <= self.phase.running.expires_at_max)
                 .include_and_continue

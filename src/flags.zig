@@ -108,6 +108,8 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
 }
 
 fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
+    @setEvalBranchQuota(5_000);
+
     if (Flags == void) {
         if (args.next()) |arg| {
             fatal("unexpected argument: '{s}'", .{arg});
@@ -1033,9 +1035,41 @@ test "flags" {
         \\
     ));
 
+    try t.check(&.{ "values", "--int=-92" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: value exceeds 32-bit unsigned integer: '-92'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=_92" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected an integer value, but found '_92' (invalid digit)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=92_" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected an integer value, but found '92_' (invalid digit)
+        \\
+    ));
+
     try t.check(&.{ "values", "--int=92" }, snap(@src(),
         \\stdout:
         \\int: 92
+        \\size: 0
+        \\boolean: false
+        \\path: not-set
+        \\optional: null
+        \\choice: marlowe
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=900_200" }, snap(@src(),
+        \\stdout:
+        \\int: 900200
         \\size: 0
         \\boolean: false
         \\path: not-set
@@ -1055,6 +1089,13 @@ test "flags" {
         \\status: 1
         \\stderr:
         \\error: --int: value exceeds 32-bit unsigned integer: '44444444444444444444'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=1_000KiB" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: invalid unit in size '1_000KiB', (needed KiB, MiB, GiB or TiB)
         \\
     ));
 

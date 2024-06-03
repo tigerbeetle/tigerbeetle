@@ -57,8 +57,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.exec("dotnet pack --configuration Release", .{});
 
         const image_tags = .{
-            "7.0",        "8.0",
-            "7.0-alpine", "8.0-alpine",
+            "8.0", "8.0-alpine",
         };
 
         inline for (image_tags) |image_tag| {

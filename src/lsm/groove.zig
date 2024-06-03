@@ -156,7 +156,7 @@ pub fn GrooveType(
     ///     but can be derived from an Object instance using the field's corresponding function.
     comptime groove_options: anytype,
 ) type {
-    @setEvalBranchQuota(64000);
+    @setEvalBranchQuota(64_000);
 
     const has_id = @hasField(Object, "id");
     if (has_id) assert(std.meta.fieldInfo(Object, .id).type == u128);

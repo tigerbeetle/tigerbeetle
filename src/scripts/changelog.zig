@@ -17,6 +17,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     const merges = try shell.exec_stdout(
         \\git log --merges --first-parent origin/release..origin/main
     , .{});
+    try shell.project_root.makePath("./zig-cache");
     try shell.project_root.writeFile("./zig-cache/merges.txt", merges);
     log.info("merged PRs: ./zig-cache/merges.txt", .{});
 
@@ -57,7 +58,8 @@ fn format_changelog(buffer: std.ArrayList(u8).Writer, options: struct {
     , .{options.today});
 
     var merges_left = options.merges;
-    for (0..128) |_| {
+    // TODO Shrink this down after we release again.
+    for (0..256) |_| {
         const merge = try format_changelog_cut_single_merge(&merges_left) orelse break;
 
         try buffer.print(

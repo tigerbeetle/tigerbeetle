@@ -34,9 +34,11 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     const benchmark_result = try shell.exec_stdout("./tigerbeetle benchmark", .{});
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
-    const batch_p99_ms = try get_measurement(benchmark_result, "batch latency p99", "ms");
-    const query_p99_ms = try get_measurement(benchmark_result, "query latency p99", "ms");
+    const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
+    const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
     const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
+    const datafile_bytes = try get_measurement(benchmark_result, "datafile", "bytes");
+    const datafile_empty_bytes = try get_measurement(benchmark_result, "datafile empty", "bytes");
 
     const batch = MetricBatch{
         .timestamp = commit_timestamp,
@@ -49,9 +51,11 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
             .{ .name = "executable size", .value = executable_size_bytes, .unit = "bytes" },
             .{ .name = "TPS", .value = tps, .unit = "count" },
-            .{ .name = "batch p99", .value = batch_p99_ms, .unit = "ms" },
-            .{ .name = "query p99", .value = query_p99_ms, .unit = "ms" },
+            .{ .name = "batch p100", .value = batch_p100_ms, .unit = "ms" },
+            .{ .name = "query p100", .value = query_p100_ms, .unit = "ms" },
             .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
+            .{ .name = "datafile", .value = datafile_bytes, .unit = "bytes" },
+            .{ .name = "datafile empty", .value = datafile_empty_bytes, .unit = "bytes" },
         },
     };
 

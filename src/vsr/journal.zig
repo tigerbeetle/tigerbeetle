@@ -2204,6 +2204,18 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 /// @L:
 /// The message was rewritten due to a view change, and belongs to the current checkpoint.
 ///
+/// Unlike @M (which has decision=fix), this case has decision=vsr.
+/// The prepare and header have different views, but regardless of which is greater, recovery can't
+/// distinguish which is actually *newer*.
+///
+/// For example, if the header.view=2 and prepare.view=4, any of these scenarios are possible:
+/// - Before crashing, we wrote the view=4 prepare, and then lost/misdirected the write for the
+///   view=4 header. The view=2 header is left behind from view=2 or view=3.
+/// - Before crashing, we wrote the view=2 prepare, and then lost/misdirected the write for the
+///   view=2 header. The view=4 header is left behind from view=3.
+/// - Before crashing, we wrote the view=4 prepare, and then crashed before we could write the
+///   view=4 header. The view=2 header is left behind from view=2 or view=3.
+///   (This last case is the most likely.)
 ///
 /// @M:
 /// The message was rewritten due to a view change, but belongs to a previous checkpoint.

@@ -11,5 +11,5 @@ if [ -f "$FILE" ]; then
     rm $FILE
 fi
 
-./zig/zig build install -Dconfig=production
+./zig/zig build -Dconfig=production
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 $FILE
