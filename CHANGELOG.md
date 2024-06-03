@@ -1,6 +1,29 @@
 # TigerBeetle Changelog
 
-## 2024-05-27
+## 2024-06-03 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1980](https://github.com/tigerbeetle/tigerbeetle/pull/1980)
+
+  Fix crash when upgrading solo replica.
+
+- [#1952](https://github.com/tigerbeetle/tigerbeetle/pull/1952)
+
+  Pin points crossing Go client FFI boundary to prevent memory corruption.
+
+### Internals
+
+- [#1931](https://github.com/tigerbeetle/tigerbeetle/pull/1931),
+  [#1933](https://github.com/tigerbeetle/tigerbeetle/pull/1933)
+
+  Improve Go client tests.
+
+- [#1946](https://github.com/tigerbeetle/tigerbeetle/pull/1946)
+
+  Add `vsr.Client.register()`.
+
+## 2024-05-27 (No release: Queued up for upcoming multi-version binary release)
 
 ### Features
 
