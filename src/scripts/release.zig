@@ -205,63 +205,72 @@ fn build_macos_universal_binary(shell: *Shell, dst: []const u8, binaries: []cons
 /// Builds a multi-version pack for the `target` specified, returns the metadata and writes the
 /// output pack to `pack_dst`.
 fn build_past_version_pack(shell: *Shell, comptime target: []const u8, debug: bool, pack_dst: []const u8) !multiversioning.MultiVersionMetadata.PastVersionPack {
-    _ = debug;
     var section = try shell.open_section("build multiversion pack");
     defer section.close();
 
     try shell.project_root.deleteTree("dist/tigerbeetle-past-pack");
 
-    // // Downloads and extract the last published release of TigerBeetle.
-    // if (std.mem.indexOf(u8, target, "-macos") == null) {
-    //     // Standard non-macOS targets.
-    //     try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-{target}{debug}.zip", .{
-    //         .target = target,
-    //         .debug = if (debug) "-debug" else "",
-    //     });
-    //     try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-{target}{debug}.zip", .{
-    //         .target = target,
-    //         .debug = if (debug) "-debug" else "",
-    //     });
-    // } else {
-    //     // For macOS, download the universal binary and split it up.
-    //     try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-universal-macos{debug}.zip", .{
-    //         .debug = if (debug) "-debug" else "",
-    //     });
-    //     try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-universal-macos{debug}.zip", .{
-    //         .debug = if (debug) "-debug" else "",
-    //     });
-    //     if (std.mem.eql(u8, target, "aarch64-macos")) {
-    //         try shell.exec("{llvm_lipo} -thin arm64 -output dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{
-    //             .llvm_lipo = "llvm-lipo",
-    //         });
-    //         try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
-    //     } else if (std.mem.eql(u8, target, "x86_64-macos")) {
-    //         try shell.exec("{llvm_lipo} -thin x86_64 -output dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{
-    //             .llvm_lipo = "llvm-lipo",
-    //         });
-    //         try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
-    //     }
-    // }
+    // Downloads and extract the last published release of TigerBeetle.
+    if (std.mem.indexOf(u8, target, "-macos") == null) {
+        // Standard non-macOS targets.
+        try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-{target}{debug}.zip", .{
+            .target = target,
+            .debug = if (debug) "-debug" else "",
+        });
+        try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-{target}{debug}.zip", .{
+            .target = target,
+            .debug = if (debug) "-debug" else "",
+        });
+    } else {
+        const llvm_lipo = for (@as([2][]const u8, .{ "llvm-lipo-16", "llvm-lipo" })) |llvm_lipo| {
+            if (shell.exec_stdout("{llvm_lipo} --version", .{
+                .llvm_lipo = llvm_lipo,
+            })) |llvm_lipo_version| {
+                log.info("llvm-lipo version {s}", .{llvm_lipo_version});
+                break llvm_lipo;
+            } else |_| {}
+        } else {
+            fatal("can't find llvm-lipo", .{});
+        };
+
+        // For macOS, download the universal binary and split it up.
+        try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-universal-macos{debug}.zip", .{
+            .debug = if (debug) "-debug" else "",
+        });
+        try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-universal-macos{debug}.zip", .{
+            .debug = if (debug) "-debug" else "",
+        });
+        if (std.mem.eql(u8, target, "aarch64-macos")) {
+            try shell.exec("{llvm_lipo} -thin arm64 -output dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{
+                .llvm_lipo = llvm_lipo,
+            });
+            try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
+        } else if (std.mem.eql(u8, target, "x86_64-macos")) {
+            try shell.exec("{llvm_lipo} -thin x86_64 -output dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{
+                .llvm_lipo = llvm_lipo,
+            });
+            try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
+        }
+    }
 
     // TODO: This code should be removed once the first multi-version release is bootstrapped!
     const multiversion_epoch = "0.15.3";
-    const is_multiversion_epoch = true; //std.mem.eql(
-    //     u8,
-    //     try shell.exec_stdout("gh release view --json tagName --template {template}", .{
-    //         .template = "{{.tagName}}", // Static, but shell.zig is not happy with '{'.
-    //     }),
-    //     multiversion_epoch,
-    // );
+    const is_multiversion_epoch = std.mem.eql(
+        u8,
+        try shell.exec_stdout("gh release view --json tagName --template {template}", .{
+            .template = "{{.tagName}}", // Static, but shell.zig is not happy with '{'.
+        }),
+        multiversion_epoch,
+    );
 
     if (is_multiversion_epoch) {
         log.info("past release is multiversion epoch ({s})", .{multiversion_epoch});
 
         const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
         const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
-        _ = exe_name;
 
-        // const past_binary = try std.fs.cwd().openFile("./dist/tigerbeetle-past-pack/" ++ exe_name, .{ .mode = .read_only });
-        const past_binary = try std.fs.cwd().openFile("/home/federico/git/tigerbeetle/tigerbeetle-5/tigerbeetle", .{ .mode = .read_only });
+        const past_binary = try std.fs.cwd().openFile("./dist/tigerbeetle-past-pack/" ++ exe_name, .{ .mode = .read_only });
+        // const past_binary = try std.fs.cwd().openFile("/home/federico/git/tigerbeetle/tigerbeetle-5/tigerbeetle", .{ .mode = .read_only });
         defer past_binary.close();
         const past_binary_contents = try past_binary.readToEndAlloc(shell.arena.allocator(), 128 * 1024 * 1024);
 
@@ -308,9 +317,9 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
 
     const targets = .{
-        // "aarch64-linux",
+        "aarch64-linux",
         "x86_64-linux",
-        // "x86_64-windows",
+        "x86_64-windows",
     };
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
