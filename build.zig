@@ -379,7 +379,7 @@ pub fn build(b: *std.Build) !void {
                     &exit_code,
                     stderr_behavior,
                 );
-                tests.target.abi = if (std.mem.indexOf(u8, ldd_result, "musl") != null)
+                tests.root_module.resolved_target.?.result.abi = if (std.mem.indexOf(u8, ldd_result, "musl") != null)
                     .musl
                 else if (std.mem.indexOf(u8, ldd_result, "libc") != null)
                     .gnu
