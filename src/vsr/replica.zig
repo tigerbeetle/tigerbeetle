@@ -4869,6 +4869,11 @@ pub fn ReplicaType(
                 return true;
             }
 
+            // This check must precede any send_eviction_message_to_client(), since only the primary
+            // should send evictions.
+            if (self.ignore_request_message_backup(message)) return true;
+            assert(self.primary());
+
             if (message.header.release.value < self.release_client_min.value) {
                 log.warn("{}: on_request: ignoring invalid version (client={} version={}<{})", .{
                     self.replica,
@@ -4946,7 +4951,6 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.ignore_request_message_backup(message)) return true;
             if (self.ignore_request_message_upgrade(message)) return true;
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;
