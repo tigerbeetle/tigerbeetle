@@ -161,7 +161,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
         pub fn open(scrubber: *GridScrubber, random: std.rand.Random) void {
             // Compute the tour origin exactly once.
-            if (scrubber.tour_tables_origin) |_| {
+            if (scrubber.tour_tables_origin != null) {
                 return;
             }
 
@@ -171,49 +171,35 @@ pub fn GridScrubberType(comptime Forest: type) type {
             //
             // To accomplish this, try to select an origin uniformly across all blocks:
             // - Bias towards levels with more tables.
-            // - Bias towards trees with larger Values (since their tables have more blocks).
+            // - Bias towards trees with more blocks per table.
             // - (Though, for ease of implementation, the origin is always at the beginning of a
             //   tree's level, never in the middle.)
             assert(scrubber.tour == .init);
 
-            const tree_count = Forest.tree_infos.len;
+            scrubber.tour_tables_origin = .{
+                .level = 0,
+                .tree_id = Forest.tree_infos[0].tree_id,
+            };
 
-            var weights: [tree_count][constants.lsm_levels]u64 = undefined;
             var weights_sum: u64 = 0;
             for (0..constants.lsm_levels) |level| {
-                inline for (Forest.tree_infos, 0..) |tree_info, tree_index| {
+                inline for (Forest.tree_infos) |tree_info| {
                     const tree_id = comptime Forest.tree_id_cast(tree_info.tree_id);
                     const tree = scrubber.forest.tree_for_id_const(tree_id);
                     const levels = &tree.manifest.levels;
-                    weights[tree_index][level] =
-                        levels[level].tables.len() * @sizeOf(tree_info.Tree.Table.Value);
-                    weights_sum += levels[level].tables.len();
-                }
-            }
-
-            scrubber.tour_tables_origin = origin: {
-                if (weights_sum == 0) {
-                    break :origin .{
-                        .level = 0,
-                        .tree_id = Forest.tree_infos[0].tree_id,
-                    };
-                }
-
-                var origin_offset = random.uintLessThan(u64, weights_sum);
-                for (0..constants.lsm_levels) |level| {
-                    inline for (Forest.tree_infos, 0..) |tree_info, tree_index| {
-                        if (origin_offset >= weights[tree_index][level]) {
-                            origin_offset -= weights[tree_index][level];
-                        } else {
-                            break :origin .{
+                    const tree_level_weight = @as(u64, levels[level].tables.len()) *
+                        tree_info.Tree.Table.index.data_block_count_max;
+                    if (tree_level_weight > 0) {
+                        weights_sum += tree_level_weight;
+                        if (random.uintLessThan(u64, weights_sum) < tree_level_weight) {
+                            scrubber.tour_tables_origin = .{
                                 .level = @intCast(level),
                                 .tree_id = tree_info.tree_id,
                             };
                         }
                     }
                 }
-                unreachable;
-            };
+            }
 
             scrubber.tour_tables = WrappingForestTableIterator.init(scrubber.tour_tables_origin.?);
 
