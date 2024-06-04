@@ -142,14 +142,14 @@ pub const samples = [_]Sample{
         \\solely *posted*, not pending.
         \\
         \\Specifically, that **account `1`** has:
-        \\ * `debits_posted = 1500`
+        \\ * `debits_posted = 900`
         \\ * `credits_posted = 0`
         \\ * `debits_pending = 0`
         \\ * and `credits_pending = 0`
         \\
         \\And that **account `2`** has:
         \\ * `debits_posted = 0`
-        \\ * `credits_posted = 1500`
+        \\ * `credits_posted = 900`
         \\ * `debits_pending = 0`
         \\ * and `credits_pending = 0`
         ,
