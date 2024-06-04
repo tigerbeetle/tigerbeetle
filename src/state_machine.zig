@@ -537,14 +537,10 @@ pub fn StateMachineType(
                 },
                 inline else => |comptime_operation| {
                     const event_size = @sizeOf(Event(comptime_operation));
-                    const result_size = @sizeOf(Result(comptime_operation));
                     comptime assert(event_size > 0);
-                    comptime assert(result_size > 0);
 
-                    const batch_limit = @min(
-                        @divFloor(self.batch_size_limit, event_size),
-                        @divFloor(self.batch_size_limit, result_size),
-                    );
+                    const batch_limit: u32 =
+                        operation_batch_max(comptime_operation, self.batch_size_limit);
                     assert(batch_limit > 0);
 
                     // Clients do not validate batch size == 0,
@@ -2074,13 +2070,18 @@ pub fn StateMachineType(
             };
         }
 
-        fn operation_batch_max(comptime operation: Operation, batch_size_limit: u32) u32 {
+        pub fn operation_batch_max(comptime operation: Operation, batch_size_limit: u32) u32 {
             assert(batch_size_limit <= constants.message_body_size_max);
 
-            return @divFloor(batch_size_limit, @max(
-                @sizeOf(Event(operation)),
-                @sizeOf(Result(operation)),
-            ));
+            const event_size = @sizeOf(Event(operation));
+            const result_size = @sizeOf(Result(operation));
+            comptime assert(event_size > 0);
+            comptime assert(result_size > 0);
+
+            return @min(
+                @divFloor(batch_size_limit, event_size),
+                @divFloor(constants.message_body_size_max, result_size),
+            );
         }
     };
 }
