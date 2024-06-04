@@ -121,12 +121,12 @@ pub fn main() !void {
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
     const batch_size_limit_min = comptime batch_size_limit_min: {
-        var event_size_max: ?u32 = null;
+        var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
         for (std.enums.values(StateMachine.Operation)) |operation| {
             const event_size = @sizeOf(StateMachine.Event(operation));
-            event_size_max = if (event_size_max) |m| @max(m, event_size) else event_size;
+            event_size_max = @max(event_size_max, event_size);
         }
-        break :batch_size_limit_min event_size_max.?;
+        break :batch_size_limit_min event_size_max;
     };
     const batch_size_limit: u32 = if (random.boolean())
         constants.message_body_size_max
