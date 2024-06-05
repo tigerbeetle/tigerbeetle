@@ -883,6 +883,7 @@ pub fn ReplicaType(
             self.state_machine_opened = true;
             if (self.event_callback) |hook| hook(self, .state_machine_opened);
 
+            self.grid_scrubber.open(self.prng.random());
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 self.sync_content();
             }
