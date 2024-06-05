@@ -198,6 +198,7 @@ pub fn ManifestLevelType(
             level.* = .{
                 .keys = level.keys,
                 .tables = level.tables,
+                .generation = level.generation + 1,
             };
         }
 
