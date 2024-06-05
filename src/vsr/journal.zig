@@ -116,6 +116,17 @@ comptime {
 
     assert(headers_size > 0);
     assert(headers_size % constants.sector_size == 0);
+    // It's important that the replica doesn't write all redundant headers simultaneously.
+    // Otherwise, a crash could lead to a series of torn writes making the entire journal faulty.
+    // Normally, this guarantee falls out naturally out of the fact that there are fewer journal
+    // writes available than there are sectors. This is not the case for the simulator, which only
+    // has two sectors worth of headers. Rather than adding simulator-only locking to the journal,
+    // the simulator itself prevents correlated torn writes at runtime. The `direct_io` condition
+    // excludes the simulator case.
+    assert(
+        @divExact(headers_size, constants.sector_size) > constants.journal_iops_write_max or
+            !constants.direct_io,
+    );
 
     assert(prepares_size > 0);
     assert(prepares_size % constants.sector_size == 0);
@@ -1711,8 +1722,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         /// `write_prepare` uses `write_sectors` to prevent concurrent disk writes.
-        // TODO To guard against torn writes, don't write simultaneously to all redundant header
-        // sectors. (This is mostly a risk for single-replica clusters with small WALs).
         pub fn write_prepare(
             journal: *Journal,
             callback: *const fn (
