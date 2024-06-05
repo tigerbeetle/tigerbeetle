@@ -58,7 +58,7 @@ const CliArgs = union(enum) {
         \\
         \\Options (inspect):
         \\
-        \\  When `superblock-copy` is set, use the trailer referenced by that superblock copy.
+        \\  When `--superblock-copy` is set, use the trailer referenced by that superblock copy.
         \\  Otherwise, copy=0 will be used by default.
         \\
         \\  superblock

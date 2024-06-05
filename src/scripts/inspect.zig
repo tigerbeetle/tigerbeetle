@@ -277,6 +277,7 @@ const Inspector = struct {
                     "release=",   header.release,
                     "view=",      header.view,
                     "op=",        header.op,
+                    "size=",      header.size,
                     "operation=", header.operation,
                 });
             }
@@ -879,13 +880,25 @@ fn print_block(writer: anytype, block: BlockPtrConst) !void {
             const data = schema.TableData.from(block);
             const metadata = data.block_metadata(block);
             const data_bytes = data.block_values_used_bytes(block);
+
+            var label_buffer: [256]u8 = undefined;
             inline for (StateMachine.Forest.tree_infos) |tree_info| {
                 if (metadata.tree_id == tree_info.tree_id) {
-                    for (std.mem.bytesAsSlice(tree_info.Tree.Table.Value, data_bytes)) |*value| {
+                    for (
+                        std.mem.bytesAsSlice(tree_info.Tree.Table.Value, data_bytes),
+                        0..,
+                    ) |*value, i| {
+                        var label_stream = std.io.fixedBufferStream(&label_buffer);
+                        try label_stream.writer().print("{s}[{}]", .{ tree_info.tree_name, i });
                         if (comptime is_composite_key(tree_info.Tree.Table.Value)) {
-                            try print_struct(writer, " ", &.{ value.field, value.timestamp });
+                            try label_stream.writer().writeAll(": ");
+                            try print_struct(
+                                writer,
+                                label_stream.getWritten(),
+                                &.{ value.field, value.timestamp },
+                            );
                         } else {
-                            try print_struct(writer, " ", value);
+                            try print_struct(writer, label_stream.getWritten(), value);
                         }
                     }
                     break;
