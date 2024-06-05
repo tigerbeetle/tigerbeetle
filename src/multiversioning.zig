@@ -15,9 +15,18 @@ pub const checksum = @import("vsr/checksum.zig").checksum;
 
 /// Creates a virtual file backed by memory.
 pub fn open_memory_file(name: [*:0]const u8) os.fd_t {
-    return @intCast(linux.memfd_create(name, 0));
+    const mfd_cloexec = 0x0001;
+
+    return @intCast(linux.memfd_create(name, mfd_cloexec));
 }
 
+pub extern "kernel32" fn GetTempPathW(
+    nBufferLength: u32,
+    lpBuffer: [*]u16,
+) callconv(.C) u32;
+
+// TODO(zig): Zig 0.11 doesn't have execveat.
+// Once that's available, this can be removed.
 pub fn execveat(dirfd: i32, path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const u8, flags: i32) usize {
     return std.os.linux.syscall5(
         .execveat,
@@ -226,6 +235,7 @@ pub const MultiVersion = struct {
     elf_string_buffer: []u8,
     elf_header: elf.Header = undefined,
     io: *IO,
+    fd: os.fd_t,
 
     completion: IO.Completion = undefined,
     completion_timeout: IO.Completion = undefined,
@@ -261,10 +271,69 @@ pub const MultiVersion = struct {
         const read_buffer = try allocator.alloc(u8, 2048);
         const elf_string_buffer = try allocator.alloc(u8, 1024);
 
+        // Only Linux has a nice API for executing from an in-memory file. For macOS and Windows,
+        // use a standard named temporary file instead.
+        const fd: os.fd_t = switch (builtin.target.os.tag) {
+            .linux => blk: {
+                const fd = open_memory_file("tigerbeetle-exec-release");
+                try os.ftruncate(fd, constants.multiversion_binary_size_max);
+
+                break :blk fd;
+            },
+            .macos => blk: {
+                const maybe_tmp_dir = std.os.getenv("TMPDIR");
+
+                if (maybe_tmp_dir) |tmp_dir| {
+                    const tmp_dir_fd = try IO.open_dir(tmp_dir);
+                    const fd = try IO.open_file(
+                        tmp_dir_fd,
+                        "randomly-generate-me-tigerbeetle",
+                        constants.multiversion_binary_size_max,
+                        .create,
+                        .direct_io_disabled,
+                    );
+                    try os.fchmod(fd, 0x700);
+
+                    break :blk fd;
+                } else {
+                    return error.TmpDirNotSet;
+                }
+            },
+            .windows => blk: {
+                var utf16le_buf: [os.windows.PATH_MAX_WIDE]u16 = undefined;
+                const result = GetTempPathW(utf16le_buf.len, &utf16le_buf);
+
+                if (result == 0) {
+                    switch (os.windows.kernel32.GetLastError()) {
+                        else => |err| return os.windows.unexpectedError(err),
+                    }
+                }
+
+                // Passing throught the pass and using the *W fns directly don't seem to work.
+                const utf8_path = try std.unicode.utf16leToUtf8Alloc(
+                    allocator,
+                    utf16le_buf[0..result :0],
+                );
+                defer allocator.free(utf8_path);
+
+                const tmp_dir_fd = try IO.open_dir(utf8_path);
+                const fd = try IO.open_file(
+                    tmp_dir_fd,
+                    "randomly-generate-me-tigerbeetle.exe",
+                    constants.multiversion_binary_size_max,
+                    .create,
+                    .direct_io_disabled,
+                );
+                break :blk fd;
+            },
+            else => @panic("multiversioning unimplemented"),
+        };
+
         return MultiVersion{
             .read_buffer = read_buffer,
             .elf_string_buffer = elf_string_buffer,
             .exe_path = exe_path,
+            .fd = fd,
 
             .io = io,
         };

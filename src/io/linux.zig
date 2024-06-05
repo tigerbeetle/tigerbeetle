@@ -983,11 +983,6 @@ pub const IO = struct {
 
     pub const INVALID_FILE: os.fd_t = -1;
 
-    /// Creates a virtual file backed by memory.
-    pub fn open_memory_file(name: []const u8) os.fd_t {
-        return @intCast(linux.memfd_create(name, 0));
-    }
-
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (if possible in development mode, but required in production mode).
