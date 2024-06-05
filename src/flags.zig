@@ -522,7 +522,7 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
     }
 }
 
-fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
+pub fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
     // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
     // Without comptime blk, the compiler thinks the result is a runtime slice returning a UAF.
     return comptime blk: {
@@ -550,7 +550,7 @@ fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8
 }
 
 /// This is essentially `field.default_value`, but with a useful type instead of `?*anyopaque`.
-fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
+pub fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
     return if (field.default_value) |default_opaque|
         @as(*const field.type, @ptrCast(@alignCast(default_opaque))).*
     else

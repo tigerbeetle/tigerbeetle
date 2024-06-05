@@ -1,29 +1,52 @@
 # TigerBeetle Changelog
 
-## 2024-05-27
+## 2024-06-03 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1980](https://github.com/tigerbeetle/tigerbeetle/pull/1980)
+
+  Fix crash when upgrading solo replica.
+
+- [#1952](https://github.com/tigerbeetle/tigerbeetle/pull/1952)
+
+  Pin points crossing Go client FFI boundary to prevent memory corruption.
+
+### Internals
+
+- [#1931](https://github.com/tigerbeetle/tigerbeetle/pull/1931),
+  [#1933](https://github.com/tigerbeetle/tigerbeetle/pull/1933)
+
+  Improve Go client tests.
+
+- [#1946](https://github.com/tigerbeetle/tigerbeetle/pull/1946)
+
+  Add `vsr.Client.register()`.
+
+## 2024-05-27 (No release: Queued up for upcoming multi-version binary release)
 
 ### Features
 
 - [#1975](https://github.com/tigerbeetle/tigerbeetle/pull/1975)
 
-      Build our .NET client for .NET 8, the current LTS version. Thanks @woksin!
+  Build our .NET client for .NET 8, the current LTS version. Thanks @woksin!
 
 ### Internals
 
 - [#1971](https://github.com/tigerbeetle/tigerbeetle/pull/1971)
 
-      Document recovery case `@L` in VSR.
+  Document recovery case `@L` in VSR.
 
 - [#1965](https://github.com/tigerbeetle/tigerbeetle/pull/1965)
 
-      We implicitly supported underscores in numerical CLI flags. Add tests to make this explicit.
+  We implicitly supported underscores in numerical CLI flags. Add tests to make this explicit.
 
 - [#1974](https://github.com/tigerbeetle/tigerbeetle/pull/1974),
   [#1970](https://github.com/tigerbeetle/tigerbeetle/pull/1970)
 
-      Add the size of an empty data file to [devhub](https://tigerbeetle.github.io/tigerbeetle/),
-      tweak the benchmark to always generate the same sized batches, and speed up loading the
-      devhub itself.
+  Add the size of an empty data file to [devhub](https://tigerbeetle.github.io/tigerbeetle/),
+  tweak the benchmark to always generate the same sized batches, and speed up loading the
+  devhub itself.
 
 ### TigerTracks 🎧
 

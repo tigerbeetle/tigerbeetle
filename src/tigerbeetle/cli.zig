@@ -42,21 +42,27 @@ const CliArgs = union(enum) {
     },
 
     start: struct {
+        // Stable CLI arguments.
         addresses: []const u8,
-        limit_storage: flags.ByteSize = .{ .value = constants.storage_size_limit_max },
+        cache_grid: ?flags.ByteSize = null,
+        development: bool = false,
+        positional: struct {
+            path: [:0]const u8,
+        },
+
+        // Everything below here is considered experimental, and requires `--experimental` to be
+        // set. Experimental flags disable automatic upgrades with multiversion binaries; each
+        // replica has to be manually restarted.
+        // Experimental flags must default to null.
+        experimental: bool = false,
+
+        limit_storage: ?flags.ByteSize = null,
         limit_pipeline_requests: ?u32 = null,
         cache_accounts: ?flags.ByteSize = null,
         cache_transfers: ?flags.ByteSize = null,
         cache_transfers_pending: ?flags.ByteSize = null,
         cache_account_balances: ?flags.ByteSize = null,
-        cache_grid: ?flags.ByteSize = null,
-        memory_lsm_manifest: flags.ByteSize =
-            .{ .value = constants.lsm_manifest_memory_size_default },
-        development: bool = false,
-
-        positional: struct {
-            path: [:0]const u8,
-        },
+        memory_lsm_manifest: ?flags.ByteSize = null,
     },
 
     version: struct {
@@ -152,12 +158,6 @@ const CliArgs = union(enum) {
         \\        (Total RAM) - 3GiB (TigerBeetle) - 1GiB (System), eg 12GiB for a 16GiB machine.
         \\        Defaults to {[default_cache_grid_gb]d}GiB.
         \\
-        \\  --memory-lsm-manifest=<size><KiB|MiB|GiB>
-        \\        Sets the amount of memory allocated for LSM-tree manifests. When the
-        \\        number or size of LSM-trees would become too large for their manifests to fit
-        \\        into memory the server will terminate.
-        \\        Defaults to {[default_memory_lsm_manifest_mb]d}MiB.
-        \\
         \\  --verbose
         \\        Print compile-time configuration along with the build version.
         \\
@@ -192,10 +192,6 @@ const CliArgs = union(enum) {
         .default_cache_grid_gb = @divExact(
             constants.grid_cache_size_default,
             1024 * 1024 * 1024,
-        ),
-        .default_memory_lsm_manifest_mb = @divExact(
-            constants.lsm_manifest_memory_size_default,
-            1024 * 1024,
         ),
     });
 };
@@ -251,6 +247,7 @@ pub const Command = union(enum) {
         cache_grid_blocks: u32,
         lsm_forest_node_count: u32,
         development: bool,
+        experimental: bool,
         path: [:0]const u8,
     };
 
@@ -378,6 +375,35 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             };
         },
         .start => |start| {
+            // Allowlist of stable flags. --development will disable automatic multiversion
+            // upgrades too, but the flag itself is stable.
+            const stable_args = .{
+                "addresses",   "cache_grid",   "positional",
+                "development", "experimental",
+            };
+            inline for (std.meta.fields(@TypeOf(start))) |field| {
+                const stable_field = comptime for (stable_args) |stable_arg| {
+                    assert(std.meta.fieldIndex(@TypeOf(start), stable_arg) != null);
+                    if (std.mem.eql(u8, field.name, stable_arg)) {
+                        break true;
+                    }
+                } else false;
+                if (stable_field) continue;
+
+                const flag_name = flags.flag_name(field);
+
+                // If you've added a flag and get a comptime error here, it's likely because
+                // we require experimental flags to default to null.
+                assert(flags.default_value(field).? == null);
+
+                if (@field(start, field.name) != null and !start.experimental) {
+                    flags.fatal(
+                        "{s} is marked experimental, add `--experimental` to continue.",
+                        .{flag_name},
+                    );
+                }
+            }
+
             const groove_config = StateMachine.Forest.groove_config;
             const AccountsValuesCache = groove_config.accounts.ObjectsCache.Cache;
             const TransfersValuesCache = groove_config.transfers.ObjectsCache.Cache;
@@ -388,20 +414,25 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const defaults =
                 if (start.development) start_defaults_development else start_defaults_production;
 
-            const storage_size_limit = start.limit_storage.bytes();
+            const start_limit_storage: flags.ByteSize = start.limit_storage orelse
+                .{ .value = constants.storage_size_limit_max };
+            const start_memory_lsm_manifest: flags.ByteSize = start.memory_lsm_manifest orelse
+                .{ .value = constants.lsm_manifest_memory_size_default };
+
+            const storage_size_limit = start_limit_storage.bytes();
             const storage_size_limit_min = data_file_size_min;
             const storage_size_limit_max = constants.storage_size_limit_max;
             if (storage_size_limit > storage_size_limit_max) {
                 flags.fatal("--limit-storage: size {}{s} exceeds maximum: {}MiB", .{
-                    start.limit_storage.value,
-                    start.limit_storage.suffix(),
+                    start_limit_storage.value,
+                    start_limit_storage.suffix(),
                     @divExact(storage_size_limit_max, 1024 * 1024),
                 });
             }
             if (storage_size_limit < storage_size_limit_min) {
                 flags.fatal("--limit-storage: size {}{s} is below minimum: {}KiB", .{
-                    start.limit_storage.value,
-                    start.limit_storage.suffix(),
+                    start_limit_storage.value,
+                    start_limit_storage.suffix(),
                     @divExact(storage_size_limit_min, 1024),
                 });
             }
@@ -409,8 +440,8 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 flags.fatal(
                     "--limit-storage: size {}{s} must be a multiple of sector size ({}KiB)",
                     .{
-                        start.limit_storage.value,
-                        start.limit_storage.suffix(),
+                        start_limit_storage.value,
+                        start_limit_storage.suffix(),
                         @divExact(constants.sector_size, 1024),
                     },
                 );
@@ -433,21 +464,21 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 });
             }
 
-            const lsm_manifest_memory = start.memory_lsm_manifest.bytes();
+            const lsm_manifest_memory = start_memory_lsm_manifest.bytes();
             const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
             const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
             const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
             if (lsm_manifest_memory > lsm_manifest_memory_max) {
                 flags.fatal("--memory-lsm-manifest: size {}{s} exceeds maximum: {}MiB", .{
-                    start.memory_lsm_manifest.value,
-                    start.memory_lsm_manifest.suffix(),
+                    start_memory_lsm_manifest.value,
+                    start_memory_lsm_manifest.suffix(),
                     @divExact(lsm_manifest_memory_max, 1024 * 1024),
                 });
             }
             if (lsm_manifest_memory < lsm_manifest_memory_min) {
                 flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}MiB", .{
-                    start.memory_lsm_manifest.value,
-                    start.memory_lsm_manifest.suffix(),
+                    start_memory_lsm_manifest.value,
+                    start_memory_lsm_manifest.suffix(),
                     @divExact(lsm_manifest_memory_min, 1024 * 1024),
                 });
             }
@@ -455,8 +486,8 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 flags.fatal(
                     "--memory-lsm-manifest: size {}{s} must be a multiple of {}MiB",
                     .{
-                        start.memory_lsm_manifest.value,
-                        start.memory_lsm_manifest.suffix(),
+                        start_memory_lsm_manifest.value,
+                        start_memory_lsm_manifest.suffix(),
                         @divExact(lsm_manifest_memory_multiplier, 1024 * 1024),
                     },
                 );
@@ -498,6 +529,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     ),
                     .lsm_forest_node_count = lsm_forest_node_count,
                     .development = start.development,
+                    .experimental = start.experimental,
                     .path = start.positional.path,
                 },
             };
