@@ -765,7 +765,7 @@ fn SegmentedArrayType(
             /// if the returned table info is outside the key range.
             done: bool = false,
 
-            pub fn next(it: *Iterator) ?*const T {
+            pub fn next(it: *Iterator) ?*T {
                 if (it.done) return null;
 
                 assert(it.cursor.node < it.array.node_count);

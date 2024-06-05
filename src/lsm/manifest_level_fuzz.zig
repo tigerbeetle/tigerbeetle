@@ -388,7 +388,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 assert(level_table.equal(env_table));
 
                 env.level.set_snapshot_max(env.snapshot, .{
-                    .table_info = @constCast(level_table),
+                    .table_info = level_table,
                     .generation = env.level.generation,
                 });
                 // This is required to keep the table in the fuzzer's environment consistent with
