@@ -961,6 +961,30 @@ pub const Simulator = struct {
         const replica_storage = &simulator.cluster.storages[replica_index];
         const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
 
+        {
+            // If the entire Zone.wal_headers is corrupted, the replica becomes permanently
+            // unavailable (returns `WALInvalid` from `open`). In the simulator, there are only two
+            // WAL sectors, which could both get corrupted when a replica crashes while writing them
+            // simultaneously. To keep the replica operational, arbitrarily repair one of the
+            // sectors.
+            //
+            // In production `journal_iops_write_max < header_sector_count`, which makes is
+            // impossible to get torn writes for all journal header sectors at the same time.
+            const header_sector_offset =
+                @divExact(vsr.Zone.wal_headers.start(), constants.sector_size);
+            const header_sector_count =
+                @divExact(constants.journal_size_headers, constants.sector_size);
+            var header_sector_count_faulty: u32 = 0;
+            for (0..header_sector_count) |header_sector_index| {
+                header_sector_count_faulty += @intFromBool(replica_storage.faults.isSet(
+                    header_sector_offset + header_sector_index,
+                ));
+            }
+            if (header_sector_count_faulty == header_sector_count) {
+                replica_storage.faults.unset(header_sector_offset);
+            }
+        }
+
         if (!fault) {
             // The journal writes redundant headers of faulty ops as zeroes to ensure
             // that they remain faulty after a crash/recover. Since that fault cannot
