@@ -277,6 +277,15 @@ pub const IO = struct {
                         op.address.getOsSockLen(),
                     );
                 },
+                .openat => |op| {
+                    linux.io_uring_prep_openat(
+                        sqe,
+                        op.dir_fd,
+                        op.file_path,
+                        op.flags,
+                        op.mode,
+                    );
+                },
                 .read => |op| {
                     linux.io_uring_prep_read(
                         sqe,
@@ -387,6 +396,45 @@ pub const IO = struct {
                             break :blk err;
                         } else {
                             assert(completion.result == 0);
+                        }
+                    };
+                    call_callback(completion, &result, callback_tracer_slot);
+                },
+                .openat => {
+                    const result: anyerror!os.fd_t = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@as(os.E, @enumFromInt(-completion.result))) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .FAULT => unreachable,
+                                .INVAL => unreachable,
+                                .BADF => unreachable,
+                                .ACCES => error.AccessDenied,
+                                .FBIG => error.FileTooBig,
+                                .OVERFLOW => error.FileTooBig,
+                                .ISDIR => error.IsDir,
+                                .LOOP => error.SymLinkLoop,
+                                .MFILE => error.ProcessFdQuotaExceeded,
+                                .NAMETOOLONG => error.NameTooLong,
+                                .NFILE => error.SystemFdQuotaExceeded,
+                                .NODEV => error.NoDevice,
+                                .NOENT => error.FileNotFound,
+                                .NOMEM => error.SystemResources,
+                                .NOSPC => error.NoSpaceLeft,
+                                .NOTDIR => error.NotDir,
+                                .PERM => error.AccessDenied,
+                                .EXIST => error.PathAlreadyExists,
+                                .BUSY => error.DeviceBusy,
+                                .OPNOTSUPP => error.FileLocksNotSupported,
+                                .AGAIN => error.WouldBlock,
+                                .TXTBSY => error.FileBusy,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(completion.result);
                         }
                     };
                     call_callback(completion, &result, callback_tracer_slot);
@@ -564,6 +612,12 @@ pub const IO = struct {
             socket: os.socket_t,
             address: std.net.Address,
         },
+        openat: struct {
+            dir_fd: os.fd_t,
+            file_path: [*:0]const u8,
+            flags: u32,
+            mode: os.mode_t,
+        },
         read: struct {
             fd: os.fd_t,
             buffer: []u8,
@@ -722,6 +776,47 @@ pub const IO = struct {
                 .connect = .{
                     .socket = socket,
                     .address = address,
+                },
+            },
+        };
+        self.enqueue(completion);
+    }
+
+    pub const OpenatError = os.OpenError || os.UnexpectedError;
+
+    pub fn openat(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: OpenatError!os.fd_t,
+        ) void,
+        completion: *Completion,
+        dir_fd: os.fd_t,
+        file_path: [*:0]const u8,
+        flags: u32,
+        mode: os.mode_t,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @ptrCast(@alignCast(ctx)),
+                        comp,
+                        @as(*const OpenatError!os.fd_t, @ptrCast(@alignCast(res))).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .openat = .{
+                    .dir_fd = dir_fd,
+                    .file_path = file_path,
+                    .flags = flags | os.O.CLOEXEC,
+                    .mode = mode,
                 },
             },
         };

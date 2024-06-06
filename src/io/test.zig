@@ -13,8 +13,8 @@ test "write/read/close" {
 
         io: IO,
         done: bool = false,
-        fd: os.fd_t,
 
+        fd: ?os.fd_t = null,
         write_buf: [20]u8 = [_]u8{97} ** 20,
         read_buf: [20]u8 = [_]u8{98} ** 20,
 
@@ -23,31 +23,57 @@ test "write/read/close" {
 
         fn run_test() !void {
             const path = "test_io_write_read_close";
-            const file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = true });
+
+            // The file gets created below, either by createFile or openat.
             defer std.fs.cwd().deleteFile(path) catch {};
 
             var self: Context = .{
                 .io = try IO.init(32, 0),
-                .fd = file.handle,
             };
             defer self.io.deinit();
 
             var completion: IO.Completion = undefined;
 
-            self.io.write(
-                *Context,
-                &self,
-                write_callback,
-                &completion,
-                self.fd,
-                &self.write_buf,
-                10,
-            );
+            if (builtin.target.os.tag == .linux) {
+                self.io.openat(
+                    *Context,
+                    &self,
+                    openat_callback,
+                    &completion,
+                    os.AT.FDCWD,
+                    path,
+                    os.O.RDWR | os.O.TRUNC | os.O.CREAT,
+                    std.fs.File.default_mode,
+                );
+            } else {
+                const file = try std.fs.cwd().createFile(path, .{
+                    .read = true,
+                    .truncate = true,
+                });
+                self.openat_callback(&completion, file.handle);
+            }
             while (!self.done) try self.io.tick();
 
             try testing.expectEqual(self.write_buf.len, self.written);
             try testing.expectEqual(self.read_buf.len, self.read);
             try testing.expectEqualSlices(u8, &self.write_buf, &self.read_buf);
+        }
+
+        fn openat_callback(
+            self: *Context,
+            completion: *IO.Completion,
+            result: anyerror!os.fd_t,
+        ) void {
+            self.fd = result catch @panic("openat error");
+            self.io.write(
+                *Context,
+                self,
+                write_callback,
+                completion,
+                self.fd.?,
+                &self.write_buf,
+                10,
+            );
         }
 
         fn write_callback(
@@ -56,7 +82,7 @@ test "write/read/close" {
             result: IO.WriteError!usize,
         ) void {
             self.written = result catch @panic("write error");
-            self.io.read(*Context, self, read_callback, completion, self.fd, &self.read_buf, 10);
+            self.io.read(*Context, self, read_callback, completion, self.fd.?, &self.read_buf, 10);
         }
 
         fn read_callback(
@@ -65,7 +91,7 @@ test "write/read/close" {
             result: IO.ReadError!usize,
         ) void {
             self.read = result catch @panic("read error");
-            self.io.close(*Context, self, close_callback, completion, self.fd);
+            self.io.close(*Context, self, close_callback, completion, self.fd.?);
         }
 
         fn close_callback(
