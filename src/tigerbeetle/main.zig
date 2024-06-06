@@ -80,8 +80,8 @@ pub fn main() !void {
 const SigIllHandler = struct {
     var original_posix_sigill_handler: ?*const fn (
         i32,
-        *const os.siginfo_t,
-        ?*const anyopaque,
+        *const std.posix.siginfo_t,
+        ?*anyopaque,
     ) callconv(.C) void = null;
 
     fn handle_sigill_windows(
@@ -95,8 +95,8 @@ const SigIllHandler = struct {
 
     fn handle_sigill_posix(
         sig: i32,
-        info: *const os.siginfo_t,
-        ctx_ptr: ?*const anyopaque,
+        info: *const std.posix.siginfo_t,
+        ctx_ptr: ?*anyopaque,
     ) callconv(.C) noreturn {
         display_message();
         original_posix_sigill_handler.?(sig, info, ctx_ptr);
@@ -129,15 +129,15 @@ const SigIllHandler = struct {
                 // For Linux / macOS, save the original signal handler so it can be called by this
                 // new handler once the log message has been printed.
                 assert(original_posix_sigill_handler == null);
-                var act = os.Sigaction{
+                var act = std.posix.Sigaction{
                     .handler = .{ .sigaction = handle_sigill_posix },
-                    .mask = os.empty_sigset,
-                    .flags = (os.SA.SIGINFO | os.SA.RESTART | os.SA.RESETHAND),
+                    .mask = std.posix.empty_sigset,
+                    .flags = (std.posix.SA.SIGINFO | std.posix.SA.RESTART | std.posix.SA.RESETHAND),
                 };
 
-                var oact: os.Sigaction = undefined;
+                var oact: std.posix.Sigaction = undefined;
 
-                try os.sigaction(os.SIG.ILL, &act, &oact);
+                try std.posix.sigaction(std.posix.SIG.ILL, &act, &oact);
                 original_posix_sigill_handler = oact.handler.sigaction.?;
             },
             else => unreachable,

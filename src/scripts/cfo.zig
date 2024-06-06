@@ -210,7 +210,7 @@ fn run_fuzzers(
                     );
                     _ = try std.posix.fcntl(
                         child.stdin.?.handle,
-                        std.os.F.SETFL,
+                        std.posix.F.SETFL,
                         @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
                     );
                     fuzzer_or_null.* = .{ .seed = seed_record, .child = child };

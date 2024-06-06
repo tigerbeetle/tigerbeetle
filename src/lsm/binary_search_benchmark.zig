@@ -181,7 +181,7 @@ const Benchmark = struct {
             return utime100ns * 100;
         }
 
-        const utime_tv = std.os.getrusage(std.os.system.rusage.SELF).utime;
+        const utime_tv = std.posix.getrusage(std.posix.rusage.SELF).utime;
         return (@as(u128, @intCast(utime_tv.tv_sec)) * std.time.ns_per_s) +
             (@as(u32, @intCast(utime_tv.tv_usec)) * std.time.ns_per_us);
     }

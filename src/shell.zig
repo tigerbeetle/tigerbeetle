@@ -517,7 +517,7 @@ pub fn exec_raw(
     shell: *Shell,
     comptime cmd: []const u8,
     cmd_args: anytype,
-) !std.ChildProcess.ExecResult {
+) !std.ChildProcess.RunResult {
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 

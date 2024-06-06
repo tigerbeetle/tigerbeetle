@@ -287,7 +287,6 @@ pub fn build(b: *std.Build) !void {
             mode,
             &.{ &install_step.step, &tb_client_header_generate.step },
             target,
-            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -307,7 +306,6 @@ pub fn build(b: *std.Build) !void {
             mode,
             &.{&install_step.step},
             target,
-            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -317,7 +315,6 @@ pub fn build(b: *std.Build) !void {
             mode,
             &.{&install_step.step},
             target,
-            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -326,7 +323,6 @@ pub fn build(b: *std.Build) !void {
             b,
             mode,
             &.{ &install_step.step, &tb_client_header_generate.step },
-            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -336,7 +332,6 @@ pub fn build(b: *std.Build) !void {
             mode,
             target,
             &.{ &install_step.step, &tb_client_header_generate.step },
-            vsr_module,
             options,
             git_clone_tracy,
             tracer_backend,
@@ -564,7 +559,6 @@ fn go_client(
     mode: Mode,
     dependencies: []const *std.Build.Step,
     target: std.Build.ResolvedTarget,
-    vsr_module: *std.Build.Module,
     options: *std.Build.Step.Options,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -586,7 +580,6 @@ fn go_client(
         .root_source_file = .{ .path = "src/go_bindings.zig" },
         .target = target,
     });
-    bindings.root_module.addImport("vsr", vsr_module);
     bindings.root_module.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
@@ -615,7 +608,6 @@ fn go_client(
         lib.pie = true;
         lib.bundle_compiler_rt = true;
         lib.root_module.stack_protector = false;
-        lib.root_module.addImport("vsr", vsr_module);
         lib.root_module.addOptions("vsr_options", options);
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
@@ -650,7 +642,6 @@ fn java_client(
         .root_source_file = .{ .path = "src/java_bindings.zig" },
         .target = target,
     });
-    bindings.root_module.addImport("vsr", vsr_module);
     bindings.root_module.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
@@ -693,7 +684,6 @@ fn dotnet_client(
     mode: Mode,
     dependencies: []const *std.Build.Step,
     target: std.Build.ResolvedTarget,
-    vsr_module: *std.Build.Module,
     options: *std.Build.Step.Options,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -709,7 +699,6 @@ fn dotnet_client(
         .root_source_file = .{ .path = "src/dotnet_bindings.zig" },
         .target = target,
     });
-    bindings.root_module.addImport("vsr", vsr_module);
     bindings.root_module.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
@@ -731,7 +720,6 @@ fn dotnet_client(
             lib.linkSystemLibrary("advapi32");
         }
 
-        lib.root_module.addImport("vsr", vsr_module);
         lib.root_module.addOptions("vsr_options", options);
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
@@ -751,7 +739,6 @@ fn node_client(
     mode: Mode,
     dependencies: []const *std.Build.Step,
     target: std.Build.ResolvedTarget,
-    vsr_module: *std.Build.Module,
     options: *std.Build.Step.Options,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -766,7 +753,6 @@ fn node_client(
         .root_source_file = .{ .path = "src/node_bindings.zig" },
         .target = target,
     });
-    bindings.root_module.addImport("vsr", vsr_module);
     bindings.root_module.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
@@ -831,7 +817,6 @@ fn node_client(
             lib.linkSystemLibrary("node");
         }
 
-        lib.root_module.addImport("vsr", vsr_module);
         lib.root_module.addOptions("vsr_options", options);
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
@@ -852,7 +837,6 @@ fn c_client(
     b: *std.Build,
     mode: Mode,
     dependencies: []const *std.Build.Step,
-    vsr_module: *std.Build.Module,
     options: *std.Build.Step.Options,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -900,7 +884,6 @@ fn c_client(
                 lib.linkSystemLibrary("advapi32");
             }
 
-            lib.root_module.addImport("vsr", vsr_module);
             lib.root_module.addOptions("vsr_options", options);
             link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
@@ -919,7 +902,6 @@ fn c_client_sample(
     mode: Mode,
     target: std.Build.ResolvedTarget,
     dependencies: []const *std.Build.Step,
-    vsr_module: *std.Build.Module,
     options: *std.Build.Step.Options,
     git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
@@ -938,7 +920,6 @@ fn c_client_sample(
     static_lib.linkLibC();
     static_lib.pie = true;
     static_lib.bundle_compiler_rt = true;
-    static_lib.root_module.addImport("vsr", vsr_module);
     static_lib.root_module.addOptions("vsr_options", options);
     link_tracer_backend(static_lib, git_clone_tracy, tracer_backend, target.result);
     c_sample_build.dependOn(&static_lib.step);
