@@ -19,6 +19,16 @@ Transfers](../develop/recipes/multi-debit-credit-transfers.md).
 
 Transfers _cannot be modified_ after creation.
 
+If a detail of a transfer is incorrect and needs to be modified, this is done using
+[correcting transfers](../develop/recipes/correcting-transfers.md).
+
+### Deletion
+
+Transfers _cannot be deleted_ after creation.
+
+If a transfer is made in error, its effects can be reversed using a 
+[correcting transfer](../develop/recipes/correcting-transfers.md).
+
 ### Guarantees
 
 - Transfers are immutable. They are never modified once they are successfully created.
