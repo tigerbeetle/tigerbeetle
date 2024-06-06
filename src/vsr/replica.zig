@@ -601,6 +601,19 @@ pub fn ReplicaType(
 
             const release_target = self.superblock.working.vsr_state.checkpoint.release;
             assert(release_target.value >= self.superblock.working.release_format.value);
+
+            // For this transitional release, it can only ever be executed as a lower version by a
+            // higher version; therefore the superblock must either be minimum or 0.15.3. If it's
+            // not, it has been invoked incorrectly.
+            assert(
+                release_target.value == vsr.Release.minimum.value or
+                    release_target.value == vsr.Release.from(.{
+                    .major = 0,
+                    .minor = 15,
+                    .patch = 3,
+                }).value,
+            );
+
             if (release_target.value != self.release.value) {
                 self.release_transition(@src());
                 return;
