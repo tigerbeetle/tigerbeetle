@@ -116,9 +116,10 @@ public class UInt128Tests
     }
 
     [TestMethod]
-    public unsafe void EndToEndTigerBeetleSimulationGuid()
+    public unsafe void EndToEndTigerBeetleSimulationViaGuid()
     {
-        // "00000001-0001-4000-AA00-000000000000"
+        // "00000001-0001-4000-AA00-000000000000" 
+        var idSourcedExternally = Guid.Parse("00000001-0001-4000-AA00-000000000000"); // e.g. guid from other database
         var bytesStoredInTB = new byte[]
             {0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x40, 0x00, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
@@ -128,51 +129,15 @@ public class UInt128Tests
 
         // Round-trip via GUID
         var roundTripped = parsed.ToGuid().ToUInt128();
-        
+
         // Send bytes to TB (TB client send raw bytes of dotnet types over the wire) 
         var roundTrippedBytes = new Span<byte>(&roundTripped, 16);
 
-        Assert.IsTrue(roundTrippedBytes.SequenceEqual(bytesStoredInTB));
-    }
-    
-    [TestMethod]
-    public unsafe void EndToEndTigerBeetleSimulationArray()
-    {
-        // "00000001-0001-4000-AA00-000000000000"
-        var bytesStoredInTB = new byte[]
-            {0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x40, 0x00, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-
-        // Parse TB result (TB client reads by overlaying dotnet types on raw bytes)
-        UInt128 parsed = UInt128.Zero;
-        bytesStoredInTB.CopyTo(new Span<byte>(&parsed, 16));
-
-        // Round-trip via Array
-        var roundTripped = parsed.ToArray().ToUInt128();
-        
-        // Send bytes to TB (TB client send raw bytes of dotnet types over the wire) 
-        var roundTrippedBytes = new Span<byte>(&roundTripped, 16);
+        var externalIdUInt128 = idSourcedExternally.ToUInt128();
+        var externalIdBytes = new Span<byte>(&externalIdUInt128, 16);
 
         Assert.IsTrue(roundTrippedBytes.SequenceEqual(bytesStoredInTB));
-    }
-
-    [TestMethod]
-    public unsafe void EndToEndTigerBeetleSimulationBigInteger()
-    {
-        // "00000001-0001-4000-AA00-000000000000"
-        var bytesStoredInTB = new byte[]
-            {0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x40, 0x00, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-
-        // Parse TB result (TB client reads by overlaying dotnet types on raw bytes)
-        UInt128 parsed = UInt128.Zero;
-        bytesStoredInTB.CopyTo(new Span<byte>(&parsed, 16));
-
-        // Round-trip via BigInteger
-        var roundTripped = parsed.ToBigInteger().ToUInt128();
-        
-        // Send bytes to TB (TB client send raw bytes of dotnet types over the wire) 
-        var roundTrippedBytes = new Span<byte>(&roundTripped, 16);
-
-        Assert.IsTrue(roundTrippedBytes.SequenceEqual(bytesStoredInTB));
+        Assert.IsTrue(externalIdBytes.SequenceEqual(bytesStoredInTB));
     }
 
     [TestMethod]
