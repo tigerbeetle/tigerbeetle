@@ -12,7 +12,7 @@ namespace TigerBeetle.Tests;
 public class UInt128Tests
 {
     [TestMethod]
-    public void GuidConvertion()
+    public void GuidConversion()
     {
         Guid guid = Guid.Parse("A945C62A-4CC7-425B-B44A-893577632902");
         UInt128 value = guid.ToUInt128();
@@ -22,7 +22,7 @@ public class UInt128Tests
     }
 
     [TestMethod]
-    public void GuidMaxConvertion()
+    public void GuidMaxConversion()
     {
         Guid guid = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
         UInt128 value = guid.ToUInt128();
@@ -32,7 +32,7 @@ public class UInt128Tests
     }
 
     [TestMethod]
-    public void ArrayConvertion()
+    public void ArrayConversion()
     {
         byte[] array = new byte[16] { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10 };
         UInt128 value = array.ToUInt128();
@@ -44,7 +44,7 @@ public class UInt128Tests
 
     [TestMethod]
     [ExpectedException(typeof(ArgumentNullException))]
-    public void NullArrayConvertion()
+    public void NullArrayConversion()
     {
         byte[] array = null!;
         _ = array.ToUInt128();
@@ -52,7 +52,7 @@ public class UInt128Tests
 
     [TestMethod]
     [ExpectedException(typeof(ArgumentException))]
-    public void EmptyArrayConvertion()
+    public void EmptyArrayConversion()
     {
         byte[] array = new byte[0];
         _ = array.ToUInt128();
@@ -60,16 +60,15 @@ public class UInt128Tests
 
     [TestMethod]
     [ExpectedException(typeof(ArgumentException))]
-    public void InvalidArrayConvertion()
+    public void InvalidArrayConversion()
     {
         // Expected ArgumentException.
         byte[] array = new byte[17];
         _ = array.ToUInt128();
     }
 
-
     [TestMethod]
-    public void BigIntegerConvertion()
+    public void BigIntegerConversion()
     {
         var checkConvertion = (BigInteger bigInteger) =>
         {
@@ -86,8 +85,6 @@ public class UInt128Tests
         checkConvertion(new BigInteger(uint.MaxValue));
         checkConvertion(new BigInteger(ulong.MaxValue));
     }
-
-
 
     [TestMethod]
     [ExpectedException(typeof(OverflowException))]
@@ -110,25 +107,72 @@ public class UInt128Tests
     public void LittleEndian()
     {
         var expected = new byte[16] {86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-        Span<byte> expectedGuidBytes = new byte[16];
-        expected.CopyTo(expectedGuidBytes);
-        if (BitConverter.IsLittleEndian)
-        {
-            Swap(expectedGuidBytes, 0, 3);
-            Swap(expectedGuidBytes, 1, 2);
-            Swap(expectedGuidBytes, 4, 5);
-            Swap(expectedGuidBytes, 6, 7);
-        }
 
         Assert.IsTrue(expected.SequenceEqual(expected.ToUInt128().ToArray()));
         Assert.IsTrue(expected.SequenceEqual(BigInteger.Parse("123456", NumberStyles.HexNumber).ToUInt128().ToArray()));
-        Assert.IsTrue(expected.SequenceEqual(new Guid(expectedGuidBytes).ToUInt128().ToArray()));
+        // `bigEndian: true` signals to the Guid constructor to store the bytes as-is 
+        Assert.IsTrue(expected.SequenceEqual(new Guid(expected, bigEndian: true).ToUInt128().ToArray()));
         Assert.IsTrue(expected.SequenceEqual(new UInt128(0, 0x123456).ToArray()));
+    }
 
-        void Swap(Span<byte> array, int sourceIndex, int destinationIndex)
-        {
-            (array[sourceIndex], array[destinationIndex]) = (array[destinationIndex], array[sourceIndex]);
-        }
+    [TestMethod]
+    public unsafe void EndToEndTigerBeetleSimulationGuid()
+    {
+        // "00000001-0001-4000-AA00-000000000000"
+        var bytesStoredInTB = new byte[]
+            {0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x40, 0x00, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+        // Parse TB result (TB client reads by overlaying dotnet types on raw bytes)
+        UInt128 parsed = UInt128.Zero;
+        bytesStoredInTB.CopyTo(new Span<byte>(&parsed, 16));
+
+        // Round-trip via GUID
+        var roundTripped = parsed.ToGuid().ToUInt128();
+        
+        // Send bytes to TB (TB client send raw bytes of dotnet types over the wire) 
+        var roundTrippedBytes = new Span<byte>(&roundTripped, 16);
+
+        Assert.IsTrue(roundTrippedBytes.SequenceEqual(bytesStoredInTB));
+    }
+    
+    [TestMethod]
+    public unsafe void EndToEndTigerBeetleSimulationArray()
+    {
+        // "00000001-0001-4000-AA00-000000000000"
+        var bytesStoredInTB = new byte[]
+            {0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x40, 0x00, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+        // Parse TB result (TB client reads by overlaying dotnet types on raw bytes)
+        UInt128 parsed = UInt128.Zero;
+        bytesStoredInTB.CopyTo(new Span<byte>(&parsed, 16));
+
+        // Round-trip via Array
+        var roundTripped = parsed.ToArray().ToUInt128();
+        
+        // Send bytes to TB (TB client send raw bytes of dotnet types over the wire) 
+        var roundTrippedBytes = new Span<byte>(&roundTripped, 16);
+
+        Assert.IsTrue(roundTrippedBytes.SequenceEqual(bytesStoredInTB));
+    }
+
+    [TestMethod]
+    public unsafe void EndToEndTigerBeetleSimulationBigInteger()
+    {
+        // "00000001-0001-4000-AA00-000000000000"
+        var bytesStoredInTB = new byte[]
+            {0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x40, 0x00, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+        // Parse TB result (TB client reads by overlaying dotnet types on raw bytes)
+        UInt128 parsed = UInt128.Zero;
+        bytesStoredInTB.CopyTo(new Span<byte>(&parsed, 16));
+
+        // Round-trip via BigInteger
+        var roundTripped = parsed.ToBigInteger().ToUInt128();
+        
+        // Send bytes to TB (TB client send raw bytes of dotnet types over the wire) 
+        var roundTrippedBytes = new Span<byte>(&roundTripped, 16);
+
+        Assert.IsTrue(roundTrippedBytes.SequenceEqual(bytesStoredInTB));
     }
 
     [TestMethod]
