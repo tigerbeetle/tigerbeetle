@@ -716,21 +716,14 @@ test "GridScrubber cycle interval" {
     const sector_faults_per_cycle =
         stdx.div_ceil(sector_faults_per_year * cycle_interval_days, 365);
 
-    // P(a specific sector is uncorrupted for an entire cycle)
-    //
-    // If we inject a fault randomly into S sectors, then the probability that the fault misses one
-    // sector in specific is `(S-1)/S`. If we then repeat this N times, then the chance that it
-    // misses that sector every time is `((S-1)/S)^N`.
-    const p_sector_healthy_per_cycle = std.math.pow(
-        f64,
-        @as(f64, @floatFromInt(storage_sectors - 1)) / @as(f64, @floatFromInt(storage_sectors)),
-        @as(f64, @floatFromInt(sector_faults_per_cycle)),
-    );
-
     // P(a specific block is uncorrupted for an entire cycle)
     // If any of the block's sectors is corrupted, then the whole block is corrupted.
-    const p_block_healthy_per_cycle =
-        std.math.pow(f64, p_sector_healthy_per_cycle, @as(f64, @floatFromInt(block_sectors)));
+    const p_block_healthy_per_cycle = std.math.pow(
+        f64,
+        @as(f64, @floatFromInt(storage_sectors - block_sectors)) /
+            @as(f64, @floatFromInt(storage_sectors)),
+        @as(f64, @floatFromInt(sector_faults_per_cycle)),
+    );
 
     const p_block_corrupt_per_cycle = 1.0 - p_block_healthy_per_cycle;
     // P(a specific block is corrupted on all replicas during a single cycle)

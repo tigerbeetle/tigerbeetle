@@ -366,7 +366,7 @@ pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
 /// (assuming a fully-loaded data file – maximum size and 100% acquired):
 ///
 ///   storage_size_limit_max      = 16TiB
-///   grid_scrubber_cycle_seconds = 180 days * 24 hr/day * 60 min/hr * 60 s/min (1 cycle/year)
+///   grid_scrubber_cycle_seconds = 180 days * 24 hr/day * 60 min/hr * 60 s/min (2 cycle/year)
 ///   read_bytes_per_second       = storage_size_max / grid_scrubber_cycle_seconds ≈ 1.08 MiB/s
 ///
 pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
