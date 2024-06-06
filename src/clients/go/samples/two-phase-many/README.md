@@ -7,7 +7,7 @@ Code for this sample is in [./main.go](./main.go).
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* Go >= 1.17
+* Go >= 1.21
 
 **Additionally on Windows**: you must install [Zig
 0.11.0](https://ziglang.org/download/#release-0.11.0) and set the
@@ -85,13 +85,13 @@ and checks that credits and debits for both account are now
 solely *posted*, not pending.
 
 Specifically, that **account `1`** has:
- * `debits_posted = 1500`
+ * `debits_posted = 900`
  * `credits_posted = 0`
  * `debits_pending = 0`
  * and `credits_pending = 0`
 
 And that **account `2`** has:
  * `debits_posted = 0`
- * `credits_posted = 1500`
+ * `credits_posted = 900`
  * `debits_pending = 0`
  * and `credits_pending = 0`

@@ -883,6 +883,7 @@ pub fn ReplicaType(
             self.state_machine_opened = true;
             if (self.event_callback) |hook| hook(self, .state_machine_opened);
 
+            self.grid_scrubber.open(self.prng.random());
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 self.sync_content();
             }
@@ -3157,7 +3158,15 @@ pub fn ReplicaType(
                 //   progress, it needs to start preparing more upgrades.
                 const release_next = self.release_for_next_checkpoint();
                 if (release_next == null or release_next.?.value != upgrade_release.value) {
-                    self.send_request_upgrade_to_self();
+                    if (self.solo() and self.view_durable_updating()) {
+                        // Solo replica just after recovering is still updating its view and ignores
+                        // requests, postpone until the next timer expiry.
+                        log.debug("{}: on_upgrade_timeout: ignoring (still persisting view)", .{
+                            self.replica,
+                        });
+                    } else {
+                        self.send_request_upgrade_to_self();
+                    }
                 } else {
                     // (Don't send an upgrade to ourself if we are already ready to upgrade and just
                     // waiting on the last commit + checkpoint before we restart.)

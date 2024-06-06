@@ -198,6 +198,7 @@ pub fn ManifestLevelType(
             level.* = .{
                 .keys = level.keys,
                 .tables = level.tables,
+                .generation = level.generation + 1,
             };
         }
 
@@ -383,7 +384,7 @@ pub fn ManifestLevelType(
             direction: Direction,
             key_range: ?KeyRange,
 
-            pub fn next(it: *Iterator) ?*const TableInfo {
+            pub fn next(it: *Iterator) ?*TableInfo {
                 while (it.inner.next()) |table| {
                     // We can't assert !it.inner.done as inner.next() may set done before returning.
 
@@ -576,7 +577,7 @@ pub fn ManifestLevelType(
                 if (optimal == null or range.tables.count() < optimal.?.range.tables.count()) {
                     optimal = LeastOverlapTable{
                         .table = TableInfoReference{
-                            .table_info = @constCast(table),
+                            .table_info = table,
                             .generation = level_a.generation,
                         },
                         .range = range,
@@ -710,11 +711,9 @@ pub fn ManifestLevelType(
                 if (table.key_max > range.key_max) {
                     range.key_max = table.key_max;
                 }
-                // This const cast is safe as we know that the memory pointed to is in fact
-                // mutable. That is, the table is not in the .text or .rodata section.
                 if (range.tables.count() < max_overlapping_tables) {
                     const table_info_reference = TableInfoReference{
-                        .table_info = @constCast(table),
+                        .table_info = table,
                         .generation = level.generation,
                     };
                     range.tables.append_assume_capacity(table_info_reference);
@@ -1024,7 +1023,7 @@ pub fn TestContext(
                 while (it.next()) |level_table| {
                     if (level_table.equal(table)) {
                         context.level.set_snapshot_max(snapshot, .{
-                            .table_info = @constCast(level_table),
+                            .table_info = level_table,
                             .generation = context.level.generation,
                         });
                         table.snapshot_max = snapshot;
