@@ -2,6 +2,12 @@
 
 Fetch one or more accounts by their `id`s.
 
+⚠️ Note that you **should not** check an account's balance using this request before creating a
+transfer. That would not be atomic and the balance could change in between the check and the
+transfer. Instead, you should use a balance limit on the account or a
+[balance-conditional transfer](../../develop/recipes/balance-conditional-transfers.md) to ensure the
+balance check is done atomically with the transfer.
+
 ## Event
 
 An [`id`](../account.md#id) belonging to a [`Account`](../account.md).
