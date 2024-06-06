@@ -17,7 +17,13 @@ What if a customer needs a refund? Or a transfer was executed in error?
 Reversals in TigerBeetle are handled with more transfers to reverse the effects of the previous
 transfer(s).
 
-Two specific recommendations are:
+This is important because adding transfers as opposed to deleting incorrect ones adds more
+information to the history. The log of events includes the original error, when it took place, as
+well as any attempts to correct the record and when they took place. A correcting entry might even
+be wrong, in which case it itself can be corrected with another transfer. All of these events form a
+timeline of the particular business event, which is stored permanently.
+
+Two specific recommendations for reversals are:
 
 1. You may want to have a [`Transfer.code`](../../reference/transfer.md#code) that indicates a given
    transfer is a reversal, or you may want multiple codes where each one represents a different
