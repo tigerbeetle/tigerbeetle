@@ -65,10 +65,18 @@ async function mainMetrics() {
 async function mainSeeds() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
-  const records = await (await fetch(dataUrl)).json();
+  const pullsURL = "https://api.github.com/repos/tigerbeetle/tigerbeetle/pulls";
+
+  const [records, pulls] = await Promise.all([
+    (async () => await (await fetch(dataUrl)).json())(),
+    (async () => await (await fetch(pullsURL)).json())(),
+  ]);
+
+  const openPullRequests = new Set(pulls.map((it) => it.number));
 
   // Filtering:
-  // - By default, show one seed per fuzzer per commit and exclude successes for the main branch.
+  // - By default, show one seed per fuzzer per commit; exclude successes for the main branch and
+  //   already merged pull requests.
   // - Clicking on the fuzzer cell in the table shows all seeds for this fuzzer/commit pair.
   // - "show all" link (in the .html) disables filtering completely.
   const query = new URLSearchParams(document.location.search);
@@ -89,6 +97,11 @@ async function mainSeeds() {
     } else if (query_fuzzer) {
       include = record.fuzzer == query_fuzzer &&
         record.commit_sha == query_commit;
+    } else if (
+      pullRequestNumber(record) &&
+      !openPullRequests.has(pullRequestNumber(record))
+    ) {
+      include = false;
     } else {
       include = (!record.ok || pullRequestNumber(record) !== undefined) &&
         !fuzzersWithFailures.has(record.branch + record.fuzzer);
