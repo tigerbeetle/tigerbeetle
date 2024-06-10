@@ -36,6 +36,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
         replicas: []const Replica,
         clients: []const Client,
+        clients_exhaustive: bool = true,
 
         /// The number of times the canonical state has been advanced.
         requests_committed: u64 = 0,
@@ -173,25 +174,31 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 assert(header_b.?.operation == .upgrade or
                     header_b.?.operation == .pulse);
             } else {
-                // The replica has transitioned to state `b` that is not yet in the commit history.
-                // Check if this is a valid new state based on the originating client's inflight request.
-                const client = for (state_checker.clients) |*client| {
-                    if (client.id == header_b.?.client) break client;
-                } else unreachable;
+                if (state_checker.clients_exhaustive) {
+                    // The replica has transitioned to state `b` that is not yet in the commit
+                    // history. Check if this is a valid new state based on the originating client's
+                    // inflight request.
+                    const client = for (state_checker.clients) |*client| {
+                        if (client.id == header_b.?.client) break client;
+                    } else unreachable;
 
-                if (client.request_inflight == null) {
-                    return error.ReplicaTransitionedToInvalidState;
+                    if (client.request_inflight == null) {
+                        return error.ReplicaTransitionedToInvalidState;
+                    }
+
+                    const request = client.request_inflight.?.message;
+                    assert(request.header.client == header_b.?.client);
+                    assert(request.header.checksum == header_b.?.request_checksum);
+                    assert(request.header.request == header_b.?.request);
+                    assert(request.header.command == .request);
+                    assert(request.header.operation == header_b.?.operation);
+                    assert(request.header.size == header_b.?.size);
+                    // `checksum_body` will not match; the leader's StateMachine updated the
+                    // timestamps in the prepare body's accounts/transfers.
+                } else {
+                    // The cluster is running with one or more raw MessageBus "clients", so there
+                    // may be requests not found in `Cluster.clients`.
                 }
-
-                const request = client.request_inflight.?.message;
-                assert(request.header.client == header_b.?.client);
-                assert(request.header.checksum == header_b.?.request_checksum);
-                assert(request.header.request == header_b.?.request);
-                assert(request.header.command == .request);
-                assert(request.header.operation == header_b.?.operation);
-                assert(request.header.size == header_b.?.size);
-                // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
-                // prepare body's accounts/transfers.
             }
 
             state_checker.requests_committed += 1;

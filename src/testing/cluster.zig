@@ -16,7 +16,6 @@ const StorageFaultAtlas = @import("storage.zig").ClusterFaultAtlas;
 const Time = @import("time.zig").Time;
 const IdPermutation = @import("id.zig").IdPermutation;
 
-const MessageBus = @import("cluster/message_bus.zig").MessageBus;
 const Network = @import("cluster/network.zig").Network;
 const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
 const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
@@ -56,6 +55,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
     return struct {
         const Self = @This();
 
+        pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
         pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
         pub const Replica = vsr.ReplicaType(
             StateMachine,
@@ -126,7 +126,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         pub fn init(
             allocator: mem.Allocator,
-            /// Includes command=register messages.
+            /// Includes operation=register messages.
             on_cluster_reply: *const fn (
                 cluster: *Self,
                 client: usize,
