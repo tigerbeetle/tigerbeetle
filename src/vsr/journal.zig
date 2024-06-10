@@ -1036,7 +1036,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_headers_callback(completion: *Storage.Read) void {
-            const chunk_read: *Journal.Read = @fieldParentPtr("completion", completion);
+            const chunk_read: *Journal.Read = @alignCast(@fieldParentPtr("completion", completion));
             const journal = chunk_read.journal;
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             assert(journal.status == .recovering);
@@ -1159,7 +1159,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_prepare_callback(completion: *Storage.Read) void {
-            const read: *Journal.Read = @fieldParentPtr("completion", completion);
+            const read: *Journal.Read = @alignCast(@fieldParentPtr("completion", completion));
             const journal = read.journal;
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
 

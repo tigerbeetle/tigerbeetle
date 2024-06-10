@@ -763,7 +763,9 @@ pub fn GrooveType(
             }
 
             fn worker_next_tick(completion: *Grid.NextTick) void {
-                const context: *PrefetchContext = @fieldParentPtr("next_tick", completion);
+                const context: *PrefetchContext = @alignCast(
+                    @fieldParentPtr("next_tick", completion),
+                );
                 assert(context.workers_pending == 0);
                 context.finish();
             }

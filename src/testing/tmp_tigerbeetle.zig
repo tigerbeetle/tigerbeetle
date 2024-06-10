@@ -19,7 +19,7 @@ port_str: stdx.BoundedArray(u8, 8),
 
 tmp_dir: std.testing.TmpDir,
 
-process: std.ChildProcess,
+process: std.process.Child,
 
 pub fn init(
     gpa: std.mem.Allocator,
@@ -85,7 +85,7 @@ pub fn init(
     }
 
     const port = port: {
-        var exit_status: ?std.ChildProcess.Term = null;
+        var exit_status: ?std.process.Child.Term = null;
         errdefer log.err(
             "failed to read port number from tigerbeetle process: {?}",
             .{exit_status},

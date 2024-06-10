@@ -115,7 +115,7 @@ pub fn ScanLookupType(
         }
 
         fn scan_read_callback(context: *Scan.Context, scan: *Scan) void {
-            var self: *ScanLookup = @fieldParentPtr("scan_context", context);
+            var self: *ScanLookup = @alignCast(@fieldParentPtr("scan_context", context));
             assert(self.state == .scan);
             assert(self.scan == scan);
 

@@ -971,10 +971,10 @@ pub fn StateMachineType(
         }
 
         fn prefetch_scan_next_tick_callback(completion: *Grid.NextTick) void {
-            const self: *StateMachine = @fieldParentPtr(
+            const self: *StateMachine = @alignCast(@fieldParentPtr(
                 "scan_lookup_next_tick",
                 completion,
-            );
+            ));
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(self.scan_lookup == .null);
 

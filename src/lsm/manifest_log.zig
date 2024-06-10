@@ -289,7 +289,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
         }
 
         fn open_next_tick_callback(next_tick: *Grid.NextTick) void {
-            const manifest_log: *ManifestLog = @fieldParentPtr("next_tick", next_tick);
+            const manifest_log: *ManifestLog = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(!manifest_log.opened);
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
@@ -559,7 +559,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
         }
 
         fn flush_next_tick_callback(next_tick: *Grid.NextTick) void {
-            const manifest_log: *ManifestLog = @fieldParentPtr("next_tick", next_tick);
+            const manifest_log: *ManifestLog = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(manifest_log.writing);
 
             manifest_log.flush_done();
@@ -690,7 +690,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
         }
 
         fn compact_tick_callback(next_tick: *Grid.NextTick) void {
-            const manifest_log: *ManifestLog = @fieldParentPtr("next_tick", next_tick);
+            const manifest_log: *ManifestLog = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(manifest_log.write_callback == null);
             assert(manifest_log.grid_reservation == null);
             assert(manifest_log.blocks_closed == 0);

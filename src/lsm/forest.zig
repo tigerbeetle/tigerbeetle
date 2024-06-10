@@ -1101,7 +1101,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn beat_finished_next_tick(next_tick: *Grid.NextTick) void {
-            const self: *CompactionPipeline = @fieldParentPtr("next_tick", next_tick);
+            const self: *CompactionPipeline = @alignCast(@fieldParentPtr("next_tick", next_tick));
 
             assert(self.beat_active.count() == 0);
             assert(self.slot_filled_count == 0);
@@ -1331,7 +1331,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn advance_pipeline_next_tick(next_tick: *Grid.NextTick) void {
-            const self: *CompactionPipeline = @fieldParentPtr("next_tick", next_tick);
+            const self: *CompactionPipeline = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(self.cpu_slot != null);
             const cpu_slot = self.cpu_slot.?;
             self.cpu_slot = null;

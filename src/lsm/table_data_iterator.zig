@@ -152,7 +152,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {
-            const it: *TableDataIterator = @fieldParentPtr("next_tick", next_tick);
+            const it: *TableDataIterator = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(it.callback == .next_tick);
             assert(it.empty());
 

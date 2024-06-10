@@ -151,7 +151,7 @@ fn run_fuzzers(
     const random = std.crypto.random;
 
     const FuzzerChild = struct {
-        child: std.ChildProcess,
+        child: std.process.Child,
         seed: SeedRecord,
     };
 

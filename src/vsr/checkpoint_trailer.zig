@@ -246,7 +246,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         fn open_next_tick(next_tick: *Grid.NextTick) void {
-            const trailer: *Self = @fieldParentPtr("next_tick", next_tick);
+            const trailer: *Self = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(trailer.callback == .open);
             assert(trailer.size == 0);
             trailer.open_done();
@@ -363,7 +363,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         fn checkpoint_next_tick(next_tick: *Grid.NextTick) void {
-            const trailer: *Self = @fieldParentPtr("next_tick", next_tick);
+            const trailer: *Self = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(trailer.callback == .checkpoint);
             assert(trailer.size == 0);
             assert(trailer.block_index == 0);

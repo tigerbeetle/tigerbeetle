@@ -284,7 +284,7 @@ pub fn ScanBuilderType(
         }
 
         inline fn groove(self: *ScanBuilder) *Groove {
-            return @fieldParentPtr("scan_builder", self);
+            return @alignCast(@fieldParentPtr("scan_builder", self));
         }
     };
 }

@@ -6,7 +6,7 @@
 //! If possible, avoid shelling out to `sh` or other systems utils --- the whole purpose here is to
 //! avoid any extra dependencies.
 //!
-//! The `exec_` family of methods provides a convenience wrapper around `std.ChildProcess`:
+//! The `exec_` family of methods provides a convenience wrapper around `std.process.Child`:
 //!   - It allows constructing the array of arguments using convenient interpolation syntax a-la
 //!     `std.fmt` (but of course no actual string concatenation happens anywhere).
 //!   - `ChildProcess` is versatile and has many knobs, but they might be hard to use correctly (eg,
@@ -517,11 +517,11 @@ pub fn exec_raw(
     shell: *Shell,
     comptime cmd: []const u8,
     cmd_args: anytype,
-) !std.ChildProcess.RunResult {
+) !std.process.Child.RunResult {
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    return try std.ChildProcess.run(.{
+    return try std.process.Child.run(.{
         .allocator = shell.arena.allocator(),
         .argv = argv.slice(),
         .cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer),
@@ -532,13 +532,13 @@ pub fn exec_raw(
 pub fn spawn(
     shell: *Shell,
     options: struct {
-        stdin_behavior: std.ChildProcess.StdIo = .Ignore,
-        stdout_behavior: std.ChildProcess.StdIo = .Ignore,
-        stderr_behavior: std.ChildProcess.StdIo = .Ignore,
+        stdin_behavior: std.process.Child.StdIo = .Ignore,
+        stdout_behavior: std.process.Child.StdIo = .Ignore,
+        stderr_behavior: std.process.Child.StdIo = .Ignore,
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
-) !std.ChildProcess {
+) !std.process.Child {
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
@@ -573,8 +573,8 @@ pub fn zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     }
 }
 
-fn create_process(shell: *Shell, argv: []const []const u8) !std.ChildProcess {
-    var child = std.ChildProcess.init(argv, shell.gpa);
+fn create_process(shell: *Shell, argv: []const []const u8) !std.process.Child {
+    var child = std.process.Child.init(argv, shell.gpa);
     child.cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
     child.env_map = &shell.env;
     child.stdin_behavior = .Ignore;
