@@ -1452,7 +1452,7 @@ const TestContext = struct {
         standby_count: u8 = 0,
         client_count: u8 = constants.clients_max,
     }) !*TestContext {
-        cnst log_level_original = std.testing.log_level;
+        const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
 
         var prng = std.rand.DefaultPrng.init(123);
