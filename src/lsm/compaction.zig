@@ -1057,7 +1057,7 @@ pub fn CompactionType(
                     2,
                 );
                 while (i < value_blocks_used and free_blocks_used < half_blocks_count) {
-                    var maybe_source_value_block =
+                    const maybe_source_value_block =
                         beat.blocks.?.source_value_blocks[1].free_to_pending();
                     free_blocks_used += 1;
 
@@ -2052,7 +2052,7 @@ pub fn CompactionType(
             else
                 beat.source_b_values.?;
             const values_out = bar.table_builder.data_block_values();
-            var values_out_index = bar.table_builder.value_count;
+            const values_out_index = bar.table_builder.value_count;
 
             assert(source_local.len > 0);
 

@@ -1013,7 +1013,7 @@ pub fn StateMachineType(
             assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
             assert(self.prefetch_timestamp != TimestampRange.timestamp_max);
 
-            var scan_lookup_buffer = std.mem.bytesAsSlice(
+            const scan_lookup_buffer = std.mem.bytesAsSlice(
                 Transfer,
                 self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
                     // We must be constrained to the same limit as `create_transfers`.

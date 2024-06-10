@@ -155,7 +155,7 @@ fn run_fuzzers(
         seed: SeedRecord,
     };
 
-    var fuzzers = try shell.arena.allocator().alloc(?FuzzerChild, options.concurrency);
+    const fuzzers = try shell.arena.allocator().alloc(?FuzzerChild, options.concurrency);
     @memset(fuzzers, null);
     defer for (fuzzers) |*fuzzer_or_null| {
         if (fuzzer_or_null.*) |*fuzzer| {
@@ -591,7 +591,7 @@ const SeedRecord = struct {
         current: []const SeedRecord,
         new: []const SeedRecord,
     ) !union(enum) { updated: []const SeedRecord, up_to_date } {
-        var current_and_new = try std.mem.concat(arena, SeedRecord, &.{ current, new });
+        const current_and_new = try std.mem.concat(arena, SeedRecord, &.{ current, new });
         std.mem.sort(SeedRecord, current_and_new, {}, SeedRecord.less_than);
 
         var result = try std.ArrayList(SeedRecord).initCapacity(arena, current.len);

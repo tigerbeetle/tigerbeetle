@@ -1364,7 +1364,7 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
 
     var a0 = t.replica(.A0);
-    var b1 = t.replica(.B1);
+    const b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
     const a0_free_set = &t.cluster.replicas[a0.replicas.get(0)].grid.free_set;
@@ -1392,7 +1392,7 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
         while (true) {
             t.run();
 
-            var faults_after = b2_storage.faults.count();
+            const faults_after = b2_storage.faults.count();
             assert(faults_after <= faults_before);
             if (faults_after == faults_before) break;
 
@@ -1452,7 +1452,7 @@ const TestContext = struct {
         standby_count: u8 = 0,
         client_count: u8 = constants.clients_max,
     }) !*TestContext {
-        var log_level_original = std.testing.log_level;
+        const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
 
         var prng = std.rand.DefaultPrng.init(123);
@@ -1497,7 +1497,7 @@ const TestContext = struct {
 
         for (cluster.storages) |*storage| storage.faulty = true;
 
-        var context = try allocator.create(TestContext);
+        const context = try allocator.create(TestContext);
         errdefer allocator.destroy(context);
 
         context.* = .{
