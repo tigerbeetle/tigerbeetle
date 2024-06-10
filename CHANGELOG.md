@@ -1,5 +1,48 @@
 # TigerBeetle Changelog
 
+## 2024-06-10 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1986](https://github.com/tigerbeetle/tigerbeetle/pull/1986)
+
+  Refactor an internal iterator to expose a mutable pointer instead of calling `@constCast` on it.
+  There was a comment justifying the operation's safety, but it turned out to be safer to expose
+  it as a mutable pointer (avoiding misusage from the origin) rather than performing an unsound
+  mutation over a constant pointer.
+
+- [#1985](https://github.com/tigerbeetle/tigerbeetle/pull/1985)
+
+  Implement a random Grid/Scrubber tour origin, where each replica starts scrubbing the local
+  storage in a different place, covering more blocks across the entire cluster.
+
+- [#1990](https://github.com/tigerbeetle/tigerbeetle/pull/1990)
+
+  Model and calculate the probability of data loss in terms of the Grid/Scrubber cycle interval,
+  allowing to reduce the read bandwidth dedicated for scrubbing.
+
+- [#1987](https://github.com/tigerbeetle/tigerbeetle/pull/1987)
+
+  Fix a simulator bug where all the WAL sectors get corrupted when a replica crashes while writing
+  them simultaneously.
+
+### Internals
+
+- [#1991](https://github.com/tigerbeetle/tigerbeetle/pull/1991)
+
+  As part of multiversioning binaries, adds the async `io_uring_prep_openat`syscall for Linux's IO
+  implementation, allowing non-blocking `open()`s while serving requests (which will be necessary
+  during upgrade checks).
+
+- [#1982](https://github.com/tigerbeetle/tigerbeetle/pull/1982)
+
+  Require the `--experimental` flag when starting TigerBeetle with flags that aren't considered
+  stable, that is, flags not explicitly documented in the help message, limiting the surface area for future compatibility.
+
+### TigerTracks 🎧
+
+- [O Rappa - A feira](https://www.youtube.com/watch?v=GmaFGnUnM1U)
+
 ## 2024-06-03 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
