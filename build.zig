@@ -137,6 +137,7 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = mode,
         });
+        tigerbeetle.stack_size = 16 * 1024 * 1024;
         tigerbeetle.root_module.addImport("vsr", vsr_module);
         tigerbeetle.root_module.addImport("vsr_options", vsr_options_module);
 

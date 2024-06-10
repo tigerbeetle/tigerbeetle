@@ -45,7 +45,7 @@ test "open/write/read/close/statx" {
                     &completion,
                     os.AT.FDCWD,
                     self.path,
-                    os.O.RDWR | os.O.TRUNC | os.O.CREAT,
+                    .{ .ACCMODE = .RDWR, .TRUNC = true, .CREAT = true },
                     std.fs.File.default_mode,
                 );
             } else {

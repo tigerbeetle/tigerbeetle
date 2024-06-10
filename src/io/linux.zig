@@ -277,8 +277,7 @@ pub const IO = struct {
                     );
                 },
                 .openat => |op| {
-                    linux.io_uring_prep_openat(
-                        sqe,
+                    sqe.prep_openat(
                         op.dir_fd,
                         op.file_path,
                         op.flags,
@@ -437,7 +436,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.FileLocksNotSupported,
                                 .AGAIN => error.WouldBlock,
                                 .TXTBSY => error.FileBusy,
-                                else => |errno| os.unexpectedErrno(errno),
+                                else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
                         } else {
@@ -646,10 +645,10 @@ pub const IO = struct {
             address: std.net.Address,
         },
         openat: struct {
-            dir_fd: os.fd_t,
+            dir_fd: posix.fd_t,
             file_path: [*:0]const u8,
-            flags: u32,
-            mode: os.mode_t,
+            flags: posix.O,
+            mode: posix.mode_t,
         },
         read: struct {
             fd: posix.fd_t,
@@ -831,12 +830,12 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: OpenatError!os.fd_t,
+            result: OpenatError!posix.fd_t,
         ) void,
         completion: *Completion,
-        dir_fd: os.fd_t,
+        dir_fd: posix.fd_t,
         file_path: [*:0]const u8,
-        flags: u32,
+        flags: posix.O,
         mode: os.mode_t,
     ) void {
         completion.* = .{
@@ -847,7 +846,7 @@ pub const IO = struct {
                     callback(
                         @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const OpenatError!os.fd_t, @ptrCast(@alignCast(res))).*,
+                        @as(*const OpenatError!posix.fd_t, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
