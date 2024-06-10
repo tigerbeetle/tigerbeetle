@@ -37,7 +37,8 @@
 - [#1982](https://github.com/tigerbeetle/tigerbeetle/pull/1982)
 
   Require the `--experimental` flag when starting TigerBeetle with flags that aren't considered
-  stable, that is, flags not explicitly documented in the help message, limiting the surface area for future compatibility.
+  stable, that is, flags not explicitly documented in the help message, limiting the surface area
+  for future compatibility.
 
 ### TigerTracks 🎧
 
