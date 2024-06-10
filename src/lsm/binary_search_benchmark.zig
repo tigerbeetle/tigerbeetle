@@ -38,7 +38,7 @@ test "benchmark: binary search" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    var blob = try arena.allocator().alloc(u8, blob_size);
+    const blob = try arena.allocator().alloc(u8, blob_size);
 
     inline for (kv_types) |kv| {
         inline for (values_per_page) |values_count| {
@@ -63,12 +63,12 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
     const page_count = layout.blob_size / @sizeOf(Page);
 
     // Search pages and keys in random order.
-    var page_picker = shuffled_index(page_count, random);
-    var value_picker = shuffled_index(layout.values_count, random);
+    const page_picker = shuffled_index(page_count, random);
+    const value_picker = shuffled_index(layout.values_count, random);
 
     // Generate 1GiB worth of 24KiB pages.
     var blob_alloc = std.heap.FixedBufferAllocator.init(blob);
-    var pages = try blob_alloc.allocator().alloc(Page, page_count);
+    const pages = try blob_alloc.allocator().alloc(Page, page_count);
     random.bytes(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
         for (&page.values, 0..) |*value, i| value.key = i;

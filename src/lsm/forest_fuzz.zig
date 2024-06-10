@@ -409,8 +409,8 @@ const Environment = struct {
                 env: *Environment,
                 params: ScanParams,
             ) ![]const tb.Account {
-                var min: Prefix = @intCast(params.min);
-                var max: Prefix = @intCast(params.max);
+                const min: Prefix = @intCast(params.min);
+                const max: Prefix = @intCast(params.max);
                 assert(min <= max);
 
                 const scan_buffer_pool = &env.forest.scan_buffer_pool;

@@ -533,7 +533,7 @@ fn print_percentiles_histogram(
 
     const percentiles = [_]u64{ 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100 };
     for (percentiles) |percentile| {
-        var histogram_percentile: usize = @divTrunc(histogram_total * percentile, 100);
+        const histogram_percentile: usize = @divTrunc(histogram_total * percentile, 100);
 
         // Since each bucket in our histogram represents 1ms, the bucket we're in is the ms value.
         var sum: usize = 0;

@@ -138,7 +138,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             forest: *Forest,
             client_sessions_checkpoint: *const CheckpointTrailer,
         ) error{OutOfMemory}!GridScrubber {
-            var tour_index_block = try allocate_block(allocator);
+            const tour_index_block = try allocate_block(allocator);
             errdefer allocator.free(tour_index_block);
 
             return .{

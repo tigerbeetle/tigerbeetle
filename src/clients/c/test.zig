@@ -122,7 +122,7 @@ test "c_client echo" {
 
     var prng = std.rand.DefaultPrng.init(tb_context);
 
-    var requests: []RequestContext = try testing.allocator.alloc(RequestContext, concurrency_max);
+    const requests: []RequestContext = try testing.allocator.alloc(RequestContext, concurrency_max);
     defer testing.allocator.free(requests);
 
     // Repeating the same test multiple times to stress the
