@@ -303,8 +303,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .{
                         .cluster = options.cluster_id,
                         .release = options.releases[0].release,
-                        // TODO(zig) It should be possible to remove the `@as(u8,...)`.
-                        .replica = @as(u8, @intCast(replica_index)),
+                        .replica = @intCast(replica_index),
                         .replica_count = options.replica_count,
                     },
                     storage,
