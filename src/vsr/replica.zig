@@ -984,6 +984,7 @@ pub fn ReplicaType(
             const request_size_limit =
                 @sizeOf(Header) + options.state_machine_options.batch_size_limit;
             assert(request_size_limit <= constants.message_size_max);
+            assert(request_size_limit > @sizeOf(Header));
 
             self.time = options.time;
 
@@ -4310,6 +4311,8 @@ pub fn ReplicaType(
                 );
                 assert(register_request.batch_size_limit > 0);
                 assert(register_request.batch_size_limit <= constants.message_body_size_max);
+                assert(register_request.batch_size_limit <=
+                    self.request_size_limit - @sizeOf(vsr.Header));
                 assert(stdx.zeroed(&register_request.reserved));
 
                 result.* = .{

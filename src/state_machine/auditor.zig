@@ -239,7 +239,7 @@ pub const AccountingAuditor = struct {
 
             // Each expiration round can expire at most one batch of transfers.
             expired_count += 1;
-            if (expired_count == self.options.batch_create_transfers_limit) break;
+            if (expired_count == StateMachine.constants.batch_max.create_transfers) break;
 
             assert(!dr.debits_exceed_credits(0));
             assert(!dr.credits_exceed_debits(0));

@@ -415,9 +415,6 @@ pub fn StateMachineType(
 
         tracer_slot: ?tracer.SpanStart = null,
 
-        scan_buffer_size_account_balances: u32,
-        scan_buffer_size_create_transfers: u32,
-
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
             assert(options.batch_size_limit <= config.message_body_size_max);
             inline for (comptime std.enums.values(Operation)) |operation| {
@@ -432,9 +429,10 @@ pub fn StateMachineType(
             );
             errdefer forest.deinit(allocator);
 
-            const scan_lookup_buffer =
-                try allocator.alignedAlloc(u8, 16, options.batch_size_limit);
-            errdefer allocator.free(scan_lookup_buffer);
+            const scan_lookup_buffer = try allocator.alignedAlloc(u8, 16, @max(
+                constants.batch_max.get_account_transfers * @sizeOf(Transfer),
+                constants.batch_max.get_account_balances * @sizeOf(AccountBalancesGrooveValue),
+            ));
 
             return StateMachine{
                 .batch_size_limit = options.batch_size_limit,
@@ -443,14 +441,6 @@ pub fn StateMachineType(
                 .commit_timestamp = 0,
                 .forest = forest,
                 .scan_lookup_buffer = scan_lookup_buffer,
-                .scan_buffer_size_account_balances = @divFloor(
-                    options.batch_size_limit,
-                    @sizeOf(AccountBalancesGrooveValue),
-                ) * @sizeOf(AccountBalancesGrooveValue),
-                .scan_buffer_size_create_transfers = @divFloor(
-                    options.batch_size_limit,
-                    @sizeOf(Transfer),
-                ) * @sizeOf(Transfer),
             };
         }
 
@@ -476,8 +466,6 @@ pub fn StateMachineType(
                 .commit_timestamp = 0,
                 .forest = self.forest,
                 .scan_lookup_buffer = self.scan_lookup_buffer,
-                .scan_buffer_size_account_balances = self.scan_buffer_size_account_balances,
-                .scan_buffer_size_create_transfers = self.scan_buffer_size_create_transfers,
             };
         }
 
@@ -526,6 +514,8 @@ pub fn StateMachineType(
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
+            assert(input.len <= self.batch_size_limit);
+
             switch (operation) {
                 .pulse => {
                     if (input.len != 0) return false;
@@ -778,7 +768,8 @@ pub fn StateMachineType(
 
                 var scan_buffer = std.mem.bytesAsSlice(
                     Transfer,
-                    self.scan_lookup_buffer[0..self.scan_buffer_size_create_transfers],
+                    self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
+                        constants.batch_max.get_account_transfers],
                 );
                 assert(scan_buffer.len <= constants.batch_max.get_account_transfers);
 
@@ -851,7 +842,8 @@ pub fn StateMachineType(
 
                         var scan_lookup_buffer = std.mem.bytesAsSlice(
                             AccountBalancesGrooveValue,
-                            self.scan_lookup_buffer[0..self.scan_buffer_size_account_balances],
+                            self.scan_lookup_buffer[0 .. @sizeOf(AccountBalancesGrooveValue) *
+                                constants.batch_max.get_account_balances],
                         );
 
                         var scan_lookup = self.scan_lookup.get(.account_balances);
@@ -998,8 +990,9 @@ pub fn StateMachineType(
 
             const scan_lookup_buffer = std.mem.bytesAsSlice(
                 Transfer,
-                // We must be constrained to the same limit as `create_transfers`.
-                self.scan_lookup_buffer[0..self.scan_buffer_size_create_transfers],
+                self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
+                    // We must be constrained to the same limit as `create_transfers`.
+                    constants.batch_max.create_transfers],
             );
 
             const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
@@ -3745,10 +3738,15 @@ test "StateMachine: input_valid" {
             event.operation,
             input[0 .. event.max * event.size],
         ));
-        try std.testing.expect(!context.state_machine.input_valid(
-            event.operation,
-            input[0 .. (event.max + 1) * event.size],
-        ));
+        if ((event.max + 1) * event.size < TestContext.message_body_size_max) {
+            try std.testing.expect(!context.state_machine.input_valid(
+                event.operation,
+                input[0 .. (event.max + 1) * event.size],
+            ));
+        } else {
+            // Don't test input larger than the message body limit, since input_valid() would panic
+            // on an assert.
+        }
         try std.testing.expect(!context.state_machine.input_valid(
             event.operation,
             input[0 .. 3 * (event.size / 2)],

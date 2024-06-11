@@ -483,6 +483,9 @@ pub fn GrooveType(
             grid: *Grid,
             options: Options,
         ) !Groove {
+            assert(options.tree_options_object.batch_value_count_limit *
+                constants.lsm_batch_multiple <= ObjectTree.Table.value_count_max);
+
             var objects_cache = try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
 
