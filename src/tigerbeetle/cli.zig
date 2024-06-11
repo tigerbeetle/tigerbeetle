@@ -85,6 +85,10 @@ const CliArgs = union(enum) {
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_balances: bool = false,
+        account_batch_size: usize = @divExact(
+            constants.message_size_max - @sizeOf(vsr.Header),
+            @sizeOf(tigerbeetle.Account),
+        ),
         transfer_count: usize = 10_000_000,
         transfer_pending: bool = false,
         transfer_batch_size: usize = @divExact(
@@ -271,6 +275,7 @@ pub const Command = union(enum) {
         cache_grid: ?[]const u8,
         account_count: usize,
         account_balances: bool,
+        account_batch_size: usize,
         transfer_count: usize,
         transfer_pending: bool,
         transfer_batch_size: usize,
@@ -560,6 +565,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cache_grid = benchmark.cache_grid,
                     .account_count = benchmark.account_count,
                     .account_balances = benchmark.account_balances,
+                    .account_batch_size = benchmark.account_batch_size,
                     .transfer_count = benchmark.transfer_count,
                     .transfer_pending = benchmark.transfer_pending,
                     .transfer_batch_size = benchmark.transfer_batch_size,
