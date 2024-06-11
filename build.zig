@@ -927,9 +927,11 @@ fn c_client_sample(
 
     const sample = b.addExecutable(.{
         .name = "c_sample",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/clients/c/samples/main.c" } },
         .target = target,
         .optimize = mode,
+    });
+    sample.addCSourceFile(.{
+        .file = .{  .src_path = .{ .owner = b, .sub_path = "src/clients/c/samples/main.c" } },
     });
     sample.linkLibrary(static_lib);
     sample.linkLibC();

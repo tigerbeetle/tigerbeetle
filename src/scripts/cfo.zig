@@ -515,7 +515,7 @@ fn upload_results(
                     seeds_merged,
                     .{ .whitespace = .indent_2 },
                 );
-                try shell.cwd.writeFile("./fuzzing/data.json", json);
+                try shell.cwd.writeFile(.{ .sub_path = "./fuzzing/data.json", .data = json });
                 try shell.exec("git add ./fuzzing/data.json", .{});
                 try shell.git_env_setup();
                 try shell.exec("git commit -m 🌱", .{});

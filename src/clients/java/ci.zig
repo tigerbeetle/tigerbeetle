@@ -49,7 +49,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
 
-    try shell.cwd.writeFile("pom.xml", try shell.fmt(
+    try shell.cwd.writeFile(.{ .sub_path = "pom.xml", .data = try shell.fmt(
         \\<project>
         \\  <modelVersion>4.0.0</modelVersion>
         \\  <groupId>com.tigerbeetle</groupId>
@@ -94,7 +94,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         \\    </dependency>
         \\  </dependencies>
         \\</project>
-    , .{options.version}));
+    , .{options.version}) });
 
     try Shell.copy_path(
         shell.project_root,

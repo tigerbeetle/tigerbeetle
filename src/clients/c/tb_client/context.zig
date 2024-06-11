@@ -301,7 +301,7 @@ pub fn ContextType(
         }
 
         fn on_signal(signal: *Signal) void {
-            const self: *Context = @fieldParentPtr("signal", signal);
+            const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
 
             // Don't send any requests until registration completes.
             if (self.batch_size_limit == null) {
@@ -487,7 +487,7 @@ pub fn ContextType(
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {
-            return @fieldParentPtr("implementation", implementation);
+            return @alignCast(@fieldParentPtr("implementation", implementation));
         }
 
         fn on_acquire_packet(implementation: *ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus {

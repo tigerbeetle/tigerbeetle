@@ -911,10 +911,10 @@ pub fn main() !void {
         var buffer = std.ArrayList(u8).init(allocator);
         try generate_bindings(ZigType, mapping, &buffer);
 
-        try std.fs.cwd().writeFile(
-            output_path ++ mapping.name ++ ".java",
-            buffer.items,
-        );
+        try std.fs.cwd().writeFile(.{
+            .sub_path = output_path ++ mapping.name ++ ".java",
+            .data = buffer.items,
+        });
     }
 }
 

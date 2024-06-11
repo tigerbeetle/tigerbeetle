@@ -270,7 +270,7 @@ pub fn file_ensure_content(
         return .unchanged;
     }
 
-    try shell.cwd.writeFile(path, content);
+    try shell.cwd.writeFile(.{ .sub_path = path, .data = content });
     return .updated;
 }
 

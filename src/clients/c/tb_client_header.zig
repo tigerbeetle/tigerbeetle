@@ -247,5 +247,5 @@ pub fn main() !void {
         \\#endif // TB_CLIENT_H
         \\
     , .{});
-    try std.fs.cwd().writeFile("src/clients/c/tb_client.h", buffer.items);
+    try std.fs.cwd().writeFile(.{ .sub_path = "src/clients/c/tb_client.h", .data = buffer.items });
 }
