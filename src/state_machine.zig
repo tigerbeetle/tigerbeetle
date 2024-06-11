@@ -988,11 +988,15 @@ pub fn StateMachineType(
             assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
             assert(self.prefetch_timestamp != TimestampRange.timestamp_max);
 
+            // We must be constrained to the same limit as `create_transfers`.
+            const scan_buffer_size = @divFloor(
+                self.batch_size_limit,
+                @sizeOf(Transfer),
+            ) * @sizeOf(Transfer);
+
             const scan_lookup_buffer = std.mem.bytesAsSlice(
                 Transfer,
-                self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
-                    // We must be constrained to the same limit as `create_transfers`.
-                    constants.batch_max.create_transfers],
+                self.scan_lookup_buffer[0..scan_buffer_size],
             );
 
             const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
