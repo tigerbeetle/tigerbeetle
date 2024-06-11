@@ -7,10 +7,12 @@ const assert = std.debug.assert;
 const Time = @import("../time.zig").Time;
 const IO = @import("../io.zig").IO;
 
-test "write/read/close" {
+test "open/write/read/close/statx" {
     try struct {
         const Context = @This();
+        const StatxType = if (builtin.target.os.tag == .linux) std.os.linux.Statx else void;
 
+        path: [:0]const u8 = "test_io_write_read_close",
         io: IO,
         done: bool = false,
 
@@ -21,16 +23,16 @@ test "write/read/close" {
         written: usize = 0,
         read: usize = 0,
 
+        statx: StatxType = undefined,
+
         fn run_test() !void {
-            const path = "test_io_write_read_close";
-
-            // The file gets created below, either by createFile or openat.
-            defer std.fs.cwd().deleteFile(path) catch {};
-
             var self: Context = .{
                 .io = try IO.init(32, 0),
             };
             defer self.io.deinit();
+
+            // The file gets created below, either by createFile or openat.
+            defer std.fs.cwd().deleteFile(self.path) catch {};
 
             var completion: IO.Completion = undefined;
 
@@ -41,12 +43,12 @@ test "write/read/close" {
                     openat_callback,
                     &completion,
                     os.AT.FDCWD,
-                    path,
+                    self.path,
                     os.O.RDWR | os.O.TRUNC | os.O.CREAT,
                     std.fs.File.default_mode,
                 );
             } else {
-                const file = try std.fs.cwd().createFile(path, .{
+                const file = try std.fs.cwd().createFile(self.path, .{
                     .read = true,
                     .truncate = true,
                 });
@@ -57,6 +59,11 @@ test "write/read/close" {
             try testing.expectEqual(self.write_buf.len, self.written);
             try testing.expectEqual(self.read_buf.len, self.read);
             try testing.expectEqualSlices(u8, &self.write_buf, &self.read_buf);
+
+            if (builtin.target.os.tag == .linux) {
+                // Offset of 10 specified to read / write below.
+                try testing.expectEqual(self.statx.size - 10, self.written);
+            }
         }
 
         fn openat_callback(
@@ -99,9 +106,34 @@ test "write/read/close" {
             completion: *IO.Completion,
             result: IO.CloseError!void,
         ) void {
-            _ = completion;
             _ = result catch @panic("close error");
 
+            if (builtin.target.os.tag == .linux) {
+                self.io.statx(
+                    *Context,
+                    self,
+                    statx_callback,
+                    completion,
+                    os.AT.FDCWD,
+                    self.path,
+                    0,
+                    os.linux.STATX_BASIC_STATS,
+                    &self.statx,
+                );
+            } else {
+                self.done = true;
+            }
+        }
+
+        fn statx_callback(
+            self: *Context,
+            completion: *IO.Completion,
+            result: IO.StatxError!void,
+        ) void {
+            _ = completion;
+            _ = result catch @panic("statx error");
+
+            assert(!self.done);
             self.done = true;
         }
     }.run_test();
