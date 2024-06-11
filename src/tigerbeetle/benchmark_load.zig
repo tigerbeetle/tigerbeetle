@@ -33,11 +33,6 @@ const IdPermutation = vsr.testing.IdPermutation;
 
 const cli = @import("./cli.zig");
 
-const account_count_per_batch = @divExact(
-    constants.message_size_max - @sizeOf(vsr.Header),
-    @sizeOf(tb.Account),
-);
-
 pub fn main(
     allocator: std.mem.Allocator,
     addresses: []const std.net.Address,
@@ -83,7 +78,7 @@ pub fn main(
     );
 
     var batch_accounts =
-        try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, account_count_per_batch);
+        try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, cli_args.account_batch_size);
     defer batch_accounts.deinit(allocator);
 
     // Each array position corresponds to a histogram bucket of 1ms. The last bucket is 10_000ms+.
@@ -216,7 +211,7 @@ const Benchmark = struct {
 
         // Fill batch.
         while (b.account_index < b.account_count and
-            b.batch_accounts.items.len < account_count_per_batch)
+            b.batch_accounts.items.len < b.batch_accounts.capacity)
         {
             b.batch_accounts.appendAssumeCapacity(.{
                 .id = b.account_id_permutation.encode(b.account_index + 1),
