@@ -300,6 +300,16 @@ pub const IO = struct {
                 .send => |op| {
                     linux.io_uring_prep_send(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
                 },
+                .statx => |op| {
+                    linux.io_uring_prep_statx(
+                        sqe,
+                        op.dir_fd,
+                        op.file_path,
+                        op.flags,
+                        op.mask,
+                        op.statxbuf,
+                    );
+                },
                 .timeout => |*op| {
                     linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
                 },
@@ -532,6 +542,32 @@ pub const IO = struct {
                     };
                     call_callback(completion, &result, callback_tracer_slot);
                 },
+                .statx => {
+                    const result: anyerror!void = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@as(os.E, @enumFromInt(-completion.result))) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .FAULT => unreachable,
+                                .INVAL => unreachable,
+                                .BADF => unreachable,
+                                .ACCES => error.AccessDenied,
+                                .LOOP => error.SymLinkLoop,
+                                .NAMETOOLONG => error.NameTooLong,
+                                .NOENT => error.FileNotFound,
+                                .NOMEM => error.SystemResources,
+                                .NOTDIR => error.NotDir,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
+                    call_callback(completion, &result, callback_tracer_slot);
+                },
                 .timeout => {
                     assert(completion.result < 0);
                     const err = switch (@as(os.E, @enumFromInt(-completion.result))) {
@@ -630,6 +666,13 @@ pub const IO = struct {
         send: struct {
             socket: os.socket_t,
             buffer: []const u8,
+        },
+        statx: struct {
+            dir_fd: os.fd_t,
+            file_path: [*:0]const u8,
+            flags: u32,
+            mask: u32,
+            statxbuf: *std.os.linux.Statx,
         },
         timeout: struct {
             timespec: os.linux.kernel_timespec,
@@ -963,6 +1006,49 @@ pub const IO = struct {
                 .send = .{
                     .socket = socket,
                     .buffer = buffer,
+                },
+            },
+        };
+        self.enqueue(completion);
+    }
+
+    pub const StatxError = std.fs.File.StatError || os.UnexpectedError;
+
+    pub fn statx(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: StatxError!void,
+        ) void,
+        completion: *Completion,
+        dir_fd: os.fd_t,
+        file_path: [*:0]const u8,
+        flags: u32,
+        mask: u32,
+        statxbuf: *std.os.linux.Statx,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @ptrCast(@alignCast(ctx)),
+                        comp,
+                        @as(*const StatxError!void, @ptrCast(@alignCast(res))).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .statx = .{
+                    .dir_fd = dir_fd,
+                    .file_path = file_path,
+                    .flags = flags,
+                    .mask = mask,
+                    .statxbuf = statxbuf,
                 },
             },
         };
