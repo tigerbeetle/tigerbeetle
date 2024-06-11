@@ -756,6 +756,6 @@ test "GridScrubber cycle interval" {
     const snap = Snap.snap;
 
     try snap(@src(),
-        \\4.3582921528e-03
+        \\4.3582921528e-3
     ).diff_fmt("{e:.10}", .{p_cluster_blocks_corrupt_per_span});
 }

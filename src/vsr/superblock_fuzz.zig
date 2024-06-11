@@ -205,7 +205,7 @@ const Environment = struct {
     /// and the quorum never regresses.
     fn tick(env: *Environment) !void {
         assert(env.pending.count() <= 2);
-        assert(env.superblock.storage.reads.len + env.superblock.storage.writes.len <= 1);
+        assert(env.superblock.storage.reads.count() + env.superblock.storage.writes.count() <= 1);
         assert(!env.pending.contains(.format));
         assert(!env.pending.contains(.open));
         assert(!env.pending_verify);

@@ -43,7 +43,7 @@ test "open/write/read/close/statx" {
                     &self,
                     openat_callback,
                     &completion,
-                    os.AT.FDCWD,
+                    posix.AT.FDCWD,
                     self.path,
                     .{ .ACCMODE = .RDWR, .TRUNC = true, .CREAT = true },
                     std.fs.File.default_mode,
@@ -70,7 +70,7 @@ test "open/write/read/close/statx" {
         fn openat_callback(
             self: *Context,
             completion: *IO.Completion,
-            result: anyerror!os.fd_t,
+            result: anyerror!posix.fd_t,
         ) void {
             self.fd = result catch @panic("openat error");
             self.io.write(

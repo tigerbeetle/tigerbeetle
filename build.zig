@@ -931,7 +931,7 @@ fn c_client_sample(
         .optimize = mode,
     });
     sample.addCSourceFile(.{
-        .file = .{  .src_path = .{ .owner = b, .sub_path = "src/clients/c/samples/main.c" } },
+        .file = .{ .src_path = .{ .owner = b, .sub_path = "src/clients/c/samples/main.c" } },
     });
     sample.linkLibrary(static_lib);
     sample.linkLibC();

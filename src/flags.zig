@@ -686,7 +686,7 @@ test "flags" {
             { // Compile this file as an executable!
                 const this_file = try std.fs.cwd().realpath(@src().file, flags_exe_buf);
                 const argv = [_][]const u8{ zig_exe, "build-exe", this_file };
-                const exec_result = try std.ChildProcess.run(.{
+                const exec_result = try std.process.Child.run(.{
                     .allocator = gpa,
                     .argv = &argv,
                     .cwd_dir = tmp_dir.dir,
@@ -736,7 +736,7 @@ test "flags" {
                 assert(argv[argv.len - 1].ptr == cli[cli.len - 1].ptr);
             }
 
-            const exec_result = try std.ChildProcess.run(.{
+            const exec_result = try std.process.Child.run(.{
                 .allocator = t.gpa,
                 .argv = argv,
             });

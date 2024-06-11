@@ -259,14 +259,14 @@ test "tidy no large blobs" {
 
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
-    const allowed_extensions = std.ComptimeStringMap(void, .{
+    const allowed_extensions = std.StaticStringMap(void).initComptime(.{
         .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"},  .{".css"},  .{".go"},
         .{".h"},   .{".hcl"},   .{".java"}, .{".js"},      .{".json"}, .{".md"},
         .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sh"},   .{".sln"},
         .{".sum"}, .{".ts"},    .{".txt"},  .{".xml"},     .{".yml"},  .{".zig"},
     });
 
-    const exceptions = std.ComptimeStringMap(void, .{
+    const exceptions = std.StaticStringMap(void).initComptime(.{
         .{".editorconfig"},          .{".gitattributes"},   .{".gitignore"},
         .{".nojekyll"},              .{"CNAME"},            .{"Dockerfile"},
         .{"exclude-pmd.properties"}, .{"favicon.ico"},      .{"favicon.png"},

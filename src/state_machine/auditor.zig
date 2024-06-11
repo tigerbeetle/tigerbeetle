@@ -368,7 +368,7 @@ pub const AccountingAuditor = struct {
                         }) catch unreachable;
                         // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
                         // created more pending transfers than permitted.
-                        assert(self.pending_expiries.len <= self.options.transfers_pending_max);
+                        assert(self.pending_expiries.count() <= self.options.transfers_pending_max);
                     }
                     dr.debits_pending += transfer.amount;
                     cr.credits_pending += transfer.amount;

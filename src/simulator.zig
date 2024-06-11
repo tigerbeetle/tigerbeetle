@@ -448,11 +448,11 @@ pub const Simulator = struct {
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
         errdefer workload.deinit(allocator);
 
-        var replica_releases = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        const replica_releases = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_releases);
         @memset(replica_releases, 1);
 
-        var replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        const replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_stability);
         @memset(replica_stability, 0);
 
@@ -1088,13 +1088,13 @@ fn chance_f64(random: std.rand.Random, p: f64) bool {
 /// Returns a random partitioning mode.
 fn random_partition_mode(random: std.rand.Random) PartitionMode {
     const typeInfo = @typeInfo(PartitionMode).Enum;
-    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
+    const enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @as(PartitionMode, @enumFromInt(enumAsInt));
 }
 
 fn random_partition_symmetry(random: std.rand.Random) PartitionSymmetry {
     const typeInfo = @typeInfo(PartitionSymmetry).Enum;
-    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
+    const enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @as(PartitionSymmetry, @enumFromInt(enumAsInt));
 }
 

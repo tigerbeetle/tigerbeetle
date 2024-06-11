@@ -821,7 +821,7 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
-    pub const OpenatError = os.OpenError || os.UnexpectedError;
+    pub const OpenatError = posix.OpenError || posix.UnexpectedError;
 
     pub fn openat(
         self: *IO,
@@ -836,8 +836,11 @@ pub const IO = struct {
         dir_fd: posix.fd_t,
         file_path: [*:0]const u8,
         flags: posix.O,
-        mode: os.mode_t,
+        mode: posix.mode_t,
     ) void {
+        var new_flags = flags;
+        new_flags.CLOEXEC = true;
+
         completion.* = .{
             .io = self,
             .context = context,
@@ -854,7 +857,7 @@ pub const IO = struct {
                 .openat = .{
                     .dir_fd = dir_fd,
                     .file_path = file_path,
-                    .flags = flags | os.O.CLOEXEC,
+                    .flags = new_flags,
                     .mode = mode,
                 },
             },
