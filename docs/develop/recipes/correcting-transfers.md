@@ -13,8 +13,8 @@ was incorrect.
 
 ## Always Add More Transfers
 
-Correcting transfers or entries in TigerBeetle are handled with more transfers to reverse the
-effects of the previous transfer(s).
+Correcting transfers or entries in TigerBeetle are handled with more transfers to reverse or adjust
+the effects of the previous transfer(s).
 
 This is important because adding transfers as opposed to deleting or modifying incorrect ones adds
 more information to the history. The log of events includes the original error, when it took place,
@@ -52,7 +52,7 @@ would submit two **additional** transfers going in the opposite direction:
 | Ledger | Debit Account | Credit Account | Amount | `code` | `user_data_128` | `flags.linked` |
 | -----: | ------------: | -------------: | -----: | -----: | --------------: | -------------: |
 |    USD |           `X` |            `A` |   1000 |  10000 |          123456 |           true |
-|    USD |           `Y` |            `A` |      5 |  10001 |          123456 |          false |
+|    USD |           `Y` |            `A` |      5 |  10000 |          123456 |          false |
 
 Note that the codes used here don't have any actual meaning, but you would want to
 [enumerate your business events](../data-modeling.md#code) and map each to a numeric code value,
