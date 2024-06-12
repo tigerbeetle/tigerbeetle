@@ -146,7 +146,7 @@ pub fn build(b: *std.Build) !void {
 
     const tigerbeetle = b.addExecutable(.{
         .name = "tigerbeetle",
-        .root_source_file = b.path( "src/tigerbeetle/main.zig"),
+        .root_source_file = b.path("src/tigerbeetle/main.zig"),
         .target = target,
         .optimize = mode,
     });
@@ -364,7 +364,7 @@ pub fn build(b: *std.Build) !void {
             tests.linkLibC();
 
             tests.linkSystemLibrary("jvm");
-            tests.addLibraryPath(b.path(libjvm_path));
+            tests.addLibraryPath(.{ .cwd_relative = libjvm_path });
             if (builtin.os.tag == .linux) {
                 // On Linux, detects the abi by calling `ldd` to check if
                 // the libjvm.so is linked against libc or musl.
@@ -521,11 +521,17 @@ fn link_tracer_backend(
                 };
 
             const b = exe.step.owner;
-            exe.addIncludePath(b.path("./tools/tracy/public/tracy"));
             exe.addCSourceFile(.{
-                .file = b.path( "./tools/tracy/public/TracyClient.cpp"),
+                .file = b.path("./tools/tracy/public/TracyClient.cpp"),
                 .flags = tracy_c_flags,
             });
+
+            // TODO: From Zig 0.12+, `addIncludePath` isn't properly detected on child modules so add it to roots.
+            // exe.addIncludePath(b.path("./tools/tracy/public/tracy"));
+            for (b.modules.values()) |root_module| {
+                root_module.addIncludePath(b.path("./tools/tracy/public/tracy"));
+            }
+
             exe.linkLibC();
             exe.linkLibCpp();
 
@@ -808,7 +814,7 @@ fn node_client(
         lib.linkLibC();
 
         lib.step.dependOn(&npm_install.step);
-        lib.addSystemIncludePath(b.path("src/clients/node/node_modules/node-api-headers/include");
+        lib.addSystemIncludePath(b.path("src/clients/node/node_modules/node-api-headers/include"));
         lib.linker_allow_shlib_undefined = true;
 
         if (resolved_target.result.os.tag == .windows) {
