@@ -123,9 +123,10 @@ async function mainSeeds() {
     );
     const rowDom = document.createElement("tr");
 
+    const seedSuccess = record.fuzzer === 'canary' ? !record.ok : record.ok
     rowDom.style.setProperty(
       "background",
-      record.ok ? "#CF0" : colors[commit_count % colors.length],
+      seedSuccess ? "#CF0" : colors[commit_count % colors.length],
     );
 
     const prLink = pullRequestNumber(record)
