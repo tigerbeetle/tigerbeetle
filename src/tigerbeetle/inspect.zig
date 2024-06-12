@@ -5,65 +5,32 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.inspect);
 
-const stdx = @import("../stdx.zig");
-const vsr = @import("../vsr.zig");
+const cli = @import("cli.zig");
+const vsr = @import("vsr");
+const stdx = vsr.stdx;
 const fatal = vsr.flags.fatal;
 const schema = vsr.lsm.schema;
 const constants = vsr.constants;
-const tb = @import("../tigerbeetle.zig");
-const Storage = @import("../storage.zig").Storage;
+const tb = vsr.tigerbeetle;
+const Storage = vsr.storage.Storage;
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
 const SuperBlock = vsr.SuperBlockType(Storage);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Grid = vsr.GridType(Storage);
-const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
-const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
-const allocate_block = @import("../vsr/grid.zig").allocate_block;
-const is_composite_key = @import("../lsm/composite_key.zig").is_composite_key;
+const BlockPtr = vsr.grid.BlockPtr;
+const BlockPtrConst = vsr.grid.BlockPtrConst;
+const allocate_block = vsr.grid.allocate_block;
+const is_composite_key = vsr.lsm.composite_key.is_composite_key;
 
-pub const CliArgs = union(enum) {
-    superblock: struct {
-        positional: struct { path: []const u8 },
-    },
-    wal: struct {
-        slot: ?usize = null,
-        positional: struct { path: []const u8 },
-    },
-    replies: struct {
-        slot: ?usize = null,
-        superblock_copy: u8 = 0,
-        positional: struct { path: []const u8 },
-    },
-    grid: struct {
-        block: ?u64 = null,
-        superblock_copy: u8 = 0,
-        positional: struct { path: []const u8 },
-    },
-    manifest: struct {
-        superblock_copy: u8 = 0,
-        positional: struct { path: []const u8 },
-    },
-    tables: struct {
-        superblock_copy: u8 = 0,
-        tree: []const u8,
-        level: ?u6 = null,
-        positional: struct { path: []const u8 },
-    },
-};
-
-pub fn main(gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
 
     const stdout = stdout_buffer.writer();
 
-    const path = switch (cli_args) {
-        inline else => |args| args.positional.path,
-    };
-
-    var inspector = try Inspector.init(gpa, path);
+    var inspector = try Inspector.init(allocator, cli_args.path);
     defer inspector.deinit();
 
-    switch (cli_args) {
+    switch (cli_args.query) {
         .superblock => try inspector.inspect_superblock(stdout),
         .wal => |args| {
             if (args.slot) |slot| {

@@ -607,6 +607,11 @@ pub usingnamespace if (@import("root") != @This()) struct {
             choice: enum { marlowe, shakespeare } = .marlowe,
         },
         subcommand: union(enum) {
+            pub const help =
+                \\subcommand help
+                \\
+            ;
+
             c1: struct { a: bool = false },
             c2: struct { b: bool = false },
         },
@@ -1227,6 +1232,16 @@ test "flags" {
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '--a'
+        \\
+    ));
+    try t.check(&.{ "subcommand", "--help" }, snap(@src(),
+        \\stdout:
+        \\subcommand help
+        \\
+    ));
+    try t.check(&.{ "subcommand", "-h" }, snap(@src(),
+        \\stdout:
+        \\subcommand help
         \\
     ));
 }

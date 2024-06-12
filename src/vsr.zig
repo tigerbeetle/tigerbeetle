@@ -22,6 +22,7 @@ pub const time = @import("time.zig");
 pub const tracer = @import("tracer.zig");
 pub const stdx = @import("stdx.zig");
 pub const flags = @import("flags.zig");
+pub const grid = @import("vsr/grid.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
 pub const repl = @import("repl.zig");
@@ -31,6 +32,7 @@ pub const lsm = .{
     .groove = @import("lsm/groove.zig"),
     .forest = @import("lsm/forest.zig"),
     .schema = @import("lsm/schema.zig"),
+    .composite_key = @import("lsm/composite_key.zig"),
 };
 pub const testing = .{
     .cluster = @import("testing/cluster.zig"),

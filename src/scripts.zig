@@ -23,7 +23,6 @@ const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const kcov = @import("./scripts/kcov.zig");
 const changelog = @import("./scripts/changelog.zig");
-const inspect = @import("./scripts/inspect.zig");
 
 const CliArgs = union(enum) {
     cfo: cfo.CliArgs,
@@ -32,7 +31,6 @@ const CliArgs = union(enum) {
     devhub: devhub.CliArgs,
     kcov: kcov.CliArgs,
     changelog: void,
-    inspect: inspect.CliArgs,
 
     pub const help =
         \\Usage:
@@ -47,57 +45,12 @@ const CliArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
-        \\  zig build scripts -- inspect <superblock|wal|replies|grid|manifest|tables> <path>
-        \\
         \\  zig build scripts -- release --run-number=<run> --sha=<commit>
         \\
         \\Options:
         \\
         \\  -h, --help
         \\        Print this help message and exit.
-        \\
-        \\Options (inspect):
-        \\
-        \\  When `--superblock-copy` is set, use the trailer referenced by that superblock copy.
-        \\  Otherwise, copy=0 will be used by default.
-        \\
-        \\  superblock
-        \\        Inspect the superblock header copies.
-        \\        In the left column of the output, "|" denotes which copies have a particular value.
-        \\        "||||" means that all four superblock copies are in agreement.
-        \\        "| | " means that the value matches in copies 0/2, but differs from copies 1/3.
-        \\
-        \\  wal
-        \\        Inspect the WAL headers and prepares.
-        \\        In the left column of the output, "|" denotes which set of headers has each value.
-        \\        "||" denotes that the prepare and the redundant header match.
-        \\        "| " is the redundant header.
-        \\        " |" is the prepare's header.
-        \\
-        \\  wal --slot=<slot>
-        \\        Inspect the WAL header/prepare in the given slot.
-        \\
-        \\  replies [--superblock-copy=<copy>]
-        \\        Inspect the client reply headers and session numbers.
-        \\
-        \\  replies --slot=<slot> [--superblock-copy=<copy>]
-        \\        Inspect a particular client reply.
-        \\        "||" denotes that the client session header and reply header match.
-        \\        "| " is the client session header.
-        \\        " |" is the client reply's header.
-        \\
-        \\  grid [--superblock-copy=<copy>]
-        \\        Inspect the free set.
-        \\
-        \\  grid --block=<address>
-        \\        Inspect the block at the given address.
-        \\
-        \\  manifest [--superblock-copy=<copy>]
-        \\        Inspect the LSM manifest.
-        \\
-        \\  tables --tree=<name|id> [--level=<integer>] [--superblock-copy=<copy>]
-        \\        List the tables matching the given tree/level.
-        \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
         \\
         \\Options (release):
         \\
@@ -138,6 +91,5 @@ pub fn main() !void {
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
         .kcov => |args_kcov| try kcov.main(shell, gpa, args_kcov),
         .changelog => try changelog.main(shell, gpa),
-        .inspect => |args_inspect| try inspect.main(gpa, args_inspect),
     }
 }
