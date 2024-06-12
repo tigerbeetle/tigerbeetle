@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: alpine
+      # Docker restricts io_uring by default, running unconfined then.
       options: --security-opt seccomp=unconfined
     steps:
       - run: apk add -U git
