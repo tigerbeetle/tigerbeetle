@@ -12,7 +12,9 @@ jobs:
 
   test_on_alpine:
     runs-on: ubuntu-latest
-    container: alpine
+    container:
+      image: alpine
+      options: --security-opt seccomp=unconfined
     steps:
       - run: apk add -U git
       # https://github.com/actions/checkout/issues/1169
