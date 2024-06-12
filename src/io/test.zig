@@ -115,7 +115,7 @@ test "open/write/read/close/statx" {
                     self,
                     statx_callback,
                     completion,
-                    os.AT.FDCWD,
+                    posix.AT.FDCWD,
                     self.path,
                     0,
                     os.linux.STATX_BASIC_STATS,

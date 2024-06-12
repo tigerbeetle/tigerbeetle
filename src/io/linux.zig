@@ -298,8 +298,7 @@ pub const IO = struct {
                     sqe.prep_send(op.socket, op.buffer, posix.MSG.NOSIGNAL);
                 },
                 .statx => |op| {
-                    linux.io_uring_prep_statx(
-                        sqe,
+                    sqe.prep_statx(
                         op.dir_fd,
                         op.file_path,
                         op.flags,
@@ -407,9 +406,9 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .openat => {
-                    const result: anyerror!std.posix.fd_t = blk: {
+                    const result: anyerror!posix.fd_t = blk: {
                         if (completion.result < 0) {
-                            const err = switch (@as(std.posix.E, @enumFromInt(-completion.result))) {
+                            const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
                                     completion.io.enqueue(completion);
                                     return;
@@ -541,7 +540,7 @@ pub const IO = struct {
                 .statx => {
                     const result: anyerror!void = blk: {
                         if (completion.result < 0) {
-                            const err = switch (@as(std.posix.E, @enumFromInt(-completion.result))) {
+                            const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
                                     completion.io.enqueue(completion);
                                     return;
@@ -555,7 +554,7 @@ pub const IO = struct {
                                 .NOENT => error.FileNotFound,
                                 .NOMEM => error.SystemResources,
                                 .NOTDIR => error.NotDir,
-                                else => |errno| os.unexpectedErrno(errno),
+                                else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
                         } else {
@@ -664,7 +663,7 @@ pub const IO = struct {
             buffer: []const u8,
         },
         statx: struct {
-            dir_fd: os.fd_t,
+            dir_fd: posix.fd_t,
             file_path: [*:0]const u8,
             flags: u32,
             mask: u32,
@@ -1011,7 +1010,7 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
-    pub const StatxError = std.fs.File.StatError || std.posix.UnexpectedError;
+    pub const StatxError = std.fs.File.StatError || posix.UnexpectedError;
 
     pub fn statx(
         self: *IO,
@@ -1023,7 +1022,7 @@ pub const IO = struct {
             result: StatxError!void,
         ) void,
         completion: *Completion,
-        dir_fd: std.posix.fd_t,
+        dir_fd: posix.fd_t,
         file_path: [*:0]const u8,
         flags: u32,
         mask: u32,
@@ -1054,7 +1053,7 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
-    pub const TimeoutError = error{Canceled} || std.posix.UnexpectedError;
+    pub const TimeoutError = error{Canceled} || posix.UnexpectedError;
 
     pub fn timeout(
         self: *IO,
