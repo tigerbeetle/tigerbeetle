@@ -1546,6 +1546,9 @@ pub fn StateMachineType(
             if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
             if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
 
+            // After this point, the transfer must succeed.
+            defer assert(self.commit_timestamp == t.timestamp);
+
             var t2 = t.*;
             t2.amount = amount;
             self.forest.grooves.transfers.insert(&t2);
@@ -1669,6 +1672,21 @@ pub fn StateMachineType(
                 },
             }
 
+            const expires_at_maybe: ?u64 = if (p.timeout == 0) null else expires_at: {
+                const expires_at = p.timestamp + p.timeout_ns();
+                if (expires_at <= t.timestamp) {
+                    // TODO: It's still possible for an operation to see an expired transfer
+                    // if there's more than one batch of transfers to expire in a single `pulse`
+                    // and the current operation was pipelined before the expiration commits.
+                    return .pending_transfer_expired;
+                }
+
+                break :expires_at expires_at;
+            };
+
+            // After this point, the transfer must succeed.
+            defer assert(self.commit_timestamp == t.timestamp);
+
             const t2 = Transfer{
                 .id = t.id,
                 .debit_account_id = p.debit_account_id,
@@ -1686,15 +1704,7 @@ pub fn StateMachineType(
             };
             self.forest.grooves.transfers.insert(&t2);
 
-            if (p.timeout > 0) {
-                const expires_at = p.timestamp + p.timeout_ns();
-                if (expires_at <= t.timestamp) {
-                    // TODO: It's still possible for an operation to see an expired transfer
-                    // if there's more than one batch of transfers to expire in a single `pulse`
-                    // and the current operation was pipelined before the expiration commits.
-                    return .pending_transfer_expired;
-                }
-
+            if (expires_at_maybe) |expires_at| {
                 // Removing the pending `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
                     .field = expires_at,
@@ -3113,6 +3123,13 @@ test "create/lookup expired transfers" {
         \\ lookup_account A1  0 10  0  0
         \\ lookup_account A2  0  0  0 10
         \\ commit lookup_accounts
+
+        // Check transfers.
+        \\ lookup_transfer T101 exists true
+        \\ lookup_transfer T102 exists false
+        \\ lookup_transfer T103 exists false
+        \\ lookup_transfer T104 exists false
+        \\ commit lookup_transfers
     );
 }
 
