@@ -119,7 +119,7 @@ pub fn build(b: *std.Build) !void {
 
     const vsr_options_module = options.createModule();
     const vsr_module = b.addModule("vsr", .{
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/vsr.zig" } },
+        .root_source_file = b.path("src/vsr.zig"),
     });
     vsr_module.addImport("vsr_options", vsr_options_module);
 
@@ -133,11 +133,10 @@ pub fn build(b: *std.Build) !void {
         // TODO(zig): https://github.com/ziglang/zig/issues/18877
         const tigerbeetle = b.addExecutable(.{
             .name = "tigerbeetle",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/tigerbeetle/main.zig" } },
+            .root_source_file = b.path("src/tigerbeetle/main.zig"),
             .target = target,
             .optimize = mode,
         });
-        tigerbeetle.stack_size = 16 * 1024 * 1024;
         tigerbeetle.root_module.addImport("vsr", vsr_module);
         tigerbeetle.root_module.addImport("vsr_options", vsr_options_module);
 
@@ -147,7 +146,7 @@ pub fn build(b: *std.Build) !void {
 
     const tigerbeetle = b.addExecutable(.{
         .name = "tigerbeetle",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/tigerbeetle/main.zig" } },
+        .root_source_file = b.path( "src/tigerbeetle/main.zig"),
         .target = target,
         .optimize = mode,
     });
@@ -160,6 +159,8 @@ pub fn build(b: *std.Build) !void {
     tigerbeetle.root_module.addImport("vsr", vsr_module);
     tigerbeetle.root_module.addImport("vsr_options", vsr_options_module);
     b.installArtifact(tigerbeetle);
+    // Tell zig to use large stack size by default if possible.
+    tigerbeetle.stack_size = 16 * 1024 * 1024;
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.root_module.omit_frame_pointer = false;
     link_tracer_backend(tigerbeetle, git_clone_tracy, tracer_backend, target.result);
@@ -187,7 +188,7 @@ pub fn build(b: *std.Build) !void {
     {
         const aof = b.addExecutable(.{
             .name = "aof",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/aof.zig" } },
+            .root_source_file = b.path("src/aof.zig"),
             .target = target,
             .optimize = mode,
         });
@@ -225,7 +226,7 @@ pub fn build(b: *std.Build) !void {
     const tb_client_header_generate = blk: {
         const tb_client_header = b.addExecutable(.{
             .name = "tb_client_header",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/clients/c/tb_client_header.zig" } },
+            .root_source_file = b.path("src/clients/c/tb_client_header.zig"),
             .target = target,
         });
         tb_client_header.root_module.addImport("vsr", vsr_module);
@@ -238,7 +239,7 @@ pub fn build(b: *std.Build) !void {
             if (b.args != null and b.args.?.len == 1) b.args.?[0] else null;
 
         const unit_tests = b.addTest(.{
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/unit_tests.zig" } },
+            .root_source_file = b.path("src/unit_tests.zig"),
             .target = target,
             .optimize = mode,
             .filter = test_filter,
@@ -249,7 +250,7 @@ pub fn build(b: *std.Build) !void {
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
-        unit_tests.addIncludePath(.{ .src_path = .{ .owner = b, .sub_path = "src/clients/c/" } });
+        unit_tests.addIncludePath(b.path("src/clients/c/"));
 
         const unit_tests_exe_step = b.step("test:build", "Build the unit tests");
         const install_unit_tests_exe = b.addInstallArtifact(unit_tests, .{});
@@ -261,7 +262,7 @@ pub fn build(b: *std.Build) !void {
         unit_tests_step.dependOn(&run_unit_tests.step);
 
         const integration_tests = b.addTest(.{
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/integration_tests.zig" } },
+            .root_source_file = b.path("src/integration_tests.zig"),
             .target = target,
             .optimize = mode,
         });
@@ -351,7 +352,7 @@ pub fn build(b: *std.Build) !void {
             });
 
             const tests = b.addTest(.{
-                .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/clients/java/src/jni_tests.zig" } },
+                .root_source_file = b.path("src/clients/java/src/jni_tests.zig"),
                 .target = target,
                 // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
                 // the stack size and causes a SEGV that is handled by Zig's panic handler.
@@ -363,7 +364,7 @@ pub fn build(b: *std.Build) !void {
             tests.linkLibC();
 
             tests.linkSystemLibrary("jvm");
-            tests.addLibraryPath(.{ .src_path = .{ .owner = b, .sub_path = libjvm_path } });
+            tests.addLibraryPath(b.path(libjvm_path));
             if (builtin.os.tag == .linux) {
                 // On Linux, detects the abi by calling `ldd` to check if
                 // the libjvm.so is linked against libc or musl.
@@ -433,7 +434,7 @@ pub fn build(b: *std.Build) !void {
 
         const simulator = b.addExecutable(.{
             .name = "simulator",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/simulator.zig" } },
+            .root_source_file = b.path("src/simulator.zig"),
             .target = target,
             .optimize = simulator_mode,
         });
@@ -458,7 +459,7 @@ pub fn build(b: *std.Build) !void {
     { // Fuzzers: zig build fuzz -- --events-max=100 lsm_tree 123
         const fuzz_exe = b.addExecutable(.{
             .name = "fuzz",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/fuzz_tests.zig" } },
+            .root_source_file = b.path("src/fuzz_tests.zig"),
             .target = target,
             .optimize = mode,
         });
@@ -480,7 +481,7 @@ pub fn build(b: *std.Build) !void {
     { // Free-form automation: `zig build scripts -- ci --language=java`
         const scripts_exe = b.addExecutable(.{
             .name = "scripts",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/scripts.zig" } },
+            .root_source_file = b.path("src/scripts.zig"),
             .target = target,
             .optimize = mode,
         });
@@ -519,9 +520,10 @@ fn link_tracer_backend(
                     "-fno-sanitize=undefined",
                 };
 
-            exe.addIncludePath(.{ .src_path = .{ .owner = exe.step.owner, .sub_path = "./tools/tracy/public/tracy" } });
+            const b = exe.step.owner;
+            exe.addIncludePath(b.path("./tools/tracy/public/tracy"));
             exe.addCSourceFile(.{
-                .file = .{ .src_path = .{ .owner = exe.step.owner, .sub_path = "./tools/tracy/public/TracyClient.cpp" } },
+                .file = b.path( "./tools/tracy/public/TracyClient.cpp"),
                 .flags = tracy_c_flags,
             });
             exe.linkLibC();
@@ -572,13 +574,13 @@ fn go_client(
 
     // Updates the generated header file:
     const install_header = b.addInstallFile(
-        .{ .src_path = .{ .owner = b, .sub_path = "src/clients/c/tb_client.h" } },
+        b.path("src/clients/c/tb_client.h"),
         "../src/clients/go/pkg/native/tb_client.h",
     );
 
     const bindings = b.addExecutable(.{
         .name = "go_bindings",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/go_bindings.zig" } },
+        .root_source_file = b.path("src/go_bindings.zig"),
         .target = target,
     });
     bindings.root_module.addOptions("vsr_options", options);
@@ -601,7 +603,7 @@ fn go_client(
         const resolved_target = b.resolveTargetQuery(cross_target);
         const lib = b_isolated.addStaticLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/tb_client_exports.zig" } },
+            .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
             .optimize = mode,
         });
@@ -640,7 +642,7 @@ fn java_client(
 
     const bindings = b.addExecutable(.{
         .name = "java_bindings",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/java_bindings.zig" } },
+        .root_source_file = b.path("src/java_bindings.zig"),
         .target = target,
     });
     bindings.root_module.addOptions("vsr_options", options);
@@ -653,7 +655,7 @@ fn java_client(
         const resolved_target = b.resolveTargetQuery(cross_target);
         const lib = b_isolated.addSharedLibrary(.{
             .name = "tb_jniclient",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/clients/java/src/client.zig" } },
+            .root_source_file = b.path("src/clients/java/src/client.zig"),
             .target = resolved_target,
             .optimize = mode,
         });
@@ -697,7 +699,7 @@ fn dotnet_client(
 
     const bindings = b.addExecutable(.{
         .name = "dotnet_bindings",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/dotnet_bindings.zig" } },
+        .root_source_file = b.path("src/dotnet_bindings.zig"),
         .target = target,
     });
     bindings.root_module.addOptions("vsr_options", options);
@@ -710,7 +712,7 @@ fn dotnet_client(
         const resolved_target = b.resolveTargetQuery(cross_target);
         const lib = b_isolated.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/tb_client_exports.zig" } },
+            .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
             .optimize = mode,
         });
@@ -751,7 +753,7 @@ fn node_client(
 
     const bindings = b.addExecutable(.{
         .name = "node_bindings",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/node_bindings.zig" } },
+        .root_source_file = b.path("src/node_bindings.zig"),
         .target = target,
     });
     bindings.root_module.addOptions("vsr_options", options);
@@ -759,7 +761,7 @@ fn node_client(
 
     // Run `npm install` to get access to node headers.
     var npm_install = b.addSystemCommand(&.{ "npm", "install" });
-    npm_install.cwd = .{ .src_path = .{ .owner = b, .sub_path = "./src/clients/node" } };
+    npm_install.cwd = b.path("./src/clients/node");
 
     // For windows, compile a set of all symbols that could be exported by node and write it to a
     // `.def` file for `zig dlltool` to generate a `.lib` file from.
@@ -779,7 +781,7 @@ fn node_client(
         \\
         \\fs.writeFileSync('./node.def', 'EXPORTS\n    ' + Array.from(allSymbols).join('\n    '))
     });
-    write_def_file.cwd = .{ .src_path = .{ .owner = b, .sub_path = "./src/clients/node" } };
+    write_def_file.cwd = b.path("./src/clients/node");
     write_def_file.step.dependOn(&npm_install.step);
 
     var run_dll_tool = b.addSystemCommand(&.{
@@ -789,7 +791,7 @@ fn node_client(
         "-d",            "node.def",
         "-l",            "node.lib",
     });
-    run_dll_tool.cwd = .{ .src_path = .{ .owner = b, .sub_path = "./src/clients/node" } };
+    run_dll_tool.cwd = b.path("./src/clients/node");
     run_dll_tool.step.dependOn(&write_def_file.step);
 
     inline for (platforms) |platform| {
@@ -799,14 +801,14 @@ fn node_client(
         const resolved_target = b.resolveTargetQuery(cross_target);
         const lib = b_isolated.addSharedLibrary(.{
             .name = "tb_nodeclient",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/node.zig" } },
+            .root_source_file = b.path("src/node.zig"),
             .target = resolved_target,
             .optimize = mode,
         });
         lib.linkLibC();
 
         lib.step.dependOn(&npm_install.step);
-        lib.addSystemIncludePath(.{ .src_path = .{ .owner = b, .sub_path = "src/clients/node/node_modules/node-api-headers/include" } });
+        lib.addSystemIncludePath(b.path("src/clients/node/node_modules/node-api-headers/include");
         lib.linker_allow_shlib_undefined = true;
 
         if (resolved_target.result.os.tag == .windows) {
@@ -814,7 +816,7 @@ fn node_client(
             lib.linkSystemLibrary("advapi32");
 
             lib.step.dependOn(&run_dll_tool.step);
-            lib.addLibraryPath(.{ .src_path = .{ .owner = b, .sub_path = "src/clients/node" } });
+            lib.addLibraryPath(b.path("src/clients/node"));
             lib.linkSystemLibrary("node");
         }
 
@@ -850,7 +852,7 @@ fn c_client(
 
     // Updates the generated header file:
     const install_header = b.addInstallFile(
-        .{ .src_path = .{ .owner = b, .sub_path = "src/clients/c/tb_client.h" } },
+        b.path("src/clients/c/tb_client.h"),
         "../src/clients/c/lib/include/tb_client.h",
     );
 
@@ -863,13 +865,13 @@ fn c_client(
         const resolved_target = b.resolveTargetQuery(cross_target);
         const shared_lib = b_isolated.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/tb_client_exports.zig" } },
+            .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
             .optimize = mode,
         });
         const static_lib = b_isolated.addStaticLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/tb_client_exports.zig" } },
+            .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
             .optimize = mode,
         });
@@ -914,7 +916,7 @@ fn c_client_sample(
 
     const static_lib = b.addStaticLibrary(.{
         .name = "tb_client",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/tb_client_exports.zig" } },
+        .root_source_file = b.path("src/tb_client_exports.zig"),
         .target = target,
         .optimize = mode,
     });
@@ -931,7 +933,7 @@ fn c_client_sample(
         .optimize = mode,
     });
     sample.addCSourceFile(.{
-        .file = .{ .src_path = .{ .owner = b, .sub_path = "src/clients/c/samples/main.c" } },
+        .file = b.path("src/clients/c/samples/main.c"),
     });
     sample.linkLibrary(static_lib);
     sample.linkLibC();
