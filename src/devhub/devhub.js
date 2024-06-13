@@ -72,6 +72,7 @@ async function mainSeeds() {
     (async () => await (await fetch(pullsURL)).json())(),
   ]);
 
+  const pullsByURL = new Map(pulls.map((pull) => [pull.html_url, pull]))
   const openPullRequests = new Set(pulls.map((it) => it.number));
 
   // Filtering:
@@ -129,6 +130,7 @@ async function mainSeeds() {
       seedSuccess ? "#CF0" : colors[commit_count % colors.length],
     );
 
+    const pull = pullsByURL.get(record.branch)
     const prLink = pullRequestNumber(record)
       ? `<a href="${record.branch}">#${pullRequestNumber(record)}</a>`
       : "";
@@ -139,6 +141,7 @@ async function mainSeeds() {
             </a>
             ${prLink}
           </td>
+          <td>${pull ? pull.user.login : ''}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
           <td><code>${record.command}</code></td>
           <td><time>${seedDuration}</time></td>
