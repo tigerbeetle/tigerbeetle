@@ -9,7 +9,6 @@ const binary_search = @import("binary_search.zig");
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
-    const value_count_max = Table.value_count_max;
     const key_from_value = Table.key_from_value;
 
     return struct {
@@ -30,6 +29,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         values: []Value,
+        value_count_limit: u32,
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
@@ -38,12 +38,18 @@ pub fn TableMemoryType(comptime Table: type) type {
             allocator: mem.Allocator,
             mutability: Mutability,
             name: []const u8,
+            options: struct {
+                value_count_limit: u32,
+            },
         ) !TableMemory {
-            const values = try allocator.alloc(Value, value_count_max);
+            assert(options.value_count_limit <= Table.value_count_max);
+
+            const values = try allocator.alloc(Value, options.value_count_limit);
             errdefer allocator.free(values);
 
             return TableMemory{
                 .values = values,
+                .value_count_limit = options.value_count_limit,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = name,
@@ -62,6 +68,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .value_count_limit = table.value_count_limit,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = table.name,
@@ -78,7 +85,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn put(table: *TableMemory, value: *const Value) void {
             assert(table.mutability == .mutable);
-            assert(table.value_context.count < value_count_max);
+            assert(table.value_context.count < table.value_count_limit);
             if (table.value_context.sorted) {
                 table.value_context.sorted = table.value_context.count == 0 or
                     key_from_value(&table.values[table.value_context.count - 1]) <=
@@ -93,7 +100,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         /// This must be called on sorted tables.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
-            assert(table.value_context.count <= value_count_max);
+            assert(table.value_context.count <= table.value_count_limit);
             assert(table.value_context.sorted);
 
             return binary_search.binary_search_values(
@@ -108,7 +115,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
-            assert(table.value_context.count <= value_count_max);
+            assert(table.value_context.count <= table.value_count_limit);
             defer assert(table.value_context.sorted);
 
             // Sort all the values. In future, this will be done incrementally, and use
@@ -125,11 +132,12 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn make_mutable(table: *TableMemory) void {
             assert(table.mutability == .immutable);
             assert(table.mutability.immutable.flushed == true);
-            assert(table.value_context.count <= value_count_max);
+            assert(table.value_context.count <= table.value_count_limit);
             assert(table.value_context.sorted);
 
             table.* = .{
                 .values = table.values,
+                .value_count_limit = table.value_count_limit,
                 .value_context = .{},
                 .mutability = .mutable,
                 .name = table.name,
@@ -191,7 +199,9 @@ test "table_memory: unit" {
     const TableMemory = TableMemoryType(TestTable);
 
     const allocator = testing.allocator;
-    var table_memory = try TableMemory.init(allocator, .mutable, "test");
+    var table_memory = try TableMemory.init(allocator, .mutable, "test", .{
+        .value_count_limit = TestTable.value_count_max,
+    });
     defer table_memory.deinit(allocator);
 
     table_memory.put(&.{ .key = 1, .value = 1, .tombstone = false });

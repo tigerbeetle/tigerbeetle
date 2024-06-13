@@ -818,9 +818,20 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         transfers_batch_size_span: usize, // inclusive
 
         pub fn generate(random: std.rand.Random, options: struct {
+            batch_size_limit: u32,
             client_count: usize,
             in_flight_max: usize,
         }) Options {
+            const batch_create_accounts_limit =
+                @divFloor(options.batch_size_limit, @sizeOf(tb.Account));
+            const batch_create_transfers_limit =
+                @divFloor(options.batch_size_limit, @sizeOf(tb.Transfer));
+            assert(batch_create_accounts_limit > 0);
+            assert(batch_create_accounts_limit <= StateMachine.constants.batch_max.create_accounts);
+            assert(batch_create_transfers_limit > 0);
+            assert(batch_create_transfers_limit <=
+                StateMachine.constants.batch_max.create_transfers);
+
             return .{
                 .auditor_options = .{
                     .accounts_max = 2 + random.uintLessThan(usize, 128),
@@ -828,6 +839,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                     .client_count = options.client_count,
                     .transfers_pending_max = 256,
                     .in_flight_max = options.in_flight_max,
+                    .batch_create_transfers_limit = batch_create_transfers_limit,
                 },
                 .transfer_id_permutation = IdPermutation.generate(random),
                 .operations = .{
@@ -857,12 +869,12 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 .accounts_batch_size_min = 0,
                 .accounts_batch_size_span = 1 + random.uintLessThan(
                     usize,
-                    StateMachine.constants.batch_max.create_accounts,
+                    batch_create_accounts_limit,
                 ),
                 .transfers_batch_size_min = 0,
                 .transfers_batch_size_span = 1 + random.uintLessThan(
                     usize,
-                    StateMachine.constants.batch_max.create_transfers,
+                    batch_create_transfers_limit,
                 ),
             };
         }

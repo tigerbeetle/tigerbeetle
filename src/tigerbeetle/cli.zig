@@ -58,6 +58,7 @@ const CliArgs = union(enum) {
 
         limit_storage: ?flags.ByteSize = null,
         limit_pipeline_requests: ?u32 = null,
+        limit_request: ?flags.ByteSize = null,
         cache_accounts: ?flags.ByteSize = null,
         cache_transfers: ?flags.ByteSize = null,
         cache_transfers_pending: ?flags.ByteSize = null,
@@ -167,7 +168,13 @@ const CliArgs = union(enum) {
         \\
         \\  --development
         \\        Allow the replica to format/start even when Direct IO is unavailable.
-        \\        Additionally, use smaller cache sizes by default.
+        \\        Additionally, use smaller cache sizes and batch size by default.
+        \\
+        \\        Since this shrinks the batch size, note that:
+        \\        * All replicas should use the same batch size. That is, if any replica in the cluster has
+        \\          "--development", then all replicas should have "--development".
+        \\        * It is always possible to increase the batch size by restarting without "--development".
+        \\        * Shrinking the batch size of an existing cluster is possible, but not recommended.
         \\
         \\        For safety, production replicas should always enforce Direct IO -- this flag should only be
         \\        used for testing and development. It should not be used for production or benchmarks.
@@ -202,6 +209,7 @@ const CliArgs = union(enum) {
 
 const StartDefaults = struct {
     limit_pipeline_requests: u32,
+    limit_request: flags.ByteSize,
     cache_accounts: flags.ByteSize,
     cache_transfers: flags.ByteSize,
     cache_transfers_pending: flags.ByteSize,
@@ -211,6 +219,7 @@ const StartDefaults = struct {
 
 const start_defaults_production = StartDefaults{
     .limit_pipeline_requests = constants.pipeline_request_queue_max,
+    .limit_request = .{ .value = constants.message_size_max },
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },
     .cache_transfers = .{ .value = constants.cache_transfers_size_default },
     .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
@@ -220,6 +229,7 @@ const start_defaults_production = StartDefaults{
 
 const start_defaults_development = StartDefaults{
     .limit_pipeline_requests = 0,
+    .limit_request = .{ .value = 32 * 1024 }, // 32KiB
     .cache_accounts = .{ .value = 0 },
     .cache_transfers = .{ .value = 0 },
     .cache_transfers_pending = .{ .value = 0 },
@@ -248,6 +258,7 @@ pub const Command = union(enum) {
         cache_account_balances: u32,
         storage_size_limit: u64,
         pipeline_requests_limit: u32,
+        request_size_limit: u32,
         cache_grid_blocks: u32,
         lsm_forest_node_count: u32,
         development: bool,
@@ -468,6 +479,25 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 });
             }
 
+            // The minimum is chosen rather arbitrarily as 4096 since it is the sector size.
+            const request_size_limit = start.limit_request orelse defaults.limit_request;
+            const request_size_limit_min = 4096;
+            const request_size_limit_max = constants.message_size_max;
+            if (request_size_limit.bytes() > request_size_limit_max) {
+                flags.fatal("--limit-request: size {}{s} exceeds maximum: {}MiB", .{
+                    request_size_limit.value,
+                    request_size_limit.suffix(),
+                    @divExact(request_size_limit_max, 1024 * 1024),
+                });
+            }
+            if (request_size_limit.bytes() < request_size_limit_min) {
+                flags.fatal("--limit-request: size {}{s} is below minimum: {}B", .{
+                    request_size_limit.value,
+                    request_size_limit.suffix(),
+                    request_size_limit_min,
+                });
+            }
+
             const lsm_manifest_memory = start_memory_lsm_manifest.bytes();
             const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
             const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
@@ -506,6 +536,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
                     .storage_size_limit = storage_size_limit,
                     .pipeline_requests_limit = pipeline_limit,
+                    .request_size_limit = @intCast(request_size_limit.bytes()),
                     .cache_accounts = parse_cache_size_to_count(
                         tigerbeetle.Account,
                         AccountsValuesCache,

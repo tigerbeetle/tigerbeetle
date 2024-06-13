@@ -56,12 +56,12 @@ pub fn StateMachineType(
 
             /// The maximum number of objects within a batch, by operation.
             pub const batch_max = struct {
-                pub const create_accounts = operation_batch_max(.create_accounts);
-                pub const create_transfers = operation_batch_max(.create_transfers);
-                pub const lookup_accounts = operation_batch_max(.lookup_accounts);
-                pub const lookup_transfers = operation_batch_max(.lookup_transfers);
-                pub const get_account_transfers = operation_batch_max(.get_account_transfers);
-                pub const get_account_balances = operation_batch_max(.get_account_balances);
+                pub const create_accounts = operation_batch_max(.create_accounts, config.message_body_size_max);
+                pub const create_transfers = operation_batch_max(.create_transfers, config.message_body_size_max);
+                pub const lookup_accounts = operation_batch_max(.lookup_accounts, config.message_body_size_max);
+                pub const lookup_transfers = operation_batch_max(.lookup_transfers, config.message_body_size_max);
+                pub const get_account_transfers = operation_batch_max(.get_account_transfers, config.message_body_size_max);
+                pub const get_account_balances = operation_batch_max(.get_account_balances, config.message_body_size_max);
 
                 comptime {
                     assert(create_accounts > 0);
@@ -70,13 +70,6 @@ pub fn StateMachineType(
                     assert(lookup_transfers > 0);
                     assert(get_account_transfers > 0);
                     assert(get_account_balances > 0);
-                }
-
-                fn operation_batch_max(comptime operation: Operation) usize {
-                    return @divFloor(message_body_size_max, @max(
-                        @sizeOf(Event(operation)),
-                        @sizeOf(Result(operation)),
-                    ));
                 }
             };
 
@@ -175,25 +168,14 @@ pub fn StateMachineType(
             };
         }
 
+        const batch_value_count_max = batch_value_counts_limit(config.message_body_size_max);
+
         const AccountsGroove = GrooveType(
             Storage,
             Account,
             .{
                 .ids = constants.tree_ids.accounts,
-                .value_count_max = .{
-                    .id = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .code = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    // Transfers mutate the account balance for debits/credits pending/posted.
-                    // Each transfer modifies two accounts.
-                    .timestamp = config.lsm_batch_multiple * @as(usize, @max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
-                    )),
-                },
+                .batch_value_count_max = batch_value_count_max.accounts,
                 .ignored = &[_][]const u8{
                     "debits_posted",
                     "debits_pending",
@@ -211,20 +193,7 @@ pub fn StateMachineType(
             Transfer,
             .{
                 .ids = constants.tree_ids.transfers,
-                .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .debit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .credit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .amount = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .pending_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .expires_at = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                },
+                .batch_value_count_max = batch_value_count_max.transfers,
                 .ignored = &[_][]const u8{ "timeout", "flags" },
                 .derived = .{
                     .expires_at = struct {
@@ -244,13 +213,7 @@ pub fn StateMachineType(
             TransferPending,
             .{
                 .ids = constants.tree_ids.transfers_pending,
-                .value_count_max = .{
-                    // Objects are mutated when the pending transfer is posted/voided/expired.
-                    .timestamp = 2 *
-                        config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .status = 2 *
-                        config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                },
+                .batch_value_count_max = batch_value_count_max.transfers_pending,
                 .ignored = &[_][]const u8{"padding"},
                 .derived = .{},
             },
@@ -273,9 +236,7 @@ pub fn StateMachineType(
             AccountBalancesGrooveValue,
             .{
                 .ids = constants.tree_ids.account_balances,
-                .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                },
+                .batch_value_count_max = batch_value_count_max.account_balances,
                 .ignored = &[_][]const u8{
                     "dr_account_id",
                     "dr_debits_pending",
@@ -357,6 +318,7 @@ pub fn StateMachineType(
         }
 
         pub const Options = struct {
+            batch_size_limit: u32,
             lsm_forest_node_count: u32,
             cache_entries_accounts: u32,
             cache_entries_transfers: u32,
@@ -430,6 +392,7 @@ pub fn StateMachineType(
             }
         };
 
+        batch_size_limit: u32,
         prefetch_timestamp: u64,
         prepare_timestamp: u64,
         commit_timestamp: u64,
@@ -453,6 +416,11 @@ pub fn StateMachineType(
         tracer_slot: ?tracer.SpanStart = null,
 
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
+            assert(options.batch_size_limit <= config.message_body_size_max);
+            inline for (comptime std.enums.values(Operation)) |operation| {
+                assert(options.batch_size_limit >= @sizeOf(Event(operation)));
+            }
+
             var forest = try Forest.init(
                 allocator,
                 grid,
@@ -465,9 +433,9 @@ pub fn StateMachineType(
                 constants.batch_max.get_account_transfers * @sizeOf(Transfer),
                 constants.batch_max.get_account_balances * @sizeOf(AccountBalancesGrooveValue),
             ));
-            errdefer allocator.free(scan_lookup_buffer);
 
             return StateMachine{
+                .batch_size_limit = options.batch_size_limit,
                 .prefetch_timestamp = 0,
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
@@ -492,6 +460,7 @@ pub fn StateMachineType(
             self.forest.reset();
 
             self.* = .{
+                .batch_size_limit = self.batch_size_limit,
                 .prefetch_timestamp = 0,
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
@@ -540,7 +509,13 @@ pub fn StateMachineType(
             callback(self);
         }
 
-        pub fn input_valid(operation: Operation, input: []align(16) const u8) bool {
+        pub fn input_valid(
+            self: *const StateMachine,
+            operation: Operation,
+            input: []align(16) const u8,
+        ) bool {
+            assert(input.len <= self.batch_size_limit);
+
             switch (operation) {
                 .pulse => {
                     if (input.len != 0) return false;
@@ -552,19 +527,18 @@ pub fn StateMachineType(
                 },
                 inline else => |comptime_operation| {
                     const event_size = @sizeOf(Event(comptime_operation));
-                    const batch_max = comptime constants.batch_max.operation_batch_max(
-                        comptime_operation,
-                    );
-
                     comptime assert(event_size > 0);
-                    comptime assert(batch_max > 0);
+
+                    const batch_limit: u32 =
+                        operation_batch_max(comptime_operation, self.batch_size_limit);
+                    assert(batch_limit > 0);
 
                     // Clients do not validate batch size == 0,
                     // and even the simulator can generate requests with no events.
                     maybe(input.len == 0);
 
                     if (input.len % event_size != 0) return false;
-                    if (input.len > batch_max * event_size) return false;
+                    if (input.len > batch_limit * event_size) return false;
                 },
             }
 
@@ -573,7 +547,8 @@ pub fn StateMachineType(
 
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
         pub fn prepare(self: *StateMachine, operation: Operation, input: []align(16) const u8) void {
-            assert(input_valid(operation, input));
+            assert(self.input_valid(operation, input));
+            assert(input.len <= self.batch_size_limit);
 
             self.prepare_timestamp += switch (operation) {
                 .pulse => 0,
@@ -605,7 +580,8 @@ pub fn StateMachineType(
             _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
-            assert(input_valid(operation, input));
+            assert(self.input_valid(operation, input));
+            assert(input.len <= self.batch_size_limit);
 
             tracer.start(
                 &self.tracer_slot,
@@ -795,7 +771,7 @@ pub fn StateMachineType(
                     self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
                         constants.batch_max.get_account_transfers],
                 );
-                assert(scan_buffer.len == constants.batch_max.get_account_transfers);
+                assert(scan_buffer.len <= constants.batch_max.get_account_transfers);
 
                 var scan_lookup = self.scan_lookup.get(.transfer);
                 scan_lookup.* = TransfersScanLookup.init(
@@ -869,7 +845,6 @@ pub fn StateMachineType(
                             self.scan_lookup_buffer[0 .. @sizeOf(AccountBalancesGrooveValue) *
                                 constants.batch_max.get_account_balances],
                         );
-                        assert(scan_lookup_buffer.len == constants.batch_max.get_account_balances);
 
                         var scan_lookup = self.scan_lookup.get(.account_balances);
                         scan_lookup.* = AccountBalancesScanLookup.init(
@@ -1013,13 +988,16 @@ pub fn StateMachineType(
             assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
             assert(self.prefetch_timestamp != TimestampRange.timestamp_max);
 
+            // We must be constrained to the same limit as `create_transfers`.
+            const scan_buffer_size = @divFloor(
+                self.batch_size_limit,
+                @sizeOf(Transfer),
+            ) * @sizeOf(Transfer);
+
             const scan_lookup_buffer = std.mem.bytesAsSlice(
                 Transfer,
-                self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
-                    // We must be constrained to the same limit as `create_transfers`.
-                    constants.batch_max.create_transfers],
+                self.scan_lookup_buffer[0..scan_buffer_size],
             );
-            assert(scan_lookup_buffer.len == constants.batch_max.create_transfers);
 
             const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
             const scan = self.expire_pending_transfers.scan(
@@ -1115,8 +1093,9 @@ pub fn StateMachineType(
         ) usize {
             _ = client;
             assert(op != 0);
-            assert(input_valid(operation, input));
+            assert(self.input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
+            assert(input.len <= self.batch_size_limit);
 
             maybe(self.scan_lookup_result_count != null);
             defer assert(self.scan_lookup_result_count == null);
@@ -1939,72 +1918,177 @@ pub fn StateMachineType(
         }
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
-            const batch_accounts_max: u32 = @intCast(constants.batch_max.create_accounts);
-            const batch_transfers_max: u32 = @intCast(constants.batch_max.create_transfers);
-            assert(batch_accounts_max == constants.batch_max.lookup_accounts);
-            assert(batch_transfers_max == constants.batch_max.lookup_transfers);
+            const batch_values_limit = batch_value_counts_limit(options.batch_size_limit);
+
+            const batch_accounts_limit: u32 =
+                @divFloor(options.batch_size_limit, @sizeOf(Account));
+            const batch_transfers_limit: u32 =
+                @divFloor(options.batch_size_limit, @sizeOf(Transfer));
+            assert(batch_accounts_limit > 0);
+            assert(batch_transfers_limit > 0);
+            assert(batch_accounts_limit <= constants.batch_max.create_accounts);
+            assert(batch_accounts_limit <= constants.batch_max.lookup_accounts);
+            assert(batch_transfers_limit <= constants.batch_max.create_transfers);
+            assert(batch_transfers_limit <= constants.batch_max.lookup_transfers);
+
+            if (options.batch_size_limit == config.message_body_size_max) {
+                assert(batch_accounts_limit == constants.batch_max.create_accounts);
+                assert(batch_accounts_limit == constants.batch_max.lookup_accounts);
+                assert(batch_transfers_limit == constants.batch_max.create_transfers);
+                assert(batch_transfers_limit == constants.batch_max.lookup_transfers);
+            }
 
             return .{
                 .accounts = .{
                     // lookup_account() looks up 1 Account per item.
-                    .prefetch_entries_for_read_max = batch_accounts_max,
+                    .prefetch_entries_for_read_max = batch_accounts_limit,
                     .prefetch_entries_for_update_max = @max(
-                        batch_accounts_max, // create_account()
-                        2 * batch_transfers_max, // create_transfer(), debit and credit accounts
+                        batch_accounts_limit, // create_account()
+                        2 * batch_transfers_limit, // create_transfer(), debit and credit accounts
                     ),
                     .cache_entries_max = options.cache_entries_accounts,
-                    .tree_options_object = .{},
-                    .tree_options_id = .{},
+                    .tree_options_object = .{ .batch_value_count_limit = batch_values_limit.accounts.timestamp },
+                    .tree_options_id = .{ .batch_value_count_limit = batch_values_limit.accounts.id },
                     .tree_options_index = .{
-                        .user_data_128 = .{},
-                        .user_data_64 = .{},
-                        .user_data_32 = .{},
-                        .ledger = .{},
-                        .code = .{},
+                        .user_data_128 = .{ .batch_value_count_limit = batch_values_limit.accounts.user_data_128 },
+                        .user_data_64 = .{ .batch_value_count_limit = batch_values_limit.accounts.user_data_64 },
+                        .user_data_32 = .{ .batch_value_count_limit = batch_values_limit.accounts.user_data_32 },
+                        .ledger = .{ .batch_value_count_limit = batch_values_limit.accounts.ledger },
+                        .code = .{ .batch_value_count_limit = batch_values_limit.accounts.code },
                     },
                 },
                 .transfers = .{
                     // lookup_transfer() looks up 1 Transfer.
                     // create_transfer() looks up at most 1 Transfer for posting/voiding.
-                    .prefetch_entries_for_read_max = batch_transfers_max,
+                    .prefetch_entries_for_read_max = batch_transfers_limit,
                     // create_transfer() updates a single Transfer.
-                    .prefetch_entries_for_update_max = batch_transfers_max,
+                    .prefetch_entries_for_update_max = batch_transfers_limit,
                     .cache_entries_max = options.cache_entries_transfers,
-                    .tree_options_object = .{},
-                    .tree_options_id = .{},
+                    .tree_options_object = .{ .batch_value_count_limit = batch_values_limit.transfers.timestamp },
+                    .tree_options_id = .{ .batch_value_count_limit = batch_values_limit.transfers.id },
                     .tree_options_index = .{
-                        .debit_account_id = .{},
-                        .credit_account_id = .{},
-                        .user_data_128 = .{},
-                        .user_data_64 = .{},
-                        .user_data_32 = .{},
-                        .pending_id = .{},
-                        .ledger = .{},
-                        .code = .{},
-                        .amount = .{},
-                        .expires_at = .{},
+                        .debit_account_id = .{ .batch_value_count_limit = batch_values_limit.transfers.debit_account_id },
+                        .credit_account_id = .{ .batch_value_count_limit = batch_values_limit.transfers.credit_account_id },
+                        .user_data_128 = .{ .batch_value_count_limit = batch_values_limit.transfers.user_data_128 },
+                        .user_data_64 = .{ .batch_value_count_limit = batch_values_limit.transfers.user_data_64 },
+                        .user_data_32 = .{ .batch_value_count_limit = batch_values_limit.transfers.user_data_32 },
+                        .pending_id = .{ .batch_value_count_limit = batch_values_limit.transfers.pending_id },
+                        .ledger = .{ .batch_value_count_limit = batch_values_limit.transfers.ledger },
+                        .code = .{ .batch_value_count_limit = batch_values_limit.transfers.code },
+                        .amount = .{ .batch_value_count_limit = batch_values_limit.transfers.amount },
+                        .expires_at = .{ .batch_value_count_limit = batch_values_limit.transfers.expires_at },
                     },
                 },
                 .transfers_pending = .{
-                    .prefetch_entries_for_read_max = batch_transfers_max,
+                    .prefetch_entries_for_read_max = batch_transfers_limit,
                     // create_transfer() posts/voids at most one transfer.
-                    .prefetch_entries_for_update_max = batch_transfers_max,
+                    .prefetch_entries_for_update_max = batch_transfers_limit,
                     .cache_entries_max = options.cache_entries_posted,
-                    .tree_options_object = .{},
+                    .tree_options_object = .{ .batch_value_count_limit = batch_values_limit.transfers_pending.timestamp },
                     .tree_options_id = {},
                     .tree_options_index = .{
-                        .status = .{},
+                        .status = .{ .batch_value_count_limit = batch_values_limit.transfers_pending.status },
                     },
                 },
                 .account_balances = .{
                     .prefetch_entries_for_read_max = 0,
-                    .prefetch_entries_for_update_max = batch_transfers_max,
+                    .prefetch_entries_for_update_max = batch_transfers_limit,
                     .cache_entries_max = options.cache_entries_account_balances,
-                    .tree_options_object = .{},
+                    .tree_options_object = .{ .batch_value_count_limit = batch_values_limit.account_balances.timestamp },
                     .tree_options_id = {},
                     .tree_options_index = .{},
                 },
             };
+        }
+
+        fn batch_value_counts_limit(batch_size_limit: u32) struct {
+            accounts: struct {
+                id: u32,
+                user_data_128: u32,
+                user_data_64: u32,
+                user_data_32: u32,
+                ledger: u32,
+                code: u32,
+                timestamp: u32,
+            },
+            transfers: struct {
+                timestamp: u32,
+                id: u32,
+                debit_account_id: u32,
+                credit_account_id: u32,
+                amount: u32,
+                pending_id: u32,
+                user_data_128: u32,
+                user_data_64: u32,
+                user_data_32: u32,
+                ledger: u32,
+                code: u32,
+                expires_at: u32,
+            },
+            transfers_pending: struct {
+                timestamp: u32,
+                status: u32,
+            },
+            account_balances: struct {
+                timestamp: u32,
+            },
+        } {
+            assert(batch_size_limit <= constants.message_body_size_max);
+
+            const batch_create_accounts = operation_batch_max(.create_accounts, batch_size_limit);
+            const batch_create_transfers = operation_batch_max(.create_transfers, batch_size_limit);
+            assert(batch_create_accounts > 0);
+            assert(batch_create_transfers > 0);
+
+            return .{
+                .accounts = .{
+                    .id = batch_create_accounts,
+                    .user_data_128 = batch_create_accounts,
+                    .user_data_64 = batch_create_accounts,
+                    .user_data_32 = batch_create_accounts,
+                    .ledger = batch_create_accounts,
+                    .code = batch_create_accounts,
+                    // Transfers mutate the account balance for debits/credits pending/posted.
+                    // Each transfer modifies two accounts.
+                    .timestamp = @max(batch_create_accounts, 2 * batch_create_transfers),
+                },
+                .transfers = .{
+                    .timestamp = batch_create_transfers,
+                    .id = batch_create_transfers,
+                    .debit_account_id = batch_create_transfers,
+                    .credit_account_id = batch_create_transfers,
+                    .amount = batch_create_transfers,
+                    .pending_id = batch_create_transfers,
+                    .user_data_128 = batch_create_transfers,
+                    .user_data_64 = batch_create_transfers,
+                    .user_data_32 = batch_create_transfers,
+                    .ledger = batch_create_transfers,
+                    .code = batch_create_transfers,
+                    .expires_at = batch_create_transfers,
+                },
+                .transfers_pending = .{
+                    // Objects are mutated when the pending transfer is posted/voided/expired.
+                    .timestamp = 2 * batch_create_transfers,
+                    .status = 2 * batch_create_transfers,
+                },
+                .account_balances = .{
+                    .timestamp = batch_create_transfers,
+                },
+            };
+        }
+
+        pub fn operation_batch_max(comptime operation: Operation, batch_size_limit: u32) u32 {
+            assert(batch_size_limit <= constants.message_body_size_max);
+
+            const event_size = @sizeOf(Event(operation));
+            const result_size = @sizeOf(Result(operation));
+            comptime assert(event_size > 0);
+            comptime assert(result_size > 0);
+
+            return @min(
+                @divFloor(batch_size_limit, event_size),
+                @divFloor(constants.message_body_size_max, result_size),
+            );
         }
     };
 }
@@ -2212,7 +2296,7 @@ const TestContext = struct {
     const StateMachine = StateMachineType(Storage, .{
         // Overestimate the batch size because the test never compacts.
         .message_body_size_max = TestContext.message_body_size_max,
-        .lsm_batch_multiple = 1,
+        .lsm_batch_multiple = global_constants.lsm_batch_multiple,
         .vsr_operations_reserved = 128,
     });
     const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
@@ -2254,6 +2338,7 @@ const TestContext = struct {
         errdefer ctx.grid.deinit(allocator);
 
         ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
+            .batch_size_limit = message_body_size_max,
             .lsm_forest_node_count = 1,
             .cache_entries_accounts = 0,
             .cache_entries_transfers = 0,
@@ -3587,21 +3672,21 @@ test "get_account_balances: invalid filter" {
     );
 }
 
-test "StateMachine: input_validate" {
-    const StateMachine = StateMachineType(
-        @import("testing/storage.zig").Storage,
-        global_constants.state_machine_config,
-    );
-    const Operation = StateMachine.Operation;
-
+test "StateMachine: input_valid" {
     const allocator = std.testing.allocator;
-    const input = try allocator.alignedAlloc(u8, 16, 2 * global_constants.message_body_size_max);
+    const input = try allocator.alignedAlloc(u8, 16, 2 * TestContext.message_body_size_max);
     defer allocator.free(input);
 
-    const Event = struct { operation: Operation, min: usize, max: usize, size: usize };
+    const Event = struct {
+        operation: TestContext.StateMachine.Operation,
+        min: usize,
+        max: usize,
+        size: usize,
+    };
+
     const events = comptime events: {
         var array: []const Event = &.{};
-        for (std.enums.values(Operation)) |operation| {
+        for (std.enums.values(TestContext.StateMachine.Operation)) |operation| {
             array = switch (operation) {
                 .pulse => array ++ [_]Event{.{
                     .operation = operation,
@@ -3612,25 +3697,25 @@ test "StateMachine: input_validate" {
                 .create_accounts => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
-                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
+                    .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(Account),
                 }},
                 .create_transfers => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
-                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
+                    .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
                     .size = @sizeOf(Transfer),
                 }},
                 .lookup_accounts => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
-                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
+                    .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(u128),
                 }},
                 .lookup_transfers => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
-                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
+                    .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
                     .size = @sizeOf(u128),
                 }},
                 .get_account_transfers => array ++ [_]Event{.{
@@ -3650,8 +3735,12 @@ test "StateMachine: input_validate" {
         break :events array;
     };
 
+    var context: TestContext = undefined;
+    try context.init(std.testing.allocator);
+    defer context.deinit(std.testing.allocator);
+
     for (events) |event| {
-        try std.testing.expect(StateMachine.input_valid(
+        try std.testing.expect(context.state_machine.input_valid(
             event.operation,
             input[0..0],
         ) == (event.min == 0));
@@ -3662,19 +3751,24 @@ test "StateMachine: input_validate" {
             continue;
         }
 
-        try std.testing.expect(StateMachine.input_valid(
+        try std.testing.expect(context.state_machine.input_valid(
             event.operation,
             input[0 .. 1 * event.size],
         ));
-        try std.testing.expect(StateMachine.input_valid(
+        try std.testing.expect(context.state_machine.input_valid(
             event.operation,
             input[0 .. event.max * event.size],
         ));
-        try std.testing.expect(!StateMachine.input_valid(
-            event.operation,
-            input[0 .. (event.max + 1) * event.size],
-        ));
-        try std.testing.expect(!StateMachine.input_valid(
+        if ((event.max + 1) * event.size < TestContext.message_body_size_max) {
+            try std.testing.expect(!context.state_machine.input_valid(
+                event.operation,
+                input[0 .. (event.max + 1) * event.size],
+            ));
+        } else {
+            // Don't test input larger than the message body limit, since input_valid() would panic
+            // on an assert.
+        }
+        try std.testing.expect(!context.state_machine.input_valid(
             event.operation,
             input[0 .. 3 * (event.size / 2)],
         ));
@@ -3728,7 +3822,7 @@ test "StateMachine: Demuxer" {
 test "StateMachine: ref all decls" {
     const Storage = @import("storage.zig").Storage;
     const StateMachine = StateMachineType(Storage, .{
-        .message_body_size_max = 1000 * @sizeOf(Account),
+        .message_body_size_max = global_constants.message_body_size_max,
         .lsm_batch_multiple = 1,
         .vsr_operations_reserved = 128,
     });

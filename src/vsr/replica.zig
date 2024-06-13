@@ -190,6 +190,13 @@ pub fn ReplicaType(
         /// with the same `pipeline_request_queue_limit`.
         pipeline_request_queue_limit: u32,
 
+        /// Runtime upper-bound size of a `operation=request` message.
+        /// Does not change after initialization.
+        /// Invariants:
+        /// - request_size_limit > @sizeOf(Header)
+        /// - request_size_limit ≤ message_size_max
+        request_size_limit: u32,
+
         /// The minimum number of replicas required to form a replication quorum:
         quorum_replication: u8,
 
@@ -974,6 +981,11 @@ pub fn ReplicaType(
 
             vsr.verify_release_list(options.releases_bundled, options.release);
 
+            const request_size_limit =
+                @sizeOf(Header) + options.state_machine_options.batch_size_limit;
+            assert(request_size_limit <= constants.message_size_max);
+            assert(request_size_limit > @sizeOf(Header));
+
             self.time = options.time;
 
             // The clock is special-cased for standbys. We want to balance two concerns:
@@ -1063,6 +1075,7 @@ pub fn ReplicaType(
                 .node_count = node_count,
                 .replica = replica_index,
                 .pipeline_request_queue_limit = options.pipeline_requests_limit,
+                .request_size_limit = request_size_limit,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .quorum_nack_prepare = quorum_nack_prepare,
@@ -1586,6 +1599,17 @@ pub fn ReplicaType(
 
                 log.debug("{}: on_prepare: ignoring (newer release)", .{self.replica});
                 return;
+            }
+
+            if (message.header.size > self.request_size_limit) {
+                // The replica needs to be restarted with a higher batch size limit.
+                log.err("{}: on_prepare: ignoring (large prepare, op={} size={} size_limit={})", .{
+                    self.replica,
+                    message.header.op,
+                    message.header.size,
+                    self.request_size_limit,
+                });
+                @panic("Cannot prepare; batch limit too low.");
             }
 
             assert(self.status == .normal);
@@ -3756,6 +3780,19 @@ pub fn ReplicaType(
 
             const prepare = self.commit_prepare.?;
 
+            if (prepare.header.size > self.request_size_limit) {
+                // Normally this would be caught during on_prepare(), but it is possible that we are
+                // replaying a message that we prepared before a restart, and the restart changed
+                // our batch_size_limit.
+                log.err("{}: commit_op_prefetch: op={} size={} size_limit={}", .{
+                    self.replica,
+                    prepare.header.op,
+                    prepare.header.size,
+                    self.request_size_limit,
+                });
+                @panic("Cannot commit prepare; batch limit too low.");
+            }
+
             tracer.start(
                 &self.tracer_slot_commit,
                 .{ .commit = .{ .op = prepare.header.op } },
@@ -4251,7 +4288,6 @@ pub fn ReplicaType(
             assert(self.commit_prepare.? == prepare);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation == .register);
-            assert(prepare.header.size == @sizeOf(vsr.Header));
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
@@ -4260,7 +4296,30 @@ pub fn ReplicaType(
                 output_buffer[0..@sizeOf(vsr.RegisterResult)],
             );
 
-            result.* = .{};
+            if (prepare.header.size == @sizeOf(vsr.Header)) {
+                // Old clients which don't send a RegisterRequest also don't check
+                // `batch_size_limit`.
+                result.* = .{
+                    .batch_size_limit = 0,
+                };
+            } else {
+                assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+
+                const register_request = std.mem.bytesAsValue(
+                    vsr.RegisterRequest,
+                    prepare.body()[0..@sizeOf(vsr.RegisterRequest)],
+                );
+                assert(register_request.batch_size_limit > 0);
+                assert(register_request.batch_size_limit <= constants.message_body_size_max);
+                assert(register_request.batch_size_limit <=
+                    self.request_size_limit - @sizeOf(vsr.Header));
+                assert(stdx.zeroed(&register_request.reserved));
+
+                result.* = .{
+                    .batch_size_limit = register_request.batch_size_limit,
+                };
+            }
+
             return @sizeOf(vsr.RegisterResult);
         }
 
@@ -4813,6 +4872,11 @@ pub fn ReplicaType(
                 return true;
             }
 
+            // This check must precede any send_eviction_message_to_client(), since only the primary
+            // should send evictions.
+            if (self.ignore_request_message_backup(message)) return true;
+            assert(self.primary());
+
             if (message.header.release.value < self.release_client_min.value) {
                 log.warn("{}: on_request: ignoring invalid version (client={} version={}<{})", .{
                     self.replica,
@@ -4835,6 +4899,20 @@ pub fn ReplicaType(
                 return true;
             }
 
+            if (message.header.size > self.request_size_limit) {
+                log.warn("{}: on_request: ignoring oversized request (client={} size={}>{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.size,
+                    self.request_size_limit,
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .invalid_request_body_size,
+                );
+                return true;
+            }
+
             // Some possible causes:
             // - client bug
             // - client memory corruption
@@ -4852,7 +4930,7 @@ pub fn ReplicaType(
                 return true;
             }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
-                if (!StateMachine.input_valid(operation, message.body())) {
+                if (!self.state_machine.input_valid(operation, message.body())) {
                     log.err(
                         "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
                         .{
@@ -4876,7 +4954,6 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.ignore_request_message_backup(message)) return true;
             if (self.ignore_request_message_upgrade(message)) return true;
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;
@@ -5773,7 +5850,7 @@ pub fn ReplicaType(
 
             switch (request.message.header.operation) {
                 .reserved, .root => unreachable,
-                .register => {},
+                .register => self.primary_prepare_register(request.message),
                 .reconfigure => self.primary_prepare_reconfiguration(request.message),
                 .upgrade => {
                     const upgrade_request = std.mem.bytesAsValue(
@@ -5869,6 +5946,34 @@ pub fn ReplicaType(
             // We expect `on_prepare()` to increment `self.op` to match the primary's latest prepare:
             // This is critical to ensure that pipelined prepares do not receive the same op number.
             assert(self.op == message.header.op);
+        }
+
+        fn primary_prepare_register(self: *Self, request: *Message.Request) void {
+            assert(self.primary());
+            assert(request.header.command == .request);
+            assert(request.header.operation == .register);
+            assert(request.header.request == 0);
+
+            if (request.header.size == @sizeOf(vsr.Header)) {
+                // Old clients don't send a RegisterRequest.
+            } else {
+                assert(request.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+
+                const batch_size_limit = self.request_size_limit - @sizeOf(vsr.Header);
+                assert(batch_size_limit > 0);
+                assert(batch_size_limit <= constants.message_body_size_max);
+
+                const register_request = std.mem.bytesAsValue(
+                    vsr.RegisterRequest,
+                    request.body()[0..@sizeOf(vsr.RegisterRequest)],
+                );
+                assert(register_request.batch_size_limit == 0);
+                assert(stdx.zeroed(&register_request.reserved));
+
+                register_request.* = .{
+                    .batch_size_limit = batch_size_limit,
+                };
+            }
         }
 
         fn primary_prepare_reconfiguration(

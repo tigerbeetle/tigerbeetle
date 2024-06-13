@@ -1416,6 +1416,45 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     try TestReplicas.expect_equal_grid(b1, b2);
 }
 
+// Compat(v0.15.3)
+test "Cluster: client: empty command=request operation=register body" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    // Wait for the primary to settle, since this test doesn't implement request retries.
+    t.run();
+
+    var client_bus = try t.client_bus(0);
+    defer client_bus.deinit();
+
+    var request_header = vsr.Header.Request{
+        .cluster = t.cluster.options.cluster_id,
+        .size = @sizeOf(vsr.Header),
+        .client = client_bus.client_id,
+        .request = 0,
+        .command = .request,
+        .operation = .register,
+        .release = .{ .value = 1 },
+    };
+    request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
+    request_header.set_checksum();
+
+    client_bus.request(t.replica(.A0).index(), &request_header, &.{});
+    t.run();
+
+    const Reply = extern struct {
+        header: vsr.Header.Reply,
+        body: vsr.RegisterResult,
+    };
+
+    const reply = std.mem.bytesAsValue(Reply, client_bus.reply.?.buffer[0..@sizeOf(Reply)]);
+    try expectEqual(reply.header.command, .reply);
+    try expectEqual(reply.header.operation, .register);
+    try expectEqual(reply.header.size, @sizeOf(Reply));
+    try expectEqual(reply.header.request, 0);
+    try std.testing.expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
@@ -1491,7 +1530,10 @@ const TestContext = struct {
                 .faulty_client_replies = false,
                 .faulty_grid = false,
             },
-            .state_machine = .{ .lsm_forest_node_count = 4096 },
+            .state_machine = .{
+                .batch_size_limit = constants.message_body_size_max,
+                .lsm_forest_node_count = 4096,
+            },
         });
         errdefer cluster.deinit();
 
@@ -1534,6 +1576,11 @@ const TestContext = struct {
             .cluster = t.cluster,
             .clients = client_indexes,
         };
+    }
+
+    pub fn client_bus(t: *TestContext, client_index: usize) !*TestClientBus {
+        // Reuse one of `Cluster.clients`' ids since the Network preallocated links for it.
+        return TestClientBus.init(t, t.cluster.clients[client_index].id);
     }
 
     pub fn run(t: *TestContext) void {
@@ -2042,12 +2089,16 @@ const TestClients = struct {
                 if (client.request_inflight == null and
                     t.context.client_requests[c] > client.request_number)
                 {
-                    const message = client.get_message();
-                    errdefer client.release_message(message);
+                    if (client.request_number == 0) {
+                        t.cluster.register(c);
+                    } else {
+                        const message = client.get_message();
+                        errdefer client.release_message(message);
 
-                    const body_size = 123;
-                    @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
-                    t.cluster.request(c, .echo, message, body_size);
+                        const body_size = 123;
+                        @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
+                        t.cluster.request(c, .echo, message, body_size);
+                    }
                 }
             }
         }
@@ -2058,5 +2109,92 @@ const TestClients = struct {
         var replies_total: usize = 0;
         for (t.clients.const_slice()) |c| replies_total += t.context.client_replies[c];
         return replies_total;
+    }
+};
+
+/// TestClientBus supports tests which require fine-grained control of the client protocol.
+/// Note that in particular, TestClientBus does *not* implement message retries.
+const TestClientBus = struct {
+    const MessagePool = @import("../message_pool.zig").MessagePool;
+    const MessageBus = Cluster.MessageBus;
+
+    context: *TestContext,
+    client_id: u128,
+    message_pool: *MessagePool,
+    message_bus: MessageBus,
+    reply: ?*Message = null,
+
+    fn init(context: *TestContext, client_id: u128) !*TestClientBus {
+        const message_pool = try allocator.create(MessagePool);
+        errdefer allocator.destroy(message_pool);
+
+        message_pool.* = try MessagePool.init(allocator, .client);
+        errdefer message_pool.deinit(allocator);
+
+        var client_bus = try allocator.create(TestClientBus);
+        errdefer allocator.destroy(client_bus);
+
+        client_bus.* = .{
+            .context = context,
+            .client_id = client_id,
+            .message_pool = message_pool,
+            .message_bus = try MessageBus.init(
+                allocator,
+                context.cluster.options.cluster_id,
+                .{ .client = client_id },
+                message_pool,
+                on_message,
+                .{ .network = context.cluster.network },
+            ),
+        };
+        errdefer client_bus.message_bus.deinit(allocator);
+
+        context.cluster.state_checker.clients_exhaustive = false;
+        context.cluster.network.link(client_bus.message_bus.process, &client_bus.message_bus);
+
+        return client_bus;
+    }
+
+    pub fn deinit(t: *TestClientBus) void {
+        if (t.reply) |reply| {
+            t.message_pool.unref(reply);
+            t.reply = null;
+        }
+        t.message_bus.deinit(allocator);
+        t.message_pool.deinit(allocator);
+        allocator.destroy(t.message_pool);
+        allocator.destroy(t);
+    }
+
+    fn on_message(message_bus: *Cluster.MessageBus, message: *Message) void {
+        const t = @fieldParentPtr(TestClientBus, "message_bus", message_bus);
+        assert(message.header.cluster == t.context.cluster.options.cluster_id);
+
+        switch (message.header.command) {
+            .reply => {
+                assert(t.reply == null);
+                t.reply = message.ref();
+            },
+            .pong_client => {},
+            else => unreachable,
+        }
+    }
+
+    pub fn request(
+        t: *TestClientBus,
+        replica: u8,
+        header: *const vsr.Header.Request,
+        body: []const u8,
+    ) void {
+        assert(replica < t.context.cluster.replicas.len);
+        assert(body.len <= constants.message_body_size_max);
+
+        const message = t.message_pool.get_message(.request);
+        defer t.message_pool.unref(message);
+
+        message.header.* = header.*;
+        stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(vsr.Header)..], body);
+
+        t.message_bus.send_message_to_replica(replica, message.base());
     }
 };

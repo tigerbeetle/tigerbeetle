@@ -107,7 +107,9 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                     callback(inflight.user_data, operation.cast(Self.StateMachine), reply.body());
                 },
                 .register => |callback| {
-                    const result = vsr.RegisterResult{};
+                    const result = vsr.RegisterResult{
+                        .batch_size_limit = constants.message_body_size_max,
+                    };
                     callback(inflight.user_data, &result);
                 },
             }
