@@ -350,7 +350,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 //TODO: implement query.
                 .get_account_transfers, .get_account_balances => unreachable,
                 //Not handled by the client.
-                .pulse => unreachable,
+                .pulse, .import_accounts, .import_transfers => unreachable,
             }
         }
 

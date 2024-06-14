@@ -172,6 +172,10 @@ pub const CreateAccountResult = enum(u32) {
     exists_with_different_code = 20,
     exists = 21,
 
+    import_timestamp_must_not_be_zero = 22,
+    import_regressed_timestamp = 23,
+    import_future_timestamp = 24,
+
     comptime {
         for (std.enums.values(CreateAccountResult), 0..) |result, index| {
             assert(@intFromEnum(result) == index);
@@ -256,6 +260,11 @@ pub const CreateTransferResult = enum(u32) {
 
     exceeds_credits = 54,
     exceeds_debits = 55,
+
+    import_timestamp_must_not_be_zero = 56,
+    import_regressed_timestamp = 57,
+    import_future_timestamp = 58,
+    import_timeout_must_be_zero = 59,
 
     comptime {
         for (std.enums.values(CreateTransferResult), 0..) |result, index| {

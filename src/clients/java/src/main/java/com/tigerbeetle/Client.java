@@ -131,6 +131,47 @@ public final class Client implements AutoCloseable {
     }
 
     /**
+     * Submits a batch of accounts to be imported.
+     *
+     * @param batch a {@link com.tigerbeetle.AccountBatch batch} containing all accounts to be
+     *        imported.
+     * @return a read-only {@link com.tigerbeetle.CreateAccountResultBatch batch} describing the
+     *         result.
+     * @throws RequestException refer to {@link PacketStatus} for more details.
+     * @throws IllegalArgumentException if {@code batch} is empty.
+     * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
+     * @throws IllegalStateException if this client is closed.
+     */
+    public CreateAccountResultBatch importAccounts(final AccountBatch batch)
+            throws ConcurrencyExceededException {
+        final var request = BlockingRequest.importAccounts(this.nativeClient, batch);
+        request.beginRequest();
+        return request.waitForResult();
+    }
+
+    /**
+     * Submits a batch of accounts to be imported asynchronously.
+     *
+     * @see Client#createAccounts(AccountBatch)
+     * @param batch a {@link com.tigerbeetle.AccountBatch batch} containing all accounts to be
+     *        created.
+     * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
+     * @throws IllegalArgumentException if {@code batch} is empty.
+     * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
+     * @throws IllegalStateException if this client is closed.
+     */
+    public CompletableFuture<CreateAccountResultBatch> importAccountsAsync(final AccountBatch batch)
+            throws ConcurrencyExceededException {
+        final var request = AsyncRequest.importAccounts(this.nativeClient, batch);
+        request.beginRequest();
+        return request.getFuture();
+    }
+
+    /**
      * Looks up a batch of accounts.
      *
      * @param batch an {@link com.tigerbeetle.IdBatch batch} containing all account ids.
@@ -203,6 +244,46 @@ public final class Client implements AutoCloseable {
     public CompletableFuture<CreateTransferResultBatch> createTransfersAsync(
             final TransferBatch batch) throws ConcurrencyExceededException {
         final var request = AsyncRequest.createTransfers(this.nativeClient, batch);
+        request.beginRequest();
+        return request.getFuture();
+    }
+
+    /**
+     * Submits a batch of transfers to be imported.
+     *
+     * @param batch a {@link com.tigerbeetle.TransferBatch batch} containing all transfers to be
+     *        imported.
+     * @return a read-only {@link com.tigerbeetle.CreateTransferResultBatch batch} describing the
+     *         result.
+     * @throws RequestException refer to {@link PacketStatus} for more details.
+     * @throws IllegalArgumentException if {@code batch} is empty.
+     * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
+     * @throws IllegalStateException if this client is closed.
+     */
+    public CreateTransferResultBatch importTransfers(final TransferBatch batch)
+            throws ConcurrencyExceededException {
+        final var request = BlockingRequest.importTransfers(this.nativeClient, batch);
+        request.beginRequest();
+        return request.waitForResult();
+    }
+
+    /**
+     * Submits a batch of transfers to be imported asynchronously.
+     *
+     * @param batch a {@link com.tigerbeetle.TransferBatch batch} containing all transfers to be
+     *        imported.
+     * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
+     * @throws IllegalArgumentException if {@code batch} is empty.
+     * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
+     * @throws IllegalStateException if this client is closed.
+     */
+    public CompletableFuture<CreateTransferResultBatch> importTransfersAsync(
+            final TransferBatch batch) throws ConcurrencyExceededException {
+        final var request = AsyncRequest.importTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
     }

@@ -36,8 +36,8 @@ operation).
 ### `timestamp_must_be_zero`
 
 The transfer was not created.
-The [`Transfer.timestamp`](../account.md#timestamp) is nonzero, but must be zero.
-The cluster is responsible for setting this field.
+The [`Transfer.timestamp`](../transfer.md#timestamp) is nonzero, but must be zero.
+The cluster is responsible for setting this field when creating a new `Transfer`.
 
 ### `reserved_flag`
 
@@ -408,6 +408,36 @@ Otherwise, the [credit account](../transfer.md#credit_account_id) has
 [`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits)
 set, but `credit_account.credits_pending + credit_account.credits_posted + transfer.amount`
 would exceed `credit_account.debits_posted`.
+
+### `import_timestamp_must_not_be_zero`
+
+This result only applies to the [import_transfers](./import_transfers.md) operation.
+
+The transfer was not created.
+The [`Transfer.timestamp`](../transfer.md#timestamp) is zero, but must be a unique nonzero value defined by the user.
+
+### `import_regressed_timestamp`
+
+This result only applies to the [import_transfers](./import_transfers.md) operation.
+
+The transfer was not created.
+The user-defined [`Transfer.timestamp`](../transfer.md#timestamp) regressed, but it must be greater than the last
+timestamp assigned to any `Account` or `Transfer` in the cluster.
+
+### `import_future_timestamp`
+
+This result only applies to the [import_transfers](./import_transfers.md) operation.
+
+The transfer was not created.
+The user-defined [`Transfer.timestamp`](../transfer.md#timestamp) is greater than the current [cluster time](../../develop/time.md),
+but it must be a past timestamp.
+
+### `import_timeout_must_be_zero`
+
+This result only applies to the [import_transfers](./import_transfers.md) operation.
+
+The transfer was not created.
+[`Transfer.timeout`](../transfer.md#timeout) is nonzero, but it must be zero.
 
 ## Client libraries
 

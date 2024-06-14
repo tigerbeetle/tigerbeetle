@@ -43,6 +43,18 @@ public sealed class Client : IDisposable
         return nativeClient.CallRequest<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
     }
 
+    public CreateAccountResult ImportAccount(Account account)
+    {
+        var ret = nativeClient.CallRequest<CreateAccountsResult, Account>(TBOperation.ImportAccounts, new[] { account });
+        return ret.Length == 0 ? CreateAccountResult.Ok : ret[0].Result;
+    }
+
+    public CreateAccountsResult[] ImportAccounts(ReadOnlySpan<Account> batch)
+    {
+        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
+        return nativeClient.CallRequest<CreateAccountsResult, Account>(TBOperation.ImportAccounts, batch);
+    }
+
     public Task<CreateAccountResult> CreateAccountAsync(Account account)
     {
         return nativeClient.CallRequestAsync<CreateAccountsResult, Account>(TBOperation.CreateAccounts, new[] { account })
@@ -53,6 +65,18 @@ public sealed class Client : IDisposable
     {
         if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequestAsync<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
+    }
+
+    public Task<CreateAccountResult> ImportAccountAsync(Account account)
+    {
+        return nativeClient.CallRequestAsync<CreateAccountsResult, Account>(TBOperation.ImportAccounts, new[] { account })
+        .ContinueWith(x => x.Result.Length == 0 ? CreateAccountResult.Ok : x.Result[0].Result);
+    }
+
+    public Task<CreateAccountsResult[]> ImportAccountsAsync(ReadOnlyMemory<Account> batch)
+    {
+        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
+        return nativeClient.CallRequestAsync<CreateAccountsResult, Account>(TBOperation.ImportAccounts, batch);
     }
 
     public CreateTransferResult CreateTransfer(Transfer transfer)
@@ -67,6 +91,18 @@ public sealed class Client : IDisposable
         return nativeClient.CallRequest<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
+    public CreateTransferResult ImportTransfer(Transfer transfer)
+    {
+        var ret = nativeClient.CallRequest<CreateTransfersResult, Transfer>(TBOperation.ImportTransfers, new[] { transfer });
+        return ret.Length == 0 ? CreateTransferResult.Ok : ret[0].Result;
+    }
+
+    public CreateTransfersResult[] ImportTransfers(ReadOnlySpan<Transfer> batch)
+    {
+        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
+        return nativeClient.CallRequest<CreateTransfersResult, Transfer>(TBOperation.ImportTransfers, batch);
+    }
+
     public Task<CreateTransferResult> CreateTransferAsync(Transfer transfer)
     {
         return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, new[] { transfer })
@@ -77,6 +113,18 @@ public sealed class Client : IDisposable
     {
         if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
+    }
+
+    public Task<CreateTransferResult> ImportTransferAsync(Transfer transfer)
+    {
+        return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.ImportTransfers, new[] { transfer })
+        .ContinueWith(x => x.Result.Length == 0 ? CreateTransferResult.Ok : x.Result[0].Result);
+    }
+
+    public Task<CreateTransfersResult[]> ImportTransfersAsync(ReadOnlyMemory<Transfer> batch)
+    {
+        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
+        return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.ImportTransfers, batch);
     }
 
     public Account? LookupAccount(UInt128 id)

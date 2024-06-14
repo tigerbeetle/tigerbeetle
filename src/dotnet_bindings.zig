@@ -55,14 +55,14 @@ const type_mappings = .{
         .name = "Account",
         .visibility = .public,
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
+        .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted" },
         .docs_link = "reference/account#",
     } },
     .{ tb.Transfer, TypeMapping{
         .name = "Transfer",
         .visibility = .public,
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{"timestamp"},
+        .readonly_fields = &.{},
         .docs_link = "reference/transfer#",
     } },
     .{ tb.CreateAccountResult, TypeMapping{

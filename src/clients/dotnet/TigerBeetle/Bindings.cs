@@ -188,7 +188,7 @@ public struct Account
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/account#timestamp
     /// </summary>
-    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
 }
 
@@ -286,7 +286,7 @@ public struct Transfer
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/transfer#timestamp
     /// </summary>
-    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
 }
 
@@ -401,6 +401,21 @@ public enum CreateAccountResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists
     /// </summary>
     Exists = 21,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#import_timestamp_must_not_be_zero
+    /// </summary>
+    ImportTimestampMustNotBeZero = 22,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#import_regressed_timestamp
+    /// </summary>
+    ImportRegressedTimestamp = 23,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#import_future_timestamp
+    /// </summary>
+    ImportFutureTimestamp = 24,
 
 }
 
@@ -686,6 +701,26 @@ public enum CreateTransferResult : uint
     /// </summary>
     ExceedsDebits = 55,
 
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#import_timestamp_must_not_be_zero
+    /// </summary>
+    ImportTimestampMustNotBeZero = 56,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#import_regressed_timestamp
+    /// </summary>
+    ImportRegressedTimestamp = 57,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#import_future_timestamp
+    /// </summary>
+    ImportFutureTimestamp = 58,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#import_timeout_must_be_zero
+    /// </summary>
+    ImportTimeoutMustBeZero = 59,
+
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
@@ -927,6 +962,10 @@ internal enum TBOperation : byte
     GetAccountTransfers = 133,
 
     GetAccountBalances = 134,
+
+    ImportAccounts = 135,
+
+    ImportTransfers = 136,
 
 }
 

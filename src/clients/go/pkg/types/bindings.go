@@ -180,6 +180,9 @@ const (
 	AccountExistsWithDifferentLedger      CreateAccountResult = 19
 	AccountExistsWithDifferentCode        CreateAccountResult = 20
 	AccountExists                         CreateAccountResult = 21
+	AccountImportTimestampMustNotBeZero   CreateAccountResult = 22
+	AccountImportRegressedTimestamp       CreateAccountResult = 23
+	AccountImportFutureTimestamp          CreateAccountResult = 24
 )
 
 func (i CreateAccountResult) String() string {
@@ -228,6 +231,12 @@ func (i CreateAccountResult) String() string {
 		return "AccountExistsWithDifferentCode"
 	case AccountExists:
 		return "AccountExists"
+	case AccountImportTimestampMustNotBeZero:
+		return "AccountImportTimestampMustNotBeZero"
+	case AccountImportRegressedTimestamp:
+		return "AccountImportRegressedTimestamp"
+	case AccountImportFutureTimestamp:
+		return "AccountImportFutureTimestamp"
 	}
 	return "CreateAccountResult(" + strconv.FormatInt(int64(i+1), 10) + ")"
 }
@@ -291,6 +300,10 @@ const (
 	TransferOverflowsTimeout                           CreateTransferResult = 53
 	TransferExceedsCredits                             CreateTransferResult = 54
 	TransferExceedsDebits                              CreateTransferResult = 55
+	TransferImportTimestampMustNotBeZero               CreateTransferResult = 56
+	TransferImportRegressedTimestamp                   CreateTransferResult = 57
+	TransferImportFutureTimestamp                      CreateTransferResult = 58
+	TransferImportTimeoutMustBeZero                    CreateTransferResult = 59
 )
 
 func (i CreateTransferResult) String() string {
@@ -407,6 +420,14 @@ func (i CreateTransferResult) String() string {
 		return "TransferExceedsCredits"
 	case TransferExceedsDebits:
 		return "TransferExceedsDebits"
+	case TransferImportTimestampMustNotBeZero:
+		return "TransferImportTimestampMustNotBeZero"
+	case TransferImportRegressedTimestamp:
+		return "TransferImportRegressedTimestamp"
+	case TransferImportFutureTimestamp:
+		return "TransferImportFutureTimestamp"
+	case TransferImportTimeoutMustBeZero:
+		return "TransferImportTimeoutMustBeZero"
 	}
 	return "CreateTransferResult(" + strconv.FormatInt(int64(i+1), 10) + ")"
 }

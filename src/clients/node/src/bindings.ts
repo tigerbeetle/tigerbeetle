@@ -351,6 +351,21 @@ export enum CreateAccountError {
   * See [exists](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
   */
   exists = 21,
+
+  /**
+  * See [import_timestamp_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_accounts#import_timestamp_must_not_be_zero)
+  */
+  import_timestamp_must_not_be_zero = 22,
+
+  /**
+  * See [import_regressed_timestamp](https://docs.tigerbeetle.com/reference/requests/create_accounts#import_regressed_timestamp)
+  */
+  import_regressed_timestamp = 23,
+
+  /**
+  * See [import_future_timestamp](https://docs.tigerbeetle.com/reference/requests/create_accounts#import_future_timestamp)
+  */
+  import_future_timestamp = 24,
 }
 
 
@@ -638,6 +653,26 @@ export enum CreateTransferError {
   * See [exceeds_debits](https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits)
   */
   exceeds_debits = 55,
+
+  /**
+  * See [import_timestamp_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#import_timestamp_must_not_be_zero)
+  */
+  import_timestamp_must_not_be_zero = 56,
+
+  /**
+  * See [import_regressed_timestamp](https://docs.tigerbeetle.com/reference/requests/create_transfers#import_regressed_timestamp)
+  */
+  import_regressed_timestamp = 57,
+
+  /**
+  * See [import_future_timestamp](https://docs.tigerbeetle.com/reference/requests/create_transfers#import_future_timestamp)
+  */
+  import_future_timestamp = 58,
+
+  /**
+  * See [import_timeout_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#import_timeout_must_be_zero)
+  */
+  import_timeout_must_be_zero = 59,
 }
 
 export type CreateAccountsError = {
@@ -722,5 +757,7 @@ export enum Operation {
   lookup_transfers = 132,
   get_account_transfers = 133,
   get_account_balances = 134,
+  import_accounts = 135,
+  import_transfers = 136,
 }
 

@@ -285,7 +285,27 @@ public enum CreateTransferResult {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits">exceeds_debits</a>
      */
-    ExceedsDebits((int) 55);
+    ExceedsDebits((int) 55),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#import_timestamp_must_not_be_zero">import_timestamp_must_not_be_zero</a>
+     */
+    ImportTimestampMustNotBeZero((int) 56),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#import_regressed_timestamp">import_regressed_timestamp</a>
+     */
+    ImportRegressedTimestamp((int) 57),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#import_future_timestamp">import_future_timestamp</a>
+     */
+    ImportFutureTimestamp((int) 58),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#import_timeout_must_be_zero">import_timeout_must_be_zero</a>
+     */
+    ImportTimeoutMustBeZero((int) 59);
 
     public final int value;
 

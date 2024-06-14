@@ -30,6 +30,12 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
                 Request.Operations.CREATE_ACCOUNTS, batch);
     }
 
+    public static AsyncRequest<CreateAccountResultBatch> importAccounts(
+            final NativeClient nativeClient, final AccountBatch batch) {
+        return new AsyncRequest<CreateAccountResultBatch>(nativeClient,
+                Request.Operations.IMPORT_ACCOUNTS, batch);
+    }
+
     public static AsyncRequest<AccountBatch> lookupAccounts(final NativeClient nativeClient,
             final IdBatch batch) {
         return new AsyncRequest<AccountBatch>(nativeClient, Request.Operations.LOOKUP_ACCOUNTS,
@@ -40,6 +46,12 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
             final NativeClient nativeClient, final TransferBatch batch) {
         return new AsyncRequest<CreateTransferResultBatch>(nativeClient,
                 Request.Operations.CREATE_TRANSFERS, batch);
+    }
+
+    public static AsyncRequest<CreateTransferResultBatch> importTransfers(
+            final NativeClient nativeClient, final TransferBatch batch) {
+        return new AsyncRequest<CreateTransferResultBatch>(nativeClient,
+                Request.Operations.IMPORT_TRANSFERS, batch);
     }
 
     public static AsyncRequest<TransferBatch> lookupTransfers(final NativeClient nativeClient,

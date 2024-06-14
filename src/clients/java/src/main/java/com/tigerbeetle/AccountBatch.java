@@ -108,7 +108,7 @@ public final class AccountBatch extends Batch {
     public BigInteger getDebitsPending() {
         final var index = at(Struct.DebitsPending);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 
@@ -163,7 +163,7 @@ public final class AccountBatch extends Batch {
     public BigInteger getDebitsPosted() {
         final var index = at(Struct.DebitsPosted);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 
@@ -218,7 +218,7 @@ public final class AccountBatch extends Batch {
     public BigInteger getCreditsPending() {
         final var index = at(Struct.CreditsPending);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 
@@ -273,7 +273,7 @@ public final class AccountBatch extends Batch {
     public BigInteger getCreditsPosted() {
         final var index = at(Struct.CreditsPosted);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 
@@ -502,7 +502,7 @@ public final class AccountBatch extends Batch {
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      * @see <a href="https://docs.tigerbeetle.com/reference/account#timestamp">timestamp</a>
      */
-    void setTimestamp(final long timestamp) {
+    public void setTimestamp(final long timestamp) {
         putUInt64(at(Struct.Timestamp), timestamp);
     }
 

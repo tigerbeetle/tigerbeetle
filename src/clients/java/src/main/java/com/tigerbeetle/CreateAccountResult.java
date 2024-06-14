@@ -115,7 +115,22 @@ public enum CreateAccountResult {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#exists">exists</a>
      */
-    Exists((int) 21);
+    Exists((int) 21),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#import_timestamp_must_not_be_zero">import_timestamp_must_not_be_zero</a>
+     */
+    ImportTimestampMustNotBeZero((int) 22),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#import_regressed_timestamp">import_regressed_timestamp</a>
+     */
+    ImportRegressedTimestamp((int) 23),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#import_future_timestamp">import_future_timestamp</a>
+     */
+    ImportFutureTimestamp((int) 24);
 
     public final int value;
 

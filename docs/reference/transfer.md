@@ -26,7 +26,7 @@ If a detail of a transfer is incorrect and needs to be modified, this is done us
 
 Transfers _cannot be deleted_ after creation.
 
-If a transfer is made in error, its effects can be reversed using a 
+If a transfer is made in error, its effects can be reversed using a
 [correcting transfer](../develop/recipes/correcting-transfers.md).
 
 ### Guarantees
@@ -377,15 +377,14 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 This is the time the transfer was created, as nanoseconds since
 UNIX epoch.
 
-It is set by TigerBeetle to the moment the transfer arrives at
-the cluster.
-
 You can read more about [Time in TigerBeetle](../develop/time.md).
 
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be set to `0` by the user when the `Transfer` is created
+- Must be set to `0` for transfers in [`create_transfers`](./requests/create_transfers.md).
+- Must be set to a user-defined unique timestamp for transfers in
+  [`import_transfers`](./requests/import_transfers.md).
 
 ## Internals
 
