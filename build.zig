@@ -45,7 +45,12 @@ pub fn build(b: *std.Build) !void {
     // idea here is to keep this file as the source of truth for what we need from the CPU.
     for (supported_targets) |supported_target| {
         if (target.result.cpu.arch == supported_target.cpu_arch) {
-            target.result.cpu.model = supported_target.cpu_model.explicit;
+            // CPU model detection from: https://github.com/ziglang/zig/blob/0.13.0/lib/std/zig/system.zig#L320
+            target.result.cpu.model = switch (supported_target.cpu_model) {
+                .native => @panic("pre-defined supported target assumed runtime-detected cpu model"),
+                .baseline, .determined_by_cpu_arch => std.Target.Cpu.baseline(supported_target.cpu_arch.?).model,
+                .explicit => |model| model,
+            };
             target.result.cpu.features.addFeatureSet(supported_target.cpu_features_add);
             target.result.cpu.features.removeFeatureSet(supported_target.cpu_features_sub);
             break;
