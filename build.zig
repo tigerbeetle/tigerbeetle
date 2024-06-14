@@ -607,10 +607,9 @@ fn go_client(
             platform[0];
 
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = name, .cpu_features = "baseline" }) catch unreachable;
-        var b_isolated = builder_with_isolated_cache(b, cross_target);
-
         const resolved_target = b.resolveTargetQuery(cross_target);
-        const lib = b_isolated.addStaticLibrary(.{
+
+        const lib = b.addStaticLibrary(.{
             .name = "tb_client",
             .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
@@ -659,10 +658,9 @@ fn java_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
-        var b_isolated = builder_with_isolated_cache(b, cross_target);
-
         const resolved_target = b.resolveTargetQuery(cross_target);
-        const lib = b_isolated.addSharedLibrary(.{
+
+        const lib = b.addSharedLibrary(.{
             .name = "tb_jniclient",
             .root_source_file = b.path("src/clients/java/src/client.zig"),
             .target = resolved_target,
@@ -716,10 +714,9 @@ fn dotnet_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
-        var b_isolated = builder_with_isolated_cache(b, cross_target);
-
         const resolved_target = b.resolveTargetQuery(cross_target);
-        const lib = b_isolated.addSharedLibrary(.{
+
+        const lib = b.addSharedLibrary(.{
             .name = "tb_client",
             .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
@@ -805,10 +802,9 @@ fn node_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
-        var b_isolated = builder_with_isolated_cache(b, cross_target);
-
         const resolved_target = b.resolveTargetQuery(cross_target);
-        const lib = b_isolated.addSharedLibrary(.{
+
+        const lib = b.addSharedLibrary(.{
             .name = "tb_nodeclient",
             .root_source_file = b.path("src/node.zig"),
             .target = resolved_target,
@@ -869,16 +865,15 @@ fn c_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
-        var b_isolated = builder_with_isolated_cache(b, cross_target);
-
         const resolved_target = b.resolveTargetQuery(cross_target);
-        const shared_lib = b_isolated.addSharedLibrary(.{
+
+        const shared_lib = b.addSharedLibrary(.{
             .name = "tb_client",
             .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
             .optimize = mode,
         });
-        const static_lib = b_isolated.addStaticLibrary(.{
+        const static_lib = b.addStaticLibrary(.{
             .name = "tb_client",
             .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
@@ -1089,71 +1084,3 @@ fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     ) catch unreachable;
     _ = set_dll_directory(java_bin_server_path);
 }
-
-/// Creates a new Builder, with isolated cache for each platform.
-/// Hit some issues with the build cache between cross compilations:
-/// - From Linux, it runs fine.
-/// - From Windows it fails on libc "invalid object".
-/// - From MacOS, similar to https://github.com/ziglang/zig/issues/9711#issuecomment-1090071087.
-/// Workaround: Just setting different cache folders for each platform.
-fn builder_with_isolated_cache(
-    b: *std.Build,
-    target: CrossTarget,
-) *std.Build {
-    // This workaround isn't necessary when cross-compiling from Linux.
-    if (builtin.os.tag == .linux) return b;
-
-    // If not cross-compiling, we can return the current *Builder in order
-    // to reuse the same cache from other artifacts.
-    if (target.cpu_arch.? == builtin.cpu.arch and
-        target.os_tag.? == builtin.os.tag)
-        return b;
-
-    // TODO: See if this still works on macos
-    return b;
-
-    // // Generating isolated cache and global_cache dirs for each cpu/os:
-    // const cache_root = create_cache_directory(b.pathJoin(&.{
-    //     b.cache_root.path.?,
-    //     @tagName(target.cpu_arch.?),
-    //     @tagName(target.os_tag.?),
-    // }));
-
-    // const global_cache_root = create_cache_directory(b.pathJoin(&.{
-    //     b.global_cache_root.path.?,
-    //     @tagName(target.cpu_arch.?),
-    //     @tagName(target.os_tag.?),
-    // }));
-
-    // // Need to create a custom cache as the local_cache_root changes.
-    // // See: https://github.com/ziglang/zig/blob/0.11.0/lib/build_runner.zig#L68
-    // const cache = b.allocator.create(std.Build.Cache) catch unreachable;
-    // cache.* = .{
-    //     .gpa = b.allocator,
-    //     .manifest_dir = cache_root.handle.makeOpenPath("h", .{}) catch unreachable,
-    // };
-    // cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
-    // cache.addPrefix(b.build_root);
-    // cache.addPrefix(cache_root);
-    // cache.addPrefix(global_cache_root);
-    // cache.hash.addBytes(builtin.zig_version_string);
-
-    // // Note, this builder leaks memory, since there is no way to deinit it.
-    // return std.Build.create(
-    //     b.allocator,
-    //     b.graph.zig_exe,
-    //     b.build_root,
-    //     cache_root,
-    //     global_cache_root,
-    //     std.zig.system.NativeTargetInfo.detect(target) catch unreachable,
-    //     cache,
-    // ) catch unreachable;
-}
-
-// fn create_cache_directory(path: []const u8) std.Build.Cache.Directory {
-//     std.fs.cwd().makePath(path) catch unreachable;
-//     return .{
-//         .path = path,
-//         .handle = std.fs.cwd().openDir(path, .{}) catch unreachable,
-//     };
-// }
