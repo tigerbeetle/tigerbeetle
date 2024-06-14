@@ -134,6 +134,7 @@ const ConfigProcess = struct {
     grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
     compaction_block_memory: usize = 256 * 1024 * 1024,
+    multiversion_binary_size_max: u64 = 64 * 1024 * 1024,
 };
 
 /// Configurations which are tunable per-cluster.

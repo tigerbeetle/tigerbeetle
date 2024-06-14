@@ -651,6 +651,9 @@ pub const IO = struct {
         const fd = try os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
         errdefer os.closeSocket(fd);
 
+        // darwin doesn't support SOCK_CLOEXEC.
+        _ = try os.fcntl(fd, os.F.SETFD, os.FD_CLOEXEC);
+
         // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try os.setsockopt(fd, os.SOL.SOCKET, os.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
         return fd;

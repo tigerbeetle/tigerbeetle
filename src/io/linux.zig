@@ -1154,7 +1154,7 @@ pub const IO = struct {
     /// Creates a socket that can be used for async operations with the IO instance.
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         _ = self;
-        return os.socket(family, sock_type, protocol);
+        return os.socket(family, sock_type | os.SOCK.CLOEXEC, protocol);
     }
 
     /// Opens a directory with read only access.

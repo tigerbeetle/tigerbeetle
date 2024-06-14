@@ -94,6 +94,7 @@ comptime {
 /// The maximum number of release versions (upgrade candidates) that can be advertised by a replica
 /// in each ping message body.
 pub const vsr_releases_max = config.cluster.vsr_releases_max;
+pub const multiversion_binary_size_max = config.process.multiversion_binary_size_max;
 
 comptime {
     assert(vsr_releases_max >= 2);
