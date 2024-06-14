@@ -2600,16 +2600,15 @@ const TestGetAccountTransfersResult = struct {
 fn check(test_table: []const u8) !void {
     // TODO(zig): Zig defaults to 16MB stack size on Linux, but not yet on mac as of 0.11.
     // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
-    // in build.zig doesn't work.
-    // Duplicated here from src/tigerbeetle/main.zig, since that code won't run on the testing
-    // path.
-    const builtin = @import("builtin");
-    if (builtin.target.os.tag == .macos)
-        std.posix.setrlimit(std.os.rlimit_resource.STACK, .{
-            .cur = 16 * 1024 * 1024,
-            .max = 16 * 1024 * 1024,
-        }) catch @panic("unable to adjust stack limit");
+    // in build.zig doesn't work. setrlimit with 16MB errors with EINVAL on macOS 13 as well.
+    // So instead, we spawn a thread with the desired stack size instead.
+    //
+    // Duplicated here from src/tigerbeetle/main.zig, since that code won't run on the testing path.
+    const thread = try std.Thread.spawn(.{ .stack_size = 16 * 1024 * 1024 }, check_real, .{test_table});
+    thread.join();
+}
 
+fn check_real(test_table: []const u8) !void {
     const parse_table = @import("testing/table.zig").parse;
     const allocator = std.testing.allocator;
 

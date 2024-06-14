@@ -159,8 +159,6 @@ pub fn build(b: *std.Build) !void {
     tigerbeetle.root_module.addImport("vsr", vsr_module);
     tigerbeetle.root_module.addImport("vsr_options", vsr_options_module);
     b.installArtifact(tigerbeetle);
-    // Tell zig to use large stack size by default if possible.
-    tigerbeetle.stack_size = 16 * 1024 * 1024;
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.root_module.omit_frame_pointer = false;
     link_tracer_backend(tigerbeetle, git_clone_tracy, tracer_backend, target.result);

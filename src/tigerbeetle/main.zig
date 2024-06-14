@@ -37,17 +37,16 @@ pub const std_options = .{
 };
 
 pub fn main() !void {
-    try SigIllHandler.register();
-
     // TODO(zig): Zig defaults to 16MB stack size on Linux, but not yet on mac as of 0.11.
     // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
-    // in build.zig doesn't work.
-    if (builtin.target.os.tag == .macos) {
-        std.posix.setrlimit(std.posix.rlimit_resource.STACK, .{
-            .cur = 16 * 1024 * 1024,
-            .max = 16 * 1024 * 1024,
-        }) catch @panic("unable to adjust stack limit");
-    }
+    // in build.zig doesn't work. setrlimit with 16MB errors with EINVAL on macOS 13 as well.
+    // So instead, we spawn a thread with the desired stack size instead.
+    const thread = try std.Thread.spawn(.{ .stack_size = 16 * 1024 * 1024 }, main_real, .{});
+    thread.join();
+}
+
+fn main_real() !void {
+    try SigIllHandler.register();
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
