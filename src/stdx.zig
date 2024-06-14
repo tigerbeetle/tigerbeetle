@@ -141,6 +141,43 @@ test "disjoint_slices" {
     try std.testing.expectEqual(false, disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
 }
 
+/// Override memcpy for entire binary with one optimized via branching tricks from hash_inline.
+export fn memcpy(noalias dst: ?[*]u8, noalias src: ?[*]const u8, len: usize) callconv(.C) ?[*]u8 {
+    @setRuntimeSafety(false);
+
+    if (len <= 16) {
+        if (len < 4) {
+            // handles sizes under a u32.
+            if (len > 0) {
+                copy_blocks(dst, src, 1, [_]usize{ 0, len / 2, len - 1 });
+            }
+        } else {
+            // handles sizes from u32 to Vector(16).
+            const mid = (len / 8) * 4;
+            copy_blocks(dst, src, 4, [_]usize{ 0, mid, len - 4, len - 4 - mid });
+        }
+    } else if (len <= 64) {
+        // handles sizes from Vector(16) to cache_line.
+        const mid = (len / 32) * 16;
+        copy_blocks(dst, src, 16, [_]usize{ 0, mid, len - 16, len - 16 - mid });
+    } else {
+        // handles sizes over a cache_line.
+        for (0..(len - 1) / 128) |i| {
+            std.mem.doNotOptimizeAway(i); // prevent LLVM from bloating loop via auto-vectorization.
+            copy_blocks(dst, src, 128, [_]usize{i * 128});
+        }
+        copy_blocks(dst, src, 64, [_]usize{ len -| 128, len - 64 });
+    }
+
+    return dst;
+}
+
+inline fn copy_blocks(dst: ?[*]u8, src: ?[*]const u8, comptime size: usize, offsets: anytype) void {
+    var blocks: [offsets.len]@Vector(size, u8) = undefined; // Vector over [N]u8 for good codegen.
+    for (offsets, &blocks) |offset, *block| block.* = src.?[offset..][0..size].*;
+    for (offsets, blocks) |offset, block| dst.?[offset..][0..size].* = block;
+}
+
 /// Checks that a byteslice is zeroed.
 pub fn zeroed(bytes: []const u8) bool {
     // This implementation already gets vectorized
