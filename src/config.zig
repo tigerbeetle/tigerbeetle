@@ -141,6 +141,8 @@ const ConfigProcess = struct {
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
     grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
+    multiversion_binary_size_max: u64 = 64 * 1024 * 1024,
+    multiversion_poll_interval_ms: u64 = 1000,
 };
 
 /// Configurations which are tunable per-cluster.

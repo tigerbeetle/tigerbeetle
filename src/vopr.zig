@@ -1065,7 +1065,7 @@ pub const Simulator = struct {
         replica_storage.faulty = fault;
         simulator.cluster.restart_replica(
             replica_index,
-            replica_releases.const_slice(),
+            &replica_releases,
         ) catch unreachable;
 
         if (replica.status == .recovering_head) {

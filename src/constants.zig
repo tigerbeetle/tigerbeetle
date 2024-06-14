@@ -96,6 +96,12 @@ comptime {
 /// in each ping message body.
 pub const vsr_releases_max = config.cluster.vsr_releases_max;
 
+/// The maximum cumulative size of a final TigerBeetle output binary - including potential past
+/// releases and metadata.
+pub const multiversion_binary_size_max = config.process.multiversion_binary_size_max;
+
+pub const multiversion_poll_interval_ms = config.process.multiversion_poll_interval_ms;
+
 comptime {
     assert(vsr_releases_max >= 2);
     assert(vsr_releases_max * @sizeOf(vsr.Release) <= message_body_size_max);
