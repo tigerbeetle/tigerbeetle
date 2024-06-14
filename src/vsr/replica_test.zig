@@ -2167,7 +2167,7 @@ const TestClientBus = struct {
     }
 
     fn on_message(message_bus: *Cluster.MessageBus, message: *Message) void {
-        const t = @fieldParentPtr(TestClientBus, "message_bus", message_bus);
+        const t: *TestClientBus = @fieldParentPtr("message_bus", message_bus);
         assert(message.header.cluster == t.context.cluster.options.cluster_id);
 
         switch (message.header.command) {
