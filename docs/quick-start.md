@@ -212,5 +212,5 @@ You can also read more about [deploying TigerBeetle in production](./operating/d
 ## Next: Designing for TigerBeetle
 
 Now that you've created some accounts and transfers, you may want to read about
-[how TigerBeetle fits into your system architecture](./develop/system-architecture.md) and dig into
-the [data model](./develop/data-modeling.md).
+[how TigerBeetle fits into your system architecture](./coding/system-architecture.md) and dig into
+the [data model](./coding/data-modeling.md).

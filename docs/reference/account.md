@@ -4,33 +4,30 @@ sidebar_position: 1
 
 # `Account`
 
-An `Account` is a record storing the cumulative effect of committed
-[transfers](./transfer.md).
+An `Account` is a record storing the cumulative effect of committed [transfers](./transfer.md).
 
 ### Updates
 
-Account fields _cannot be changed by the user_ after
-creation. However, debits and credits fields are updated by
-TigerBeetle as transfers move money to and from an account.
+Account fields _cannot be changed by the user_ after creation. However, debits and credits fields
+are updated by TigerBeetle as transfers move money to and from an account.
 
 ### Deletion
 
 Accounts **cannot be deleted** after creation. This provides a strong guarantee for an audit trail
 -- and the account record is only 128 bytes.
 
-If an account is no longer in use, you may want to [zero out its
-balance](../develop/recipes/close-account.md).
+If an account is no longer in use, you may want to
+[zero out its balance](../coding/recipes/close-account.md).
 
 ### Guarantees
 
 - Accounts are immutable. They are never modified once they are successfully created (excluding
   balance fields, which are modified by transfers).
 - There is at most one `Account` with a particular [`id`](#id).
-- The sum of all accounts' [`debits_pending`](#debits_pending) equals
-  the sum of all accounts' [`credits_pending`](#credits_pending).
-- The sum of all accounts' [`debits_posted`](#debits_posted) equals the
-  sum of all accounts' [`credits_posted`](#credits_posted).
-
+- The sum of all accounts' [`debits_pending`](#debits_pending) equals the sum of all accounts'
+  [`credits_pending`](#credits_pending).
+- The sum of all accounts' [`debits_posted`](#debits_posted) equals the sum of all accounts'
+  [`credits_posted`](#credits_posted).
 
 ## Fields
 
@@ -44,7 +41,7 @@ Constraints:
 - Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
 - Must not conflict with another account in the cluster
 
-See the [`id` section in the data modeling doc](../develop/data-modeling.md#id) for more
+See the [`id` section in the data modeling doc](../coding/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
 
 Note that account IDs are unique for the cluster -- not per ledger. If you want to store a
@@ -75,8 +72,8 @@ Constraints:
 
 ### `credits_pending`
 
-`credits_pending` counts credits reserved by pending transfers. When a pending transfer posts, voids,
-or times out, the amount is removed from `credits_pending`.
+`credits_pending` counts credits reserved by pending transfers. When a pending transfer posts,
+voids, or times out, the amount is removed from `credits_pending`.
 
 Money in `credits_pending` is reserved — that is, it cannot be spent until the corresponding pending
 transfer resolves.
@@ -97,14 +94,14 @@ Constraints:
 
 ### `user_data_128`
 
-This is an optional 128-bit secondary identifier to link this account to an
-external entity or event.
+This is an optional 128-bit secondary identifier to link this account to an external entity or
+event.
 
 As an example, you might use a
-[ULID](../develop/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties together
+[ULID](../coding/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties together
 a group of accounts.
 
-For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
+For more information, see [Data Modeling](../coding/data-modeling.md#user_data).
 
 Constraints:
 
@@ -112,12 +109,11 @@ Constraints:
 
 ### `user_data_64`
 
-This is an optional 64-bit secondary identifier to link this account to an
-external entity or event.
+This is an optional 64-bit secondary identifier to link this account to an external entity or event.
 
 As an example, you might use this field store an external timestamp.
 
-For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
+For more information, see [Data Modeling](../coding/data-modeling.md#user_data).
 
 Constraints:
 
@@ -125,12 +121,11 @@ Constraints:
 
 ### `user_data_32`
 
-This is an optional 32-bit secondary identifier to link this account to an
-external entity or event.
+This is an optional 32-bit secondary identifier to link this account to an external entity or event.
 
 As an example, you might use this field to store a timezone or locale.
 
-For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
+For more information, see [Data Modeling](../coding/data-modeling.md#user_data).
 
 Constraints:
 
@@ -147,11 +142,10 @@ Constraints:
 
 ### `ledger`
 
-This is an identifier that partitions the sets of accounts that can
-transact with each other.
+This is an identifier that partitions the sets of accounts that can transact with each other.
 
-See [data modeling](../develop/data-modeling.md#ledgers) for more details
-about how to think about setting up your ledgers.
+See [data modeling](../coding/data-modeling.md#ledgers) for more details about how to think about
+setting up your ledgers.
 
 Constraints:
 
@@ -162,9 +156,8 @@ Constraints:
 
 This is a user-defined enum denoting the category of the account.
 
-As an example, you might use codes `1000`-`3340` to indicate asset
-accounts in general, where `1001` is Bank Account and `1002` is Money
-Market Account and `2003` is Motor Vehicles and so on.
+As an example, you might use codes `1000`-`3340` to indicate asset accounts in general, where `1001`
+is Bank Account and `1002` is Money Market Account and `2003` is Motor Vehicles and so on.
 
 Constraints:
 
@@ -192,17 +185,17 @@ You can read more about [linked events](./requests/README.md#linked-events).
 
 #### `flags.debits_must_not_exceed_credits`
 
-When set, transfers will be rejected that would cause this account's
-debits to exceed credits. Specifically when `account.debits_pending +
-account.debits_posted + transfer.amount > account.credits_posted`.
+When set, transfers will be rejected that would cause this account's debits to exceed credits.
+Specifically when
+`account.debits_pending + account.debits_posted + transfer.amount > account.credits_posted`.
 
 This cannot be set when `credits_must_not_exceed_debits` is also set.
 
 #### `flags.credits_must_not_exceed_debits`
 
-When set, transfers will be rejected that would cause this account's
-credits to exceed debits. Specifically when `account.credits_pending +
-account.credits_posted + transfer.amount > account.debits_posted`.
+When set, transfers will be rejected that would cause this account's credits to exceed debits.
+Specifically when
+`account.credits_pending + account.credits_posted + transfer.amount > account.debits_posted`.
 
 This cannot be set when `debits_must_not_exceed_credits` is also set.
 
@@ -210,18 +203,16 @@ This cannot be set when `debits_must_not_exceed_credits` is also set.
 
 When set, the account will retain the history of balances at each transfer.
 
-Note that the [`get_account_balances`](./requests/get_account_balances.md) operation only works
-for accounts with this flag set.
+Note that the [`get_account_balances`](./requests/get_account_balances.md) operation only works for
+accounts with this flag set.
 
 ### `timestamp`
 
-This is the time the account was created, as nanoseconds since
-UNIX epoch.
+This is the time the account was created, as nanoseconds since UNIX epoch.
 
-It is set by TigerBeetle to the moment the account arrives at
-the cluster.
+It is set by TigerBeetle to the moment the account arrives at the cluster.
 
-You can read more about [Time in TigerBeetle](../develop/time.md).
+You can read more about [Time in TigerBeetle](../coding/time.md).
 
 Constraints:
 
@@ -230,11 +221,10 @@ Constraints:
 
 ## Internals
 
-If you're curious and want to learn more, you can find the source code
-for this struct in
-[src/tigerbeetle.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/tigerbeetle.zig). Search
-for `const Account = extern struct {`.
+If you're curious and want to learn more, you can find the source code for this struct in
+[src/tigerbeetle.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/tigerbeetle.zig).
+Search for `const Account = extern struct {`.
 
 You can find the source code for creating an account in
-[src/state_machine.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/state_machine.zig). Search
-for `fn create_account(`.
+[src/state_machine.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/state_machine.zig).
+Search for `fn create_account(`.

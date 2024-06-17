@@ -12,9 +12,9 @@ performance.
 
 [./quick-start](./quick-start.md)
 
-## Developing on TigerBeetle
+## Coding
 
-Read more about [Developing on TigerBeetle](./develop/README.md) to understand the data model, learn
+Read more about [Coding with TigerBeetle](./coding/README.md) to understand the data model, learn
 how to integrate TigerBeetle into your system, and see some advanced design patterns.
 
 ## Client libraries
