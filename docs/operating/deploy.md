@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-# The TigerBeetle Cluster
+# Deploying for Production
 
 A TigerBeetle **cluster** is a set of machines each running the TigerBeetle server for strict
 serializability, high availability and durability. The TigerBeetle server is a single binary.
