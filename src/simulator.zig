@@ -193,10 +193,10 @@ pub fn main() !void {
                 .lsm_forest_compaction_block_count = random.uintAtMost(u32, 256) +
                     StateMachine.Forest.Options.compaction_block_count_min,
                 .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = 2048,
-                .cache_entries_transfers = 2048,
-                .cache_entries_posted = 2048,
-                .cache_entries_account_balances = 2048,
+                .cache_entries_accounts = 256,
+                .cache_entries_transfers = 256,
+                .cache_entries_posted = 256,
+                .cache_entries_account_balances = 256,
             },
         },
     };

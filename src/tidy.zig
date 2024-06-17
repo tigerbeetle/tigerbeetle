@@ -390,7 +390,6 @@ const naughty_list = [_][]const u8{
     "lsm/manifest_level.zig",
     "lsm/segmented_array_benchmark.zig",
     "lsm/segmented_array.zig",
-    "lsm/set_associative_cache.zig",
     "lsm/table_data_iterator.zig",
     "lsm/tree_fuzz.zig",
     "simulator.zig",

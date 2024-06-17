@@ -78,7 +78,7 @@ const Environment = struct {
 
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
-    const cache_entries_max = 2048;
+    const cache_entries_max = GrooveAccounts.ObjectsCache.Cache.value_count_max_multiple;
     const forest_options = StateMachine.forest_options(.{
         .batch_size_limit = constants.message_body_size_max,
         .lsm_forest_compaction_block_count = Forest.Options.compaction_block_count_min,

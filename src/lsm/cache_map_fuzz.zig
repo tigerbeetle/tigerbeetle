@@ -400,7 +400,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     defer allocator.free(fuzz_ops);
 
     // Running the same fuzz with and without cache enabled.
-    inline for (&.{ 2048, 0 }) |cache_value_count_max| {
+    inline for (&.{ TestCacheMap.Cache.value_count_max_multiple, 0 }) |cache_value_count_max| {
         const options = TestCacheMap.Options{
             .cache_value_count_max = cache_value_count_max,
             .map_value_count_max = 1024,
