@@ -1,0 +1,20 @@
+diff --git a/tigerlings/000_download.sh b/tigerlings/000_download.sh
+index c3f5717d7..5dfd5d993 100644
+--- a/tigerlings/000_download.sh
++++ b/tigerlings/000_download.sh
+@@ -14,10 +14,10 @@
+ #powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .; .\tigerbeetle version"
+ 
+ # Or build it from source:
+-# cd ..
+-# ./scripts/install_zig.sh # or .bat if you're on Windows.
+-# ./zig/zig build
+-# cp tigerbeetle tigerlings/tigerbeetle
+-# cd tigerlings
++cd ..
++./scripts/install_zig.sh # or .bat if you're on Windows.
++./zig/zig build
++cp tigerbeetle tigerlings/tigerbeetle
++cd tigerlings
+ 
+ ./tigerbeetle version

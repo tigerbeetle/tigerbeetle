@@ -14,8 +14,10 @@
 #powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .; .\tigerbeetle version"
 
 # Or build it from source:
-# ../scripts/install_zig.sh # or .bat if you're on Windows.
-# ../zig/zig build
-# cp ../tigerbeetle .
+# cd ..
+# ./scripts/install_zig.sh # or .bat if you're on Windows.
+# ./zig/zig build
+# cp tigerbeetle tigerlings/tigerbeetle
+# cd tigerlings
 
 ./tigerbeetle version
