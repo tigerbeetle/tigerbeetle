@@ -11,6 +11,8 @@ zig/
 zig-cache/
 zig-out/
 kcov-output/
+tigerlings/tigerbeetle
+tigerlings/tigerbeetle.zip
 
 tools/tracy
 # It is occasionally useful to dump LLVM IR to an `.ll` file to investigate perf problems.
