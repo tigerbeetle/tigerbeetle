@@ -28,7 +28,5 @@ done
 
 # Check the exit status
 if [ $? -ne 0 ]; then
-    echo ""
-    echo "Uh oh, there is a problem in one of the exercises!"
     exit 1
 fi

@@ -7,8 +7,14 @@ normal=$(tput sgr0)
 for file in $(ls [0-9][0-9][0-9]*.sh | grep -v "$0" | sort -n); do
     echo "${bold}Running exercise: ./$file${normal}"
 
-    # Check if the current file is 002_server.sh
-    if [ "$file" = "002_server.sh" ]; then
+    if [ "$file" = "000_download.sh" ]; then
+        # Only download/build TigerBeetle if it's not already available
+        if  ./tigerbeetle version >/dev/null 2>&1; then
+            echo "TigerBeetle is already available. Skipping exercise."
+        else
+            bash "$file"
+        fi
+    elif [ "$file" = "002_server.sh" ]; then
         # Execute the file in the background and store its process ID
         bash "$file" 2>&1 | sed "s/^/${bold}[Server]${normal} /" &
         server_pid=$!
