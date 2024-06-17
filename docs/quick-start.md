@@ -165,11 +165,11 @@ lookup_accounts id=1, id=2;
 And indeed you can see that account `1` has `debits_posted` as `10` and account `2` has
 `credits_posted` as `10`. The `10` amount is fully accounted for!
 
-You can take a look at the [`Accounts` reference](./reference/account.md) to understand all of
-the fields on the accounts.
+You can take a look at the [`Accounts` reference](./reference/account.md) to understand all of the
+fields on the accounts.
 
-You can also take a look at the [Request Types](./reference/requests/README.md) to see what else
-you can do with the REPL.
+You can also take a look at the [Request Types](./reference/requests/README.md) to see what else you
+can do with the REPL.
 
 ## Optional: Run a Multi-Node Cluster
 
@@ -212,5 +212,5 @@ You can also read more about [deploying TigerBeetle in production](./deploy/clus
 ## Next: Designing for TigerBeetle
 
 Now that you've created some accounts and transfers, you may want to read about
-[how TigerBeetle fits into your system architecture](./develop/system-architecture.md) and dig into
-the [data model](./develop/data-modeling.md).
+[how TigerBeetle fits into your system architecture](./coding/system-architecture.md) and dig into
+the [data model](./coding/data-modeling.md).
