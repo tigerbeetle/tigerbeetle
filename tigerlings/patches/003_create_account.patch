@@ -1,7 +1,7 @@
-diff --git a/tigerlings/003_create_accounts1.sh b/tigerlings/003_create_accounts1.sh
+diff --git a/tigerlings/003_create_account.sh b/tigerlings/003_create_account.sh
 index 6a8a380a2..92825561c 100755
---- a/tigerlings/003_create_accounts1.sh
-+++ b/tigerlings/003_create_accounts1.sh
+--- a/tigerlings/003_create_account.sh
++++ b/tigerlings/003_create_account.sh
 @@ -5,7 +5,7 @@
  # To connect to TigerBeetle, we normally use one of the client libraries.
  # However, for these exercises we're just going to use the REPL command via the CLI.

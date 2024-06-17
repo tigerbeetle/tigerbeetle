@@ -1,7 +1,7 @@
-diff --git a/tigerlings/004_create_accounts2.sh b/tigerlings/004_create_accounts2.sh
+diff --git a/tigerlings/004_create_accounts.sh b/tigerlings/004_create_accounts.sh
 index cf1168077..9ce27aa8b 100644
---- a/tigerlings/004_create_accounts2.sh
-+++ b/tigerlings/004_create_accounts2.sh
+--- a/tigerlings/004_create_accounts.sh
++++ b/tigerlings/004_create_accounts.sh
 @@ -6,8 +6,8 @@ source ./tb_function.sh
  
  # We want to create two accounts.
