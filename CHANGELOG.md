@@ -1,5 +1,59 @@
 # TigerBeetle Changelog
 
+## 2024-06-17 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#2000](https://github.com/tigerbeetle/tigerbeetle/pull/2000)
+
+  Fix a case where an early return could result in a partially inserted transfer persisting.
+
+- [#2011](https://github.com/tigerbeetle/tigerbeetle/pull/2011),
+  [#2009](https://github.com/tigerbeetle/tigerbeetle/pull/2009),
+  [#1981](https://github.com/tigerbeetle/tigerbeetle/pull/1981)
+
+  Big improvements to allowing TigerBeetle to run with less memory! You can now run TigerBeetle
+  in `--development` mode by default with an RSS of under 1GB. Most of these gains came from #1981
+  which allows running with a smaller runtime request size.
+
+- [#2014](https://github.com/tigerbeetle/tigerbeetle/pull/2014),
+  [#2012](https://github.com/tigerbeetle/tigerbeetle/pull/2012),
+  [#2006](https://github.com/tigerbeetle/tigerbeetle/pull/2006)
+
+  Devhub improvements - make it harder to miss failures due to visualization bugs, show the PR
+  author in fuzzer table and color canary "failures" as success.
+
+### Features
+
+- [#2001](https://github.com/tigerbeetle/tigerbeetle/pull/2001)
+
+  Add `--account-batch-size` to the benchmark, mirroring `--transfer-batch-size`.
+
+- [#2017](https://github.com/tigerbeetle/tigerbeetle/pull/2017),
+  [#1992](https://github.com/tigerbeetle/tigerbeetle/pull/1992),
+  [#1993](https://github.com/tigerbeetle/tigerbeetle/pull/1993)
+
+  Rename the Deploy section to Operating, add a new correcting transfer recipe, and note that
+  `lookup_accounts` shouldn't be used before creating transfers to avoid potential TOCTOUs.
+
+### Internals
+
+- [#1878](https://github.com/tigerbeetle/tigerbeetle/pull/1878),
+  [#1997](https://github.com/tigerbeetle/tigerbeetle/pull/1997)
+
+  ⚡ Update Zig from 0.11.0 to 0.13.0! As part of this, replace non-mutated `var`s with `const`.
+
+- [#1999](https://github.com/tigerbeetle/tigerbeetle/pull/1999)
+
+  Similar to #1991, adds the async `io_uring_prep_statx` syscall for Linux's IO implementation,
+  allowing non-blocking `statx()`s while serving requests - to determine when the binary on
+  disk has changed.
+
+
+### TigerTracks 🎧
+
+- [Canon in D](https://www.youtube.com/watch?v=Ptk_1Dc2iPY)
+
 ## 2024-06-10 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
