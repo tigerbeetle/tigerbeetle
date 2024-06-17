@@ -56,7 +56,7 @@ You can download prebuilt binaries here:
 
 #### Docker
 
-You can find instructions on using TigerBeetle with Docker [here](./deploy/docker.md).
+You can find instructions on using TigerBeetle with Docker [here](./operating/docker.md).
 
 ## 2. Create the Data File
 
@@ -174,7 +174,7 @@ you can do with the REPL.
 ## Optional: Run a Multi-Node Cluster
 
 Up to this point, we have only shown you how to run a single-node TigerBeetle cluster. In
-production, TigerBeetle is intended to be run with [6 nodes](./deploy/cluster.md).
+production, TigerBeetle is intended to be run with [6 nodes](./operating/cluster.md).
 
 Here, we will show you how to run a 3-node cluster (the idea is the same for 6 nodes):
 
@@ -207,7 +207,7 @@ provided.
 
 You can connect to the REPL as described above try creating accounts and transfers in this cluster.
 
-You can also read more about [deploying TigerBeetle in production](./deploy/cluster.md).
+You can also read more about [deploying TigerBeetle in production](./operating/cluster.md).
 
 ## Next: Designing for TigerBeetle
 
