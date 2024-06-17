@@ -1,0 +1,13 @@
+diff --git a/tigerlings/001_data_file.sh b/tigerlings/001_data_file.sh
+index b3181fede..e1543b3c7 100755
+--- a/tigerlings/001_data_file.sh
++++ b/tigerlings/001_data_file.sh
+@@ -6,7 +6,7 @@
+ # Uh oh! Our data file needs a filename!
+ # By convention, we use the .tigerbeetle file extension.
+ # You can name it whatever you like but we'd recommend "0_0.tigerbeetle".
+-data_file=""
++data_file="0_0.tigerbeetle"
+ ./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 $data_file
+ 
+ # TigerBeetle is designed to run in production as a cluster of 6 replicas.

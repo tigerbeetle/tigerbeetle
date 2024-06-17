@@ -1,0 +1,13 @@
+diff --git a/tigerlings/002_server.sh b/tigerlings/002_server.sh
+index be891abca..761dcc319 100755
+--- a/tigerlings/002_server.sh
++++ b/tigerlings/002_server.sh
+@@ -5,7 +5,7 @@
+ # and the data file that the server will use.
+ 
+ # We'll need to pass the path of the data file we just created to the server as the last argument:
+-./tigerbeetle start --addresses=3000
++./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+ 
+ # When you run TigerBeetle as a cluster, you'll pass all of the addresses as a comma-separated list
+ # and the --replica argument passed to the `format` command for creating the data file tells the
