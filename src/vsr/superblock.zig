@@ -1090,7 +1090,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         fn write_header_callback(write: *Storage.Write) void {
-            const context = @fieldParentPtr(Context, "write", write);
+            const context: *Context = @alignCast(@fieldParentPtr("write", write));
             const superblock = context.superblock;
             const copy = context.copy.?;
 
@@ -1162,7 +1162,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         fn read_header_callback(read: *Storage.Read) void {
-            const context = @fieldParentPtr(Context, "read", read);
+            const context: *Context = @alignCast(@fieldParentPtr("read", read));
             const superblock = context.superblock;
             const threshold = context.read_threshold.?;
 

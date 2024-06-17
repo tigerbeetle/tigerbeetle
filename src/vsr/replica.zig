@@ -783,19 +783,19 @@ pub fn ReplicaType(
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            const self: *Self = @alignCast(@fieldParentPtr("superblock_context", superblock_context));
             assert(!self.opened);
             self.opened = true;
         }
 
         fn journal_recover_callback(journal: *Journal) void {
-            const self = @fieldParentPtr(Self, "journal", journal);
+            const self: *Self = @alignCast(@fieldParentPtr("journal", journal));
             assert(!self.opened);
             self.opened = true;
         }
 
         fn grid_open_callback(grid: *Grid) void {
-            const self = @fieldParentPtr(Self, "grid", grid);
+            const self: *Self = @alignCast(@fieldParentPtr("grid", grid));
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
@@ -816,7 +816,7 @@ pub fn ReplicaType(
         }
 
         fn client_sessions_open_callback(client_sessions_checkpoint: *CheckpointTrailer) void {
-            const self = @fieldParentPtr(Self, "client_sessions_checkpoint", client_sessions_checkpoint);
+            const self: *Self = @alignCast(@fieldParentPtr("client_sessions_checkpoint", client_sessions_checkpoint));
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
@@ -873,7 +873,7 @@ pub fn ReplicaType(
         }
 
         fn state_machine_open_callback(state_machine: *StateMachine) void {
-            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            const self: *Self = @alignCast(@fieldParentPtr("state_machine", state_machine));
             assert(self.grid.free_set.opened);
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
@@ -1317,7 +1317,7 @@ pub fn ReplicaType(
 
         /// Called by the MessageBus to deliver a message to the replica.
         fn on_message_from_bus(message_bus: *MessageBus, message: *Message) void {
-            const self = @fieldParentPtr(Self, "message_bus", message_bus);
+            const self: *Self = @alignCast(@fieldParentPtr("message_bus", message_bus));
             if (message.header.into(.request)) |header| {
                 assert(header.client != 0 or constants.aof_recovery);
             }
@@ -2471,7 +2471,7 @@ pub fn ReplicaType(
             reply_: ?*Message.Reply,
             destination_replica: ?u8,
         ) void {
-            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            const self: *Self = @fieldParentPtr("client_replies", client_replies);
             const reply = reply_ orelse {
                 log.debug("{}: on_request_reply: reply not found for replica={} (checksum={})", .{
                     self.replica,
@@ -2606,7 +2606,7 @@ pub fn ReplicaType(
             grid_read: *Grid.Read,
             result: Grid.ReadBlockResult,
         ) void {
-            const read = @fieldParentPtr(BlockRead, "read", grid_read);
+            const read: *BlockRead = @fieldParentPtr("read", grid_read);
             const self = read.replica;
             defer {
                 self.message_bus.unref(read.message);
@@ -2720,7 +2720,7 @@ pub fn ReplicaType(
         }
 
         fn grid_repair_block_callback(grid_write: *Grid.Write) void {
-            const write = @fieldParentPtr(BlockWrite, "write", grid_write);
+            const write: *BlockWrite = @fieldParentPtr("write", grid_write);
             const self = write.replica;
             defer self.grid_repair_writes.release(write);
 
@@ -3817,7 +3817,7 @@ pub fn ReplicaType(
         }
 
         fn commit_op_prefetch_callback(state_machine: *StateMachine) void {
-            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            const self: *Self = @alignCast(@fieldParentPtr("state_machine", state_machine));
             assert(self.commit_stage == .prefetch_state_machine);
             assert(self.commit_prepare != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
@@ -3828,7 +3828,7 @@ pub fn ReplicaType(
         }
 
         fn commit_op_client_replies_ready_callback(client_replies: *ClientReplies) void {
-            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            const self: *Self = @fieldParentPtr("client_replies", client_replies);
             assert(self.commit_stage == .setup_client_replies);
             assert(self.commit_prepare != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
@@ -3882,7 +3882,7 @@ pub fn ReplicaType(
         }
 
         fn commit_op_compact_callback(state_machine: *StateMachine) void {
-            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            const self: *Self = @alignCast(@fieldParentPtr("state_machine", state_machine));
             assert(self.commit_stage == .compact_state_machine);
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.checkpoint.header.op);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.checkpoint.header.op);
@@ -3921,25 +3921,25 @@ pub fn ReplicaType(
         }
 
         fn commit_op_checkpoint_state_machine_callback(state_machine: *StateMachine) void {
-            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            const self: *Self = @alignCast(@fieldParentPtr("state_machine", state_machine));
             assert(self.commit_stage == .checkpoint_data);
             self.commit_op_checkpoint_data_callback(.state_machine);
         }
 
         fn commit_op_checkpoint_client_replies_callback(client_replies: *ClientReplies) void {
-            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            const self: *Self = @alignCast(@fieldParentPtr("client_replies", client_replies));
             assert(self.commit_stage == .checkpoint_data);
             self.commit_op_checkpoint_data_callback(.client_replies);
         }
 
         fn commit_op_checkpoint_client_sessions_callback(client_sessions_checkpoint: *CheckpointTrailer) void {
-            const self = @fieldParentPtr(Self, "client_sessions_checkpoint", client_sessions_checkpoint);
+            const self: *Self = @alignCast(@fieldParentPtr("client_sessions_checkpoint", client_sessions_checkpoint));
             assert(self.commit_stage == .checkpoint_data);
             self.commit_op_checkpoint_data_callback(.client_sessions);
         }
 
         fn commit_op_checkpoint_grid_callback(grid: *Grid) void {
-            const self = @fieldParentPtr(Self, "grid", grid);
+            const self: *Self = @alignCast(@fieldParentPtr("grid", grid));
             assert(self.commit_stage == .checkpoint_data);
             assert(self.commit_prepare.?.header.op <= self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
@@ -4052,7 +4052,7 @@ pub fn ReplicaType(
         }
 
         fn commit_op_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            const self: *Self = @fieldParentPtr("superblock_context", superblock_context);
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op <= self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
@@ -5163,7 +5163,7 @@ pub fn ReplicaType(
             reply_: ?*Message.Reply,
             destination_replica: ?u8,
         ) void {
-            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            const self: *Self = @fieldParentPtr("client_replies", client_replies);
             assert(reply_header.size > @sizeOf(Header));
             assert(destination_replica == null);
 
@@ -7648,7 +7648,7 @@ pub fn ReplicaType(
         }
 
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Self, "superblock_context_view_change", context);
+            const self: *Self = @fieldParentPtr("superblock_context_view_change", context);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()) or
                 self.status == .recovering_head);
@@ -8670,7 +8670,7 @@ pub fn ReplicaType(
         }
 
         fn sync_cancel_grid_callback(grid: *Grid) void {
-            const self = @fieldParentPtr(Self, "grid", grid);
+            const self: *Self = @alignCast(@fieldParentPtr("grid", grid));
             assert(self.syncing == .canceling_grid);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
@@ -8819,7 +8819,7 @@ pub fn ReplicaType(
         }
 
         fn sync_superblock_update_callback(superblock_context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            const self: *Self = @fieldParentPtr("superblock_context", superblock_context);
             assert(self.sync_tables == null);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
@@ -8999,7 +8999,7 @@ pub fn ReplicaType(
 
         fn sync_reclaim_tables(self: *Self) void {
             while (self.grid.blocks_missing.reclaim_table()) |queue_table| {
-                const table = @fieldParentPtr(RepairTable, "table", queue_table);
+                const table: *RepairTable = @fieldParentPtr("table", queue_table);
                 self.grid_repair_tables.release(table);
             }
             assert(self.grid_repair_tables.available() <= constants.grid_missing_tables_max);

@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const Atomic = std.atomic.Atomic;
+const Atomic = std.atomic.Value;
 
 pub const Packet = extern struct {
     next: ?*Packet,
@@ -33,20 +33,20 @@ pub const Packet = extern struct {
         popped: ?*Packet = null,
 
         pub fn push(self: *SubmissionStack, packet: *Packet) void {
-            var pushed = self.pushed.load(.Monotonic);
+            var pushed = self.pushed.load(.monotonic);
             while (true) {
                 packet.next = pushed;
-                pushed = self.pushed.tryCompareAndSwap(
+                pushed = self.pushed.cmpxchgWeak(
                     pushed,
                     packet,
-                    .Release,
-                    .Monotonic,
+                    .release,
+                    .monotonic,
                 ) orelse break;
             }
         }
 
         pub fn pop(self: *SubmissionStack) ?*Packet {
-            if (self.popped == null) self.popped = self.pushed.swap(null, .Acquire);
+            if (self.popped == null) self.popped = self.pushed.swap(null, .acquire);
             const packet = self.popped orelse return null;
             self.popped = packet.next;
             packet.next = null;

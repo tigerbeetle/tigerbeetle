@@ -2,6 +2,7 @@ const std = @import("std");
 
 // TODO: Move this back to src/clients/go when there's a better solution for main_pkg_path=src/
 const vsr = @import("vsr.zig");
+const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 
@@ -26,7 +27,7 @@ fn go_type(comptime Type: type) []const u8 {
         .Bool => return "bool",
         .Enum => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         .Struct => |info| switch (info.layout) {
-            .Packed => return comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+            .@"packed" => return comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         },
         .Int => |info| {
@@ -64,20 +65,20 @@ fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const 
             if (is_upper_case(word)) {
                 _ = std.ascii.upperString(output[len..], word);
             } else {
-                std.mem.copy(u8, output[len..], word);
+                @memcpy(output[len..][0..word.len], word);
                 output[len] = std.ascii.toUpper(output[len]);
             }
             len += word.len;
         }
 
-        break :blk output[0 .. min_len orelse len];
+        break :blk stdx.comptime_slice(&output, min_len orelse len);
     };
 }
 
 fn calculate_min_len(comptime type_info: anytype) comptime_int {
     comptime {
-        comptime var min_len: comptime_int = 0;
-        inline for (type_info.fields) |field| {
+        var min_len: comptime_int = 0;
+        for (type_info.fields) |field| {
             const field_len = to_pascal_case(field.name, null).len;
             if (field_len > min_len) {
                 min_len = field_len;
@@ -280,7 +281,7 @@ fn emit_struct(
 
         switch (@typeInfo(flagType)) {
             .Struct => |info| switch (info.layout) {
-                .Packed => inline for (info.fields, 0..) |field, i| {
+                .@"packed" => inline for (info.fields, 0..) |field, i| {
                     if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
                     try buffer.writer().print("\tf.{s} = ((o.Flags >> {}) & 0x1) == 1\n", .{
@@ -325,9 +326,9 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
-                .Auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
-                .Packed => try emit_packed_struct(buffer, info, name, comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
-                .Extern => try emit_struct(buffer, info, name),
+                .auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
+                .@"packed" => try emit_packed_struct(buffer, info, name, comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
+                .@"extern" => try emit_struct(buffer, info, name),
             },
             .Enum => try emit_enum(buffer, ZigType, name, type_mapping[2], comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
@@ -342,7 +343,7 @@ pub fn main() !void {
 
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
-    try std.fs.cwd().writeFile(output_file, buffer.items);
+    try std.fs.cwd().writeFile(.{ .sub_path = output_file, .data = buffer.items });
 }
 
 const testing = std.testing;

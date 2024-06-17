@@ -299,7 +299,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         fn read_next_callback(grid_read: *Grid.Read, result: Grid.ReadBlockResult) void {
-            const read = @fieldParentPtr(Read, "read", grid_read);
+            const read: *Read = @fieldParentPtr("read", grid_read);
             const scrubber = read.scrubber;
             assert(scrubber.reads_busy.contains(read));
             assert(!scrubber.reads_done.contains(read));
@@ -756,6 +756,6 @@ test "GridScrubber cycle interval" {
     const snap = Snap.snap;
 
     try snap(@src(),
-        \\4.3582921528e-03
+        \\4.3582921528e-3
     ).diff_fmt("{e:.10}", .{p_cluster_blocks_corrupt_per_span});
 }

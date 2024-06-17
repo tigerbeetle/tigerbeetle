@@ -29,7 +29,7 @@
 //!
 //!     // bad
 //!     tracer.start(&slot, event_a, @src());
-//!     std.os.exit(0);
+//!     std.posix.exit(0);
 //!
 //! Before freeing a slot, you should `assert(slot == null)`
 //! to ensure that you didn't forget to end an event.

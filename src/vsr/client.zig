@@ -160,7 +160,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         pub fn on_message(message_bus: *MessageBus, message: *Message) void {
-            const self = @fieldParentPtr(Self, "message_bus", message_bus);
+            const self: *Self = @fieldParentPtr("message_bus", message_bus);
             log.debug("{}: on_message: {}", .{ self.id, message.header });
             if (message.header.invalid()) |reason| {
                 log.debug("{}: on_message: invalid ({s})", .{ self.id, reason });

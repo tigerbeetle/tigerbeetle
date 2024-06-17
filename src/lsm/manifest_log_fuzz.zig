@@ -193,8 +193,8 @@ fn generate_events(
                     .address = table_address,
                     .snapshot_min = 1,
                     .snapshot_max = std.math.maxInt(u64),
-                    .key_min = .{0} ** 16,
-                    .key_max = .{0} ** 16,
+                    .key_min = std.mem.zeroes(TableInfo.KeyPadded),
+                    .key_max = std.mem.zeroes(TableInfo.KeyPadded),
                     .value_count = 1,
                     .tree_id = 1,
                     .label = .{
@@ -379,7 +379,7 @@ const Environment = struct {
     }
 
     fn format_superblock_callback(context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "superblock_context", context);
+        const env: *Environment = @fieldParentPtr("superblock_context", context);
         env.pending -= 1;
     }
 
@@ -390,7 +390,7 @@ const Environment = struct {
     }
 
     fn open_superblock_callback(context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "superblock_context", context);
+        const env: *Environment = @fieldParentPtr("superblock_context", context);
         env.pending -= 1;
     }
 
@@ -401,7 +401,7 @@ const Environment = struct {
     }
 
     fn open_grid_callback(grid: *Grid) void {
-        const env = @fieldParentPtr(Environment, "grid", grid);
+        const env: *Environment = @fieldParentPtr("grid", grid);
         env.pending -= 1;
     }
 
@@ -421,7 +421,7 @@ const Environment = struct {
     }
 
     fn open_callback(manifest_log: *ManifestLog) void {
-        const env = @fieldParentPtr(Environment, "manifest_log", manifest_log);
+        const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
         env.pending -= 1;
     }
 
@@ -443,7 +443,7 @@ const Environment = struct {
     }
 
     fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {
-        const env = @fieldParentPtr(Environment, "manifest_log", manifest_log);
+        const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
         env.pending -= 1;
     }
 
@@ -501,17 +501,17 @@ const Environment = struct {
     }
 
     fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
-        const env = @fieldParentPtr(Environment, "manifest_log", manifest_log);
+        const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
         env.pending -= 1;
     }
 
     fn checkpoint_grid_callback(grid: *Grid) void {
-        const env = @fieldParentPtr(Environment, "grid", grid);
+        const env: *Environment = @fieldParentPtr("grid", grid);
         env.pending -= 1;
     }
 
     fn checkpoint_superblock_callback(context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "superblock_context", context);
+        const env: *Environment = @fieldParentPtr("superblock_context", context);
         env.pending -= 1;
     }
 
@@ -575,7 +575,7 @@ const Environment = struct {
     }
 
     fn verify_superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "superblock_context", superblock_context);
+        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
         env.pending -= 1;
     }
 
@@ -583,7 +583,7 @@ const Environment = struct {
         manifest_log_verify: *ManifestLog,
         table: *const TableInfo,
     ) void {
-        const env = @fieldParentPtr(Environment, "manifest_log_verify", manifest_log_verify);
+        const env: *Environment = @fieldParentPtr("manifest_log_verify", manifest_log_verify);
         assert(env.pending > 0);
 
         const expect = env.manifest_log_opening.?.fetchRemove(table.address).?;
@@ -591,7 +591,7 @@ const Environment = struct {
     }
 
     fn verify_manifest_open_callback(manifest_log_verify: *ManifestLog) void {
-        const env = @fieldParentPtr(Environment, "manifest_log_verify", manifest_log_verify);
+        const env: *Environment = @fieldParentPtr("manifest_log_verify", manifest_log_verify);
         env.pending -= 1;
     }
 };

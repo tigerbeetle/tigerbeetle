@@ -1068,7 +1068,7 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "toLowerCase", "(C)C");
         try testing.expect(method_id != null);
 
-        var ret = env.call_static_char_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(@as(jni.JChar, 'A'))});
+        const ret = env.call_static_char_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(@as(jni.JChar, 'A'))});
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 'a');
     }
@@ -1096,7 +1096,7 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseInt", "(Ljava/lang/String;)I");
         try testing.expect(method_id != null);
 
-        var ret = env.call_static_int_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_int_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 1);
     }
@@ -1138,7 +1138,7 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseDouble", "(Ljava/lang/String;)D");
         try testing.expect(method_id != null);
 
-        var ret = env.call_static_double_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_double_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 1.0);
     }

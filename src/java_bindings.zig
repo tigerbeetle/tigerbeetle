@@ -2,10 +2,9 @@ const std = @import("std");
 
 // TODO: Move this back to src/clients/java when there's a better solution for main_pkg_path=src/
 const vsr = @import("vsr.zig");
+const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
-
-const trait = std.meta.trait;
 const assert = std.debug.assert;
 
 const output_path = "src/clients/java/src/main/java/com/tigerbeetle/";
@@ -142,7 +141,7 @@ fn java_type(
             "Type " ++ @typeName(Type) ++ " not mapped.",
         ),
         .Struct => |info| switch (info.layout) {
-            .Packed => return comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+            .@"packed" => return comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => return comptime get_mapped_type_name(Type) orelse @compileError(
                 "Type " ++ @typeName(Type) ++ " not mapped.",
             ),
@@ -181,7 +180,8 @@ fn to_case(
     return comptime blk: {
         var output: [input.len]u8 = undefined;
         if (case == .upper) {
-            break :blk std.ascii.upperString(output[0..], input);
+            const len = std.ascii.upperString(output[0..], input).len;
+            break :blk stdx.comptime_slice(&output, len);
         } else {
             var len: usize = 0;
             var iterator = std.mem.tokenize(u8, input, "_");
@@ -197,7 +197,7 @@ fn to_case(
                 .upper => unreachable,
             };
 
-            break :blk output[0..len];
+            break :blk stdx.comptime_slice(&output, len);
         }
     };
 }
@@ -355,7 +355,7 @@ fn batch_type(comptime Type: type) []const u8 {
             }
         },
         .Struct => |info| switch (info.layout) {
-            .Packed => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+            .@"packed" => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => {},
         },
         .Enum => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
@@ -485,7 +485,7 @@ fn emit_batch_accessors(
         , .{});
     }
 
-    if (comptime trait.is(.Array)(field.type)) {
+    if (@typeInfo(field.type) == .Array) {
         try buffer.writer().print(
             \\    {[visibility]s}byte[] get{[property]s}() {{
             \\        return getArray(at(Struct.{[property]s}), {[array_len]d});
@@ -510,7 +510,7 @@ fn emit_batch_accessors(
             .java_type = java_type(field.type),
             .property = to_case(field.name, .pascal),
             .batch_type = batch_type(field.type),
-            .return_expression = comptime if (trait.is(.Enum)(field.type))
+            .return_expression = comptime if (@typeInfo(field.type) == .Enum)
                 get_mapped_type_name(field.type).? ++ ".fromValue(value)"
             else
                 "value",
@@ -544,7 +544,7 @@ fn emit_batch_accessors(
         , .{});
     }
 
-    if (comptime trait.is(.Array)(field.type)) {
+    if (@typeInfo(field.type) == .Array) {
         try buffer.writer().print(
             \\    {[visibility]s}void set{[property]s}(byte[] {[param_name]s}) {{
             \\        if ({[param_name]s} == null)
@@ -574,7 +574,7 @@ fn emit_batch_accessors(
             .visibility = if (is_private or is_read_only) "" else "public ",
             .batch_type = batch_type(field.type),
             .java_type = java_type(field.type),
-            .value_expression = if (comptime trait.is(.Enum)(field.type))
+            .value_expression = if (comptime @typeInfo(field.type) == .Enum)
                 ".value"
             else
                 "",
@@ -872,16 +872,16 @@ pub fn generate_bindings(
 
     switch (@typeInfo(ZigType)) {
         .Struct => |info| switch (info.layout) {
-            .Auto => @compileError(
+            .auto => @compileError(
                 "Only packed or extern structs are supported: " ++ @typeName(ZigType),
             ),
-            .Packed => try emit_packed_enum(
+            .@"packed" => try emit_packed_enum(
                 buffer,
                 info,
                 mapping,
                 comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
             ),
-            .Extern => try emit_batch(
+            .@"extern" => try emit_batch(
                 buffer,
                 info,
                 mapping,
@@ -911,10 +911,10 @@ pub fn main() !void {
         var buffer = std.ArrayList(u8).init(allocator);
         try generate_bindings(ZigType, mapping, &buffer);
 
-        try std.fs.cwd().writeFile(
-            output_path ++ mapping.name ++ ".java",
-            buffer.items,
-        );
+        try std.fs.cwd().writeFile(.{
+            .sub_path = output_path ++ mapping.name ++ ".java",
+            .data = buffer.items,
+        });
     }
 }
 

@@ -151,7 +151,7 @@ fn run_fuzzers(
     const random = std.crypto.random;
 
     const FuzzerChild = struct {
-        child: std.ChildProcess,
+        child: std.process.Child,
         seed: SeedRecord,
     };
 
@@ -208,10 +208,10 @@ fn run_fuzzers(
                         "{zig} {args}",
                         .{ .zig = shell.zig_exe.?, .args = args.items },
                     );
-                    _ = try std.os.fcntl(
+                    _ = try std.posix.fcntl(
                         child.stdin.?.handle,
-                        std.os.F.SETFL,
-                        @as(u32, std.os.O.NONBLOCK),
+                        std.posix.F.SETFL,
+                        @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
                     );
                     fuzzer_or_null.* = .{ .seed = seed_record, .child = child };
                 }
@@ -515,7 +515,7 @@ fn upload_results(
                     seeds_merged,
                     .{ .whitespace = .indent_2 },
                 );
-                try shell.cwd.writeFile("./fuzzing/data.json", json);
+                try shell.cwd.writeFile(.{ .sub_path = "./fuzzing/data.json", .data = json });
                 try shell.exec("git add ./fuzzing/data.json", .{});
                 try shell.git_env_setup();
                 try shell.exec("git commit -m 🌱", .{});

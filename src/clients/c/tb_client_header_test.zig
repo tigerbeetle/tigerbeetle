@@ -1,8 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const tb = @import("../../tigerbeetle.zig");
 const tb_client = @import("tb_client.zig");
+const tb = tb_client.vsr.tigerbeetle;
 const c = @cImport(@cInclude("tb_client.h"));
 
 fn to_lowercase(comptime input: []const u8) []const u8 {
@@ -79,8 +79,8 @@ test "valid tb_client.h" {
                 }
             },
             .Struct => |type_info| switch (type_info.layout) {
-                .Auto => @compileError("struct must be extern or packed to be used in C"),
-                .Packed => {
+                .auto => @compileError("struct must be extern or packed to be used in C"),
+                .@"packed" => {
                     const prefix_offset = comptime std.mem.lastIndexOf(u8, c_type_name, "_").?;
                     const c_enum_prefix = c_type_name[0 .. prefix_offset + 1];
                     comptime assert(c_type == c_uint);
@@ -98,7 +98,7 @@ test "valid tb_client.h" {
                         }
                     }
                 },
-                .Extern => {
+                .@"extern" => {
                     // Ensure structs are effectively the same.
                     comptime assert(@sizeOf(ty) == @sizeOf(c_type));
                     comptime assert(@alignOf(ty) == @alignOf(c_type));
@@ -108,7 +108,7 @@ test "valid tb_client.h" {
                         comptime var field_type = field.type;
                         switch (@typeInfo(field_type)) {
                             .Struct => |info| {
-                                comptime assert(info.layout == .Packed);
+                                comptime assert(info.layout == .@"packed");
                                 comptime assert(@sizeOf(field_type) <= @sizeOf(u128));
                                 field_type = std.meta.Int(.unsigned, @bitSizeOf(field_type));
                             },
@@ -117,7 +117,7 @@ test "valid tb_client.h" {
                         }
 
                         // In C, pointers are opaque so we compare only the field sizes,
-                        comptime var c_field_type = @TypeOf(@field(@as(c_type, undefined), field.name));
+                        const c_field_type = @TypeOf(@field(@as(c_type, undefined), field.name));
                         switch (@typeInfo(c_field_type)) {
                             .Pointer => |info| {
                                 comptime assert(info.size == .C);

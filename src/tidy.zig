@@ -16,7 +16,7 @@ test "tidy" {
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
-    var src_dir = try fs.cwd().openIterableDir("./src", .{});
+    var src_dir = try fs.cwd().openDir("./src", .{ .iterate = true });
     defer src_dir.close();
 
     var walker = try src_dir.walk(allocator);
@@ -259,14 +259,14 @@ test "tidy no large blobs" {
 
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
-    const allowed_extensions = std.ComptimeStringMap(void, .{
+    const allowed_extensions = std.StaticStringMap(void).initComptime(.{
         .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"},  .{".css"},  .{".go"},
         .{".h"},   .{".hcl"},   .{".java"}, .{".js"},      .{".json"}, .{".md"},
         .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sh"},   .{".sln"},
         .{".sum"}, .{".ts"},    .{".txt"},  .{".xml"},     .{".yml"},  .{".zig"},
     });
 
-    const exceptions = std.ComptimeStringMap(void, .{
+    const exceptions = std.StaticStringMap(void).initComptime(.{
         .{".editorconfig"},          .{".gitattributes"},   .{".gitignore"},
         .{".nojekyll"},              .{"CNAME"},            .{"Dockerfile"},
         .{"exclude-pmd.properties"}, .{"favicon.ico"},      .{"favicon.png"},
@@ -364,7 +364,6 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "clients/c/tb_client_header_test.zig",
     "clients/c/tb_client.zig",
     "clients/c/tb_client/context.zig",
     "clients/c/tb_client/signal.zig",

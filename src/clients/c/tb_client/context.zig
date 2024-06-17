@@ -1,19 +1,20 @@
 const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
+const Atomic = std.atomic.Value;
 
-const Atomic = std.atomic.Atomic;
+// When referenced from unit_test.zig, there is no vsr import module so use path.
+const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
 
-const constants = @import("../../../constants.zig");
+const constants = vsr.constants;
 const log = std.log.scoped(.tb_client_context);
 
-const stdx = @import("../../../stdx.zig");
-const vsr = @import("../../../vsr.zig");
+const stdx = vsr.stdx;
 const Header = vsr.Header;
 
-const IO = @import("../../../io.zig").IO;
-const FIFO = @import("../../../fifo.zig").FIFO;
-const message_pool = @import("../../../message_pool.zig");
+const IO = vsr.io.IO;
+const FIFO = vsr.fifo.FIFO;
+const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
@@ -243,7 +244,7 @@ pub fn ContextType(
         }
 
         pub fn deinit(self: *Context) void {
-            const is_shutdown = self.shutdown.swap(true, .Monotonic);
+            const is_shutdown = self.shutdown.swap(true, .monotonic);
             if (!is_shutdown) {
                 self.thread.join();
                 self.signal.deinit();
@@ -278,7 +279,7 @@ pub fn ContextType(
 
             while (true) {
                 // Keep running until shutdown:
-                const is_shutdown = self.shutdown.load(.Acquire);
+                const is_shutdown = self.shutdown.load(.acquire);
                 if (is_shutdown) {
                     // We need to drain all free packets, to ensure that all
                     // inflight requests have finished.
@@ -300,7 +301,7 @@ pub fn ContextType(
         }
 
         fn on_signal(signal: *Signal) void {
-            const self = @fieldParentPtr(Context, "signal", signal);
+            const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
 
             // Don't send any requests until registration completes.
             if (self.batch_size_limit == null) {
@@ -486,14 +487,14 @@ pub fn ContextType(
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {
-            return @fieldParentPtr(Context, "implementation", implementation);
+            return @alignCast(@fieldParentPtr("implementation", implementation));
         }
 
         fn on_acquire_packet(implementation: *ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus {
             const self = get_context(implementation);
 
             // During shutdown, no packet can be acquired by the application.
-            const is_shutdown = self.shutdown.load(.Acquire);
+            const is_shutdown = self.shutdown.load(.acquire);
             if (is_shutdown) {
                 return .shutdown;
             } else if (self.packets_free.pop()) |packet| {

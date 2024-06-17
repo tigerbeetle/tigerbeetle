@@ -189,7 +189,10 @@ pub const Snap = struct {
         }
         try file_text_updated.appendSlice(snapshot_suffix);
 
-        try std.fs.cwd().writeFile(snapshot.location.file, file_text_updated.items);
+        try std.fs.cwd().writeFile(.{
+            .sub_path = snapshot.location.file,
+            .data = file_text_updated.items,
+        });
 
         std.debug.print("Updated {s}\n", .{snapshot.location.file});
         return error.SnapUpdated;

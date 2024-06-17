@@ -49,7 +49,7 @@ pub const Failure = enum(u8) {
 /// with a replica index.
 const client_id_permutation_shift = constants.members_max;
 
-// TODO(Zig): Once Zig is upgraded from 0.11, change StateMachineType from anytype back to
+// TODO(Zig): Once Zig is upgraded from 0.13, change StateMachineType from anytype back to
 // fn (comptime Storage: type, comptime constants: anytype) type.
 pub fn ClusterType(comptime StateMachineType: anytype) type {
     return struct {
@@ -728,7 +728,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// Print an error message and then exit with an exit code.
         fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
             std.log.scoped(.state_checker).err(fmt_string, args);
-            std.os.exit(@intFromEnum(failure));
+            std.posix.exit(@intFromEnum(failure));
         }
 
         /// Print the current state of the cluster, intended for printf debugging.

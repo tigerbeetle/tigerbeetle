@@ -196,13 +196,14 @@ fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         fn write_sectors_callback(write: *Storage.Write) void {
-            const self = @fieldParentPtr(Self, "write", write);
+            const self: *Self = @alignCast(@fieldParentPtr("write", write));
             assert(self.formatting);
             self.formatting = false;
         }
 
         fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            const self: *Self =
+                @alignCast(@fieldParentPtr("superblock_context", superblock_context));
             assert(self.formatting);
             self.formatting = false;
         }

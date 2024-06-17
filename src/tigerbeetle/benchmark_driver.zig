@@ -15,7 +15,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
-const ChildProcess = std.ChildProcess;
+const ChildProcess = std.process.Child;
 
 const cli = @import("./cli.zig");
 const benchmark_load = @import("./benchmark_load.zig");
@@ -81,7 +81,7 @@ fn format(allocator: std.mem.Allocator, options: struct {
     tigerbeetle: []const u8,
     data_file: []const u8,
 }) !void {
-    const format_result = try ChildProcess.exec(.{
+    const format_result = try ChildProcess.run(.{
         .allocator = allocator,
         .argv = &.{
             options.tigerbeetle,
@@ -105,10 +105,10 @@ fn format(allocator: std.mem.Allocator, options: struct {
 }
 
 const TigerBeetleProcess = struct {
-    child: std.ChildProcess,
+    child: std.process.Child,
     address: std.net.Address,
 
-    fn deinit(self: *TigerBeetleProcess) std.ChildProcess.ResourceUsageStatistics {
+    fn deinit(self: *TigerBeetleProcess) std.process.Child.ResourceUsageStatistics {
         // Although we could just kill the child here, let's exercise the "normal" termination logic
         // through stdin closure, such that, from the perspective of the child, there's no
         // difference between the parent process exiting normally or just crashing.
@@ -156,7 +156,7 @@ fn start(allocator: std.mem.Allocator, options: struct {
     }
 
     try start_args.append(arena.allocator(), options.data_file);
-    var child = std.ChildProcess.init(start_args.items, allocator);
+    var child = std.process.Child.init(start_args.items, allocator);
 
     child.request_resource_usage_statistics = true;
     child.stdin_behavior = .Pipe;

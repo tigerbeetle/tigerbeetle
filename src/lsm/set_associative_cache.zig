@@ -592,7 +592,7 @@ test "SetAssociativeCache: hash collision" {
 fn PackedUnsignedIntegerArray(comptime UInt: type) type {
     const Word = u64;
 
-    assert(builtin.target.cpu.arch.endian() == .Little);
+    assert(builtin.target.cpu.arch.endian() == .little);
     assert(@typeInfo(UInt).Int.signedness == .unsigned);
     assert(@typeInfo(UInt).Int.bits < @bitSizeOf(u8));
     assert(math.isPowerOfTwo(@typeInfo(UInt).Int.bits));

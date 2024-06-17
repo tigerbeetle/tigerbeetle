@@ -293,7 +293,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn open_free_set_callback(free_set_checkpoint: *CheckpointTrailer) void {
-            const grid = @fieldParentPtr(Grid, "free_set_checkpoint", free_set_checkpoint);
+            const grid: *Grid = @fieldParentPtr("free_set_checkpoint", free_set_checkpoint);
             const callback = grid.callback.open;
 
             {
@@ -359,7 +359,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn checkpoint_free_set_callback(set: *CheckpointTrailer) void {
-            const grid = @fieldParentPtr(Grid, "free_set_checkpoint", set);
+            const grid: *Grid = @fieldParentPtr("free_set_checkpoint", set);
             assert(grid.callback == .checkpoint);
             grid.checkpoint_join();
         }
@@ -429,7 +429,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn cancel_tick_callback(next_tick: *NextTick) void {
-            const grid = @fieldParentPtr(Grid, "canceling_tick_context", next_tick);
+            const grid: *Grid = @alignCast(@fieldParentPtr("canceling_tick_context", next_tick));
             if (grid.callback != .cancel) return;
 
             assert(grid.read_queue.empty());
@@ -739,7 +739,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn write_block_callback(completion: *Storage.Write) void {
-            const iop = @fieldParentPtr(WriteIOP, "completion", completion);
+            const iop: *WriteIOP = @fieldParentPtr("completion", completion);
 
             // We must copy these values to the stack as they will be overwritten
             // when we release the iop and potentially start a queued write.
@@ -897,7 +897,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn read_block_tick_callback(next_tick: *Storage.NextTick) void {
-            const read = @fieldParentPtr(Grid.Read, "next_tick", next_tick);
+            const read: *Grid.Read = @alignCast(@fieldParentPtr("next_tick", next_tick));
             const grid = read.grid;
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
@@ -989,7 +989,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn read_block_callback(completion: *Storage.Read) void {
-            const iop = @fieldParentPtr(ReadIOP, "completion", completion);
+            const iop: *ReadIOP = @fieldParentPtr("completion", completion);
             const read = iop.read;
             const grid = read.grid;
             const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
@@ -1024,7 +1024,7 @@ pub fn GridType(comptime Storage: type) type {
 
             // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {
-                const queued_read = @fieldParentPtr(Read, "pending", pending);
+                const queued_read: *Read = @alignCast(@fieldParentPtr("pending", pending));
                 grid.read_block_with(iop, queued_read);
             } else {
                 grid.read_iops.release(iop);
@@ -1120,7 +1120,7 @@ pub fn GridType(comptime Storage: type) type {
 
             // Resolve all reads queued to the address with the block.
             while (read.resolves.pop()) |pending| {
-                const pending_read = @fieldParentPtr(Read, "pending", pending);
+                const pending_read: *Read = @alignCast(@fieldParentPtr("pending", pending));
                 assert(pending_read.address == read.address);
                 assert(pending_read.checksum == read.checksum);
                 if (pending_read.coherent) {
@@ -1156,7 +1156,9 @@ pub fn GridType(comptime Storage: type) type {
             // resolves) to recovery queue. Future reads on the same address will see the "root"
             // read in the recovery queue and enqueue to it.
             if (read_remote_resolves.pop()) |read_remote_head_pending| {
-                const read_remote_head = @fieldParentPtr(Read, "pending", read_remote_head_pending);
+                const read_remote_head: *Read = @alignCast(
+                    @fieldParentPtr("pending", read_remote_head_pending),
+                );
                 assert(read_remote_head.callback == .from_local_or_global_storage);
                 assert(read_remote_head.coherent);
 

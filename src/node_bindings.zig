@@ -80,7 +80,7 @@ fn typescript_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
         .Enum => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         .Struct => |info| switch (info.layout) {
-            .Packed => return comptime typescript_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+            .@"packed" => return comptime typescript_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         },
         .Int => |info| {
@@ -133,7 +133,7 @@ fn emit_packed_struct(
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
 ) !void {
-    assert(type_info.layout == .Packed);
+    assert(type_info.layout == .@"packed");
     try emit_docs(buffer, mapping, 0, null);
 
     try buffer.writer().print(
@@ -225,9 +225,9 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
-                .Auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
-                .Packed => try emit_packed_struct(buffer, info, mapping),
-                .Extern => try emit_struct(buffer, info, mapping),
+                .auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
+                .@"packed" => try emit_packed_struct(buffer, info, mapping),
+                .@"extern" => try emit_struct(buffer, info, mapping),
             },
             .Enum => try emit_enum(buffer, ZigType, mapping),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
@@ -242,7 +242,7 @@ pub fn main() !void {
 
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
-    try std.fs.cwd().writeFile(output_file, buffer.items);
+    try std.fs.cwd().writeFile(.{ .sub_path = output_file, .data = buffer.items });
 }
 
 const testing = std.testing;

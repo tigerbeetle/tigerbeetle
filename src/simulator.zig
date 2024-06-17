@@ -49,12 +49,12 @@ const releases = [_]Release{
 pub const output = std.log.scoped(.cluster);
 const log = std.log.scoped(.simulator);
 
-pub const std_options = struct {
-    /// The -Dsimulator-log=<full|short> build option selects two logging modes.
-    /// In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
-    /// "full" mode is the usual logging according to the level.
-    pub const log_level: std.log.Level = if (vsr_simulator_options.log == .short) .info else .debug;
-    pub const logFn = log_override;
+pub const std_options = .{
+    // The -Dsimulator-log=<full|short> build option selects two logging modes.
+    // In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
+    // "full" mode is the usual logging according to the level.
+    .log_level = if (vsr_simulator_options.log == .short) .info else .debug,
+    .logFn = log_override,
 
     // Uncomment if you need per-scope control over the log levels.
     // pub const log_scope_levels: []const std.log.ScopeLevel = &.{
@@ -448,11 +448,11 @@ pub const Simulator = struct {
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
         errdefer workload.deinit(allocator);
 
-        var replica_releases = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        const replica_releases = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_releases);
         @memset(replica_releases, 1);
 
-        var replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        const replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_stability);
         @memset(replica_stability, 0);
 
@@ -1070,7 +1070,7 @@ pub const Simulator = struct {
 /// Print an error message and then exit with an exit code.
 fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
     output.err(fmt_string, args);
-    std.os.exit(@intFromEnum(failure));
+    std.posix.exit(@intFromEnum(failure));
 }
 
 /// Returns true, `p` percent of the time, else false.
@@ -1088,13 +1088,13 @@ fn chance_f64(random: std.rand.Random, p: f64) bool {
 /// Returns a random partitioning mode.
 fn random_partition_mode(random: std.rand.Random) PartitionMode {
     const typeInfo = @typeInfo(PartitionMode).Enum;
-    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
+    const enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @as(PartitionMode, @enumFromInt(enumAsInt));
 }
 
 fn random_partition_symmetry(random: std.rand.Random) PartitionSymmetry {
     const typeInfo = @typeInfo(PartitionSymmetry).Enum;
-    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
+    const enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @as(PartitionSymmetry, @enumFromInt(enumAsInt));
 }
 

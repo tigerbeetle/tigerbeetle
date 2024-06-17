@@ -19,7 +19,7 @@ port_str: stdx.BoundedArray(u8, 8),
 
 tmp_dir: std.testing.TmpDir,
 
-process: std.ChildProcess,
+process: std.process.Child,
 
 pub fn init(
     gpa: std.mem.Allocator,
@@ -73,9 +73,7 @@ pub fn init(
         .{
             .stdin_behavior = .Pipe,
             .stdout_behavior = .Pipe,
-            // TODO(Zig): ignoring stderr is broken in 0.11, fixed in 0.12:
-            //     https://github.com/ziglang/zig/pull/15565
-            .stderr_behavior = if (builtin.os.tag == .windows) .Inherit else .Ignore,
+            .stderr_behavior = .Ignore,
         },
         "{tigerbeetle} start --development --addresses=0 {data_file}",
         .{ .tigerbeetle = tigerbeetle, .data_file = data_file },
@@ -85,7 +83,7 @@ pub fn init(
     }
 
     const port = port: {
-        var exit_status: ?std.ChildProcess.Term = null;
+        var exit_status: ?std.process.Child.Term = null;
         errdefer log.err(
             "failed to read port number from tigerbeetle process: {?}",
             .{exit_status},

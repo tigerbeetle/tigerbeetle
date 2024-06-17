@@ -25,9 +25,9 @@ const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state
 const Operation = StateMachine.Operation;
 const constants = vsr.constants;
 
-pub const std_options = struct {
+pub const std_options = .{
     // Since this is running in application space, log only critical messages to reduce noise.
-    pub const log_level: std.log.Level = .err;
+    .log_level = .err,
 };
 
 // Cached value for JS (null).

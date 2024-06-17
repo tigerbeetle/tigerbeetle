@@ -107,7 +107,7 @@ fn generate_fuzz_ops(
     errdefer allocator.free(fuzz_ops);
 
     // TODO: These seem good enough, but we should find proper distributions.
-    var fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
+    const fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
         .insert_tables = 8,
         .update_tables = 5,
         .take_snapshot = 3,
@@ -143,7 +143,7 @@ const GenerateContext = struct {
                     return ctx.next(.remove_visible);
                 }
 
-                var amount = ctx.random.intRangeAtMostBiased(usize, 1, insertable);
+                const amount = ctx.random.intRangeAtMostBiased(usize, 1, insertable);
                 ctx.inserted += amount;
                 assert(ctx.invisible <= ctx.inserted);
                 assert(ctx.invisible + ctx.updated <= ctx.inserted);
@@ -155,7 +155,7 @@ const GenerateContext = struct {
                 if (visible_latest == 0) return ctx.next(.insert_tables);
 
                 // Decide if all, or tables visible to snapshot_latest should be updated.
-                var amount = if (ctx.random.boolean())
+                const amount = if (ctx.random.boolean())
                     visible_latest
                 else
                     ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
@@ -183,7 +183,7 @@ const GenerateContext = struct {
                 }
 
                 // Decide if all invisible tables should be removed.
-                var amount = if (ctx.random.boolean())
+                const amount = if (ctx.random.boolean())
                     invisible
                 else
                     ctx.random.intRangeAtMostBiased(usize, 1, invisible);
@@ -204,7 +204,7 @@ const GenerateContext = struct {
                 }
 
                 // Decide if all tables visible ot snapshot_latest should be removed.
-                var amount = if (ctx.random.boolean())
+                const amount = if (ctx.random.boolean())
                     visible_latest
                 else
                     ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
@@ -330,7 +330,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             var new_key_min = key + env.random.uintLessThanBiased(Key, 31) + 1;
             assert(new_key_min > key);
 
-            var i = binary_search.binary_search_values_upsert_index(
+            const i = binary_search.binary_search_values_upsert_index(
                 Key,
                 TableInfo,
                 key_min_from_table,

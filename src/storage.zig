@@ -5,11 +5,11 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.storage);
 
-const stdx = @import("stdx.zig");
-const IO = @import("io.zig").IO;
-const FIFO = @import("fifo.zig").FIFO;
-const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
+const stdx = vsr.stdx;
+const IO = vsr.io.IO;
+const FIFO = vsr.fifo.FIFO;
+const constants = vsr.constants;
 
 pub const Storage = struct {
     /// See usage in Journal.write_sectors() for details.
@@ -79,13 +79,13 @@ pub const Storage = struct {
     pub const NextTickSource = enum { lsm, vsr };
 
     io: *IO,
-    fd: os.fd_t,
+    fd: std.posix.fd_t,
 
     next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
     next_tick_completion_scheduled: bool = false,
     next_tick_completion: IO.Completion = undefined,
 
-    pub fn init(io: *IO, fd: os.fd_t) !Storage {
+    pub fn init(io: *IO, fd: std.posix.fd_t) !Storage {
         return Storage{
             .io = io,
             .fd = fd,
@@ -220,7 +220,7 @@ pub const Storage = struct {
     }
 
     fn on_read(self: *Storage, completion: *IO.Completion, result: IO.ReadError!usize) void {
-        const read = @fieldParentPtr(Storage.Read, "completion", completion);
+        const read: *Storage.Read = @fieldParentPtr("completion", completion);
 
         const bytes_read = result catch |err| switch (err) {
             error.InputOutput => {
@@ -358,7 +358,7 @@ pub const Storage = struct {
     }
 
     fn on_write(self: *Storage, completion: *IO.Completion, result: IO.WriteError!usize) void {
-        const write = @fieldParentPtr(Storage.Write, "completion", completion);
+        const write: *Storage.Write = @fieldParentPtr("completion", completion);
 
         const bytes_written = result catch |err| switch (err) {
             // We assume that the disk will attempt to reallocate a spare sector for any LSE.

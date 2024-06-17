@@ -194,7 +194,7 @@ const ConfigCluster = struct {
         comptime for (std.meta.fields(ConfigCluster)) |field| {
             const value = @field(config, field.name);
             const value_64 = @as(u64, value);
-            assert(builtin.target.cpu.arch.endian() == .Little);
+            assert(builtin.target.cpu.arch.endian() == .little);
             config_bytes = config_bytes ++ std.mem.asBytes(&value_64);
         };
         return vsr.checksum(config_bytes);

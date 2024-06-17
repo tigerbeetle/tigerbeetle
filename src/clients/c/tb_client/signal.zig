@@ -1,11 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const IO = @import("../../../io.zig").IO;
+
+const vsr = @import("../tb_client.zig").vsr;
+const IO = vsr.io.IO;
 
 const os = std.os;
 const assert = std.debug.assert;
-const Atomic = std.atomic.Atomic;
-
+const Atomic = std.atomic.Value;
 const log = std.log.scoped(.tb_client_signal);
 
 /// A Signal is a way to trigger a registered callback on a tigerbeetle IO instance
@@ -14,9 +15,9 @@ const log = std.log.scoped(.tb_client_signal);
 /// to resolve IO.Completions on the tigerbeetle thread.
 pub const Signal = struct {
     io: *IO,
-    server_socket: os.socket_t,
-    accept_socket: os.socket_t,
-    connect_socket: os.socket_t,
+    server_socket: std.posix.socket_t,
+    accept_socket: std.posix.socket_t,
+    connect_socket: std.posix.socket_t,
 
     completion: IO.Completion,
     recv_buffer: [1]u8,
@@ -31,10 +32,10 @@ pub const Signal = struct {
 
     pub fn init(self: *Signal, io: *IO, on_signal_fn: *const fn (*Signal) void) !void {
         self.io = io;
-        self.server_socket = os.socket(
-            os.AF.INET,
-            os.SOCK.STREAM | os.SOCK.NONBLOCK,
-            os.IPPROTO.TCP,
+        self.server_socket = std.posix.socket(
+            std.posix.AF.INET,
+            std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK,
+            std.posix.IPPROTO.TCP,
         ) catch |err| {
             log.err("failed to create signal server socket: {}", .{err});
             return switch (err) {
@@ -43,12 +44,12 @@ pub const Signal = struct {
                 error.Unexpected => error.Unexpected,
             };
         };
-        errdefer os.closeSocket(self.server_socket);
+        errdefer self.io.close_socket(self.server_socket);
 
         // Windows requires that the socket is bound before listening
         if (builtin.target.os.tag == .windows) {
             const addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0); // zero port lets the OS choose
-            os.bind(self.server_socket, &addr.any, addr.getOsSockLen()) catch |err| {
+            std.posix.bind(self.server_socket, &addr.any, addr.getOsSockLen()) catch |err| {
                 log.err("failed to bind the server socket to a local random port: {}", .{err});
                 return switch (err) {
                     error.AccessDenied => unreachable,
@@ -65,7 +66,7 @@ pub const Signal = struct {
             };
         }
 
-        os.listen(self.server_socket, 1) catch |err| {
+        std.posix.listen(self.server_socket, 1) catch |err| {
             log.err("failed to listen on signal server socket: {}", .{err});
             return switch (err) {
                 error.AddressInUse => unreachable,
@@ -80,7 +81,7 @@ pub const Signal = struct {
 
         var addr = std.net.Address.initIp4(undefined, undefined);
         var addr_len = addr.getOsSockLen();
-        os.getsockname(self.server_socket, &addr.any, &addr_len) catch |err| {
+        std.posix.getsockname(self.server_socket, &addr.any, &addr_len) catch |err| {
             log.err("failed to get address of signal server socket: {}", .{err});
             return switch (err) {
                 error.SocketNotBound => unreachable,
@@ -92,14 +93,14 @@ pub const Signal = struct {
         };
 
         self.connect_socket = self.io.open_socket(
-            os.AF.INET,
-            os.SOCK.STREAM,
-            os.IPPROTO.TCP,
+            std.posix.AF.INET,
+            std.posix.SOCK.STREAM,
+            std.posix.IPPROTO.TCP,
         ) catch |err| {
             log.err("failed to create signal connect socket: {}", .{err});
             return error.Unexpected;
         };
-        errdefer os.closeSocket(self.connect_socket);
+        errdefer self.io.close_socket(self.connect_socket);
 
         // Tracks when the connect_socket connects to the server_socket
         const DoConnect = struct {
@@ -139,7 +140,7 @@ pub const Signal = struct {
 
             // Try to accept the connection from the connect_socket as the accept_socket
             if (self.accept_socket == IO.INVALID_SOCKET) {
-                self.accept_socket = os.accept(self.server_socket, null, null, 0) catch |e| switch (e) {
+                self.accept_socket = std.posix.accept(self.server_socket, null, null, 0) catch |e| switch (e) {
                     error.WouldBlock => continue,
                     error.ConnectionAborted => unreachable,
                     error.ConnectionResetByPeer => unreachable,
@@ -172,15 +173,15 @@ pub const Signal = struct {
     }
 
     pub fn deinit(self: *Signal) void {
-        os.closeSocket(self.server_socket);
-        os.closeSocket(self.accept_socket);
-        os.closeSocket(self.connect_socket);
+        self.io.close_socket(self.server_socket);
+        self.io.close_socket(self.accept_socket);
+        self.io.close_socket(self.connect_socket);
     }
 
     /// Schedules the on_signal callback to be invoked on the IO thread.
     /// Safe to call from multiple threads.
     pub fn notify(self: *Signal) void {
-        if (self.state.swap(.notified, .Release) == .waiting) {
+        if (self.state.swap(.notified, .release) == .waiting) {
             self.wake();
         }
     }
@@ -189,9 +190,9 @@ pub const Signal = struct {
         assert(self.accept_socket != IO.INVALID_SOCKET);
         self.send_buffer[0] = 0;
 
-        // TODO: use os.send() instead when it gets fixed for windows
+        // TODO: use std.posix.send() instead when it gets fixed for windows
         if (builtin.target.os.tag != .windows) {
-            _ = os.send(self.accept_socket, &self.send_buffer, 0) catch unreachable;
+            _ = std.posix.send(self.accept_socket, &self.send_buffer, 0) catch unreachable;
             return;
         }
 
@@ -201,11 +202,11 @@ pub const Signal = struct {
     }
 
     fn wait(self: *Signal) void {
-        const state = self.state.compareAndSwap(
+        const state = self.state.cmpxchgStrong(
             .running,
             .waiting,
-            .Acquire,
-            .Acquire,
+            .acquire,
+            .acquire,
         ) orelse return self.io.recv(
             *Signal,
             self,
@@ -251,11 +252,11 @@ pub const Signal = struct {
     }
 
     fn on_signal(self: *Signal) void {
-        const state = self.state.compareAndSwap(
+        const state = self.state.cmpxchgStrong(
             .notified,
             .running,
-            .Acquire,
-            .Acquire,
+            .acquire,
+            .acquire,
         ) orelse {
             (self.on_signal_fn)(self);
             return self.wait();

@@ -306,7 +306,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         \\<https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/go>
         \\for documentation and contributions.
     , .{ .sha = info.sha });
-    try dist_dir.writeFile("README.md", readme);
+    try dist_dir.writeFile(.{ .sub_path = "README.md", .data = readme });
 }
 
 fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {

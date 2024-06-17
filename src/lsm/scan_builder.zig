@@ -284,7 +284,7 @@ pub fn ScanBuilderType(
         }
 
         inline fn groove(self: *ScanBuilder) *Groove {
-            return @fieldParentPtr(Groove, "scan_builder", self);
+            return @alignCast(@fieldParentPtr("scan_builder", self));
         }
     };
 }
@@ -519,11 +519,10 @@ pub fn ScanType(
             impl: *std.meta.FieldType(Dispatcher, field),
         ) *Scan {
             const dispatcher: *Dispatcher = @alignCast(@fieldParentPtr(
-                Dispatcher,
                 @tagName(field),
                 impl,
             ));
-            return @fieldParentPtr(Scan, "dispatcher", dispatcher);
+            return @fieldParentPtr("dispatcher", dispatcher);
         }
     };
 }

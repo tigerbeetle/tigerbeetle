@@ -345,8 +345,8 @@ pub fn StateMachineType(
             ) *StateMachine {
                 comptime assert(field != .null);
 
-                const context = @fieldParentPtr(PrefetchContext, @tagName(field), completion);
-                return @fieldParentPtr(StateMachine, "prefetch_context", context);
+                const context: *PrefetchContext = @fieldParentPtr(@tagName(field), completion);
+                return @fieldParentPtr("prefetch_context", context);
             }
 
             pub fn get(self: *PrefetchContext, comptime field: Field) *FieldType(field) {
@@ -379,8 +379,8 @@ pub fn StateMachineType(
             ) *StateMachine {
                 comptime assert(field != .null);
 
-                const context = @fieldParentPtr(ScanLookup, @tagName(field), completion);
-                return @fieldParentPtr(StateMachine, "scan_lookup", context);
+                const context: *ScanLookup = @fieldParentPtr(@tagName(field), completion);
+                return @fieldParentPtr("scan_lookup", context);
             }
 
             pub fn get(self: *ScanLookup, comptime field: Field) *FieldType(field) {
@@ -501,7 +501,7 @@ pub fn StateMachineType(
         }
 
         fn forest_open_callback(forest: *Forest) void {
-            const self = @fieldParentPtr(StateMachine, "forest", forest);
+            const self: *StateMachine = @fieldParentPtr("forest", forest);
             assert(self.open_callback != null);
 
             const callback = self.open_callback.?;
@@ -971,11 +971,10 @@ pub fn StateMachineType(
         }
 
         fn prefetch_scan_next_tick_callback(completion: *Grid.NextTick) void {
-            const self: *StateMachine = @fieldParentPtr(
-                StateMachine,
+            const self: *StateMachine = @alignCast(@fieldParentPtr(
                 "scan_lookup_next_tick",
                 completion,
-            );
+            ));
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(self.scan_lookup == .null);
 
@@ -1139,7 +1138,7 @@ pub fn StateMachineType(
         }
 
         fn compact_finish(forest: *Forest) void {
-            const self = @fieldParentPtr(StateMachine, "forest", forest);
+            const self: *StateMachine = @fieldParentPtr("forest", forest);
             const callback = self.compact_callback.?;
             self.compact_callback = null;
 
@@ -1160,7 +1159,7 @@ pub fn StateMachineType(
         }
 
         fn checkpoint_finish(forest: *Forest) void {
-            const self = @fieldParentPtr(StateMachine, "forest", forest);
+            const self: *StateMachine = @fieldParentPtr("forest", forest);
             const callback = self.checkpoint_callback.?;
             self.checkpoint_callback = null;
             callback(self);
@@ -2239,11 +2238,10 @@ fn ExpirePendingTransfersType(
         }
 
         inline fn value_next(context: *Context, value: *const Value) EvaluateNext {
-            const self: *ExpirePendingTransfers = @fieldParentPtr(
-                ExpirePendingTransfers,
+            const self: *ExpirePendingTransfers = @alignCast(@fieldParentPtr(
                 "context",
                 context,
-            );
+            ));
             assert(self.phase == .running);
 
             const expires_at: u64 = value.field;
@@ -2357,7 +2355,7 @@ const TestContext = struct {
     }
 
     fn callback(state_machine: *StateMachine) void {
-        const ctx = @fieldParentPtr(TestContext, "state_machine", state_machine);
+        const ctx: *TestContext = @fieldParentPtr("state_machine", state_machine);
         assert(ctx.busy);
         ctx.busy = false;
     }
@@ -2602,16 +2600,15 @@ const TestGetAccountTransfersResult = struct {
 fn check(test_table: []const u8) !void {
     // TODO(zig): Zig defaults to 16MB stack size on Linux, but not yet on mac as of 0.11.
     // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
-    // in build.zig doesn't work.
-    // Duplicated here from src/tigerbeetle/main.zig, since that code won't run on the testing
-    // path.
-    const builtin = @import("builtin");
-    if (builtin.target.os.tag == .macos)
-        std.os.setrlimit(std.os.rlimit_resource.STACK, .{
-            .cur = 16 * 1024 * 1024,
-            .max = 16 * 1024 * 1024,
-        }) catch @panic("unable to adjust stack limit");
+    // in build.zig doesn't work. setrlimit with 16MB errors with EINVAL on macOS 13 as well.
+    // So instead, we spawn a thread with the desired stack size instead.
+    //
+    // Duplicated here from src/tigerbeetle/main.zig, since that code won't run on the testing path.
+    const thread = try std.Thread.spawn(.{ .stack_size = 16 * 1024 * 1024 }, check_real, .{test_table});
+    thread.join();
+}
 
+fn check_real(test_table: []const u8) !void {
     const parse_table = @import("testing/table.zig").parse;
     const allocator = std.testing.allocator;
 
@@ -2657,7 +2654,7 @@ fn check(test_table: []const u8) !void {
 
             .tick => |ticks| {
                 assert(ticks.value != 0);
-                const interval_ns: u64 = std.math.absCast(ticks.value) *
+                const interval_ns: u64 = @abs(ticks.value) *
                     switch (ticks.unit) {
                     .seconds => std.time.ns_per_s,
                 };

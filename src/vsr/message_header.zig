@@ -1407,7 +1407,7 @@ comptime {
         assert(@sizeOf(CommandHeader) == @sizeOf(Header));
         assert(@alignOf(CommandHeader) == @alignOf(Header));
         assert(@typeInfo(CommandHeader) == .Struct);
-        assert(@typeInfo(CommandHeader).Struct.layout == .Extern);
+        assert(@typeInfo(CommandHeader).Struct.layout == .@"extern");
         assert(stdx.no_padding(CommandHeader));
 
         // Verify that the command's header's frame is identical to Header's.
