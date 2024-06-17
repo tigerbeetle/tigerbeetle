@@ -86,6 +86,7 @@ async function mainSeeds() {
   const query_all = query.get("all") !== null;
   const fuzzersWithFailures = new Set();
 
+  const seedsDom = document.querySelector("#seeds");
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
   let commit_count = 0;
@@ -149,6 +150,24 @@ async function mainSeeds() {
       `;
     tableDom.appendChild(rowDom);
   }
+
+  let mainBranchFail = 0;
+  let mainBranchOk = 0;
+  let mainBranchCanary = 0;
+  for (const record of records) {
+    if (record.branch == "https://github.com/tigerbeetle/tigerbeetle") {
+      if (record.fuzzer === "canary") {
+        mainBranchCanary += 1;
+      } else if (record.ok) {
+        mainBranchOk += 1;
+      } else {
+        mainBranchFail += 1;
+      }
+    }
+  }
+  seedsDom.append(
+    `main branch ok=${mainBranchOk} fail=${mainBranchFail} canary=${mainBranchCanary}`,
+  );
 }
 
 function pullRequestNumber(record) {
