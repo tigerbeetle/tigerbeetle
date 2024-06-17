@@ -7,7 +7,7 @@ for file in $(ls [0-9][0-9][0-9]*.sh | grep -v "$0" | sort -n); do
     # Check if the current file is 002_server.sh
     if [ "$file" = "002_server.sh" ]; then
         # Execute the file in the background and store its process ID
-        bash $file &
+        bash "$file" 2>&1 | sed 's/^/[Server] /' &
         server_pid=$!
         sleep 1
         if ! kill -0 $server_pid 2>/dev/null; then
