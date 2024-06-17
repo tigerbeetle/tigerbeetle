@@ -13,7 +13,11 @@ function tb() {
     # For efficiency, TigerBeetle only returns error responses.
     # These will be printed to the console when we use the REPL.
     # For the purposes of these exercises, we want to treat any error responses as script failures.
-    if [[ $output != "[Client] info(message_bus): connected to replica 0" ]]; then
-        exit 1
-    fi
+    # The one exception is if an account or transfer already exists, it will return the "exists" error.
+    # We treat the "exists" error as a successful operation here.
+    while IFS= read -r line; do
+        if [[ $line != *"connected to replica"* && $line != *"Result.exists." ]]; then
+            exit 1
+        fi
+    done <<< "$output"
 }
