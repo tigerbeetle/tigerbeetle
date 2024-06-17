@@ -1370,7 +1370,7 @@ pub const IO = struct {
                 const BLKGETSIZE64 = os.linux.IOCTL.IOR(0x12, 114, usize);
                 var block_device_size: usize = 0;
 
-                switch (posix.errno(os.linux.ioctl(
+                switch (os.linux.E.init(os.linux.ioctl(
                     fd,
                     BLKGETSIZE64,
                     @intFromPtr(&block_device_size),
@@ -1436,7 +1436,7 @@ pub const IO = struct {
 
         while (true) {
             const res = stdx.fstatfs(dir_fd, &statfs);
-            switch (posix.errno(res)) {
+            switch (os.linux.E.init(res)) {
                 .SUCCESS => {
                     return statfs.f_type == stdx.TmpfsMagic;
                 },
@@ -1461,7 +1461,7 @@ pub const IO = struct {
         while (true) {
             const dir_flags: posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDONLY, .DIRECT = true };
             const res = os.linux.openat(dir_fd, path, dir_flags, 0);
-            switch (posix.errno(res)) {
+            switch (os.linux.E.init(res)) {
                 .SUCCESS => {
                     posix.close(@intCast(res));
                     return true;
@@ -1482,7 +1482,7 @@ pub const IO = struct {
 
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);
-            switch (posix.errno(rc)) {
+            switch (os.linux.E.init(rc)) {
                 .SUCCESS => return,
                 .BADF => return error.FileDescriptorInvalid,
                 .FBIG => return error.FileTooBig,
