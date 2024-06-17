@@ -307,6 +307,7 @@ const Command = struct {
             .time = .{},
             .state_machine_options = .{
                 .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
+                .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,
                 .lsm_forest_node_count = args.lsm_forest_node_count,
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,

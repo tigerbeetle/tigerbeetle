@@ -133,7 +133,6 @@ const ConfigProcess = struct {
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
     grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
-    compaction_block_memory: usize = 256 * 1024 * 1024,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -268,7 +267,6 @@ pub const configs = struct {
             .grid_scrubber_reads_max = 2,
             .grid_scrubber_cycle_ms = std.time.ms_per_hour,
             .verify = true,
-            .compaction_block_memory = 16 * 1024 * 1024,
         },
         .cluster = .{
             .clients_max = 4 + 3,

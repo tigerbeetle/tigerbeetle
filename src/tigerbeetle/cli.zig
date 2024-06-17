@@ -64,6 +64,7 @@ const CliArgs = union(enum) {
         cache_transfers_pending: ?flags.ByteSize = null,
         cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
+        memory_lsm_compaction: ?flags.ByteSize = null,
     },
 
     version: struct {
@@ -215,6 +216,7 @@ const StartDefaults = struct {
     cache_transfers_pending: flags.ByteSize,
     cache_account_balances: flags.ByteSize,
     cache_grid: flags.ByteSize,
+    memory_lsm_compaction: flags.ByteSize,
 };
 
 const start_defaults_production = StartDefaults{
@@ -225,6 +227,10 @@ const start_defaults_production = StartDefaults{
     .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
     .cache_account_balances = .{ .value = constants.cache_account_balances_size_default },
     .cache_grid = .{ .value = constants.grid_cache_size_default },
+    .memory_lsm_compaction = .{
+        // By default, add a few extra blocks for beat-scoped work.
+        .value = (lsm_compaction_block_count_min + 16) * constants.block_size,
+    },
 };
 
 const start_defaults_development = StartDefaults{
@@ -235,7 +241,11 @@ const start_defaults_development = StartDefaults{
     .cache_transfers_pending = .{ .value = 0 },
     .cache_account_balances = .{ .value = 0 },
     .cache_grid = .{ .value = constants.block_size * Grid.Cache.value_count_max_multiple },
+    .memory_lsm_compaction = .{ .value = lsm_compaction_block_memory_min },
 };
+
+const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
+const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
 pub const Command = union(enum) {
     pub const Format = struct {
@@ -260,6 +270,7 @@ pub const Command = union(enum) {
         pipeline_requests_limit: u32,
         request_size_limit: u32,
         cache_grid_blocks: u32,
+        lsm_forest_compaction_block_count: u32,
         lsm_forest_node_count: u32,
         development: bool,
         experimental: bool,
@@ -527,6 +538,36 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 );
             }
 
+            const lsm_compaction_block_memory =
+                start.memory_lsm_compaction orelse defaults.memory_lsm_compaction;
+            const lsm_compaction_block_memory_max = constants.compaction_block_memory_size_max;
+            if (lsm_compaction_block_memory.bytes() > lsm_compaction_block_memory_max) {
+                flags.fatal("--memory-lsm-compaction: size {}{s} exceeds maximum: {}GiB", .{
+                    lsm_compaction_block_memory.value,
+                    lsm_compaction_block_memory.suffix(),
+                    @divFloor(lsm_compaction_block_memory_max, 1024 * 1024 * 1024),
+                });
+            }
+            if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
+                flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}KiB", .{
+                    lsm_compaction_block_memory.value,
+                    lsm_compaction_block_memory.suffix(),
+                    @divExact(lsm_compaction_block_memory_min, 1024),
+                });
+            }
+            if (lsm_compaction_block_memory.bytes() % constants.block_size != 0) {
+                flags.fatal(
+                    "--memory-lsm-compaction: size {}{s} must be a multiple of {}KiB",
+                    .{
+                        lsm_compaction_block_memory.value,
+                        lsm_compaction_block_memory.suffix(),
+                        @divExact(constants.block_size, 1024),
+                    },
+                );
+            }
+
+            const lsm_forest_compaction_block_count: u32 =
+                @intCast(@divExact(lsm_compaction_block_memory.bytes(), constants.block_size));
             const lsm_forest_node_count: u32 =
                 @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
 
@@ -562,6 +603,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                         Grid.Cache,
                         start.cache_grid orelse defaults.cache_grid,
                     ),
+                    .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
                     .lsm_forest_node_count = lsm_forest_node_count,
                     .development = start.development,
                     .experimental = start.experimental,

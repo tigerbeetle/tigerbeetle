@@ -81,6 +81,7 @@ const Environment = struct {
     const cache_entries_max = 2048;
     const forest_options = StateMachine.forest_options(.{
         .batch_size_limit = constants.message_body_size_max,
+        .lsm_forest_compaction_block_count = Forest.Options.compaction_block_count_min,
         .lsm_forest_node_count = node_count,
         .cache_entries_accounts = cache_entries_max,
         .cache_entries_transfers = cache_entries_max,
@@ -203,7 +204,12 @@ const Environment = struct {
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
 
-        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
+        env.forest = try Forest.init(allocator, &env.grid, .{
+            // TODO Test that the same sequence of events applied to forests with different
+            // compaction_blocks result in identical grids.
+            .compaction_block_count = Forest.Options.compaction_block_count_min,
+            .node_count = node_count,
+        }, forest_options);
         env.change_state(.forest_init, .forest_open);
         env.forest.open(forest_open_callback);
 

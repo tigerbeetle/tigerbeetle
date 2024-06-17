@@ -319,6 +319,7 @@ pub fn StateMachineType(
 
         pub const Options = struct {
             batch_size_limit: u32,
+            lsm_forest_compaction_block_count: u32,
             lsm_forest_node_count: u32,
             cache_entries_accounts: u32,
             cache_entries_transfers: u32,
@@ -424,7 +425,10 @@ pub fn StateMachineType(
             var forest = try Forest.init(
                 allocator,
                 grid,
-                options.lsm_forest_node_count,
+                .{
+                    .compaction_block_count = options.lsm_forest_compaction_block_count,
+                    .node_count = options.lsm_forest_node_count,
+                },
                 forest_options(options),
             );
             errdefer forest.deinit(allocator);
@@ -2337,6 +2341,7 @@ const TestContext = struct {
 
         ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
             .batch_size_limit = message_body_size_max,
+            .lsm_forest_compaction_block_count = StateMachine.Forest.Options.compaction_block_count_min,
             .lsm_forest_node_count = 1,
             .cache_entries_accounts = 0,
             .cache_entries_transfers = 0,
