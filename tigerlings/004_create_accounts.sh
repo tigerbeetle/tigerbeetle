@@ -6,7 +6,7 @@ source ./tb_function.sh
 
 # We want to create two accounts.
 # However, this command has two problems. Can you spot them?
-tb "create_accounts id=300 code=10 ledger=4000,
+tb "create_accounts id=300 code=10 ledger=40,
                     id=401 code=10;"
 
 # Hint 1: All account IDs are globally unique (and we created an account in the previous exercise...)

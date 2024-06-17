@@ -6,10 +6,10 @@ index cf1168077..9ce27aa8b 100644
  
  # We want to create two accounts.
  # However, this command has two problems. Can you spot them?
--tb "create_accounts id=300 code=10 ledger=4000,
+-tb "create_accounts id=300 code=10 ledger=40,
 -                    id=401 code=10;"
-+tb "create_accounts id=400 code=10 ledger=4000,
-+                    id=401 code=10 ledger=4000;"
++tb "create_accounts id=400 code=10 ledger=40,
++                    id=401 code=10 ledger=40;"
  
  # Hint 1: All account IDs are globally unique (and we created an account in the previous exercise...)
  # Hint 2: Accounts are partitioned by `ledgers` (more on what these are in the next exercise!)
