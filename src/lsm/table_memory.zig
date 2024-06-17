@@ -15,7 +15,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         const TableMemory = @This();
 
         pub const ValueContext = struct {
-            count: usize = 0,
+            count: u32 = 0,
             sorted: bool = true,
         };
 
@@ -75,7 +75,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             };
         }
 
-        pub fn count(table: *const TableMemory) usize {
+        pub fn count(table: *const TableMemory) u32 {
             return table.value_context.count;
         }
 
