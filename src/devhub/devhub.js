@@ -106,7 +106,7 @@ async function mainSeeds() {
     } else {
       include = (!record.ok || pullRequestNumber(record) !== undefined) &&
         !fuzzersWithFailures.has(record.branch + record.fuzzer);
-      fuzzersWithFailures.add(record.branch + record.fuzzer);
+      if (include) fuzzersWithFailures.add(record.branch + record.fuzzer);
     }
 
     if (!include) continue;
