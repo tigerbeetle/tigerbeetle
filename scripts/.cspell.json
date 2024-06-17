@@ -147,6 +147,7 @@
 	"spcsc",
 	"SQPOLL",
 	"stacktracehash",
+	"statx",
 	"struct",
 	"structs",
 	"swcsc",
