@@ -5,7 +5,7 @@
 # and the data file that the server will use.
 
 # Looks like we'll need to pass the path of the data file we just created to the server.
-./tigerbeetle start --addresses=3000
+./tigerbeetle start --addresses=3000 
 
 # When you run TigerBeetle as a cluster, you'll pass all of the addresses as a comma-separated list
 # and the --replica argument passed to the `format` command for creating the data file tells the
