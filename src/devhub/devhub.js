@@ -72,7 +72,7 @@ async function mainSeeds() {
     (async () => await (await fetch(pullsURL)).json())(),
   ]);
 
-  const pullsByURL = new Map(pulls.map((pull) => [pull.html_url, pull]))
+  const pullsByURL = new Map(pulls.map((pull) => [pull.html_url, pull]));
   const openPullRequests = new Set(pulls.map((it) => it.number));
 
   // Filtering:
@@ -86,6 +86,7 @@ async function mainSeeds() {
   const query_all = query.get("all") !== null;
   const fuzzersWithFailures = new Set();
 
+  const seedsDom = document.querySelector("#seeds");
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
   let commit_count = 0;
@@ -106,7 +107,7 @@ async function mainSeeds() {
     } else {
       include = (!record.ok || pullRequestNumber(record) !== undefined) &&
         !fuzzersWithFailures.has(record.branch + record.fuzzer);
-      fuzzersWithFailures.add(record.branch + record.fuzzer);
+      if (include) fuzzersWithFailures.add(record.branch + record.fuzzer);
     }
 
     if (!include) continue;
@@ -124,13 +125,13 @@ async function mainSeeds() {
     );
     const rowDom = document.createElement("tr");
 
-    const seedSuccess = record.fuzzer === 'canary' ? !record.ok : record.ok
+    const seedSuccess = record.fuzzer === "canary" ? !record.ok : record.ok;
     rowDom.style.setProperty(
       "background",
       seedSuccess ? "#CF0" : colors[commit_count % colors.length],
     );
 
-    const pull = pullsByURL.get(record.branch)
+    const pull = pullsByURL.get(record.branch);
     const prLink = pullRequestNumber(record)
       ? `<a href="${record.branch}">#${pullRequestNumber(record)}</a>`
       : "";
@@ -141,7 +142,7 @@ async function mainSeeds() {
             </a>
             ${prLink}
           </td>
-          <td>${pull ? pull.user.login : ''}</td>
+          <td>${pull ? pull.user.login : ""}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
           <td><code>${record.command}</code></td>
           <td><time>${seedDuration}</time></td>
@@ -149,6 +150,24 @@ async function mainSeeds() {
       `;
     tableDom.appendChild(rowDom);
   }
+
+  let mainBranchFail = 0;
+  let mainBranchOk = 0;
+  let mainBranchCanary = 0;
+  for (const record of records) {
+    if (record.branch == "https://github.com/tigerbeetle/tigerbeetle") {
+      if (record.fuzzer === "canary") {
+        mainBranchCanary += 1;
+      } else if (record.ok) {
+        mainBranchOk += 1;
+      } else {
+        mainBranchFail += 1;
+      }
+    }
+  }
+  seedsDom.append(
+    `main branch ok=${mainBranchOk} fail=${mainBranchFail} canary=${mainBranchCanary}`,
+  );
 }
 
 function pullRequestNumber(record) {
