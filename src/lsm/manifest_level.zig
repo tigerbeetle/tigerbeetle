@@ -662,8 +662,10 @@ pub fn ManifestLevelType(
         }
 
         /// Returns the smallest visible range of tables in the given level
-        /// that overlap with the given range: [key_min, key_max], or null
-        /// if the number of tables that intersect with the range is > max_overlapping_tables.
+        /// that overlap with the given range: [key_min, key_max]
+        ///
+        /// Returns null if the number of tables that intersect with the range intersects more than
+        /// max_overlapping_tables tables.
         ///
         /// The range keys are guaranteed to encompass all the relevant level A and level B tables:
         ///   range.key_min = min(a.key_min, b.key_min)
