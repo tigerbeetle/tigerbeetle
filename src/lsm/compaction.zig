@@ -576,6 +576,7 @@ pub fn CompactionType(
                 const range_b = tree.manifest.immutable_table_compaction_range(
                     tree.table_immutable.key_min(),
                     tree.table_immutable.key_max(),
+                    .{ .value_count = tree.table_immutable.count() },
                 );
 
                 // +1 to count the immutable table (level A).

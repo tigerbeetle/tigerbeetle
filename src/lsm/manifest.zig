@@ -524,20 +524,73 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest: *const Manifest,
             key_min: Key,
             key_max: Key,
+            options: struct { value_count: u32 },
         ) CompactionRange {
             assert(key_min <= key_max);
+            assert(options.value_count > 0);
+            assert(options.value_count <= Table.value_count_max);
+
             const level_b = 0;
             const manifest_level: *const Level = &manifest.levels[level_b];
 
             // We are guaranteed to get a non-null range because Level 0 has
             // lsm_growth_factor number of tables, so the number of tables that intersect
             // with the immutable table can be no more than lsm_growth_factor.
-            const range = manifest_level.tables_overlapping_with_key_range(
+            var range = manifest_level.tables_overlapping_with_key_range(
                 key_min,
                 key_max,
                 snapshot_latest,
                 growth_factor,
             ).?;
+
+            {
+                // Attempt to coalesce with adjacent tables in level 0.
+                const value_count_target = @divFloor((Table.value_count_max * 90), 100); // FIXME constant
+                assert(value_count_target > 0);
+                assert(value_count_target < Table.value_count_max);
+
+                var value_count_output: u32 = options.value_count;
+                for (range.tables.const_slice()) |*table| {
+                    value_count_output += table.table_info.value_count;
+                }
+
+                outer: for ([_]Direction{ .descending, .ascending }) |direction| {
+                    inner: for (0..constants.lsm_growth_factor + 1) |_| {
+                        if (range.tables.full()) break :outer;
+                        if (value_count_output >= value_count_target) break :outer;
+
+                        const table_next = manifest_level.next_table(.{
+                            .snapshot = snapshot_latest,
+                            .key_min = 0,
+                            .key_max = std.math.maxInt(Key),
+                            .key_exclusive = switch (direction) {
+                                .descending => range.key_min,
+                                .ascending => range.key_max,
+                            },
+                            .direction = direction,
+                        }) orelse break :inner;
+
+                        const table_next_value_count = table_next.table_info.value_count;
+                        assert(table_next_value_count > 0);
+
+                        if (value_count_output + table_next_value_count <= Table.value_count_max) {
+                            value_count_output += table_next_value_count;
+
+                            switch (direction) {
+                                .descending => range.key_min = table_next.table_info.key_min,
+                                .ascending => range.key_max = table_next.table_info.key_max,
+                            }
+
+                            switch (direction) {
+                                .descending => range.tables.insert_assume_capacity(0, table_next),
+                                .ascending => range.tables.append_assume_capacity(table_next),
+                            }
+                        } else {
+                            break :inner;
+                        }
+                    } else unreachable;
+                }
+            }
 
             assert(range.key_min <= range.key_max);
             assert(range.key_min <= key_min);
