@@ -1339,7 +1339,9 @@ fn FuzzContextType(
                     context.array.search(math.maxInt(Key)),
                     .ascending,
                 );
-                try testing.expectEqual(iterator_end.next(), null);
+                while (iterator_end.next()) |item| {
+                    try testing.expectEqual(key_from_value(item), math.maxInt(Key));
+                }
             }
 
             {
