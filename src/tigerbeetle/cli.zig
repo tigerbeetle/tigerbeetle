@@ -165,14 +165,14 @@ const CliArgs = union(enum) {
             \\        Inspect the superblock header copies.
             \\        In the left column of the output, "|" denotes which copies have a particular value.
             \\        "||||" means that all four superblock copies are in agreement.
-            \\        "| | " means that the value matches in copies 0/2, but differs from copies 1/3.
+            \\        "|_|_" means that the value matches in copies 0/2, but differs from copies 1/3.
             \\
             \\  wal
             \\        Inspect the WAL headers and prepares.
             \\        In the left column of the output, "|" denotes which set of headers has each value.
             \\        "||" denotes that the prepare and the redundant header match.
-            \\        "| " is the redundant header.
-            \\        " |" is the prepare's header.
+            \\        "|_" is the redundant header.
+            \\        "_|" is the prepare's header.
             \\
             \\  wal --slot=<slot>
             \\        Inspect the WAL header/prepare in the given slot.
@@ -183,8 +183,8 @@ const CliArgs = union(enum) {
             \\  replies --slot=<slot> [--superblock-copy=<copy>]
             \\        Inspect a particular client reply.
             \\        "||" denotes that the client session header and reply header match.
-            \\        "| " is the client session header.
-            \\        " |" is the client reply's header.
+            \\        "|_" is the client session header.
+            \\        "_|" is the client reply's header.
             \\
             \\  grid [--superblock-copy=<copy>]
             \\        Inspect the free set.
