@@ -104,11 +104,6 @@ pub fn build(b: *std.Build) !void {
         "Which backend to use for tracing.",
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
-    const git_clone_tracy = GitCloneStep.add(b, .{
-        .repo = "https://github.com/wolfpld/tracy.git",
-        .tag = "v0.9.1", // unrelated to Zig 0.9.1
-        .path = "tools/tracy",
-    });
 
     const aof_record_enable = b.option(bool, "config-aof-record", "Enable AOF Recording.") orelse false;
     const aof_recovery_enable = b.option(bool, "config-aof-recovery", "Enable AOF Recovery mode.") orelse false;
@@ -127,6 +122,47 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/vsr.zig"),
     });
     vsr_module.addImport("vsr_options", vsr_options_module);
+    switch (tracer_backend) {
+        .none => {},
+        .tracy => {
+            // Code here is based on
+            // https://github.com/ziglang/zig/blob/a660df4900520c505a0865707552dcc777f4b791/build.zig#L382
+
+            // On mingw, we need to opt into windows 7+ to get some features required by tracy.
+            const tracy_c_flags: []const []const u8 = if (target.result.os.tag == .windows and target.result.abi == .gnu)
+                &[_][]const u8{
+                    "-DTRACY_ENABLE=1",
+                    "-DTRACY_FIBERS=1",
+                    "-fno-sanitize=undefined",
+                    "-D_WIN32_WINNT=0x601",
+                }
+            else
+                &[_][]const u8{
+                    "-DTRACY_ENABLE=1",
+                    "-DTRACY_FIBERS=1",
+                    "-fno-sanitize=undefined",
+                };
+
+            const tracy = GitCloneStep.add(b, .{
+                .repo = "https://github.com/wolfpld/tracy.git",
+                .tag = "v0.9.1",
+                .path = "tools/tracy",
+            });
+
+            vsr_module.addCSourceFile(.{
+                .file = tracy.path().path(b, "./public/TracyClient.cpp"),
+                .flags = tracy_c_flags,
+            });
+            vsr_module.addIncludePath(tracy.path().path(b, "./public/tracy"));
+            vsr_module.link_libc = true;
+            vsr_module.link_libcpp = true;
+
+            if (target.result.os.tag == .windows) {
+                vsr_module.linkSystemLibrary("dbghelp", .{});
+                vsr_module.linkSystemLibrary("ws2_32", .{});
+            }
+        },
+    }
 
     {
         // Run a tigerbeetle build without running codegen and waiting for llvm
@@ -166,7 +202,6 @@ pub fn build(b: *std.Build) !void {
     b.installArtifact(tigerbeetle);
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.root_module.omit_frame_pointer = false;
-    link_tracer_backend(tigerbeetle, git_clone_tracy, tracer_backend, target.result);
 
     {
         const run_cmd = b.addRunArtifact(tigerbeetle);
@@ -196,7 +231,6 @@ pub fn build(b: *std.Build) !void {
             .optimize = mode,
         });
         aof.root_module.addOptions("vsr_options", options);
-        link_tracer_backend(aof, git_clone_tracy, tracer_backend, target.result);
 
         const run_cmd = b.addRunArtifact(aof);
         if (b.args) |args| run_cmd.addArgs(args);
@@ -249,7 +283,6 @@ pub fn build(b: *std.Build) !void {
         });
         unit_tests.root_module.addImport("vsr_options", vsr_options_module);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
-        link_tracer_backend(unit_tests, git_clone_tracy, tracer_backend, target.result);
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
@@ -293,8 +326,6 @@ pub fn build(b: *std.Build) !void {
             &.{ &install_step.step, &tb_client_header_generate.step },
             target,
             options,
-            git_clone_tracy,
-            tracer_backend,
         );
         java_client(
             b,
@@ -303,8 +334,6 @@ pub fn build(b: *std.Build) !void {
             target,
             vsr_module,
             options,
-            git_clone_tracy,
-            tracer_backend,
         );
         dotnet_client(
             b,
@@ -312,8 +341,6 @@ pub fn build(b: *std.Build) !void {
             &.{&install_step.step},
             target,
             options,
-            git_clone_tracy,
-            tracer_backend,
         );
         node_client(
             b,
@@ -321,16 +348,12 @@ pub fn build(b: *std.Build) !void {
             &.{&install_step.step},
             target,
             options,
-            git_clone_tracy,
-            tracer_backend,
         );
         c_client(
             b,
             mode,
             &.{ &install_step.step, &tb_client_header_generate.step },
             options,
-            git_clone_tracy,
-            tracer_backend,
         );
         c_client_sample(
             b,
@@ -338,8 +361,6 @@ pub fn build(b: *std.Build) !void {
             target,
             &.{ &install_step.step, &tb_client_header_generate.step },
             options,
-            git_clone_tracy,
-            tracer_backend,
         );
     }
 
@@ -445,7 +466,6 @@ pub fn build(b: *std.Build) !void {
         simulator.root_module.omit_frame_pointer = false;
         simulator.root_module.addOptions("vsr_options", options);
         simulator.root_module.addOptions("vsr_simulator_options", simulator_options);
-        link_tracer_backend(simulator, git_clone_tracy, tracer_backend, target.result);
 
         const run_cmd = b.addRunArtifact(simulator);
 
@@ -468,7 +488,6 @@ pub fn build(b: *std.Build) !void {
         });
         fuzz_exe.root_module.omit_frame_pointer = false;
         fuzz_exe.root_module.addOptions("vsr_options", options);
-        link_tracer_backend(fuzz_exe, git_clone_tracy, tracer_backend, target.result);
 
         const fuzz_run = b.addRunArtifact(fuzz_exe);
         if (b.args) |args| fuzz_run.addArgs(args);
@@ -493,57 +512,6 @@ pub fn build(b: *std.Build) !void {
         if (b.args) |args| scripts_run.addArgs(args);
         const scripts_step = b.step("scripts", "Run automation scripts");
         scripts_step.dependOn(&scripts_run.step);
-    }
-}
-
-fn link_tracer_backend(
-    exe: *std.Build.Step.Compile,
-    git_clone_tracy: *GitCloneStep,
-    tracer_backend: config.TracerBackend,
-    target: std.Target,
-) void {
-    switch (tracer_backend) {
-        .none => {},
-        .tracy => {
-            // Code here is based on
-            // https://github.com/ziglang/zig/blob/a660df4900520c505a0865707552dcc777f4b791/build.zig#L382
-
-            // On mingw, we need to opt into windows 7+ to get some features required by tracy.
-            const tracy_c_flags: []const []const u8 = if (target.os.tag == .windows and target.abi == .gnu)
-                &[_][]const u8{
-                    "-DTRACY_ENABLE=1",
-                    "-DTRACY_FIBERS=1",
-                    "-fno-sanitize=undefined",
-                    "-D_WIN32_WINNT=0x601",
-                }
-            else
-                &[_][]const u8{
-                    "-DTRACY_ENABLE=1",
-                    "-DTRACY_FIBERS=1",
-                    "-fno-sanitize=undefined",
-                };
-
-            const b = exe.step.owner;
-            exe.addCSourceFile(.{
-                .file = b.path("./tools/tracy/public/TracyClient.cpp"),
-                .flags = tracy_c_flags,
-            });
-
-            // TODO: From Zig 0.12+, `addIncludePath` isn't properly detected on child modules so add it to roots.
-            // exe.addIncludePath(b.path("./tools/tracy/public/tracy"));
-            for (b.modules.values()) |root_module| {
-                root_module.addIncludePath(b.path("./tools/tracy/public/tracy"));
-            }
-
-            exe.linkLibC();
-            exe.linkLibCpp();
-
-            if (target.os.tag == .windows) {
-                exe.linkSystemLibrary("dbghelp");
-                exe.linkSystemLibrary("ws2_32");
-            }
-            exe.step.dependOn(&git_clone_tracy.step);
-        },
     }
 }
 
@@ -572,8 +540,6 @@ fn go_client(
     dependencies: []const *std.Build.Step,
     target: std.Build.ResolvedTarget,
     options: *std.Build.Step.Options,
-    git_clone_tracy: *GitCloneStep,
-    tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("go_client", "Build Go client shared library");
 
@@ -620,7 +586,6 @@ fn go_client(
         lib.bundle_compiler_rt = true;
         lib.root_module.stack_protector = false;
         lib.root_module.addOptions("vsr_options", options);
-        link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
         lib.step.dependOn(&install_header.step);
         lib.step.dependOn(&bindings_step.step);
@@ -639,8 +604,6 @@ fn java_client(
     target: std.Build.ResolvedTarget,
     vsr_module: *std.Build.Module,
     options: *std.Build.Step.Options,
-    git_clone_tracy: *GitCloneStep,
-    tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("java_client", "Build Java client shared library");
 
@@ -675,7 +638,6 @@ fn java_client(
 
         lib.root_module.addImport("vsr", vsr_module);
         lib.root_module.addOptions("vsr_options", options);
-        link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
         lib.step.dependOn(&bindings_step.step);
 
@@ -695,8 +657,6 @@ fn dotnet_client(
     dependencies: []const *std.Build.Step,
     target: std.Build.ResolvedTarget,
     options: *std.Build.Step.Options,
-    git_clone_tracy: *GitCloneStep,
-    tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("dotnet_client", "Build dotnet client shared library");
 
@@ -730,7 +690,6 @@ fn dotnet_client(
         }
 
         lib.root_module.addOptions("vsr_options", options);
-        link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
         lib.step.dependOn(&bindings_step.step);
 
@@ -749,8 +708,6 @@ fn node_client(
     dependencies: []const *std.Build.Step,
     target: std.Build.ResolvedTarget,
     options: *std.Build.Step.Options,
-    git_clone_tracy: *GitCloneStep,
-    tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("node_client", "Build Node client shared library");
     for (dependencies) |dependency| {
@@ -826,7 +783,6 @@ fn node_client(
         }
 
         lib.root_module.addOptions("vsr_options", options);
-        link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
         lib.step.dependOn(&bindings_step.step);
 
@@ -846,8 +802,6 @@ fn c_client(
     mode: Mode,
     dependencies: []const *std.Build.Step,
     options: *std.Build.Step.Options,
-    git_clone_tracy: *GitCloneStep,
-    tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("c_client", "Build C client library");
 
@@ -892,7 +846,6 @@ fn c_client(
             }
 
             lib.root_module.addOptions("vsr_options", options);
-            link_tracer_backend(lib, git_clone_tracy, tracer_backend, resolved_target.result);
 
             // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
             const lib_install = b.addInstallArtifact(lib, .{});
@@ -910,8 +863,6 @@ fn c_client_sample(
     target: std.Build.ResolvedTarget,
     dependencies: []const *std.Build.Step,
     options: *std.Build.Step.Options,
-    git_clone_tracy: *GitCloneStep,
-    tracer_backend: config.TracerBackend,
 ) void {
     const c_sample_build = b.step("c_sample", "Build the C client sample");
     for (dependencies) |dependency| {
@@ -928,7 +879,6 @@ fn c_client_sample(
     static_lib.pie = true;
     static_lib.bundle_compiler_rt = true;
     static_lib.root_module.addOptions("vsr_options", options);
-    link_tracer_backend(static_lib, git_clone_tracy, tracer_backend, target.result);
     c_sample_build.dependOn(&static_lib.step);
 
     const sample = b.addExecutable(.{
@@ -1030,6 +980,7 @@ const ShellcheckStep = struct {
 /// We use `GitCloneStep` to lazily download build-time dependencies when we need them.
 const GitCloneStep = struct {
     step: std.Build.Step,
+    result: std.Build.GeneratedFile,
     gpa: std.mem.Allocator,
     options: Options,
 
@@ -1048,10 +999,19 @@ const GitCloneStep = struct {
                 .owner = b,
                 .makeFn = GitCloneStep.make,
             }),
+            .result = .{
+                .step = &result.step,
+            },
             .gpa = b.allocator,
             .options = options,
         };
         return result;
+    }
+
+    fn path(step: *GitCloneStep) std.Build.LazyPath {
+        return .{ .generated = .{
+            .file = &step.result,
+        } };
     }
 
     fn make(step: *std.Build.Step, _: std.Progress.Node) anyerror!void {
@@ -1060,8 +1020,10 @@ const GitCloneStep = struct {
         var shell = try Shell.create(self.gpa);
         defer shell.destroy();
 
-        if (try shell.dir_exists(self.options.path)) return;
-        try shell.exec("git clone --branch {tag} {repo} {path}", self.options);
+        if (!try shell.dir_exists(self.options.path)) {
+            try shell.exec("git clone --branch {tag} {repo} {path}", self.options);
+        }
+        self.result.path = self.options.path;
     }
 };
 
