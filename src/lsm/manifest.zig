@@ -470,13 +470,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }) ?*const TreeTableInfo {
             assert(parameters.level < constants.lsm_levels);
             assert(parameters.key_min <= parameters.key_max);
-            return manifest.levels[parameters.level].next_table(.{
+
+            const table_info_reference = manifest.levels[parameters.level].next_table(.{
                 .snapshot = parameters.snapshot,
                 .key_min = parameters.key_min,
                 .key_max = parameters.key_max,
                 .key_exclusive = parameters.key_exclusive,
                 .direction = parameters.direction,
-            });
+            }) orelse return null;
+
+            return table_info_reference.table_info;
         }
 
         /// Returns the most optimal table from a level that is due for compaction.
