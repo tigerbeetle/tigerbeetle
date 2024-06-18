@@ -95,8 +95,8 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
 
 const Inspector = struct {
     allocator: std.mem.Allocator,
-    dir_fd: std.os.fd_t,
-    fd: std.os.fd_t,
+    dir_fd: std.posix.fd_t,
+    fd: std.posix.fd_t,
     io: vsr.io.IO,
     storage: Storage,
 
@@ -117,7 +117,7 @@ const Inspector = struct {
 
         const dirname = std.fs.path.dirname(path) orelse ".";
         inspector.dir_fd = try vsr.io.IO.open_dir(dirname);
-        errdefer std.os.close(inspector.dir_fd);
+        errdefer std.posix.close(inspector.dir_fd);
 
         const basename = std.fs.path.basename(path);
         inspector.fd = try vsr.io.IO.open_file(
@@ -127,7 +127,7 @@ const Inspector = struct {
             .open,
             .direct_io_optional,
         );
-        errdefer std.os.close(inspector.fd);
+        errdefer std.posix.close(inspector.fd);
 
         inspector.io = try vsr.io.IO.init(128, 0);
         errdefer inspector.io.deinit();
@@ -140,8 +140,8 @@ const Inspector = struct {
 
     fn deinit(inspector: *Inspector) void {
         inspector.storage.deinit();
-        std.os.close(inspector.fd);
-        std.os.close(inspector.dir_fd);
+        std.posix.close(inspector.fd);
+        std.posix.close(inspector.dir_fd);
         inspector.allocator.destroy(inspector);
     }
 
@@ -155,7 +155,7 @@ const Inspector = struct {
     }
 
     fn inspector_read_callback(read: *Storage.Read) void {
-        const inspector = @fieldParentPtr(Inspector, "read", read);
+        const inspector: *Inspector = @fieldParentPtr("read", read);
         assert(inspector.busy);
 
         inspector.busy = false;
@@ -706,7 +706,7 @@ fn print_struct(
 
     const Type = @typeInfo(@TypeOf(value)).Pointer.child;
     // Print structs *without* a custom format() function.
-    if (@typeInfo(Type) == .Struct and !comptime std.meta.trait.hasFn("format")(Type)) {
+    if (@typeInfo(Type) == .Struct and !comptime std.meta.hasFn(Type, "format")) {
         if (@typeInfo(Type).Struct.is_tuple) {
             try output.writeAll(label);
             // Print tuples as a single line.
@@ -765,7 +765,7 @@ fn print_struct(
 
 fn print_value(output: anytype, value: anytype) !void {
     const Type = @TypeOf(value);
-    if (@typeInfo(Type) == .Struct) assert(std.meta.trait.hasFn("format")(Type));
+    if (@typeInfo(Type) == .Struct) assert(std.meta.hasFn(Type, "format"));
     assert(@typeInfo(Type) != .Array);
 
     if (Type == u128) return output.print("0x{x:0>32}", .{value});
