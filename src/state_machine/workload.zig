@@ -611,11 +611,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     transfer.debit_account_id = self.auditor.account_index_to_id(dr);
                     transfer.credit_account_id = self.auditor.account_index_to_id(cr);
                     if (method == .post_pending) {
-                        // TODO(zig): random.uintLessThanBiased does not support u128.
-                        const amount: u64 = @truncate(pending_transfer.amount);
-
-                        // 1+rng for minimum amount of 1. This also makes the pending amount inclusive.
-                        transfer.amount = 1 + self.random.uintLessThanBiased(u64, amount);
+                        transfer.amount = self.random.intRangeAtMost(
+                            u128,
+                            1,
+                            pending_transfer.amount,
+                        );
                     } else {
                         transfer.amount = pending_transfer.amount;
                     }
