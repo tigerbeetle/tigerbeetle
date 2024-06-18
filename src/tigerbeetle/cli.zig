@@ -161,6 +161,9 @@ const CliArgs = union(enum) {
             \\  When `--superblock-copy` is set, use the trailer referenced by that superblock copy.
             \\  Otherwise, copy=0 will be used by default.
             \\
+            \\  -h, --help
+            \\        Print this help message and exit.
+            \\
             \\  superblock
             \\        Inspect the superblock header copies.
             \\        In the left column of the output, "|" denotes which copies have a particular value.

@@ -768,7 +768,7 @@ fn print_value(output: anytype, value: anytype) !void {
     if (@typeInfo(Type) == .Struct) assert(std.meta.trait.hasFn("format")(Type));
     assert(@typeInfo(Type) != .Array);
 
-    if (Type == u128) return output.print("{x:0>32}", .{value});
+    if (Type == u128) return output.print("0x{x:0>32}", .{value});
 
     if (Type == vsr.Operation) {
         if (value.valid(StateMachine)) {
