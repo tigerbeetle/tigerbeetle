@@ -62,9 +62,6 @@ pub fn build(b: *std.Build) !void {
 
     const options = b.addOptions();
 
-    var shell = Shell.create(b.allocator) catch unreachable;
-    defer shell.destroy();
-
     // The "tigerbeetle version" command includes the build-time commit hash.
     const git_commit = b.option(
         []const u8,
@@ -143,17 +140,18 @@ pub fn build(b: *std.Build) !void {
                     "-fno-sanitize=undefined",
                 };
 
-            const tracy = GitCloneStep.add(b, .{
-                .repo = "https://github.com/wolfpld/tracy.git",
-                .tag = "v0.9.1",
-                .path = "tools/tracy",
-            });
+            const tracy = b.addSystemCommand(&.{
+                "git",
+                "clone",
+                "--branch=v0.9.1",
+                "https://github.com/wolfpld/tracy.git",
+            }).addOutputDirectoryArg("tracy");
 
             vsr_module.addCSourceFile(.{
-                .file = tracy.path().path(b, "./public/TracyClient.cpp"),
+                .file = tracy.path(b, "./public/TracyClient.cpp"),
                 .flags = tracy_c_flags,
             });
-            vsr_module.addIncludePath(tracy.path().path(b, "./public/tracy"));
+            vsr_module.addIncludePath(tracy.path(b, "./public/tracy"));
             vsr_module.link_libc = true;
             vsr_module.link_libcpp = true;
 
@@ -973,57 +971,6 @@ const ShellcheckStep = struct {
         });
 
         try shell.exec("shellcheck {scripts}", .{ .scripts = scripts });
-    }
-};
-
-/// Every large project contains its own bespoke implementation of `git submodule`, this is ours.
-/// We use `GitCloneStep` to lazily download build-time dependencies when we need them.
-const GitCloneStep = struct {
-    step: std.Build.Step,
-    result: std.Build.GeneratedFile,
-    gpa: std.mem.Allocator,
-    options: Options,
-
-    const Options = struct {
-        repo: []const u8,
-        tag: []const u8,
-        path: []const u8,
-    };
-
-    fn add(b: *std.Build, options: Options) *GitCloneStep {
-        const result = b.allocator.create(GitCloneStep) catch unreachable;
-        result.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = "run git clone",
-                .owner = b,
-                .makeFn = GitCloneStep.make,
-            }),
-            .result = .{
-                .step = &result.step,
-            },
-            .gpa = b.allocator,
-            .options = options,
-        };
-        return result;
-    }
-
-    fn path(step: *GitCloneStep) std.Build.LazyPath {
-        return .{ .generated = .{
-            .file = &step.result,
-        } };
-    }
-
-    fn make(step: *std.Build.Step, _: std.Progress.Node) anyerror!void {
-        const self: *GitCloneStep = @fieldParentPtr("step", step);
-
-        var shell = try Shell.create(self.gpa);
-        defer shell.destroy();
-
-        if (!try shell.dir_exists(self.options.path)) {
-            try shell.exec("git clone --branch {tag} {repo} {path}", self.options);
-        }
-        self.result.path = self.options.path;
     }
 };
 
