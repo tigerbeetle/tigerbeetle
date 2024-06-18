@@ -596,6 +596,15 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(range.key_min <= key_min);
             assert(key_max <= range.key_max);
 
+            if (range.tables.count() > 1) {
+                for (
+                    range.tables.const_slice()[0 .. range.tables.count() - 1],
+                    range.tables.const_slice()[1..],
+                ) |a, b| {
+                    assert(a.table_info.key_max < b.table_info.key_min);
+                }
+            }
+
             return .{
                 .key_min = range.key_min,
                 .key_max = range.key_max,
