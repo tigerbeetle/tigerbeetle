@@ -45,6 +45,9 @@ test "valid tb_client.h" {
         .{ tb.CreateTransferResult, "TB_CREATE_TRANSFER_RESULT" },
         .{ tb.CreateAccountsResult, "tb_create_accounts_result_t" },
         .{ tb.CreateTransfersResult, "tb_create_transfers_result_t" },
+        .{ tb.AccountFilter, "tb_account_filter_t" },
+        .{ tb.AccountFilterFlags, "TB_ACCOUNT_FILTER_FLAGS" },
+        .{ tb.AccountBalance, "tb_account_balance_t" },
 
         .{ u128, "tb_uint128_t" },
         .{ tb_client.tb_status_t, "TB_STATUS" },
@@ -85,18 +88,18 @@ test "valid tb_client.h" {
                     const c_enum_prefix = c_type_name[0 .. prefix_offset + 1];
                     comptime assert(c_type == c_uint);
 
-                    inline for (std.meta.fields(ty)) |field| {
-                        if (comptime !std.mem.eql(u8, field.name, "padding")) {
+                    inline for (std.meta.fields(ty)) |field| comptime {
+                        if (!std.mem.eql(u8, field.name, "padding")) {
                             // Get the bit value in the C enum.
-                            const c_enum_field = comptime to_uppercase(to_snakecase(field.name));
+                            const c_enum_field = to_uppercase(to_snakecase(field.name));
                             const c_value = @field(c, c_enum_prefix ++ c_enum_field);
 
                             // Compare the bit value to the packed struct's field.
-                            comptime var instance = std.mem.zeroes(ty);
+                            var instance = std.mem.zeroes(ty);
                             @field(instance, field.name) = true;
-                            comptime assert(@as(u16, @bitCast(instance)) == c_value);
+                            assert(@as(type_info.backing_integer.?, @bitCast(instance)) == c_value);
                         }
-                    }
+                    };
                 },
                 .@"extern" => {
                     // Ensure structs are effectively the same.
