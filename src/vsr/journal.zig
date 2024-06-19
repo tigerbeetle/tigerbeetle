@@ -121,11 +121,11 @@ comptime {
     // Normally, this guarantee falls out naturally out of the fact that there are fewer journal
     // writes available than there are sectors. This is not the case for the simulator, which only
     // has two sectors worth of headers. Rather than adding simulator-only locking to the journal,
-    // the simulator itself prevents correlated torn writes at runtime. The `direct_io` condition
-    // excludes the simulator case.
+    // the simulator itself prevents correlated torn writes at runtime, and we just exclude the
+    // simulator from the assert:
     assert(
         @divExact(headers_size, constants.sector_size) > constants.journal_iops_write_max or
-            !constants.direct_io,
+            !constants.config.is_production(),
     );
 
     assert(prepares_size > 0);

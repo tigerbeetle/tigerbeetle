@@ -69,6 +69,14 @@ pub const Config = struct {
 
     cluster: ConfigCluster,
     process: ConfigProcess,
+
+    /// Returns true if the configuration is intended for "production".
+    /// Intended solely for extra sanity-checks: all meaningful decisions should be driven by
+    /// specific fields of the config.
+    pub fn is_production(config: *const Config) bool {
+        _ = config;
+        return build_options.config_base == .production;
+    }
 };
 
 /// Configurations which are tunable per-replica (or per-client).

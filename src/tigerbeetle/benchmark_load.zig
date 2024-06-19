@@ -14,8 +14,6 @@ pub const std_options = .{
     .log_level = .info,
 };
 
-const build_options = @import("vsr_options");
-
 const vsr = @import("vsr");
 const constants = vsr.constants;
 const stdx = vsr.stdx;
@@ -43,12 +41,11 @@ pub fn main(
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built with '-Drelease' for reasonable results.\n", .{});
     }
-    if (build_options.config_base != .production) {
+    if (!vsr.constants.config.is_production()) {
         try stderr.print(
             \\Benchmark must be built with '-Dconfig=production' for reasonable results.
-            \\Benchmark was built with -Dconfig={s} instead.
             \\
-        , .{@tagName(build_options.config_base)});
+        , .{});
     }
 
     if (cli_args.account_count < 2) flags.fatal(
