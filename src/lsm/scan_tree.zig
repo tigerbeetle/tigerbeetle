@@ -319,7 +319,9 @@ pub fn ScanTreeType(
                 .ascending => self.key_min == probe_key,
                 .descending => self.key_max == probe_key,
             }) {
-                assert(self.state == .idle or self.state == .needs_data);
+                assert(self.state == .idle or
+                    self.state == .seeking or
+                    self.state == .needs_data);
                 return;
             }
 

@@ -167,7 +167,7 @@ const ConfigCluster = struct {
     lsm_manifest_compact_extra_blocks: comptime_int = 1,
     vsr_releases_max: usize = 64,
 
-    // Minimal value.
+    /// Enough for scanning the three user_data fields plus code and ledger.
     // TODO(batiati): Maybe this constant should be derived from `grid_iops_read_max`,
     // since each scan can read from `lsm_levels` in parallel.
     lsm_scans_max: comptime_int = 5,
