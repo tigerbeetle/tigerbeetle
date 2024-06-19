@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build lint
+      - run: ./zig/zig fmt --check .
       - run: ./zig/zig build check
 
   linux:

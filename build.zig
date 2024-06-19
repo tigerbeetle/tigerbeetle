@@ -236,20 +236,6 @@ pub fn build(b: *std.Build) !void {
         run_step.dependOn(&run_cmd.step);
     }
 
-    // Linting targets
-    // We currently have: lint_zig_fmt.
-    // The meta-target lint runs them all
-    {
-        // lint_zig_fmt
-        const lint_zig_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
-        const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt");
-        lint_zig_fmt_step.dependOn(&lint_zig_fmt.step);
-
-        // lint
-        const lint_step = b.step("lint", "Run all defined linters");
-        lint_step.dependOn(lint_zig_fmt_step);
-    }
-
     // Executable which generates src/clients/c/tb_client.h
     const tb_client_header_generate = blk: {
         const tb_client_header = b.addExecutable(.{
@@ -299,11 +285,15 @@ pub fn build(b: *std.Build) !void {
         const integration_tests_step = b.step("test:integration", "Run the integration tests");
         integration_tests_step.dependOn(&run_integration_tests.step);
 
+        const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
+        const fmt_test_step = b.step("test:fmt", "Check formatting");
+        fmt_test_step.dependOn(&run_fmt.step);
+
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&run_unit_tests.step);
-
         if (test_filter == null) {
             test_step.dependOn(&run_integration_tests.step);
+            test_step.dependOn(&run_fmt.step);
         }
     }
 
