@@ -182,6 +182,36 @@ const ScanLookup = ScanLookupType(
 const QueryCondition = union(enum) {
     field_condition: FieldCondition,
     parenthesis_condition: ParenthesisCondition,
+
+    pub fn format(
+        self: QueryCondition,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        switch (self) {
+            .field_condition => |field_condition| try writer.print(
+                "{s}={}",
+                .{
+                    std.enums.tagName(Index, field_condition.index).?,
+                    field_condition.value,
+                },
+            ),
+            .parenthesis_condition => |parenthesis_condition| {
+                try writer.print("(", .{});
+                for (parenthesis_condition.operands, 0..) |operand, i| {
+                    try writer.print("{}", .{operand});
+                    if (i < parenthesis_condition.operands.len - 1) {
+                        switch (parenthesis_condition.operator) {
+                            .union_set => try writer.print(" OR ", .{}),
+                            .intersection_set => try writer.print(" AND ", .{}),
+                        }
+                    }
+                }
+                try writer.print(")", .{});
+            },
+        }
+    }
 };
 
 const QueryOperator = enum {
@@ -575,7 +605,7 @@ const Environment = struct {
         assert(repeat > 0);
         assert(env.state == .fuzzing);
 
-        for (0..repeat) |_| {
+        for (0..repeat) |step| {
             // Inserting one batch for each query spec.
             for (query_specs) |*query_spec| {
                 try env.populate_things(query_spec);
@@ -583,6 +613,22 @@ const Environment = struct {
 
             // Executing each query spec.
             for (query_specs) |*query_spec| {
+                std.log.info(
+                    \\step: {}
+                    \\query {}:
+                    \\expected_results: {}
+                    \\reversed: {}
+                    \\condition: {}
+                    \\
+                    \\
+                , .{
+                    step,
+                    query_spec.prefix,
+                    query_spec.expected_results,
+                    query_spec.reversed,
+                    query_spec.condition,
+                });
+
                 try env.query(query_spec);
             }
         }
