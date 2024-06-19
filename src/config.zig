@@ -167,10 +167,10 @@ const ConfigCluster = struct {
     lsm_manifest_compact_extra_blocks: comptime_int = 1,
     vsr_releases_max: usize = 64,
 
-    /// Enough for scanning the three user_data fields plus code and ledger.
+    /// Minimal value.
     // TODO(batiati): Maybe this constant should be derived from `grid_iops_read_max`,
     // since each scan can read from `lsm_levels` in parallel.
-    lsm_scans_max: comptime_int = 5,
+    lsm_scans_max: comptime_int = 2,
 
     /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them
     /// all to a single torn write. A replica needs at least one valid redundant header to
@@ -289,6 +289,8 @@ pub const configs = struct {
             .lsm_growth_factor = 4,
             // (This is higher than the production default value because the block size is smaller.)
             .lsm_manifest_compact_extra_blocks = 5,
+            // (We need to fuzz more scans merge than in production.)
+            .lsm_scans_max = 12,
         },
     };
 
