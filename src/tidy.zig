@@ -305,6 +305,18 @@ fn banned(source: []const u8) ?[]const u8 {
         return "use stdx." ++ "has_unique_representation instead of std version";
     }
 
+    if (std.mem.indexOf(u8, source, "mem." ++ "copy(") != null) {
+        return "use stdx." ++ "copy_disjoint instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "mem." ++ "copyForwards(") != null) {
+        return "use stdx." ++ "copy_left instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "mem." ++ "copyBackwards(") != null) {
+        return "use stdx." ++ "copy_right instead of std version";
+    }
+
     // Ban "fixme" comments. This allows using fixe as reminders with teeth --- when working on a
     // larger pull requests, it is often helpful to leave fixme comments as a reminder to oneself.
     // This tidy rule ensures that the reminder is acted upon before code gets into main. That is:
