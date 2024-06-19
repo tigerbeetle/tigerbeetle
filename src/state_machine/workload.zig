@@ -171,6 +171,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         create_transfers = @intFromEnum(Operation.create_transfers),
         lookup_accounts = @intFromEnum(Operation.lookup_accounts),
         lookup_transfers = @intFromEnum(Operation.lookup_transfers),
+        get_account_transfers = @intFromEnum(Operation.get_account_transfers),
+        get_account_balances = @intFromEnum(Operation.get_account_balances),
     };
 
     return struct {
@@ -212,6 +214,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(options.lookup_account_invalid_probability <= 100);
 
             assert(options.account_limit_probability <= 100);
+            assert(options.account_history_probability <= 100);
             assert(options.linked_valid_probability <= 100);
             assert(options.linked_invalid_probability <= 100);
 
@@ -243,6 +246,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     account.flags.debits_must_not_exceed_credits = b;
                     account.flags.credits_must_not_exceed_debits = !b;
                 }
+
+                account.flags.history = chance(random, options.account_history_probability);
             }
 
             return Self{
@@ -288,6 +293,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .create_transfers => Action.create_transfers,
                     .lookup_accounts => Action.lookup_accounts,
                     .lookup_transfers => Action.lookup_transfers,
+                    .get_account_transfers => Action.get_account_transfers,
+                    .get_account_balances => Action.get_account_balances,
                 };
             };
 
@@ -300,6 +307,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     self.build_lookup_accounts(self.batch(u128, action, body)),
                 .lookup_transfers => @sizeOf(u128) *
                     self.build_lookup_transfers(self.batch(u128, action, body)),
+                .get_account_transfers, .get_account_balances => @sizeOf(tb.AccountFilter) *
+                    self.build_get_account_filter(self.batch(tb.AccountFilter, action, body)),
             };
             assert(size <= body.len);
 
@@ -347,8 +356,18 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     std.mem.bytesAsSlice(u128, request_body),
                     std.mem.bytesAsSlice(tb.Transfer, reply_body),
                 ),
-                //TODO: implement query.
-                .get_account_transfers, .get_account_balances => unreachable,
+                .get_account_transfers => self.on_get_account_transfers(
+                    client_index,
+                    timestamp,
+                    std.mem.bytesAsSlice(tb.AccountFilter, request_body),
+                    std.mem.bytesAsSlice(tb.Transfer, reply_body),
+                ),
+                .get_account_balances => self.on_get_account_balances(
+                    client_index,
+                    timestamp,
+                    std.mem.bytesAsSlice(tb.AccountFilter, request_body),
+                    std.mem.bytesAsSlice(tb.AccountBalance, reply_body),
+                ),
                 //Not handled by the client.
                 .pulse => unreachable,
             }
@@ -382,7 +401,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     account.ledger = 0;
                     results[i].insert(.ledger_must_not_be_zero);
                 } else {
-                    if (!self.auditor.accounts_created[account_index]) {
+                    if (!self.auditor.accounts_state[account_index].created) {
                         results[i].insert(.ok);
                     }
                     // Even if the account doesn't exist yet, we may race another request.
@@ -503,6 +522,73 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return lookup_ids.len;
         }
 
+        fn build_get_account_filter(self: *const Self, body: []tb.AccountFilter) usize {
+            assert(body.len == 1);
+            const account_filter = &body[0];
+            account_filter.* = tb.AccountFilter{
+                .account_id = 0,
+                .limit = 0,
+                .flags = .{
+                    .credits = false,
+                    .debits = false,
+                    .reversed = false,
+                },
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+            };
+
+            account_filter.account_id = if (self.auditor.pick_account(.{
+                .created = null,
+                .debits_must_not_exceed_credits = null,
+                .credits_must_not_exceed_debits = null,
+            })) |account| account.id else
+            // Pick an account with valid index (rather than "random.int(u128)") because the
+            // Auditor must decode the id to check for a matching account.
+            self.auditor.account_index_to_id(self.random.int(usize));
+
+            switch (self.random.enumValue(enum { none, debits, credits, all })) {
+                .none => {}, // Testing invalid flags.
+                .debits => account_filter.flags.debits = true,
+                .credits => account_filter.flags.credits = true,
+                .all => {
+                    account_filter.flags.debits = true;
+                    account_filter.flags.credits = true;
+                },
+            }
+            account_filter.flags.reversed = self.random.boolean();
+
+            const batch_size = AccountingStateMachine.constants.batch_max.get_account_transfers;
+            account_filter.limit = switch (self.random.enumValue(enum { none, one, batch, max })) {
+                .none => 0, // Testing invalid limit.
+                .one => 1,
+                .batch => batch_size,
+                .max => std.math.maxInt(u32),
+            };
+
+            // The filter by timestamp range is restrictive and applied only when both the debit and
+            // credit sides are included, so we can assert the result count minus one.
+            if (account_filter.flags.debits and account_filter.flags.credits and
+                account_filter.limit >= batch_size and
+                chance(self.random, self.options.account_filter_timestamp_range_probability))
+            {
+                if (self.auditor.get_account_state(
+                    account_filter.account_id,
+                )) |account_state| {
+                    // Exclude the first or the last result depending on the sort order.
+                    if (account_state.transfer_timestamp_last -
+                        account_state.transfer_timestamp_first > 1)
+                    {
+                        account_filter.timestamp_min = account_state.transfer_timestamp_first +
+                            @intFromBool(!account_filter.flags.reversed);
+                        account_filter.timestamp_max = account_state.transfer_timestamp_last -
+                            @intFromBool(account_filter.flags.reversed);
+                    }
+                }
+            }
+
+            return 1;
+        }
+
         /// The transfer built is guaranteed to match the TransferPlan's outcome.
         /// The transfer built is _not_ guaranteed to match the TransferPlan's method.
         ///
@@ -541,12 +627,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
             const limit_debits = transfer_plan.limit and self.random.boolean();
             const limit_credits = transfer_plan.limit and (self.random.boolean() or !limit_debits);
+            assert(transfer_plan.limit == (limit_debits or limit_credits));
 
             const debit_account = self.auditor.pick_account(.{
                 .created = true,
                 .debits_must_not_exceed_credits = limit_debits,
                 .credits_must_not_exceed_debits = null,
             }) orelse return null;
+            assert(!limit_debits or debit_account.flags.debits_must_not_exceed_credits);
 
             const credit_account = self.auditor.pick_account(.{
                 .created = true,
@@ -554,6 +642,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .credits_must_not_exceed_debits = limit_credits,
                 .exclude = debit_account.id,
             }) orelse return null;
+            assert(!limit_credits or credit_account.flags.credits_must_not_exceed_debits);
 
             transfer.* = .{
                 .id = transfer_id,
@@ -634,10 +723,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const batch_min = switch (action) {
                 .create_accounts, .lookup_accounts => self.options.accounts_batch_size_min,
                 .create_transfers, .lookup_transfers => self.options.transfers_batch_size_min,
+                .get_account_transfers, .get_account_balances => 1,
             };
             const batch_span = switch (action) {
                 .create_accounts, .lookup_accounts => self.options.accounts_batch_size_span,
                 .create_transfers, .lookup_transfers => self.options.transfers_batch_size_span,
+                .get_account_transfers, .get_account_balances => 0,
             };
 
             // +1 because the span is inclusive.
@@ -729,15 +820,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 const transfer_outcome = self.transfer_index_to_plan(transfer_index).outcome();
                 const result = transfers.take(transfer_id);
 
-                if (result) |transfer| {
-                    // The transfer exists; verify its integrity.
-                    const checksum_actual = transfer.user_data_128;
-                    var check = transfer.*;
-                    check.user_data_128 = 0;
-                    check.timestamp = 0;
-                    const checksum_expect = vsr.checksum(std.mem.asBytes(&check));
-                    assert(checksum_expect == checksum_actual);
-                }
+                if (result) |transfer| validate_transfer_checksum(transfer);
 
                 if (transfer_index >= self.transfers_sent) {
                     // This transfer hasn't been created yet.
@@ -773,6 +856,203 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
             }
         }
+
+        fn on_get_account_transfers(
+            self: *Self,
+            client_index: usize,
+            timestamp: u64,
+            body: []const tb.AccountFilter,
+            results: []const tb.Transfer,
+        ) void {
+            _ = client_index;
+            _ = timestamp;
+            assert(body.len == 1);
+
+            const batch_size = AccountingStateMachine.constants.batch_max.get_account_transfers;
+            const account_filter = &body[0];
+            assert(results.len <= account_filter.limit);
+            assert(results.len <= batch_size);
+
+            const account_state = self.auditor.get_account_state(
+                account_filter.account_id,
+            ) orelse {
+                // Invalid account id.
+                assert(results.len == 0);
+                return;
+            };
+
+            const filter_valid = account_state.created and
+                (account_filter.flags.credits or account_filter.flags.debits) and
+                account_filter.limit > 0 and
+                account_filter.timestamp_min <= account_filter.timestamp_max;
+            if (!filter_valid) {
+                // Invalid filter.
+                assert(results.len == 0);
+                return;
+            }
+
+            self.validate_account_filter_result_count(account_filter, results.len);
+
+            var timestamp_last: u64 = if (account_filter.flags.reversed)
+                account_state.transfer_timestamp_last +| 1
+            else
+                account_state.transfer_timestamp_first -| 1;
+
+            for (results) |*transfer| {
+                if (account_filter.flags.reversed) {
+                    assert(transfer.timestamp < timestamp_last);
+                } else {
+                    assert(transfer.timestamp > timestamp_last);
+                }
+                timestamp_last = transfer.timestamp;
+
+                assert(account_filter.timestamp_min == 0 or
+                    transfer.timestamp >= account_filter.timestamp_min);
+                assert(account_filter.timestamp_max == 0 or
+                    transfer.timestamp <= account_filter.timestamp_max);
+
+                validate_transfer_checksum(transfer);
+
+                const transfer_index = self.transfer_id_to_index(transfer.id);
+                assert(transfer_index < self.transfers_sent);
+
+                const transfer_plan = self.transfer_index_to_plan(transfer_index);
+                assert(transfer_plan.valid);
+                assert(transfer_plan.outcome() != .failure);
+                if (transfer.flags.pending) assert(transfer_plan.method == .pending);
+                if (transfer.flags.post_pending_transfer) assert(transfer_plan.method == .post_pending);
+                if (transfer.flags.void_pending_transfer) assert(transfer_plan.method == .void_pending);
+                if (transfer_plan.method == .single_phase) assert(!transfer.flags.pending and
+                    !transfer.flags.post_pending_transfer and
+                    !transfer.flags.void_pending_transfer);
+
+                assert(transfer.debit_account_id == account_filter.account_id or
+                    transfer.credit_account_id == account_filter.account_id);
+                assert(account_filter.flags.credits or account_filter.flags.debits);
+                assert(account_filter.flags.credits or
+                    transfer.debit_account_id == account_filter.account_id);
+                assert(account_filter.flags.debits or
+                    transfer.credit_account_id == account_filter.account_id);
+
+                if (transfer_plan.limit) {
+                    // The plan does not guarantee the "limit" flag for posting
+                    // or voiding pending transfers.
+                    const post_or_void_pending_transfer = transfer.flags.post_pending_transfer or
+                        transfer.flags.void_pending_transfer;
+                    assert(post_or_void_pending_transfer == (transfer.pending_id != 0));
+
+                    const dr_account = self.auditor.get_account(transfer.debit_account_id).?;
+                    const cr_account = self.auditor.get_account(transfer.credit_account_id).?;
+                    assert(
+                        post_or_void_pending_transfer or
+                            dr_account.flags.debits_must_not_exceed_credits or
+                            cr_account.flags.credits_must_not_exceed_debits,
+                    );
+                }
+            }
+        }
+
+        fn on_get_account_balances(
+            self: *Self,
+            client_index: usize,
+            timestamp: u64,
+            body: []const tb.AccountFilter,
+            results: []const tb.AccountBalance,
+        ) void {
+            _ = client_index;
+            _ = timestamp;
+            assert(body.len == 1);
+
+            const batch_size = AccountingStateMachine.constants.batch_max.get_account_balances;
+            const account_filter = &body[0];
+            assert(results.len <= account_filter.limit);
+            assert(results.len <= batch_size);
+
+            const account_state = self.auditor.get_account_state(
+                account_filter.account_id,
+            ) orelse {
+                // Invalid account id.
+                assert(results.len == 0);
+                return;
+            };
+
+            const filter_valid = account_state.created and
+                self.auditor.get_account(account_filter.account_id).?.flags.history and
+                (account_filter.flags.credits or account_filter.flags.debits) and
+                account_filter.limit > 0 and
+                account_filter.timestamp_min <= account_filter.timestamp_max;
+            if (!filter_valid) {
+                // Invalid filter.
+                assert(results.len == 0);
+                return;
+            }
+
+            self.validate_account_filter_result_count(account_filter, results.len);
+
+            var timestamp_last: u64 = if (account_filter.flags.reversed)
+                account_state.transfer_timestamp_last +| 1
+            else
+                account_state.transfer_timestamp_first -| 1;
+
+            for (results) |*balance| {
+                assert(if (account_filter.flags.reversed)
+                    balance.timestamp < timestamp_last
+                else
+                    balance.timestamp > timestamp_last);
+                timestamp_last = balance.timestamp;
+
+                assert(account_filter.timestamp_min == 0 or
+                    balance.timestamp >= account_filter.timestamp_min);
+                assert(account_filter.timestamp_max == 0 or
+                    balance.timestamp <= account_filter.timestamp_max);
+            }
+        }
+
+        fn validate_account_filter_result_count(
+            self: *const Self,
+            account_filter: *const tb.AccountFilter,
+            result_count: usize,
+        ) void {
+            const batch_size = batch_size: {
+                comptime assert(AccountingStateMachine.constants.batch_max.get_account_transfers ==
+                    AccountingStateMachine.constants.batch_max.get_account_balances);
+                break :batch_size AccountingStateMachine.constants.batch_max.get_account_transfers;
+            };
+
+            if (self.auditor.get_account_state(account_filter.account_id)) |account_state| {
+                var transfer_count: u32 = 0;
+                if (account_filter.flags.debits) {
+                    transfer_count += account_state.dr_transfer_count;
+                }
+                if (account_filter.flags.credits) {
+                    transfer_count += account_state.cr_transfer_count;
+                }
+
+                if (transfer_count > batch_size) {
+                    assert(result_count == @min(account_filter.limit, batch_size));
+                } else if (account_filter.timestamp_min == 0 and account_filter.timestamp_max == 0) {
+                    assert(result_count == @min(account_filter.limit, transfer_count));
+                } else {
+                    assert(account_filter.limit >= batch_size);
+                    assert(account_filter.timestamp_max > account_filter.timestamp_min);
+                    assert(account_filter.timestamp_min >= account_state.transfer_timestamp_first);
+                    assert(account_filter.timestamp_max <= account_state.transfer_timestamp_last);
+                    assert(result_count < transfer_count);
+                }
+            } else {
+                assert(result_count == 0);
+            }
+        }
+
+        /// Verify the transfer's integrity.
+        fn validate_transfer_checksum(transfer: *const tb.Transfer) void {
+            const checksum_actual = transfer.user_data_128;
+            var check = transfer.*;
+            check.user_data_128 = 0;
+            check.timestamp = 0;
+            const checksum_expect = vsr.checksum(std.mem.asBytes(&check));
+            assert(checksum_expect == checksum_actual);
+        }
     };
 }
 
@@ -793,6 +1073,9 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         create_transfer_void_probability: u8, // ≤ 100
         lookup_account_invalid_probability: u8, // ≤ 100
 
+        account_filter_invalid_account_probability: u8, // ≤ 100
+        account_filter_timestamp_range_probability: u8, // ≤ 100
+
         lookup_transfer: std.enums.EnumFieldStruct(enum {
             /// Query a transfer that has either been committed or rejected.
             delivered,
@@ -804,6 +1087,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         lookup_transfer_span_mean: usize,
 
         account_limit_probability: u8, // ≤ 100
+        account_history_probability: u8, // ≤ 100
 
         /// This probability is only checked for consecutive guaranteed-successful transfers.
         linked_valid_probability: u8,
@@ -847,6 +1131,8 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                     .create_transfers = 1 + random.uintLessThan(usize, 100),
                     .lookup_accounts = 1 + random.uintLessThan(usize, 20),
                     .lookup_transfers = 1 + random.uintLessThan(usize, 20),
+                    .get_account_transfers = 1 + random.uintLessThan(usize, 20),
+                    .get_account_balances = 1 + random.uintLessThan(usize, 20),
                 },
                 .create_account_invalid_probability = 1,
                 .create_transfer_invalid_probability = 1,
@@ -855,12 +1141,17 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
                 .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
                 .lookup_account_invalid_probability = 1,
+
+                .account_filter_invalid_account_probability = 1 + random.uintLessThan(u8, 20),
+                .account_filter_timestamp_range_probability = 1 + random.uintLessThan(u8, 80),
+
                 .lookup_transfer = .{
                     .delivered = 1 + random.uintLessThan(usize, 10),
                     .sending = 1 + random.uintLessThan(usize, 10),
                 },
                 .lookup_transfer_span_mean = 10 + random.uintLessThan(usize, 1000),
                 .account_limit_probability = random.uintLessThan(u8, 80),
+                .account_history_probability = random.uintLessThan(u8, 80),
                 .linked_valid_probability = random.uintLessThan(u8, 101),
                 // 100% chance because this only applies to consecutive invalid transfers, which are rare.
                 .linked_invalid_probability = 100,
