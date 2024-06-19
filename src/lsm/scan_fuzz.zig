@@ -27,6 +27,7 @@ const batch_max: u32 = @divFloor(
     @sizeOf(Thing),
 );
 
+/// The testing object.
 const Thing = extern struct {
     id: u128,
     // All indexes must be `u64` to avoid conflicting matching values:
@@ -182,6 +183,7 @@ const QueryCondition = union(enum) {
     field_condition: FieldCondition,
     parenthesis_condition: ParenthesisCondition,
 };
+
 const QueryOperator = enum {
     union_set,
     intersection_set,
@@ -193,10 +195,12 @@ const QueryOperator = enum {
         };
     }
 };
+
 const FieldCondition = struct {
     index: Index,
     value: u64,
 };
+
 const ParenthesisCondition = struct {
     operator: QueryOperator,
     operands: []const QueryCondition,
@@ -216,6 +220,23 @@ const QuerySpec = struct {
     expected_results: u32,
 };
 
+/// This fuzzer generates random arbitrary complex query conditions such as
+/// `(a OR b) and (c OR d OR (e AND f AND g))`.
+/// It also includes an array of at least one object that matches the condition.
+/// Those objects are used as template to populate the database in such a way
+/// that the results retrieved by the query can be asserted.
+///
+/// Some limitations in place:
+///
+/// - Limited up to the max number of scans defined at `constants.lsm_scans_max`.
+///
+/// - The next operator must be the opposite of the previous one,
+///   avoiding unnecessary use of parenthesis, such as `(a AND b) AND c`.
+///   This way, the query generated can be either `a AND b AND c` without
+///   precedence or `(a AND b) OR c` flipping the operator.
+///
+/// - Cannot repeat fields, while `(a=1 OR a=2)` is valid, this limitation avoids
+///   always false conditions such as `(a=1 AND a=2)`.
 const QuerySpecFuzzer = struct {
     arena: std.mem.Allocator,
     random: std.rand.Random,
@@ -298,10 +319,6 @@ const QuerySpecFuzzer = struct {
                     fields_remain -= field_count_parenthesis;
                     break :parenthesis_condition QueryCondition{
                         .parenthesis_condition = try self.generate_parenthesys_condition(
-                            // The next operator must be the opposite of the previous one,
-                            // avoiding unnecessary use of parenthesis, such as `(a AND b) AND c`.
-                            // This way, the queries generated are either `a AND b AND c` without
-                            // precedence or `(a AND b) OR c` flipping the operator.
                             operator.flip(),
                             field_count_parenthesis,
                         ),
@@ -370,33 +387,32 @@ const QuerySpecFuzzer = struct {
                 try templates.append(self.arena, template);
             },
             .parenthesis_condition => |parenthesis_condition| {
-                var matrix: [][]const Thing = try self.arena.alloc(
-                    []const Thing,
-                    parenthesis_condition.operands.len,
-                );
+                const matrix_len = parenthesis_condition.operands.len;
+                assert(matrix_len > 0);
+                assert(matrix_len <= constants.lsm_scans_max);
+
+                var matrix = [_][]const Thing{undefined} ** constants.lsm_scans_max;
                 for (parenthesis_condition.operands, 0..) |operand, i| {
                     matrix[i] = try self.get_templates(operand);
                 }
 
                 switch (parenthesis_condition.operator) {
-                    .union_set => for (matrix) |operand_templates| {
-                        try templates.appendSlice(self.arena, operand_templates);
+                    .union_set => {
+                        for (matrix[0..matrix_len]) |operand_templates| {
+                            try templates.appendSlice(self.arena, operand_templates);
+                        }
                     },
                     .intersection_set => {
-                        var matrix_indexes: []u32 = try self.arena.alloc(
-                            u32,
-                            parenthesis_condition.operands.len,
-                        );
-                        @memset(matrix_indexes, 0);
+                        var matrix_indexes = [_]u32{0} ** constants.lsm_scans_max;
                         while (matrix_indexes[0] < matrix[0].len) {
                             var template = Thing.zeroed();
-                            for (matrix, 0..) |operand_templates, i| {
+                            for (matrix[0..matrix_len], 0..) |operand_templates, i| {
                                 template.merge(operand_templates[matrix_indexes[i]]);
                             }
                             try templates.append(self.arena, template);
 
-                            for (0..matrix_indexes.len) |i| {
-                                const reverse_index = matrix_indexes.len - 1 - i;
+                            for (0..parenthesis_condition.operands.len) |i| {
+                                const reverse_index = parenthesis_condition.operands.len - 1 - i;
                                 if (reverse_index == 0 or
                                     matrix_indexes[reverse_index] < matrix[reverse_index].len - 1)
                                 {
@@ -615,13 +631,18 @@ const Environment = struct {
     }
 
     fn query(env: *Environment, query_spec: *QuerySpec) !void {
+        assert(query_spec.expected_results > 0);
+
+        const pages = stdx.div_ceil(query_spec.expected_results, batch_max);
+        assert(pages > 0);
+
         var result_count: u32 = 0;
         var timestamp_last: u64 = if (query_spec.reversed)
             std.math.maxInt(u64)
         else
             0;
 
-        while (true) {
+        for (0..pages) |page| {
             const results = try env.fetch(query_spec, timestamp_last);
 
             for (results) |result| {
@@ -640,10 +661,12 @@ const Environment = struct {
             }
 
             const remaining: u32 = query_spec.expected_results - result_count;
-            if (remaining == 0) break;
-
-            assert(query_spec.expected_results > batch_max);
-            assert(results.len == batch_max);
+            if (remaining == 0) {
+                assert(page == pages - 1);
+                assert(results.len + (page * batch_max) == query_spec.expected_results);
+            } else {
+                assert(results.len == batch_max);
+            }
         }
 
         assert(result_count == query_spec.expected_results);
@@ -656,6 +679,8 @@ const Environment = struct {
     ) ![]const Thing {
         assert(env.forest.scan_buffer_pool.scan_buffer_used == 0);
         defer {
+            assert(env.forest.scan_buffer_pool.scan_buffer_used > 0);
+
             env.forest.scan_buffer_pool.reset();
             env.forest.grooves.things.scan_builder.reset();
         }
@@ -714,20 +739,21 @@ const Environment = struct {
             .parenthesis_condition => |parenthesis_condition| {
                 assert(parenthesis_condition.operands.len > 0);
 
-                var conditions: stdx.BoundedArray(
+                var scans: stdx.BoundedArray(
                     *ThingsGroove.ScanBuilder.Scan,
                     constants.lsm_scans_max,
                 ) = .{};
                 for (parenthesis_condition.operands) |operand| {
                     const scan = env.scan_from_condition(operand, timestamp_last, reversed);
-                    conditions.append_assume_capacity(scan);
+                    scans.append_assume_capacity(scan);
                 }
-                assert(conditions.count() == parenthesis_condition.operands.len);
-                if (conditions.count() == 1) return conditions.get(0);
+                assert(scans.count() == parenthesis_condition.operands.len);
 
-                return switch (parenthesis_condition.operator) {
-                    .union_set => scan_builder.merge_union(conditions.const_slice()),
-                    .intersection_set => scan_builder.merge_intersection(conditions.const_slice()),
+                return if (scans.count() == 1)
+                    scans.get(0)
+                else switch (parenthesis_condition.operator) {
+                    .union_set => scan_builder.merge_union(scans.const_slice()),
+                    .intersection_set => scan_builder.merge_intersection(scans.const_slice()),
                 };
             },
         }
