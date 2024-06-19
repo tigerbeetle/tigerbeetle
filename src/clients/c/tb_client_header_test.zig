@@ -54,6 +54,8 @@ test "valid tb_client.h" {
         .{ tb_client.tb_client_t, "tb_client_t" },
         .{ tb_client.tb_packet_t, "tb_packet_t" },
         .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
+        .{ tb_client.tb_operation_t, "TB_OPERATION" },
+        .{ tb_client.tb_packet_acquire_status_t, "TB_PACKET_ACQUIRE_STATUS" },
     }) |c_export| {
         const ty: type = c_export[0];
         const c_type_name = @as([]const u8, c_export[1]);
@@ -68,7 +70,7 @@ test "valid tb_client.h" {
                 comptime assert(c_type == c_uint);
 
                 // TB_STATUS is a special case in naming
-                if (comptime std.mem.eql(u8, c_type_name, "TB_STATUS")) {
+                if (comptime std.mem.eql(u8, c_type_name, "TB_STATUS") or std.mem.eql(u8, c_type_name, "TB_OPERATION")) {
                     c_enum_prefix = c_type_name ++ "_";
                 }
 
