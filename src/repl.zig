@@ -2,8 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const build_options = @import("vsr_options");
-
 const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
