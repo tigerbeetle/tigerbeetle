@@ -220,7 +220,7 @@ const StartDefaults = struct {
 };
 
 const start_defaults_production = StartDefaults{
-    .limit_pipeline_requests = @divExact(constants.clients_max, 2) -
+    .limit_pipeline_requests = vsr.stdx.div_ceil(constants.clients_max, 2) -
         constants.pipeline_prepare_queue_max,
     .limit_request = .{ .value = constants.message_size_max },
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },

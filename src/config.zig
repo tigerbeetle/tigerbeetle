@@ -277,7 +277,7 @@ pub const configs = struct {
             .verify = true,
         },
         .cluster = .{
-            .clients_max = 4 + 4,
+            .clients_max = 4 + 3,
             .pipeline_prepare_queue_max = 4,
             .view_change_headers_suffix_max = 4 + 1,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
