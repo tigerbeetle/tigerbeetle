@@ -104,12 +104,7 @@ fn main_smoke() !void {
 fn main_single(cli_args: CliArgs) !void {
     assert(cli_args.positional.fuzzer != .smoke);
 
-    const seed: usize = cli_args.positional.seed orelse seed: {
-        // If no seed was given, use a random seed instead.
-        var seed_random: u64 = undefined;
-        try std.posix.getrandom(std.mem.asBytes(&seed_random));
-        break :seed seed_random;
-    };
+    const seed = cli_args.positional.seed orelse std.crypto.random.int(u64);
     log.info("Fuzz seed = {}", .{seed});
 
     var timer = try std.time.Timer.start();
