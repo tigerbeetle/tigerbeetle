@@ -251,7 +251,7 @@ const QuerySpec = struct {
 };
 
 /// This fuzzer generates random arbitrary complex query conditions such as
-/// `(a OR b) and (c OR d OR (e AND f AND g))`.
+/// `(a OR b) AND (c OR d OR (e AND f AND g))`.
 /// It also includes an array of at least one object that matches the condition.
 /// Those objects are used as template to populate the database in such a way
 /// that the results retrieved by the query can be asserted.
@@ -566,8 +566,12 @@ const Environment = struct {
     pub fn run(
         storage: *Storage,
         random: std.rand.Random,
+        /// Repeating multiple times is valuable since it populates
+        /// more data and scans again after compaction.
         repeat: u32,
     ) !void {
+        assert(repeat > 0);
+
         var env: Environment = undefined;
         try env.init(storage, random);
         defer env.deinit();
@@ -592,45 +596,40 @@ const Environment = struct {
             random,
         );
 
-        try env.apply(query_specs, repeat);
+        for (0..repeat) |_| {
+            try env.apply(query_specs);
+        }
     }
 
     fn apply(
         env: *Environment,
         query_specs: []QuerySpec,
-        /// Repeating the same test multiple times is valuable since
-        /// it scans the same values after compaction.
-        repeat: u32,
     ) !void {
-        assert(repeat > 0);
         assert(env.state == .fuzzing);
 
-        for (0..repeat) |step| {
-            // Inserting one batch for each query spec.
-            for (query_specs) |*query_spec| {
-                try env.populate_things(query_spec);
-            }
+        // Inserting one batch for each query spec.
+        for (query_specs) |*query_spec| {
+            try env.populate_things(query_spec);
+        }
 
-            // Executing each query spec.
-            for (query_specs) |*query_spec| {
-                std.log.info(
-                    \\step: {}
-                    \\query {}:
-                    \\expected_results: {}
-                    \\reversed: {}
-                    \\condition: {}
-                    \\
-                    \\
-                , .{
-                    step,
-                    query_spec.prefix,
-                    query_spec.expected_results,
-                    query_spec.reversed,
-                    query_spec.condition,
-                });
+        // Executing each query spec.
+        for (query_specs) |*query_spec| {
+            log.debug(
+                \\prefix: {}
+                \\object_count: {}
+                \\expected_results: {}
+                \\reversed: {}
+                \\condition: {}
+                \\
+            , .{
+                query_spec.prefix,
+                env.object_count,
+                query_spec.expected_results,
+                query_spec.reversed,
+                query_spec.condition,
+            });
 
-                try env.query(query_spec);
-            }
+            try env.query(query_spec);
         }
     }
 
@@ -976,6 +975,8 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
 }
 
 fn prefix_combine(prefix: u32, suffix: u32) u64 {
+    assert(prefix != 0);
+    assert(suffix != 0);
     return @as(u64, @intCast(prefix)) << 32 |
         @as(u64, @intCast(suffix));
 }
