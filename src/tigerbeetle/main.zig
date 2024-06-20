@@ -257,9 +257,15 @@ const Command = struct {
         // `constants.block_size` and `SetAssociativeCache.value_count_max_multiple`,
         // and it may have been converted to zero if a smaller value is passed in.
         if (grid_cache_size == 0) {
-            fatal("Grid cache must be greater than {}MiB. See --cache-grid", .{
-                @divExact(grid_cache_size_min, 1024 * 1024),
-            });
+            if (comptime (grid_cache_size_min >= 1024 * 1024)) {
+                fatal("Grid cache must be greater than {}MiB. See --cache-grid", .{
+                    @divExact(grid_cache_size_min, 1024 * 1024),
+                });
+            } else {
+                fatal("Grid cache must be greater than {}KiB. See --cache-grid", .{
+                    @divExact(grid_cache_size_min, 1024),
+                });
+            }
         }
         assert(grid_cache_size >= grid_cache_size_min);
 
