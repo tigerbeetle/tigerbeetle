@@ -29,8 +29,7 @@ test "benchmark: binary search" {
     log.info("WT: Wall time/search", .{});
     log.info("UT: utime time/search", .{});
 
-    var seed: u64 = undefined;
-    try std.posix.getrandom(std.mem.asBytes(&seed));
+    const seed = std.crypto.random.int(u64);
     var prng = std.rand.DefaultPrng.init(seed);
 
     // Allocate on the heap just once.
