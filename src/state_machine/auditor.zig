@@ -93,6 +93,17 @@ pub const AccountingAuditor = struct {
             }
             state.transfer_timestamp_last = transfer_timestamp;
         }
+
+        pub fn transfers_count(self: *const AccountState, flags: tb.AccountFilterFlags) u32 {
+            var transfer_count: u32 = 0;
+            if (flags.debits) {
+                transfer_count += self.dr_transfer_count;
+            }
+            if (flags.credits) {
+                transfer_count += self.cr_transfer_count;
+            }
+            return transfer_count;
+        }
     };
 
     pub const Options = struct {

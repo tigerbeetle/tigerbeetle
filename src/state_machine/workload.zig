@@ -546,44 +546,47 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             // Auditor must decode the id to check for a matching account.
             self.auditor.account_index_to_id(self.random.int(usize));
 
-            switch (self.random.enumValue(enum { none, debits, credits, all })) {
-                .none => {}, // Testing invalid flags.
-                .debits => account_filter.flags.debits = true,
-                .credits => account_filter.flags.credits = true,
-                .all => {
-                    account_filter.flags.debits = true;
-                    account_filter.flags.credits = true;
-                },
-            }
+            // It may be an invalid account.
+            const account_state: ?*const Auditor.AccountState = self.auditor.get_account_state(
+                account_filter.account_id,
+            );
+
             account_filter.flags.reversed = self.random.boolean();
 
-            const batch_size = AccountingStateMachine.constants.batch_max.get_account_transfers;
-            account_filter.limit = switch (self.random.enumValue(enum { none, one, batch, max })) {
-                .none => 0, // Testing invalid limit.
-                .one => 1,
-                .batch => batch_size,
-                .max => std.math.maxInt(u32),
-            };
-
-            // The filter by timestamp range is restrictive and applied only when both the debit and
-            // credit sides are included, so we can assert the result count minus one.
-            if (account_filter.flags.debits and account_filter.flags.credits and
-                account_filter.limit >= batch_size and
+            // The timestamp range is restrictive to the number of transfers inserted at the
+            // moment the filter was generated. Only when this filter is in place we can assert
+            // the expected result count.
+            if (account_state != null and
                 chance(self.random, self.options.account_filter_timestamp_range_probability))
             {
-                if (self.auditor.get_account_state(
-                    account_filter.account_id,
-                )) |account_state| {
-                    // Exclude the first or the last result depending on the sort order.
-                    if (account_state.transfer_timestamp_last -
-                        account_state.transfer_timestamp_first > 1)
-                    {
-                        account_filter.timestamp_min = account_state.transfer_timestamp_first +
-                            @intFromBool(!account_filter.flags.reversed);
-                        account_filter.timestamp_max = account_state.transfer_timestamp_last -
-                            @intFromBool(account_filter.flags.reversed);
-                    }
+                account_filter.flags.credits = true;
+                account_filter.flags.debits = true;
+                account_filter.limit = account_state.?.transfers_count(account_filter.flags);
+                account_filter.timestamp_min = account_state.?.transfer_timestamp_first;
+                account_filter.timestamp_max = account_state.?.transfer_timestamp_last;
+
+                // Exclude the first or the last result depending on the sort order,
+                // if there are more than one single transfer.
+                account_filter.timestamp_min += @intFromBool(!account_filter.flags.reversed);
+                account_filter.timestamp_max -|= @intFromBool(account_filter.flags.reversed);
+            } else {
+                switch (self.random.enumValue(enum { none, debits, credits, all })) {
+                    .none => {}, // Testing invalid flags.
+                    .debits => account_filter.flags.debits = true,
+                    .credits => account_filter.flags.credits = true,
+                    .all => {
+                        account_filter.flags.debits = true;
+                        account_filter.flags.credits = true;
+                    },
                 }
+
+                const batch_size = AccountingStateMachine.constants.batch_max.get_account_transfers;
+                account_filter.limit = switch (self.random.enumValue(enum { none, one, batch, max })) {
+                    .none => 0, // Testing invalid limit.
+                    .one => 1,
+                    .batch => batch_size,
+                    .max => std.math.maxInt(u32),
+                };
             }
 
             return 1;
@@ -891,7 +894,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 return;
             }
 
-            self.validate_account_filter_result_count(account_filter, results.len);
+            validate_account_filter_result_count(
+                account_state,
+                account_filter,
+                results.len,
+            );
 
             var timestamp_last: u64 = if (account_filter.flags.reversed)
                 account_state.transfer_timestamp_last +| 1
@@ -987,7 +994,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 return;
             }
 
-            self.validate_account_filter_result_count(account_filter, results.len);
+            validate_account_filter_result_count(
+                account_state,
+                account_filter,
+                results.len,
+            );
 
             var timestamp_last: u64 = if (account_filter.flags.reversed)
                 account_state.transfer_timestamp_last +| 1
@@ -1009,38 +1020,34 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn validate_account_filter_result_count(
-            self: *const Self,
+            account_state: *const Auditor.AccountState,
             account_filter: *const tb.AccountFilter,
             result_count: usize,
         ) void {
+            assert(account_filter.limit != 0);
+
             const batch_size = batch_size: {
                 comptime assert(AccountingStateMachine.constants.batch_max.get_account_transfers ==
                     AccountingStateMachine.constants.batch_max.get_account_balances);
                 break :batch_size AccountingStateMachine.constants.batch_max.get_account_transfers;
             };
 
-            if (self.auditor.get_account_state(account_filter.account_id)) |account_state| {
-                var transfer_count: u32 = 0;
-                if (account_filter.flags.debits) {
-                    transfer_count += account_state.dr_transfer_count;
-                }
-                if (account_filter.flags.credits) {
-                    transfer_count += account_state.cr_transfer_count;
-                }
+            if (account_filter.timestamp_min == 0 and account_filter.timestamp_max == 0) {
+                assert(account_filter.limit == 1 or
+                    account_filter.limit == batch_size or
+                    account_filter.limit == std.math.maxInt(u32));
 
-                if (transfer_count > batch_size) {
-                    assert(result_count == @min(account_filter.limit, batch_size));
-                } else if (account_filter.timestamp_min == 0 and account_filter.timestamp_max == 0) {
-                    assert(result_count == @min(account_filter.limit, transfer_count));
-                } else {
-                    assert(account_filter.limit >= batch_size);
-                    assert(account_filter.timestamp_max > account_filter.timestamp_min);
-                    assert(account_filter.timestamp_min >= account_state.transfer_timestamp_first);
-                    assert(account_filter.timestamp_max <= account_state.transfer_timestamp_last);
-                    assert(result_count < transfer_count);
-                }
+                // It's not possible to narrow the exact number of results because
+                // new transfers might have been inserted in between the execution and the validation.
+                assert(result_count <= @min(account_filter.limit, batch_size));
             } else {
-                assert(result_count == 0);
+                assert(account_filter.limit != std.math.maxInt(u32));
+                assert(account_filter.timestamp_max > account_filter.timestamp_min);
+                assert(account_filter.timestamp_min >= account_state.transfer_timestamp_first);
+                assert(account_filter.timestamp_max <= account_state.transfer_timestamp_last);
+
+                // Exactly one result was excluded by the timestamp filter.
+                assert(result_count == @min(account_filter.limit - 1, batch_size));
             }
         }
 
