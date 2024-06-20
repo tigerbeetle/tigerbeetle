@@ -580,7 +580,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     },
                 }
 
-                const batch_size = AccountingStateMachine.constants.batch_max.get_account_transfers;
+                const batch_size = batch_size: {
+                    // This same function is used for both `get_account_{transfers,accounts}`.
+                    const batch_max = AccountingStateMachine.constants.batch_max;
+                    comptime assert(batch_max.get_account_transfers ==
+                        batch_max.get_account_balances);
+                    break :batch_size batch_max.get_account_transfers;
+                };
                 account_filter.limit = switch (self.random.enumValue(enum { none, one, batch, max })) {
                     .none => 0, // Testing invalid limit.
                     .one => 1,
@@ -1027,27 +1033,43 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(account_filter.limit != 0);
 
             const batch_size = batch_size: {
-                comptime assert(AccountingStateMachine.constants.batch_max.get_account_transfers ==
-                    AccountingStateMachine.constants.batch_max.get_account_balances);
-                break :batch_size AccountingStateMachine.constants.batch_max.get_account_transfers;
+                // This same function is used for both `get_account_{transfers,accounts}`.
+                const batch_max = AccountingStateMachine.constants.batch_max;
+                comptime assert(batch_max.get_account_transfers ==
+                    batch_max.get_account_balances);
+                break :batch_size batch_max.get_account_transfers;
             };
 
+            const transfer_count = account_state.transfers_count(account_filter.flags);
             if (account_filter.timestamp_min == 0 and account_filter.timestamp_max == 0) {
                 assert(account_filter.limit == 1 or
                     account_filter.limit == batch_size or
                     account_filter.limit == std.math.maxInt(u32));
-
-                // It's not possible to narrow the exact number of results because
-                // new transfers might have been inserted in between the execution and the validation.
-                assert(result_count <= @min(account_filter.limit, batch_size));
+                assert(result_count == @min(account_filter.limit, batch_size, transfer_count));
             } else {
-                assert(account_filter.limit != std.math.maxInt(u32));
-                assert(account_filter.timestamp_max > account_filter.timestamp_min);
-                assert(account_filter.timestamp_min >= account_state.transfer_timestamp_first);
-                assert(account_filter.timestamp_max <= account_state.transfer_timestamp_last);
+                // If timestamp range is set, then the limit is exactly the number of transfer
+                // at the time the filter was generated, but new transfers could heve been
+                // inserted since then.
+                assert(account_filter.limit <= transfer_count);
+                assert(account_filter.timestamp_max >= account_filter.timestamp_min);
+                if (account_filter.flags.reversed) {
+                    // This filter is only set if there is at least one transfer, so the first
+                    // transfer timestamp never changes.
+                    assert(account_filter.timestamp_min == account_state.transfer_timestamp_first);
+                    // The filter `timestamp_max` was decremented to skip one result.
+                    assert(account_filter.timestamp_max < account_state.transfer_timestamp_last);
+                } else {
+                    // The filter `timestamp_max` was incremented to skip one result.
+                    assert(account_filter.timestamp_min > account_state.transfer_timestamp_first);
+                    // New transfers can update `transfer_timestamp_last`.
+                    assert(account_filter.timestamp_max <= account_state.transfer_timestamp_last);
+                }
 
-                // Exactly one result was excluded by the timestamp filter.
-                assert(result_count == @min(account_filter.limit - 1, batch_size));
+                // Either the result count is larger than the batch size (so excluding one result
+                // makes no difference), or it is exactly one result less that was excluded by the
+                // timestamp filter.
+                assert((result_count == batch_size and transfer_count > batch_size) or
+                    result_count == account_filter.limit - 1);
             }
         }
 
