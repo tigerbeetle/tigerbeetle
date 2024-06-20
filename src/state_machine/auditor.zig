@@ -72,9 +72,9 @@ pub const AccountingAuditor = struct {
         /// The number of transfers created on the credit side.
         cr_transfer_count: u32 = 0,
         /// Timestamp of the first transfer recorded.
-        transfer_timestamp_first: u64 = 0,
+        transfer_timestamp_min: u64 = 0,
         /// Timestamp of the last transfer recorded.
-        transfer_timestamp_last: u64 = 0,
+        transfer_timestamp_max: u64 = 0,
 
         fn update(
             state: *AccountState,
@@ -87,11 +87,11 @@ pub const AccountingAuditor = struct {
                 .cr => state.cr_transfer_count += 1,
             }
 
-            if (state.transfer_timestamp_first == 0) {
-                assert(state.transfer_timestamp_last == 0);
-                state.transfer_timestamp_first = transfer_timestamp;
+            if (state.transfer_timestamp_min == 0) {
+                assert(state.transfer_timestamp_max == 0);
+                state.transfer_timestamp_min = transfer_timestamp;
             }
-            state.transfer_timestamp_last = transfer_timestamp;
+            state.transfer_timestamp_max = transfer_timestamp;
         }
 
         pub fn transfers_count(self: *const AccountState, flags: tb.AccountFilterFlags) u32 {

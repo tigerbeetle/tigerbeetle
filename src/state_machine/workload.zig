@@ -562,8 +562,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 account_filter.flags.credits = true;
                 account_filter.flags.debits = true;
                 account_filter.limit = account_state.?.transfers_count(account_filter.flags);
-                account_filter.timestamp_min = account_state.?.transfer_timestamp_first;
-                account_filter.timestamp_max = account_state.?.transfer_timestamp_last;
+                account_filter.timestamp_min = account_state.?.transfer_timestamp_min;
+                account_filter.timestamp_max = account_state.?.transfer_timestamp_max;
 
                 // Exclude the first or the last result depending on the sort order,
                 // if there are more than one single transfer.
@@ -906,18 +906,18 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 results.len,
             );
 
-            var timestamp_last: u64 = if (account_filter.flags.reversed)
-                account_state.transfer_timestamp_last +| 1
+            var timestamp_previous: u64 = if (account_filter.flags.reversed)
+                account_state.transfer_timestamp_max +| 1
             else
-                account_state.transfer_timestamp_first -| 1;
+                account_state.transfer_timestamp_min -| 1;
 
             for (results) |*transfer| {
                 if (account_filter.flags.reversed) {
-                    assert(transfer.timestamp < timestamp_last);
+                    assert(transfer.timestamp < timestamp_previous);
                 } else {
-                    assert(transfer.timestamp > timestamp_last);
+                    assert(transfer.timestamp > timestamp_previous);
                 }
-                timestamp_last = transfer.timestamp;
+                timestamp_previous = transfer.timestamp;
 
                 assert(account_filter.timestamp_min == 0 or
                     transfer.timestamp >= account_filter.timestamp_min);
@@ -1007,9 +1007,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             );
 
             var timestamp_last: u64 = if (account_filter.flags.reversed)
-                account_state.transfer_timestamp_last +| 1
+                account_state.transfer_timestamp_max +| 1
             else
-                account_state.transfer_timestamp_first -| 1;
+                account_state.transfer_timestamp_min -| 1;
 
             for (results) |*balance| {
                 assert(if (account_filter.flags.reversed)
@@ -1055,14 +1055,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 if (account_filter.flags.reversed) {
                     // This filter is only set if there is at least one transfer, so the first
                     // transfer timestamp never changes.
-                    assert(account_filter.timestamp_min == account_state.transfer_timestamp_first);
+                    assert(account_filter.timestamp_min == account_state.transfer_timestamp_min);
                     // The filter `timestamp_max` was decremented to skip one result.
-                    assert(account_filter.timestamp_max < account_state.transfer_timestamp_last);
+                    assert(account_filter.timestamp_max < account_state.transfer_timestamp_max);
                 } else {
                     // The filter `timestamp_max` was incremented to skip one result.
-                    assert(account_filter.timestamp_min > account_state.transfer_timestamp_first);
-                    // New transfers can update `transfer_timestamp_last`.
-                    assert(account_filter.timestamp_max <= account_state.transfer_timestamp_last);
+                    assert(account_filter.timestamp_min > account_state.transfer_timestamp_min);
+                    // New transfers can update `transfer_timestamp_max`.
+                    assert(account_filter.timestamp_max <= account_state.transfer_timestamp_max);
                 }
 
                 // Either the result count is larger than the batch size (so excluding one result
