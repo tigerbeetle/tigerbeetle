@@ -1059,15 +1059,15 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     // The filter `timestamp_max` was decremented to skip one result.
                     assert(account_filter.timestamp_max < account_state.transfer_timestamp_max);
                 } else {
-                    // The filter `timestamp_max` was incremented to skip one result.
+                    // The filter `timestamp_min` was incremented to skip one result.
                     assert(account_filter.timestamp_min > account_state.transfer_timestamp_min);
                     // New transfers can update `transfer_timestamp_max`.
                     assert(account_filter.timestamp_max <= account_state.transfer_timestamp_max);
                 }
 
-                // Either the result count is larger than the batch size (so excluding one result
-                // makes no difference), or it is exactly one result less that was excluded by the
-                // timestamp filter.
+                // Either `transfer_count` is greater than the batch size (so removing a result
+                // doesn't make a difference) or there is exactly one less result that was
+                // excluded by the timestamp filter.
                 assert((result_count == batch_size and transfer_count > batch_size) or
                     result_count == account_filter.limit - 1);
             }
