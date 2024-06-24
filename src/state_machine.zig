@@ -82,36 +82,25 @@ pub fn StateMachineType(
             pub const tree_ids = struct {
                 pub const accounts = .{
                     .id = 1,
-                    .user_data_128 = 2,
-                    .user_data_64 = 3,
-                    .user_data_32 = 4,
-                    .ledger = 5,
-                    .code = 6,
-                    .timestamp = 7,
+                    .timestamp = 2,
                 };
 
                 pub const transfers = .{
-                    .id = 8,
-                    .debit_account_id = 9,
-                    .credit_account_id = 10,
-                    .amount = 11,
-                    .pending_id = 12,
-                    .user_data_128 = 13,
-                    .user_data_64 = 14,
-                    .user_data_32 = 15,
-                    .ledger = 16,
-                    .code = 17,
-                    .timestamp = 18,
-                    .expires_at = 19,
+                    .id = 3,
+                    .debit_account_id = 4,
+                    .credit_account_id = 5,
+                    .pending_id = 6,
+                    .timestamp = 7,
+                    .expires_at = 8,
                 };
 
                 pub const transfers_pending = .{
-                    .timestamp = 20,
-                    .status = 21,
+                    .timestamp = 9,
+                    .status = 10,
                 };
 
                 pub const account_balances = .{
-                    .timestamp = 22,
+                    .timestamp = 11,
                 };
             };
         };
@@ -180,11 +169,6 @@ pub fn StateMachineType(
                 .ids = constants.tree_ids.accounts,
                 .value_count_max = .{
                     .id = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .code = config.lsm_batch_multiple * constants.batch_max.create_accounts,
                     // Transfers mutate the account balance for debits/credits pending/posted.
                     // Each transfer modifies two accounts.
                     .timestamp = config.lsm_batch_multiple * @as(usize, @max(
@@ -199,6 +183,11 @@ pub fn StateMachineType(
                     "credits_pending",
                     "flags",
                     "reserved",
+                    "user_data_128",
+                    "user_data_64",
+                    "user_data_32",
+                    "ledger",
+                    "code",
                 },
                 .derived = .{},
             },
@@ -223,7 +212,16 @@ pub fn StateMachineType(
                     .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .expires_at = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
-                .ignored = &[_][]const u8{ "timeout", "flags" },
+                .ignored = &[_][]const u8{
+                    "timeout",
+                    "flags",
+                    "amount",
+                    "user_data_128",
+                    "user_data_64",
+                    "user_data_32",
+                    "ledger",
+                    "code",
+                },
                 .derived = .{
                     .expires_at = struct {
                         fn expires_at(object: *const Transfer) u64 {
@@ -1990,11 +1988,11 @@ pub fn StateMachineType(
                     .tree_options_object = .{},
                     .tree_options_id = .{},
                     .tree_options_index = .{
-                        .user_data_128 = .{},
-                        .user_data_64 = .{},
-                        .user_data_32 = .{},
-                        .ledger = .{},
-                        .code = .{},
+                        // .user_data_128 = .{},
+                        // .user_data_64 = .{},
+                        // .user_data_32 = .{},
+                        // .ledger = .{},
+                        // .code = .{},
                     },
                 },
                 .transfers = .{
@@ -2009,13 +2007,13 @@ pub fn StateMachineType(
                     .tree_options_index = .{
                         .debit_account_id = .{},
                         .credit_account_id = .{},
-                        .user_data_128 = .{},
-                        .user_data_64 = .{},
-                        .user_data_32 = .{},
+                        // .user_data_128 = .{},
+                        // .user_data_64 = .{},
+                        // .user_data_32 = .{},
                         .pending_id = .{},
-                        .ledger = .{},
-                        .code = .{},
-                        .amount = .{},
+                        // .ledger = .{},
+                        // .code = .{},
+                        // .amount = .{},
                         .expires_at = .{},
                     },
                 },
