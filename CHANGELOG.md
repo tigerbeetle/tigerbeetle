@@ -1,5 +1,49 @@
 # TigerBeetle Changelog
 
+## 2024-06-24 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#2034](https://github.com/tigerbeetle/tigerbeetle/pull/2034),
+  [#2022](https://github.com/tigerbeetle/tigerbeetle/pull/2022),
+  [#2023](https://github.com/tigerbeetle/tigerbeetle/pull/2023)
+
+  Fuzzer Fixing For Fun! Particularly around random number generation and number sequences.
+
+- [#2004](https://github.com/tigerbeetle/tigerbeetle/pull/2004)
+
+  Add simulator coverage for `get_account_transfers` and `get_account_balances`.
+
+### Features
+
+- [#2010](https://github.com/tigerbeetle/tigerbeetle/pull/2010)
+
+  Reduce the default `--limit-pipeline-requests` value, dropping RSS memory consumption.
+
+### Internals
+
+- [#2024](https://github.com/tigerbeetle/tigerbeetle/pull/2024),
+  [#2018](https://github.com/tigerbeetle/tigerbeetle/pull/2018),
+  [#2027](https://github.com/tigerbeetle/tigerbeetle/pull/2027)
+
+  Build system simplifications.
+
+- [#2026](https://github.com/tigerbeetle/tigerbeetle/pull/2026),
+  [#2020](https://github.com/tigerbeetle/tigerbeetle/pull/2020),
+  [#2030](https://github.com/tigerbeetle/tigerbeetle/pull/2030),
+  [#2031](https://github.com/tigerbeetle/tigerbeetle/pull/2031),
+  [#2008](https://github.com/tigerbeetle/tigerbeetle/pull/2008)
+
+  Tidying up (now) unused symbols and functionality.
+
+- [#2016](https://github.com/tigerbeetle/tigerbeetle/pull/2016)
+
+  Rename docs section from "Develop" to "Coding".
+
+### TigerTracks 🎧
+
+- [On The Riverbank](https://open.spotify.com/track/0zfluauTutYrU13nEV2zyc?si=5278f387bfdd4dbc)
+
 ## 2024-06-17 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
