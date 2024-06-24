@@ -11,7 +11,10 @@ or
 
 What if you want an account's balance to stay between an upper and a lower bound?
 
-This is possible to check atomically using a set of linked transfers.
+This is possible to check atomically using a set of linked transfers. (Note: with the
+`must_not_exceed` flag invariants, an account is guaranteed to never violate those invariants. This
+maximum balance approach must be enforced per-transfer -- it is possible to exceed the limit simply
+by not enforcing it for a particular transfer.)
 
 ## Preconditions
 
@@ -50,7 +53,7 @@ We will refer to two amounts:
 
 - The **limit amount** is upper bound we want to maintain on the target account's balance.
 - The **transfer amount** is the amount we want to transfer if and only if the target account's
-  balance is within the bounds.
+  balance after a successful transfer would be within the bounds.
 
 ### If the Target Account Has a Credit Balance
 
@@ -60,8 +63,8 @@ In this case, we are keeping the Destination Account's balance between the bound
 | -------- | ------------- | -------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1        | Source        | Destination    | Transfer | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                               |
 | 2        | Control       | Operator       | Limit    | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                               |
-| 3        | Destination   | Control        | `0`      | `0`        | [`flags.balancing_debit`](../../reference/transfer.md#flagsbalancing_debit) \| [`flags.pending`](../../reference/transfer.md#flagspending) \| [`flags.linked`](../../reference/transfer.md#flagslinked) |
-| 4        | `0`           | `0`            | `0`      | `3`\*      | [`flags.void_pending_transfer`](../../reference/transfer.md#flagsvoid_pending_transfer) \| [`flags.linked`](../../reference/transfer.md#flagslinked)                                                    |
+| 3        | Destination   | Control        | `0`      | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked) \| [`flags.balancing_debit`](../../reference/transfer.md#flagsbalancing_debit) \| [`flags.pending`](../../reference/transfer.md#flagspending) |
+| 4        | `0`           | `0`            | `0`      | `3`\*      | [`flags.linked`](../../reference/transfer.md#flagslinked) \| [`flags.void_pending_transfer`](../../reference/transfer.md#flagsvoid_pending_transfer)                                                    |
 | 5        | Operator      | Control        | Limit    | `0`        | `0`                                                                                                                                                                                                     |
 
 \*This must be set to the transfer ID of the pending transfer (in this example, it is transfer 3).
