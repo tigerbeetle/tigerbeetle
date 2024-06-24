@@ -44,6 +44,7 @@ Depending on your use case, you may find these additional design patterns helpfu
 - [Closing Accounts](./recipes/close-account.md)
 - [Balance-Conditional Transfers](./recipes/balance-conditional-transfers.md)
 - [Correcting Transfers](./recipes/correcting-transfers.md)
+- [Balance Bounds](./recipes/balance-bounds.md)
 
 ## Want Help Developing on TigerBeetle?
 

@@ -54,6 +54,9 @@ By convention, debit balances are used to represent:
 To enforce a positive (non-negative) debit balance, use
 [`flags.credits_must_not_exceed_debits`](../reference/account.md#flagscredits_must_not_exceed_debits).
 
+To keep an account's balance between an upper and lower bound, see the
+[Balance Bounds recipe](./recipes/balance-bounds.md).
+
 ### Credit Balances
 
 `balance = credits - debits`
@@ -68,6 +71,9 @@ To enforce a positive (non-negative) credit balance, use
 [`flags.debits_must_not_exceed_credits`](../reference/account.md#flagsdebits_must_not_exceed_credits).
 For example, a customer account that is represented as an Operator's Liability would use this flag
 to ensure that the balance cannot go negative.
+
+To keep an account's balance between an upper and lower bound, see the
+[Balance Bounds recipe](./recipes/balance-bounds.md).
 
 ### Compound Transfers
 
