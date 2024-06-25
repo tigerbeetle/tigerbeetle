@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build c_sample -Drelease
+      - run: zig/zig build clients:c:sample -Drelease
 
   fuzz:
     runs-on: ubuntu-latest
@@ -65,5 +65,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build simulator_run -Dsimulator-state-machine=accounting -Drelease -- ${{ github.sha }}
-      - run: zig/zig build simulator_run -Dsimulator-state-machine=testing    -Drelease -- ${{ github.sha }}
+      - run: zig/zig build vopr -Dsimulator-state-machine=accounting -Drelease -- ${{ github.sha }}
+      - run: zig/zig build vopr -Dsimulator-state-machine=testing    -Drelease -- ${{ github.sha }}

@@ -12,7 +12,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("go.mod"));
 
     // `go build`  won't compile the native library automatically, we need to do that ourselves.
-    try shell.zig("build go_client -Drelease -Dconfig=production", .{});
+    try shell.zig("build clients:go -Drelease -Dconfig=production", .{});
+    try shell.zig("build -Drelease -Dconfig=production", .{});
 
     // Although we have compiled the TigerBeetle client library, we still need `cgo` to link it with
     // our resulting Go binary. Strictly speaking, `CC` is controlled by the users of TigerBeetle,
@@ -31,8 +32,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         else => unreachable,
     }
 
-    // Building the server before running the integrated tests:
-    try shell.zig("build -Drelease -Dconfig=production", .{});
     try shell.exec("go test", .{});
     {
         log.info("testing `types` package helpers", .{});
