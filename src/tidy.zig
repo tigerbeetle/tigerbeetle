@@ -262,16 +262,22 @@ test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
         .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"},  .{".css"},  .{".go"},
         .{".h"},   .{".hcl"},   .{".java"}, .{".js"},      .{".json"}, .{".md"},
-        .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sh"},   .{".sln"},
-        .{".sum"}, .{".ts"},    .{".txt"},  .{".xml"},     .{".yml"},  .{".zig"},
+        .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sln"},  .{".sum"},
+        .{".ts"},  .{".txt"},   .{".xml"},  .{".yml"},     .{".zig"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
-        .{".editorconfig"},          .{".gitattributes"},   .{".gitignore"},
-        .{".nojekyll"},              .{"CNAME"},            .{"Dockerfile"},
-        .{"exclude-pmd.properties"}, .{"favicon.ico"},      .{"favicon.png"},
-        .{"LICENSE"},                .{"module-info.test"}, .{"index.html"},
-        .{"logo.svg"},               .{"logo-white.svg"},   .{"logo-with-text-white.svg"},
+        .{".editorconfig"},                          .{".gitattributes"},
+        .{".gitignore"},                             .{".nojekyll"},
+        .{"CNAME"},                                  .{"Dockerfile"},
+        .{"exclude-pmd.properties"},                 .{"favicon.ico"},
+        .{"favicon.png"},                            .{"LICENSE"},
+        .{"module-info.test"},                       .{"index.html"},
+        .{"logo.svg"},                               .{"logo-white.svg"},
+        .{"logo-with-text-white.svg"},               .{"scripts/install_zig.sh"},
+        .{"src/scripts/cfo_supervisor.sh"},          .{"src/docs_website/scripts/build.sh"},
+        .{".github/ci/docs_check.sh"},               .{".github/ci/test_aof.sh"},
+        .{"tools/systemd/tigerbeetle-pre-start.sh"}, .{"tools/vscode/format_debug_server.sh"},
     });
 
     const allocator = std.testing.allocator;
@@ -286,7 +292,7 @@ test "tidy extensions" {
         const extension = std.fs.path.extension(path);
         if (!allowed_extensions.has(extension)) {
             const basename = std.fs.path.basename(path);
-            if (!exceptions.has(basename)) {
+            if (!exceptions.has(basename) and !exceptions.has(path)) {
                 std.debug.print("bad extension: {s}\n", .{path});
                 bad_extension = true;
             }

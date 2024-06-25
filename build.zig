@@ -5,7 +5,6 @@ const CrossTarget = std.zig.CrossTarget;
 const Mode = std.builtin.Mode;
 
 const config = @import("./src/config.zig");
-const Shell = @import("./src/shell.zig");
 
 // TigerBeetle binary requires certain CPU feature and supports a closed set of CPUs. Here, we
 // specify exactly which features the binary needs. Client shared libraries might be more lax with
@@ -237,26 +236,6 @@ pub fn build(b: *std.Build) !void {
         run_step.dependOn(&run_cmd.step);
     }
 
-    // Linting targets
-    // We currently have: lint_zig_fmt, lint_shellcheck.
-    // The meta-target lint runs them all
-    {
-        // lint_zig_fmt
-        const lint_zig_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
-        const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt");
-        lint_zig_fmt_step.dependOn(&lint_zig_fmt.step);
-
-        // lint_shellcheck
-        const lint_shellcheck = ShellcheckStep.add(b);
-        const lint_shellcheck_step = b.step("lint_shellcheck", "Run shellcheck on **.sh");
-        lint_shellcheck_step.dependOn(&lint_shellcheck.step);
-
-        // lint
-        const lint_step = b.step("lint", "Run all defined linters");
-        lint_step.dependOn(lint_zig_fmt_step);
-        lint_step.dependOn(lint_shellcheck_step);
-    }
-
     // Executable which generates src/clients/c/tb_client.h
     const tb_client_header_generate = blk: {
         const tb_client_header = b.addExecutable(.{
@@ -306,11 +285,15 @@ pub fn build(b: *std.Build) !void {
         const integration_tests_step = b.step("test:integration", "Run the integration tests");
         integration_tests_step.dependOn(&run_integration_tests.step);
 
+        const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
+        const fmt_test_step = b.step("test:fmt", "Check formatting");
+        fmt_test_step.dependOn(&run_fmt.step);
+
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&run_unit_tests.step);
-
         if (test_filter == null) {
             test_step.dependOn(&run_integration_tests.step);
+            test_step.dependOn(&run_fmt.step);
         }
     }
 
@@ -930,47 +913,6 @@ const FailStep = struct {
         const self: *FailStep = @fieldParentPtr("step", step);
         std.log.err("{s}", .{self.message});
         return error.FailStep;
-    }
-};
-
-const ShellcheckStep = struct {
-    step: std.Build.Step,
-    gpa: std.mem.Allocator,
-
-    fn add(b: *std.Build) *ShellcheckStep {
-        const result = b.allocator.create(ShellcheckStep) catch unreachable;
-        result.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = "run shellcheck",
-                .owner = b,
-                .makeFn = ShellcheckStep.make,
-            }),
-            .gpa = b.allocator,
-        };
-        return result;
-    }
-
-    fn make(step: *std.Build.Step, _: std.Progress.Node) anyerror!void {
-        const self: *ShellcheckStep = @fieldParentPtr("step", step);
-
-        var shell = try Shell.create(self.gpa);
-        defer shell.destroy();
-
-        if (!try shell.exec_status_ok("shellcheck --version", .{})) {
-            shell.echo(
-                "{ansi-red}Please install shellcheck - https://www.shellcheck.net/{ansi-reset}",
-                .{},
-            );
-            return error.NoShellcheck;
-        }
-
-        const scripts = try shell.find(.{
-            .where = &.{ "src", "scripts", ".github" },
-            .extension = ".sh",
-        });
-
-        try shell.exec("shellcheck {scripts}", .{ .scripts = scripts });
     }
 };
 

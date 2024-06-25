@@ -23,8 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: shellcheck ./scripts/install_zig.sh
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build lint
+      - run: ./zig/zig fmt --check .
       - run: ./zig/zig build check
 
   linux:
