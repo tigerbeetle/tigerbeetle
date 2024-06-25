@@ -114,18 +114,17 @@ With TigerBeetle, these fields are already built into the schema and ready for y
   [`credit_account_id`](../reference/transfer.md#credit_account_id) indicate which accounts are
   transacting.
 - **What**: each asset or type of value in TigerBeetle is tracked on a separate
-  [ledger](../develop/data-modeling.md#ledgers). The
-  [`ledger`](../reference/transfer.md#ledger) field indicates what is being transferred.
-- **When**: each transfer has a unique [`timestamp`](../reference/transfer.md#timestamp) for
-  when it is processed by the cluster, but you can add another timestamp representing when the
-  transaction happened in the real world in the
-  [`user_data_64`](../reference/transfer.md#user_data_64) field.
-- **Where**: the [`user_data_32`](../reference/transfer.md#user_data_32) can be used to store
-  the locale where the transfer occurred.
-- **Why**: the [`code`](../reference/transfer.md#code) field stores the reason a transfer
-  occurred and should map to an enum or table of all the possible business events.
-- **How Much**: the [`amount`](../reference/transfer.md#amount) indicates how much of the asset
-  or item is being transferred.
+  [ledger](../coding/data-modeling.md#ledgers). The [`ledger`](../reference/transfer.md#ledger)
+  field indicates what is being transferred.
+- **When**: each transfer has a unique [`timestamp`](../reference/transfer.md#timestamp) for when it
+  is processed by the cluster, but you can add another timestamp representing when the transaction
+  happened in the real world in the [`user_data_64`](../reference/transfer.md#user_data_64) field.
+- **Where**: the [`user_data_32`](../reference/transfer.md#user_data_32) can be used to store the
+  locale where the transfer occurred.
+- **Why**: the [`code`](../reference/transfer.md#code) field stores the reason a transfer occurred
+  and should map to an enum or table of all the possible business events.
+- **How Much**: the [`amount`](../reference/transfer.md#amount) indicates how much of the asset or
+  item is being transferred.
 
 For centuries, this information has been modeled as debits and credits, and double-entry bookkeeping
 has been the language of business since it was invented over 1000 years ago. TigerBeetle takes this
@@ -148,7 +147,7 @@ should be routed. The data plane must be as fast and efficient as possible, wher
 plane does not need to be touched as frequently.
 
 TigerBeetle is designed to be in the hot path of your system, processing every transaction in
-real-time. You can have a [stateless API service](../develop/system-architecture.md) construct and
+real-time. You can have a [stateless API service](../coding/system-architecture.md) construct and
 batch transfers to send to TigerBeetle.
 
 Metadata, such as account details or infrequently changed ledger details, can be stored in a general

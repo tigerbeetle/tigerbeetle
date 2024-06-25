@@ -70,11 +70,11 @@ pub const ReplySequence = struct {
     }
 
     pub fn empty(sequence: *const ReplySequence) bool {
-        return sequence.stalled_queue.len == 0;
+        return sequence.stalled_queue.count() == 0;
     }
 
     pub fn free(sequence: ReplySequence) usize {
-        return stalled_queue_capacity - sequence.stalled_queue.len;
+        return stalled_queue_capacity - sequence.stalled_queue.count();
     }
 
     pub fn insert(
@@ -102,7 +102,7 @@ pub const ReplySequence = struct {
 
     // TODO(Zig): This type signature could be *const once std.PriorityQueue.peek() is updated.
     pub fn peek(sequence: *ReplySequence, op: u64) ?PendingReply {
-        assert(sequence.stalled_queue.len <= stalled_queue_capacity);
+        assert(sequence.stalled_queue.count() <= stalled_queue_capacity);
 
         const commit = sequence.stalled_queue.peek() orelse return null;
         if (commit.reply.header.op == op) {

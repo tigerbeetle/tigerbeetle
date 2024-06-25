@@ -50,10 +50,6 @@ const releases = .{
 // TODO Test client eviction once it no longer triggers a client panic.
 // TODO Detect when cluster has stabilized and stop run() early, rather than just running for a
 //      fixed number of ticks.
-// TODO (Maybe:) Lazy-enable (begin ticks) for clients, so that clients don't register via ping,
-//      causing unexpected/unaccounted-for commits. Maybe also don't tick clients at all during
-//      run(), so that new requests cannot be added "unexpectedly". (This will remove the need for
-//      the boilerplate c.request(20) == 20 at the beginning of most tests).
 
 comptime {
     // The tests are written for these configuration values in particular.
@@ -66,19 +62,18 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
     t.replica(.R_).stop();
-    t.replica(.R0).corrupt(.{ .wal_prepare = 22 });
+    t.replica(.R0).corrupt(.{ .wal_prepare = 2 });
 
     // 2/3 can't commit when 1/2 is status=recovering_head.
     try t.replica(.R0).open();
     try expectEqual(t.replica(.R0).status(), .recovering_head);
     try t.replica(.R1).open();
-    try c.request(24, 20);
+    try c.request(4, 0);
     // With the aid of the last replica, the cluster can recover.
     try t.replica(.R2).open();
-    try c.request(24, 24);
-    try expectEqual(t.replica(.R_).commit(), 24);
+    try c.request(4, 4);
+    try expectEqual(t.replica(.R_).commit(), 4);
 }
 
 test "Cluster: recovery: WAL prepare corruption (R=3, corrupt left of head, 3/3 corrupt)" {
@@ -88,9 +83,9 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt left of head, 3/3 
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
     t.replica(.R_).stop();
-    t.replica(.R_).corrupt(.{ .wal_prepare = 10 });
+    t.replica(.R_).corrupt(.{ .wal_prepare = 1 });
     try t.replica(.R_).open();
     t.run();
 
@@ -106,13 +101,12 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt root)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 0 });
     try t.replica(.R0).open();
 
-    try c.request(21, 21);
-    try expectEqual(t.replica(.R_).commit(), 21);
+    try c.request(1, 1);
+    try expectEqual(t.replica(.R_).commit(), 1);
 }
 
 test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)" {
@@ -144,9 +138,9 @@ test "Cluster: recovery: WAL prepare corruption (R=1, corrupt between checkpoint
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
     t.replica(.R0).stop();
-    t.replica(.R0).corrupt(.{ .wal_prepare = 15 });
+    t.replica(.R0).corrupt(.{ .wal_prepare = 1 });
     if (t.replica(.R0).open()) {
         unreachable;
     } else |err| switch (err) {
@@ -161,11 +155,11 @@ test "Cluster: recovery: WAL header corruption (R=1)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
     t.replica(.R0).stop();
-    t.replica(.R0).corrupt(.{ .wal_header = 15 });
+    t.replica(.R0).corrupt(.{ .wal_header = 1 });
     try t.replica(.R0).open();
-    try c.request(30, 30);
+    try c.request(3, 3);
 }
 
 test "Cluster: recovery: WAL torn prepare, standby with intact prepare (R=1 S=1)" {
@@ -181,13 +175,13 @@ test "Cluster: recovery: WAL torn prepare, standby with intact prepare (R=1 S=1)
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
     t.replica(.R0).stop();
-    t.replica(.R0).corrupt(.{ .wal_header = 20 });
+    t.replica(.R0).corrupt(.{ .wal_header = 2 });
     try t.replica(.R0).open();
-    try c.request(30, 30);
-    try expectEqual(t.replica(.R0).commit(), 30);
-    try expectEqual(t.replica(.S0).commit(), 30);
+    try c.request(3, 3);
+    try expectEqual(t.replica(.R0).commit(), 3);
+    try expectEqual(t.replica(.S0).commit(), 3);
 }
 
 test "Cluster: recovery: grid corruption (disjoint)" {
@@ -235,9 +229,9 @@ test "Cluster: recovery: grid corruption (disjoint)" {
 }
 
 test "Cluster: recovery: recovering_head, outdated start view" {
-    // 1. Wait for B1 to ok op=21.
-    // 2. Restart B1 while corrupting op=21, so that it gets into a .recovering_head with op=20.
-    // 3. Try make B1 forget about op=21 by delivering it an outdated .start_view with op=20.
+    // 1. Wait for B1 to ok op=3.
+    // 2. Restart B1 while corrupting op=3, so that it gets into a .recovering_head with op=2.
+    // 3. Try make B1 forget about op=3 by delivering it an outdated .start_view with op=2.
     const t = try TestContext.init(.{
         .replica_count = 3,
     });
@@ -248,30 +242,30 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
-    try c.request(20, 20);
+    try c.request(2, 2);
 
     b1.stop();
-    b1.corrupt(.{ .wal_prepare = 20 });
+    b1.corrupt(.{ .wal_prepare = 2 });
 
     try b1.open();
     try expectEqual(b1.status(), .recovering_head);
-    try expectEqual(b1.op_head(), 19);
+    try expectEqual(b1.op_head(), 1);
 
     b1.record(.A0, .incoming, .start_view);
     t.run();
     try expectEqual(b1.status(), .normal);
-    try expectEqual(b1.op_head(), 20);
+    try expectEqual(b1.op_head(), 2);
 
     b2.drop_all(.R_, .bidirectional);
 
-    try c.request(21, 21);
+    try c.request(3, 3);
 
     b1.stop();
-    b1.corrupt(.{ .wal_prepare = 21 });
+    b1.corrupt(.{ .wal_prepare = 3 });
 
     try b1.open();
     try expectEqual(b1.status(), .recovering_head);
-    try expectEqual(b1.op_head(), 20);
+    try expectEqual(b1.op_head(), 2);
 
     const mark = marks.check("ignoring (recovering_head, nonce mismatch)");
     a.stop();
@@ -279,13 +273,13 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     t.run();
 
     try expectEqual(b1.status(), .recovering_head);
-    try expectEqual(b1.op_head(), 20);
+    try expectEqual(b1.op_head(), 2);
 
-    // Should B1 erroneously accept op=20 as head, unpartitioning B2 here would lead to a data loss.
+    // Should B1 erroneously accept op=2 as head, unpartitioning B2 here would lead to a data loss.
     b2.pass_all(.R_, .bidirectional);
     t.run();
     try a.open();
-    try c.request(22, 22);
+    try c.request(4, 4);
     try mark.expect_hit();
 }
 
@@ -296,20 +290,20 @@ test "Cluster: recovery: recovering head: idle cluster" {
     var c = t.clients(0, t.cluster.clients.len);
     var b = t.replica(.B1);
 
-    try c.request(20, 20);
+    try c.request(2, 2);
 
     b.stop();
-    b.corrupt(.{ .wal_prepare = 21 });
-    b.corrupt(.{ .wal_header = 21 });
+    b.corrupt(.{ .wal_prepare = 3 });
+    b.corrupt(.{ .wal_header = 3 });
 
     try b.open();
     try expectEqual(b.status(), .recovering_head);
-    try expectEqual(b.op_head(), 20);
+    try expectEqual(b.op_head(), 2);
 
     t.run();
 
     try expectEqual(b.status(), .normal);
-    try expectEqual(b.op_head(), 20);
+    try expectEqual(b.op_head(), 2);
 }
 
 test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
@@ -317,12 +311,12 @@ test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
     t.replica(.B2).drop_all(.__, .bidirectional);
-    try c.request(30, 30);
-    try expectEqual(t.replica(.A0).commit(), 30);
-    try expectEqual(t.replica(.B1).commit(), 30);
-    try expectEqual(t.replica(.B2).commit(), 20);
+    try c.request(3, 3);
+    try expectEqual(t.replica(.A0).commit(), 3);
+    try expectEqual(t.replica(.B1).commit(), 3);
+    try expectEqual(t.replica(.B2).commit(), 2);
 }
 
 test "Cluster: network: partition 2-1 (isolate backup, asymmetric, send-only)" {
@@ -330,12 +324,12 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, send-only)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
     t.replica(.B2).drop_all(.__, .incoming);
-    try c.request(30, 30);
-    try expectEqual(t.replica(.A0).commit(), 30);
-    try expectEqual(t.replica(.B1).commit(), 30);
-    try expectEqual(t.replica(.B2).commit(), 20);
+    try c.request(3, 3);
+    try expectEqual(t.replica(.A0).commit(), 3);
+    try expectEqual(t.replica(.B1).commit(), 3);
+    try expectEqual(t.replica(.B2).commit(), 2);
 }
 
 test "Cluster: network: partition 2-1 (isolate backup, asymmetric, receive-only)" {
@@ -343,16 +337,16 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, receive-only)
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
     t.replica(.B2).drop_all(.__, .outgoing);
-    try c.request(30, 30);
-    try expectEqual(t.replica(.A0).commit(), 30);
-    try expectEqual(t.replica(.B1).commit(), 30);
+    try c.request(3, 3);
+    try expectEqual(t.replica(.A0).commit(), 3);
+    try expectEqual(t.replica(.B1).commit(), 3);
     // B2 may commit some ops, but at some point is will likely fall behind.
     // Prepares may be reordered by the network, and if B1 receives X+1 then X,
     // it will not forward X on, as it is a "repair".
     // And B2 is partitioned, so it cannot repair its hash chain.
-    try std.testing.expect(t.replica(.B2).commit() >= 20);
+    try std.testing.expect(t.replica(.B2).commit() >= 2);
 }
 
 test "Cluster: network: partition 1-2 (isolate primary, symmetric)" {
@@ -362,13 +356,13 @@ test "Cluster: network: partition 1-2 (isolate primary, symmetric)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
 
     const p = t.replica(.A0);
     p.drop_all(.B1, .bidirectional);
     p.drop_all(.B2, .bidirectional);
-    try c.request(30, 30);
-    try expectEqual(p.commit(), 20);
+    try c.request(3, 3);
+    try expectEqual(p.commit(), 2);
 }
 
 test "Cluster: network: partition 1-2 (isolate primary, asymmetric, send-only)" {
@@ -379,11 +373,11 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, send-only)" 
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(1, 1);
     t.replica(.A0).drop_all(.B1, .incoming);
     t.replica(.A0).drop_all(.B2, .incoming);
     const mark = marks.check("send_commit: primary abdicating");
-    try c.request(30, 30);
+    try c.request(2, 2);
     try mark.expect_hit();
 }
 
@@ -394,10 +388,10 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, receive-only
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(1, 1);
     t.replica(.A0).drop_all(.B1, .outgoing);
     t.replica(.A0).drop_all(.B2, .outgoing);
-    try c.request(30, 30);
+    try c.request(2, 2);
 }
 
 test "Cluster: network: partition client-primary (symmetric)" {
@@ -406,12 +400,11 @@ test "Cluster: network: partition client-primary (symmetric)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
 
     t.replica(.A0).drop_all(.C_, .bidirectional);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(30, 30);
-    try c.request(30, 20);
+    // try c.request(1, 1);
+    try c.request(1, 0);
 }
 
 test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
@@ -420,12 +413,11 @@ test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
 
     t.replica(.A0).drop_all(.C_, .incoming);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(30, 40);
-    try c.request(30, 20);
+    // try c.request(1, 1);
+    try c.request(1, 0);
 }
 
 test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
@@ -434,12 +426,11 @@ test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
 
     t.replica(.A0).drop_all(.C_, .outgoing);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(30, 30);
-    try c.request(30, 20);
+    // try c.request(1, 1);
+    try c.request(1, 0);
 }
 
 test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
@@ -448,15 +439,15 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
+    try c.request(3, 3);
+    try expectEqual(t.replica(.R_).commit(), 3);
 
     var r_lag = t.replica(.B2);
     r_lag.drop_all(.__, .bidirectional);
 
     // Commit enough ops to checkpoint once, and then nearly wrap around, leaving enough slack
     // that the lagging backup can repair (without state sync).
-    const commit = 20 + slot_count - constants.pipeline_prepare_queue_max;
+    const commit = 3 + slot_count - constants.pipeline_prepare_queue_max;
     try c.request(commit, commit);
     try expectEqual(t.replica(.A0).op_checkpoint(), checkpoint_1);
     try expectEqual(t.replica(.B1).op_checkpoint(), checkpoint_1);
@@ -479,8 +470,8 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
+    try c.request(2, 2);
+    try expectEqual(t.replica(.R_).commit(), 2);
 
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
@@ -493,10 +484,10 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     try expectEqual(b1.op_checkpoint(), 0);
     try expectEqual(b2.op_checkpoint(), checkpoint_1);
     try expectEqual(a0.commit(), checkpoint_1_prepare_max + 1);
-    try expectEqual(b1.commit(), 20);
+    try expectEqual(b1.commit(), 2);
     try expectEqual(b2.commit(), checkpoint_1_prepare_max + 1);
     try expectEqual(a0.op_head(), checkpoint_1_prepare_max + 1);
-    try expectEqual(b1.op_head(), 20);
+    try expectEqual(b1.op_head(), 2);
     try expectEqual(b2.op_head(), checkpoint_1_prepare_max + 1);
 
     // Partition the primary, but restore B1. B1 will attempt to become the primary next,
@@ -538,7 +529,7 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
+    try c.request(2, 2);
 
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
@@ -546,12 +537,12 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
 
     b2.drop_all(.R_, .bidirectional);
 
-    try c.request(30, 30);
+    try c.request(4, 4);
 
     b1.stop();
-    b1.corrupt(.{ .wal_prepare = 30 });
+    b1.corrupt(.{ .wal_prepare = 4 });
 
-    // We can't learn op=30's prepare, only its header (via start_view).
+    // We can't learn op=4's prepare, only its header (via start_view).
     b1.drop(.R_, .bidirectional, .prepare);
     try b1.open();
     try expectEqual(b1.status(), .recovering_head);
@@ -563,19 +554,19 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     a0.drop_all(.R_, .outgoing);
     t.run();
 
-    // The cluster is stuck trying to repair op=30 (requesting the prepare).
-    // B2 can nack op=30, but B1 *must not*.
+    // The cluster is stuck trying to repair op=4 (requesting the prepare).
+    // B2 can nack op=4, but B1 *must not*.
     try expectEqual(b1.status(), .view_change);
-    try expectEqual(b1.commit(), 29);
-    try expectEqual(b1.op_head(), 30);
+    try expectEqual(b1.commit(), 3);
+    try expectEqual(b1.op_head(), 4);
 
-    // A0 provides prepare=30.
+    // A0 provides prepare=4.
     a0.pass_all(.R_, .outgoing);
     try a0.open();
     t.run();
     try expectEqual(t.replica(.R_).status(), .normal);
-    try expectEqual(t.replica(.R_).commit(), 30);
-    try expectEqual(t.replica(.R_).op_head(), 30);
+    try expectEqual(t.replica(.R_).commit(), 4);
+    try expectEqual(t.replica(.R_).op_head(), 4);
 }
 
 test "Cluster: repair: corrupt reply" {
@@ -583,15 +574,15 @@ test "Cluster: repair: corrupt reply" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
+    try c.request(2, 2);
+    try expectEqual(t.replica(.R_).commit(), 2);
 
     // Prevent any view changes, to ensure A0 repairs its corrupt prepare.
     t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
 
     // Block the client from seeing the reply from the cluster.
     t.replica(.R_).drop(.C_, .outgoing, .reply);
-    try c.request(21, 20);
+    try c.request(3, 2);
 
     // Corrupt all of the primary's saved replies.
     // (This is easier than figuring out the reply's actual slot.)
@@ -600,13 +591,13 @@ test "Cluster: repair: corrupt reply" {
         t.replica(.A0).corrupt(.{ .client_reply = slot });
     }
 
-    // The client will keep retrying request 21 until it receives a reply.
+    // The client will keep retrying request 3 until it receives a reply.
     // The primary requests the reply from one of its backups.
     // (Pass A0 only to ensure that no other client forwards the reply.)
     t.replica(.A0).pass(.C_, .outgoing, .reply);
     t.run();
 
-    try expectEqual(c.replies(), 21);
+    try expectEqual(c.replies(), 3);
 }
 
 test "Cluster: repair: ack committed prepare" {
@@ -614,41 +605,41 @@ test "Cluster: repair: ack committed prepare" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
+    try c.request(2, 2);
+    try expectEqual(t.replica(.R_).commit(), 2);
 
     const p = t.replica(.A0);
     const b1 = t.replica(.B1);
     const b2 = t.replica(.B2);
 
-    // A0 commits 21.
-    // B1 prepares 21, but does not commit.
+    // A0 commits 3.
+    // B1 prepares 3, but does not commit.
     t.replica(.R_).drop(.R_, .bidirectional, .start_view_change);
     t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
     p.drop(.__, .outgoing, .commit);
     b2.drop(.__, .incoming, .prepare);
-    try c.request(21, 21);
-    try expectEqual(p.commit(), 21);
-    try expectEqual(b1.commit(), 20);
-    try expectEqual(b2.commit(), 20);
+    try c.request(3, 3);
+    try expectEqual(p.commit(), 3);
+    try expectEqual(b1.commit(), 2);
+    try expectEqual(b2.commit(), 2);
 
-    try expectEqual(p.op_head(), 21);
-    try expectEqual(b1.op_head(), 21);
-    try expectEqual(b2.op_head(), 20);
+    try expectEqual(p.op_head(), 3);
+    try expectEqual(b1.op_head(), 3);
+    try expectEqual(b2.op_head(), 2);
 
     try expectEqual(p.status(), .normal);
     try expectEqual(b1.status(), .normal);
     try expectEqual(b2.status(), .normal);
 
-    // Change views. B1/B2 participate. Don't allow B2 to repair op=21.
+    // Change views. B1/B2 participate. Don't allow B2 to repair op=3.
     t.replica(.R_).pass(.R_, .bidirectional, .start_view_change);
     t.replica(.R_).pass(.R_, .bidirectional, .do_view_change);
     p.drop(.__, .bidirectional, .prepare);
     p.drop(.__, .bidirectional, .do_view_change);
     p.drop(.__, .bidirectional, .start_view_change);
     t.run();
-    try expectEqual(b1.commit(), 20);
-    try expectEqual(b2.commit(), 20);
+    try expectEqual(b1.commit(), 2);
+    try expectEqual(b2.commit(), 2);
 
     try expectEqual(p.status(), .normal);
     try expectEqual(b1.status(), .normal);
@@ -667,10 +658,10 @@ test "Cluster: repair: ack committed prepare" {
     try expectEqual(b1.status(), .normal);
     try expectEqual(b2.status(), .normal);
 
-    // A0 acks op=21 even though it already committed it.
-    try expectEqual(p.commit(), 21);
-    try expectEqual(b1.commit(), 21);
-    try expectEqual(b2.commit(), 20);
+    // A0 acks op=3 even though it already committed it.
+    try expectEqual(p.commit(), 3);
+    try expectEqual(b1.commit(), 3);
+    try expectEqual(b2.commit(), 2);
 }
 
 test "Cluster: repair: primary checkpoint, backup crash before checkpoint, primary prepare" {
@@ -687,9 +678,6 @@ test "Cluster: repair: primary checkpoint, backup crash before checkpoint, prima
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
-
     var p = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
@@ -723,20 +711,20 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
+    try c.request(2, 2);
+    try expectEqual(t.replica(.R_).commit(), 2);
 
     t.replica(.R0).stop();
-    try c.request(24, 24);
+    try c.request(4, 4);
     t.replica(.R1).stop();
     t.replica(.R2).stop();
 
-    t.replica(.R1).corrupt(.{ .wal_prepare = 22 });
+    t.replica(.R1).corrupt(.{ .wal_prepare = 3 });
 
     // The nack quorum size is 2.
-    // The new view must determine whether op=22 is possibly committed.
-    // - R0 never received op=22 (it had already crashed), so it nacks.
-    // - R1 did receive op=22, but upon recovering its WAL, it was corrupt, so it cannot nack.
+    // The new view must determine whether op=3 is possibly committed.
+    // - R0 never received op=3 (it had already crashed), so it nacks.
+    // - R1 did receive op=3, but upon recovering its WAL, it was corrupt, so it cannot nack.
     // The cluster must wait form R2 before recovering.
     try t.replica(.R0).open();
     try t.replica(.R1).open();
@@ -750,7 +738,7 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     try t.replica(.R2).open();
     t.run();
     try expectEqual(t.replica(.R_).status(), .normal);
-    try expectEqual(t.replica(.R_).commit(), 24);
+    try expectEqual(t.replica(.R_).commit(), 4);
 }
 
 test "Cluster: view-change: DVC, 2/3 faulty header stall" {
@@ -758,16 +746,14 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
 
     t.replica(.R0).stop();
-    try c.request(24, 24);
+    try c.request(3, 3);
     t.replica(.R1).stop();
     t.replica(.R2).stop();
 
-    t.replica(.R1).corrupt(.{ .wal_prepare = 22 });
-    t.replica(.R2).corrupt(.{ .wal_prepare = 22 });
+    t.replica(.R1).corrupt(.{ .wal_prepare = 2 });
+    t.replica(.R2).corrupt(.{ .wal_prepare = 2 });
 
     try t.replica(.R_).open();
     const mark = marks.check("quorum received, deadlocked");
@@ -784,19 +770,19 @@ test "Cluster: view-change: duel of the primaries" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
+    try c.request(2, 2);
+    try expectEqual(t.replica(.R_).commit(), 2);
 
     try expectEqual(t.replica(.R_).view(), 1);
     try expectEqual(t.replica(.R1).role(), .primary);
 
     t.replica(.R2).drop_all(.R_, .bidirectional);
     t.replica(.R1).drop(.R_, .outgoing, .commit);
-    try c.request(21, 21);
+    try c.request(3, 3);
 
-    try expectEqual(t.replica(.R0).commit_max(), 20);
-    try expectEqual(t.replica(.R1).commit_max(), 21);
-    try expectEqual(t.replica(.R2).commit_max(), 20);
+    try expectEqual(t.replica(.R0).commit_max(), 2);
+    try expectEqual(t.replica(.R1).commit_max(), 3);
+    try expectEqual(t.replica(.R2).commit_max(), 2);
 
     t.replica(.R0).pass_all(.R_, .bidirectional);
     t.replica(.R2).pass_all(.R_, .bidirectional);
@@ -809,22 +795,22 @@ test "Cluster: view-change: duel of the primaries" {
     try expectEqual(t.replica(.R1).view(), 1);
     try expectEqual(t.replica(.R1).status(), .normal);
     try expectEqual(t.replica(.R1).role(), .primary);
-    try expectEqual(t.replica(.R1).commit(), 21);
-    try expectEqual(t.replica(.R2).op_head(), 21);
+    try expectEqual(t.replica(.R1).commit(), 3);
+    try expectEqual(t.replica(.R2).op_head(), 3);
 
     try expectEqual(t.replica(.R2).view(), 2);
     try expectEqual(t.replica(.R2).status(), .normal);
     try expectEqual(t.replica(.R2).role(), .primary);
-    try expectEqual(t.replica(.R2).commit(), 20);
-    try expectEqual(t.replica(.R2).op_head(), 21);
+    try expectEqual(t.replica(.R2).commit(), 2);
+    try expectEqual(t.replica(.R2).op_head(), 3);
 
     t.replica(.R1).pass_all(.R_, .bidirectional);
     t.replica(.R2).pass_all(.R_, .bidirectional);
     t.replica(.R0).drop_all(.R_, .bidirectional);
     t.run();
 
-    try expectEqual(t.replica(.R1).commit(), 21);
-    try expectEqual(t.replica(.R2).commit(), 21);
+    try expectEqual(t.replica(.R1).commit(), 3);
+    try expectEqual(t.replica(.R2).commit(), 3);
 }
 
 test "Cluster: view-change: primary with dirty log" {
@@ -832,9 +818,6 @@ test "Cluster: view-change: primary with dirty log" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(16, 16);
-    try expectEqual(t.replica(.R_).commit(), 16);
-
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
@@ -942,8 +925,6 @@ test "Cluster: sync: partition, lag, sync (transition from idle)" {
         defer t.deinit();
 
         var c = t.clients(0, t.cluster.clients.len);
-        try c.request(20, 20);
-        try expectEqual(t.replica(.R_).commit(), 20);
 
         t.replica(.R2).drop_all(.R_, .bidirectional);
         try c.request(cluster_commit_max, cluster_commit_max);
@@ -971,8 +952,6 @@ test "Cluster: sync: sync, bump target, sync" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(16, 16);
-    try expectEqual(t.replica(.R_).commit(), 16);
 
     t.replica(.R2).drop_all(.R_, .bidirectional);
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
@@ -1048,8 +1027,8 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
+    try c.request(1, 1);
+    try expectEqual(t.replica(.R_).commit(), 1);
 
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
@@ -1086,8 +1065,9 @@ test "Cluster: sync: view-change with lagging replica in recovering_head" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(16, 16);
-    try expectEqual(t.replica(.R_).commit(), 16);
+    // B2 will need at least one commit to ensure it ends up in recovering_head.
+    try c.request(1, 1);
+    try expectEqual(t.replica(.R_).commit(), 1);
 
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
@@ -1232,8 +1212,6 @@ test "Cluster: prepare beyond checkpoint trigger" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-
     try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
 
@@ -1308,9 +1286,6 @@ test "Cluster: upgrade: R=1" {
     const t = try TestContext.init(.{ .replica_count = 1 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-
     t.replica(.R_).stop();
     try t.replica(.R0).open_upgrade(&[_]u8{ 1, 2 });
     t.run();
@@ -1326,7 +1301,6 @@ test "Cluster: upgrade: state-sync to new release" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
 
     t.replica(.R_).stop();
     try t.replica(.R0).open_upgrade(&[_]u8{ 1, 2 });
@@ -1364,7 +1338,7 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
 
     var a0 = t.replica(.A0);
-    var b1 = t.replica(.B1);
+    const b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
     const a0_free_set = &t.cluster.replicas[a0.replicas.get(0)].grid.free_set;
@@ -1392,7 +1366,7 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
         while (true) {
             t.run();
 
-            var faults_after = b2_storage.faults.count();
+            const faults_after = b2_storage.faults.count();
             assert(faults_after <= faults_before);
             if (faults_after == faults_before) break;
 
@@ -1414,6 +1388,45 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
 
     try TestReplicas.expect_equal_grid(a0, b2);
     try TestReplicas.expect_equal_grid(b1, b2);
+}
+
+// Compat(v0.15.3)
+test "Cluster: client: empty command=request operation=register body" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    // Wait for the primary to settle, since this test doesn't implement request retries.
+    t.run();
+
+    var client_bus = try t.client_bus(0);
+    defer client_bus.deinit();
+
+    var request_header = vsr.Header.Request{
+        .cluster = t.cluster.options.cluster_id,
+        .size = @sizeOf(vsr.Header),
+        .client = client_bus.client_id,
+        .request = 0,
+        .command = .request,
+        .operation = .register,
+        .release = .{ .value = 1 },
+    };
+    request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
+    request_header.set_checksum();
+
+    client_bus.request(t.replica(.A0).index(), &request_header, &.{});
+    t.run();
+
+    const Reply = extern struct {
+        header: vsr.Header.Reply,
+        body: vsr.RegisterResult,
+    };
+
+    const reply = std.mem.bytesAsValue(Reply, client_bus.reply.?.buffer[0..@sizeOf(Reply)]);
+    try expectEqual(reply.header.command, .reply);
+    try expectEqual(reply.header.operation, .register);
+    try expectEqual(reply.header.size, @sizeOf(Reply));
+    try expectEqual(reply.header.request, 0);
+    try std.testing.expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
 }
 
 const ProcessSelector = enum {
@@ -1452,7 +1465,7 @@ const TestContext = struct {
         standby_count: u8 = 0,
         client_count: u8 = constants.clients_max,
     }) !*TestContext {
-        var log_level_original = std.testing.log_level;
+        const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
 
         var prng = std.rand.DefaultPrng.init(123);
@@ -1491,13 +1504,16 @@ const TestContext = struct {
                 .faulty_client_replies = false,
                 .faulty_grid = false,
             },
-            .state_machine = .{ .lsm_forest_node_count = 4096 },
+            .state_machine = .{
+                .batch_size_limit = constants.message_body_size_max,
+                .lsm_forest_node_count = 4096,
+            },
         });
         errdefer cluster.deinit();
 
         for (cluster.storages) |*storage| storage.faulty = true;
 
-        var context = try allocator.create(TestContext);
+        const context = try allocator.create(TestContext);
         errdefer allocator.destroy(context);
 
         context.* = .{
@@ -1534,6 +1550,11 @@ const TestContext = struct {
             .cluster = t.cluster,
             .clients = client_indexes,
         };
+    }
+
+    pub fn client_bus(t: *TestContext, client_index: usize) !*TestClientBus {
+        // Reuse one of `Cluster.clients`' ids since the Network preallocated links for it.
+        return TestClientBus.init(t, t.cluster.clients[client_index].id);
     }
 
     pub fn run(t: *TestContext) void {
@@ -2042,12 +2063,16 @@ const TestClients = struct {
                 if (client.request_inflight == null and
                     t.context.client_requests[c] > client.request_number)
                 {
-                    const message = client.get_message();
-                    errdefer client.release_message(message);
+                    if (client.request_number == 0) {
+                        t.cluster.register(c);
+                    } else {
+                        const message = client.get_message();
+                        errdefer client.release_message(message);
 
-                    const body_size = 123;
-                    @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
-                    t.cluster.request(c, .echo, message, body_size);
+                        const body_size = 123;
+                        @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
+                        t.cluster.request(c, .echo, message, body_size);
+                    }
                 }
             }
         }
@@ -2058,5 +2083,92 @@ const TestClients = struct {
         var replies_total: usize = 0;
         for (t.clients.const_slice()) |c| replies_total += t.context.client_replies[c];
         return replies_total;
+    }
+};
+
+/// TestClientBus supports tests which require fine-grained control of the client protocol.
+/// Note that in particular, TestClientBus does *not* implement message retries.
+const TestClientBus = struct {
+    const MessagePool = @import("../message_pool.zig").MessagePool;
+    const MessageBus = Cluster.MessageBus;
+
+    context: *TestContext,
+    client_id: u128,
+    message_pool: *MessagePool,
+    message_bus: MessageBus,
+    reply: ?*Message = null,
+
+    fn init(context: *TestContext, client_id: u128) !*TestClientBus {
+        const message_pool = try allocator.create(MessagePool);
+        errdefer allocator.destroy(message_pool);
+
+        message_pool.* = try MessagePool.init(allocator, .client);
+        errdefer message_pool.deinit(allocator);
+
+        var client_bus = try allocator.create(TestClientBus);
+        errdefer allocator.destroy(client_bus);
+
+        client_bus.* = .{
+            .context = context,
+            .client_id = client_id,
+            .message_pool = message_pool,
+            .message_bus = try MessageBus.init(
+                allocator,
+                context.cluster.options.cluster_id,
+                .{ .client = client_id },
+                message_pool,
+                on_message,
+                .{ .network = context.cluster.network },
+            ),
+        };
+        errdefer client_bus.message_bus.deinit(allocator);
+
+        context.cluster.state_checker.clients_exhaustive = false;
+        context.cluster.network.link(client_bus.message_bus.process, &client_bus.message_bus);
+
+        return client_bus;
+    }
+
+    pub fn deinit(t: *TestClientBus) void {
+        if (t.reply) |reply| {
+            t.message_pool.unref(reply);
+            t.reply = null;
+        }
+        t.message_bus.deinit(allocator);
+        t.message_pool.deinit(allocator);
+        allocator.destroy(t.message_pool);
+        allocator.destroy(t);
+    }
+
+    fn on_message(message_bus: *Cluster.MessageBus, message: *Message) void {
+        const t: *TestClientBus = @fieldParentPtr("message_bus", message_bus);
+        assert(message.header.cluster == t.context.cluster.options.cluster_id);
+
+        switch (message.header.command) {
+            .reply => {
+                assert(t.reply == null);
+                t.reply = message.ref();
+            },
+            .pong_client => {},
+            else => unreachable,
+        }
+    }
+
+    pub fn request(
+        t: *TestClientBus,
+        replica: u8,
+        header: *const vsr.Header.Request,
+        body: []const u8,
+    ) void {
+        assert(replica < t.context.cluster.replicas.len);
+        assert(body.len <= constants.message_body_size_max);
+
+        const message = t.message_pool.get_message(.request);
+        defer t.message_pool.unref(message);
+
+        message.header.* = header.*;
+        stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(vsr.Header)..], body);
+
+        t.message_bus.send_message_to_replica(replica, message.base());
     }
 };

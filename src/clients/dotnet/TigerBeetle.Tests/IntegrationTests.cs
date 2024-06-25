@@ -982,7 +982,7 @@ public class IntegrationTests
                 AccountId = accounts[0].Id,
                 TimestampMin = 0,
                 TimestampMax = 0,
-                Limit = 8190,
+                Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits
             };
             var account_transfers = client.GetAccountTransfers(filter);
@@ -1012,7 +1012,7 @@ public class IntegrationTests
                 AccountId = accounts[1].Id,
                 TimestampMin = 0,
                 TimestampMax = 0,
-                Limit = 8190,
+                Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits | AccountFilterFlags.Reversed
             };
             var account_transfers = client.GetAccountTransfers(filter);
@@ -1042,7 +1042,7 @@ public class IntegrationTests
                 AccountId = accounts[0].Id,
                 TimestampMin = 0,
                 TimestampMax = 0,
-                Limit = 8190,
+                Limit = 254,
                 Flags = AccountFilterFlags.Debits
             };
             var account_transfers = client.GetAccountTransfers(filter);
@@ -1072,7 +1072,7 @@ public class IntegrationTests
                 AccountId = accounts[1].Id,
                 TimestampMin = 1,
                 TimestampMax = ulong.MaxValue - 1,
-                Limit = 8190,
+                Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Reversed
             };
             var account_transfers = client.GetAccountTransfers(filter);
@@ -1220,7 +1220,7 @@ public class IntegrationTests
                 AccountId = 0,
                 TimestampMin = 0,
                 TimestampMax = 0,
-                Limit = 8190,
+                Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
@@ -1232,7 +1232,7 @@ public class IntegrationTests
                 AccountId = accounts[0].Id,
                 TimestampMin = ulong.MaxValue,
                 TimestampMax = 0,
-                Limit = 8190,
+                Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
@@ -1244,7 +1244,7 @@ public class IntegrationTests
                 AccountId = accounts[0].Id,
                 TimestampMin = 0,
                 TimestampMax = ulong.MaxValue,
-                Limit = 8190,
+                Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
@@ -1256,7 +1256,7 @@ public class IntegrationTests
                 AccountId = accounts[0].Id,
                 TimestampMin = ulong.MaxValue - 1,
                 TimestampMax = 1,
-                Limit = 8190,
+                Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
@@ -1280,7 +1280,7 @@ public class IntegrationTests
                 AccountId = accounts[0].Id,
                 TimestampMin = 0,
                 TimestampMax = 0,
-                Limit = 8190,
+                Limit = 254,
                 Flags = (AccountFilterFlags)0,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
@@ -1292,7 +1292,7 @@ public class IntegrationTests
                 AccountId = accounts[0].Id,
                 TimestampMin = 0,
                 TimestampMax = 0,
-                Limit = 8190,
+                Limit = 254,
                 Flags = (AccountFilterFlags)0xFFFF,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
@@ -1608,7 +1608,7 @@ internal class TBServer : IDisposable
         {
             using var format = new Process();
             format.StartInfo.FileName = TB_SERVER;
-            format.StartInfo.Arguments = $"format --cluster=0 --replica=0 --replica-count=1 ./{dataFile}";
+            format.StartInfo.Arguments = $"format --cluster=0 --replica=0 --replica-count=1 --development ./{dataFile}";
             format.StartInfo.RedirectStandardError = true;
             format.Start();
             var formatStderr = format.StandardError.ReadToEnd();

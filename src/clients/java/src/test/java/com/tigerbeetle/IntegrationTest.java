@@ -1256,7 +1256,7 @@ public class IntegrationTest {
             filter.setAccountId(account1Id);
             filter.setTimestampMin(0);
             filter.setTimestampMax(0);
-            filter.setLimit(8190);
+            filter.setLimit(254);
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
@@ -1282,7 +1282,7 @@ public class IntegrationTest {
             filter.setAccountId(account2Id);
             filter.setTimestampMin(0);
             filter.setTimestampMax(0);
-            filter.setLimit(8190);
+            filter.setLimit(254);
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(true);
@@ -1309,7 +1309,7 @@ public class IntegrationTest {
             filter.setAccountId(account1Id);
             filter.setTimestampMin(0);
             filter.setTimestampMax(0);
-            filter.setLimit(8190);
+            filter.setLimit(254);
             filter.setDebits(true);
             filter.setCredits(false);
             filter.setReversed(false);
@@ -1336,7 +1336,7 @@ public class IntegrationTest {
             filter.setAccountId(account2Id);
             filter.setTimestampMin(1);
             filter.setTimestampMax(-2L); // -2L == ulong max - 1
-            filter.setLimit(8190);
+            filter.setLimit(254);
             filter.setDebits(false);
             filter.setCredits(true);
             filter.setReversed(true);
@@ -1480,7 +1480,7 @@ public class IntegrationTest {
             filter.setAccountId(0);
             filter.setTimestampMin(0);
             filter.setTimestampMax(0);
-            filter.setLimit(8190);
+            filter.setLimit(254);
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
@@ -1494,7 +1494,7 @@ public class IntegrationTest {
             filter.setAccountId(account2Id);
             filter.setTimestampMin(-1L); // -1L == ulong max value
             filter.setTimestampMax(0);
-            filter.setLimit(8190);
+            filter.setLimit(254);
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
@@ -1508,7 +1508,7 @@ public class IntegrationTest {
             filter.setAccountId(account2Id);
             filter.setTimestampMin(0);
             filter.setTimestampMax(-1L); // -1L == ulong max value
-            filter.setLimit(8190);
+            filter.setLimit(254);
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
@@ -1522,7 +1522,7 @@ public class IntegrationTest {
             filter.setAccountId(account2Id);
             filter.setTimestampMin(-2L); // -2L == ulong max - 1
             filter.setTimestampMax(1);
-            filter.setLimit(8190);
+            filter.setLimit(254);
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
@@ -1652,7 +1652,7 @@ public class IntegrationTest {
             }
 
             final var format = Runtime.getRuntime().exec(new String[] {exe, "format", "--cluster=0",
-                    "--replica=0", "--replica-count=1", TB_FILE});
+                    "--replica=0", "--replica-count=1", "--development", TB_FILE});
             if (format.waitFor() != 0) {
                 final var reader =
                         new BufferedReader(new InputStreamReader(format.getErrorStream()));

@@ -158,29 +158,6 @@ typedef struct tb_create_transfers_result_t {
     uint32_t result;
 } tb_create_transfers_result_t;
 
-typedef enum TB_OPERATION {
-    TB_OPERATION_PULSE = 128,
-    TB_OPERATION_CREATE_ACCOUNTS = 129,
-    TB_OPERATION_CREATE_TRANSFERS = 130,
-    TB_OPERATION_LOOKUP_ACCOUNTS = 131,
-    TB_OPERATION_LOOKUP_TRANSFERS = 132,
-    TB_OPERATION_GET_ACCOUNT_TRANSFERS = 133,
-    TB_OPERATION_GET_ACCOUNT_BALANCES = 134,
-} TB_OPERATION;
-
-typedef enum TB_PACKET_STATUS {
-    TB_PACKET_OK = 0,
-    TB_PACKET_TOO_MUCH_DATA = 1,
-    TB_PACKET_INVALID_OPERATION = 2,
-    TB_PACKET_INVALID_DATA_SIZE = 3,
-} TB_PACKET_STATUS;
-
-typedef enum TB_PACKET_ACQUIRE_STATUS {
-    TB_PACKET_ACQUIRE_OK = 0,
-    TB_PACKET_ACQUIRE_CONCURRENCY_MAX_EXCEEDED = 1,
-    TB_PACKET_ACQUIRE_SHUTDOWN = 2,
-} TB_PACKET_ACQUIRE_STATUS;
-
 typedef struct tb_account_filter_t {
     tb_uint128_t account_id;
     uint64_t timestamp_min;
@@ -204,6 +181,29 @@ typedef struct tb_account_balance_t {
     uint64_t timestamp;
     uint8_t reserved[56];
 } tb_account_balance_t;
+
+typedef enum TB_OPERATION {
+    TB_OPERATION_PULSE = 128,
+    TB_OPERATION_CREATE_ACCOUNTS = 129,
+    TB_OPERATION_CREATE_TRANSFERS = 130,
+    TB_OPERATION_LOOKUP_ACCOUNTS = 131,
+    TB_OPERATION_LOOKUP_TRANSFERS = 132,
+    TB_OPERATION_GET_ACCOUNT_TRANSFERS = 133,
+    TB_OPERATION_GET_ACCOUNT_BALANCES = 134,
+} TB_OPERATION;
+
+typedef enum TB_PACKET_STATUS {
+    TB_PACKET_OK = 0,
+    TB_PACKET_TOO_MUCH_DATA = 1,
+    TB_PACKET_INVALID_OPERATION = 2,
+    TB_PACKET_INVALID_DATA_SIZE = 3,
+} TB_PACKET_STATUS;
+
+typedef enum TB_PACKET_ACQUIRE_STATUS {
+    TB_PACKET_ACQUIRE_OK = 0,
+    TB_PACKET_ACQUIRE_CONCURRENCY_MAX_EXCEEDED = 1,
+    TB_PACKET_ACQUIRE_SHUTDOWN = 2,
+} TB_PACKET_ACQUIRE_STATUS;
 
 typedef struct tb_packet_t {
     struct tb_packet_t* next;

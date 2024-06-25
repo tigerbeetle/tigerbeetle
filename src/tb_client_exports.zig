@@ -10,13 +10,13 @@ comptime {
         @compileError("Must be built with libc to export tb_client symbols");
     }
 
-    @export(init, .{ .name = "tb_client_init", .linkage = .Strong });
-    @export(init_echo, .{ .name = "tb_client_init_echo", .linkage = .Strong });
-    @export(tb.completion_context, .{ .name = "tb_client_completion_context", .linkage = .Strong });
-    @export(tb.acquire_packet, .{ .name = "tb_client_acquire_packet", .linkage = .Strong });
-    @export(tb.release_packet, .{ .name = "tb_client_release_packet", .linkage = .Strong });
-    @export(tb.submit, .{ .name = "tb_client_submit", .linkage = .Strong });
-    @export(tb.deinit, .{ .name = "tb_client_deinit", .linkage = .Strong });
+    @export(init, .{ .name = "tb_client_init", .linkage = .strong });
+    @export(init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
+    @export(tb.completion_context, .{ .name = "tb_client_completion_context", .linkage = .strong });
+    @export(tb.acquire_packet, .{ .name = "tb_client_acquire_packet", .linkage = .strong });
+    @export(tb.release_packet, .{ .name = "tb_client_release_packet", .linkage = .strong });
+    @export(tb.submit, .{ .name = "tb_client_submit", .linkage = .strong });
+    @export(tb.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
 }
 
 fn init(

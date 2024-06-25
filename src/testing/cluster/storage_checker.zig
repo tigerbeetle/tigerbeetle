@@ -202,7 +202,11 @@ pub const StorageChecker = struct {
         areas: std.enums.EnumSet(CheckpointArea),
     ) !void {
         const checkpoint_actual = checkpoint: {
-            var checkpoint = Checkpoint.init(.{});
+            var checkpoint = Checkpoint.init(.{
+                .superblock_checkpoint = null,
+                .client_replies = null,
+                .grid = null,
+            });
             if (areas.contains(.superblock_checkpoint)) {
                 checkpoint.put(
                     .superblock_checkpoint,

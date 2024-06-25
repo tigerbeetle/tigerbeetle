@@ -8,6 +8,7 @@ const meta = std.meta;
 
 const constants = @import("../constants.zig");
 const div_ceil = @import("../stdx.zig").div_ceil;
+const maybe = @import("../stdx.zig").maybe;
 const verify = constants.verify;
 
 const tracer = @import("../tracer.zig");
@@ -95,7 +96,14 @@ pub fn SetAssociativeCacheType(
         /// We don't require `value_count_max` in `init` to be a power of 2, but we do require
         /// it to be a multiple of `value_count_max_multiple`. The calculation below
         /// follows from a multiple which will satisfy all asserts.
-        pub const value_count_max_multiple = layout.cache_line_size * layout.ways * layout.clock_bits;
+        pub const value_count_max_multiple: u64 = @max(
+            // `values`:
+            @divExact(
+                @max(@sizeOf(Value), layout.cache_line_size),
+                @min(@sizeOf(Value), layout.cache_line_size),
+            ) * layout.ways,
+            @divExact(layout.cache_line_size * 8, layout.clock_bits), // `counts`
+        );
 
         name: []const u8,
         sets: u64,
@@ -151,9 +159,12 @@ pub fn SetAssociativeCacheType(
             assert(counts_size >= layout.cache_line_size);
             assert(counts_size % layout.cache_line_size == 0);
 
+            // Each clock hand is guaranteed (by comptime asserts) to not span multiple cache lines.
+            // But in order to shrink the lower-bound cache size, we do not require that `clocks`
+            // itself is a multiple of the cache line size.
             const clocks_size = @divExact(sets * clock_hand_bits, 8);
-            assert(clocks_size >= layout.cache_line_size);
-            assert(clocks_size % layout.cache_line_size == 0);
+            maybe(clocks_size >= layout.cache_line_size);
+            maybe(clocks_size % layout.cache_line_size == 0);
 
             assert(value_count_max % value_count_max_multiple == 0);
 
@@ -170,7 +181,7 @@ pub fn SetAssociativeCacheType(
             const counts = try allocator.alloc(u64, @divExact(counts_size, @sizeOf(u64)));
             errdefer allocator.free(counts);
 
-            const clocks = try allocator.alloc(u64, @divExact(clocks_size, @sizeOf(u64)));
+            const clocks = try allocator.alloc(u64, div_ceil(clocks_size, @sizeOf(u64)));
             errdefer allocator.free(clocks);
 
             // Explicitly allocated so that get / get_index can be `*const Self`.
@@ -592,7 +603,7 @@ test "SetAssociativeCache: hash collision" {
 fn PackedUnsignedIntegerArray(comptime UInt: type) type {
     const Word = u64;
 
-    assert(builtin.target.cpu.arch.endian() == .Little);
+    assert(builtin.target.cpu.arch.endian() == .little);
     assert(@typeInfo(UInt).Int.signedness == .unsigned);
     assert(@typeInfo(UInt).Int.bits < @bitSizeOf(u8));
     assert(math.isPowerOfTwo(@typeInfo(UInt).Int.bits));

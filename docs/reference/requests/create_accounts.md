@@ -20,47 +20,41 @@ result when the account was successfully created.
 
 ### `linked_event_failed`
 
-The account was not created.
-One or more of the accounts in the [linked chain](../account.md#flagslinked) is invalid, so the
-whole chain failed.
+The account was not created. One or more of the accounts in the
+[linked chain](../account.md#flagslinked) is invalid, so the whole chain failed.
 
 ### `linked_event_chain_open`
 
-The account was not created.
-The [`Account.flags.linked`](../account.md#flagslinked) flag was set on the last event in the
-batch, which is not legal. (`flags.linked` indicates that the chain continues to the next
-operation).
+The account was not created. The [`Account.flags.linked`](../account.md#flagslinked) flag was set on
+the last event in the batch, which is not legal. (`flags.linked` indicates that the chain continues
+to the next operation).
 
 ### `timestamp_must_be_zero`
 
-The account was not created.
-The [`Account.timestamp`](../account.md#timestamp) is nonzero, but must be zero.
-The cluster is responsible for setting this field.
+The account was not created. The [`Account.timestamp`](../account.md#timestamp) is nonzero, but must
+be zero. The cluster is responsible for setting this field.
 
 ### `reserved_field`
 
-The account was not created.
-[`Account.reserved`](../account.md#reserved) is nonzero, but must be zero.
+The account was not created. [`Account.reserved`](../account.md#reserved) is nonzero, but must be
+zero.
 
 ### `reserved_flag`
 
-The account was not created.
-`Account.flags.reserved` is nonzero, but must be zero.
+The account was not created. `Account.flags.reserved` is nonzero, but must be zero.
 
 ### `id_must_not_be_zero`
 
-The account was not created.
-[`Account.id`](../account.md#id) is zero, which is a reserved value.
+The account was not created. [`Account.id`](../account.md#id) is zero, which is a reserved value.
 
 ### `id_must_not_be_int_max`
 
-The account was not created.
-[`Account.id`](../account.md#id) is `2^128 - 1`, which is a reserved value.
+The account was not created. [`Account.id`](../account.md#id) is `2^128 - 1`, which is a reserved
+value.
 
 ### `flags_are_mutually_exclusive`
 
-The account was not created.
-An account cannot be created with the specified combination of
+The account was not created. An account cannot be created with the specified combination of
 [`Account.flags`](../account.md#flags).
 
 The following flags are mutually exclusive:
@@ -70,41 +64,39 @@ The following flags are mutually exclusive:
 
 ### `debits_pending_must_be_zero`
 
-The account was not created.
-[`Account.debits_pending`](../account.md#debits_pending) is nonzero, but must be zero.
+The account was not created. [`Account.debits_pending`](../account.md#debits_pending) is nonzero,
+but must be zero.
 
 An account's debits and credits are only modified by transfers.
 
 ### `debits_posted_must_be_zero`
 
-The account was not created.
-[`Account.debits_posted`](../account.md#debits_posted) is nonzero, but must be zero.
+The account was not created. [`Account.debits_posted`](../account.md#debits_posted) is nonzero, but
+must be zero.
 
 An account's debits and credits are only modified by transfers.
 
 ### `credits_pending_must_be_zero`
 
-The account was not created.
-[`Account.credits_pending`](../account.md#credits_pending) is nonzero, but must be zero.
+The account was not created. [`Account.credits_pending`](../account.md#credits_pending) is nonzero,
+but must be zero.
 
 An account's debits and credits are only modified by transfers.
 
 ### `credits_posted_must_be_zero`
 
-The account was not created.
-[`Account.credits_posted`](../account.md#credits_posted) is nonzero, but must be zero.
+The account was not created. [`Account.credits_posted`](../account.md#credits_posted) is nonzero,
+but must be zero.
 
 An account's debits and credits are only modified by transfers.
 
 ### `ledger_must_not_be_zero`
 
-The account was not created.
-[`Account.ledger`](../account.md#ledger) is zero, but must be nonzero.
+The account was not created. [`Account.ledger`](../account.md#ledger) is zero, but must be nonzero.
 
 ### `code_must_not_be_zero`
 
-The account was not created.
-[`Account.code`](../account.md#code) is zero, but must be nonzero.
+The account was not created. [`Account.code`](../account.md#code) is zero, but must be nonzero.
 
 ### `exists_with_different_flags`
 
@@ -145,7 +137,7 @@ account in the request:
 - `credits_pending`
 - `credits_posted`
 
-To correctly [recover from application crashes](../../develop/reliable-transaction-submission.md),
+To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
 many applications should handle `exists` exactly as [`ok`](#ok).
 
 ## Client libraries
@@ -159,7 +151,6 @@ For language-specific docs see:
 
 ## Internals
 
-If you're curious and want to learn more, you can find the source code
-for creating an account in
-[src/state_machine.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/state_machine.zig). Search
-for `fn create_account(` and `fn execute(`.
+If you're curious and want to learn more, you can find the source code for creating an account in
+[src/state_machine.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/state_machine.zig).
+Search for `fn create_account(` and `fn execute(`.

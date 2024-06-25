@@ -768,7 +768,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         fn index_block_callback(
             iterator: *LevelTableValueBlockIterator,
         ) LevelTableValueBlockIterator.DataBlocksToLoad {
-            const self: *ScanTreeLevel = @fieldParentPtr(ScanTreeLevel, "iterator", iterator);
+            const self: *ScanTreeLevel = @fieldParentPtr("iterator", iterator);
             const scan: *const ScanTree = self.scan;
 
             assert(self.manifest == .iterating_blocks or
@@ -816,7 +816,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             iterator: *LevelTableValueBlockIterator,
             data_block: ?BlockPtrConst,
         ) void {
-            const self: *ScanTreeLevel = @fieldParentPtr(ScanTreeLevel, "iterator", iterator);
+            const self: *ScanTreeLevel = @fieldParentPtr("iterator", iterator);
             const scan: *ScanTree = self.scan;
 
             assert(self.manifest == .iterating_blocks or

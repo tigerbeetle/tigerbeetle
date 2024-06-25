@@ -29,8 +29,7 @@ test "benchmark: binary search" {
     log.info("WT: Wall time/search", .{});
     log.info("UT: utime time/search", .{});
 
-    var seed: u64 = undefined;
-    try std.os.getrandom(std.mem.asBytes(&seed));
+    const seed = std.crypto.random.int(u64);
     var prng = std.rand.DefaultPrng.init(seed);
 
     // Allocate on the heap just once.
@@ -38,7 +37,7 @@ test "benchmark: binary search" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    var blob = try arena.allocator().alloc(u8, blob_size);
+    const blob = try arena.allocator().alloc(u8, blob_size);
 
     inline for (kv_types) |kv| {
         inline for (values_per_page) |values_count| {
@@ -63,12 +62,12 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
     const page_count = layout.blob_size / @sizeOf(Page);
 
     // Search pages and keys in random order.
-    var page_picker = shuffled_index(page_count, random);
-    var value_picker = shuffled_index(layout.values_count, random);
+    const page_picker = shuffled_index(page_count, random);
+    const value_picker = shuffled_index(layout.values_count, random);
 
     // Generate 1GiB worth of 24KiB pages.
     var blob_alloc = std.heap.FixedBufferAllocator.init(blob);
-    var pages = try blob_alloc.allocator().alloc(Page, page_count);
+    const pages = try blob_alloc.allocator().alloc(Page, page_count);
     random.bytes(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
         for (&page.values, 0..) |*value, i| value.key = i;
@@ -181,7 +180,7 @@ const Benchmark = struct {
             return utime100ns * 100;
         }
 
-        const utime_tv = std.os.getrusage(std.os.system.rusage.SELF).utime;
+        const utime_tv = std.posix.getrusage(std.posix.rusage.SELF).utime;
         return (@as(u128, @intCast(utime_tv.tv_sec)) * std.time.ns_per_s) +
             (@as(u32, @intCast(utime_tv.tv_usec)) * std.time.ns_per_us);
     }
@@ -201,9 +200,9 @@ fn timeval_to_ns(tv: std.os.timeval) u64 {
         @as(u64, @intCast(tv.tv_usec)) * ns_per_us;
 }
 
-fn readPerfFd(fd: std.os.fd_t) !usize {
+fn readPerfFd(fd: std.posix.fd_t) !usize {
     var result: usize = 0;
-    const n = try std.os.read(fd, std.mem.asBytes(&result));
+    const n = try std.posix.read(fd, std.mem.asBytes(&result));
     assert(n == @sizeOf(usize));
 
     return result;

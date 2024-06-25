@@ -18,7 +18,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
         \\git log --merges --first-parent origin/release..origin/main
     , .{});
     try shell.project_root.makePath("./zig-cache");
-    try shell.project_root.writeFile("./zig-cache/merges.txt", merges);
+    try shell.project_root.writeFile(.{ .sub_path = "./zig-cache/merges.txt", .data = merges });
     log.info("merged PRs: ./zig-cache/merges.txt", .{});
 
     const max_bytes = 10 * 1024 * 1024;
@@ -35,7 +35,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
         .today = today,
     });
 
-    try shell.project_root.writeFile("CHANGELOG.md", changelog_new.items);
+    try shell.project_root.writeFile(.{ .sub_path = "CHANGELOG.md", .data = changelog_new.items });
 
     log.info("don't forget to update ./CHANGELOG.md", .{});
 }

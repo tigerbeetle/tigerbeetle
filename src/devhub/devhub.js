@@ -65,10 +65,19 @@ async function mainMetrics() {
 async function mainSeeds() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
-  const records = await (await fetch(dataUrl)).json();
+  const pullsURL = "https://api.github.com/repos/tigerbeetle/tigerbeetle/pulls";
+
+  const [records, pulls] = await Promise.all([
+    (async () => await (await fetch(dataUrl)).json())(),
+    (async () => await (await fetch(pullsURL)).json())(),
+  ]);
+
+  const pullsByURL = new Map(pulls.map((pull) => [pull.html_url, pull]));
+  const openPullRequests = new Set(pulls.map((it) => it.number));
 
   // Filtering:
-  // - By default, show one seed per fuzzer per commit and exclude successes for the main branch.
+  // - By default, show one seed per fuzzer per commit; exclude successes for the main branch and
+  //   already merged pull requests.
   // - Clicking on the fuzzer cell in the table shows all seeds for this fuzzer/commit pair.
   // - "show all" link (in the .html) disables filtering completely.
   const query = new URLSearchParams(document.location.search);
@@ -77,6 +86,7 @@ async function mainSeeds() {
   const query_all = query.get("all") !== null;
   const fuzzersWithFailures = new Set();
 
+  const seedsDom = document.querySelector("#seeds");
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
   let commit_count = 0;
@@ -89,10 +99,15 @@ async function mainSeeds() {
     } else if (query_fuzzer) {
       include = record.fuzzer == query_fuzzer &&
         record.commit_sha == query_commit;
+    } else if (
+      pullRequestNumber(record) &&
+      !openPullRequests.has(pullRequestNumber(record))
+    ) {
+      include = false;
     } else {
       include = (!record.ok || pullRequestNumber(record) !== undefined) &&
         !fuzzersWithFailures.has(record.branch + record.fuzzer);
-      fuzzersWithFailures.add(record.branch + record.fuzzer);
+      if (include) fuzzersWithFailures.add(record.branch + record.fuzzer);
     }
 
     if (!include) continue;
@@ -110,11 +125,13 @@ async function mainSeeds() {
     );
     const rowDom = document.createElement("tr");
 
+    const seedSuccess = record.fuzzer === "canary" ? !record.ok : record.ok;
     rowDom.style.setProperty(
       "background",
-      record.ok ? "#CF0" : colors[commit_count % colors.length],
+      seedSuccess ? "#CF0" : colors[commit_count % colors.length],
     );
 
+    const pull = pullsByURL.get(record.branch);
     const prLink = pullRequestNumber(record)
       ? `<a href="${record.branch}">#${pullRequestNumber(record)}</a>`
       : "";
@@ -125,6 +142,7 @@ async function mainSeeds() {
             </a>
             ${prLink}
           </td>
+          <td>${pull ? pull.user.login : ""}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
           <td><code>${record.command}</code></td>
           <td><time>${seedDuration}</time></td>
@@ -132,6 +150,24 @@ async function mainSeeds() {
       `;
     tableDom.appendChild(rowDom);
   }
+
+  let mainBranchFail = 0;
+  let mainBranchOk = 0;
+  let mainBranchCanary = 0;
+  for (const record of records) {
+    if (record.branch == "https://github.com/tigerbeetle/tigerbeetle") {
+      if (record.fuzzer === "canary") {
+        mainBranchCanary += 1;
+      } else if (record.ok) {
+        mainBranchOk += 1;
+      } else {
+        mainBranchFail += 1;
+      }
+    }
+  }
+  seedsDom.append(
+    `main branch ok=${mainBranchOk} fail=${mainBranchFail} canary=${mainBranchCanary}`,
+  );
 }
 
 function pullRequestNumber(record) {

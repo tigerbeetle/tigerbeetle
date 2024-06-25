@@ -31,23 +31,13 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
-pub const std_options = struct {
-    pub const log_level: std.log.Level = constants.log_level;
-    pub const logFn = constants.log;
+pub const std_options = .{
+    .log_level = constants.log_level,
+    .logFn = constants.log,
 };
 
 pub fn main() !void {
     try SigIllHandler.register();
-
-    // TODO(zig): Zig defaults to 16MB stack size on Linux, but not yet on mac as of 0.11.
-    // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
-    // in build.zig doesn't work.
-    if (builtin.target.os.tag == .macos) {
-        os.setrlimit(os.rlimit_resource.STACK, .{
-            .cur = 16 * 1024 * 1024,
-            .max = 16 * 1024 * 1024,
-        }) catch @panic("unable to adjust stack limit");
-    }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -80,8 +70,8 @@ pub fn main() !void {
 const SigIllHandler = struct {
     var original_posix_sigill_handler: ?*const fn (
         i32,
-        *const os.siginfo_t,
-        ?*const anyopaque,
+        *const std.posix.siginfo_t,
+        ?*anyopaque,
     ) callconv(.C) void = null;
 
     fn handle_sigill_windows(
@@ -95,8 +85,8 @@ const SigIllHandler = struct {
 
     fn handle_sigill_posix(
         sig: i32,
-        info: *const os.siginfo_t,
-        ctx_ptr: ?*const anyopaque,
+        info: *const std.posix.siginfo_t,
+        ctx_ptr: ?*anyopaque,
     ) callconv(.C) noreturn {
         display_message();
         original_posix_sigill_handler.?(sig, info, ctx_ptr);
@@ -129,15 +119,15 @@ const SigIllHandler = struct {
                 // For Linux / macOS, save the original signal handler so it can be called by this
                 // new handler once the log message has been printed.
                 assert(original_posix_sigill_handler == null);
-                var act = os.Sigaction{
+                var act = std.posix.Sigaction{
                     .handler = .{ .sigaction = handle_sigill_posix },
-                    .mask = os.empty_sigset,
-                    .flags = (os.SA.SIGINFO | os.SA.RESTART | os.SA.RESETHAND),
+                    .mask = std.posix.empty_sigset,
+                    .flags = (std.posix.SA.SIGINFO | std.posix.SA.RESTART | std.posix.SA.RESETHAND),
                 };
 
-                var oact: os.Sigaction = undefined;
+                var oact: std.posix.Sigaction = undefined;
 
-                try os.sigaction(os.SIG.ILL, &act, &oact);
+                try std.posix.sigaction(std.posix.SIG.ILL, &act, &oact);
                 original_posix_sigill_handler = oact.handler.sigaction.?;
             },
             else => unreachable,
@@ -146,8 +136,8 @@ const SigIllHandler = struct {
 };
 
 const Command = struct {
-    dir_fd: os.fd_t,
-    fd: os.fd_t,
+    dir_fd: std.posix.fd_t,
+    fd: std.posix.fd_t,
     io: IO,
     storage: Storage,
 
@@ -163,7 +153,7 @@ const Command = struct {
         // TODO Handle physical volumes where there is no directory to fsync.
         const dirname = std.fs.path.dirname(path) orelse ".";
         command.dir_fd = try IO.open_dir(dirname);
-        errdefer os.close(command.dir_fd);
+        errdefer std.posix.close(command.dir_fd);
 
         const direct_io: vsr.io.DirectIO = if (!constants.direct_io)
             .direct_io_disabled
@@ -180,7 +170,7 @@ const Command = struct {
             if (options.must_create) .create else .open,
             direct_io,
         );
-        errdefer os.close(command.fd);
+        errdefer std.posix.close(command.fd);
 
         command.io = try IO.init(128, 0);
         errdefer command.io.deinit();
@@ -192,8 +182,8 @@ const Command = struct {
     fn deinit(command: *Command) void {
         command.storage.deinit();
         command.io.deinit();
-        os.close(command.fd);
-        os.close(command.dir_fd);
+        std.posix.close(command.fd);
+        std.posix.close(command.dir_fd);
     }
 
     pub fn format(
@@ -307,6 +297,8 @@ const Command = struct {
             .nonce = nonce,
             .time = .{},
             .state_machine_options = .{
+                .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
+                .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,
                 .lsm_forest_node_count = args.lsm_forest_node_count,
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,

@@ -123,7 +123,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         /// (Constructed by the StateMachine.)
         pub const Options = struct {
-            // No options currently.
+            /// The (runtime) upper-limit of values created by a single batch.
+            batch_value_count_limit: u32,
         };
 
         pub fn init(
@@ -137,13 +138,21 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(config.id != 0); // id=0 is reserved.
             assert(config.name.len > 0);
 
-            var table_mutable = try TableMemory.init(allocator, .mutable, config.name);
+            const value_count_limit =
+                options.batch_value_count_limit * constants.lsm_batch_multiple;
+            assert(value_count_limit > 0);
+            assert(value_count_limit <= TreeTable.value_count_max);
+
+            var table_mutable = try TableMemory.init(allocator, .mutable, config.name, .{
+                .value_count_limit = value_count_limit,
+            });
             errdefer table_mutable.deinit(allocator);
 
             var table_immutable = try TableMemory.init(
                 allocator,
                 .{ .immutable = .{} },
                 config.name,
+                .{ .value_count_limit = value_count_limit },
             );
             errdefer table_immutable.deinit(allocator);
 
@@ -411,7 +420,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             fn read_index_block_callback(completion: *Read, index_block: BlockPtrConst) void {
-                const context = @fieldParentPtr(LookupContext, "completion", completion);
+                const context: *LookupContext = @fieldParentPtr("completion", completion);
                 assert(context.data_block == null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
@@ -439,7 +448,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             fn read_data_block_callback(completion: *Read, data_block: BlockPtrConst) void {
-                const context = @fieldParentPtr(LookupContext, "completion", completion);
+                const context: *LookupContext = @fieldParentPtr("completion", completion);
                 assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);

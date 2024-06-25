@@ -43,6 +43,8 @@ Depending on your use case, you may find these additional design patterns helpfu
 - [Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfers.md)
 - [Closing Accounts](./recipes/close-account.md)
 - [Balance-Conditional Transfers](./recipes/balance-conditional-transfers.md)
+- [Balance Bounds](./recipes/balance-bounds.md)
+- [Correcting Transfers](./recipes/correcting-transfers.md)
 
 ## Want Help Developing on TigerBeetle?
 

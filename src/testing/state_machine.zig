@@ -67,6 +67,7 @@ pub fn StateMachineType(
         }
 
         pub const Options = struct {
+            batch_size_limit: u32,
             lsm_forest_node_count: u32,
         };
 
@@ -81,10 +82,10 @@ pub fn StateMachineType(
                     .id = 2,
                     .value = 3,
                 },
-                .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple,
-                    .id = config.lsm_batch_multiple,
-                    .value = config.lsm_batch_multiple,
+                .batch_value_count_max = .{
+                    .timestamp = 1,
+                    .id = 1,
+                    .value = 1,
                 },
                 .ignored = &[_][]const u8{},
                 .derived = .{},
@@ -108,18 +109,23 @@ pub fn StateMachineType(
         callback: ?*const fn (state_machine: *StateMachine) void = null,
 
         pub fn init(allocator: std.mem.Allocator, grid: *Grid, options: Options) !StateMachine {
+            const things_cache_entries_max =
+                ThingGroove.ObjectsCache.Cache.value_count_max_multiple;
             var forest = try Forest.init(
                 allocator,
                 grid,
-                options.lsm_forest_node_count,
+                .{
+                    .compaction_block_count = Forest.Options.compaction_block_count_min,
+                    .node_count = options.lsm_forest_node_count,
+                },
                 .{
                     .things = .{
-                        .cache_entries_max = 2048,
+                        .cache_entries_max = things_cache_entries_max,
                         .prefetch_entries_for_read_max = 0,
                         .prefetch_entries_for_update_max = 1,
-                        .tree_options_object = .{},
-                        .tree_options_id = .{},
-                        .tree_options_index = .{ .value = .{} },
+                        .tree_options_object = .{ .batch_value_count_limit = 1 },
+                        .tree_options_id = .{ .batch_value_count_limit = 1 },
+                        .tree_options_index = .{ .value = .{ .batch_value_count_limit = 1 } },
                     },
                 },
             );
@@ -152,7 +158,7 @@ pub fn StateMachineType(
         }
 
         fn open_callback(forest: *Forest) void {
-            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
+            const state_machine: *StateMachine = @fieldParentPtr("forest", forest);
             const callback = state_machine.callback.?;
             state_machine.callback = null;
 
@@ -165,9 +171,11 @@ pub fn StateMachineType(
         }
 
         pub fn input_valid(
+            state_machine: *const StateMachine,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
+            _ = state_machine;
             _ = operation;
             _ = input;
             return true;
@@ -203,7 +211,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_callback(completion: *ThingGroove.PrefetchContext) void {
-            const state_machine = @fieldParentPtr(StateMachine, "prefetch_context", completion);
+            const state_machine: *StateMachine = @fieldParentPtr("prefetch_context", completion);
             const callback = state_machine.callback.?;
             state_machine.callback = null;
 
@@ -252,7 +260,7 @@ pub fn StateMachineType(
         }
 
         fn compact_callback(forest: *Forest) void {
-            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
+            const state_machine: *StateMachine = @fieldParentPtr("forest", forest);
             const callback = state_machine.callback.?;
             state_machine.callback = null;
 
@@ -270,7 +278,7 @@ pub fn StateMachineType(
         }
 
         fn checkpoint_callback(forest: *Forest) void {
-            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
+            const state_machine: *StateMachine = @fieldParentPtr("forest", forest);
             const callback = state_machine.callback.?;
             state_machine.callback = null;
 
@@ -285,6 +293,7 @@ fn WorkloadType(comptime StateMachine: type) type {
         const constants = StateMachine.constants;
 
         random: std.rand.Random,
+        options: Options,
         requests_sent: usize = 0,
         requests_delivered: usize = 0,
 
@@ -294,10 +303,10 @@ fn WorkloadType(comptime StateMachine: type) type {
             options: Options,
         ) !Workload {
             _ = allocator;
-            _ = options;
 
             return Workload{
                 .random = random,
+                .options = options,
             };
         }
 
@@ -323,7 +332,7 @@ fn WorkloadType(comptime StateMachine: type) type {
             workload.requests_sent += 1;
 
             // +1 for inclusive limit.
-            const size = workload.random.uintLessThan(usize, constants.message_body_size_max + 1);
+            const size = workload.random.uintAtMost(usize, workload.options.batch_size_limit);
             workload.random.bytes(body[0..size]);
 
             return .{
@@ -364,13 +373,18 @@ fn WorkloadType(comptime StateMachine: type) type {
         }
 
         pub const Options = struct {
+            batch_size_limit: u32,
+
             pub fn generate(random: std.rand.Random, options: struct {
+                batch_size_limit: u32,
                 client_count: usize,
                 in_flight_max: usize,
             }) Options {
                 _ = random;
-                _ = options;
-                return .{};
+
+                return .{
+                    .batch_size_limit = options.batch_size_limit,
+                };
             }
         };
     };

@@ -8,7 +8,7 @@ transfers.
 
 The cluster commits an entire request at once. Events are applied in series, such that successive
 events observe the effects of previous ones and event timestamps are
-[totally ordered](../../develop/time.md#timestamps-are-totally-ordered).
+[totally ordered](../../coding/time.md#timestamps-are-totally-ordered).
 
 Each request receives one _reply_ message from the cluster. The reply contains one _result_ for each
 event in the request.
@@ -112,8 +112,8 @@ Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`, and each o
 
 After the chain of linked events has executed, the fact that they were linked will not be saved. To
 save the association between Transfers or Accounts, it must be
-[encoded into the data model](../../develop/data-modeling.md), for example by adding an ID to one of
-the [user data](../../develop/data-modeling.md#user_data) fields.
+[encoded into the data model](../../coding/data-modeling.md), for example by adding an ID to one of
+the [user data](../../coding/data-modeling.md#user_data) fields.
 
 ## Guarantees
 
@@ -122,7 +122,7 @@ the [user data](../../develop/data-modeling.md#user_data) fields.
   they receive a reply from the cluster. This is because in the case of a network partition, a lack
   of response from the cluster could either indicate that the request was dropped before it was
   processed or that the reply was dropped after the request was processed. Note that individual
-  [pending transfers](../../develop/two-phase-transfers.md) within a request may have
+  [pending transfers](../../coding/two-phase-transfers.md) within a request may have
   [timeouts](../transfer.md#timeout).
 - Requests retried by their original client session receive identical replies.
 - Requests retried by a different client (same request body, different session) may receive
@@ -135,6 +135,6 @@ the [user data](../../develop/data-modeling.md#user_data) fields.
   independently unless they are explicitly [linked](#linked-events)
 - Once committed, an event will always be committed — the cluster's state never backtracks.
 - Within a cluster, object
-  [timestamps are unique and strictly increasing](../../develop/time.md#timestamps-are-totally-ordered).
+  [timestamps are unique and strictly increasing](../../coding/time.md#timestamps-are-totally-ordered).
   No two objects within the same cluster will have the same timestamp. Furthermore, the order of the
   timestamps indicates the order in which the objects were committed.

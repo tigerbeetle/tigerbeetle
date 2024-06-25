@@ -58,11 +58,13 @@ const CliArgs = union(enum) {
 
         limit_storage: ?flags.ByteSize = null,
         limit_pipeline_requests: ?u32 = null,
+        limit_request: ?flags.ByteSize = null,
         cache_accounts: ?flags.ByteSize = null,
         cache_transfers: ?flags.ByteSize = null,
         cache_transfers_pending: ?flags.ByteSize = null,
         cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
+        memory_lsm_compaction: ?flags.ByteSize = null,
     },
 
     version: struct {
@@ -85,6 +87,10 @@ const CliArgs = union(enum) {
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_balances: bool = false,
+        account_batch_size: usize = @divExact(
+            constants.message_size_max - @sizeOf(vsr.Header),
+            @sizeOf(tigerbeetle.Account),
+        ),
         transfer_count: usize = 10_000_000,
         transfer_pending: bool = false,
         transfer_batch_size: usize = @divExact(
@@ -163,7 +169,13 @@ const CliArgs = union(enum) {
         \\
         \\  --development
         \\        Allow the replica to format/start even when Direct IO is unavailable.
-        \\        Additionally, use smaller cache sizes by default.
+        \\        Additionally, use smaller cache sizes and batch size by default.
+        \\
+        \\        Since this shrinks the batch size, note that:
+        \\        * All replicas should use the same batch size. That is, if any replica in the cluster has
+        \\          "--development", then all replicas should have "--development".
+        \\        * It is always possible to increase the batch size by restarting without "--development".
+        \\        * Shrinking the batch size of an existing cluster is possible, but not recommended.
         \\
         \\        For safety, production replicas should always enforce Direct IO -- this flag should only be
         \\        used for testing and development. It should not be used for production or benchmarks.
@@ -198,30 +210,43 @@ const CliArgs = union(enum) {
 
 const StartDefaults = struct {
     limit_pipeline_requests: u32,
+    limit_request: flags.ByteSize,
     cache_accounts: flags.ByteSize,
     cache_transfers: flags.ByteSize,
     cache_transfers_pending: flags.ByteSize,
     cache_account_balances: flags.ByteSize,
     cache_grid: flags.ByteSize,
+    memory_lsm_compaction: flags.ByteSize,
 };
 
 const start_defaults_production = StartDefaults{
-    .limit_pipeline_requests = constants.pipeline_request_queue_max,
+    .limit_pipeline_requests = @divExact(constants.clients_max, 2) -
+        constants.pipeline_prepare_queue_max,
+    .limit_request = .{ .value = constants.message_size_max },
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },
     .cache_transfers = .{ .value = constants.cache_transfers_size_default },
     .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
     .cache_account_balances = .{ .value = constants.cache_account_balances_size_default },
     .cache_grid = .{ .value = constants.grid_cache_size_default },
+    .memory_lsm_compaction = .{
+        // By default, add a few extra blocks for beat-scoped work.
+        .value = (lsm_compaction_block_count_min + 16) * constants.block_size,
+    },
 };
 
 const start_defaults_development = StartDefaults{
     .limit_pipeline_requests = 0,
+    .limit_request = .{ .value = 32 * 1024 }, // 32KiB
     .cache_accounts = .{ .value = 0 },
     .cache_transfers = .{ .value = 0 },
     .cache_transfers_pending = .{ .value = 0 },
     .cache_account_balances = .{ .value = 0 },
     .cache_grid = .{ .value = constants.block_size * Grid.Cache.value_count_max_multiple },
+    .memory_lsm_compaction = .{ .value = lsm_compaction_block_memory_min },
 };
+
+const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
+const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
 pub const Command = union(enum) {
     pub const Format = struct {
@@ -244,7 +269,9 @@ pub const Command = union(enum) {
         cache_account_balances: u32,
         storage_size_limit: u64,
         pipeline_requests_limit: u32,
+        request_size_limit: u32,
         cache_grid_blocks: u32,
+        lsm_forest_compaction_block_count: u32,
         lsm_forest_node_count: u32,
         development: bool,
         experimental: bool,
@@ -271,6 +298,7 @@ pub const Command = union(enum) {
         cache_grid: ?[]const u8,
         account_count: usize,
         account_balances: bool,
+        account_batch_size: usize,
         transfer_count: usize,
         transfer_pending: bool,
         transfer_batch_size: usize,
@@ -463,6 +491,25 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 });
             }
 
+            // The minimum is chosen rather arbitrarily as 4096 since it is the sector size.
+            const request_size_limit = start.limit_request orelse defaults.limit_request;
+            const request_size_limit_min = 4096;
+            const request_size_limit_max = constants.message_size_max;
+            if (request_size_limit.bytes() > request_size_limit_max) {
+                flags.fatal("--limit-request: size {}{s} exceeds maximum: {}MiB", .{
+                    request_size_limit.value,
+                    request_size_limit.suffix(),
+                    @divExact(request_size_limit_max, 1024 * 1024),
+                });
+            }
+            if (request_size_limit.bytes() < request_size_limit_min) {
+                flags.fatal("--limit-request: size {}{s} is below minimum: {}B", .{
+                    request_size_limit.value,
+                    request_size_limit.suffix(),
+                    request_size_limit_min,
+                });
+            }
+
             const lsm_manifest_memory = start_memory_lsm_manifest.bytes();
             const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
             const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
@@ -492,6 +539,36 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 );
             }
 
+            const lsm_compaction_block_memory =
+                start.memory_lsm_compaction orelse defaults.memory_lsm_compaction;
+            const lsm_compaction_block_memory_max = constants.compaction_block_memory_size_max;
+            if (lsm_compaction_block_memory.bytes() > lsm_compaction_block_memory_max) {
+                flags.fatal("--memory-lsm-compaction: size {}{s} exceeds maximum: {}GiB", .{
+                    lsm_compaction_block_memory.value,
+                    lsm_compaction_block_memory.suffix(),
+                    @divFloor(lsm_compaction_block_memory_max, 1024 * 1024 * 1024),
+                });
+            }
+            if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
+                flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}KiB", .{
+                    lsm_compaction_block_memory.value,
+                    lsm_compaction_block_memory.suffix(),
+                    @divExact(lsm_compaction_block_memory_min, 1024),
+                });
+            }
+            if (lsm_compaction_block_memory.bytes() % constants.block_size != 0) {
+                flags.fatal(
+                    "--memory-lsm-compaction: size {}{s} must be a multiple of {}KiB",
+                    .{
+                        lsm_compaction_block_memory.value,
+                        lsm_compaction_block_memory.suffix(),
+                        @divExact(constants.block_size, 1024),
+                    },
+                );
+            }
+
+            const lsm_forest_compaction_block_count: u32 =
+                @intCast(@divExact(lsm_compaction_block_memory.bytes(), constants.block_size));
             const lsm_forest_node_count: u32 =
                 @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
 
@@ -501,6 +578,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
                     .storage_size_limit = storage_size_limit,
                     .pipeline_requests_limit = pipeline_limit,
+                    .request_size_limit = @intCast(request_size_limit.bytes()),
                     .cache_accounts = parse_cache_size_to_count(
                         tigerbeetle.Account,
                         AccountsValuesCache,
@@ -526,6 +604,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                         Grid.Cache,
                         start.cache_grid orelse defaults.cache_grid,
                     ),
+                    .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
                     .lsm_forest_node_count = lsm_forest_node_count,
                     .development = start.development,
                     .experimental = start.experimental,
@@ -560,6 +639,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cache_grid = benchmark.cache_grid,
                     .account_count = benchmark.account_count,
                     .account_balances = benchmark.account_balances,
+                    .account_batch_size = benchmark.account_batch_size,
                     .transfer_count = benchmark.transfer_count,
                     .transfer_pending = benchmark.transfer_pending,
                     .transfer_batch_size = benchmark.transfer_batch_size,

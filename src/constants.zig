@@ -366,8 +366,8 @@ pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
 /// (assuming a fully-loaded data file – maximum size and 100% acquired):
 ///
 ///   storage_size_limit_max      = 16TiB
-///   grid_scrubber_cycle_seconds = 90 days * 24 hr/day * 60 min/hr * 60 s/min (1 cycle/year)
-///   read_bytes_per_second       = storage_size_max / grid_scrubber_cycle_seconds ≈ 2.16 MiB/s
+///   grid_scrubber_cycle_seconds = 180 days * 24 hr/day * 60 min/hr * 60 s/min (2 cycle/year)
+///   read_bytes_per_second       = storage_size_max / grid_scrubber_cycle_seconds ≈ 1.08 MiB/s
 ///
 pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
 
@@ -732,11 +732,8 @@ pub const aof_record = config.process.aof_record;
 /// replay our AOF.
 pub const aof_recovery = config.process.aof_recovery;
 
-/// The amount of memory allocated for compactions. Compactions will be deterministic regardless
-/// of how much memory you give them, but will run in fewer steps with more memory.
-// TODO: Expose this as a CLI flag, to allow tuning of compaction rate.
-// (And use this current value as the default.)
-pub const compaction_block_memory = config.process.compaction_block_memory;
+/// The maximum number of bytes to use for compaction blocks.
+pub const compaction_block_memory_size_max = std.math.maxInt(u32) * block_size;
 
 /// Maximum number of tree scans that can be performed by a single query.
 /// NOTE: Each condition in a query is a scan, for example `WHERE a=0 AND b=1` needs 2 scans.

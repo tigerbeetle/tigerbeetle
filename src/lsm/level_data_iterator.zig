@@ -164,7 +164,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             read: *Grid.Read,
             index_block: BlockPtrConst,
         ) void {
-            const it = @fieldParentPtr(LevelTableValueBlockIterator, "read", read);
+            const it: *LevelTableValueBlockIterator = @fieldParentPtr("read", read);
             assert(it.table_data_iterator.empty());
 
             const callback = it.callback.level_next;
@@ -213,8 +213,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             table_data_iterator: *TableDataIterator,
             data_block: ?BlockPtrConst,
         ) void {
-            const it = @fieldParentPtr(
-                LevelTableValueBlockIterator,
+            const it: *LevelTableValueBlockIterator = @fieldParentPtr(
                 "table_data_iterator",
                 table_data_iterator,
             );

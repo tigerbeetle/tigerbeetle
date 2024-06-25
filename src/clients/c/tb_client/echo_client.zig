@@ -1,24 +1,22 @@
 const std = @import("std");
-const stdx = @import("../../../stdx.zig");
 const assert = std.debug.assert;
 const testing = std.testing;
 const mem = std.mem;
 
-const constants = @import("../../../constants.zig");
-const vsr = @import("../../../vsr.zig");
+const vsr = @import("../tb_client.zig").vsr;
 const Header = vsr.Header;
-
-const IOPS = @import("../../../iops.zig").IOPS;
-const RingBuffer = @import("../../../ring_buffer.zig").RingBuffer;
-const MessagePool = @import("../../../message_pool.zig").MessagePool;
-const Message = @import("../../../message_pool.zig").MessagePool.Message;
+const stdx = vsr.stdx;
+const constants = vsr.constants;
+const RingBuffer = vsr.ring_buffer.RingBuffer;
+const MessagePool = vsr.message_pool.MessagePool;
+const Message = MessagePool.Message;
 
 pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {
         const Self = @This();
 
         // Exposing the same types the real client does:
-        const VSRClient = @import("../../../vsr/client.zig").Client(StateMachine_, MessageBus);
+        const VSRClient = vsr.Client(StateMachine_, MessageBus);
         pub const StateMachine = VSRClient.StateMachine;
         pub const Request = VSRClient.Request;
 
@@ -107,7 +105,9 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                     callback(inflight.user_data, operation.cast(Self.StateMachine), reply.body());
                 },
                 .register => |callback| {
-                    const result = vsr.RegisterResult{};
+                    const result = vsr.RegisterResult{
+                        .batch_size_limit = constants.message_body_size_max,
+                    };
                     callback(inflight.user_data, &result);
                 },
             }
@@ -209,11 +209,11 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 }
 
 test "Echo Demuxer" {
-    const StateMachine = @import("../../../state_machine.zig").StateMachineType(
+    const StateMachine = vsr.state_machine.StateMachineType(
         @import("../../../testing/storage.zig").Storage,
         constants.state_machine_config,
     );
-    const MessageBus = @import("../../../message_bus.zig").MessageBusClient;
+    const MessageBus = vsr.message_bus.MessageBusClient;
     const Client = EchoClient(StateMachine, MessageBus);
 
     var prng = std.rand.DefaultPrng.init(42);

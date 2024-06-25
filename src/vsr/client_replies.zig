@@ -229,7 +229,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         fn read_reply_callback(completion: *Storage.Read) void {
-            const read = @fieldParentPtr(ClientReplies.Read, "completion", completion);
+            const read: *ClientReplies.Read = @alignCast(@fieldParentPtr("completion", completion));
             const client_replies = read.client_replies;
             const header = read.header;
             const message = read.message;
@@ -422,7 +422,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         fn write_reply_callback(completion: *Storage.Write) void {
-            const write = @fieldParentPtr(ClientReplies.Write, "completion", completion);
+            const write: *ClientReplies.Write = @fieldParentPtr("completion", completion);
             const client_replies = write.client_replies;
             const message = write.message;
             assert(client_replies.writing.isSet(write.slot.index));
@@ -483,7 +483,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         fn checkpoint_next_tick_callback(next_tick: *Storage.NextTick) void {
-            const client_replies = @fieldParentPtr(ClientReplies, "checkpoint_next_tick", next_tick);
+            const client_replies: *ClientReplies = @alignCast(@fieldParentPtr("checkpoint_next_tick", next_tick));
             client_replies.checkpoint_done();
         }
 

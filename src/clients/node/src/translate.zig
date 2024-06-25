@@ -20,7 +20,7 @@ pub fn register_function(
 
 const TranslationError = error{ExceptionThrown};
 pub fn throw(env: c.napi_env, comptime message: [:0]const u8) TranslationError {
-    var result = c.napi_throw_error(env, null, @as([*c]const u8, @ptrCast(message)));
+    const result = c.napi_throw_error(env, null, @as([*c]const u8, @ptrCast(message)));
     switch (result) {
         c.napi_ok, c.napi_pending_exception => {},
         else => unreachable,

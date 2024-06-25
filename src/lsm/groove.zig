@@ -144,9 +144,9 @@ pub fn GrooveType(
     ///     An anonymous struct which maps each of the groove's trees to a stable, forest-unique,
     ///     tree identifier.
     ///
-    /// - value_count_max: { .field = usize }:
+    /// - batch_value_count_max: { .field = usize }:
     ///     An anonymous struct which contains, for each field of `Object`,
-    ///     the maximum number of values per table for the corresponding index tree.
+    ///     the maximum number of values per table per batch for the corresponding index tree.
     ///
     /// - ignored: [][]const u8:
     ///     An array of fields on the Object type that should not be given index trees
@@ -186,7 +186,8 @@ pub fn GrooveType(
             const IndexTree = IndexTreeType(
                 Storage,
                 field.type,
-                @field(groove_options.value_count_max, field.name),
+                @field(groove_options.batch_value_count_max, field.name) *
+                    constants.lsm_batch_multiple,
             );
             index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
@@ -228,7 +229,7 @@ pub fn GrooveType(
         const IndexTree = IndexTreeType(
             Storage,
             DerivedType,
-            @field(groove_options.value_count_max, field.name),
+            @field(groove_options.batch_value_count_max, field.name) * constants.lsm_batch_multiple,
         );
 
         index_fields = index_fields ++ [_]std.builtin.Type.StructField{
@@ -264,7 +265,7 @@ pub fn GrooveType(
             ObjectTreeHelpers(Object).sentinel_key,
             ObjectTreeHelpers(Object).tombstone,
             ObjectTreeHelpers(Object).tombstone_from_key,
-            groove_options.value_count_max.timestamp,
+            groove_options.batch_value_count_max.timestamp * constants.lsm_batch_multiple,
             .general,
         );
         break :blk TreeType(Table, Storage);
@@ -278,7 +279,7 @@ pub fn GrooveType(
             IdTreeValue.sentinel_key,
             IdTreeValue.tombstone,
             IdTreeValue.tombstone_from_key,
-            groove_options.value_count_max.id,
+            groove_options.batch_value_count_max.id * constants.lsm_batch_multiple,
             .general,
         );
         break :blk TreeType(Table, Storage);
@@ -286,7 +287,7 @@ pub fn GrooveType(
 
     const _IndexTrees = @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = index_fields,
             .decls = &.{},
             .is_tuple = false,
@@ -294,7 +295,7 @@ pub fn GrooveType(
     });
     const IndexTreeOptions = @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = index_options_fields,
             .decls = &.{},
             .is_tuple = false,
@@ -482,19 +483,23 @@ pub fn GrooveType(
             grid: *Grid,
             options: Options,
         ) !Groove {
+            assert(options.tree_options_object.batch_value_count_limit *
+                constants.lsm_batch_multiple <= ObjectTree.Table.value_count_max);
+
             var objects_cache = try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
 
-                // In the worst case, each Map must be able to store the value_count_max (to
-                // contain either TableMutable or TableImmutable) as well as the maximum number of
-                // prefetches a bar may perform, excluding prefetches already accounted for by
-                // value_count_max.
-                .map_value_count_max = @as(u32, ObjectTree.Table.value_count_max) +
-                    (options.prefetch_entries_for_read_max * constants.lsm_batch_multiple),
+                // In the worst case, each Map must be able to store batch_value_count_limit per
+                // beat (to contain either TableMutable or TableImmutable) as well as the maximum
+                // number of prefetches a bar may perform, excluding prefetches already accounted
+                // for by batch_value_count_limit.
+                .map_value_count_max = constants.lsm_batch_multiple *
+                    (options.tree_options_object.batch_value_count_limit +
+                    options.prefetch_entries_for_read_max),
 
                 // Scopes are limited to a single beat, so the maximum number of entries in a
-                // single scope is value_count_max / constants.lsm_batch_multiple.
-                .scope_value_count_max = @divExact(ObjectTree.Table.value_count_max, constants.lsm_batch_multiple),
+                // single scope is batch_value_count_limit (total – not per beat).
+                .scope_value_count_max = options.tree_options_object.batch_value_count_limit,
 
                 .name = @typeName(Object),
             });
@@ -758,7 +763,9 @@ pub fn GrooveType(
             }
 
             fn worker_next_tick(completion: *Grid.NextTick) void {
-                const context = @fieldParentPtr(PrefetchContext, "next_tick", completion);
+                const context: *PrefetchContext = @alignCast(
+                    @fieldParentPtr("next_tick", completion),
+                );
                 assert(context.workers_pending == 0);
                 context.finish();
             }
@@ -796,8 +803,8 @@ pub fn GrooveType(
                     comptime field: Field,
                     completion: *FieldType(field),
                 ) *PrefetchWorker {
-                    const lookup = @fieldParentPtr(LookupContext, @tagName(field), completion);
-                    return @fieldParentPtr(PrefetchWorker, "lookup", lookup);
+                    const lookup: *LookupContext = @fieldParentPtr(@tagName(field), completion);
+                    return @fieldParentPtr("lookup", lookup);
                 }
 
                 pub inline fn get(self: *LookupContext, comptime field: Field) *FieldType(field) {
@@ -1140,16 +1147,16 @@ test "Groove" {
                 .amount = 9,
             },
             // Doesn't matter for this test.
-            .value_count_max = .{
-                .timestamp = constants.lsm_batch_multiple,
-                .id = constants.lsm_batch_multiple,
-                .debit_account_id = constants.lsm_batch_multiple,
-                .credit_account_id = constants.lsm_batch_multiple,
-                .pending_id = constants.lsm_batch_multiple,
-                .timeout = constants.lsm_batch_multiple,
-                .ledger = constants.lsm_batch_multiple,
-                .code = constants.lsm_batch_multiple,
-                .amount = constants.lsm_batch_multiple,
+            .batch_value_count_max = .{
+                .timestamp = 1,
+                .id = 1,
+                .debit_account_id = 1,
+                .credit_account_id = 1,
+                .pending_id = 1,
+                .timeout = 1,
+                .ledger = 1,
+                .code = 1,
+                .amount = 1,
             },
             .ignored = [_][]const u8{ "user_data_128", "user_data_64", "user_data_32", "flags" },
             .derived = .{},

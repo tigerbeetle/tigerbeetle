@@ -289,7 +289,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    var fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
+    const fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
         // Always do puts, and always more puts than removes.
         .upsert = constants.lsm_batch_multiple * 2,
         // Maybe do some removes.
@@ -307,9 +307,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     //       the maximum capacity...?
     var op: u64 = 0;
     var operations_since_scope_open: usize = 0;
-    var operations_since_scope_open_max: usize = 32;
+    const operations_since_scope_open_max: usize = 32;
     var upserts_since_compact: usize = 0;
-    var upserts_since_compact_max: usize = 1024;
+    const upserts_since_compact_max: usize = 1024;
     var scope_is_open = false;
     for (fuzz_ops, 0..) |*fuzz_op, i| {
         var fuzz_op_tag: FuzzOpTag = undefined;
@@ -400,7 +400,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     defer allocator.free(fuzz_ops);
 
     // Running the same fuzz with and without cache enabled.
-    inline for (&.{ 2048, 0 }) |cache_value_count_max| {
+    inline for (&.{ TestCacheMap.Cache.value_count_max_multiple, 0 }) |cache_value_count_max| {
         const options = TestCacheMap.Options{
             .cache_value_count_max = cache_value_count_max,
             .map_value_count_max = 1024,

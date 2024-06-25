@@ -56,7 +56,7 @@ You can download prebuilt binaries here:
 
 #### Docker
 
-You can find instructions on using TigerBeetle with Docker [here](./deploy/docker.md).
+You can find instructions on using TigerBeetle with Docker [here](./operating/docker.md).
 
 ## 2. Create the Data File
 
@@ -165,16 +165,16 @@ lookup_accounts id=1, id=2;
 And indeed you can see that account `1` has `debits_posted` as `10` and account `2` has
 `credits_posted` as `10`. The `10` amount is fully accounted for!
 
-You can take a look at the [`Accounts` reference](./reference/account.md) to understand all of
-the fields on the accounts.
+You can take a look at the [`Accounts` reference](./reference/account.md) to understand all of the
+fields on the accounts.
 
-You can also take a look at the [Request Types](./reference/requests/README.md) to see what else
-you can do with the REPL.
+You can also take a look at the [Request Types](./reference/requests/README.md) to see what else you
+can do with the REPL.
 
 ## Optional: Run a Multi-Node Cluster
 
 Up to this point, we have only shown you how to run a single-node TigerBeetle cluster. In
-production, TigerBeetle is intended to be run with [6 nodes](./deploy/cluster.md).
+production, TigerBeetle is intended to be run with [6 nodes](./operating/deploy.md).
 
 Here, we will show you how to run a 3-node cluster (the idea is the same for 6 nodes):
 
@@ -207,10 +207,10 @@ provided.
 
 You can connect to the REPL as described above try creating accounts and transfers in this cluster.
 
-You can also read more about [deploying TigerBeetle in production](./deploy/cluster.md).
+You can also read more about [deploying TigerBeetle in production](./operating/deploy.md).
 
 ## Next: Designing for TigerBeetle
 
 Now that you've created some accounts and transfers, you may want to read about
-[how TigerBeetle fits into your system architecture](./develop/system-architecture.md) and dig into
-the [data model](./develop/data-modeling.md).
+[how TigerBeetle fits into your system architecture](./coding/system-architecture.md) and dig into
+the [data model](./coding/data-modeling.md).

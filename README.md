@@ -149,7 +149,7 @@ Check out [docs.tigerbeetle.com](https://docs.tigerbeetle.com/).
 Here are a few key pages you might be interested in:
 
 - Deployment
-  - [Hardware](https://docs.tigerbeetle.com/deploy/hardware)
+  - [Hardware](https://docs.tigerbeetle.com/operating/hardware)
 - Usage
   - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
 - Reference

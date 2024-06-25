@@ -223,8 +223,8 @@ pub const Storage = struct {
     /// Corrupt the target sectors of any in-progress writes.
     pub fn reset(storage: *Storage) void {
         log.debug("Reset: {} pending reads, {} pending writes, {} pending next_ticks", .{
-            storage.reads.len,
-            storage.writes.len,
+            storage.reads.count(),
+            storage.writes.count(),
             storage.next_tick_queue.count,
         });
         while (storage.writes.peek()) |_| {
@@ -236,9 +236,9 @@ pub const Storage = struct {
             const sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
             storage.fault_sector(write.zone, sectors.random(storage.prng.random()));
         }
-        assert(storage.writes.len == 0);
+        assert(storage.writes.items.len == 0);
 
-        storage.reads.len = 0;
+        storage.reads.items.len = 0;
         storage.next_tick_queue.reset();
     }
 
@@ -277,13 +277,13 @@ pub const Storage = struct {
         storage.faults.toggleSet(storage.faults);
         storage.faults.toggleSet(origin.faults);
 
-        storage.reads.len = 0;
-        for (origin.reads.items[0..origin.reads.len]) |read| {
+        storage.reads.items.len = 0;
+        for (origin.reads.items) |read| {
             storage.reads.add(read) catch unreachable;
         }
 
-        storage.writes.len = 0;
-        for (origin.writes.items[0..origin.writes.len]) |write| {
+        storage.writes.items.len = 0;
+        for (origin.writes.items) |write| {
             storage.writes.add(write) catch unreachable;
         }
     }
@@ -631,12 +631,10 @@ pub const Storage = struct {
     }
 
     pub fn log_pending_io(storage: *const Storage) void {
-        const reads = storage.reads;
-        for (reads.items[0..reads.len]) |read| {
+        for (storage.reads.items) |read| {
             log.debug("Pending read: {} {}\n{}", .{ read.offset, read.zone, read.stack_trace });
         }
-        const writes = storage.writes;
-        for (writes.items[0..writes.len]) |write| {
+        for (storage.writes.items) |write| {
             log.debug("Pending write: {} {}\n{}", .{ write.offset, write.zone, write.stack_trace });
         }
     }
@@ -644,8 +642,7 @@ pub const Storage = struct {
     pub fn assert_no_pending_reads(storage: *const Storage, zone: vsr.Zone) void {
         var assert_failed = false;
 
-        const reads = storage.reads;
-        for (reads.items[0..reads.len]) |read| {
+        for (storage.reads.items) |read| {
             if (read.zone == zone) {
                 log.err("Pending read: {} {}\n{}", .{ read.offset, read.zone, read.stack_trace });
                 assert_failed = true;
@@ -661,7 +658,7 @@ pub const Storage = struct {
         var assert_failed = false;
 
         const writes = storage.writes;
-        for (writes.items[0..writes.len]) |write| {
+        for (writes.items) |write| {
             if (write.zone == zone) {
                 log.err("Pending write: {} {}\n{}", .{ write.offset, write.zone, write.stack_trace });
                 assert_failed = true;

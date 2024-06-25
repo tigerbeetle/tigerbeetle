@@ -64,10 +64,54 @@ const PendingExpiryQueue = PriorityQueue(PendingExpiry, void, struct {
 pub const AccountingAuditor = struct {
     const Self = @This();
 
+    pub const AccountState = struct {
+        /// Set to true when `create_accounts` returns `.ok` for an account.
+        created: bool = false,
+        /// The number of transfers created on the debit side.
+        dr_transfer_count: u32 = 0,
+        /// The number of transfers created on the credit side.
+        cr_transfer_count: u32 = 0,
+        /// Timestamp of the first transfer recorded.
+        transfer_timestamp_min: u64 = 0,
+        /// Timestamp of the last transfer recorded.
+        transfer_timestamp_max: u64 = 0,
+
+        fn update(
+            state: *AccountState,
+            comptime entry: enum { dr, cr },
+            transfer_timestamp: u64,
+        ) void {
+            assert(state.created);
+            switch (entry) {
+                .dr => state.dr_transfer_count += 1,
+                .cr => state.cr_transfer_count += 1,
+            }
+
+            if (state.transfer_timestamp_min == 0) {
+                assert(state.transfer_timestamp_max == 0);
+                state.transfer_timestamp_min = transfer_timestamp;
+            }
+            state.transfer_timestamp_max = transfer_timestamp;
+        }
+
+        pub fn transfers_count(self: *const AccountState, flags: tb.AccountFilterFlags) u32 {
+            var transfer_count: u32 = 0;
+            if (flags.debits) {
+                transfer_count += self.dr_transfer_count;
+            }
+            if (flags.credits) {
+                transfer_count += self.cr_transfer_count;
+            }
+            return transfer_count;
+        }
+    };
+
     pub const Options = struct {
         accounts_max: usize,
         account_id_permutation: IdPermutation,
         client_count: usize,
+
+        batch_create_transfers_limit: u32,
 
         /// This is the maximum number of pending transfers, not counting those that have timed
         /// out.
@@ -95,8 +139,8 @@ pub const AccountingAuditor = struct {
     /// given commit (double-double entry accounting).
     accounts: []tb.Account,
 
-    /// Set to true when `create_accounts` returns `.ok` for an account.
-    accounts_created: []bool,
+    /// Additional account state. Keyed by account index.
+    accounts_state: []AccountState,
 
     /// Map pending transfers to the (pending) amount and accounts.
     ///
@@ -131,9 +175,9 @@ pub const AccountingAuditor = struct {
         errdefer allocator.free(accounts);
         @memset(accounts, undefined);
 
-        const accounts_created = try allocator.alloc(bool, options.accounts_max);
-        errdefer allocator.free(accounts_created);
-        @memset(accounts_created, false);
+        const accounts_state = try allocator.alloc(AccountState, options.accounts_max);
+        errdefer allocator.free(accounts_state);
+        @memset(accounts_state, AccountState{});
 
         var pending_transfers = std.AutoHashMapUnmanaged(u128, PendingTransfer){};
         errdefer pending_transfers.deinit(allocator);
@@ -159,7 +203,7 @@ pub const AccountingAuditor = struct {
             .random = random,
             .options = options,
             .accounts = accounts,
-            .accounts_created = accounts_created,
+            .accounts_state = accounts_state,
             .pending_transfers = pending_transfers,
             .pending_expiries = pending_expiries,
             .in_flight = in_flight,
@@ -170,7 +214,7 @@ pub const AccountingAuditor = struct {
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         allocator.free(self.accounts);
-        allocator.free(self.accounts_created);
+        allocator.free(self.accounts_state);
         self.pending_transfers.deinit(allocator);
         self.pending_expiries.deinit();
         self.in_flight.deinit(allocator);
@@ -227,8 +271,8 @@ pub const AccountingAuditor = struct {
             const pending_transfer =
                 self.pending_transfers.get(expiration.transfer_id) orelse continue;
             assert(self.pending_transfers.remove(expiration.transfer_id));
-            assert(self.accounts_created[pending_transfer.debit_account_index]);
-            assert(self.accounts_created[pending_transfer.credit_account_index]);
+            assert(self.accounts_state[pending_transfer.debit_account_index].created);
+            assert(self.accounts_state[pending_transfer.credit_account_index].created);
 
             const dr = &self.accounts[pending_transfer.debit_account_index];
             const cr = &self.accounts[pending_transfer.credit_account_index];
@@ -237,7 +281,7 @@ pub const AccountingAuditor = struct {
 
             // Each expiration round can expire at most one batch of transfers.
             expired_count += 1;
-            if (expired_count == StateMachine.constants.batch_max.create_transfers) break;
+            if (expired_count == self.options.batch_create_transfers_limit) break;
 
             assert(!dr.debits_exceed_credits(0));
             assert(!dr.credits_exceed_debits(0));
@@ -276,8 +320,8 @@ pub const AccountingAuditor = struct {
 
             const account_index = self.account_id_to_index(account.id);
             if (result_actual == .ok) {
-                assert(!self.accounts_created[account_index]);
-                self.accounts_created[account_index] = true;
+                assert(!self.accounts_state[account_index].created);
+                self.accounts_state[account_index].created = true;
                 self.accounts[account_index] = account.*;
                 self.accounts[account_index].timestamp = account_timestamp;
             }
@@ -319,38 +363,41 @@ pub const AccountingAuditor = struct {
             if (result_actual != .ok) continue;
 
             if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
-                if (self.pending_transfers.get(transfer.pending_id)) |p| {
-                    const dr = &self.accounts[p.debit_account_index];
-                    const cr = &self.accounts[p.credit_account_index];
-                    assert(self.accounts_created[p.debit_account_index]);
-                    assert(self.accounts_created[p.credit_account_index]);
+                const p = self.pending_transfers.get(transfer.pending_id).?;
+                const dr_state = &self.accounts_state[p.debit_account_index];
+                const cr_state = &self.accounts_state[p.credit_account_index];
+                dr_state.update(.dr, transfer_timestamp);
+                cr_state.update(.cr, transfer_timestamp);
 
-                    assert(self.pending_transfers.remove(transfer.pending_id));
-                    // The transfer may still be in `pending_expiries` — removal would be O(n),
-                    // so don't bother.
+                const dr = &self.accounts[p.debit_account_index];
+                const cr = &self.accounts[p.credit_account_index];
 
-                    dr.debits_pending -= p.amount;
-                    cr.credits_pending -= p.amount;
-                    if (transfer.flags.post_pending_transfer) {
-                        const amount = if (transfer.amount > 0) transfer.amount else p.amount;
-                        dr.debits_posted += amount;
-                        cr.credits_posted += amount;
-                    }
+                assert(self.pending_transfers.remove(transfer.pending_id));
+                // The transfer may still be in `pending_expiries` — removal would be O(n),
+                // so don't bother.
 
-                    assert(!dr.debits_exceed_credits(0));
-                    assert(!dr.credits_exceed_debits(0));
-                    assert(!cr.debits_exceed_credits(0));
-                    assert(!cr.credits_exceed_debits(0));
-                } else {
-                    // The transfer was already completed by another post/void or timeout.
+                dr.debits_pending -= p.amount;
+                cr.credits_pending -= p.amount;
+                if (transfer.flags.post_pending_transfer) {
+                    const amount = if (transfer.amount > 0) transfer.amount else p.amount;
+                    dr.debits_posted += amount;
+                    cr.credits_posted += amount;
                 }
+
+                assert(!dr.debits_exceed_credits(0));
+                assert(!dr.credits_exceed_debits(0));
+                assert(!cr.debits_exceed_credits(0));
+                assert(!cr.credits_exceed_debits(0));
             } else {
                 const dr_index = self.account_id_to_index(transfer.debit_account_id);
                 const cr_index = self.account_id_to_index(transfer.credit_account_id);
+                const dr_state = &self.accounts_state[dr_index];
+                const cr_state = &self.accounts_state[cr_index];
+                dr_state.update(.dr, transfer_timestamp);
+                cr_state.update(.cr, transfer_timestamp);
+
                 const dr = &self.accounts[dr_index];
                 const cr = &self.accounts[cr_index];
-                assert(self.accounts_created[dr_index]);
-                assert(self.accounts_created[cr_index]);
 
                 if (transfer.flags.pending) {
                     if (transfer.timeout > 0) {
@@ -366,7 +413,7 @@ pub const AccountingAuditor = struct {
                         }) catch unreachable;
                         // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
                         // created more pending transfers than permitted.
-                        assert(self.pending_expiries.len <= self.options.transfers_pending_max);
+                        assert(self.pending_expiries.count() <= self.options.transfers_pending_max);
                     }
                     dr.debits_pending += transfer.amount;
                     cr.credits_pending += transfer.amount;
@@ -402,7 +449,9 @@ pub const AccountingAuditor = struct {
             const account_index = self.account_id_to_index(account_id);
             const account_lookup = results_iterator.take(account_id);
 
-            if (account_index < self.accounts.len and self.accounts_created[account_index]) {
+            if (account_index < self.accounts.len and
+                self.accounts_state[account_index].created)
+            {
                 // If this assertion fails, `lookup_accounts` didn't return an account when it
                 // should have.
                 assert(account_lookup != null);
@@ -473,7 +522,7 @@ pub const AccountingAuditor = struct {
         while (i < self.accounts.len) : (i += 1) {
             const account_index = (offset + i) % self.accounts.len;
             if (match.created) |expect_created| {
-                if (self.accounts_created[account_index]) {
+                if (self.accounts_state[account_index].created) {
                     if (!expect_created) continue;
                 } else {
                     if (expect_created) continue;
@@ -505,6 +554,16 @@ pub const AccountingAuditor = struct {
     pub fn account_index_to_id(self: *const Self, index: usize) u128 {
         // +1 so that index=0 is encoded as a valid id.
         return self.options.account_id_permutation.encode(index + 1);
+    }
+
+    pub fn get_account(self: *const Self, id: u128) ?*const tb.Account {
+        const index = self.account_id_to_index(id);
+        return if (index < self.accounts.len) &self.accounts[index] else null;
+    }
+
+    pub fn get_account_state(self: *const Self, id: u128) ?*const AccountState {
+        const index = self.account_id_to_index(id);
+        return if (index < self.accounts_state.len) &self.accounts_state[index] else null;
     }
 
     fn take_in_flight(self: *Self, client_index: usize) InFlight {

@@ -100,5 +100,4 @@ would be misleading. An error would imply that a request did not execute, when t
 - If a client session is terminated and restarts, it is _not_ guaranteed to see the effects of
   updates for which the corresponding reply was _not_ received prior to the restart. Those updates
   may occur at any point in the future, or never. Handling application crash recovery safely
-  requires
-  [using `id`s to idempotently retry events](../develop/reliable-transaction-submission.md).
+  requires [using `id`s to idempotently retry events](../coding/reliable-transaction-submission.md).

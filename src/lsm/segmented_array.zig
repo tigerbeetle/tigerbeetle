@@ -55,7 +55,7 @@ fn SegmentedArrayType(
     comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.Inline) K) else void,
     comptime options: Options,
 ) type {
-    comptime assert(Key == null or std.meta.trait.isIntegral(Key.?));
+    comptime assert(Key == null or @typeInfo(Key.?) == .Int or @typeInfo(Key.?) == .ComptimeInt);
 
     return struct {
         const Self = @This();
@@ -943,6 +943,92 @@ fn SegmentedArrayType(
     };
 }
 
+test "SortedSegmentedArray duplicate elements" {
+    // Create [0, 0, 0, 100, 100, 100, ~0, ~0, ~0] array, verify that the search is left-biased.
+    const testing = std.testing;
+
+    const NodePool = @import("node_pool.zig").NodePool;
+    const TestPool = NodePool(128 * @sizeOf(u32), 2 * @alignOf(u32));
+    const TestArray = SortedSegmentedArray(
+        u32,
+        TestPool,
+        1024,
+        u32,
+        struct {
+            inline fn key_from_value(value: *const u32) u32 {
+                return value.*;
+            }
+        }.key_from_value,
+        .{ .verify = true },
+    );
+
+    var pool = try TestPool.init(testing.allocator, TestArray.node_count_max);
+    defer pool.deinit(testing.allocator);
+
+    var array = try TestArray.init(testing.allocator);
+    defer array.deinit(testing.allocator, &pool);
+
+    for (0..3) |index| {
+        // Elements are inserted to the left of a row of duplicates.
+        var inserted_at = array.insert_element(&pool, 0);
+        try testing.expectEqual(inserted_at, 0);
+
+        inserted_at = array.insert_element(&pool, 100);
+        try testing.expectEqual(inserted_at, @as(u32, @intCast(index + 1)));
+
+        inserted_at = array.insert_element(&pool, math.maxInt(u32));
+        try testing.expectEqual(inserted_at, @as(u32, @intCast((index + 1) * 2)));
+    }
+    try testing.expectEqual(array.len(), 9);
+
+    // Search finds the leftmost element.
+    try testing.expectEqual(array.absolute_index_for_cursor(array.search(0)), 0);
+    try testing.expectEqual(array.absolute_index_for_cursor(array.search(100)), 3);
+    try testing.expectEqual(array.absolute_index_for_cursor(array.search(math.maxInt(u32))), 6);
+
+    // Ascending iterators pick the leftmost element.
+    // Descending iterators are weird --- they _also_ pick the leftmost element, although the
+    // rightmost makes more sense.
+    {
+        const target: u32 = 0;
+        var it = array.iterator_from_cursor(array.search(target), .ascending);
+        try testing.expectEqual(it.next().?.*, 0);
+        try testing.expectEqual(it.next().?.*, 0);
+        try testing.expectEqual(it.next().?.*, 0);
+        try testing.expectEqual(it.next().?.*, 100);
+
+        it = array.iterator_from_cursor(array.search(target), .descending);
+        try testing.expectEqual(it.next().?.*, 0);
+        try testing.expectEqual(it.next(), null);
+    }
+
+    {
+        const target: u32 = 100;
+        var it = array.iterator_from_cursor(array.search(target), .ascending);
+        try testing.expectEqual(it.next().?.*, 100);
+        try testing.expectEqual(it.next().?.*, 100);
+        try testing.expectEqual(it.next().?.*, 100);
+        try testing.expectEqual(it.next().?.*, math.maxInt(u32));
+
+        it = array.iterator_from_cursor(array.search(target), .descending);
+        try testing.expectEqual(it.next().?.*, 100);
+        try testing.expectEqual(it.next().?.*, 0);
+    }
+
+    {
+        const target: u32 = math.maxInt(u32);
+        var it = array.iterator_from_cursor(array.search(target), .ascending);
+        try testing.expectEqual(it.next().?.*, math.maxInt(u32));
+        try testing.expectEqual(it.next().?.*, math.maxInt(u32));
+        try testing.expectEqual(it.next().?.*, math.maxInt(u32));
+        try testing.expectEqual(it.next(), null);
+
+        it = array.iterator_from_cursor(array.search(target), .descending);
+        try testing.expectEqual(it.next().?.*, math.maxInt(u32));
+        try testing.expectEqual(it.next().?.*, 100);
+    }
+}
+
 /// In order to avoid making internal details of segmented array public, the fuzzing code is defined
 /// in this file an is driven by =segmented_array_fuzz.zig`.
 fn FuzzContextType(
@@ -1253,7 +1339,9 @@ fn FuzzContextType(
                     context.array.search(math.maxInt(Key)),
                     .ascending,
                 );
-                try testing.expectEqual(iterator_end.next(), null);
+                while (iterator_end.next()) |item| {
+                    try testing.expectEqual(key_from_value(item), math.maxInt(Key));
+                }
             }
 
             {

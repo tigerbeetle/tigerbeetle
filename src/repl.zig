@@ -2,8 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const build_options = @import("vsr_options");
-
 const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
@@ -452,7 +450,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn fail(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (!repl.interactive) {
                 try repl.printer.print_error(format, arguments);
-                std.os.exit(1);
+                std.posix.exit(1);
             }
 
             try repl.printer.print(format, arguments);
@@ -654,7 +652,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             // TODO: This wil be more convenient to express
                             // once https://github.com/ziglang/zig/issues/2473 is
                             // in.
-                            => std.os.exit(1),
+                            => std.posix.exit(1),
 
                             // An unexpected error for which we do
                             // want the stacktrace.

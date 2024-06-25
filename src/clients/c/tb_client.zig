@@ -1,6 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+// When referenced from unit_test.zig, there is no vsr import module. So use relative path instead.
+pub const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../vsr.zig");
+
 pub const tb_packet_t = @import("tb_client/packet.zig").Packet;
 pub const tb_packet_status_t = tb_packet_t.Status;
 pub const tb_packet_acquire_status_t = @import("tb_client/context.zig").PacketAcquireStatus;

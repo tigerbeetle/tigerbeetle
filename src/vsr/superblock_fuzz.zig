@@ -205,7 +205,7 @@ const Environment = struct {
     /// and the quorum never regresses.
     fn tick(env: *Environment) !void {
         assert(env.pending.count() <= 2);
-        assert(env.superblock.storage.reads.len + env.superblock.storage.writes.len <= 1);
+        assert(env.superblock.storage.reads.count() + env.superblock.storage.writes.count() <= 1);
         assert(!env.pending.contains(.format));
         assert(!env.pending.contains(.open));
         assert(!env.pending_verify);
@@ -271,7 +271,7 @@ const Environment = struct {
     }
 
     fn verify_callback(context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "context_verify", context);
+        const env: *Environment = @fieldParentPtr("context_verify", context);
         assert(env.pending_verify);
         env.pending_verify = false;
     }
@@ -304,7 +304,7 @@ const Environment = struct {
     }
 
     fn format_callback(context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "context_format", context);
+        const env: *Environment = @fieldParentPtr("context_format", context);
         assert(env.pending.contains(.format));
         env.pending.remove(.format);
     }
@@ -316,7 +316,7 @@ const Environment = struct {
     }
 
     fn open_callback(context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "context_open", context);
+        const env: *Environment = @fieldParentPtr("context_open", context);
         assert(env.pending.contains(.open));
         env.pending.remove(.open);
 
@@ -376,7 +376,7 @@ const Environment = struct {
     }
 
     fn view_change_callback(context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "context_view_change", context);
+        const env: *Environment = @fieldParentPtr("context_view_change", context);
         assert(env.pending.contains(.view_change));
         env.pending.remove(.view_change);
     }
@@ -465,7 +465,7 @@ const Environment = struct {
     }
 
     fn checkpoint_callback(context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(Environment, "context_checkpoint", context);
+        const env: *Environment = @fieldParentPtr("context_checkpoint", context);
         assert(env.pending.contains(.checkpoint));
         env.pending.remove(.checkpoint);
     }

@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 
 // TODO: Move this back to src/clients/dotnet when there's a better solution for main_pkg_path=src/
 const vsr = @import("vsr.zig");
+const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 
@@ -174,7 +175,7 @@ fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []
             .pascal => std.ascii.toUpper(output[0]),
         };
 
-        break :blk output[0..len];
+        break :blk stdx.comptime_slice(&output, len);
     };
 }
 
@@ -187,7 +188,7 @@ fn emit_enum(
 ) !void {
     const is_packed_struct = @TypeOf(type_info) == std.builtin.Type.Struct;
     if (is_packed_struct) {
-        assert(type_info.layout == .Packed);
+        assert(type_info.layout == .@"packed");
         // Packed structs represented as Enum needs a Flags attribute:
         try buffer.writer().print("[Flags]\n", .{});
     }
@@ -411,15 +412,15 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
-                .Auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
-                .Packed => try emit_enum(
+                .auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
+                .@"packed" => try emit_enum(
                     buffer,
                     ZigType,
                     info,
                     mapping,
                     comptime dotnet_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
                 ),
-                .Extern => try emit_struct(
+                .@"extern" => try emit_struct(
                     buffer,
                     info,
                     mapping,
@@ -503,7 +504,7 @@ pub fn main() !void {
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
 
-    try std.fs.cwd().writeFile(output_file, buffer.items);
+    try std.fs.cwd().writeFile(.{ .sub_path = output_file, .data = buffer.items });
 }
 
 const testing = std.testing;

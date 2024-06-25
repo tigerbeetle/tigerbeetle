@@ -10,6 +10,8 @@ const log = std.log.scoped(.vsr);
 // Note that we don't promise any stability of these interfaces yet.
 pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
+pub const fifo = @import("fifo.zig");
+pub const ring_buffer = @import("ring_buffer.zig");
 pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
 pub const state_machine = @import("state_machine.zig");
@@ -409,8 +411,23 @@ pub const Operation = enum(u8) {
     }
 };
 
+pub const RegisterRequest = extern struct {
+    /// When command=request, batch_size_limit = 0.
+    /// When command=prepare, batch_size_limit > 0 and batch_size_limit ≤ message_body_size_max.
+    /// (Note that this does *not* include the `@sizeOf(Header)`.)
+    batch_size_limit: u32,
+    reserved: [252]u8 = [_]u8{0} ** 252,
+
+    comptime {
+        assert(@sizeOf(RegisterRequest) == 256);
+        assert(@sizeOf(RegisterRequest) <= constants.message_body_size_max);
+        assert(stdx.no_padding(RegisterRequest));
+    }
+};
+
 pub const RegisterResult = extern struct {
-    reserved: [64]u8 = [_]u8{0} ** 64,
+    batch_size_limit: u32,
+    reserved: [60]u8 = [_]u8{0} ** 60,
 
     comptime {
         assert(@sizeOf(RegisterResult) == 64);

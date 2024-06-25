@@ -10,7 +10,7 @@ const BufferCompletion = struct {
 };
 
 pub const StatsD = struct {
-    socket: std.os.socket_t,
+    socket: std.posix.socket_t,
     io: *IO,
     buffer_completions: []BufferCompletion,
     buffer_completions_fifo: FIFO(BufferCompletion) = .{ .name = "statsd" },
@@ -19,10 +19,10 @@ pub const StatsD = struct {
     pub fn init(allocator: std.mem.Allocator, io: *IO, address: std.net.Address) !StatsD {
         const socket = try io.open_socket(
             address.any.family,
-            std.os.SOCK.DGRAM,
-            std.os.IPPROTO.UDP,
+            std.posix.SOCK.DGRAM,
+            std.posix.IPPROTO.UDP,
         );
-        errdefer std.os.closeSocket(socket);
+        errdefer io.close_socket(socket);
 
         const buffer_completions = try allocator.alloc(BufferCompletion, 256);
         errdefer allocator.free(buffer_completions);
@@ -39,13 +39,13 @@ pub const StatsD = struct {
         }
 
         // 'Connect' the UDP socket, so we can just send() to it normally.
-        try std.os.connect(socket, &address.any, address.getOsSockLen());
+        try std.posix.connect(socket, &address.any, address.getOsSockLen());
 
         return statsd;
     }
 
     pub fn deinit(self: *StatsD, allocator: std.mem.Allocator) void {
-        std.os.closeSocket(self.socket);
+        self.io.close_socket(self.socket);
         allocator.free(self.buffer_completions);
     }
 
@@ -91,7 +91,7 @@ pub const StatsD = struct {
         result: IO.SendError!usize,
     ) void {
         _ = result catch {};
-        const buffer_completion = @fieldParentPtr(BufferCompletion, "completion", completion);
+        const buffer_completion: *BufferCompletion = @fieldParentPtr("completion", completion);
         context.buffer_completions_fifo.push(buffer_completion);
     }
 };

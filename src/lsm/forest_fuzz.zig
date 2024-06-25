@@ -78,8 +78,10 @@ const Environment = struct {
 
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
-    const cache_entries_max = 2048;
+    const cache_entries_max = GrooveAccounts.ObjectsCache.Cache.value_count_max_multiple;
     const forest_options = StateMachine.forest_options(.{
+        .batch_size_limit = constants.message_body_size_max,
+        .lsm_forest_compaction_block_count = Forest.Options.compaction_block_count_min,
         .lsm_forest_node_count = node_count,
         .cache_entries_accounts = cache_entries_max,
         .cache_entries_transfers = cache_entries_max,
@@ -202,7 +204,12 @@ const Environment = struct {
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
 
-        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
+        env.forest = try Forest.init(allocator, &env.grid, .{
+            // TODO Test that the same sequence of events applied to forests with different
+            // compaction_blocks result in identical grids.
+            .compaction_block_count = Forest.Options.compaction_block_count_min,
+            .node_count = node_count,
+        }, forest_options);
         env.change_state(.forest_init, .forest_open);
         env.forest.open(forest_open_callback);
 
@@ -238,22 +245,22 @@ const Environment = struct {
     }
 
     fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
         env.change_state(.superblock_format, .superblock_open);
     }
 
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
         env.change_state(.superblock_open, .free_set_open);
     }
 
     fn grid_open_callback(grid: *Grid) void {
-        const env = @fieldParentPtr(@This(), "grid", grid);
+        const env: *Environment = @fieldParentPtr("grid", grid);
         env.change_state(.free_set_open, .forest_init);
     }
 
     fn forest_open_callback(forest: *Forest) void {
-        const env = @fieldParentPtr(@This(), "forest", forest);
+        const env: *Environment = @fieldParentPtr("forest", forest);
         env.change_state(.forest_open, .fuzzing);
     }
 
@@ -264,7 +271,7 @@ const Environment = struct {
     }
 
     fn forest_compact_callback(forest: *Forest) void {
-        const env = @fieldParentPtr(@This(), "forest", forest);
+        const env: *Environment = @fieldParentPtr("forest", forest);
         env.change_state(.forest_compact, .fuzzing);
     }
 
@@ -308,19 +315,19 @@ const Environment = struct {
     }
 
     fn grid_checkpoint_callback(grid: *Grid) void {
-        const env = @fieldParentPtr(Environment, "grid", grid);
+        const env: *Environment = @fieldParentPtr("grid", grid);
         assert(env.checkpoint_op != null);
         env.change_state(.grid_checkpoint, .superblock_checkpoint);
     }
 
     fn forest_checkpoint_callback(forest: *Forest) void {
-        const env = @fieldParentPtr(@This(), "forest", forest);
+        const env: *Environment = @fieldParentPtr("forest", forest);
         assert(env.checkpoint_op != null);
         env.change_state(.forest_checkpoint, .grid_checkpoint);
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
-        const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
         env.change_state(.superblock_checkpoint, .fuzzing);
     }
 
@@ -340,7 +347,7 @@ const Environment = struct {
             }
 
             fn prefetch_callback(prefetch_context: *GrooveAccounts.PrefetchContext) void {
-                const getter = @fieldParentPtr(@This(), "prefetch_context", prefetch_context);
+                const getter: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
                 assert(!getter.finished);
                 getter.finished = true;
             }
@@ -409,8 +416,8 @@ const Environment = struct {
                 env: *Environment,
                 params: ScanParams,
             ) ![]const tb.Account {
-                var min: Prefix = @intCast(params.min);
-                var max: Prefix = @intCast(params.max);
+                const min: Prefix = @intCast(params.min);
+                const max: Prefix = @intCast(params.max);
                 assert(min <= max);
 
                 const scan_buffer_pool = &env.forest.scan_buffer_pool;
@@ -449,7 +456,7 @@ const Environment = struct {
             }
 
             fn scan_lookup_callback(lookup: *ScanLookup, result: []const tb.Account) void {
-                const self = @fieldParentPtr(Self, "lookup", lookup);
+                const self: *Self = @fieldParentPtr("lookup", lookup);
                 assert(self.result == null);
                 self.result = result;
             }

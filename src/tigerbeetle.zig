@@ -329,7 +329,7 @@ comptime {
     }
 
     // We require little-endian architectures everywhere for efficient network deserialization:
-    if (target.cpu.arch.endian() != .Little) {
+    if (target.cpu.arch.endian() != .little) {
         @compileError("big-endian systems not supported");
     }
 

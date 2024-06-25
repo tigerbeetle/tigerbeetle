@@ -69,6 +69,14 @@ pub const Config = struct {
 
     cluster: ConfigCluster,
     process: ConfigProcess,
+
+    /// Returns true if the configuration is intended for "production".
+    /// Intended solely for extra sanity-checks: all meaningful decisions should be driven by
+    /// specific fields of the config.
+    pub fn is_production(config: *const Config) bool {
+        _ = config;
+        return build_options.config_base == .production;
+    }
 };
 
 /// Configurations which are tunable per-replica (or per-client).
@@ -129,11 +137,10 @@ const ConfigProcess = struct {
     grid_missing_tables_max: usize = 3,
     aof_record: bool = false,
     grid_scrubber_reads_max: usize = 1,
-    grid_scrubber_cycle_ms: usize = std.time.ms_per_day * 90,
+    grid_scrubber_cycle_ms: usize = std.time.ms_per_day * 180,
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
     grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
-    compaction_block_memory: usize = 256 * 1024 * 1024,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -194,7 +201,7 @@ const ConfigCluster = struct {
         comptime for (std.meta.fields(ConfigCluster)) |field| {
             const value = @field(config, field.name);
             const value_64 = @as(u64, value);
-            assert(builtin.target.cpu.arch.endian() == .Little);
+            assert(builtin.target.cpu.arch.endian() == .little);
             config_bytes = config_bytes ++ std.mem.asBytes(&value_64);
         };
         return vsr.checksum(config_bytes);
@@ -257,7 +264,7 @@ pub const configs = struct {
         .process = .{
             .storage_size_limit_max = 200 * 1024 * 1024,
             .direct_io = false,
-            .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 2048,
+            .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 256,
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
             .cache_account_balances_size_default = 0,
@@ -268,7 +275,6 @@ pub const configs = struct {
             .grid_scrubber_reads_max = 2,
             .grid_scrubber_cycle_ms = std.time.ms_per_hour,
             .verify = true,
-            .compaction_block_memory = 16 * 1024 * 1024,
         },
         .cluster = .{
             .clients_max = 4 + 3,

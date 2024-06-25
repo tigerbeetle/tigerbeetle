@@ -20,7 +20,7 @@ data file than to provision high performance storage. The data file is created b
 initially run and grows automatically.
 
 A replica's data file may reside on local storage or else on remote storage. The most important
-concern is to ensure [independent fault domains](./cluster.md#hardware-fault-tolerance) across
+concern is to ensure [independent fault domains](./deploy.md#hardware-fault-tolerance) across
 replicas.
 
 The operator may consider the use of RAID 10 to reduce the need for remote recovery if a replica's

@@ -57,7 +57,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
     const _Grooves = @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = groove_fields,
             .decls = &.{},
             .is_tuple = false,
@@ -66,7 +66,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
     const _GroovesOptions = @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = groove_options_fields,
             .decls = &.{},
             .is_tuple = false,
@@ -101,7 +101,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     // Invariants:
     // - tree_infos[tree_id - tree_id_range.min].tree_id == tree_id
     // - tree_infos.len == tree_id_range.max - tree_id_range.min
-    const _tree_infos: []const TreeInfo = tree_infos: {
+    const _tree_infos = tree_infos: {
         var tree_infos: []const TreeInfo = &[_]TreeInfo{};
         for (std.meta.fields(_Grooves)) |groove_field| {
             const Groove = groove_field.type;
@@ -151,14 +151,14 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         // There are no gaps in the tree ids.
         assert(tree_infos_set.count() == tree_infos.len);
 
-        break :tree_infos tree_infos_sorted[0..];
+        break :tree_infos tree_infos_sorted;
     };
 
     const _TreeID = comptime tree_id: {
         var fields: []const std.builtin.Type.EnumField = &.{};
         for (_tree_infos) |tree_info| {
             fields = fields ++ [1]std.builtin.Type.EnumField{.{
-                .name = tree_info.tree_name,
+                .name = @ptrCast(tree_info.tree_name),
                 .value = tree_info.tree_id,
             }};
         }
@@ -204,6 +204,16 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             .max = tree_infos[tree_infos.len - 1].tree_id,
         };
 
+        pub const Options = struct {
+            node_count: u32,
+            /// The amount of blocks allocated for compactions. Compactions will be deterministic
+            /// regardless of how much blocks you give them, but will run in fewer steps with more
+            /// memory.
+            compaction_block_count: u32,
+
+            pub const compaction_block_count_min: u32 = CompactionPipeline.block_count_min;
+        };
+
         progress: ?union(enum) {
             open: struct { callback: Callback },
             checkpoint: struct { callback: Callback },
@@ -228,16 +238,18 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub fn init(
             allocator: mem.Allocator,
             grid: *Grid,
-            node_count: u32,
+            options: Options,
             // (e.g.) .{ .transfers = .{ .cache_entries_max = 128, … }, .accounts = … }
             grooves_options: GroovesOptions,
         ) !Forest {
+            assert(options.compaction_block_count >= Options.compaction_block_count_min);
+
             // NodePool must be allocated to pass in a stable address for the Grooves.
             const node_pool = try allocator.create(NodePool);
             errdefer allocator.destroy(node_pool);
 
             // TODO: look into using lsm_table_size_max for the node_count.
-            node_pool.* = try NodePool.init(allocator, node_count);
+            node_pool.* = try NodePool.init(allocator, options.node_count);
             errdefer node_pool.deinit(allocator);
 
             var manifest_log = try ManifestLog.init(allocator, grid, .{
@@ -267,7 +279,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 grooves_initialized += 1;
             }
 
-            var compaction_pipeline = try CompactionPipeline.init(allocator, grid);
+            var compaction_pipeline =
+                try CompactionPipeline.init(allocator, grid, options.compaction_block_count);
             errdefer compaction_pipeline.deinit(allocator);
 
             const scan_buffer_pool = try ScanBufferPool.init(allocator);
@@ -338,7 +351,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             manifest_log: *ManifestLog,
             table: *const schema.ManifestNode.TableInfo,
         ) void {
-            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
             assert(forest.manifest_log_progress == .idle);
             assert(table.label.level < constants.lsm_levels);
@@ -357,7 +370,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
-            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
             assert(forest.manifest_log_progress == .idle);
             forest.verify_tables_recovered();
@@ -525,7 +538,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
-            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.manifest_log_progress == .compacting);
 
             forest.manifest_log_progress = .done;
@@ -560,7 +573,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
-            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .checkpoint);
             assert(forest.manifest_log_progress == .idle);
             forest.verify_table_extents();
@@ -796,6 +809,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             break :blk minimum_block_count;
         };
 
+        pub const block_count_min = block_count_bar_concurrent + minimum_block_count_beat;
+
         /// If you think of a pipeline diagram, a pipeline slot is a single instruction.
         const PipelineSlot = struct {
             pipeline: *CompactionPipeline,
@@ -843,18 +858,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         forest: ?*Forest = null,
         callback: ?*const fn (*Forest) void = null,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid) !CompactionPipeline {
-            // CompactionBlock has some metadata, but we only look at the Block for now which
-            // makes up the bulk.
-            const block_count = @divExact(
-                constants.compaction_block_memory,
-                constants.block_size,
-            );
-            log.debug("compaction_block_memory={} block_count={}", .{
-                constants.compaction_block_memory,
-                block_count,
-            });
-            assert(block_count >= block_count_bar_concurrent + minimum_block_count_beat);
+        pub fn init(allocator: mem.Allocator, grid: *Grid, block_count: u32) !CompactionPipeline {
+            log.debug("block_count={}", .{block_count});
+            assert(block_count >= block_count_min);
 
             var block_pool: CompactionBlockFIFO = .{
                 .name = "block_pool",
@@ -1101,7 +1107,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn beat_finished_next_tick(next_tick: *Grid.NextTick) void {
-            const self = @fieldParentPtr(CompactionPipeline, "next_tick", next_tick);
+            const self: *CompactionPipeline = @alignCast(@fieldParentPtr("next_tick", next_tick));
 
             assert(self.beat_active.count() == 0);
             assert(self.slot_filled_count == 0);
@@ -1331,7 +1337,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn advance_pipeline_next_tick(next_tick: *Grid.NextTick) void {
-            const self = @fieldParentPtr(CompactionPipeline, "next_tick", next_tick);
+            const self: *CompactionPipeline = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(self.cpu_slot != null);
             const cpu_slot = self.cpu_slot.?;
             self.cpu_slot = null;

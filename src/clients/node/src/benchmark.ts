@@ -7,7 +7,8 @@ import {
 } from '.'
 
 const MAX_TRANSFERS = 51200
-const MAX_REQUEST_BATCH_SIZE = 5120
+// CI runs benchmark.ts against a "--development" replica.
+const MAX_REQUEST_BATCH_SIZE = 254
 const IS_TWO_PHASE_TRANSFER = false
 
 const client = createClient({

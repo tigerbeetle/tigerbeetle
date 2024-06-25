@@ -115,7 +115,7 @@ pub fn ScanLookupType(
         }
 
         fn scan_read_callback(context: *Scan.Context, scan: *Scan) void {
-            var self: *ScanLookup = @fieldParentPtr(ScanLookup, "scan_context", context);
+            var self: *ScanLookup = @alignCast(@fieldParentPtr("scan_context", context));
             assert(self.state == .scan);
             assert(self.scan == scan);
 
@@ -230,7 +230,7 @@ pub fn ScanLookupType(
             // Since the scan produced a valid key, it's expected to be found here.
             assert(result != null);
 
-            const worker = @fieldParentPtr(LookupWorker, "lookup_context", completion);
+            const worker: *LookupWorker = @fieldParentPtr("lookup_context", completion);
             const self: *ScanLookup = worker.scan_lookup;
 
             assert(worker.index_produced != null);

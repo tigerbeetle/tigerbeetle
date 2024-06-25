@@ -97,10 +97,6 @@ const replica_count = 6;
 const node_count = 1024;
 const scan_results_max = 4096;
 const events_max = 10_000_000;
-const tree_options = .{
-    // This is the smallest size that set_associative_cache will allow us.
-    .cache_entries_max = 2048,
-};
 
 // We must call compact after every 'batch'.
 // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
@@ -260,7 +256,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, .{
                 .id = 1,
                 .name = "Key.Value",
-            }, .{});
+            }, .{
+                .batch_value_count_limit = commit_entries_max,
+            });
             defer env.tree.deinit(allocator);
 
             env.change_state(.tree_init, .manifest_log_open);
@@ -275,17 +273,17 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-            const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+            const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
             env.change_state(.superblock_format, .superblock_open);
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-            const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+            const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
             env.change_state(.superblock_open, .free_set_open);
         }
 
         fn grid_open_callback(grid: *Grid) void {
-            const env = @fieldParentPtr(Environment, "grid", grid);
+            const env: *Environment = @fieldParentPtr("grid", grid);
             env.change_state(.free_set_open, .tree_init);
         }
 
@@ -301,7 +299,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
-            const env = @fieldParentPtr(@This(), "manifest_log", manifest_log);
+            const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
             env.change_state(.manifest_log_open, .fuzzing);
         }
 
@@ -403,12 +401,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {
-            const env = @fieldParentPtr(@This(), "manifest_log", manifest_log);
+            const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
             env.change_state(.manifest_log_compact, .fuzzing);
         }
 
         fn tree_compact_callback(tree: *Tree) void {
-            const env = @fieldParentPtr(@This(), "tree", tree);
+            const env: *Environment = @fieldParentPtr("tree", tree);
             env.change_state(.tree_compact, .fuzzing);
         }
 
@@ -449,12 +447,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn grid_checkpoint_callback(grid: *Grid) void {
-            const env = @fieldParentPtr(Environment, "grid", grid);
+            const env: *Environment = @fieldParentPtr("grid", grid);
             env.change_state(.grid_checkpoint, .fuzzing);
         }
 
         fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
-            const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+            const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
             env.change_state(.superblock_checkpoint, .fuzzing);
         }
 
@@ -479,7 +477,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Value) void {
-            const env = @fieldParentPtr(Environment, "lookup_context", lookup_context);
+            const env: *Environment = @fieldParentPtr("lookup_context", lookup_context);
             assert(env.lookup_value == null);
             env.lookup_value = if (value) |val| val.* else null;
             env.change_state(.tree_lookup, .fuzzing);
@@ -763,7 +761,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    var fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
+    const fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (random.boolean()) 0 else 1,
         // Always do puts, and always more puts than removes.

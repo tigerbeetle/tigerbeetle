@@ -189,7 +189,7 @@ test "checksum stability" {
 
     // Hash me, baby, one more time! If this final hash changes, we broke compatibility in a major
     // way.
-    comptime assert(builtin.target.cpu.arch.endian() == .Little);
+    comptime assert(builtin.target.cpu.arch.endian() == .little);
     const hash = checksum(mem.sliceAsBytes(&cases));
     try testing.expectEqual(hash, 0x82dcaacf4875b279446825b6830d1263);
 }

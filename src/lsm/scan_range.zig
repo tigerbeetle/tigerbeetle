@@ -70,7 +70,7 @@ pub fn ScanRangeType(
         }
 
         fn on_read_callback(context: *Context, ptr: *ScanTree) void {
-            const parent: *ScanRange = @fieldParentPtr(ScanRange, "scan_tree", ptr);
+            const parent: *ScanRange = @fieldParentPtr("scan_tree", ptr);
             context.callback(context, parent);
         }
 

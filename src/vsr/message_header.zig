@@ -501,11 +501,11 @@ pub const Header = extern struct {
                     if (self.parent != 0) return "register: parent != 0";
                     if (self.session != 0) return "register: session != 0";
                     if (self.request != 0) return "register: request != 0";
-                    // The .register operation carries no payload:
-                    if (self.checksum_body != checksum_body_empty) {
-                        return "register: checksum_body != expected";
+                    if (self.size != @sizeOf(Header) and // Compat(v0.15.3)
+                        self.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest))
+                    {
+                        return "register: size != @sizeOf(Header) [+ @sizeOf(vsr.RegisterRequest)]";
                     }
-                    if (self.size != @sizeOf(Header)) return "register: size != @sizeOf(Header)";
                 },
                 .pulse => {
                     // These requests don't originate from a real client or session.
@@ -1240,6 +1240,7 @@ pub const Header = extern struct {
             release_too_high = 3,
             invalid_request_operation = 4,
             invalid_request_body = 5,
+            invalid_request_body_size = 6,
 
             comptime {
                 for (std.enums.values(Reason), 0..) |reason, index| {
@@ -1406,7 +1407,7 @@ comptime {
         assert(@sizeOf(CommandHeader) == @sizeOf(Header));
         assert(@alignOf(CommandHeader) == @alignOf(Header));
         assert(@typeInfo(CommandHeader) == .Struct);
-        assert(@typeInfo(CommandHeader).Struct.layout == .Extern);
+        assert(@typeInfo(CommandHeader).Struct.layout == .@"extern");
         assert(stdx.no_padding(CommandHeader));
 
         // Verify that the command's header's frame is identical to Header's.

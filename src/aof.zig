@@ -117,7 +117,7 @@ pub const AOFEntry = extern struct {
 /// CLI command does it by hashing together all checksum_body, operation and timestamp
 /// fields.
 pub const AOF = struct {
-    fd: os.fd_t,
+    fd: std.posix.fd_t,
     last_checksum: ?u128 = null,
 
     /// Create an AOF given an absolute path. Handles opening the
@@ -126,24 +126,24 @@ pub const AOF = struct {
     pub fn from_absolute_path(absolute_path: []const u8) !AOF {
         const dirname = std.fs.path.dirname(absolute_path) orelse ".";
         const dir_fd = try IO.open_dir(dirname);
-        errdefer os.close(dir_fd);
+        errdefer std.posix.close(dir_fd);
 
         const basename = std.fs.path.basename(absolute_path);
 
         return AOF.init(dir_fd, basename);
     }
 
-    fn init(dir_fd: os.fd_t, relative_path: []const u8) !AOF {
+    fn init(dir_fd: std.posix.fd_t, relative_path: []const u8) !AOF {
         const fd = try IO.open_file(dir_fd, relative_path, 0, .create_or_open, .direct_io_required);
-        errdefer os.close(fd);
+        errdefer std.posix.close(fd);
 
-        try os.lseek_END(fd, 0);
+        try std.posix.lseek_END(fd, 0);
 
         return AOF{ .fd = fd };
     }
 
     pub fn close(self: *AOF) void {
-        os.close(self.fd);
+        std.posix.close(self.fd);
     }
 
     /// Write a message to disk. Once this function returns, the data passed in
@@ -177,7 +177,7 @@ pub const AOF = struct {
         // by signals, and a single write supports up to 0x7ffff000 bytes, which is
         // much greater than the size of our struct could ever be. Zig handles EINTR
         // for us automatically.
-        const bytes_written = try os.write(self.fd, bytes[0..disk_size]);
+        const bytes_written = try std.posix.write(self.fd, bytes[0..disk_size]);
 
         assert(bytes_written == disk_size);
     }
@@ -724,8 +724,8 @@ pub fn main() !void {
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            std.io.getStdOut().writeAll(usage) catch os.exit(1);
-            os.exit(0);
+            std.io.getStdOut().writeAll(usage) catch std.posix.exit(1);
+            std.posix.exit(0);
         }
 
         if (count == 1) {
@@ -782,7 +782,7 @@ pub fn main() !void {
     } else if (action != null and std.mem.eql(u8, action.?, "merge") and count >= 2) {
         try aof_merge(allocator, paths[0 .. count - 2], "prepared.aof");
     } else {
-        std.io.getStdOut().writeAll(usage) catch os.exit(1);
-        os.exit(1);
+        std.io.getStdOut().writeAll(usage) catch std.posix.exit(1);
+        std.posix.exit(1);
     }
 }

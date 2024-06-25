@@ -16,7 +16,7 @@ test "tidy" {
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
-    var src_dir = try fs.cwd().openIterableDir("./src", .{});
+    var src_dir = try fs.cwd().openDir("./src", .{ .iterate = true });
     defer src_dir.close();
 
     var walker = try src_dir.walk(allocator);
@@ -131,7 +131,7 @@ const DeadDetector = struct {
     }
 
     fn file_state(detector: *DeadDetector, path: []const u8) !*FileState {
-        var gop = try detector.files.getOrPut(path_to_name(path));
+        const gop = try detector.files.getOrPut(path_to_name(path));
         if (!gop.found_existing) gop.value_ptr.* = .{ .import_count = 0, .definition_count = 0 };
         return gop.value_ptr;
     }
@@ -241,9 +241,9 @@ test "tidy no large blobs" {
     while (lines.next()) |line| {
         // Parsing lines like
         //     blob 1032 client/package.json
-        var blob = stdx.cut_prefix(line, "blob ") orelse continue;
+        const blob = stdx.cut_prefix(line, "blob ") orelse continue;
 
-        var cut = stdx.cut(blob, " ").?;
+        const cut = stdx.cut(blob, " ").?;
         const size = try std.fmt.parseInt(u64, cut.prefix, 10);
         const path = cut.suffix;
 
@@ -259,14 +259,14 @@ test "tidy no large blobs" {
 
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
-    const allowed_extensions = std.ComptimeStringMap(void, .{
+    const allowed_extensions = std.StaticStringMap(void).initComptime(.{
         .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"},  .{".css"},  .{".go"},
         .{".h"},   .{".hcl"},   .{".java"}, .{".js"},      .{".json"}, .{".md"},
         .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sh"},   .{".sln"},
         .{".sum"}, .{".ts"},    .{".txt"},  .{".xml"},     .{".yml"},  .{".zig"},
     });
 
-    const exceptions = std.ComptimeStringMap(void, .{
+    const exceptions = std.StaticStringMap(void).initComptime(.{
         .{".editorconfig"},          .{".gitattributes"},   .{".gitignore"},
         .{".nojekyll"},              .{"CNAME"},            .{"Dockerfile"},
         .{"exclude-pmd.properties"}, .{"favicon.ico"},      .{"favicon.png"},
@@ -303,6 +303,18 @@ fn banned(source: []const u8) ?[]const u8 {
 
     if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
         return "use stdx." ++ "has_unique_representation instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "mem." ++ "copy(") != null) {
+        return "use stdx." ++ "copy_disjoint instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "mem." ++ "copyForwards(") != null) {
+        return "use stdx." ++ "copy_left instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "mem." ++ "copyBackwards(") != null) {
+        return "use stdx." ++ "copy_right instead of std version";
     }
 
     // Ban "fixme" comments. This allows using fixe as reminders with teeth --- when working on a
@@ -364,7 +376,6 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "clients/c/tb_client_header_test.zig",
     "clients/c/tb_client.zig",
     "clients/c/tb_client/context.zig",
     "clients/c/tb_client/signal.zig",
@@ -391,7 +402,6 @@ const naughty_list = [_][]const u8{
     "lsm/manifest_level.zig",
     "lsm/segmented_array_benchmark.zig",
     "lsm/segmented_array.zig",
-    "lsm/set_associative_cache.zig",
     "lsm/table_data_iterator.zig",
     "lsm/tree_fuzz.zig",
     "simulator.zig",

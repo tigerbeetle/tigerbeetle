@@ -14,11 +14,11 @@ comptime {
     assert(constants.storage_size_limit_max == tigerbeetle_config.process.storage_size_limit_max);
 }
 
-pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
-    pub const log_scope_levels = &[_]std.log.ScopeLevel{
+pub const std_options = .{
+    .log_level = .info,
+    .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .superblock_quorums, .level = .err },
-    };
+    },
 };
 
 const Fuzzers = .{
@@ -104,12 +104,7 @@ fn main_smoke() !void {
 fn main_single(cli_args: CliArgs) !void {
     assert(cli_args.positional.fuzzer != .smoke);
 
-    const seed: usize = cli_args.positional.seed orelse seed: {
-        // If no seed was given, use a random seed instead.
-        var seed_random: u64 = undefined;
-        try std.os.getrandom(std.mem.asBytes(&seed_random));
-        break :seed seed_random;
-    };
+    const seed = cli_args.positional.seed orelse std.crypto.random.int(u64);
     log.info("Fuzz seed = {}", .{seed});
 
     var timer = try std.time.Timer.start();

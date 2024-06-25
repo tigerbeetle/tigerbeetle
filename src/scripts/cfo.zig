@@ -78,7 +78,19 @@ const Fuzzer = enum {
     vopr_lite,
     vopr_testing_lite,
 
-    fn fill_args(fuzzer: Fuzzer, accumulator: *std.ArrayList([]const u8)) !void {
+    fn fill_args_build(fuzzer: Fuzzer, accumulator: *std.ArrayList([]const u8)) !void {
+        switch (fuzzer) {
+            .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
+                if (f == .vopr_testing or f == .vopr_testing_lite) {
+                    try accumulator.append("-Dsimulator-state-machine=testing");
+                }
+                try accumulator.appendSlice(&.{"simulator"});
+            },
+            else => try accumulator.appendSlice(&.{"build_fuzz"}),
+        }
+    }
+
+    fn fill_args_run(fuzzer: Fuzzer, accumulator: *std.ArrayList([]const u8)) !void {
         switch (fuzzer) {
             .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
                 if (f == .vopr_testing or f == .vopr_testing_lite) {
@@ -147,15 +159,25 @@ fn run_fuzzers(
     },
 ) !void {
     const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
+    log.info("fuzzing {} tasks", .{tasks.seed_record.len});
+    for (tasks.seed_record, tasks.weight) |seed_record, weight| {
+        log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
+            seed_record.commit_sha[0..7],
+            seed_record.commit_timestamp,
+            @tagName(seed_record.fuzzer),
+            seed_record.branch,
+            weight,
+        });
+    }
 
     const random = std.crypto.random;
 
     const FuzzerChild = struct {
-        child: std.ChildProcess,
+        child: std.process.Child,
         seed: SeedRecord,
     };
 
-    var fuzzers = try shell.arena.allocator().alloc(?FuzzerChild, options.concurrency);
+    const fuzzers = try shell.arena.allocator().alloc(?FuzzerChild, options.concurrency);
     @memset(fuzzers, null);
     defer for (fuzzers) |*fuzzer_or_null| {
         if (fuzzer_or_null.*) |*fuzzer| {
@@ -182,12 +204,26 @@ fn run_fuzzers(
 
                     assert(try shell.dir_exists(".git") or shell.file_exists(".git"));
 
+                    {
+                        // First, build the fuzzer separately to exclude compilation from the
+                        // recorded timings.
+                        args.clearRetainingCapacity();
+                        try args.appendSlice(&.{ "build", "-Drelease" });
+                        try seed_record.fuzzer.fill_args_build(&args);
+                        shell.exec("{zig} {args}", .{
+                            .zig = shell.zig_exe.?,
+                            .args = args.items,
+                        }) catch {
+                            // Ignore the error, it'll get recorded by the run anyway.
+                        };
+                    }
+
                     seed_record.seed = random.int(u64);
                     seed_record.seed_timestamp_start = @intCast(std.time.timestamp());
 
                     args.clearRetainingCapacity();
                     try args.appendSlice(&.{ "build", "-Drelease" });
-                    try seed_record.fuzzer.fill_args(&args);
+                    try seed_record.fuzzer.fill_args_run(&args);
                     try args.append(try shell.fmt("{d}", .{seed_record.seed}));
 
                     var command = std.ArrayList(u8).init(shell.arena.allocator());
@@ -208,10 +244,10 @@ fn run_fuzzers(
                         "{zig} {args}",
                         .{ .zig = shell.zig_exe.?, .args = args.items },
                     );
-                    _ = try std.os.fcntl(
+                    _ = try std.posix.fcntl(
                         child.stdin.?.handle,
-                        std.os.F.SETFL,
-                        @as(u32, std.os.O.NONBLOCK),
+                        std.posix.F.SETFL,
+                        @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
                     );
                     fuzzer_or_null.* = .{ .seed = seed_record, .child = child };
                 }
@@ -282,8 +318,6 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
 
             break :commit try run_fuzzers_prepare_repository(shell, .main_branch);
         };
-        log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
-        run_fuzzers_build_all(shell);
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             try working_directory.append(if (gh_token == null) "." else "./working/main");
@@ -335,8 +369,6 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
                 shell,
                 .{ .pull_request = pr.number },
             );
-            log.info("fuzzing commit={s} timestamp={d}", .{ commit.sha, commit.timestamp });
-            run_fuzzers_build_all(shell);
 
             var pr_fuzzers_count: u32 = 0;
             for (std.enums.values(Fuzzer)) |fuzzer| {
@@ -451,18 +483,6 @@ fn run_fuzzers_commit_info(shell: *Shell) !Commit {
     return .{ .sha = commit_sha, .timestamp = commit_timestamp };
 }
 
-fn run_fuzzers_build_all(shell: *Shell) void {
-    shell.zig("build -Drelease build_fuzz", .{}) catch |err| {
-        log.err("'build -Drelease build_fuzz': {}", .{err});
-    };
-    shell.zig("build -Drelease simulator", .{}) catch |err| {
-        log.err("'build -Drelease simulator': {}", .{err});
-    };
-    shell.zig("build -Drelease simulator -Dsimulator-state-machine=testing", .{}) catch |err| {
-        log.err("'build -Drelease simulator -Dsimulator-state-machine=testing': {}", .{err});
-    };
-}
-
 fn upload_results(
     shell: *Shell,
     gpa: std.mem.Allocator,
@@ -515,7 +535,7 @@ fn upload_results(
                     seeds_merged,
                     .{ .whitespace = .indent_2 },
                 );
-                try shell.cwd.writeFile("./fuzzing/data.json", json);
+                try shell.cwd.writeFile(.{ .sub_path = "./fuzzing/data.json", .data = json });
                 try shell.exec("git add ./fuzzing/data.json", .{});
                 try shell.git_env_setup();
                 try shell.exec("git commit -m 🌱", .{});
@@ -591,7 +611,7 @@ const SeedRecord = struct {
         current: []const SeedRecord,
         new: []const SeedRecord,
     ) !union(enum) { updated: []const SeedRecord, up_to_date } {
-        var current_and_new = try std.mem.concat(arena, SeedRecord, &.{ current, new });
+        const current_and_new = try std.mem.concat(arena, SeedRecord, &.{ current, new });
         std.mem.sort(SeedRecord, current_and_new, {}, SeedRecord.less_than);
 
         var result = try std.ArrayList(SeedRecord).initCapacity(arena, current.len);

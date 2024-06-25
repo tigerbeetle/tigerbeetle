@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const os = std.os;
+const posix = std.posix;
+const system = posix.system;
 const assert = std.debug.assert;
 const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
@@ -69,8 +71,8 @@ pub const Time = struct {
         // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
         const darwin = struct {
-            const mach_timebase_info_t = os.darwin.mach_timebase_info_data;
-            extern "c" fn mach_timebase_info(info: *mach_timebase_info_t) os.darwin.kern_return_t;
+            const mach_timebase_info_t = system.mach_timebase_info_data;
+            extern "c" fn mach_timebase_info(info: *mach_timebase_info_t) system.kern_return_t;
             extern "c" fn mach_continuous_time() u64;
         };
 
@@ -94,8 +96,8 @@ pub const Time = struct {
         //
         // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC, see
         // https://github.com/ziglang/zig/pull/933#discussion_r656021295.
-        var ts: os.timespec = undefined;
-        os.clock_gettime(os.CLOCK.BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
+        var ts: posix.timespec = undefined;
+        posix.clock_gettime(posix.CLOCK.BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
         return @as(u64, @intCast(ts.tv_sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.tv_nsec));
     }
 
@@ -129,8 +131,8 @@ pub const Time = struct {
 
     fn realtime_unix() i64 {
         assert(is_darwin or is_linux);
-        var ts: os.timespec = undefined;
-        os.clock_gettime(os.CLOCK.REALTIME, &ts) catch unreachable;
+        var ts: posix.timespec = undefined;
+        posix.clock_gettime(posix.CLOCK.REALTIME, &ts) catch unreachable;
         return @as(i64, ts.tv_sec) * std.time.ns_per_s + ts.tv_nsec;
     }
 

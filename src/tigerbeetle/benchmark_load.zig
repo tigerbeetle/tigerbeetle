@@ -10,11 +10,9 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const panic = std.debug.panic;
 const log = std.log;
-pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
+pub const std_options = .{
+    .log_level = .info,
 };
-
-const build_options = @import("vsr_options");
 
 const vsr = @import("vsr");
 const constants = vsr.constants;
@@ -33,11 +31,6 @@ const IdPermutation = vsr.testing.IdPermutation;
 
 const cli = @import("./cli.zig");
 
-const account_count_per_batch = @divExact(
-    constants.message_size_max - @sizeOf(vsr.Header),
-    @sizeOf(tb.Account),
-);
-
 pub fn main(
     allocator: std.mem.Allocator,
     addresses: []const std.net.Address,
@@ -48,12 +41,11 @@ pub fn main(
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built with '-Drelease' for reasonable results.\n", .{});
     }
-    if (build_options.config_base != .production) {
+    if (!vsr.constants.config.is_production()) {
         try stderr.print(
             \\Benchmark must be built with '-Dconfig=production' for reasonable results.
-            \\Benchmark was built with -Dconfig={s} instead.
             \\
-        , .{@tagName(build_options.config_base)});
+        , .{});
     }
 
     if (cli_args.account_count < 2) flags.fatal(
@@ -83,7 +75,7 @@ pub fn main(
     );
 
     var batch_accounts =
-        try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, account_count_per_batch);
+        try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, cli_args.account_batch_size);
     defer batch_accounts.deinit(allocator);
 
     // Each array position corresponds to a histogram bucket of 1ms. The last bucket is 10_000ms+.
@@ -216,7 +208,7 @@ const Benchmark = struct {
 
         // Fill batch.
         while (b.account_index < b.account_count and
-            b.batch_accounts.items.len < account_count_per_batch)
+            b.batch_accounts.items.len < b.batch_accounts.capacity)
         {
             b.batch_accounts.appendAssumeCapacity(.{
                 .id = b.account_id_permutation.encode(b.account_index + 1),
@@ -533,7 +525,7 @@ fn print_percentiles_histogram(
 
     const percentiles = [_]u64{ 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100 };
     for (percentiles) |percentile| {
-        var histogram_percentile: usize = @divTrunc(histogram_total * percentile, 100);
+        const histogram_percentile: usize = @divTrunc(histogram_total * percentile, 100);
 
         // Since each bucket in our histogram represents 1ms, the bucket we're in is the ms value.
         var sum: usize = 0;

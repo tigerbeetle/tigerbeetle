@@ -35,8 +35,8 @@ const flags = @import("./flags.zig");
 const assert = std.debug.assert;
 
 const log = std.log;
-pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
+pub const std_options = .{
+    .log_level = .info,
 };
 
 const CliArgs = union(enum) {
@@ -55,8 +55,8 @@ pub fn main() !void {
 
     const cli_args = flags.parse(&args, CliArgs);
 
-    var line_buffer = try allocator.alloc(u8, 1024 * 1024);
-    var func_buf = try allocator.alloc(u8, 4096);
+    const line_buffer = try allocator.alloc(u8, 1024 * 1024);
+    const func_buf = try allocator.alloc(u8, 4096);
 
     const stdin = std.io.getStdIn();
     var buf_reader = std.io.bufferedReader(stdin.reader());
@@ -198,5 +198,5 @@ test "extract_memcpy_size" {
 pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
-    std.os.exit(1);
+    std.posix.exit(1);
 }

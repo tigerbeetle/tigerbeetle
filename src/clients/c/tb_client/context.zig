@@ -1,19 +1,20 @@
 const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
+const Atomic = std.atomic.Value;
 
-const Atomic = std.atomic.Atomic;
+// When referenced from unit_test.zig, there is no vsr import module so use path.
+const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
 
-const constants = @import("../../../constants.zig");
+const constants = vsr.constants;
 const log = std.log.scoped(.tb_client_context);
 
-const stdx = @import("../../../stdx.zig");
-const vsr = @import("../../../vsr.zig");
+const stdx = vsr.stdx;
 const Header = vsr.Header;
 
-const IO = @import("../../../io.zig").IO;
-const FIFO = @import("../../../fifo.zig").FIFO;
-const message_pool = @import("../../../message_pool.zig");
+const IO = vsr.io.IO;
+const FIFO = vsr.fifo.FIFO;
+const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
@@ -64,6 +65,23 @@ pub fn ContextType(
             assert(@sizeOf(UserData) == @sizeOf(u128));
         }
 
+        fn operation_from_int(op: u8) ?Client.StateMachine.Operation {
+            const allowed_operations = [_]Client.StateMachine.Operation{
+                .create_accounts,
+                .create_transfers,
+                .lookup_accounts,
+                .lookup_transfers,
+                .get_account_transfers,
+                .get_account_balances,
+            };
+            inline for (allowed_operations) |operation| {
+                if (op == @intFromEnum(operation)) {
+                    return operation;
+                }
+            }
+            return null;
+        }
+
         fn operation_event_size(op: u8) ?usize {
             const allowed_operations = [_]Client.StateMachine.Operation{
                 .create_accounts,
@@ -96,7 +114,7 @@ pub fn ContextType(
         io: IO,
         message_pool: MessagePool,
         client: Client,
-        registered: bool,
+        batch_size_limit: ?u32,
 
         completion_fn: tb_completion_t,
         implementation: ContextImplementation,
@@ -219,14 +237,14 @@ pub fn ContextType(
                 };
             };
 
-            context.registered = false;
+            context.batch_size_limit = null;
             context.client.register(client_register_callback, @intFromPtr(context));
 
             return context;
         }
 
         pub fn deinit(self: *Context) void {
-            const is_shutdown = self.shutdown.swap(true, .Monotonic);
+            const is_shutdown = self.shutdown.swap(true, .monotonic);
             if (!is_shutdown) {
                 self.thread.join();
                 self.signal.deinit();
@@ -243,8 +261,11 @@ pub fn ContextType(
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
-            _ = result;
-            self.registered = true;
+            assert(self.batch_size_limit == null);
+            assert(result.batch_size_limit > 0);
+            assert(result.batch_size_limit <= constants.message_body_size_max);
+
+            self.batch_size_limit = result.batch_size_limit;
             // Some requests may have queued up while the client was registering.
             self.signal.notify();
         }
@@ -258,7 +279,7 @@ pub fn ContextType(
 
             while (true) {
                 // Keep running until shutdown:
-                const is_shutdown = self.shutdown.load(.Acquire);
+                const is_shutdown = self.shutdown.load(.acquire);
                 if (is_shutdown) {
                     // We need to drain all free packets, to ensure that all
                     // inflight requests have finished.
@@ -280,10 +301,10 @@ pub fn ContextType(
         }
 
         fn on_signal(signal: *Signal) void {
-            const self = @fieldParentPtr(Context, "signal", signal);
+            const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
 
             // Don't send any requests until registration completes.
-            if (!self.registered) {
+            if (self.batch_size_limit == null) {
                 assert(self.client.request_inflight != null);
                 assert(self.client.request_inflight.?.message.header.operation == .register);
                 return;
@@ -295,11 +316,15 @@ pub fn ContextType(
         }
 
         fn request(self: *Context, packet: *Packet) void {
-            assert(self.registered);
+            const operation = operation_from_int(packet.operation) orelse {
+                return self.on_complete(packet, error.InvalidOperation);
+            };
 
             // Get the size of each request structure in the packet.data:
-            const event_size: usize = operation_event_size(packet.operation) orelse {
-                return self.on_complete(packet, error.InvalidOperation);
+            const event_size: usize = switch (operation) {
+                inline else => |operation_comptime| blk: {
+                    break :blk @sizeOf(Client.StateMachine.Event(operation_comptime));
+                },
             };
 
             // Make sure the packet.data size is correct:
@@ -308,10 +333,19 @@ pub fn ContextType(
                 return self.on_complete(packet, error.InvalidDataSize);
             }
 
-            // Make sure the packet.data wouldn't overflow a message:
-            if (events.len > constants.message_body_size_max) {
+            // Make sure the packet.data wouldn't overflow a request, and that the corresponding
+            // results won't overflow a reply.
+            const events_batch_max = switch (operation) {
+                .pulse => unreachable,
+                inline else => |operation_comptime| StateMachine.operation_batch_max(
+                    operation_comptime,
+                    self.batch_size_limit.?,
+                ),
+            };
+            if (@divExact(events.len, event_size) > events_batch_max) {
                 return self.on_complete(packet, error.TooMuchData);
             }
+            assert(events.len <= self.batch_size_limit.?);
 
             packet.batch_next = null;
             packet.batch_tail = packet;
@@ -330,7 +364,9 @@ pub fn ContextType(
 
                     // Check for pending packets of the same operation which can be batched.
                     if (root.operation != packet.operation) continue;
-                    if (root.batch_size + packet.data_size > constants.message_body_size_max) continue;
+
+                    const merged_events = @divExact(root.batch_size + packet.data_size, event_size);
+                    if (merged_events > events_batch_max) continue;
 
                     root.batch_size += packet.data_size;
                     root.batch_tail.?.batch_next = packet;
@@ -451,14 +487,14 @@ pub fn ContextType(
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {
-            return @fieldParentPtr(Context, "implementation", implementation);
+            return @alignCast(@fieldParentPtr("implementation", implementation));
         }
 
         fn on_acquire_packet(implementation: *ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus {
             const self = get_context(implementation);
 
             // During shutdown, no packet can be acquired by the application.
-            const is_shutdown = self.shutdown.load(.Acquire);
+            const is_shutdown = self.shutdown.load(.acquire);
             if (is_shutdown) {
                 return .shutdown;
             } else if (self.packets_free.pop()) |packet| {

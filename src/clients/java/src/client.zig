@@ -33,14 +33,14 @@ const Context = struct {
 const NativeClient = struct {
     /// On JVM loads this library.
     fn on_load(vm: *jni.JavaVM) jni.JInt {
-        var env = JNIHelper.get_env(vm);
+        const env = JNIHelper.get_env(vm);
         ReflectionHelper.load(env);
         return jni_version;
     }
 
     /// On JVM unloads this library.
     fn on_unload(vm: *jni.JavaVM) void {
-        var env = JNIHelper.get_env(vm);
+        const env = JNIHelper.get_env(vm);
         ReflectionHelper.unload(env);
     }
 
@@ -61,7 +61,7 @@ const NativeClient = struct {
         };
         defer env.release_string_utf_chars(addresses_obj, addresses.ptr);
 
-        var context = global_allocator.create(Context) catch {
+        const context = global_allocator.create(Context) catch {
             ReflectionHelper.initialization_exception_throw(env, tb.tb_status_t.out_of_memory);
             return null;
         };
@@ -143,12 +143,12 @@ const NativeClient = struct {
         result_len: u32,
     ) callconv(.C) void {
         _ = client;
-        var context: *Context = @ptrFromInt(context_ptr);
+        const context: *Context = @ptrFromInt(context_ptr);
         var env = JNIHelper.attach_current_thread(context.jvm);
 
         // Retrieves the request instance, and drops the GC reference.
         assert(packet.user_data != null);
-        var request_obj: jni.JObject = @ptrCast(packet.user_data);
+        const request_obj: jni.JObject = @ptrCast(packet.user_data);
         defer env.delete_global_ref(request_obj);
 
         const packet_operation = packet.operation;
@@ -204,7 +204,7 @@ comptime {
             const cluster_id_elements = env.get_byte_array_elements(cluster_id, null).?;
             defer env.release_byte_array_elements(cluster_id, cluster_id_elements, .abort);
 
-            var context = NativeClient.client_init(
+            const context = NativeClient.client_init(
                 false,
                 env,
                 @bitCast(cluster_id_elements[0..16].*),
@@ -227,7 +227,7 @@ comptime {
             const cluster_id_elements = env.get_byte_array_elements(cluster_id, null).?;
             defer env.release_byte_array_elements(cluster_id, cluster_id_elements, .abort);
 
-            var context = NativeClient.client_init(
+            const context = NativeClient.client_init(
                 true,
                 env,
                 @as(u128, @bitCast(cluster_id_elements[0..16].*)),
@@ -265,13 +265,13 @@ comptime {
         }
     };
 
-    @export(Exports.on_load, .{ .name = "JNI_OnLoad", .linkage = .Strong });
-    @export(Exports.on_unload, .{ .name = "JNI_OnUnload", .linkage = .Strong });
+    @export(Exports.on_load, .{ .name = "JNI_OnLoad", .linkage = .strong });
+    @export(Exports.on_unload, .{ .name = "JNI_OnUnload", .linkage = .strong });
 
-    @export(Exports.client_init, .{ .name = prefix ++ "clientInit", .linkage = .Strong });
-    @export(Exports.client_init_echo, .{ .name = prefix ++ "clientInitEcho", .linkage = .Strong });
-    @export(Exports.client_deinit, .{ .name = prefix ++ "clientDeinit", .linkage = .Strong });
-    @export(Exports.submit, .{ .name = prefix ++ "submit", .linkage = .Strong });
+    @export(Exports.client_init, .{ .name = prefix ++ "clientInit", .linkage = .strong });
+    @export(Exports.client_init_echo, .{ .name = prefix ++ "clientInitEcho", .linkage = .strong });
+    @export(Exports.client_deinit, .{ .name = prefix ++ "clientDeinit", .linkage = .strong });
+    @export(Exports.submit, .{ .name = prefix ++ "submit", .linkage = .strong });
 }
 
 /// Reflection helper and metadata cache.
@@ -382,7 +382,7 @@ const ReflectionHelper = struct {
         assert(initialization_exception_class != null);
         assert(initialization_exception_ctor_id != null);
 
-        var exception = env.new_object(
+        const exception = env.new_object(
             initialization_exception_class,
             initialization_exception_ctor_id,
             &[_]jni.JValue{jni.JValue.to_jvalue(@as(jni.JInt, @bitCast(@intFromEnum(status))))},
@@ -421,14 +421,14 @@ const ReflectionHelper = struct {
         assert(request_send_buffer_field_id != null);
         assert(request_send_buffer_len_field_id != null);
 
-        var buffer_obj = env.get_object_field(this_obj, request_send_buffer_field_id) orelse
+        const buffer_obj = env.get_object_field(this_obj, request_send_buffer_field_id) orelse
             return null;
         defer env.delete_local_ref(buffer_obj);
 
-        var direct_buffer: []u8 = JNIHelper.get_direct_buffer(env, buffer_obj) orelse
+        const direct_buffer: []u8 = JNIHelper.get_direct_buffer(env, buffer_obj) orelse
             return null;
 
-        var buffer_len = env.get_long_field(this_obj, request_send_buffer_len_field_id);
+        const buffer_len = env.get_long_field(this_obj, request_send_buffer_len_field_id);
         if (buffer_len < 0 or buffer_len > direct_buffer.len)
             return null;
 
@@ -440,7 +440,7 @@ const ReflectionHelper = struct {
         assert(request_reply_buffer_field_id != null);
         assert(reply.len > 0);
 
-        var reply_buffer_obj = env.new_byte_array(
+        const reply_buffer_obj = env.new_byte_array(
             @intCast(reply.len),
         ) orelse {
             // Cannot allocate an array, it's likely the JVM has run out of resources.
@@ -612,7 +612,7 @@ const JNIHelper = struct {
     }
 
     pub inline fn find_class(env: *jni.JNIEnv, comptime class_name: [:0]const u8) jni.JClass {
-        var class_obj = env.find_class(class_name.ptr) orelse {
+        const class_obj = env.find_class(class_name.ptr) orelse {
             vm_panic(
                 env,
                 "Unexpected result calling JNIEnv.FindClass for {s}",
@@ -662,10 +662,10 @@ const JNIHelper = struct {
         env: *jni.JNIEnv,
         buffer_obj: jni.JObject,
     ) ?[]u8 {
-        var buffer_capacity = env.get_direct_buffer_capacity(buffer_obj);
+        const buffer_capacity = env.get_direct_buffer_capacity(buffer_obj);
         if (buffer_capacity < 0) return null;
 
-        var buffer_address = env.get_direct_buffer_address(buffer_obj) orelse return null;
+        const buffer_address = env.get_direct_buffer_address(buffer_obj) orelse return null;
         return buffer_address[0..@as(u32, @intCast(buffer_capacity))];
     }
 

@@ -116,7 +116,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
         }
 
         fn on_read(read: *Grid.Read, block: BlockPtrConst) void {
-            const it = @fieldParentPtr(TableDataIterator, "read", read);
+            const it: *TableDataIterator = @fieldParentPtr("read", read);
             assert(it.callback == .read);
             assert(it.context.addresses.len == it.context.checksums.len);
 
@@ -152,7 +152,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {
-            const it = @fieldParentPtr(TableDataIterator, "next_tick", next_tick);
+            const it: *TableDataIterator = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(it.callback == .next_tick);
             assert(it.empty());
 

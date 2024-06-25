@@ -246,7 +246,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         fn open_next_tick(next_tick: *Grid.NextTick) void {
-            const trailer = @fieldParentPtr(Self, "next_tick", next_tick);
+            const trailer: *Self = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(trailer.callback == .open);
             assert(trailer.size == 0);
             trailer.open_done();
@@ -280,7 +280,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         fn open_read_next_callback(read: *Grid.Read, block: BlockPtrConst) void {
-            const trailer = @fieldParentPtr(Self, "read", read);
+            const trailer: *Self = @fieldParentPtr("read", read);
             assert(trailer.callback == .open);
             assert(trailer.size > 0);
             assert(trailer.block_index < trailer.block_count());
@@ -363,7 +363,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         fn checkpoint_next_tick(next_tick: *Grid.NextTick) void {
-            const trailer = @fieldParentPtr(Self, "next_tick", next_tick);
+            const trailer: *Self = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(trailer.callback == .checkpoint);
             assert(trailer.size == 0);
             assert(trailer.block_index == 0);
@@ -415,7 +415,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         fn checkpoint_write_next_callback(write: *Grid.Write) void {
-            const trailer = @fieldParentPtr(Self, "write", write);
+            const trailer: *Self = @fieldParentPtr("write", write);
             assert(trailer.callback == .checkpoint);
 
             trailer.block_index += 1;

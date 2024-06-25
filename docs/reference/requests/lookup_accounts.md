@@ -2,6 +2,14 @@
 
 Fetch one or more accounts by their `id`s.
 
+⚠️ Note that you **should not** check an account's balance using this request before creating a
+transfer. That would not be atomic and the balance could change in between the check and the
+transfer. Instead, set the
+[`debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) or
+[`credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) flag on the
+accounts to limit their account balances. More complex conditional transfers can be expressed using
+[balance-conditional transfers](../../coding/recipes/balance-conditional-transfers.md).
+
 ## Event
 
 An [`id`](../account.md#id) belonging to a [`Account`](../account.md).
@@ -15,14 +23,13 @@ An [`id`](../account.md#id) belonging to a [`Account`](../account.md).
 
 For language-specific docs see:
 
-* [.NET library](/src/clients/dotnet/README.md#account-lookup)
-* [Java library](/src/clients/java/README.md#account-lookup)
-* [Go library](/src/clients/go/README.md#account-lookup)
-* [Node.js library](/src/clients/node/README.md#account-lookup)
+- [.NET library](/src/clients/dotnet/README.md#account-lookup)
+- [Java library](/src/clients/java/README.md#account-lookup)
+- [Go library](/src/clients/go/README.md#account-lookup)
+- [Node.js library](/src/clients/node/README.md#account-lookup)
 
 ## Internals
 
-If you're curious and want to learn more, you can find the source code
-for looking up an account in
-[src/state_machine.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/state_machine.zig). Search
-for `fn execute_lookup_accounts(`.
+If you're curious and want to learn more, you can find the source code for looking up an account in
+[src/state_machine.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/state_machine.zig).
+Search for `fn execute_lookup_accounts(`.
