@@ -145,6 +145,16 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
+    const all_args = try std.process.argsAlloc(allocator);
+    // no need to free all_args
+
+    const cmd_args = all_args[1..];
+    if (cmd_args.len != 1) {
+        std.log.err("expected 1 cmdline argument but got {}", .{cmd_args.len});
+        std.process.exit(0xff);
+    }
+    const out_file_path = cmd_args[0];
+
     var buffer = std.ArrayList(u8).init(allocator);
     try buffer.writer().print(
         \\ //////////////////////////////////////////////////////////
@@ -248,5 +258,5 @@ pub fn main() !void {
         \\#endif // TB_CLIENT_H
         \\
     , .{});
-    try std.fs.cwd().writeFile(.{ .sub_path = "src/clients/c/tb_client.h", .data = buffer.items });
+    try std.fs.cwd().writeFile(.{ .sub_path = out_file_path, .data = buffer.items });
 }
