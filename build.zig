@@ -101,14 +101,14 @@ pub fn build(b: *std.Build) !void {
             "hash-log-mode",
             "Log hashes (used for debugging non-deterministic executions).",
         ) orelse .none,
-        .simulator_state_machine = b.option(
+        .vopr_state_machine = b.option(
             enum { testing, accounting },
-            "simulator-state-machine",
+            "vopr-state-machine",
             "State machine.",
         ) orelse .accounting,
-        .simulator_log = b.option(
+        .vopr_log = b.option(
             enum { full, short },
-            "simulator-log",
+            "vopr-log",
             "Log only state transitions (short) or everything (full).",
         ) orelse .short,
         .tracer_backend = b.option(
@@ -372,34 +372,34 @@ pub fn build(b: *std.Build) !void {
     }
 
     { // zig build vopr -- 42
-        const simulator_options = b.addOptions();
+        const vopr_options = b.addOptions();
 
         // When running without a SEED, default to release.
-        const simulator_mode = if (b.args == null) .ReleaseSafe else mode;
-        simulator_options.addOption(
-            @TypeOf(build_options.simulator_state_machine),
+        const vopr_mode = if (b.args == null) .ReleaseSafe else mode;
+        vopr_options.addOption(
+            @TypeOf(build_options.vopr_state_machine),
             "state_machine",
-            build_options.simulator_state_machine,
+            build_options.vopr_state_machine,
         );
-        simulator_options.addOption(
-            @TypeOf(build_options.simulator_log),
+        vopr_options.addOption(
+            @TypeOf(build_options.vopr_log),
             "log",
-            build_options.simulator_log,
+            build_options.vopr_log,
         );
 
-        const simulator = b.addExecutable(.{
-            .name = "simulator",
-            .root_source_file = b.path("src/simulator.zig"),
+        const vopr = b.addExecutable(.{
+            .name = "vopr",
+            .root_source_file = b.path("src/vopr.zig"),
             .target = target,
-            .optimize = simulator_mode,
+            .optimize = vopr_mode,
         });
-        simulator.root_module.addOptions("vsr_options", vsr_options);
-        simulator.root_module.addOptions("vsr_simulator_options", simulator_options);
+        vopr.root_module.addOptions("vsr_options", vsr_options);
+        vopr.root_module.addOptions("vsr_vopr_options", vopr_options);
         // Ensure that we get stack traces even in release builds.
-        simulator.root_module.omit_frame_pointer = false;
-        build_steps.vopr_build.dependOn(&b.addInstallArtifact(simulator, .{}).step);
+        vopr.root_module.omit_frame_pointer = false;
+        build_steps.vopr_build.dependOn(&b.addInstallArtifact(vopr, .{}).step);
 
-        const run_cmd = b.addRunArtifact(simulator);
+        const run_cmd = b.addRunArtifact(vopr);
         if (b.args) |args| run_cmd.addArgs(args);
         build_steps.vopr.dependOn(&run_cmd.step);
     }

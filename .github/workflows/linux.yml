@@ -65,5 +65,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build vopr -Dsimulator-state-machine=accounting -Drelease -- ${{ github.sha }}
-      - run: zig/zig build vopr -Dsimulator-state-machine=testing    -Drelease -- ${{ github.sha }}
+      - run: zig/zig build vopr -Dvopr-state-machine=accounting -Drelease -- ${{ github.sha }}
+      - run: zig/zig build vopr -Dvopr-state-machine=testing    -Drelease -- ${{ github.sha }}
