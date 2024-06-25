@@ -31,7 +31,7 @@ zig/zig build
 Then create the TigerBeetle data file.
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 --development 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
 ```
 ```console
 info(io): creating "0_0.tigerbeetle"...
