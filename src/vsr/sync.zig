@@ -9,6 +9,11 @@ const stdx = @import("../stdx.zig");
 pub const Stage = union(enum) {
     idle,
 
+    /// The replica didn't make any progress committing recently and is waiting for a missing
+    /// prepare or a missing grid block. In stuck stage a replica periodically sends
+    /// `request_start_view` to learn about the new checkpoint.
+    stuck,
+
     /// The commit lifecycle is in a stage that cannot be interrupted/canceled.
     /// We are waiting until that uninterruptible stage completes.
     /// When it completes, we will abort the commit chain and resume sync.
@@ -19,55 +24,29 @@ pub const Stage = union(enum) {
     canceling_grid,
 
     /// We need to sync, but are waiting for a usable `sync_target_max`.
-    requesting_target,
+    awaiting_checkpoint,
 
-    requesting_checkpoint: RequestingCheckpoint,
     updating_superblock: UpdatingSuperBlock,
 
-    pub const RequestingCheckpoint = struct {
-        target: Target,
-    };
-
     pub const UpdatingSuperBlock = struct {
-        target: Target,
+        // target: Target,
         checkpoint_state: vsr.CheckpointState,
     };
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
         return switch (from) {
-            .idle => to == .canceling_commit or
+            .stuck => to == .idle or
+                to == .canceling_commit or
                 to == .canceling_grid or
-                to == .requesting_target,
+                to == .awaiting_checkpoint,
+            .idle => to == .stuck or
+                to == .canceling_commit or
+                to == .canceling_grid or
+                to == .awaiting_checkpoint,
             .canceling_commit => to == .canceling_grid,
-            .canceling_grid => to == .requesting_target,
-            .requesting_target => to == .requesting_target or
-                to == .requesting_checkpoint,
-            .requesting_checkpoint => to == .requesting_checkpoint or
-                to == .updating_superblock,
-            .updating_superblock => to == .requesting_checkpoint or
-                to == .idle,
+            .canceling_grid => to == .awaiting_checkpoint,
+            .awaiting_checkpoint => to == .awaiting_checkpoint or to == .updating_superblock,
+            .updating_superblock => to == .idle,
         };
     }
-
-    pub fn target(stage: *const Stage) ?Target {
-        return switch (stage.*) {
-            .idle,
-            .canceling_commit,
-            .canceling_grid,
-            .requesting_target,
-            => null,
-            .requesting_checkpoint => |s| s.target,
-            .updating_superblock => |s| s.target,
-        };
-    }
-};
-
-pub const Target = struct {
-    /// The target's checkpoint identifier.
-    checkpoint_id: u128,
-    /// The op_checkpoint() that corresponds to the checkpoint id.
-    checkpoint_op: u64,
-    /// The view where the target's checkpoint is committed.
-    /// It might be greater than `checkpoint.header.view`.
-    view: u32,
 };
