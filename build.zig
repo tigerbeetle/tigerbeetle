@@ -236,8 +236,7 @@ pub fn build(b: *std.Build) !void {
         run_step.dependOn(&run_cmd.step);
     }
 
-    // Executable which generates src/clients/c/tb_client.h
-    const tb_client_header_generate = blk: {
+    const tb_client_header = blk: {
         const tb_client_header = b.addExecutable(.{
             .name = "tb_client_header",
             .root_source_file = b.path("src/clients/c/tb_client_header.zig"),
@@ -245,7 +244,12 @@ pub fn build(b: *std.Build) !void {
         });
         tb_client_header.root_module.addImport("vsr", vsr_module);
         tb_client_header.root_module.addOptions("vsr_options", options);
-        break :blk b.addRunArtifact(tb_client_header);
+
+        const run = b.addRunArtifact(tb_client_header);
+        const out_file = run.addOutputFileArg("tb_client.h");
+
+        const install = InstallFile.create(b, out_file, b.pathFromRoot("src/clients/c/tb_client.h"));
+        break :blk install.getDest();
     };
 
     {
@@ -259,11 +263,10 @@ pub fn build(b: *std.Build) !void {
             .filter = test_filter,
         });
         unit_tests.root_module.addImport("vsr_options", vsr_options_module);
-        unit_tests.step.dependOn(&tb_client_header_generate.step);
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
-        unit_tests.addIncludePath(b.path("src/clients/c/"));
+        unit_tests.addIncludePath(tb_client_header.dirname());
 
         const unit_tests_exe_step = b.step("test:build", "Build the unit tests");
         const install_unit_tests_exe = b.addInstallArtifact(unit_tests, .{});
@@ -304,7 +307,8 @@ pub fn build(b: *std.Build) !void {
         go_client(
             b,
             mode,
-            &.{ &install_step.step, &tb_client_header_generate.step },
+            &.{&install_step.step},
+            tb_client_header,
             target,
             options,
         );
@@ -333,14 +337,15 @@ pub fn build(b: *std.Build) !void {
         c_client(
             b,
             mode,
-            &.{ &install_step.step, &tb_client_header_generate.step },
+            &.{&install_step.step},
+            tb_client_header,
             options,
         );
         c_client_sample(
             b,
             mode,
             target,
-            &.{ &install_step.step, &tb_client_header_generate.step },
+            &.{&install_step.step},
             options,
         );
     }
@@ -519,6 +524,7 @@ fn go_client(
     b: *std.Build,
     mode: Mode,
     dependencies: []const *std.Build.Step,
+    tb_client_header: std.Build.LazyPath,
     target: std.Build.ResolvedTarget,
     options: *std.Build.Step.Options,
 ) void {
@@ -529,10 +535,12 @@ fn go_client(
     }
 
     // Updates the generated header file:
-    const install_header = b.addInstallFile(
-        b.path("src/clients/c/tb_client.h"),
-        "../src/clients/go/pkg/native/tb_client.h",
+    const install_header = InstallFile.create(
+        b,
+        tb_client_header,
+        b.pathFromRoot("src/clients/go/pkg/native/tb_client.h"),
     );
+    build_step.dependOn(&install_header.step);
 
     const bindings = b.addExecutable(.{
         .name = "go_bindings",
@@ -568,7 +576,6 @@ fn go_client(
         lib.root_module.stack_protector = false;
         lib.root_module.addOptions("vsr_options", options);
 
-        lib.step.dependOn(&install_header.step);
         lib.step.dependOn(&bindings_step.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
@@ -782,6 +789,7 @@ fn c_client(
     b: *std.Build,
     mode: Mode,
     dependencies: []const *std.Build.Step,
+    tb_client_header: std.Build.LazyPath,
     options: *std.Build.Step.Options,
 ) void {
     const build_step = b.step("c_client", "Build C client library");
@@ -791,9 +799,10 @@ fn c_client(
     }
 
     // Updates the generated header file:
-    const install_header = b.addInstallFile(
-        b.path("src/clients/c/tb_client.h"),
-        "../src/clients/c/lib/include/tb_client.h",
+    const install_header = InstallFile.create(
+        b,
+        tb_client_header,
+        b.pathFromRoot("src/clients/c/lib/include/tb_client.h"),
     );
 
     build_step.dependOn(&install_header.step);
@@ -935,3 +944,56 @@ fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     ) catch unreachable;
     _ = set_dll_directory(java_bin_server_path);
 }
+
+const InstallFile = struct {
+    step: std.Build.Step,
+    source: std.Build.LazyPath,
+    dest_path: []const u8,
+    generated: std.Build.GeneratedFile,
+
+    pub fn create(
+        owner: *std.Build,
+        source: std.Build.LazyPath,
+        dest_path: []const u8,
+    ) *InstallFile {
+        assert(dest_path.len != 0);
+        const install = owner.allocator.create(InstallFile) catch @panic("OOM");
+        install.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = owner.fmt(
+                    "install {s} to {s}",
+                    .{ source.getDisplayName(), dest_path },
+                ),
+                .owner = owner,
+                .makeFn = make,
+            }),
+            .source = source.dupe(owner),
+            .dest_path = dest_path,
+            .generated = .{
+                .step = &install.step,
+                .path = dest_path,
+            },
+        };
+        source.addStepDependencies(&install.step);
+        return install;
+    }
+
+    pub fn getDest(self: *InstallFile) std.Build.LazyPath {
+        return .{ .generated = .{ .file = &self.generated } };
+    }
+
+    fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
+        _ = prog_node;
+        const b = step.owner;
+        const install: *InstallFile = @fieldParentPtr("step", step);
+        const full_src_path = install.source.getPath2(b, step);
+        const cwd = std.fs.cwd();
+        const prev = std.fs.Dir.updateFile(cwd, full_src_path, cwd, install.dest_path, .{}) catch |err| {
+            return step.fail("unable to update file from '{s}' to '{s}': {s}", .{
+                full_src_path, install.dest_path, @errorName(err),
+            });
+        };
+        step.result_cached = prev == .fresh;
+    }
+};
