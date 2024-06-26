@@ -27,6 +27,7 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig fmt --check .
       - run: ./zig/zig build check
+      - run: git diff --exit-code
 
   linux:
     uses: ./.github/workflows/linux.yml
@@ -76,6 +77,7 @@ jobs:
 
       - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=${{ matrix.language }}
+      - run: git diff --exit-code
 
   # Work around GitHub considering Skipped jobs success for "Require status checks before merging"
   # See also:

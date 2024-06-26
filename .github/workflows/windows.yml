@@ -10,3 +10,4 @@ jobs:
       - uses: actions/checkout@v4
       - run: .\scripts\install_zig.bat
       - run: .\zig\zig build c_sample
+      - run: git diff --exit-code

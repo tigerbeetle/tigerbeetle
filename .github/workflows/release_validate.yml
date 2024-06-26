@@ -44,6 +44,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - run: git diff --exit-code
 
   alert_failure:
     runs-on: ubuntu-latest
