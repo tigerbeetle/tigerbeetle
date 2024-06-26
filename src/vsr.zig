@@ -192,7 +192,11 @@ pub const Zone = enum {
             size_wal_headers +
             size_wal_prepares +
             size_client_replies;
-        const grid_start_aligned = std.mem.alignForward(usize, grid_start_unaligned, constants.block_size);
+        const grid_start_aligned = std.mem.alignForward(
+            usize,
+            grid_start_unaligned,
+            constants.block_size,
+        );
         break :size_grid_padding grid_start_aligned - grid_start_unaligned;
     };
 
@@ -600,7 +604,11 @@ test "ReconfigurationRequest" {
 
         tested: ResultSet = ResultSet{},
 
-        fn check(t: *@This(), request: ReconfigurationRequest, expected: ReconfigurationResult) !void {
+        fn check(
+            t: *@This(),
+            request: ReconfigurationRequest,
+            expected: ReconfigurationResult,
+        ) !void {
             const actual = request.validate(.{
                 .members = &t.members,
                 .epoch = t.epoch,
@@ -877,7 +885,11 @@ test "exponential_backoff_with_jitter" {
 /// * A replica's IP address may be changed without reconfiguration.
 /// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
-pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8, address_limit: usize) ![]std.net.Address {
+pub fn parse_addresses(
+    allocator: std.mem.Allocator,
+    raw: []const u8,
+    address_limit: usize,
+) ![]std.net.Address {
     const address_count = std.mem.count(u8, raw, ",") + 1;
     if (address_count > address_limit) return error.AddressLimitExceeded;
 
@@ -980,7 +992,16 @@ test parse_addresses {
             .raw = "[fe80::1ff:fe23:4567:890a]",
             .addresses = &[_]std.net.Address{
                 std.net.Address.initIp6(
-                    [_]u8{ 0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x01, 0xff, 0xfe, 0x23, 0x45, 0x67, 0x89, 0x0a },
+                    [_]u8{
+                        0xfe, 0x80,
+                        0,    0,
+                        0,    0,
+                        0,    0,
+                        0x01, 0xff,
+                        0xfe, 0x23,
+                        0x45, 0x67,
+                        0x89, 0x0a,
+                    },
                     constants.port,
                     0,
                     0,
@@ -992,7 +1013,16 @@ test parse_addresses {
             .raw = "[fe80::1ff:fe23:4567:890a]:1234",
             .addresses = &[_]std.net.Address{
                 std.net.Address.initIp6(
-                    [_]u8{ 0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x01, 0xff, 0xfe, 0x23, 0x45, 0x67, 0x89, 0x0a },
+                    [_]u8{
+                        0xfe, 0x80,
+                        0,    0,
+                        0,    0,
+                        0,    0,
+                        0x01, 0xff,
+                        0xfe, 0x23,
+                        0x45, 0x67,
+                        0x89, 0x0a,
+                    },
                     1234,
                     0,
                     0,
@@ -1036,7 +1066,10 @@ test parse_addresses {
     }
 
     for (vectors_negative) |vector| {
-        try std.testing.expectEqual(vector.err, parse_addresses(std.testing.allocator, vector.raw, 2));
+        try std.testing.expectEqual(
+            vector.err,
+            parse_addresses(std.testing.allocator, vector.raw, 2),
+        );
     }
 }
 

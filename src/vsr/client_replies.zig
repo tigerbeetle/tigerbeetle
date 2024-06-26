@@ -467,7 +467,10 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             }
         }
 
-        pub fn checkpoint(client_replies: *ClientReplies, callback: *const fn (*ClientReplies) void) void {
+        pub fn checkpoint(
+            client_replies: *ClientReplies,
+            callback: *const fn (*ClientReplies) void,
+        ) void {
             assert(client_replies.checkpoint_callback == null);
             client_replies.checkpoint_callback = callback;
 
@@ -483,7 +486,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         fn checkpoint_next_tick_callback(next_tick: *Storage.NextTick) void {
-            const client_replies: *ClientReplies = @alignCast(@fieldParentPtr("checkpoint_next_tick", next_tick));
+            const client_replies: *ClientReplies =
+                @alignCast(@fieldParentPtr("checkpoint_next_tick", next_tick));
             client_replies.checkpoint_done();
         }
 

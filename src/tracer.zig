@@ -325,7 +325,8 @@ const TracerTracy = struct {
                     std.hash.autoHashStrat(
                         &hasher,
                         key,
-                        // We can get away with shallow as long as all string fields are comptime constants.
+                        // We can get away with shallow as long as all string fields are comptime
+                        // constants.
                         .Shallow,
                     );
                     return hasher.final();
@@ -497,7 +498,13 @@ const TracerTracy = struct {
                 return result;
             }
 
-            fn resizeFn(ptr: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+            fn resizeFn(
+                ptr: *anyopaque,
+                buf: []u8,
+                buf_align: u8,
+                new_len: usize,
+                ret_addr: usize,
+            ) bool {
                 const self: *Self = @ptrCast(@alignCast(ptr));
                 if (self.parent_allocator.rawResize(buf, buf_align, new_len, ret_addr)) {
                     if (name) |n| {
@@ -511,16 +518,17 @@ const TracerTracy = struct {
                     return true;
                 }
 
-                // during normal operation the compiler hits this case thousands of times due to this
-                // emitting messages for it is both slow and causes clutter
+                // During normal operation the compiler hits this case thousands of times due to
+                // this emitting messages for it is both slow and causes clutter.
                 return false;
             }
 
             fn freeFn(ptr: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
                 const self: *Self = @ptrCast(@alignCast(ptr));
                 self.parent_allocator.rawFree(buf, buf_align, ret_addr);
-                // this condition is to handle free being called on an empty slice that was never even allocated
-                // example case: `std.process.getSelfExeSharedLibPaths` can return `&[_][:0]u8{}`
+                // This condition is to handle free being called on an empty slice that was never
+                // even allocated example case: `std.process.getSelfExeSharedLibPaths` can return
+                // `&[_][:0]u8{}`
                 if (buf.len != 0) {
                     if (name) |n| {
                         freeNamed(buf.ptr, n);
