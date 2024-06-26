@@ -220,7 +220,7 @@ const StartDefaults = struct {
 };
 
 const start_defaults_production = StartDefaults{
-    .limit_pipeline_requests = @divExact(constants.clients_max, 2) -
+    .limit_pipeline_requests = vsr.stdx.div_ceil(constants.clients_max, 2) -
         constants.pipeline_prepare_queue_max,
     .limit_request = .{ .value = constants.message_size_max },
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },
@@ -496,11 +496,19 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const request_size_limit_min = 4096;
             const request_size_limit_max = constants.message_size_max;
             if (request_size_limit.bytes() > request_size_limit_max) {
-                flags.fatal("--limit-request: size {}{s} exceeds maximum: {}MiB", .{
-                    request_size_limit.value,
-                    request_size_limit.suffix(),
-                    @divExact(request_size_limit_max, 1024 * 1024),
-                });
+                if (comptime (request_size_limit_max >= 1024 * 1024)) {
+                    flags.fatal("--limit-request: size {}{s} exceeds maximum: {}MiB", .{
+                        request_size_limit.value,
+                        request_size_limit.suffix(),
+                        @divExact(request_size_limit_max, 1024 * 1024),
+                    });
+                } else {
+                    flags.fatal("--limit-request: size {}{s} exceeds maximum: {}KiB", .{
+                        request_size_limit.value,
+                        request_size_limit.suffix(),
+                        @divExact(request_size_limit_max, 1024),
+                    });
+                }
             }
             if (request_size_limit.bytes() < request_size_limit_min) {
                 flags.fatal("--limit-request: size {}{s} is below minimum: {}B", .{
