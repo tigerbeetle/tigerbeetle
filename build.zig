@@ -58,6 +58,19 @@ pub fn build(b: *std.Build) !void {
 
     const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
     const emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false;
+    const enforce_no_changes = blk: {
+        if (b.option(
+            bool,
+            "enforce-no-changes",
+            "Enforce that generated files are not changed",
+        )) |v| break :blk v;
+        if (b.graph.env_map.get("CI")) |ci_env| {
+            if (std.mem.eql(u8, ci_env, "true"))
+                break :blk true;
+            std.debug.panic("expected environment variable CI to be 'true' but got '{s}'", .{ci_env});
+        }
+        break :blk false;
+    };
 
     const options = b.addOptions();
 
@@ -248,7 +261,12 @@ pub fn build(b: *std.Build) !void {
         const run = b.addRunArtifact(tb_client_header);
         const out_file = run.addOutputFileArg("tb_client.h");
 
-        const install = InstallFile.create(b, out_file, b.pathFromRoot("src/clients/c/tb_client.h"));
+        const install = InstallFile.create(
+            b,
+            out_file,
+            b.pathFromRoot("src/clients/c/tb_client.h"),
+            .{ .enforce_already_installed = enforce_no_changes },
+        );
         break :blk install.getDest();
     };
 
@@ -311,6 +329,7 @@ pub fn build(b: *std.Build) !void {
             tb_client_header,
             target,
             options,
+            enforce_no_changes,
         );
         java_client(
             b,
@@ -340,6 +359,7 @@ pub fn build(b: *std.Build) !void {
             &.{&install_step.step},
             tb_client_header,
             options,
+            enforce_no_changes,
         );
         c_client_sample(
             b,
@@ -527,6 +547,7 @@ fn go_client(
     tb_client_header: std.Build.LazyPath,
     target: std.Build.ResolvedTarget,
     options: *std.Build.Step.Options,
+    enforce_no_changes: bool,
 ) void {
     const build_step = b.step("go_client", "Build Go client shared library");
 
@@ -539,6 +560,7 @@ fn go_client(
         b,
         tb_client_header,
         b.pathFromRoot("src/clients/go/pkg/native/tb_client.h"),
+        .{ .enforce_already_installed = enforce_no_changes },
     );
     build_step.dependOn(&install_header.step);
 
@@ -791,6 +813,7 @@ fn c_client(
     dependencies: []const *std.Build.Step,
     tb_client_header: std.Build.LazyPath,
     options: *std.Build.Step.Options,
+    enforce_no_changes: bool,
 ) void {
     const build_step = b.step("c_client", "Build C client library");
 
@@ -803,6 +826,7 @@ fn c_client(
         b,
         tb_client_header,
         b.pathFromRoot("src/clients/c/lib/include/tb_client.h"),
+        .{ .enforce_already_installed = enforce_no_changes },
     );
 
     build_step.dependOn(&install_header.step);
@@ -950,11 +974,15 @@ const InstallFile = struct {
     source: std.Build.LazyPath,
     dest_path: []const u8,
     generated: std.Build.GeneratedFile,
+    enforce_already_installed: bool,
 
     pub fn create(
         owner: *std.Build,
         source: std.Build.LazyPath,
         dest_path: []const u8,
+        options: struct {
+            enforce_already_installed: bool = false,
+        },
     ) *InstallFile {
         assert(dest_path.len != 0);
         const install = owner.allocator.create(InstallFile) catch @panic("OOM");
@@ -969,11 +997,12 @@ const InstallFile = struct {
                 .makeFn = make,
             }),
             .source = source.dupe(owner),
-            .dest_path = dest_path,
+            .dest_path = owner.dupePath(dest_path),
             .generated = .{
                 .step = &install.step,
                 .path = dest_path,
             },
+            .enforce_already_installed = options.enforce_already_installed,
         };
         source.addStepDependencies(&install.step);
         return install;
@@ -989,6 +1018,20 @@ const InstallFile = struct {
         const install: *InstallFile = @fieldParentPtr("step", step);
         const full_src_path = install.source.getPath2(b, step);
         const cwd = std.fs.cwd();
+
+        if (install.enforce_already_installed) {
+            const src = try std.fs.cwd().readFileAlloc(step.owner.allocator, full_src_path, std.math.maxInt(usize));
+            defer step.owner.allocator.free(src);
+            const dest = try std.fs.cwd().readFileAlloc(step.owner.allocator, install.dest_path, std.math.maxInt(usize));
+            defer step.owner.allocator.free(dest);
+            if (!std.mem.eql(u8, src, dest)) return step.fail(
+                "file '{s}' differs from source '{s}'",
+                .{ install.dest_path, full_src_path },
+            );
+            step.result_cached = true;
+            return;
+        }
+
         const prev = std.fs.Dir.updateFile(cwd, full_src_path, cwd, install.dest_path, .{}) catch |err| {
             return step.fail("unable to update file from '{s}' to '{s}': {s}", .{
                 full_src_path, install.dest_path, @errorName(err),
