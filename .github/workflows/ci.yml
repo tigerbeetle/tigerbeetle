@@ -54,6 +54,14 @@ jobs:
       - run: zig/zig build vopr -Dvopr-state-machine=accounting -Drelease -- ${{ github.sha }}
       - run: zig/zig build vopr -Dvopr-state-machine=testing    -Drelease -- ${{ github.sha }}
       - run: zig/zig build -Dtracer-backend=tracy
+
+  test_aof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+      - run: ./scripts/install_zig.sh
       - run: ./.github/ci/test_aof.sh
 
   test_windows:
@@ -150,7 +158,7 @@ jobs:
   core-pipeline:
     if: always() && github.event_name == 'merge_group'
     runs-on: ubuntu-latest
-    needs: [smoke, test_alpine, test_ubuntu, test_windows, test_macos, clients]
+    needs: [smoke, test_alpine, test_ubuntu, test_aof, test_windows, test_macos, clients]
     steps:
       - if: ${{ !(contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
         run: exit 0
