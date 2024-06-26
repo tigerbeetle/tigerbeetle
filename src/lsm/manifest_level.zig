@@ -545,8 +545,9 @@ pub fn ManifestLevelType(
         /// is invoked and B is the other level), finds a table in Level A that
         /// overlaps with the least number of tables in Level B.
         ///
-        /// * Exits early if it finds a table that doesn't overlap with any
-        ///   tables in the second level.
+        /// As a tiebreaker between multiple tables with the same overlap, prefer to compact the
+        /// oldest (least-recently-created) table. This is primarily for the benefit of trees with
+        /// long runs of strictly monotonic key updates.
         pub fn table_with_least_overlap(
             level_a: *const Self,
             level_b: *const Self,
@@ -576,7 +577,11 @@ pub fn ManifestLevelType(
                 ) orelse continue;
                 assert(range.tables.count() <= max_overlapping_tables);
 
-                if (optimal == null or range.tables.count() < optimal.?.range.tables.count()) {
+                if (optimal == null or
+                    range.tables.count() < optimal.?.range.tables.count() or
+                    (range.tables.count() == optimal.?.range.tables.count() and
+                    table.snapshot_min < optimal.?.table.table_info.snapshot_min))
+                {
                     optimal = LeastOverlapTable{
                         .table = TableInfoReference{
                             .table_info = table,
@@ -585,8 +590,6 @@ pub fn ManifestLevelType(
                         .range = range,
                     };
                 }
-                // If the table can be moved directly between levels then that is already optimal.
-                if (optimal.?.range.tables.empty()) break;
             }
             assert(iterations > 0);
             assert(iterations == level_a.table_count_visible or
