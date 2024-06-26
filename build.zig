@@ -224,12 +224,12 @@ pub fn build(b: *std.Build) !void {
 
         b.installArtifact(tigerbeetle);
         // "zig build install" moves the server executable to the root folder:
-        const move_cmd = b.addInstallBinFile(
+        b.getInstallStep().dependOn(&CopyFile.create(
+            b,
             tigerbeetle.getEmittedBin(),
-            b.pathJoin(&.{ "../../", tigerbeetle.out_filename }),
-        );
-        const install_step = b.getInstallStep();
-        install_step.dependOn(&move_cmd.step);
+            tigerbeetle.out_filename,
+            .{},
+        ).step);
 
         const run_cmd = b.addRunArtifact(tigerbeetle);
         if (b.args) |args| run_cmd.addArgs(args);
@@ -246,12 +246,12 @@ pub fn build(b: *std.Build) !void {
         tb_client_header.root_module.addOptions("vsr_options", vsr_options);
 
         const run = b.addRunArtifact(tb_client_header);
-        const out_file = run.addOutputFileArg("tb_client.h");
+        const out_file = run.captureStdOut();
 
-        const install = InstallFile.create(
+        const install = CopyFile.create(
             b,
             out_file,
-            b.pathFromRoot("src/clients/c/tb_client.h"),
+            "./src/clients/c/tb_client.h",
             .{ .enforce_already_installed = build_options.ci },
         );
         break :blk install.getDest();
@@ -505,10 +505,10 @@ fn go_client(
     ci: bool,
 ) void {
     // Updates the generated header file:
-    const install_header = InstallFile.create(
+    const install_header = CopyFile.create(
         b,
         tb_client_header,
-        b.pathFromRoot("src/clients/go/pkg/native/tb_client.h"),
+        "./src/clients/go/pkg/native/tb_client.h",
         .{ .enforce_already_installed = ci },
     );
 
@@ -644,12 +644,15 @@ fn dotnet_client(
 
         lib.step.dependOn(&bindings_step.step);
 
-        // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
-        const lib_install = b.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{
-            .custom = "../src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native",
-        };
-        build_step.dependOn(&lib_install.step);
+        build_step.dependOn(&CopyFile.create(
+            b,
+            lib.getEmittedBin(),
+            b.fmt(
+                "./src/clients/dotnet/TigerBeetle/runtimes/{s}/native/{s}",
+                .{ platform[1], lib.out_filename },
+            ),
+            .{},
+        ).step);
     }
 }
 
@@ -731,14 +734,14 @@ fn node_client(
 
         lib.step.dependOn(&bindings_step.step);
 
-        // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
-        const lib_install = b.addInstallFile(
+        build_step.dependOn(&CopyFile.create(
+            b,
             lib.getEmittedBin(),
-            "../src/clients/node/dist/bin/" ++
+            "./src/clients/node/dist/bin/" ++
                 comptime strip_glibc_version(platform[0]) ++
                 "/client.node",
-        );
-        build_step.dependOn(&lib_install.step);
+            .{},
+        ).step);
     }
 }
 
@@ -750,10 +753,10 @@ fn c_client(
     tb_client_header: std.Build.LazyPath,
 ) void {
     // Updates the generated header file:
-    const install_header = InstallFile.create(
+    const install_header = CopyFile.create(
         b,
         tb_client_header,
-        b.pathFromRoot("src/clients/c/lib/include/tb_client.h"),
+        "./src/clients/c/lib/include/tb_client.h",
         .{},
     );
     build_step.dependOn(&install_header.step);
@@ -791,12 +794,12 @@ fn c_client(
 
             lib.root_module.addOptions("vsr_options", vsr_options);
 
-            // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
-            const lib_install = b.addInstallArtifact(lib, .{});
-            lib_install.dest_dir = .{
-                .custom = "../src/clients/c/lib/" ++ comptime strip_glibc_version(platform[0]),
-            };
-            build_step.dependOn(&lib_install.step);
+            build_step.dependOn(&CopyFile.create(
+                b,
+                lib.getEmittedBin(),
+                b.fmt("./src/clients/c/lib/{s}/{s}", .{ platform[0], lib.out_filename }),
+                .{},
+            ).step);
         }
     }
 }
@@ -874,7 +877,11 @@ fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     _ = set_dll_directory(java_bin_server_path);
 }
 
-const InstallFile = struct {
+// Zig's `install` step is used for installation inside a user-override prefix (zig-out by default).
+// In contrast, `CopyFile` installs a file into a specific location, which we need for:
+// * lifting the build binary out of `./zig-out/bin/tigerbeetle` to just `./tigerbeetle`
+// * placing compiled `.so` for client libraries in a place where runtimes like Node can find them.
+const CopyFile = struct {
     step: std.Build.Step,
     source: std.Build.LazyPath,
     dest_path: []const u8,
@@ -884,13 +891,16 @@ const InstallFile = struct {
     pub fn create(
         owner: *std.Build,
         source: std.Build.LazyPath,
-        dest_path: []const u8,
+        destination: []const u8,
         options: struct {
             enforce_already_installed: bool = false,
         },
-    ) *InstallFile {
-        assert(dest_path.len != 0);
-        const install = owner.allocator.create(InstallFile) catch @panic("OOM");
+    ) *CopyFile {
+        assert(destination.len != 0);
+        assert(!std.fs.path.isAbsolute(destination));
+        const dest_path = owner.pathFromRoot(destination);
+
+        const install = owner.allocator.create(CopyFile) catch @panic("OOM");
         install.* = .{
             .step = std.Build.Step.init(.{
                 .id = .custom,
@@ -913,14 +923,14 @@ const InstallFile = struct {
         return install;
     }
 
-    pub fn getDest(self: *InstallFile) std.Build.LazyPath {
+    pub fn getDest(self: *CopyFile) std.Build.LazyPath {
         return .{ .generated = .{ .file = &self.generated } };
     }
 
     fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
         _ = prog_node;
         const b = step.owner;
-        const install: *InstallFile = @fieldParentPtr("step", step);
+        const install: *CopyFile = @fieldParentPtr("step", step);
         const full_src_path = install.source.getPath2(b, step);
         const cwd = std.fs.cwd();
 
