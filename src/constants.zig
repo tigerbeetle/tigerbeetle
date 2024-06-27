@@ -572,6 +572,10 @@ comptime {
 /// factor of 8 for lower write amplification rather than the more typical growth factor of 10.
 pub const lsm_growth_factor = config.cluster.lsm_growth_factor;
 
+comptime {
+    assert(lsm_growth_factor > 1);
+}
+
 /// Size of nodes used by the LSM tree manifest implementation.
 /// TODO Double-check this with our "LSM Manifest" spreadsheet.
 pub const lsm_manifest_node_size = config.process.lsm_manifest_node_size;
@@ -645,6 +649,15 @@ pub const lsm_manifest_memory_size_multiplier = lsm_manifest_memory_multiplier: 
     assert(lsm_manifest_memory_multiplier == 1024 * 1024);
     break :lsm_manifest_memory_multiplier lsm_manifest_memory_multiplier;
 };
+
+/// The LSM will attempt to coalesce a table if it is less full than this threshold.
+pub const lsm_table_coalescing_threshold_percent =
+    config.cluster.lsm_table_coalescing_threshold_percent;
+
+comptime {
+    assert(lsm_table_coalescing_threshold_percent > 0); // Ensure that coalescing is possible.
+    assert(lsm_table_coalescing_threshold_percent < 100); // Don't coalesce full tables.
+}
 
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
