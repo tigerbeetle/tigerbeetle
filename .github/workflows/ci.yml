@@ -20,6 +20,7 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig fmt --check .
       - run: ./zig/zig build check
+      - run: ./zig/zig build check -Dconfig=test_min
       - run: ./.github/ci/docs_check.sh
 
   test_alpine:
