@@ -360,7 +360,7 @@ pub fn CompactionType(
                     move_to_level_b,
                 },
                 table: TableInfo,
-            }, constants.lsm_growth_factor + 1) = .{},
+            }, compaction_tables_output_max) = .{},
 
             table_builder: Table.Builder = .{},
         };
