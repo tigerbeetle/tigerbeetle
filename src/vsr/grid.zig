@@ -300,9 +300,11 @@ pub fn GridType(comptime Storage: type) type {
                 assert(!grid.free_set.opened);
                 defer assert(grid.free_set.opened);
 
+                const free_set_checkpoint_block_addresses =
+                    free_set_checkpoint.block_addresses[0..free_set_checkpoint.block_count()];
                 grid.free_set.open(.{
                     .encoded = free_set_checkpoint.decode_chunks(),
-                    .block_addresses = free_set_checkpoint.block_addresses[0..free_set_checkpoint.block_count()],
+                    .block_addresses = free_set_checkpoint_block_addresses,
                 });
                 assert((grid.free_set.count_acquired() > 0) == (free_set_checkpoint.size > 0));
                 assert(grid.free_set.count_reservations() == 0);
@@ -746,7 +748,8 @@ pub fn GridType(comptime Storage: type) type {
             const grid = iop.grid;
             const completed_write = iop.write;
 
-            // We can only update the cache if the Grid is not resolving callbacks with a cache block.
+            // We can only update the cache if the Grid is not resolving callbacks with a cache
+            // block.
             assert(!grid.read_resolving);
             assert(!grid.free_set.is_free(completed_write.address));
 
@@ -945,8 +948,8 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            // Become the "root" read that's fetching the block for the given address.
-            // The fetch happens asynchronously to avoid stack-overflow and nested cache invalidation.
+            // Become the "root" read that's fetching the block for the given address. The fetch
+            // happens asynchronously to avoid stack-overflow and nested cache invalidation.
             grid.read_queue.push(read);
 
             // Grab an IOP to resolve the block from storage.
@@ -963,7 +966,8 @@ pub fn GridType(comptime Storage: type) type {
             const address = read.address;
             assert(address > 0);
 
-            // We can only update the cache if the Grid is not resolving callbacks with a cache block.
+            // We can only update the cache if the Grid is not resolving callbacks with a cache
+            // block.
             assert(!grid.read_resolving);
 
             const read_iop_index = grid.read_iops.index(iop);

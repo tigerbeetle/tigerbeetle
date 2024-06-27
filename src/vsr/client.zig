@@ -81,8 +81,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Set by the `register`'s reply.
         batch_size_limit: ?u32 = null,
 
-        /// The highest view number seen by the client in messages exchanged with the cluster.
-        /// Used to locate the current primary, and provide more information to a partitioned primary.
+        /// The highest view number seen by the client in messages exchanged with the cluster. Used
+        /// to locate the current primary, and provide more information to a partitioned primary.
         view: u32 = 0,
 
         /// Tracks a currently processing (non-register) request message submitted by `register()`
@@ -626,7 +626,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.request_timeout.start();
 
             // If our view number is out of date, then the old primary will forward our request.
-            // If the primary is offline, then our request timeout will fire and we will round-robin.
+            // If the primary is offline, then our request timeout will fire and we will
+            // round-robin.
             self.send_message_to_replica(
                 @as(u8, @intCast(self.view % self.replica_count)),
                 message.base(),
