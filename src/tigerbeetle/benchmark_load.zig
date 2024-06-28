@@ -53,6 +53,18 @@ pub fn main(
         .{cli_args.account_count},
     );
 
+    // The first account_count_hot accounts are "hot" -- they will be the debit side of
+    // transfer_hot_percent of the transfers.
+    if (cli_args.account_count_hot > cli_args.account_count) flags.fatal(
+        "--account-count-hot: must be less-than-or-equal-to --account-count, got {}",
+        .{cli_args.account_count_hot},
+    );
+
+    if (cli_args.transfer_hot_percent > 100) flags.fatal(
+        "--transfer-hot-percent: must be less-than-or-equal-to 100, got {}",
+        .{cli_args.transfer_hot_percent},
+    );
+
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u128 = 0;
 
@@ -123,6 +135,7 @@ pub fn main(
         .client = &client,
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
+        .account_count_hot = cli_args.account_count_hot,
         .account_balances = cli_args.account_balances,
         .account_index = 0,
         .query_count = cli_args.query_count,
@@ -135,6 +148,7 @@ pub fn main(
         .batch_transfers = batch_transfers,
         .batch_start_ns = 0,
         .transfer_count = cli_args.transfer_count,
+        .transfer_hot_percent = cli_args.transfer_hot_percent,
         .transfer_pending = cli_args.transfer_pending,
         .transfer_batch_size = cli_args.transfer_batch_size,
         .transfer_batch_delay_us = cli_args.transfer_batch_delay_us,
@@ -170,6 +184,7 @@ const Benchmark = struct {
     client: *Client,
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
+    account_count_hot: usize,
     account_balances: bool,
     account_index: usize,
     query_count: usize,
@@ -183,6 +198,7 @@ const Benchmark = struct {
     batch_start_ns: usize,
     transfers_sent: usize,
     transfer_count: usize,
+    transfer_hot_percent: usize,
     transfer_pending: bool,
     transfer_batch_size: usize,
     transfer_batch_delay_us: usize,
@@ -276,11 +292,23 @@ const Benchmark = struct {
         while (b.transfer_index < b.transfer_count and
             b.batch_transfers.items.len < b.batch_transfers.capacity)
         {
-            const debit_account_index = random.uintLessThan(u64, b.account_count);
-            var credit_account_index = random.uintLessThan(u64, b.account_count);
-            if (debit_account_index == credit_account_index) {
-                credit_account_index = (credit_account_index + 1) % b.account_count;
-            }
+            const account_count_cold = b.account_count - b.account_count_hot;
+
+            const debit_account_hot = b.account_count_hot > 0 and
+                random.uintLessThan(u64, 100) < b.transfer_hot_percent;
+            const debit_account_index = if (debit_account_hot)
+                random.uintLessThan(u64, b.account_count_hot)
+            else
+                random.uintLessThan(u64, account_count_cold) + b.account_count_hot;
+
+            const credit_account_index = index: {
+                var index = random.uintLessThan(u64, account_count_cold);
+                if (index == debit_account_index -% b.account_count_hot) {
+                    index = (index + 1) % account_count_cold;
+                }
+                break :index index + b.account_count_hot;
+            };
+
             const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
             const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
             assert(debit_account_index != credit_account_index);
