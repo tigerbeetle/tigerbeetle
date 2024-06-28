@@ -194,7 +194,8 @@ pub const Storage = struct {
         errdefer reads.deinit();
         try reads.ensureTotalCapacity(constants.iops_read_max);
 
-        var writes = PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
+        var writes =
+            PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
         errdefer writes.deinit();
         try writes.ensureTotalCapacity(constants.iops_write_max);
 
@@ -468,7 +469,10 @@ pub const Storage = struct {
     }
 
     fn write_latency(storage: *Storage) u64 {
-        return storage.latency(storage.options.write_latency_min, storage.options.write_latency_mean);
+        return storage.latency(
+            storage.options.write_latency_min,
+            storage.options.write_latency_mean,
+        );
     }
 
     fn latency(storage: *Storage, min: u64, mean: u64) u64 {
@@ -481,7 +485,12 @@ pub const Storage = struct {
         return x > storage.prng.random().uintLessThan(u8, 100);
     }
 
-    fn fault_faulty_sectors(storage: *Storage, zone: vsr.Zone, offset_in_zone: u64, size: u64) void {
+    fn fault_faulty_sectors(
+        storage: *Storage,
+        zone: vsr.Zone,
+        offset_in_zone: u64,
+        size: u64,
+    ) void {
         const atlas = storage.options.fault_atlas orelse return;
         const replica_index = storage.options.replica_index.?;
         const faulty_sectors = switch (zone) {
@@ -660,7 +669,11 @@ pub const Storage = struct {
         const writes = storage.writes;
         for (writes.items) |write| {
             if (write.zone == zone) {
-                log.err("Pending write: {} {}\n{}", .{ write.offset, write.zone, write.stack_trace });
+                log.err("Pending write: {} {}\n{}", .{
+                    write.offset,
+                    write.zone,
+                    write.stack_trace,
+                });
                 assert_failed = true;
             }
         }

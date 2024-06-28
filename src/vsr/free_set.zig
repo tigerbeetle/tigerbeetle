@@ -376,8 +376,8 @@ pub const FreeSet = struct {
     /// Leave the address allocated for now, but free it at the next checkpoint.
     /// This ensures that it will not be overwritten during the current checkpoint — the block may
     /// still be needed if we crash and recover from the current checkpoint.
-    /// (TODO) If the block was created since the last checkpoint then it's safe to free immediately.
-    ///        This may reduce space amplification, especially for smaller datasets.
+    /// (TODO) If the block was created since the last checkpoint then it's safe to free
+    ///        immediately. This may reduce space amplification, especially for smaller datasets.
     ///        (Note: This must be careful not to release while any reservations are held
     ///        to avoid making the reservation's acquire()s nondeterministic).
     pub fn release(set: *FreeSet, address: u64) void {

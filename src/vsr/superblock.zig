@@ -484,11 +484,12 @@ pub const SuperBlockHeader = extern struct {
     }
 
     pub fn client_sessions_reference(superblock: *const SuperBlockHeader) TrailerReference {
+        const checkpoint = &superblock.vsr_state.checkpoint;
         return .{
-            .checksum = superblock.vsr_state.checkpoint.client_sessions_checksum,
-            .last_block_address = superblock.vsr_state.checkpoint.client_sessions_last_block_address,
-            .last_block_checksum = superblock.vsr_state.checkpoint.client_sessions_last_block_checksum,
-            .trailer_size = superblock.vsr_state.checkpoint.client_sessions_size,
+            .checksum = checkpoint.client_sessions_checksum,
+            .last_block_address = checkpoint.client_sessions_last_block_address,
+            .last_block_checksum = checkpoint.client_sessions_last_block_checksum,
+            .trailer_size = checkpoint.client_sessions_size,
         };
     }
 };
@@ -850,6 +851,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // directly. A miscompilation bug (as of Zig 0.11.0) causes fields to receive the
             // incorrect values.
             const vsr_state_staging = superblock.staging.vsr_state;
+            const update_client_sessions = &update.client_sessions_reference;
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = .{
@@ -860,9 +862,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .free_set_last_block_checksum = update.free_set_reference.last_block_checksum,
                 .free_set_last_block_address = update.free_set_reference.last_block_address,
                 .free_set_size = update.free_set_reference.trailer_size,
-                .client_sessions_checksum = update.client_sessions_reference.checksum,
-                .client_sessions_last_block_checksum = update.client_sessions_reference.last_block_checksum,
-                .client_sessions_last_block_address = update.client_sessions_reference.last_block_address,
+                .client_sessions_checksum = update_client_sessions.checksum,
+                .client_sessions_last_block_checksum = update_client_sessions.last_block_checksum,
+                .client_sessions_last_block_address = update_client_sessions.last_block_address,
                 .client_sessions_size = update.client_sessions_reference.trailer_size,
                 .manifest_oldest_checksum = update.manifest_references.oldest_checksum,
                 .manifest_oldest_address = update.manifest_references.oldest_address,
@@ -1053,7 +1055,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             // The superblock cluster and replica should never change once formatted:
             assert(superblock.staging.cluster == superblock.working.cluster);
-            assert(superblock.staging.vsr_state.replica_id == superblock.working.vsr_state.replica_id);
+            assert(superblock.staging.vsr_state.replica_id ==
+                superblock.working.vsr_state.replica_id);
 
             const storage_size = superblock.staging.vsr_state.checkpoint.storage_size;
             assert(storage_size >= data_file_size_min);
@@ -1068,7 +1071,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const buffer = mem.asBytes(superblock.staging);
             const offset = superblock_copy_size * @as(u32, context.copy.?);
 
-            log.debug("{?}: {s}: write_header: checksum={x:0>32} sequence={} copy={} size={} offset={}", .{
+            log.debug("{?}: {s}: write_header: " ++
+                "checksum={x:0>32} sequence={} copy={} size={} offset={}", .{
                 superblock.replica_index,
                 @tagName(context.caller),
                 superblock.staging.checksum,
@@ -1213,6 +1217,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.working.* = working.*;
                 superblock.staging.* = working.*;
 
+                const working_checkpoint = &superblock.working.vsr_state.checkpoint;
                 log.debug(
                     "{[replica]?}: " ++
                         "{[caller]s}: installed working superblock: checksum={[checksum]x:0>32} " ++
@@ -1237,27 +1242,27 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .caller = @tagName(context.caller),
                         .checksum = superblock.working.checksum,
                         .sequence = superblock.working.sequence,
-                        .release = superblock.working.vsr_state.checkpoint.release,
+                        .release = working_checkpoint.release,
                         .cluster = superblock.working.cluster,
                         .replica_id = superblock.working.vsr_state.replica_id,
-                        .size = superblock.working.vsr_state.checkpoint.storage_size,
-                        .free_set_size = superblock.working.vsr_state.checkpoint.free_set_size,
-                        .client_sessions_size = superblock.working.vsr_state.checkpoint.client_sessions_size,
+                        .size = working_checkpoint.storage_size,
+                        .free_set_size = working_checkpoint.free_set_size,
+                        .client_sessions_size = working_checkpoint.client_sessions_size,
                         .checkpoint_id = superblock.working.checkpoint_id(),
-                        .commit_min_checksum = superblock.working.vsr_state.checkpoint.header.checksum,
-                        .commit_min = superblock.working.vsr_state.checkpoint.header.op,
+                        .commit_min_checksum = working_checkpoint.header.checksum,
+                        .commit_min = working_checkpoint.header.op,
                         .commit_max = superblock.working.vsr_state.commit_max,
                         .sync_op_min = superblock.working.vsr_state.sync_op_min,
                         .sync_op_max = superblock.working.vsr_state.sync_op_max,
                         .log_view = superblock.working.vsr_state.log_view,
                         .view = superblock.working.vsr_state.view,
-                        .manifest_oldest_checksum = superblock.working.vsr_state.checkpoint.manifest_oldest_checksum,
-                        .manifest_oldest_address = superblock.working.vsr_state.checkpoint.manifest_oldest_address,
-                        .manifest_newest_checksum = superblock.working.vsr_state.checkpoint.manifest_newest_checksum,
-                        .manifest_newest_address = superblock.working.vsr_state.checkpoint.manifest_newest_address,
-                        .manifest_block_count = superblock.working.vsr_state.checkpoint.manifest_block_count,
-                        .snapshots_block_checksum = superblock.working.vsr_state.checkpoint.snapshots_block_checksum,
-                        .snapshots_block_address = superblock.working.vsr_state.checkpoint.snapshots_block_address,
+                        .manifest_oldest_checksum = working_checkpoint.manifest_oldest_checksum,
+                        .manifest_oldest_address = working_checkpoint.manifest_oldest_address,
+                        .manifest_newest_checksum = working_checkpoint.manifest_newest_checksum,
+                        .manifest_newest_address = working_checkpoint.manifest_newest_address,
+                        .manifest_block_count = working_checkpoint.manifest_block_count,
+                        .snapshots_block_checksum = working_checkpoint.snapshots_block_checksum,
+                        .snapshots_block_address = working_checkpoint.snapshots_block_address,
                     },
                 );
                 for (superblock.working.vsr_headers().slice) |*header| {
@@ -1351,7 +1356,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn release(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            log.debug("{?}: {s}: complete", .{ superblock.replica_index, @tagName(context.caller) });
+            log.debug("{?}: {s}: complete", .{
+                superblock.replica_index,
+                @tagName(context.caller),
+            });
 
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io by now.

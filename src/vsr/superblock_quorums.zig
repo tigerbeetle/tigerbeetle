@@ -135,8 +135,8 @@ pub fn QuorumsType(comptime options: Options) type {
             // Even the best copy with the most quorum still has inadequate quorum.
             if (!b.valid) return error.QuorumLost;
 
-            // If a parent quorum is present (either complete or incomplete) it must be connected to the
-            // new working quorum. The parent quorum can exist due to:
+            // If a parent quorum is present (either complete or incomplete) it must be connected to
+            // the new working quorum. The parent quorum can exist due to:
             // - a crash during checkpoint()/view_change() before writing all copies
             // - a lost or misdirected write
             // - a latent sector error that prevented a write
@@ -246,9 +246,9 @@ pub fn QuorumsType(comptime options: Options) type {
 
             if (copy.copy >= options.superblock_copies) {
                 // This header is a valid member of the quorum, but with an unexpected copy number.
-                // The "SuperBlockHeader.copy" field is not protected by the checksum, so if that byte
-                // (and only that byte) is corrupted, the superblock is still valid — but we don't know
-                // for certain which copy this was supposed to be.
+                // The "SuperBlockHeader.copy" field is not protected by the checksum, so if that
+                // byte (and only that byte) is corrupted, the superblock is still valid — but we
+                // don't know for certain which copy this was supposed to be.
                 // We make the assumption that this was not a double-fault (corrupt + misdirect) —
                 // that is, the copy is in the correct slot, and its copy index is simply corrupt.
                 quorum.slots[slot] = @intCast(slot);
@@ -263,7 +263,10 @@ pub fn QuorumsType(comptime options: Options) type {
             quorum.valid = quorum.copies.count() >= threshold.count();
         }
 
-        fn find_or_insert_quorum_for_copy(quorums: *Quorums, copy: *const SuperBlockHeader) *Quorum {
+        fn find_or_insert_quorum_for_copy(
+            quorums: *Quorums,
+            copy: *const SuperBlockHeader,
+        ) *Quorum {
             assert(copy.valid_checksum());
 
             for (quorums.array[0..quorums.count]) |*quorum| {
@@ -311,24 +314,26 @@ pub fn QuorumsType(comptime options: Options) type {
         ///   3.   Write B₁ — misdirected to B₂'s slot.
         ///   4. Crash.
         ///   5. Recover with quorum B[B₀,A₁,B₁,A₃].
-        /// If we repair the superblock quorum while only considering the valid copies (and not slots)
-        /// the following scenario could occur:
+        /// If we repair the superblock quorum while only considering the valid copies (and not
+        /// slots) the following scenario could occur:
         ///   6. We already have a valid B₀ and B₁, so begin writing B₂.
         ///   7. Crash, tearing the B₂ write.
         ///   8. Recover with quorum A[B₀,A₁,_,A₂].
         /// The working quorum backtracked from B to A!
         pub const RepairIterator = struct {
             /// An integer value indicates the copy index found in the corresponding slot.
-            /// A `null` value indicates that the copy is invalid or not a member of the working quorum.
-            /// All copies belong to the same (valid, working) quorum.
+            /// A `null` value indicates that the copy is invalid or not a member of the working
+            /// quorum. All copies belong to the same (valid, working) quorum.
             slots: [options.superblock_copies]?u8,
 
             /// Returns the slot/copy to repair next.
-            /// We never (deliberately) write a copy to a slot other than its own. This is simpler to
-            /// implement, and also reduces risk when one of open()'s reads was misdirected.
+            /// We never (deliberately) write a copy to a slot other than its own. This is simpler
+            /// to implement, and also reduces risk when one of open()'s reads was misdirected.
             pub fn next(iterator: *RepairIterator) ?u8 {
                 // Corrupt copy indices have already been normalized.
-                for (iterator.slots) |slot| assert(slot == null or slot.? < options.superblock_copies);
+                for (iterator.slots) |slot| {
+                    assert(slot == null or slot.? < options.superblock_copies);
+                }
 
                 // Set bits indicate that the corresponding copy was found at least once.
                 var copies_any = QuorumCount.initEmpty();
