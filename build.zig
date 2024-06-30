@@ -513,6 +513,7 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = mode,
         });
+        scripts_exe.root_module.addOptions("vsr_options", options);
         const scripts_run = b.addRunArtifact(scripts_exe);
         scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
         if (b.args) |args| scripts_run.addArgs(args);
