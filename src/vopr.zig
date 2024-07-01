@@ -12,8 +12,8 @@ const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
-const vsr_simulator_options = @import("vsr_simulator_options");
-const state_machine = vsr_simulator_options.state_machine;
+const vsr_vopr_options = @import("vsr_vopr_options");
+const state_machine = vsr_vopr_options.state_machine;
 const StateMachineType = switch (state_machine) {
     .accounting => @import("state_machine.zig").StateMachineType,
     .testing => @import("testing/state_machine.zig").StateMachineType,
@@ -53,7 +53,7 @@ pub const std_options = .{
     // The -Dsimulator-log=<full|short> build option selects two logging modes.
     // In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
     // "full" mode is the usual logging according to the level.
-    .log_level = if (vsr_simulator_options.log == .short) .info else .debug,
+    .log_level = if (vsr_vopr_options.log == .short) .info else .debug,
     .logFn = log_override,
 
     // Uncomment if you need per-scope control over the log levels.
@@ -105,7 +105,7 @@ pub fn main() !void {
             // If no seed is provided, than Debug is too slow and ReleaseSafe is much faster.
             @panic("no seed provided: the simulator must be run with -OReleaseSafe");
         }
-        if (vsr_simulator_options.log != .short) {
+        if (vsr_vopr_options.log != .short) {
             output.warn("no seed provided: full debug logs are enabled, this will be slow", .{});
         }
     }
@@ -1171,10 +1171,10 @@ fn log_override(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (vsr_simulator_options.log == .short and scope != .cluster) return;
+    if (vsr_vopr_options.log == .short and scope != .cluster) return;
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
-    const prefix = if (vsr_simulator_options.log == .short) "" else prefix_default;
+    const prefix = if (vsr_vopr_options.log == .short) "" else prefix_default;
 
     // Print the message to stderr using a buffer to avoid many small write() syscalls when
     // providing many format arguments. Silently ignore failure.

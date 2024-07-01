@@ -28,4 +28,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build c_sample -Drelease
+      - run: ./zig/zig build clients:c:sample -Drelease

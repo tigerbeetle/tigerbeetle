@@ -9,4 +9,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: .\scripts\install_zig.bat
-      - run: .\zig\zig build c_sample
+      - run: .\zig\zig build clients:c:sample

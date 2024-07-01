@@ -82,11 +82,11 @@ const Fuzzer = enum {
         switch (fuzzer) {
             .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
                 if (f == .vopr_testing or f == .vopr_testing_lite) {
-                    try accumulator.append("-Dsimulator-state-machine=testing");
+                    try accumulator.append("-Dvopr-state-machine=testing");
                 }
-                try accumulator.appendSlice(&.{"simulator"});
+                try accumulator.appendSlice(&.{"vopr:build"});
             },
-            else => try accumulator.appendSlice(&.{"build_fuzz"}),
+            else => try accumulator.appendSlice(&.{"fuzz:build"}),
         }
     }
 
@@ -94,9 +94,9 @@ const Fuzzer = enum {
         switch (fuzzer) {
             .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
                 if (f == .vopr_testing or f == .vopr_testing_lite) {
-                    try accumulator.append("-Dsimulator-state-machine=testing");
+                    try accumulator.append("-Dvopr-state-machine=testing");
                 }
-                try accumulator.appendSlice(&.{ "simulator_run", "--" });
+                try accumulator.appendSlice(&.{ "vopr", "--" });
                 if (f == .vopr_lite or f == .vopr_testing_lite) {
                     try accumulator.append("--lite");
                 }

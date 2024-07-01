@@ -10,7 +10,8 @@ const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("pom.xml"));
 
-    try shell.zig("build java_client -Drelease -Dconfig=production", .{});
+    try shell.zig("build clients:java -Drelease -Dconfig=production", .{});
+    try shell.zig("build -Drelease -Dconfig=production", .{});
 
     try shell.zig("build test:jni", .{});
     // Java's maven doesn't support a separate test command, or a way to add dependency on a

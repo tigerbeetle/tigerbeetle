@@ -11,7 +11,7 @@ const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("package.json"));
 
-    try shell.zig("build node_client -Drelease -Dconfig=production", .{});
+    try shell.zig("build clients:node -Drelease -Dconfig=production", .{});
 
     // Integration tests.
 
