@@ -58,8 +58,8 @@ balance after they expire.
 
 ## Bandwidth Limiting
 
-To limit user requests based on bandwith as opposed to request rate, we can apply the same technique
-but use amounts that represent the request size.
+To limit user requests based on bandwidth as opposed to request rate, we can apply the same
+technique but use amounts that represent the request size.
 
 Let's say we wanted to limit each user to 10 MB (10,000,000 bytes) per minute.
 
