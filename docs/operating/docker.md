@@ -21,7 +21,8 @@ The Docker image is available from the Github Container Registry:
 When using Docker, the data file must be mounted as a volume:
 
 ```shell
-docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
+docker run --security-opt seccomp=unconfined \
+     -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
     format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
 ```
 
@@ -33,7 +34,8 @@ info(io): allocating 660.140625MiB...
 ## Run the Server
 
 ```console
-docker run -it -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
+docker run -it --security-opt seccomp=unconfined \
+    -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
     start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 ```
 
@@ -47,9 +49,9 @@ info(main): 0: cluster=0: listening on 0.0.0.0:3000
 Format the data file for each replica:
 
 ```console
-docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
-docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
-docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
+docker run --security-opt seccomp=unconfined -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
+docker run --security-opt seccomp=unconfined -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
+docker run --security-opt seccomp=unconfined -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
 ```
 
 Note that the data file stores which replica in the cluster the file belongs to.
@@ -80,6 +82,8 @@ services:
     network_mode: host
     volumes:
       - ./data:/data
+    security_opt:
+      - "seccomp=unconfined"
 
   tigerbeetle_1:
     image: ghcr.io/tigerbeetle/tigerbeetle
@@ -87,6 +91,8 @@ services:
     network_mode: host
     volumes:
       - ./data:/data
+    security_opt:
+      - "seccomp=unconfined"
 
   tigerbeetle_2:
     image: ghcr.io/tigerbeetle/tigerbeetle
@@ -94,6 +100,8 @@ services:
     network_mode: host
     volumes:
       - ./data:/data
+    security_opt:
+      - "seccomp=unconfined"
 ```
 
 And run it:
@@ -128,6 +136,12 @@ tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
 ```
 
 ## Troubleshooting
+
+### `error: PermissionDenied`
+
+If you see this error at startup, it is likely because you are running Docker
+25.0.0 or newer, which blocks io_uring by default. Set
+`--security-opt seccomp=unconfined` to fix it.
 
 ### `exited with code 137`
 
