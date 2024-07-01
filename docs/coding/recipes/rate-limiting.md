@@ -67,7 +67,7 @@ Our account setup is the same as before:
 
 | Ledger    | Account  | Flags                                                                                              |
 | --------- | -------- | -------------------------------------------------------------------------------------------------- |
-| Bandwidth | Operator | `0`                                                                                                |
+| Bandwidth | Operator | 0                                                                                                  |
 | Bandwidth | User     | [`debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits) |
 
 Now, we'll transfer 10,000,000 units (bytes in this case) from the operator to the user:
@@ -93,9 +93,9 @@ money per time window. We can do that using 2 ledgers and linked transfers.
 
 | Ledger        | Account  | Flags                                                                                              |
 | ------------- | -------- | -------------------------------------------------------------------------------------------------- |
-| Rate Limiting | Operator | `0`                                                                                                |
+| Rate Limiting | Operator | 0                                                                                                  |
 | Rate Limiting | User     | [`debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits) |
-| USD           | Operator | `0`                                                                                                |
+| USD           | Operator | 0                                                                                                  |
 | USD           | User     | [`debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits) |
 
 Let's say we wanted to limit each account to sending no more than 1000 USD per day.
@@ -111,8 +111,8 @@ For each transfer the user wants to do, we will create 2 transfers that are
 
 | Transfer |        Ledger | Debit Account | Credit Account |          Amount | Timeout |                                                                        Flags (Note `\|` sets multiple flags) |
 | -------- | ------------: | ------------: | -------------: | --------------: | ------- | -----------------------------------------------------------------------------------------------------------: |
-| 2N       | Rate Limiting |          User |       Operator | Transfer Amount | `86400` | [`pending`](../../reference/transfer.md#flagspending) \| [`linked`](../../reference/transfer.md#flagslinked) |
-| 2N + 1   |           USD |          User |    Destination | Transfer Amount | `0`     |                                                                                                          `0` |
+| 2N       | Rate Limiting |          User |       Operator | Transfer Amount | 86400   | [`pending`](../../reference/transfer.md#flagspending) \| [`linked`](../../reference/transfer.md#flagslinked) |
+| 2N + 1   |           USD |          User |    Destination | Transfer Amount | 0       |                                                                                                            0 |
 
 Note that we are using a timeout of 86400 seconds, because this is the number of seconds in a day.
 
