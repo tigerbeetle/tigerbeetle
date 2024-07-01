@@ -1,5 +1,42 @@
 # TigerBeetle Changelog
 
+## 2024-07-01 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#2058](https://github.com/tigerbeetle/tigerbeetle/pull/2058)
+
+  `tigerbeetle benchmark` command can now simulate few "hot" accounts which account for most of
+  transfers, the distribution expected in a typical deployment.
+
+### Features
+
+- [#2040](https://github.com/tigerbeetle/tigerbeetle/pull/2040)
+
+  Add a recipe for accounts with bounded balance
+
+### Internals
+
+- [#2033](https://github.com/tigerbeetle/tigerbeetle/pull/2033),
+  [#2041](https://github.com/tigerbeetle/tigerbeetle/pull/2041)
+
+  Rewrite `build.zig` to introduce a more regular naming scheme for top-level steps.
+
+- [#2057](https://github.com/tigerbeetle/tigerbeetle/pull/2057)
+
+  Our internal dashboard, [devhub](https://tigerbeetle.github.io/tigerbeetle/) now has dark mode 😎.
+
+- [#2052](https://github.com/tigerbeetle/tigerbeetle/pull/2052),
+  [#2032](https://github.com/tigerbeetle/tigerbeetle/pull/2032),
+  [#2044](https://github.com/tigerbeetle/tigerbeetle/pull/2044)
+
+  Ensure that the generated `tb_client.h` C header is in sync with Zig code.
+
+
+### TigerTracks 🎧
+
+- [Wish You Were Here](https://open.spotify.com/track/7aE5WXu5sFeNRh3Z05wwu4?si=317f6e0302cc4040)
+
 ## 2024-06-24 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
