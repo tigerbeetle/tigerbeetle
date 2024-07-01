@@ -41,7 +41,7 @@ info(io): allocating 660.140625MiB...
 And start the replica.
 
 ```console
-./tigerbeetle start --addresses=3000 --development 0_0.tigerbeetle
+./tigerbeetle start --addresses=3000 0_0.tigerbeetle
 ```
 ```console
 info(io): opening "0_0.tigerbeetle"...
