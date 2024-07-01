@@ -292,21 +292,19 @@ const Benchmark = struct {
         while (b.transfer_index < b.transfer_count and
             b.batch_transfers.items.len < b.batch_transfers.capacity)
         {
-            const account_count_cold = b.account_count - b.account_count_hot;
-
             const debit_account_hot = b.account_count_hot > 0 and
                 random.uintLessThan(u64, 100) < b.transfer_hot_percent;
+
             const debit_account_index = if (debit_account_hot)
                 random.uintLessThan(u64, b.account_count_hot)
             else
-                random.uintLessThan(u64, account_count_cold) + b.account_count_hot;
-
+                random.uintLessThan(u64, b.account_count);
             const credit_account_index = index: {
-                var index = random.uintLessThan(u64, account_count_cold);
-                if (index == debit_account_index -% b.account_count_hot) {
-                    index = (index + 1) % account_count_cold;
+                var index = random.uintLessThan(u64, b.account_count);
+                if (index == debit_account_index) {
+                    index = (index + 1) % b.account_count;
                 }
-                break :index index + b.account_count_hot;
+                break :index index;
             };
 
             const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
