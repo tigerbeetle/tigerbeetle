@@ -285,8 +285,8 @@ A transfer with the same `id` already exists, but with a different
 [`amount`](../transfer.md#amount).
 
 If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
-[`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) set, then the actual amount
-transferred exceeded the maximum amount of the transfer in the request.
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the actual amount
+transferred exceeds this failed transfer's `amount`.
 
 ### `exists_with_different_pending_id`
 
@@ -322,7 +322,7 @@ A transfer with the same `id` already exists, but with a different [`code`](../t
 A transfer with the same `id` already exists.
 
 If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
-[`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) set, then the existing
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
 transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
 (if non-zero) `amount` of the transfer in the request.
 
