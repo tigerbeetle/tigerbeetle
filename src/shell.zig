@@ -445,7 +445,7 @@ pub fn exec_stdout_options(
     shell: *Shell,
     options: struct {
         stdin_slice: ?[]const u8 = null,
-        max_output_bytes: usize = 50 * 1024,
+        max_output_bytes: usize = 1024 * 1024,
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
