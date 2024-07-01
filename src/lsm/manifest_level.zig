@@ -574,6 +574,8 @@ pub fn ManifestLevelType(
                     snapshot,
                     max_overlapping_tables,
                 ) orelse continue;
+                assert(range.tables.count() <= max_overlapping_tables);
+
                 if (optimal == null or range.tables.count() < optimal.?.range.tables.count()) {
                     optimal = LeastOverlapTable{
                         .table = TableInfoReference{
@@ -723,6 +725,7 @@ pub fn ManifestLevelType(
             }
             assert(range.key_min <= range.key_max);
             assert(range.key_min <= key_min);
+            assert(range.tables.count() <= max_overlapping_tables);
             assert(key_max <= range.key_max);
 
             return range;

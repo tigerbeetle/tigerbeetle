@@ -1281,7 +1281,7 @@ Welcome to 2024!
 
   Add example for setting up TigerBeetle as a systemd service.
 
-- [#1400 ](https://github.com/tigerbeetle/tigerbeetle/pull/1400)
+- [#1400](https://github.com/tigerbeetle/tigerbeetle/pull/1400)
 
   Drop support for .Net Standard 2.1.
 
