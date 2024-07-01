@@ -45,6 +45,7 @@ Depending on your use case, you may find these additional design patterns helpfu
 - [Balance-Conditional Transfers](./recipes/balance-conditional-transfers.md)
 - [Balance Bounds](./recipes/balance-bounds.md)
 - [Correcting Transfers](./recipes/correcting-transfers.md)
+- [Rate Limiting](./recipes/rate-limiting.md)
 
 ## Want Help Developing on TigerBeetle?
 
