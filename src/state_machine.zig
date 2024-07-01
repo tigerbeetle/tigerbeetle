@@ -1587,11 +1587,20 @@ pub fn StateMachineType(
             // If the accounts are the same, the ledger must be the same.
             assert(t.ledger == e.ledger);
 
-            // Balancing transfers with `amount=0` must not raise `exists_with_different_amount`.
-            const balancing_transfer = t.amount == 0 and
-                (t.flags.balancing_debit or t.flags.balancing_credit);
-            if (t.amount != e.amount and !balancing_transfer) {
-                return .exists_with_different_amount;
+            // In transfers with `flags.balancing_debit = true` or `flags.balancing_credit = true`,
+            // the field `amount` means the _upper limit_ (or zero for `maxInt`) that can be moved
+            // in order to balance debits and credits.
+            // The actual amount moved depends on the account's balance at the time the transfer
+            // was executed.
+            //
+            // This is a special case in the idempotency check:
+            // When _resubmitting_ the same balancing transfer, the amount will likely be different
+            // from what was previously commited, but as long it is within the range of possible
+            // values it should fail with `exists` rather than `exists_with_different_amount`.
+            if (t.flags.balancing_debit or t.flags.balancing_credit) {
+                if (t.amount > 0 and t.amount < e.amount) return .exists_with_different_amount;
+            } else {
+                if (t.amount != e.amount) return .exists_with_different_amount;
             }
 
             if (t.user_data_128 != e.user_data_128) return .exists_with_different_user_data_128;
@@ -3325,11 +3334,15 @@ test "create_transfers: balancing_debit | balancing_credit (*_must_not_exceed_*)
         \\ transfer   T5 A3 A2  1     _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exceeds_debits
         \\ transfer   T5 A1 A2  1     _  _  _  _    _ L1 C1   _   _   _   _ BDR BCR  _ _ exceeds_credits
         \\ transfer   T1 A1 A3    2   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists_with_different_amount
-        \\ transfer   T1 A1 A3    4   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists_with_different_amount
+        \\ transfer   T1 A1 A3    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
         \\ transfer   T1 A1 A3    3   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
+        \\ transfer   T1 A1 A3    4   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
         \\ transfer   T2 A1 A3    6   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
         \\ transfer   T2 A1 A3    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
+        \\ transfer   T3 A3 A2    2   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists_with_different_amount
+        \\ transfer   T3 A3 A2    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
         \\ transfer   T3 A3 A2    3   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
+        \\ transfer   T3 A3 A2    4   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
         \\ transfer   T4 A3 A2    5   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
         \\ transfer   T4 A3 A2    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
         \\ commit create_transfers
