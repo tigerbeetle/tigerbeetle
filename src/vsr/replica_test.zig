@@ -1464,11 +1464,11 @@ const TestContext = struct {
         replica_count: u8,
         standby_count: u8 = 0,
         client_count: u8 = constants.clients_max,
+        seed: u64 = 123,
     }) !*TestContext {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
-
-        var prng = std.rand.DefaultPrng.init(123);
+        var prng = std.rand.DefaultPrng.init(options.seed);
         const random = prng.random();
 
         const cluster = try Cluster.init(allocator, TestContext.on_client_reply, .{
