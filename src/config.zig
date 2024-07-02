@@ -167,7 +167,7 @@ const ConfigCluster = struct {
     lsm_manifest_compact_extra_blocks: comptime_int = 1,
     vsr_releases_max: usize = 64,
 
-    // Minimal value.
+    /// Minimal value.
     // TODO(batiati): Maybe this constant should be derived from `grid_iops_read_max`,
     // since each scan can read from `lsm_levels` in parallel.
     lsm_scans_max: comptime_int = 2,
@@ -296,6 +296,7 @@ pub const configs = struct {
     pub const fuzz_min = config: {
         var base = test_min;
         base.process.storage_size_limit_max = 1 * 1024 * 1024 * 1024;
+        base.cluster.lsm_scans_max = 12;
         break :config base;
     };
 
