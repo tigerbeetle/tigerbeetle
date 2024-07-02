@@ -140,7 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build scripts -- ci devhub --sha=${{ github.sha }}
+      - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
           NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}
