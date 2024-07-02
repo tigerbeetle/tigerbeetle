@@ -330,12 +330,15 @@ such that
 If the highest amount transferable is `0`, returns
 [`exceeds_credits`](./requests/create_transfers.md#exceeds_credits).
 
-Retrying a balancing transfer will return
-[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount) if the
-amount of the retry differs from the amount that was actually transferred.
-
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
+
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount)
+only when the maximum amount passed to `create_transfers` is insufficient to fulfill the amount
+that was actually transferred.
+Otherwise it may return [`exists`](./requests/create_transfers.md#exists) even if the retry amount
+differs from the original value.
 
 `flags.balancing_debit` is exclusive with the
 `flags.post_pending_transfer`/`flags.void_pending_transfer` flags because posting or voiding a
@@ -357,12 +360,15 @@ such that
 If the highest amount transferable is `0`, returns
 [`exceeds_debits`](./requests/create_transfers.md#exceeds_debits).
 
-Retrying a balancing transfer will return
-[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount) if the
-amount of the retry differs from the amount that was actually transferred.
-
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
+
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount)
+only when the maximum amount passed to `create_transfers` is insufficient to fulfill the amount
+that was actually transferred.
+Otherwise it may return [`exists`](./requests/create_transfers.md#exists) even if the retry amount
+differs from the original value.
 
 `flags.balancing_credit` is exclusive with the
 `flags.post_pending_transfer`/`flags.void_pending_transfer` flags because posting or voiding a

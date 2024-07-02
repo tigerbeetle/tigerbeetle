@@ -1572,20 +1572,41 @@ pub fn StateMachineType(
         fn create_transfer_exists(t: *const Transfer, e: *const Transfer) CreateTransferResult {
             assert(t.id == e.id);
             // The flags change the behavior of the remaining comparisons, so compare the flags first.
-            if (@as(u16, @bitCast(t.flags)) != @as(u16, @bitCast(e.flags))) return .exists_with_different_flags;
+            if (@as(u16, @bitCast(t.flags)) != @as(u16, @bitCast(e.flags))) {
+                return .exists_with_different_flags;
+            }
+            // We know that the flags are the same.
+            assert(t.pending_id == 0 and e.pending_id == 0);
+
             if (t.debit_account_id != e.debit_account_id) {
                 return .exists_with_different_debit_account_id;
             }
             if (t.credit_account_id != e.credit_account_id) {
                 return .exists_with_different_credit_account_id;
             }
-            if (t.amount != e.amount) return .exists_with_different_amount;
-            assert(t.pending_id == 0 and e.pending_id == 0); // We know that the flags are the same.
+            // If the accounts are the same, the ledger must be the same.
+            assert(t.ledger == e.ledger);
+
+            // In transfers with `flags.balancing_debit = true` or `flags.balancing_credit = true`,
+            // the field `amount` means the _upper limit_ (or zero for `maxInt`) that can be moved
+            // in order to balance debits and credits.
+            // The actual amount moved depends on the account's balance at the time the transfer
+            // was executed.
+            //
+            // This is a special case in the idempotency check:
+            // When _resubmitting_ the same balancing transfer, the amount will likely be different
+            // from what was previously commited, but as long it is within the range of possible
+            // values it should fail with `exists` rather than `exists_with_different_amount`.
+            if (t.flags.balancing_debit or t.flags.balancing_credit) {
+                if (t.amount > 0 and t.amount < e.amount) return .exists_with_different_amount;
+            } else {
+                if (t.amount != e.amount) return .exists_with_different_amount;
+            }
+
             if (t.user_data_128 != e.user_data_128) return .exists_with_different_user_data_128;
             if (t.user_data_64 != e.user_data_64) return .exists_with_different_user_data_64;
             if (t.user_data_32 != e.user_data_32) return .exists_with_different_user_data_32;
             if (t.timeout != e.timeout) return .exists_with_different_timeout;
-            assert(t.ledger == e.ledger); // If the accounts are the same, the ledger must be the same.
             if (t.code != e.code) return .exists_with_different_code;
             return .exists;
         }
@@ -3141,8 +3162,15 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T103 A1 A2   15  T3 U1 U1 U1    _ L1 C1   _   _   _ VOI   _   _  _ _ ok
         \\ transfer T102 A1 A2   13  T3 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ pending_transfer_already_voided
         \\ transfer T102 A1 A2   15  T4 U1 U1 U1    _ L1 C1   _   _   _ VOI   _   _  _ _ pending_transfer_expired
+
+        // Transfers posted/voided with optional fields must not raise `exists_with_different_*`.
         \\ transfer T105 A0 A0    _  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ ok
+        \\ transfer T105 A0 A0    _  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ exists
+        \\ transfer T105 A0 A0    7  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ exists
         \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ ok
+        \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ exists
+        \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ exists
+        \\ transfer T106 A0 A0    1  T6 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ exists
         \\ commit create_transfers
 
         // Check balances after resolving.
@@ -3305,14 +3333,18 @@ test "create_transfers: balancing_debit | balancing_credit (*_must_not_exceed_*)
         \\ transfer   T5 A1 A3  1     _  _  _  _    _ L1 C1   _   _   _   _ BDR BCR  _ _ exceeds_credits
         \\ transfer   T5 A3 A2  1     _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exceeds_debits
         \\ transfer   T5 A1 A2  1     _  _  _  _    _ L1 C1   _   _   _   _ BDR BCR  _ _ exceeds_credits
-
-        // "exists" requires that the amount matches exactly, even when BDR/BCR is set.
         \\ transfer   T1 A1 A3    2   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists_with_different_amount
-        \\ transfer   T1 A1 A3    4   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists_with_different_amount
+        \\ transfer   T1 A1 A3    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
         \\ transfer   T1 A1 A3    3   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
+        \\ transfer   T1 A1 A3    4   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
         \\ transfer   T2 A1 A3    6   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
+        \\ transfer   T2 A1 A3    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
+        \\ transfer   T3 A3 A2    2   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists_with_different_amount
+        \\ transfer   T3 A3 A2    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
         \\ transfer   T3 A3 A2    3   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
+        \\ transfer   T3 A3 A2    4   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
         \\ transfer   T4 A3 A2    5   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
+        \\ transfer   T4 A3 A2    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
         \\ commit create_transfers
         \\
         \\ lookup_account A1 1  9 0 10
@@ -3374,8 +3406,11 @@ test "create_transfers: balancing_debit | balancing_credit (amount=0)" {
         \\ setup A3 0 10 2  0
         \\
         \\ transfer   T1 A1 A4    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ ok
+        \\ transfer   T1 A1 A4    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ exists
         \\ transfer   T2 A4 A2    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ ok
+        \\ transfer   T2 A4 A2    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ exists
         \\ transfer   T3 A4 A3    0   _  _  _  _    _ L1 C1   _ PEN   _   _   _ BCR  _ _ ok
+        \\ transfer   T3 A4 A3    0   _  _  _  _    _ L1 C1   _ PEN   _   _   _ BCR  _ _ exists
         \\ commit create_transfers
         \\
         \\ lookup_account A1 1  9  0 10
