@@ -286,6 +286,9 @@ pub fn build(b: *std.Build) !void {
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         run_unit_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
+        if (b.args != null) { // Don't cache test results if running a specific test.
+            run_unit_tests.has_side_effects = true;
+        }
         build_steps.test_unit.dependOn(&run_unit_tests.step);
 
         const integration_tests = b.addTest(.{
