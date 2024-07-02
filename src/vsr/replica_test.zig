@@ -443,7 +443,7 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(t.replica(.R_).commit(), 3);
 
     var r_lag = t.replica(.B2);
-    r_lag.drop_all(.__, .bidirectional);
+    r_lag.stop();
 
     // Commit enough ops to checkpoint once, and then nearly wrap around, leaving enough slack
     // that the lagging backup can repair (without state sync).
@@ -452,11 +452,11 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(t.replica(.A0).op_checkpoint(), checkpoint_1);
     try expectEqual(t.replica(.B1).op_checkpoint(), checkpoint_1);
 
+    try r_lag.open();
     try expectEqual(r_lag.status(), .normal);
     try expectEqual(r_lag.op_checkpoint(), 0);
 
     // Allow repair, but ensure that state sync doesn't run.
-    r_lag.pass_all(.__, .bidirectional);
     r_lag.drop(.__, .bidirectional, .sync_checkpoint);
     t.run();
 
