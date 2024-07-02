@@ -262,7 +262,7 @@ pub const configs = struct {
     /// Not suitable for production, but good for testing code that would be otherwise hard to reach.
     pub const test_min = Config{
         .process = .{
-            .storage_size_limit_max = 200 * 1024 * 1024,
+            .storage_size_limit_max = 1 * 1024 * 1024 * 1024,
             .direct_io = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 256,
             .cache_transfers_size_default = 0,
@@ -289,14 +289,6 @@ pub const configs = struct {
             // (This is higher than the production default value because the block size is smaller.)
             .lsm_manifest_compact_extra_blocks = 5,
         },
-    };
-
-    /// Mostly-minimal configuration, with a higher storage limit to ensure that the fuzzers are
-    /// able to max out the LSM levels.
-    pub const fuzz_min = config: {
-        var base = test_min;
-        base.process.storage_size_limit_max = 1 * 1024 * 1024 * 1024;
-        break :config base;
     };
 
     const default = if (@hasDecl(root, "tigerbeetle_config"))
