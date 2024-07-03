@@ -276,7 +276,7 @@ const QuerySpec = struct {
     expected_results: u32,
 
     /// Formats the array of `QueryPart`, for debugging purposes.
-    /// E.g. ((a OR b) and C)
+    /// E.g. ((a OR b) and c)
     pub fn format(
         self: *const QuerySpec,
         comptime _: []const u8,
@@ -445,10 +445,15 @@ const QuerySpecFuzzer = struct {
             },
         });
 
+        // Limiting the maximum number of merges upfront produces both simple and complex
+        // queries with the same probability.
+        // Otherwise, simple queries would be rare and limited to have few fields.
+        const merge_max = self.random.intRangeAtMostBiased(u32, 1, field_max - 1);
+
         var field_remain: u32 = field_max;
         while (field_remain > 0) {
             const stack_top: *MergeStack = &stack.slice()[stack.count() - 1];
-            const query_part_tag: QueryPartTag = tag: {
+            const query_part_tag: QueryPartTag = if (stack.count() == merge_max) .field else tag: {
                 // Choose randomly between `.field` or `.merge` if there are enough
                 // available fields to start a new `.merge`.
                 assert(stack_top.fields_remain > 0);
@@ -1159,7 +1164,7 @@ fn prefix_validate(prefix: u32, value: u128) bool {
 }
 
 /// Returns true, `p` percent of the time, else false.
-pub fn chance(random: std.rand.Random, p: u8) bool {
+fn chance(random: std.rand.Random, p: u8) bool {
     assert(p <= 100);
     return random.uintLessThanBiased(u8, 100) < p;
 }
