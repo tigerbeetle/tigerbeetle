@@ -326,12 +326,12 @@ pub fn ScanTreeType(
             switch (self.direction) {
                 .ascending => {
                     assert(self.key_min < probe_key);
-                    assert(probe_key < self.key_max);
+                    assert(probe_key <= self.key_max);
                     self.key_min = probe_key;
                 },
                 .descending => {
                     assert(probe_key < self.key_max);
-                    assert(self.key_min < probe_key);
+                    assert(self.key_min <= probe_key);
                     self.key_max = probe_key;
                 },
             }

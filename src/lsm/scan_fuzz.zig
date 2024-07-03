@@ -30,7 +30,8 @@ const batch_max: u32 = @divFloor(
 /// The testing object.
 const Thing = extern struct {
     id: u128,
-    // All indexes must be `u64` to avoid conflicting matching values:
+    // All indexes must be `u64` to avoid conflicting matching values,
+    // the most significant bits are a seed used for assertions.
     index_1: u64,
     index_2: u64,
     index_3: u64,
@@ -43,7 +44,7 @@ const Thing = extern struct {
     index_10: u64,
     index_11: u64,
     index_12: u64,
-    reserved: u64,
+    checksum: u64,
     timestamp: u64,
 
     comptime {
@@ -52,6 +53,7 @@ const Thing = extern struct {
         assert(@alignOf(Thing) == 16);
     }
 
+    /// Initializes a struct with all fields zeroed.
     fn zeroed() Thing {
         return .{
             .id = 0,
@@ -67,62 +69,79 @@ const Thing = extern struct {
             .index_10 = 0,
             .index_11 = 0,
             .index_12 = 0,
-            .reserved = 0,
+            .checksum = 0,
             .timestamp = 0,
         };
     }
 
-    fn get_index(self: *const Thing, index: Index) u64 {
+    /// Gets the field's value based on the `Index` enum.
+    fn get_index(thing: *const Thing, index: Index) u64 {
         switch (index) {
             inline else => |comptime_index| {
-                return @field(self, @tagName(comptime_index));
+                return @field(thing, @tagName(comptime_index));
             },
         }
     }
 
-    fn set_index(self: *Thing, index: Index, value: u64) void {
+    /// Sets the field's value based on the `Index` enum.
+    fn set_index(thing: *Thing, index: Index, value: u64) void {
         switch (index) {
             inline else => |comptime_index| {
-                @field(self, @tagName(comptime_index)) = value;
+                @field(thing, @tagName(comptime_index)) = value;
             },
         }
     }
 
-    fn merge(self: *Thing, other: Thing) void {
-        stdx.maybe(stdx.zeroed(std.mem.asBytes(self)));
+    /// Merges all non-zero fields.
+    fn merge(template: *Thing, other: Thing) void {
+        stdx.maybe(stdx.zeroed(std.mem.asBytes(template)));
         assert(!stdx.zeroed(std.mem.asBytes(&other)));
-        defer assert(!stdx.zeroed(std.mem.asBytes(self)));
+        defer assert(!stdx.zeroed(std.mem.asBytes(template)));
 
         for (std.enums.values(Index)) |index| {
             const value = other.get_index(index);
             if (value != 0) {
-                assert(self.get_index(index) == 0);
-                self.set_index(index, value);
+                assert(template.get_index(index) == 0);
+                template.set_index(index, value);
             }
         }
     }
 
-    fn randomize(self: Thing, random: std.rand.Random, id: u128, timestamp: u64) Thing {
-        assert(self.id == 0);
-        assert(self.timestamp == 0);
+    /// Creates a struct from a template, setting all zeroed fields with random values and
+    /// calculating the checksum of the resulting struct.
+    fn from_template(template: Thing, random: std.rand.Random, id: u128, timestamp: u64) Thing {
+        assert(template.id == 0);
+        assert(template.timestamp == 0);
         assert(id != 0);
         assert(timestamp != 0);
 
-        var other: Thing = self;
-        other.id = id;
-        other.timestamp = timestamp;
+        var thing: Thing = template;
+        thing.id = id;
+        thing.timestamp = timestamp;
         for (std.enums.values(Index)) |index| {
-            const value = other.get_index(index);
+            const value = thing.get_index(index);
             if (value == 0) {
                 // Fill the zeroed fields with random values out of the matching prefix.
-                other.set_index(
+                thing.set_index(
                     index,
                     prefix_combine(std.math.maxInt(u32), random.int(u32)),
                 );
             }
         }
 
-        return other;
+        thing.checksum = stdx.hash_inline(thing);
+        return thing;
+    }
+
+    fn checksum_valid(thing: *const Thing) bool {
+        assert(thing.id != 0);
+        assert(thing.timestamp != 0);
+        assert(thing.checksum != 0);
+
+        var copy = thing.*;
+        copy.checksum = 0;
+
+        return thing.checksum == stdx.hash_inline(copy);
     }
 };
 
@@ -162,7 +181,7 @@ const ThingsGroove = GrooveType(
             .index_12 = batch_max,
             .timestamp = batch_max,
         },
-        .ignored = &[_][]const u8{"reserved"},
+        .ignored = &[_][]const u8{"checksum"},
         .derived = .{},
     },
 );
@@ -179,40 +198,54 @@ const ScanLookup = ScanLookupType(
     Storage,
 );
 
-const QueryCondition = union(enum) {
-    field_condition: FieldCondition,
-    parenthesis_condition: ParenthesisCondition,
+const Scan = ThingsGroove.ScanBuilder.Scan;
 
-    pub fn format(
-        self: QueryCondition,
-        comptime _: []const u8,
-        _: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        switch (self) {
-            .field_condition => |field_condition| try writer.print(
-                "{s}={}",
-                .{
-                    std.enums.tagName(Index, field_condition.index).?,
-                    field_condition.value,
-                },
-            ),
-            .parenthesis_condition => |parenthesis_condition| {
-                try writer.print("(", .{});
-                for (parenthesis_condition.operands, 0..) |operand, i| {
-                    try writer.print("{}", .{operand});
-                    if (i < parenthesis_condition.operands.len - 1) {
-                        switch (parenthesis_condition.operator) {
-                            .union_set => try writer.print(" OR ", .{}),
-                            .intersection_set => try writer.print(" AND ", .{}),
-                        }
-                    }
-                }
-                try writer.print(")", .{});
-            },
+/// The max number of query parts.
+/// If `lsm_scans_max == x`, then we can have at most x fields and x - 1 merge operations.
+const query_part_max = (constants.lsm_scans_max * 2) - 1;
+
+/// The max number of combinations all indexes can produce.
+/// Combinations Formula: `C(n,r) = n! / (r! * (n - r)!)`,
+/// where `n == lsm_scans_max` and `r == 2` (either assigned or zeroed).
+const template_max: u32 = template_max: {
+    assert(constants.lsm_scans_max >= 2);
+
+    const factorial = struct {
+        fn factorial(comptime n: comptime_int) comptime_int {
+            var result = 1;
+            for (1..n + 1) |i| {
+                result *= i;
+            }
+            return result;
         }
-    }
+    }.factorial;
+
+    break :template_max factorial(constants.lsm_scans_max) /
+        (2 * factorial(constants.lsm_scans_max - 2));
 };
+
+/// The max number of query specs generated per run.
+/// Always generate more than one query spec, since multiple queries can
+/// test both the positive space (results must match the query) and the
+/// negative space (results from other queries must not match).
+const query_spec_max = 8;
+
+const Templates = stdx.BoundedArray(Thing, template_max);
+
+const QueryPart = union(enum) {
+    const Field = struct { index: Index, value: u64 };
+    const Merge = struct { operator: QueryOperator, operand_count: u8 };
+
+    field: Field,
+    merge: Merge,
+};
+
+/// The query is represented non-recursively in reverse polish notation as an array of `QueryPart`.
+/// Example: `(a OR b) AND (c OR d OR e)` == `[{AND;2}, {OR;2}, {a}, {b}, {OR;3}, {c}, {d}, {e}]`.
+const Query = stdx.BoundedArray(
+    QueryPart,
+    query_part_max,
+);
 
 const QueryOperator = enum {
     union_set,
@@ -226,28 +259,79 @@ const QueryOperator = enum {
     }
 };
 
-const FieldCondition = struct {
-    index: Index,
-    value: u64,
-};
-
-const ParenthesisCondition = struct {
-    operator: QueryOperator,
-    operands: []const QueryCondition,
-};
-
 const QuerySpec = struct {
     // All matching fields must start with this prefix, to avoid collision.
     prefix: u32,
-    // The query condition.
-    condition: QueryCondition,
+    // The query.
+    query: Query,
     // Ascending or descending.
     reversed: bool,
     // Matching templates to populate the database.
     // Zeroed fields are not part of the condition and can be filled with random values.
-    templates: []const Thing,
+    templates: Templates,
     // Number of expected results.
     expected_results: u32,
+
+    /// Formats the array of `QueryPart`, for debugging purposes.
+    /// E.g. ((a OR b) and C)
+    pub fn format(
+        self: *const QuerySpec,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        var stack: stdx.BoundedArray(QueryPart.Merge, constants.lsm_scans_max - 1) = .{};
+        var print_operator: bool = false;
+        for (0..self.query.count()) |index| {
+            // Reverse the RPN array in order to print in the natual order.
+            const query_part = self.query.get(self.query.count() - index - 1);
+
+            const merge_current: ?*QueryPart.Merge = if (stack.count() > 0) merge_current: {
+                const merge = &stack.slice()[stack.count() - 1];
+                assert(merge.operand_count > 0);
+                if (print_operator) switch (merge.operator) {
+                    .union_set => try writer.print(" OR ", .{}),
+                    .intersection_set => try writer.print(" AND ", .{}),
+                };
+                break :merge_current merge;
+            } else null;
+
+            switch (query_part) {
+                .field => |field| {
+                    print_operator = true;
+                    try writer.print("{s}={}", .{
+                        std.enums.tagName(Index, field.index).?,
+                        field.value,
+                    });
+
+                    if (merge_current) |merge| {
+                        merge.operand_count -= 1;
+                    }
+                },
+                .merge => |merge| {
+                    print_operator = false;
+                    try writer.print("(", .{});
+                    stack.append_assume_capacity(merge);
+                },
+            }
+
+            if (merge_current) |merge| {
+                if (merge.operand_count == 0) {
+                    print_operator = true;
+                    try writer.print(")", .{});
+                    stack.truncate(stack.count() - 1);
+                }
+            }
+        }
+
+        // Closing the parenthesis from the tail of the stack:
+        stdx.maybe(stack.count() > 0);
+        while (stack.count() > 0) {
+            try writer.print(")", .{});
+            stack.truncate(stack.count() - 1);
+        }
+        assert(stack.count() == 0);
+    }
 };
 
 /// This fuzzer generates random arbitrary complex query conditions such as
@@ -268,109 +352,187 @@ const QuerySpec = struct {
 /// - Cannot repeat fields, while `(a=1 OR a=2)` is valid, this limitation avoids
 ///   always false conditions such as `(a=1 AND a=2)`.
 const QuerySpecFuzzer = struct {
-    arena: std.mem.Allocator,
     random: std.rand.Random,
     prefix: u32,
 
     suffix_last: u32 = 0,
     indexes_used: std.EnumSet(Index) = std.EnumSet(Index).initEmpty(),
 
-    /// Always generate more than one query spec, since multiple queries can
-    /// test both the positive space (results must match the query) and the
-    /// negative space (results from other queries must not match).
     fn generate_fuzz_query_specs(
-        arena: std.mem.Allocator,
         random: std.rand.Random,
-    ) ![]QuerySpec {
-        const query_spec_count = random.intRangeAtMostBiased(usize, 2, 8);
-        const query_specs = try arena.alloc(QuerySpec, query_spec_count);
-        for (query_specs, 1..) |*query_spec, prefix| {
+    ) stdx.BoundedArray(QuerySpec, query_spec_max) {
+        var query_specs = stdx.BoundedArray(QuerySpec, query_spec_max){};
+        const query_spec_count = random.intRangeAtMostBiased(
+            usize,
+            2,
+            query_specs.inner.capacity(),
+        );
+
+        for (0..query_spec_count) |prefix| {
             var fuzzer = QuerySpecFuzzer{
-                .arena = arena,
                 .random = random,
-                .prefix = @truncate(prefix),
+                .prefix = @truncate(prefix + 1),
             };
-            query_spec.* = try fuzzer.generate_query_spec();
+
+            query_specs.append_assume_capacity(fuzzer.generate_query_spec());
         }
+
         return query_specs;
     }
 
     fn generate_query_spec(
         self: *QuerySpecFuzzer,
-    ) !QuerySpec {
-        const condition = QueryCondition{
-            .parenthesis_condition = try self.generate_parenthesys_condition(
-                self.random.enumValue(QueryOperator),
-                1 + self.random.intRangeLessThanBiased(u32, 0, constants.lsm_scans_max),
-            ),
-        };
-        const templates = try self.get_templates(condition);
+    ) QuerySpec {
+        const field_max = self.random.intRangeAtMostBiased(u32, 1, constants.lsm_scans_max);
+        const query = self.generate_query(field_max);
+        const templates = get_templates(query.const_slice());
 
         return QuerySpec{
             .prefix = self.prefix,
-            .condition = condition,
+            .query = query,
             .templates = templates,
             .reversed = self.random.boolean(),
             .expected_results = 0,
         };
     }
 
-    fn generate_parenthesys_condition(
+    fn generate_query(
         self: *QuerySpecFuzzer,
-        operator: QueryOperator,
-        field_count: u32,
-    ) !ParenthesisCondition {
-        assert(field_count > 0);
-        assert(field_count <= constants.lsm_scans_max);
+        field_max: u32,
+    ) Query {
+        assert(field_max > 0);
+        assert(field_max <= constants.lsm_scans_max);
 
-        const QueryConditionTag = std.meta.Tag(QueryCondition);
-        var operands = std.ArrayListUnmanaged(QueryCondition){};
-        var fields_remain: u32 = field_count;
-        while (fields_remain > 0) {
-            const condition_tag = if (fields_remain > 1)
-                self.random.enumValue(QueryConditionTag)
-            else
-                .field_condition;
+        const QueryPartTag = std.meta.Tag(QueryPart);
+        const MergeStack = struct {
+            index: usize,
+            operand_count: u8,
+            fields_remain: u32,
 
-            const condition = switch (condition_tag) {
-                .field_condition => field_condition: {
-                    fields_remain -= 1;
-                    break :field_condition QueryCondition{
-                        .field_condition = self.generate_field_condition(),
+            fn nested_merge_field_max(merge_stack: *const @This()) u32 {
+                // The query part must have at least two operands, if `operand_count == 0`
+                // it can start a nested query part, but at least one field must remain for
+                // the next operand.
+                return merge_stack.fields_remain - @intFromBool(merge_stack.operand_count == 0);
+            }
+        };
+
+        var query: Query = .{};
+        if (field_max == 1) {
+            // Single field queries must have just one part.
+            query.append_assume_capacity(.{
+                .field = self.generate_query_field(),
+            });
+
+            return query;
+        }
+
+        // Multi field queries must start with a merge.
+        var stack: stdx.BoundedArray(MergeStack, constants.lsm_scans_max - 1) = .{};
+        stack.append_assume_capacity(.{
+            .index = 0,
+            .operand_count = 0,
+            .fields_remain = field_max,
+        });
+
+        query.append_assume_capacity(.{
+            .merge = .{
+                .operator = self.random.enumValue(QueryOperator),
+                .operand_count = 0,
+            },
+        });
+
+        var field_remain: u32 = field_max;
+        while (field_remain > 0) {
+            const stack_top: *MergeStack = &stack.slice()[stack.count() - 1];
+            const query_part_tag: QueryPartTag = tag: {
+                // Choose randomly between `.field` or `.merge` if there are enough
+                // available fields to start a new `.merge`.
+                assert(stack_top.fields_remain > 0);
+                const nested_merge_field_max = stack_top.nested_merge_field_max();
+                stdx.maybe(nested_merge_field_max == 0);
+                break :tag if (nested_merge_field_max > 1)
+                    self.random.enumValue(QueryPartTag)
+                else
+                    .field;
+            };
+
+            const query_part = switch (query_part_tag) {
+                .field => field: {
+                    assert(field_remain > 0);
+                    field_remain -= 1;
+
+                    assert(stack_top.fields_remain > 0);
+                    stack_top.operand_count += 1;
+                    stack_top.fields_remain -= 1;
+
+                    if (stack_top.fields_remain == 0) {
+                        assert(stack_top.operand_count > 1 or field_max == 1);
+
+                        const parent = &query.slice()[stack_top.index];
+                        parent.merge.operand_count = stack_top.operand_count;
+                        stack.truncate(stack.count() - 1);
+                    }
+
+                    break :field QueryPart{
+                        .field = self.generate_query_field(),
                     };
                 },
-                .parenthesis_condition => parenthesis_condition: {
-                    const field_count_parenthesis = self.random.intRangeAtMostBiased(
+                .merge => merge: {
+                    assert(field_remain > 1);
+                    const merge_field_remain = self.random.intRangeAtMostBiased(
                         u32,
-                        // Parenthesis conditions must contain at least two fields:
+                        // Merge must contain at least two fields, and at most the
+                        // number of remaining field for the current merge.
                         2,
-                        fields_remain,
+                        stack_top.nested_merge_field_max(),
                     );
-                    fields_remain -= field_count_parenthesis;
-                    break :parenthesis_condition QueryCondition{
-                        .parenthesis_condition = try self.generate_parenthesys_condition(
-                            operator.flip(),
-                            field_count_parenthesis,
-                        ),
+
+                    assert(merge_field_remain > 1);
+                    assert(field_remain >= merge_field_remain);
+
+                    stack_top.fields_remain -= merge_field_remain;
+                    stack_top.operand_count += 1;
+
+                    const parent: *QueryPart.Merge = &query.slice()[stack_top.index].merge;
+                    if (stack_top.fields_remain == 0) {
+                        assert(stack_top.operand_count > 1);
+                        parent.operand_count = stack_top.operand_count;
+                        stack.truncate(stack.count() - 1);
+                    }
+
+                    stack.append_assume_capacity(.{
+                        .index = query.count(),
+                        .operand_count = 0,
+                        .fields_remain = merge_field_remain,
+                    });
+
+                    break :merge QueryPart{
+                        .merge = .{
+                            .operator = parent.operator.flip(),
+                            .operand_count = 0,
+                        },
                     };
                 },
             };
-            try operands.append(self.arena, condition);
+
+            query.append_assume_capacity(query_part);
         }
 
-        return ParenthesisCondition{
-            .operator = operator,
-            .operands = try operands.toOwnedSlice(self.arena),
-        };
+        assert(stack.count() == 0);
+
+        // Represented in reverse polish notation.
+        std.mem.reverse(QueryPart, query.slice());
+        return query;
     }
 
-    fn generate_field_condition(
+    fn generate_query_field(
         self: *QuerySpecFuzzer,
-    ) FieldCondition {
+    ) QueryPart.Field {
         self.suffix_last += 1;
         const value: u64 = prefix_combine(self.prefix, self.suffix_last);
 
-        return FieldCondition{
+        return QueryPart.Field{
             .index = self.index_random(),
             .value = value,
         };
@@ -406,59 +568,66 @@ const QuerySpecFuzzer = struct {
     /// templates generated by each individual condition in such a way any of
     /// them can satisfy the OR and AND clauses: {a,c},{a,d},{b,c}, and {b,d}.
     fn get_templates(
-        self: *QuerySpecFuzzer,
-        condition: QueryCondition,
-    ) ![]const Thing {
-        var templates: std.ArrayListUnmanaged(Thing) = .{};
-        switch (condition) {
-            .field_condition => |field_condition| {
-                var template = Thing.zeroed();
-                template.set_index(field_condition.index, field_condition.value);
-                try templates.append(self.arena, template);
-            },
-            .parenthesis_condition => |parenthesis_condition| {
-                const matrix_len = parenthesis_condition.operands.len;
-                assert(matrix_len > 0);
-                assert(matrix_len <= constants.lsm_scans_max);
+        query_parts: []const QueryPart,
+    ) Templates {
+        var stack = stdx.BoundedArray(Templates, query_part_max){};
+        for (query_parts) |query_part| {
+            switch (query_part) {
+                .field => |field| {
+                    var template = Thing.zeroed();
+                    template.set_index(field.index, field.value);
 
-                var matrix = [_][]const Thing{undefined} ** constants.lsm_scans_max;
-                for (parenthesis_condition.operands, 0..) |operand, i| {
-                    matrix[i] = try self.get_templates(operand);
-                }
+                    var templates: Templates = .{};
+                    templates.append_assume_capacity(template);
+                    stack.append_assume_capacity(templates);
+                },
+                .merge => |merge| {
+                    const templates_to_merge = stack.slice()[stack.count() - merge.operand_count ..];
+                    var templates: Templates = .{};
 
-                switch (parenthesis_condition.operator) {
-                    .union_set => {
-                        for (matrix[0..matrix_len]) |operand_templates| {
-                            try templates.appendSlice(self.arena, operand_templates);
-                        }
-                    },
-                    .intersection_set => {
-                        var matrix_indexes = [_]u32{0} ** constants.lsm_scans_max;
-                        while (matrix_indexes[0] < matrix[0].len) {
-                            var template = Thing.zeroed();
-                            for (matrix[0..matrix_len], 0..) |operand_templates, i| {
-                                template.merge(operand_templates[matrix_indexes[i]]);
-                            }
-                            try templates.append(self.arena, template);
-
-                            for (0..parenthesis_condition.operands.len) |i| {
-                                const reverse_index = parenthesis_condition.operands.len - 1 - i;
-                                if (reverse_index == 0 or
-                                    matrix_indexes[reverse_index] < matrix[reverse_index].len - 1)
-                                {
-                                    matrix_indexes[reverse_index] += 1;
-                                } else {
-                                    matrix_indexes[reverse_index] = 0;
-                                    matrix_indexes[reverse_index - 1] += 1;
+                    switch (merge.operator) {
+                        .union_set => {
+                            // Templates should be added on unions.
+                            for (templates_to_merge) |operand_templates| {
+                                for (operand_templates.const_slice()) |template| {
+                                    templates.append_assume_capacity(template);
                                 }
                             }
-                        }
-                    },
-                }
-            },
+                        },
+                        .intersection_set => {
+                            // Templates should be merged on intersections,
+                            // see the documentation above for more details.
+                            var matrix_indexes = [_]u32{0} ** query_part_max;
+                            while (matrix_indexes[0] < templates_to_merge[0].count()) {
+                                var template = Thing.zeroed();
+                                for (templates_to_merge, 0..) |template_to_merge, i| {
+                                    template.merge(template_to_merge.get(matrix_indexes[i]));
+                                }
+                                templates.append_assume_capacity(template);
+
+                                for (0..merge.operand_count) |i| {
+                                    const reverse_index = merge.operand_count - 1 - i;
+                                    if (reverse_index == 0 or
+                                        matrix_indexes[reverse_index] < templates_to_merge[reverse_index].count() - 1)
+                                    {
+                                        matrix_indexes[reverse_index] += 1;
+                                    } else {
+                                        matrix_indexes[reverse_index] = 0;
+                                        matrix_indexes[reverse_index - 1] += 1;
+                                    }
+                                }
+                            }
+                        },
+                    }
+
+                    stack.truncate(stack.count() - merge.operand_count);
+                    stack.append_assume_capacity(templates);
+                },
+            }
         }
 
-        return try templates.toOwnedSlice(self.arena);
+        assert(stack.count() == 1);
+        return stack.get(0);
     }
 };
 
@@ -567,7 +736,7 @@ const Environment = struct {
         storage: *Storage,
         random: std.rand.Random,
         /// Repeating multiple times is valuable since it populates
-        /// more data and scans again after compaction.
+        /// more data, compacts and scans again on each iteration.
         repeat: u32,
     ) !void {
         assert(repeat > 0);
@@ -588,16 +757,9 @@ const Environment = struct {
         try env.open();
         defer env.close();
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-
-        const query_specs = try QuerySpecFuzzer.generate_fuzz_query_specs(
-            arena.allocator(),
-            random,
-        );
-
+        var query_specs = QuerySpecFuzzer.generate_fuzz_query_specs(random);
         for (0..repeat) |_| {
-            try env.apply(query_specs);
+            try env.apply(query_specs.slice());
         }
     }
 
@@ -614,27 +776,28 @@ const Environment = struct {
 
         // Executing each query spec.
         for (query_specs) |*query_spec| {
-            log.debug(
+            log.info(
                 \\prefix: {}
                 \\object_count: {}
                 \\expected_results: {}
                 \\reversed: {}
-                \\condition: {}
+                \\query: {}
                 \\
             , .{
                 query_spec.prefix,
                 env.object_count,
                 query_spec.expected_results,
                 query_spec.reversed,
-                query_spec.condition,
+                query_spec,
             });
 
-            try env.query(query_spec);
+            try env.run_query(query_spec);
         }
     }
 
+    // TODO: sometimes update and delete things.
     fn populate_things(env: *Environment, query_spec: *QuerySpec) !void {
-        assert(query_spec.templates.len > 0);
+        assert(query_spec.templates.count() > 0);
 
         for (0..batch_max) |_| {
             // Total number of objects inserted.
@@ -644,7 +807,7 @@ const Environment = struct {
             const noise_probability = 20;
             if (fuzz.chance(env.random, noise_probability)) {
                 var dummy = Thing.zeroed();
-                env.forest.grooves.things.insert(&dummy.randomize(
+                env.forest.grooves.things.insert(&dummy.from_template(
                     env.random,
                     env.random.int(u128),
                     env.object_count,
@@ -653,16 +816,16 @@ const Environment = struct {
                 continue;
             }
 
-            const template = query_spec.templates[
+            const template = query_spec.templates.slice()[
                 env.random.intRangeAtMostBiased(
                     usize,
                     0,
-                    query_spec.templates.len - 1,
+                    query_spec.templates.count() - 1,
                 )
             ];
 
             query_spec.expected_results += 1; // Expected objects that match the spec.
-            env.forest.grooves.things.insert(&template.randomize(
+            env.forest.grooves.things.insert(&template.from_template(
                 env.random,
                 prefix_combine(
                     query_spec.prefix,
@@ -675,29 +838,30 @@ const Environment = struct {
         try env.commit();
     }
 
-    fn query(env: *Environment, query_spec: *QuerySpec) !void {
+    fn run_query(env: *Environment, query_spec: *QuerySpec) !void {
         assert(query_spec.expected_results > 0);
 
         const pages = stdx.div_ceil(query_spec.expected_results, batch_max);
         assert(pages > 0);
 
         var result_count: u32 = 0;
-        var timestamp_last: u64 = if (query_spec.reversed)
+        var timestamp_prev: u64 = if (query_spec.reversed)
             std.math.maxInt(u64)
         else
             0;
 
         for (0..pages) |page| {
-            const results = try env.fetch(query_spec, timestamp_last);
+            const results = try env.fetch_page(query_spec, timestamp_prev);
 
             for (results) |result| {
                 if (query_spec.reversed)
-                    assert(timestamp_last > result.timestamp)
+                    assert(timestamp_prev > result.timestamp)
                 else
-                    assert(timestamp_last < result.timestamp);
-                timestamp_last = result.timestamp;
+                    assert(timestamp_prev < result.timestamp);
+                timestamp_prev = result.timestamp;
 
                 assert(prefix_validate(query_spec.prefix, result.id));
+                assert(result.checksum_valid());
                 result_count += 1;
             }
 
@@ -717,10 +881,10 @@ const Environment = struct {
         assert(result_count == query_spec.expected_results);
     }
 
-    fn fetch(
+    fn fetch_page(
         env: *Environment,
         query_spec: *const QuerySpec,
-        timestamp_last: u64,
+        timestamp_last: u64, // exclusive
     ) ![]const Thing {
         assert(env.forest.scan_buffer_pool.scan_buffer_used == 0);
         defer {
@@ -731,7 +895,7 @@ const Environment = struct {
         }
 
         const scan = env.scan_from_condition(
-            query_spec.condition,
+            &query_spec.query,
             timestamp_last,
             query_spec.reversed,
         );
@@ -752,56 +916,55 @@ const Environment = struct {
 
     fn scan_from_condition(
         env: *Environment,
-        condition: QueryCondition,
+        query: *const Query,
         timestamp_last: u64, // exclusive
         reversed: bool,
-    ) *ThingsGroove.ScanBuilder.Scan {
+    ) *Scan {
         const scan_buffer_pool = &env.forest.scan_buffer_pool;
         const things_groove = &env.forest.grooves.things;
         const scan_builder: *ThingsGroove.ScanBuilder = &things_groove.scan_builder;
 
-        switch (condition) {
-            .field_condition => |field_condition| {
-                const direction: Direction = if (reversed) .descending else .ascending;
-                const timestamp_range = if (timestamp_last == 0)
-                    TimestampRange.all()
-                else if (reversed)
-                    TimestampRange.lte(timestamp_last - 1)
-                else
-                    TimestampRange.gte(timestamp_last + 1);
+        var stack = stdx.BoundedArray(*Scan, constants.lsm_scans_max){};
+        for (query.const_slice()) |query_part| {
+            switch (query_part) {
+                .field => |field| {
+                    const direction: Direction = if (reversed) .descending else .ascending;
+                    const timestamp_range = if (timestamp_last == 0)
+                        TimestampRange.all()
+                    else if (reversed)
+                        TimestampRange.lte(timestamp_last - 1)
+                    else
+                        TimestampRange.gte(timestamp_last + 1);
 
-                return switch (field_condition.index) {
-                    inline else => |comptime_index| scan_builder.scan_prefix(
-                        comptime_index,
-                        scan_buffer_pool.acquire_assume_capacity(),
-                        lsm.snapshot_latest,
-                        field_condition.value,
-                        timestamp_range,
-                        direction,
-                    ),
-                };
-            },
-            .parenthesis_condition => |parenthesis_condition| {
-                assert(parenthesis_condition.operands.len > 0);
+                    const scan = switch (field.index) {
+                        inline else => |comptime_index| scan_builder.scan_prefix(
+                            comptime_index,
+                            scan_buffer_pool.acquire_assume_capacity(),
+                            lsm.snapshot_latest,
+                            field.value,
+                            timestamp_range,
+                            direction,
+                        ),
+                    };
+                    stack.append_assume_capacity(scan);
+                },
+                .merge => |merge| {
+                    assert(merge.operand_count > 1);
 
-                var scans: stdx.BoundedArray(
-                    *ThingsGroove.ScanBuilder.Scan,
-                    constants.lsm_scans_max,
-                ) = .{};
-                for (parenthesis_condition.operands) |operand| {
-                    const scan = env.scan_from_condition(operand, timestamp_last, reversed);
-                    scans.append_assume_capacity(scan);
-                }
-                assert(scans.count() == parenthesis_condition.operands.len);
+                    const scans_to_merge = stack.slice()[stack.count() - merge.operand_count ..];
 
-                return if (scans.count() == 1)
-                    scans.get(0)
-                else switch (parenthesis_condition.operator) {
-                    .union_set => scan_builder.merge_union(scans.const_slice()),
-                    .intersection_set => scan_builder.merge_intersection(scans.const_slice()),
-                };
-            },
+                    const scan = switch (merge.operator) {
+                        .union_set => scan_builder.merge_union(scans_to_merge),
+                        .intersection_set => scan_builder.merge_intersection(scans_to_merge),
+                    };
+
+                    stack.truncate(stack.count() - merge.operand_count);
+                    stack.append_assume_capacity(scan);
+                },
+            }
         }
+        assert(stack.count() == 1);
+        return stack.get(0);
     }
 
     fn change_state(env: *Environment, current_state: State, next_state: State) void {
