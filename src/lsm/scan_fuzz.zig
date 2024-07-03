@@ -582,8 +582,9 @@ const QuerySpecFuzzer = struct {
                     stack.append_assume_capacity(templates);
                 },
                 .merge => |merge| {
-                    const templates_to_merge = stack.slice()[stack.count() - merge.operand_count ..];
                     var templates: Templates = .{};
+                    const templates_to_merge =
+                        stack.slice()[stack.count() - merge.operand_count ..];
 
                     switch (merge.operator) {
                         .union_set => {
@@ -608,7 +609,8 @@ const QuerySpecFuzzer = struct {
                                 for (0..merge.operand_count) |i| {
                                     const reverse_index = merge.operand_count - 1 - i;
                                     if (reverse_index == 0 or
-                                        matrix_indexes[reverse_index] < templates_to_merge[reverse_index].count() - 1)
+                                        matrix_indexes[reverse_index] <
+                                        templates_to_merge[reverse_index].count() - 1)
                                     {
                                         matrix_indexes[reverse_index] += 1;
                                     } else {
