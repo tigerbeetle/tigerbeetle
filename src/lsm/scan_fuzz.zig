@@ -124,7 +124,10 @@ const Thing = extern struct {
                 // Fill the zeroed fields with random values out of the matching prefix.
                 thing.set_index(
                     index,
-                    prefix_combine(std.math.maxInt(u32), random.int(u32)),
+                    prefix_combine(
+                        std.math.maxInt(u32),
+                        random.intRangeAtMost(u32, 1, std.math.maxInt(u32)),
+                    ),
                 );
             }
         }
