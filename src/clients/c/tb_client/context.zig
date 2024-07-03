@@ -28,8 +28,6 @@ const tb_completion_t = api.tb_completion_t;
 
 pub const ContextImplementation = struct {
     completion_ctx: usize,
-    acquire_packet_fn: *const fn (*ContextImplementation, out: *?*Packet) PacketAcquireStatus,
-    release_packet_fn: *const fn (*ContextImplementation, *Packet) void,
     submit_fn: *const fn (*ContextImplementation, *Packet) void,
     deinit_fn: *const fn (*ContextImplementation) void,
 };
@@ -38,15 +36,8 @@ pub const Error = std.mem.Allocator.Error || error{
     Unexpected,
     AddressInvalid,
     AddressLimitExceeded,
-    ConcurrencyMaxInvalid,
     SystemResources,
     NetworkSubsystemFailed,
-};
-
-pub const PacketAcquireStatus = enum(c_int) {
-    ok = 0,
-    concurrency_max_exceeded,
-    shutdown,
 };
 
 pub fn ContextType(
@@ -101,14 +92,13 @@ pub fn ContextType(
 
         const PacketError = error{
             TooMuchData,
+            ClientShutdown,
             InvalidOperation,
             InvalidDataSize,
         };
 
         allocator: std.mem.Allocator,
         client_id: u128,
-        packets: []Packet,
-        packets_free: Packet.ConcurrentStack,
 
         addresses: []const std.net.Address,
         io: IO,
@@ -129,7 +119,6 @@ pub fn ContextType(
             allocator: std.mem.Allocator,
             cluster_id: u128,
             addresses: []const u8,
-            concurrency_max: u32,
             completion_ctx: usize,
             completion_fn: tb_completion_t,
         ) Error!*Context {
@@ -139,23 +128,6 @@ pub fn ContextType(
             context.allocator = allocator;
             context.client_id = std.crypto.random.int(u128);
             assert(context.client_id != 0); // Broken CSPRNG is the likeliest explanation for zero.
-
-            log.debug("{}: init: initializing", .{context.client_id});
-
-            // Arbitrary limit: To take advantage of batching, the `concurrency_max` should be set
-            // high enough to allow concurrent requests to completely fill the message body.
-            if (concurrency_max == 0 or concurrency_max > 8192) {
-                return error.ConcurrencyMaxInvalid;
-            }
-
-            log.debug("{}: init: allocating tb_packets", .{context.client_id});
-            context.packets = try context.allocator.alloc(Packet, concurrency_max);
-            errdefer context.allocator.free(context.packets);
-
-            context.packets_free = .{};
-            for (context.packets) |*packet| {
-                context.packets_free.push(packet);
-            }
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
             context.addresses = vsr.parse_addresses(
@@ -207,8 +179,6 @@ pub fn ContextType(
             context.completion_fn = completion_fn;
             context.implementation = .{
                 .completion_ctx = completion_ctx,
-                .acquire_packet_fn = Context.on_acquire_packet,
-                .release_packet_fn = Context.on_release_packet,
                 .submit_fn = Context.on_submit,
                 .deinit_fn = Context.on_deinit,
             };
@@ -220,6 +190,9 @@ pub fn ContextType(
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.on_signal);
             errdefer context.signal.deinit();
+
+            context.batch_size_limit = null;
+            context.client.register(client_register_callback, @intFromPtr(context));
 
             log.debug("{}: init: spawning thread", .{context.client_id});
             context.thread = std.Thread.spawn(.{}, Context.run, .{context}) catch |err| {
@@ -237,9 +210,6 @@ pub fn ContextType(
                 };
             };
 
-            context.batch_size_limit = null;
-            context.client.register(client_register_callback, @intFromPtr(context));
-
             return context;
         }
 
@@ -254,7 +224,6 @@ pub fn ContextType(
                 self.io.deinit();
 
                 self.allocator.free(self.addresses);
-                self.allocator.free(self.packets);
                 self.allocator.destroy(self);
             }
         }
@@ -275,19 +244,11 @@ pub fn ContextType(
         }
 
         pub fn run(self: *Context) void {
-            var drained_packets: u32 = 0;
-
             while (true) {
-                // Keep running until shutdown:
+                // Keep running until shutdown. On shutdown, wait for inflight request to finish.
+                // Shutdown being false prevents further requests from becoming inflight.
                 const is_shutdown = self.shutdown.load(.acquire);
-                if (is_shutdown) {
-                    // We need to drain all free packets, to ensure that all
-                    // inflight requests have finished.
-                    while (self.packets_free.pop() != null) {
-                        drained_packets += 1;
-                        if (drained_packets == self.packets.len) return;
-                    }
-                }
+                if (is_shutdown and self.client.request_inflight == null) break;
 
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
@@ -344,12 +305,18 @@ pub fn ContextType(
             };
             if (@divExact(events.len, event_size) > events_batch_max) {
                 return self.on_complete(packet, error.TooMuchData);
+            } else {
+                assert(events.len <= self.batch_size_limit.?);
             }
-            assert(events.len <= self.batch_size_limit.?);
 
             packet.batch_next = null;
             packet.batch_tail = packet;
             packet.batch_size = packet.data_size;
+
+            // Avoid making a packet inflight by cancelling it if the client was shutdown.
+            if (self.shutdown.load(.acquire)) {
+                return self.on_complete(packet, error.ClientShutdown);
+            }
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
@@ -382,6 +349,17 @@ pub fn ContextType(
 
         fn submit(self: *Context, packet: *Packet) void {
             assert(self.client.request_inflight == null);
+
+            // On shutdown, cancel this packet as well as any others batched onto it.
+            if (self.shutdown.load(.acquire)) {
+                var it: ?*Packet = packet;
+                while (it) |batched| {
+                    it = batched.batch_next;
+                    self.on_complete(batched, error.ClientShutdown);
+                }
+                return;
+            }
+
             const message = self.client.get_message().build(.request);
             errdefer self.client.release_message(message.base());
 
@@ -427,9 +405,11 @@ pub fn ContextType(
             const self = user_data.self;
             const packet = user_data.packet;
 
-            // Submit the next pending packet now that VSR has completed this one.
-            if (self.pending.pop()) |packet_next| {
+            // Submit the next pending packet (if any) now that VSR has completed this one.
+            // The submit() call may complete it inline so keep submitting until theres an inflight.
+            while (self.pending.pop()) |packet_next| {
                 self.submit(packet_next);
+                if (self.client.request_inflight != null) break;
             }
 
             switch (op) {
@@ -475,10 +455,12 @@ pub fn ContextType(
             const bytes = result catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
+                    error.ClientShutdown => .client_shutdown,
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,
                 };
-                return (self.completion_fn)(completion_ctx, tb_client, packet, null, 0);
+                (self.completion_fn)(completion_ctx, tb_client, packet, null, 0);
+                return;
             };
 
             // The packet completed normally.
@@ -488,26 +470,6 @@ pub fn ContextType(
 
         inline fn get_context(implementation: *ContextImplementation) *Context {
             return @alignCast(@fieldParentPtr("implementation", implementation));
-        }
-
-        fn on_acquire_packet(implementation: *ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus {
-            const self = get_context(implementation);
-
-            // During shutdown, no packet can be acquired by the application.
-            const is_shutdown = self.shutdown.load(.acquire);
-            if (is_shutdown) {
-                return .shutdown;
-            } else if (self.packets_free.pop()) |packet| {
-                out_packet.* = packet;
-                return .ok;
-            } else {
-                return .concurrency_max_exceeded;
-            }
-        }
-
-        fn on_release_packet(implementation: *ContextImplementation, packet: *Packet) void {
-            const self = get_context(implementation);
-            return self.packets_free.push(packet);
         }
 
         fn on_submit(implementation: *ContextImplementation, packet: *Packet) void {

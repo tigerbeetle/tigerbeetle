@@ -20,9 +20,9 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
         const Self = @This();
 
         completion: *Completion,
+        packet: c.tb_packet_t,
         sent_data: [request_size_max]u8 = undefined,
         sent_data_size: u32,
-        packet: *c.tb_packet_t = undefined,
         reply: ?struct {
             tb_context: usize,
             tb_client: c.tb_client_t,
@@ -112,7 +112,6 @@ test "c_client echo" {
         cluster_id,
         address,
         @intCast(address.len),
-        concurrency_max,
         tb_context,
         RequestContext.on_complete,
     );
@@ -140,24 +139,15 @@ test "c_client echo" {
             };
             prng.random().bytes(request.sent_data[0..request.sent_data_size]);
 
-            request.packet = blk: {
-                var out_packet: ?*c.tb_packet_t = null;
-                const packet_acquire_status = c.tb_client_acquire_packet(tb_client, &out_packet);
+            const packet = &request.packet;
+            packet.operation = create_accounts_operation;
+            packet.user_data = request;
+            packet.data = &request.sent_data;
+            packet.data_size = request.sent_data_size;
+            packet.next = null;
+            packet.status = c.TB_PACKET_OK;
 
-                if (out_packet) |packet| {
-                    try testing.expectEqual(@as(c_uint, c.TB_PACKET_ACQUIRE_OK), packet_acquire_status);
-
-                    packet.operation = create_accounts_operation;
-                    packet.user_data = request;
-                    packet.data = &request.sent_data;
-                    packet.data_size = request.sent_data_size;
-                    packet.next = null;
-                    packet.status = c.TB_PACKET_OK;
-                    break :blk packet;
-                } else unreachable;
-            };
-
-            c.tb_client_submit(tb_client, request.packet);
+            assert(c.tb_client_submit(tb_client, packet));
         }
 
         // Waiting until the c_client thread has processed all submitted requests:
@@ -165,13 +155,12 @@ test "c_client echo" {
 
         // Checking if the received echo matches the data we sent:
         for (requests) |*request| {
-            defer c.tb_client_release_packet(tb_client, request.packet);
 
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(tb_client, request.reply.?.tb_client);
             try testing.expectEqual(c.TB_PACKET_OK, request.packet.status);
-            try testing.expectEqual(@intFromPtr(request.packet), @intFromPtr(request.reply.?.tb_packet));
+            try testing.expectEqual(@intFromPtr(&request.packet), @intFromPtr(request.reply.?.tb_packet));
             try testing.expect(request.reply.?.result != null);
             try testing.expectEqual(request.sent_data_size, request.reply.?.result_len);
 
@@ -242,14 +231,12 @@ test "c_client tb_packet_status" {
     var tb_client: c.tb_client_t = undefined;
     const cluster_id = 0;
     const address = "3000";
-    const concurrency_max = 1;
     const tb_context: usize = 42;
     const result = c.tb_client_init_echo(
         &tb_client,
         cluster_id,
         address,
         @intCast(address.len),
-        concurrency_max,
         tb_context,
         RequestContext.on_complete,
     );
@@ -272,32 +259,22 @@ test "c_client tb_packet_status" {
                 .sent_data_size = request_size,
             };
 
-            request.packet = blk: {
-                var out_packet: ?*c.tb_packet_t = null;
-                const packet_acquire_status = c.tb_client_acquire_packet(client, &out_packet);
+            const packet = &request.packet;
+            packet.operation = operation;
+            packet.user_data = &request;
+            packet.data = &request.sent_data;
+            packet.data_size = request_size;
+            packet.next = null;
+            packet.status = c.TB_PACKET_OK;
 
-                if (out_packet) |packet| {
-                    try testing.expectEqual(@as(c_uint, c.TB_PACKET_ACQUIRE_OK), packet_acquire_status);
-
-                    packet.operation = operation;
-                    packet.user_data = &request;
-                    packet.data = &request.sent_data;
-                    packet.data_size = request_size;
-                    packet.next = null;
-                    packet.status = c.TB_PACKET_OK;
-                    break :blk packet;
-                } else unreachable;
-            };
-            defer c.tb_client_release_packet(client, request.packet);
-
-            c.tb_client_submit(client, request.packet);
+            assert(c.tb_client_submit(client, packet));
 
             completion.wait_pending();
 
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(client, request.reply.?.tb_client);
-            try testing.expectEqual(@intFromPtr(request.packet), @intFromPtr(request.reply.?.tb_packet));
+            try testing.expectEqual(@intFromPtr(&request.packet), @intFromPtr(request.reply.?.tb_packet));
             try testing.expectEqual(tb_packet_status_expected, request.packet.status);
         }
     }.action;

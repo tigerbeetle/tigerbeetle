@@ -18,7 +18,6 @@ const type_mappings = .{
 
     .{ tb_client.tb_operation_t, "TB_OPERATION" },
     .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
-    .{ tb_client.tb_packet_acquire_status_t, "TB_PACKET_ACQUIRE_STATUS" },
     .{ tb_client.tb_packet_t, "tb_packet_t" },
     .{ tb_client.tb_client_t, "tb_client_t" },
     .{ tb_client.tb_status_t, "TB_STATUS" },
@@ -203,7 +202,6 @@ pub fn main() !void {
         \\    tb_uint128_t cluster_id,
         \\    const char* address_ptr,
         \\    uint32_t address_len,
-        \\    uint32_t packets_count,
         \\    uintptr_t on_completion_ctx,
         \\    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
         \\);
@@ -213,19 +211,12 @@ pub fn main() !void {
         \\    tb_uint128_t cluster_id,
         \\    const char* address_ptr,
         \\    uint32_t address_len,
-        \\    uint32_t packets_count,
         \\    uintptr_t on_completion_ctx,
         \\    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
         \\);
         \\
-        \\TB_PACKET_ACQUIRE_STATUS tb_client_acquire_packet(
-        \\    tb_client_t client,
-        \\    tb_packet_t** out_packet
-        \\);
-        \\
-        \\void tb_client_release_packet(
-        \\    tb_client_t client,
-        \\    tb_packet_t* packet
+        \\uintptr_t tb_client_completion_context(
+        \\    tb_client_t client
         \\);
         \\
         \\void tb_client_submit(
