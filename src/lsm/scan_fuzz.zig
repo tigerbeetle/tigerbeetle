@@ -778,7 +778,7 @@ const Environment = struct {
 
         // Executing each query spec.
         for (query_specs) |*query_spec| {
-            log.info(
+            log.debug(
                 \\prefix: {}
                 \\object_count: {}
                 \\expected_results: {}
