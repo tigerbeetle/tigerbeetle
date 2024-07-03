@@ -67,12 +67,6 @@ pub fn random_enum(
     unreachable;
 }
 
-/// Returns true, `p` percent of the time, else false.
-pub fn chance(random: std.rand.Random, p: u8) bool {
-    assert(p <= 100);
-    return random.uintLessThanBiased(u8, 100) < p;
-}
-
 pub const FuzzArgs = struct {
     seed: u64,
     events_max: ?usize,

@@ -805,7 +805,7 @@ const Environment = struct {
 
             // Non-match inserted just for creating "noise".
             const noise_probability = 20;
-            if (fuzz.chance(env.random, noise_probability)) {
+            if (chance(env.random, noise_probability)) {
                 var dummy = Thing.zeroed();
                 env.forest.grooves.things.insert(&dummy.from_template(
                     env.random,
@@ -1151,4 +1151,10 @@ fn prefix_validate(prefix: u32, value: u128) bool {
 
     const value_64: u64 = @truncate(value);
     return prefix == @as(u32, @truncate(value_64 >> 32));
+}
+
+/// Returns true, `p` percent of the time, else false.
+pub fn chance(random: std.rand.Random, p: u8) bool {
+    assert(p <= 100);
+    return random.uintLessThanBiased(u8, 100) < p;
 }
