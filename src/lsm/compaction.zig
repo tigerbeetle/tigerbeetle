@@ -817,6 +817,7 @@ pub fn CompactionType(
             assert(compaction.beat != null);
             assert(compaction.beat.?.blocks == null);
             assert(!compaction.bar.?.move_table);
+            assert(compaction.bar.?.table_builder.data_block_empty());
 
             assert(blocks.source_value_blocks[0].count > 0);
             assert(blocks.source_value_blocks[1].count > 0);
