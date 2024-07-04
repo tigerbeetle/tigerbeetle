@@ -16,7 +16,8 @@ const tb = @import("../tigerbeetle.zig");
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const StateMachine = @import("../state_machine.zig")
+    .StateMachineType(Storage, constants.state_machine_config);
 const Reservation = @import("../vsr/free_set.zig").Reservation;
 const GridType = @import("../vsr/grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
@@ -543,13 +544,21 @@ const Environment = struct {
 
         for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
             assert(env.state == .fuzzing);
-            log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op.action });
+            log.debug("Running fuzz_ops[{}/{}] == {}", .{
+                fuzz_op_index,
+                fuzz_ops.len,
+                fuzz_op.action,
+            });
 
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = (model.log.readableLength() + model.checkpointed.count()) * @sizeOf(Account);
-            // NOTE: This isn't accurate anymore because the model can contain multiple copies of an account in the log
+            const model_size = brk: {
+                const account_count = model.log.readableLength() + model.checkpointed.count();
+                break :brk account_count * @sizeOf(Account);
+            };
+            // NOTE: This isn't accurate anymore because the model can contain multiple copies of
+            // an account in the log
             log.debug("space_amplification ~= {d:.2}", .{
                 @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
             });
@@ -606,7 +615,10 @@ const Environment = struct {
                         if (env.get_account(id)) |lsm_account| {
                             assert(stdx.equal_bytes(Account, lsm_account, checkpointed_account));
                         } else {
-                            std.debug.panic("Account checkpointed but not in lsm after crash.\n {}\n", .{checkpointed_account});
+                            std.debug.panic(
+                                "Account checkpointed but not in lsm after crash.\n {}\n",
+                                .{checkpointed_account},
+                            );
                         }
 
                         // There are strict limits around how many values can be prefetched by one
@@ -772,7 +784,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     var persisted_op: u64 = op;
     var puts_since_compact: usize = 0;
     for (fuzz_ops, 0..) |*fuzz_op, fuzz_op_index| {
-        const action_tag: FuzzOpActionTag = if (puts_since_compact >= Environment.puts_since_compact_max)
+        const too_many_puts = puts_since_compact >= Environment.puts_since_compact_max;
+        const action_tag: FuzzOpActionTag = if (too_many_puts)
             // We have to compact before doing any other operations.
             .compact
         else
