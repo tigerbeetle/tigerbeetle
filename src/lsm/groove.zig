@@ -174,8 +174,10 @@ pub fn GrooveType(
         // See if we should ignore this field from the options.
         //
         // By default, we ignore the "timestamp" field since it's a special identifier.
-        // Since the "timestamp" is ignored by default, it shouldn't be provided in groove_options.ignored.
-        comptime var ignored = mem.eql(u8, field.name, "timestamp") or mem.eql(u8, field.name, "id");
+        // Since the "timestamp" is ignored by default, it shouldn't be provided
+        // in groove_options.ignored.
+        comptime var ignored =
+            mem.eql(u8, field.name, "timestamp") or mem.eql(u8, field.name, "id");
         for (groove_options.ignored) |ignored_field_name| {
             comptime assert(!std.mem.eql(u8, ignored_field_name, "timestamp"));
             comptime assert(!std.mem.eql(u8, ignored_field_name, "id"));

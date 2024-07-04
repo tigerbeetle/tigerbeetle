@@ -384,7 +384,6 @@ const naughty_list = [_][]const u8{
     "lsm/binary_search.zig",
     "lsm/binary_search_benchmark.zig",
     "lsm/forest_fuzz.zig",
-    "lsm/groove.zig",
     "lsm/level_data_iterator.zig",
     "lsm/manifest_level.zig",
     "lsm/segmented_array_benchmark.zig",
