@@ -284,17 +284,64 @@ pub const CreateTransfersResult = extern struct {
     }
 };
 
+pub const QueryFilter = extern struct {
+    /// Query by the `user_data_128` index.
+    /// Use zero for no filter.
+    user_data_128: u128,
+    /// Query by the `user_data_64` index.
+    /// Use zero for no filter.
+    user_data_64: u64,
+    /// Query by the `user_data_32` index.
+    /// Use zero for no filter.
+    user_data_32: u32,
+    /// Query by the `ledger` index.
+    /// Use zero for no filter.
+    ledger: u32,
+    /// Query by the `code` index.
+    /// Use zero for no filter.
+    code: u16,
+    reserved: [6]u8 = [_]u8{0} ** 6,
+    /// The initial timestamp (inclusive).
+    /// Use zero for no filter.
+    timestamp_min: u64,
+    /// The final timestamp (inclusive).
+    /// Use zero for no filter.
+    timestamp_max: u64,
+    /// Maximum number of results that can be returned by this query.
+    /// Must be greater than zero.
+    limit: u32,
+    /// Query flags.
+    flags: QueryFlags,
+
+    comptime {
+        assert(@sizeOf(QueryFilter) == 64);
+        assert(stdx.no_padding(QueryFilter));
+    }
+};
+
+pub const QueryFlags = packed struct(u32) {
+    /// Whether the results are sorted by timestamp in chronological or reverse-chronological order.
+    reversed: bool,
+    padding: u31 = 0,
+
+    comptime {
+        assert(@sizeOf(QueryFlags) == @sizeOf(u32));
+        assert(@bitSizeOf(QueryFlags) == @sizeOf(QueryFlags) * 8);
+    }
+};
+
 /// Filter used in both `get_account_transfer` and `get_account_balances`.
 pub const AccountFilter = extern struct {
     /// The account id.
     account_id: u128,
     /// The initial timestamp (inclusive).
-    /// Use ZERO for no filter.
+    /// Use zero for no filter.
     timestamp_min: u64,
     /// The final timestamp (inclusive).
-    /// Use ZERO for no filter.
+    /// Use zero for no filter.
     timestamp_max: u64,
     /// Maximum number of results that can be returned by this query.
+    /// Must be greater than zero.
     limit: u32,
     /// Query flags.
     flags: AccountFilterFlags,

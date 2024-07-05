@@ -934,6 +934,10 @@ internal enum TBOperation : byte
 
     GetAccountBalances = 134,
 
+    QueryAccounts = 135,
+
+    QueryTransfers = 136,
+
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]

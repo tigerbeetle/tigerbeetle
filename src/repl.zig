@@ -59,6 +59,8 @@ pub const Parser = struct {
         lookup_transfers,
         get_account_transfers,
         get_account_balances,
+        query_accounts,
+        query_transfers,
     };
 
     pub const LookupSyntaxTree = struct {
@@ -70,6 +72,7 @@ pub const Parser = struct {
         transfer: tb.Transfer,
         id: LookupSyntaxTree,
         account_filter: tb.AccountFilter,
+        query_filter: tb.QueryFilter,
     };
 
     pub const Statement = struct {
@@ -283,6 +286,25 @@ pub const Parser = struct {
                     .reversed = false,
                 },
             } },
+            .query_accounts, .query_transfers => .{ .query_filter = tb.QueryFilter{
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .ledger = 0,
+                .code = 0,
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+                .limit = switch (operation) {
+                    .query_accounts => StateMachine.constants
+                        .batch_max.query_accounts,
+                    .query_transfers => StateMachine.constants
+                        .batch_max.query_transfers,
+                    else => unreachable,
+                },
+                .flags = .{
+                    .reversed = false,
+                },
+            } },
         };
         var object = default;
 
@@ -482,6 +504,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .lookup_transfers,
                 .get_account_transfers,
                 .get_account_balances,
+                .query_accounts,
+                .query_transfers,
                 => |operation| {
                     const state_machine_operation =
                         std.meta.stringToEnum(StateMachine.Operation, @tagName(operation));
@@ -715,10 +739,11 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .get_account_transfers, .get_account_balances => "get",
                 .lookup_accounts, .lookup_transfers => "lookup",
                 .pulse => unreachable,
+                .query_accounts, .query_transfers => "query",
             };
             const object_type = switch (operation) {
-                .create_accounts, .lookup_accounts => "accounts",
-                .create_transfers, .lookup_transfers => "transfers",
+                .create_accounts, .lookup_accounts, .query_accounts => "accounts",
+                .create_transfers, .lookup_transfers, .query_transfers => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
                 .pulse => unreachable,
@@ -821,19 +846,16 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                     }
                 },
-                .lookup_accounts => {
-                    const lookup_account_results = std.mem.bytesAsSlice(
+                .lookup_accounts, .query_accounts => {
+                    const account_results = std.mem.bytesAsSlice(
                         tb.Account,
                         result,
                     );
 
-                    if (lookup_account_results.len == 0) {
-                        try repl.fail(
-                            "Cannot lookup account: {any}\n",
-                            .{LookupAccountResult.account_not_found},
-                        );
+                    if (account_results.len == 0) {
+                        try repl.fail("No accounts were found.\n", .{});
                     } else {
-                        for (lookup_account_results) |*account| {
+                        for (account_results) |*account| {
                             try repl.display_object(account);
                         }
                     }
@@ -853,53 +875,30 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                     }
                 },
-                .lookup_transfers => {
-                    const lookup_transfer_results = std.mem.bytesAsSlice(
+                .lookup_transfers, .get_account_transfers, .query_transfers => {
+                    const transfer_results = std.mem.bytesAsSlice(
                         tb.Transfer,
                         result,
                     );
 
-                    if (lookup_transfer_results.len == 0) {
-                        try repl.fail(
-                            "Cannot lookup transfer: {any}\n",
-                            .{LookupTransferResult.transfer_not_found},
-                        );
+                    if (transfer_results.len == 0) {
+                        try repl.fail("No transfers were found.\n", .{});
                     } else {
-                        for (lookup_transfer_results) |*transfer| {
-                            try repl.display_object(transfer);
-                        }
-                    }
-                },
-                .get_account_transfers => {
-                    const get_account_transfers_results = std.mem.bytesAsSlice(
-                        tb.Transfer,
-                        result,
-                    );
-
-                    if (get_account_transfers_results.len == 0) {
-                        try repl.fail(
-                            "Cannot get account transfers: {any}\n",
-                            .{LookupTransferResult.no_matching_results},
-                        );
-                    } else {
-                        for (get_account_transfers_results) |*transfer| {
+                        for (transfer_results) |*transfer| {
                             try repl.display_object(transfer);
                         }
                     }
                 },
                 .get_account_balances => {
-                    const get_account_transfers_results = std.mem.bytesAsSlice(
+                    const get_account_balances_results = std.mem.bytesAsSlice(
                         tb.AccountBalance,
                         result,
                     );
 
-                    if (get_account_transfers_results.len == 0) {
-                        try repl.fail(
-                            "Cannot get account balances: {any}\n",
-                            .{LookupTransferResult.no_matching_results},
-                        );
+                    if (get_account_balances_results.len == 0) {
+                        try repl.fail("No balances were found.\n", .{});
                     } else {
-                        for (get_account_transfers_results) |*balance| {
+                        for (get_account_balances_results) |*balance| {
                             try repl.display_object(balance);
                         }
                     }
@@ -924,27 +923,6 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
     };
 }
-
-pub const LookupAccountResult = enum(u32) {
-    ok = 0,
-    account_not_found = 1,
-    comptime {
-        for (std.enums.values(LookupAccountResult), 0..) |result, index| {
-            assert(@intFromEnum(result) == index);
-        }
-    }
-};
-
-pub const LookupTransferResult = enum(u32) {
-    ok = 0,
-    transfer_not_found = 1,
-    no_matching_results = 2,
-    comptime {
-        for (std.enums.values(LookupTransferResult), 0..) |result, index| {
-            assert(@intFromEnum(result) == index);
-        }
-    }
-};
 
 const null_printer = Printer{
     .stderr = null,
@@ -1224,6 +1202,70 @@ test "repl.zig: Parser account filter successfully" {
                 .flags = .{
                     .credits = false,
                     .debits = true,
+                    .reversed = true,
+                },
+            },
+        },
+    };
+
+    for (tests) |t| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        const statement = try Parser.parse_statement(
+            &arena,
+            t.in,
+            null_printer,
+        );
+
+        try std.testing.expectEqual(statement.operation, t.operation);
+        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
+    }
+}
+
+test "repl.zig: Parser query filter successfully" {
+    const tests = [_]struct {
+        in: []const u8,
+        operation: Parser.Operation,
+        want: tb.QueryFilter,
+    }{
+        .{
+            .in = "query_transfers user_data_128=1",
+            .operation = .query_transfers,
+            .want = tb.QueryFilter{
+                .user_data_128 = 1,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .ledger = 0,
+                .code = 0,
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+                .limit = StateMachine.constants.batch_max.query_transfers,
+                .flags = .{
+                    .reversed = false,
+                },
+            },
+        },
+        .{
+            .in =
+            \\query_accounts user_data_128=1000
+            \\user_data_64=100 user_data_32=10
+            \\ledger=1 code=2
+            \\flags=reversed limit=10
+            \\timestamp_min=1 timestamp_max=9999;
+            \\
+            ,
+            .operation = .query_accounts,
+            .want = tb.QueryFilter{
+                .user_data_128 = 1000,
+                .user_data_64 = 100,
+                .user_data_32 = 10,
+                .ledger = 1,
+                .code = 2,
+                .timestamp_min = 1,
+                .timestamp_max = 9999,
+                .limit = 10,
+                .flags = .{
                     .reversed = true,
                 },
             },
