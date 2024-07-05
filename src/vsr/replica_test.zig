@@ -1297,7 +1297,7 @@ test "Cluster: upgrade: R=1" {
 }
 
 test "Cluster: upgrade: state-sync to new release" {
-    const t = try TestContext.init(.{ .replica_count = 3 });
+    const t = try TestContext.init(.{ .replica_count = 3, .seed = 2 });
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
