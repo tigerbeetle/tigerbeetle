@@ -1002,9 +1002,11 @@ pub fn ReplicaType(
                 if (replica_index < replica_count) .{
                     .replica_count = replica_count,
                     .replica = replica_index,
+                    .quorum = quorum_replication,
                 } else .{
                     .replica_count = replica_count + 1,
                     .replica = replica_count,
+                    .quorum = quorum_replication + 1,
                 },
             );
             errdefer self.clock.deinit(allocator);

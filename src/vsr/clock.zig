@@ -78,6 +78,8 @@ pub fn ClockType(comptime Time: type) type {
 
         /// The index of the replica using this clock to provide synchronized time.
         replica: u8,
+        /// Minimal number of distinct clock sources required for synchronization.
+        quorum: u8,
 
         /// The underlying time source for this clock (system time or deterministic time).
         time: *Time,
@@ -103,10 +105,14 @@ pub fn ClockType(comptime Time: type) type {
                 /// The size of the cluster, i.e. the number of clock sources (including this replica).
                 replica_count: u8,
                 replica: u8,
+                quorum: u8,
             },
         ) !Self {
             assert(options.replica_count > 0);
             assert(options.replica < options.replica_count);
+            assert(options.quorum > 0);
+            assert(options.quorum <= options.replica_count);
+            if (options.replica_count > 1) assert(options.quorum > 1);
 
             var epoch: Epoch = undefined;
             epoch.sources = try allocator.alloc(?Sample, options.replica_count);
@@ -122,6 +128,7 @@ pub fn ClockType(comptime Time: type) type {
 
             var self = Self{
                 .replica = options.replica,
+                .quorum = options.quorum,
                 .time = time,
                 .epoch = epoch,
                 .window = window,
@@ -343,7 +350,7 @@ pub fn ClockType(comptime Time: type) type {
             // Do not reset `learned` any earlier than this (before we have attempted to synchronize).
             self.window.learned = false;
 
-            // Starting with the most clock offset tolerance, while we have a majority, find the best
+            // Starting with the most clock offset tolerance, while we have a quorum, find the best
             // smallest interval with the least clock offset tolerance, reducing tolerance at each step:
             var tolerance: u64 = clock_offset_tolerance_max;
             var terminate = false;
@@ -354,15 +361,14 @@ pub fn ClockType(comptime Time: type) type {
                 rounds += 1;
 
                 const interval = Marzullo.smallest_interval(self.window_tuples(tolerance));
-                const majority = interval.sources_true > @divTrunc(self.window.sources.len, 2);
-                if (!majority) break;
+                if (interval.sources_true < self.quorum) break;
 
                 // The new interval may reduce the number of `sources_true` while also decreasing error.
-                // In other words, provided we maintain a majority, we prefer tighter tolerance bounds.
+                // In other words, provided we maintain a quorum, we prefer tighter tolerance bounds.
                 self.window.synchronized = interval;
             }
 
-            // Wait for more accurate samples or until we timeout the window for lack of majority:
+            // Wait for more accurate samples or until we timeout the window for lack of quorum:
             if (self.window.synchronized == null) return;
 
             var new_window = self.epoch;
@@ -484,6 +490,7 @@ const ClockUnitTestContainer = struct {
             .clock = try DeterministicClock.init(allocator, &self.time, .{
                 .replica_count = 3,
                 .replica = 0,
+                .quorum = 2,
             }),
         };
     }
@@ -699,6 +706,7 @@ const ClockSimulator = struct {
             clock.* = try DeterministicClock.init(allocator, &times[replica], .{
                 .replica_count = options.clock_count,
                 .replica = @intCast(replica),
+                .quorum = @divFloor(options.clock_count, 2) + 1,
             });
             errdefer clock.deinit(allocator);
         }
