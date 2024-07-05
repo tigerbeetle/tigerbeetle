@@ -98,33 +98,36 @@ pub fn ClockType(comptime Time: type) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            /// The size of the cluster, i.e. the number of clock sources (including this replica).
-            replica_count: u8,
-            replica: u8,
             time: *Time,
+            options: struct {
+                /// The size of the cluster, i.e. the number of clock sources (including this replica).
+                replica_count: u8,
+                replica: u8,
+            },
         ) !Self {
-            assert(replica_count > 0);
-            assert(replica < replica_count);
+            assert(options.replica_count > 0);
+            assert(options.replica < options.replica_count);
 
             var epoch: Epoch = undefined;
-            epoch.sources = try allocator.alloc(?Sample, replica_count);
+            epoch.sources = try allocator.alloc(?Sample, options.replica_count);
             errdefer allocator.free(epoch.sources);
 
             var window: Epoch = undefined;
-            window.sources = try allocator.alloc(?Sample, replica_count);
+            window.sources = try allocator.alloc(?Sample, options.replica_count);
             errdefer allocator.free(window.sources);
 
             // There are two Marzullo tuple bounds (lower and upper) per source clock offset sample:
-            const marzullo_tuples = try allocator.alloc(Marzullo.Tuple, replica_count * 2);
+            const marzullo_tuples = try allocator.alloc(Marzullo.Tuple, options.replica_count * 2);
             errdefer allocator.free(marzullo_tuples);
 
             var self = Self{
-                .replica = replica,
+                .replica = options.replica,
                 .time = time,
                 .epoch = epoch,
                 .window = window,
                 .marzullo_tuples = marzullo_tuples,
-                .synchronization_disabled = replica_count == 1, // A cluster of one cannot synchronize.
+                // A cluster of one cannot synchronize.
+                .synchronization_disabled = options.replica_count == 1,
             };
 
             // Reset the current epoch to be unsynchronized,
@@ -478,7 +481,10 @@ const ClockUnitTestContainer = struct {
                 .offset_coefficient_A = offset_coefficient_A,
                 .offset_coefficient_B = offset_coefficient_B,
             },
-            .clock = try DeterministicClock.init(allocator, 3, 0, &self.time),
+            .clock = try DeterministicClock.init(allocator, &self.time, .{
+                .replica_count = 3,
+                .replica = 0,
+            }),
         };
     }
 
@@ -690,12 +696,10 @@ const ClockSimulator = struct {
                 .offset_coefficient_C = 10,
             };
 
-            clock.* = try DeterministicClock.init(
-                allocator,
-                options.clock_count,
-                @as(u8, @intCast(replica)),
-                &times[replica],
-            );
+            clock.* = try DeterministicClock.init(allocator, &times[replica], .{
+                .replica_count = options.clock_count,
+                .replica = @intCast(replica),
+            });
             errdefer clock.deinit(allocator);
         }
         errdefer for (clocks) |*clock| clock.deinit(allocator);

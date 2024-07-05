@@ -996,16 +996,16 @@ pub fn ReplicaType(
             // To do this:
             //   - an active replica clock tracks only other active replicas,
             //   - a standby clock tracks active replicas and the standby itself.
-            self.clock = try if (replica_index < replica_count) Clock.init(
+            self.clock = try Clock.init(
                 allocator,
-                replica_count,
-                replica_index,
                 &self.time,
-            ) else Clock.init(
-                allocator,
-                replica_count + 1,
-                replica_count,
-                &self.time,
+                if (replica_index < replica_count) .{
+                    .replica_count = replica_count,
+                    .replica = replica_index,
+                } else .{
+                    .replica_count = replica_count + 1,
+                    .replica = replica_count,
+                },
             );
             errdefer self.clock.deinit(allocator);
 
