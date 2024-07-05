@@ -639,6 +639,11 @@ pub fn ReplicaType(
             self.opened = false;
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
+            for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
+                if (self.journal.faulty.bit(.{ .index = slot })) {
+                    assert(header.operation == .reserved);
+                }
+            }
 
             // Abort if all slots are faulty, since something is very wrong.
             if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
@@ -5627,14 +5632,6 @@ pub fn ReplicaType(
         ///              (`replica.op_checkpoint` == `replica.op`).
         fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
-
-            // Immediately after recovery, any faulty non-reserved prepares must be within our
-            // current checkpoint. See recovery case @M.
-            for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
-                if (self.journal.faulty.bit(.{ .index = slot })) {
-                    assert(header.operation == .reserved or self.op_checkpoint() <= header.op);
-                }
-            }
 
             // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt or
             // if the replica restarts after state sync updates superblock.
