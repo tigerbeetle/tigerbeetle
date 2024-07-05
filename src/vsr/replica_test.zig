@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.test_replica);
 const expectEqual = std.testing.expectEqual;
-const expect = std.testing.expectEqual;
+const expect = std.testing.expect;
 const allocator = std.testing.allocator;
 
 const stdx = @import("../stdx.zig");
@@ -346,7 +346,7 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, receive-only)
     // Prepares may be reordered by the network, and if B1 receives X+1 then X,
     // it will not forward X on, as it is a "repair".
     // And B2 is partitioned, so it cannot repair its hash chain.
-    try std.testing.expect(t.replica(.B2).commit() >= 2);
+    try expect(t.replica(.B2).commit() >= 2);
 }
 
 test "Cluster: network: partition 1-2 (isolate primary, symmetric)" {
@@ -1429,7 +1429,7 @@ test "Cluster: client: empty command=request operation=register body" {
     try expectEqual(reply.header.operation, .register);
     try expectEqual(reply.header.size, @sizeOf(Reply));
     try expectEqual(reply.header.request, 0);
-    try std.testing.expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
+    try expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
 }
 
 const ProcessSelector = enum {
