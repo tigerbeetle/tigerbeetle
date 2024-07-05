@@ -151,6 +151,20 @@ Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code fore
 - Restrict the length of function bodies to reduce the probability of poorly structured code. We
   enforce a **hard limit of 70 lines per function**.
 
+  Splitting code into functions requires taste. There are many ways to cut a wall of code into
+  chunks of 70 lines, but only a few splits will feel right. Some rules of thumb:
+
+  * Good function shape is often the inverse of an hourglass: a few parameters, a simple return
+    type, and a lot of meaty logic between the braces.
+  * Centralize control flow. When splitting a large function, try to keep all switch/if
+    statements in the "parent" function, and move non-branchy logic fragments to helper
+    functions. Divide responsibility. All control flow should be handled by _one_ function, the rest shouldn't
+    care about control flow at all. In other words,
+    ["push ifs up and fors down"](https://matklad.github.io/2023/11/15/push-ifs-up-and-fors-down.html).
+  * Similarly, centralize state manipulation. Let the parent function keep all relevant state in
+    local variables, and use helpers to compute what needs to change, rather than applying the
+    change directly. Keep leaf functions pure.
+
 - Appreciate, from day one, **all compiler warnings at the compiler's strictest setting**.
 
 - Whenever your program has to interact with external entities, **don't do things directly in
