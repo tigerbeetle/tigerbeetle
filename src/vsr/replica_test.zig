@@ -1297,7 +1297,7 @@ test "Cluster: upgrade: R=1" {
 }
 
 test "Cluster: upgrade: state-sync to new release" {
-    const t = try TestContext.init(.{ .replica_count = 3, .seed = 2 });
+    const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
@@ -1305,7 +1305,10 @@ test "Cluster: upgrade: state-sync to new release" {
     t.replica(.R_).stop();
     try t.replica(.R0).open_upgrade(&[_]u8{ 1, 2 });
     try t.replica(.R1).open_upgrade(&[_]u8{ 1, 2 });
-    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    t.run();
+    try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
+    try c.request(constants.vsr_checkpoint_interval, constants.vsr_checkpoint_interval);
+    try expectEqual(t.replica(.R0).commit(), checkpoint_2_trigger);
 
     // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
     try t.replica(.R2).open();
