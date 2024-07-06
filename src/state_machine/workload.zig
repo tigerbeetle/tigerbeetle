@@ -173,6 +173,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         lookup_transfers = @intFromEnum(Operation.lookup_transfers),
         get_account_transfers = @intFromEnum(Operation.get_account_transfers),
         get_account_balances = @intFromEnum(Operation.get_account_balances),
+        query_accounts = @intFromEnum(Operation.query_accounts),
+        query_transfers = @intFromEnum(Operation.query_transfers),
     };
 
     return struct {
@@ -295,6 +297,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .lookup_transfers => Action.lookup_transfers,
                     .get_account_transfers => Action.get_account_transfers,
                     .get_account_balances => Action.get_account_balances,
+                    .query_accounts => Action.query_accounts,
+                    .query_transfers => Action.query_transfers,
                 };
             };
 
@@ -313,6 +317,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     self.build_lookup_transfers(self.batch(u128, action, body)),
                 .get_account_transfers, .get_account_balances => @sizeOf(tb.AccountFilter) *
                     self.build_get_account_filter(self.batch(tb.AccountFilter, action, body)),
+                .query_accounts, .query_transfers => @sizeOf(tb.QueryFilter) *
+                    self.build_query_filter(self.batch(tb.QueryFilter, action, body)),
             };
             assert(size <= body.len);
 
@@ -371,6 +377,18 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     timestamp,
                     std.mem.bytesAsSlice(tb.AccountFilter, request_body),
                     std.mem.bytesAsSlice(tb.AccountBalance, reply_body),
+                ),
+                .query_accounts => self.on_query_accounts(
+                    client_index,
+                    timestamp,
+                    std.mem.bytesAsSlice(tb.QueryFilter, request_body),
+                    std.mem.bytesAsSlice(tb.Account, reply_body),
+                ),
+                .query_transfers => self.on_query_transfers(
+                    client_index,
+                    timestamp,
+                    std.mem.bytesAsSlice(tb.QueryFilter, request_body),
+                    std.mem.bytesAsSlice(tb.Transfer, reply_body),
                 ),
                 //Not handled by the client.
                 .pulse => unreachable,
@@ -614,6 +632,28 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return 1;
         }
 
+        fn build_query_filter(self: *const Self, body: []tb.QueryFilter) usize {
+            assert(body.len == 1);
+            const query_filter = &body[0];
+            query_filter.* = .{
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                // If user_data_32 != zero, it's not expected to find any object.
+                .user_data_32 = if (chance(self.random, 20)) 1 else 0,
+                // Code == 123 is present in all objects.
+                .code = if (chance(self.random, 20)) 123 else 0,
+                .ledger = 0,
+                .limit = self.random.int(u32),
+                .flags = .{
+                    .reversed = self.random.boolean(),
+                },
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+            };
+
+            return 1;
+        }
+
         /// The transfer built is guaranteed to match the TransferPlan's outcome.
         /// The transfer built is _not_ guaranteed to match the TransferPlan's method.
         ///
@@ -754,12 +794,20 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const batch_min = switch (action) {
                 .create_accounts, .lookup_accounts => self.options.accounts_batch_size_min,
                 .create_transfers, .lookup_transfers => self.options.transfers_batch_size_min,
-                .get_account_transfers, .get_account_balances => 1,
+                .get_account_transfers,
+                .get_account_balances,
+                .query_accounts,
+                .query_transfers,
+                => 1,
             };
             const batch_span = switch (action) {
                 .create_accounts, .lookup_accounts => self.options.accounts_batch_size_span,
                 .create_transfers, .lookup_transfers => self.options.transfers_batch_size_span,
-                .get_account_transfers, .get_account_balances => 0,
+                .get_account_transfers,
+                .get_account_balances,
+                .query_accounts,
+                .query_transfers,
+                => 0,
             };
 
             // +1 because the span is inclusive.
@@ -1099,6 +1147,82 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }
 
+        fn on_query_accounts(
+            self: *Self,
+            client_index: usize,
+            timestamp: u64,
+            body: []const tb.QueryFilter,
+            results: []const tb.Account,
+        ) void {
+            _ = self;
+            _ = client_index;
+            _ = timestamp;
+            assert(body.len == 1);
+
+            const batch_size = AccountingStateMachine.constants.batch_max.query_accounts;
+            const query_filter = &body[0];
+            assert(results.len <= query_filter.limit);
+            assert(results.len <= batch_size);
+
+            // If user_data_32 != zero, it's not expected to find any object.
+            if (query_filter.user_data_32 != 0) {
+                assert(results.len == 0);
+                return;
+            }
+
+            var timestamp_last: u64 = if (query_filter.flags.reversed)
+                std.math.maxInt(u64)
+            else
+                0;
+
+            for (results) |*account| {
+                if (query_filter.flags.reversed) {
+                    assert(account.timestamp < timestamp_last);
+                } else {
+                    assert(account.timestamp > timestamp_last);
+                }
+                timestamp_last = account.timestamp;
+            }
+        }
+
+        fn on_query_transfers(
+            self: *Self,
+            client_index: usize,
+            timestamp: u64,
+            body: []const tb.QueryFilter,
+            results: []const tb.Transfer,
+        ) void {
+            _ = self;
+            _ = client_index;
+            _ = timestamp;
+            assert(body.len == 1);
+
+            const batch_size = AccountingStateMachine.constants.batch_max.query_transfers;
+            const query_filter = &body[0];
+            assert(results.len <= query_filter.limit);
+            assert(results.len <= batch_size);
+
+            // If user_data_32 != zero, it's not expected to find any object.
+            if (query_filter.user_data_32 != 0) {
+                assert(results.len == 0);
+                return;
+            }
+
+            var timestamp_last: u64 = if (query_filter.flags.reversed)
+                std.math.maxInt(u64)
+            else
+                0;
+
+            for (results) |*transfer| {
+                if (query_filter.flags.reversed) {
+                    assert(transfer.timestamp < timestamp_last);
+                } else {
+                    assert(transfer.timestamp > timestamp_last);
+                }
+                timestamp_last = transfer.timestamp;
+            }
+        }
+
         /// Verify the transfer's integrity.
         fn validate_transfer_checksum(transfer: *const tb.Transfer) void {
             const checksum_actual = transfer.user_data_128;
@@ -1188,6 +1312,8 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                     .lookup_transfers = 1 + random.uintLessThan(usize, 20),
                     .get_account_transfers = 1 + random.uintLessThan(usize, 20),
                     .get_account_balances = 1 + random.uintLessThan(usize, 20),
+                    .query_accounts = 1 + random.uintLessThan(usize, 20),
+                    .query_transfers = 1 + random.uintLessThan(usize, 20),
                 },
                 .create_account_invalid_probability = 1,
                 .create_transfer_invalid_probability = 1,
