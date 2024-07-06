@@ -311,7 +311,7 @@ pub const QueryFilter = extern struct {
     /// Must be greater than zero.
     limit: u32,
     /// Query flags.
-    flags: QueryFlags,
+    flags: QueryFilterFlags,
 
     comptime {
         assert(@sizeOf(QueryFilter) == 64);
@@ -319,14 +319,14 @@ pub const QueryFilter = extern struct {
     }
 };
 
-pub const QueryFlags = packed struct(u32) {
+pub const QueryFilterFlags = packed struct(u32) {
     /// Whether the results are sorted by timestamp in chronological or reverse-chronological order.
     reversed: bool,
     padding: u31 = 0,
 
     comptime {
-        assert(@sizeOf(QueryFlags) == @sizeOf(u32));
-        assert(@bitSizeOf(QueryFlags) == @sizeOf(QueryFlags) * 8);
+        assert(@sizeOf(QueryFilterFlags) == @sizeOf(u32));
+        assert(@bitSizeOf(QueryFilterFlags) == @sizeOf(QueryFilterFlags) * 8);
     }
 };
 

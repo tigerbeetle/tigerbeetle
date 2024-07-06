@@ -5,19 +5,9 @@
 
 package com.tigerbeetle;
 
-interface AccountFilterFlags {
+interface QueryFilterFlags {
     int NONE = (int) 0;
-    int DEBITS = (int) (1 << 0);
-    int CREDITS = (int) (1 << 1);
-    int REVERSED = (int) (1 << 2);
-
-    static boolean hasDebits(final int flags) {
-        return (flags & DEBITS) == DEBITS;
-    }
-
-    static boolean hasCredits(final int flags) {
-        return (flags & CREDITS) == CREDITS;
-    }
+    int REVERSED = (int) (1 << 0);
 
     static boolean hasReversed(final int flags) {
         return (flags & REVERSED) == REVERSED;
