@@ -147,6 +147,26 @@ public sealed class Client : IDisposable
         return nativeClient.CallRequestAsync<AccountBalance, AccountFilter>(TBOperation.GetAccountBalances, new[] { filter });
     }
 
+    public Account[] QueryAccounts(QueryFilter filter)
+    {
+        return nativeClient.CallRequest<Account, QueryFilter>(TBOperation.QueryAccounts, new[] { filter });
+    }
+
+    public Task<Account[]> QueryAccountsAsync(QueryFilter filter)
+    {
+        return nativeClient.CallRequestAsync<Account, QueryFilter>(TBOperation.QueryAccounts, new[] { filter });
+    }
+
+    public Transfer[] QueryTransfers(QueryFilter filter)
+    {
+        return nativeClient.CallRequest<Transfer, QueryFilter>(TBOperation.QueryTransfers, new[] { filter });
+    }
+
+    public Task<Transfer[]> QueryTransfersAsync(QueryFilter filter)
+    {
+        return nativeClient.CallRequestAsync<Transfer, QueryFilter>(TBOperation.QueryTransfers, new[] { filter });
+    }
+
     public void Dispose()
     {
         GC.SuppressFinalize(this);
