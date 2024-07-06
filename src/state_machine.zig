@@ -1038,29 +1038,39 @@ pub fn StateMachineType(
         fn prefetch_query_accounts(self: *StateMachine, filter: QueryFilter) void {
             assert(self.scan_lookup_result_count == null);
 
-            const scan = self.get_scan_from_query_filter(
+            if (self.get_scan_from_query_filter(
                 AccountsGroove,
                 &self.forest.grooves.accounts,
                 filter,
-            );
-            assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+            )) |scan| {
+                assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-            var scan_lookup_buffer = std.mem.bytesAsSlice(
-                Account,
-                self.scan_lookup_buffer[0 .. @sizeOf(Account) *
-                    constants.batch_max.query_accounts],
-            );
+                const scan_buffer = std.mem.bytesAsSlice(
+                    Account,
+                    self.scan_lookup_buffer[0 .. @sizeOf(Account) *
+                        constants.batch_max.query_accounts],
+                );
+                assert(scan_buffer.len <= constants.batch_max.query_accounts);
 
-            var scan_lookup = self.scan_lookup.get(.accounts);
-            scan_lookup.* = AccountsScanLookup.init(
-                &self.forest.grooves.accounts,
-                scan,
-            );
+                const scan_lookup = self.scan_lookup.get(.accounts);
+                scan_lookup.* = AccountsScanLookup.init(
+                    &self.forest.grooves.accounts,
+                    scan,
+                );
 
-            scan_lookup.read(
-                // Limiting the buffer size according to the query limit.
-                scan_lookup_buffer[0..@min(filter.limit, scan_lookup_buffer.len)],
-                &prefetch_query_accounts_callback,
+                scan_lookup.read(
+                    // Limiting the buffer size according to the query limit.
+                    scan_buffer[0..@min(filter.limit, scan_buffer.len)],
+                    &prefetch_query_accounts_callback,
+                );
+                return;
+            }
+
+            // TODO(batiati): Improve the way we do validations on the state machine.
+            log.info("invalid filter for query_accounts: {any}", .{filter});
+            self.forest.grid.on_next_tick(
+                &prefetch_scan_next_tick_callback,
+                &self.scan_lookup_next_tick,
             );
         }
 
@@ -1082,29 +1092,39 @@ pub fn StateMachineType(
         fn prefetch_query_transfers(self: *StateMachine, filter: QueryFilter) void {
             assert(self.scan_lookup_result_count == null);
 
-            const scan = self.get_scan_from_query_filter(
+            if (self.get_scan_from_query_filter(
                 TransfersGroove,
                 &self.forest.grooves.transfers,
                 filter,
-            );
-            assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+            )) |scan| {
+                assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-            var scan_lookup_buffer = std.mem.bytesAsSlice(
-                Transfer,
-                self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
-                    constants.batch_max.query_transfers],
-            );
+                var scan_buffer = std.mem.bytesAsSlice(
+                    Transfer,
+                    self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
+                        constants.batch_max.query_transfers],
+                );
+                assert(scan_buffer.len <= constants.batch_max.query_transfers);
 
-            var scan_lookup = self.scan_lookup.get(.transfers);
-            scan_lookup.* = TransfersScanLookup.init(
-                &self.forest.grooves.transfers,
-                scan,
-            );
+                var scan_lookup = self.scan_lookup.get(.transfers);
+                scan_lookup.* = TransfersScanLookup.init(
+                    &self.forest.grooves.transfers,
+                    scan,
+                );
 
-            scan_lookup.read(
-                // Limiting the buffer size according to the query limit.
-                scan_lookup_buffer[0..@min(filter.limit, scan_lookup_buffer.len)],
-                &prefetch_query_transfers_callback,
+                scan_lookup.read(
+                    // Limiting the buffer size according to the query limit.
+                    scan_buffer[0..@min(filter.limit, scan_buffer.len)],
+                    &prefetch_query_transfers_callback,
+                );
+                return;
+            }
+
+            // TODO(batiati): Improve the way we do validations on the state machine.
+            log.info("invalid filter for query_transfers: {any}", .{filter});
+            self.forest.grid.on_next_tick(
+                &prefetch_scan_next_tick_callback,
+                &self.scan_lookup_next_tick,
             );
         }
 
@@ -1128,8 +1148,18 @@ pub fn StateMachineType(
             comptime Groove: type,
             groove: *Groove,
             filter: QueryFilter,
-        ) *Groove.ScanBuilder.Scan {
+        ) ?*Groove.ScanBuilder.Scan {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+
+            const filter_valid =
+                filter.timestamp_min != std.math.maxInt(u64) and
+                filter.timestamp_max != std.math.maxInt(u64) and
+                (filter.timestamp_max == 0 or filter.timestamp_min <= filter.timestamp_max) and
+                filter.limit != 0 and
+                filter.flags.padding == 0 and
+                stdx.zeroed(&filter.reserved);
+
+            if (!filter_valid) return null;
 
             const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
             const timestamp_range: TimestampRange = .{
@@ -1538,12 +1568,14 @@ pub fn StateMachineType(
         ) usize {
             _ = input;
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
+            assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_transfers);
 
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_transfers);
             const result_size: usize = self.scan_lookup_result_count.? * @sizeOf(Transfer);
+            assert(result_size <= output.len);
+            assert(result_size <= self.scan_lookup_buffer.len);
             stdx.copy_disjoint(
                 .exact,
                 u8,
@@ -1560,11 +1592,11 @@ pub fn StateMachineType(
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
+            assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_balances);
 
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_balances);
             const filter: AccountFilter = mem.bytesToValue(
                 AccountFilter,
                 input[0..@sizeOf(AccountFilter)],
@@ -1612,25 +1644,22 @@ pub fn StateMachineType(
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             _ = input;
-            assert(self.scan_lookup_result_count != null);
+            if (self.scan_lookup_result_count == null) return 0; // invalid filter
             assert(self.scan_lookup_result_count.? <= constants.batch_max.query_accounts);
 
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const target: []Account = mem.bytesAsSlice(
-                Account,
-                output[0 .. self.scan_lookup_result_count.? *
-                    @sizeOf(Account)],
+            const result_size: usize = self.scan_lookup_result_count.? * @sizeOf(Account);
+            assert(result_size <= output.len);
+            assert(result_size <= self.scan_lookup_buffer.len);
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                output[0..result_size],
+                self.scan_lookup_buffer[0..result_size],
             );
-            const source: []const Account = mem.bytesAsSlice(
-                Account,
-                self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? *
-                    @sizeOf(Account)],
-            );
-            stdx.copy_disjoint(.inexact, Account, target, source);
-            return self.scan_lookup_result_count.? *
-                @sizeOf(Account);
+            return result_size;
         }
 
         fn execute_query_transfers(
@@ -1639,25 +1668,22 @@ pub fn StateMachineType(
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             _ = input;
-            assert(self.scan_lookup_result_count != null);
+            if (self.scan_lookup_result_count == null) return 0; // invalid filter
             assert(self.scan_lookup_result_count.? <= constants.batch_max.query_transfers);
 
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const target: []Transfer = mem.bytesAsSlice(
-                Transfer,
-                output[0 .. self.scan_lookup_result_count.? *
-                    @sizeOf(Transfer)],
+            const result_size: usize = self.scan_lookup_result_count.? * @sizeOf(Transfer);
+            assert(result_size <= output.len);
+            assert(result_size <= self.scan_lookup_buffer.len);
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                output[0..result_size],
+                self.scan_lookup_buffer[0..result_size],
             );
-            const source: []const Transfer = mem.bytesAsSlice(
-                Transfer,
-                self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? *
-                    @sizeOf(Transfer)],
-            );
-            stdx.copy_disjoint(.inexact, Transfer, target, source);
-            return self.scan_lookup_result_count.? *
-                @sizeOf(Transfer);
+            return result_size;
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
