@@ -1648,7 +1648,7 @@ public class IntegrationTest {
         }
 
         {
-            // Querying transfers where:
+            // Querying accounts where:
             // `code=999 ORDER BY timestamp ASC`.
             final var filter = new QueryFilter();
             filter.setCode(999);
@@ -1666,7 +1666,7 @@ public class IntegrationTest {
         }
 
         {
-            // Querying transfers where:
+            // Querying accounts where:
             // `code=999 ORDER BY timestamp DESC LIMIT 5`.
             final var filter = new QueryFilter();
             filter.setCode(999);
