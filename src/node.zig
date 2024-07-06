@@ -18,6 +18,8 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 const AccountFilter = tb.AccountFilter;
 const AccountFilterFlags = tb.AccountFilterFlags;
 const AccountBalance = tb.AccountBalance;
+const QueryFilter = tb.QueryFilter;
+const QueryFilterFlags = tb.QueryFilterFlags;
 
 const vsr = @import("vsr.zig");
 const Storage = vsr.storage.Storage;
@@ -388,7 +390,12 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
     for (events, 0..) |*event, i| {
         const object = try translate.array_element(env, array, @intCast(i));
         switch (Event) {
-            Account, Transfer, AccountFilter, AccountBalance => {
+            Account,
+            Transfer,
+            AccountFilter,
+            AccountBalance,
+            QueryFilter,
+            => {
                 inline for (std.meta.fields(Event)) |field| {
                     const value: field.type = switch (@typeInfo(field.type)) {
                         .Struct => |info| @bitCast(try @field(
@@ -542,7 +549,11 @@ fn BufferType(comptime op: Operation) type {
         fn event_count(operation: Operation, count: usize) usize {
             // TODO(batiati): Refine the way we handle events with asymmetric results.
             return switch (operation) {
-                .get_account_transfers, .get_account_balances => 8190,
+                .get_account_transfers,
+                .get_account_balances,
+                .query_accounts,
+                .query_transfers,
+                => 8190,
                 else => count,
             };
         }

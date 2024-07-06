@@ -94,6 +94,19 @@ export enum AccountFilterFlags {
 
 
 /**
+* See [QueryFilterFlags](https://docs.tigerbeetle.com/reference/query-filter#flags)
+*/
+export enum QueryFilterFlags {
+  none = 0,
+
+  /**
+  * See [reversed](https://docs.tigerbeetle.com/reference/query-filter#flagsreversed)
+  */
+  reversed = (1 << 0),
+}
+
+
+/**
 * See [Account](https://docs.tigerbeetle.com/reference/account/#)
 */
 export type Account = {
@@ -678,6 +691,58 @@ export type AccountFilter = {
 
   /**
   * See [flags](https://docs.tigerbeetle.com/reference/account-filter#flags)
+  */
+  flags: number
+}
+
+
+/**
+* See [QueryFilter](https://docs.tigerbeetle.com/reference/query-filter#)
+*/
+export type QueryFilter = {
+
+  /**
+  * See [user_data_128](https://docs.tigerbeetle.com/reference/query-filter#user_data_128)
+  */
+  user_data_128: bigint
+
+  /**
+  * See [user_data_64](https://docs.tigerbeetle.com/reference/query-filter#user_data_64)
+  */
+  user_data_64: bigint
+
+  /**
+  * See [user_data_32](https://docs.tigerbeetle.com/reference/query-filter#user_data_32)
+  */
+  user_data_32: number
+
+  /**
+  * See [ledger](https://docs.tigerbeetle.com/reference/query-filter#ledger)
+  */
+  ledger: number
+
+  /**
+  * See [code](https://docs.tigerbeetle.com/reference/query-filter#code)
+  */
+  code: number
+
+  /**
+  * See [timestamp_min](https://docs.tigerbeetle.com/reference/query-filter#timestamp_min)
+  */
+  timestamp_min: bigint
+
+  /**
+  * See [timestamp_max](https://docs.tigerbeetle.com/reference/query-filter#timestamp_max)
+  */
+  timestamp_max: bigint
+
+  /**
+  * See [limit](https://docs.tigerbeetle.com/reference/query-filter#limit)
+  */
+  limit: number
+
+  /**
+  * See [flags](https://docs.tigerbeetle.com/reference/query-filter#flags)
   */
   flags: number
 }

@@ -38,6 +38,11 @@ const type_mappings = .{
         .hidden_fields = &.{"padding"},
         .docs_link = "reference/account-filter#flags",
     } },
+    .{ tb.QueryFilterFlags, TypeMapping{
+        .name = "QueryFilterFlags",
+        .hidden_fields = &.{"padding"},
+        .docs_link = "reference/query-filter#flags",
+    } },
     .{ tb.Account, TypeMapping{
         .name = "Account",
         .docs_link = "reference/account/#",
@@ -64,6 +69,11 @@ const type_mappings = .{
         .name = "AccountFilter",
         .hidden_fields = &.{"reserved"},
         .docs_link = "reference/account-filter#",
+    } },
+    .{ tb.QueryFilter, TypeMapping{
+        .name = "QueryFilter",
+        .hidden_fields = &.{"reserved"},
+        .docs_link = "reference/query-filter#",
     } },
     .{ tb.AccountBalance, TypeMapping{
         .name = "AccountBalance",
