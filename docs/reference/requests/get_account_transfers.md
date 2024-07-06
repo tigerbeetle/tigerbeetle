@@ -4,7 +4,8 @@ Fetch [`Transfer`](../transfer.md)s involving a given [`Account`](../account.md)
 
 ## Event
 
-The query filter. See [`AccountFilter`](../account-filter.md) for constraints.
+The account filter.
+See [`AccountFilter`](../account-filter.md) for constraints.
 
 ## Result
 
