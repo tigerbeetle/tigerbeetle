@@ -1,6 +1,6 @@
 # `query_accounts`
 
-Query [`Account`](../account.md)s by the intersection of fields and timestamp range.
+Query [`Account`](../account.md)s by the intersection of some fields and by timestamp range.
 
 ## Event
 

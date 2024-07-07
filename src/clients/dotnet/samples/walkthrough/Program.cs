@@ -128,6 +128,7 @@ using (var client = new Client(clusterID, addresses))
         PendingId = 1,
         Flags = TransferFlags.PostPendingTransfer,
     };
+
     createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
     // error handling omitted
     // endsection:transfer-flags-post
@@ -139,6 +140,7 @@ using (var client = new Client(clusterID, addresses))
         PendingId = 1,
         Flags = TransferFlags.PostPendingTransfer,
     };
+
     createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
     // error handling omitted
     // endsection:transfer-flags-void
@@ -158,6 +160,7 @@ using (var client = new Client(clusterID, addresses))
             AccountFilterFlags.Credits | // Include transfer from the credit side.
             AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
     };
+
     transfers = client.GetAccountTransfers(filter);
     // endsection:get-account-transfers
 
@@ -172,8 +175,43 @@ using (var client = new Client(clusterID, addresses))
             AccountFilterFlags.Credits | // Include transfer from the credit side.
             AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
     };
+
     var account_balances = client.GetAccountBalances(filter);
     // endsection:get-account-balances
+
+    // section:query-accounts
+    var query_filter = new QueryFilter
+    {
+        UserData128 = 1000, // Filter by UserData.
+        UserData64 = 100,
+        UserData32 = 10,
+        Code = 1, // Filter by Code.
+        Ledger = 0, // No filter by Ledger.
+        TimestampMin = 0, // No filter by Timestamp.
+        TimestampMax = 0, // No filter by Timestamp.
+        Limit = 10, // Limit to ten balances at most.
+        Flags = QueryFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+    };
+
+    var query_accounts = client.QueryAccounts(query_filter);
+    // endsection:query-accounts
+
+    // section:query-transfers
+    query_filter = new QueryFilter
+    {
+        UserData128 = 1000, // Filter by UserData
+        UserData64 = 100,
+        UserData32 = 10,
+        Code = 1, // Filter by Code
+        Ledger = 0, // No filter by Ledger
+        TimestampMin = 0, // No filter by Timestamp.
+        TimestampMax = 0, // No filter by Timestamp.
+        Limit = 10, // Limit to ten balances at most.
+        Flags = QueryFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+    };
+
+    var query_transfers = client.QueryTransfers(query_filter);
+    // endsection:query-transfers
 
     // section:linked-events
     var batch = new System.Collections.Generic.List<Transfer>();

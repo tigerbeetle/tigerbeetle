@@ -1,6 +1,6 @@
 # `query_transfers`
 
-Query [`Transfer`](../transfer.md)s by the intersection of fields and timestamp range.
+Query [`Transfer`](../transfer.md)s by the intersection of some fields and by timestamp range.
 
 ## Event
 
