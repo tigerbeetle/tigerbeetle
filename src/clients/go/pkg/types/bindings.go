@@ -103,6 +103,20 @@ func (f AccountFilterFlags) ToUint32() uint32 {
 	return ret
 }
 
+type QueryFilterFlags struct {
+	Reversed bool
+}
+
+func (f QueryFilterFlags) ToUint32() uint32 {
+	var ret uint32 = 0
+
+	if f.Reversed {
+		ret |= (1 << 0)
+	}
+
+	return ret
+}
+
 type Account struct {
 	ID             Uint128
 	DebitsPending  Uint128
@@ -445,5 +459,24 @@ type AccountBalance struct {
 	CreditsPosted  Uint128
 	Timestamp      uint64
 	Reserved       [56]uint8
+}
+
+type QueryFilter struct {
+	UserData128  Uint128
+	UserData64   uint64
+	UserData32   uint32
+	Ledger       uint32
+	Code         uint16
+	Reserved     [6]uint8
+	TimestampMin uint64
+	TimestampMax uint64
+	Limit        uint32
+	Flags        uint32
+}
+
+func (o QueryFilter) QueryFilterFlags() QueryFilterFlags {
+	var f QueryFilterFlags
+	f.Reversed = ((o.Flags >> 0) & 0x1) == 1
+	return f
 }
 
