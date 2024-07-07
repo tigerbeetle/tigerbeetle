@@ -21,6 +21,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_workload);
 
+const stdx = @import("../stdx.zig");
+const maybe = stdx.maybe;
+
 const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
@@ -237,10 +240,18 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             );
 
             for (auditor.accounts, 0..) |*account, i| {
+                const query_intersection_index = random.uintLessThanBiased(
+                    usize,
+                    auditor.query_intersections.len,
+                );
+                const query_intersection = auditor.query_intersections[query_intersection_index];
+
                 account.* = std.mem.zeroInit(tb.Account, .{
                     .id = auditor.account_index_to_id(i),
+                    .user_data_64 = query_intersection.user_data_64,
+                    .user_data_32 = query_intersection.user_data_32,
+                    .code = query_intersection.code,
                     .ledger = 1,
-                    .code = 123,
                 });
 
                 if (chance(random, options.account_limit_probability)) {
@@ -317,8 +328,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     self.build_lookup_transfers(self.batch(u128, action, body)),
                 .get_account_transfers, .get_account_balances => @sizeOf(tb.AccountFilter) *
                     self.build_get_account_filter(self.batch(tb.AccountFilter, action, body)),
-                .query_accounts, .query_transfers => @sizeOf(tb.QueryFilter) *
-                    self.build_query_filter(self.batch(tb.QueryFilter, action, body)),
+                inline .query_accounts, .query_transfers => |action_comptime| @sizeOf(tb.QueryFilter) *
+                    self.build_query_filter(
+                    action_comptime,
+                    self.batch(tb.QueryFilter, action, body),
+                ),
             };
             assert(size <= body.len);
 
@@ -378,13 +392,15 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     std.mem.bytesAsSlice(tb.AccountFilter, request_body),
                     std.mem.bytesAsSlice(tb.AccountBalance, reply_body),
                 ),
-                .query_accounts => self.on_query_accounts(
+                .query_accounts => self.on_query(
+                    tb.Account,
                     client_index,
                     timestamp,
                     std.mem.bytesAsSlice(tb.QueryFilter, request_body),
                     std.mem.bytesAsSlice(tb.Account, reply_body),
                 ),
-                .query_transfers => self.on_query_transfers(
+                .query_transfers => self.on_query(
+                    tb.Transfer,
                     client_index,
                     timestamp,
                     std.mem.bytesAsSlice(tb.QueryFilter, request_body),
@@ -447,7 +463,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 const transfer_index = self.transfers_sent;
                 const transfer_plan = self.transfer_index_to_plan(transfer_index);
                 const transfer_id = self.transfer_index_to_id(transfer_index);
-                results[i] = self.build_transfer(transfer_id, transfer_plan, &transfers[i]) orelse {
+                results[i] = self.build_transfer(
+                    transfer_id,
+                    transfer_plan,
+                    &transfers[i],
+                ) orelse {
                     // This transfer index can't be built; stop with what we have so far.
                     // Hopefully it will be unblocked before the next `create_transfers`.
                     transfers_count = i;
@@ -632,24 +652,78 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return 1;
         }
 
-        fn build_query_filter(self: *const Self, body: []tb.QueryFilter) usize {
+        fn build_query_filter(
+            self: *const Self,
+            comptime action: Action,
+            body: []tb.QueryFilter,
+        ) usize {
+            comptime assert(action == .query_accounts or action == .query_transfers);
             assert(body.len == 1);
             const query_filter = &body[0];
-            query_filter.* = .{
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                // If user_data_32 != zero, it's not expected to find any object.
-                .user_data_32 = if (chance(self.random, 20)) 1 else 0,
-                // Code == 123 is present in all objects.
-                .code = if (chance(self.random, 20)) 123 else 0,
-                .ledger = 0,
-                .limit = self.random.int(u32),
-                .flags = .{
-                    .reversed = self.random.boolean(),
-                },
-                .timestamp_min = 0,
-                .timestamp_max = 0,
+
+            const batch_max = switch (action) {
+                .query_accounts => AccountingStateMachine.constants.batch_max.query_accounts,
+                .query_transfers => AccountingStateMachine.constants.batch_max.query_accounts,
+                else => unreachable,
             };
+
+            if (chance(self.random, self.options.query_filter_not_found_probability)) {
+                query_filter.* = .{
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .code = 0,
+                    .ledger = 999, // Non-existent ledger
+                    .limit = batch_max,
+                    .flags = .{
+                        .reversed = false,
+                    },
+                    .timestamp_min = 0,
+                    .timestamp_max = 0,
+                };
+            } else {
+                const query_intersection_index = self.random.uintLessThanBiased(
+                    usize,
+                    self.auditor.query_intersections.len,
+                );
+                const query_intersection = self.auditor.query_intersections[query_intersection_index];
+
+                query_filter.* = .{
+                    .user_data_128 = 0,
+                    .user_data_64 = query_intersection.user_data_64,
+                    .user_data_32 = query_intersection.user_data_32,
+                    .code = query_intersection.code,
+                    .ledger = 0,
+                    .limit = self.random.int(u32),
+                    .flags = .{
+                        .reversed = self.random.boolean(),
+                    },
+                    .timestamp_min = 0,
+                    .timestamp_max = 0,
+                };
+
+                // Maybe filter by timestamp:
+                const state = switch (action) {
+                    .query_accounts => &query_intersection.accounts,
+                    .query_transfers => &query_intersection.transfers,
+                    else => unreachable,
+                };
+
+                if (state.count > 1 and state.count <= batch_max and
+                    chance(self.random, self.options.query_filter_timestamp_range_probability))
+                {
+                    // Excluding the first or last object:
+                    if (query_filter.flags.reversed) {
+                        query_filter.timestamp_min = state.timestamp_min;
+                        query_filter.timestamp_max = state.timestamp_max - 1;
+                    } else {
+                        query_filter.timestamp_min = state.timestamp_min + 1;
+                        query_filter.timestamp_max = state.timestamp_max;
+                    }
+                    // Later we can assert that results.len == count - 1:
+                    query_filter.limit = state.count;
+                }
+            }
 
             return 1;
         }
@@ -709,18 +783,24 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }) orelse return null;
             assert(!limit_credits or credit_account.flags.credits_must_not_exceed_debits);
 
+            const query_intersection_index = self.random.uintLessThanBiased(
+                usize,
+                self.auditor.query_intersections.len,
+            );
+            const query_intersection = self.auditor.query_intersections[query_intersection_index];
+
             transfer.* = .{
                 .id = transfer_id,
                 .debit_account_id = debit_account.id,
                 .credit_account_id = credit_account.id,
                 // "user_data_128" will be set to a checksum of the Transfer.
                 .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
+                .user_data_64 = query_intersection.user_data_64,
+                .user_data_32 = query_intersection.user_data_32,
+                .code = query_intersection.code,
                 .pending_id = 0,
                 .timeout = 0,
                 .ledger = transfer_template.ledger,
-                .code = 123,
                 .flags = .{},
                 // +1 to avoid `.amount_must_not_be_zero`.
                 .amount = 1 + @as(u128, self.random.int(u8)),
@@ -760,11 +840,16 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     const pending_transfer = self.auditor.pending_transfers.getPtr(previous.?).?;
                     const dr = pending_transfer.debit_account_index;
                     const cr = pending_transfer.credit_account_index;
+                    const pending_query_intersection = self.auditor
+                        .query_intersections[pending_transfer.query_intersection_index];
                     // Don't use the default '0' parameters because the StateMachine overwrites 0s
                     // with the pending transfer's values, invalidating the post/void transfer
                     // checksum.
                     transfer.debit_account_id = self.auditor.account_index_to_id(dr);
                     transfer.credit_account_id = self.auditor.account_index_to_id(cr);
+                    transfer.user_data_64 = pending_query_intersection.user_data_64;
+                    transfer.user_data_32 = pending_query_intersection.user_data_32;
+                    transfer.code = pending_query_intersection.code;
                     if (method == .post_pending) {
                         transfer.amount = self.random.intRangeAtMost(
                             u128,
@@ -1147,79 +1232,95 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }
 
-        fn on_query_accounts(
+        fn on_query(
             self: *Self,
+            comptime Object: type,
             client_index: usize,
             timestamp: u64,
             body: []const tb.QueryFilter,
-            results: []const tb.Account,
+            results: []const Object,
         ) void {
-            _ = self;
             _ = client_index;
             _ = timestamp;
             assert(body.len == 1);
 
-            const batch_size = AccountingStateMachine.constants.batch_max.query_accounts;
-            const query_filter = &body[0];
-            assert(results.len <= query_filter.limit);
-            assert(results.len <= batch_size);
+            const batch_size = switch (Object) {
+                tb.Account => AccountingStateMachine.constants.batch_max.query_accounts,
+                tb.Transfer => AccountingStateMachine.constants.batch_max.query_transfers,
+                else => unreachable,
+            };
 
-            // If user_data_32 != zero, it's not expected to find any object.
-            if (query_filter.user_data_32 != 0) {
+            const filter = &body[0];
+
+            if (filter.ledger != 0) {
+                // No results expected.
                 assert(results.len == 0);
                 return;
             }
 
-            var timestamp_last: u64 = if (query_filter.flags.reversed)
-                std.math.maxInt(u64)
-            else
-                0;
+            assert(filter.user_data_64 != 0);
+            assert(filter.user_data_32 != 0);
+            assert(filter.code != 0);
+            assert(filter.user_data_128 == 0);
+            assert(filter.ledger == 0);
+            maybe(filter.limit == 0);
+            maybe(filter.timestamp_min == 0);
+            maybe(filter.timestamp_max == 0);
 
-            for (results) |*account| {
-                if (query_filter.flags.reversed) {
-                    assert(account.timestamp < timestamp_last);
-                } else {
-                    assert(account.timestamp > timestamp_last);
-                }
-                timestamp_last = account.timestamp;
-            }
-        }
+            const query_intersection_index = filter.code - 1;
+            const query_intersection = self.auditor.query_intersections[query_intersection_index];
+            const state = switch (Object) {
+                tb.Account => &query_intersection.accounts,
+                tb.Transfer => &query_intersection.transfers,
+                else => unreachable,
+            };
 
-        fn on_query_transfers(
-            self: *Self,
-            client_index: usize,
-            timestamp: u64,
-            body: []const tb.QueryFilter,
-            results: []const tb.Transfer,
-        ) void {
-            _ = self;
-            _ = client_index;
-            _ = timestamp;
-            assert(body.len == 1);
-
-            const batch_size = AccountingStateMachine.constants.batch_max.query_transfers;
-            const query_filter = &body[0];
-            assert(results.len <= query_filter.limit);
+            assert(results.len <= filter.limit);
             assert(results.len <= batch_size);
 
-            // If user_data_32 != zero, it's not expected to find any object.
-            if (query_filter.user_data_32 != 0) {
-                assert(results.len == 0);
-                return;
+            if (filter.timestamp_min > 0 or filter.timestamp_max > 0) {
+                assert(filter.limit <= state.count);
+                assert(filter.timestamp_min > 0);
+                assert(filter.timestamp_max > 0);
+                assert(filter.timestamp_min <= filter.timestamp_max);
+
+                // Filtering by timestamp always exclude one single result.
+                assert(results.len == filter.limit - 1);
+            } else {
+                assert(results.len == @min(
+                    filter.limit,
+                    batch_size,
+                    state.count,
+                ));
             }
 
-            var timestamp_last: u64 = if (query_filter.flags.reversed)
+            var timestamp_previous: u64 = if (filter.flags.reversed)
                 std.math.maxInt(u64)
             else
                 0;
 
-            for (results) |*transfer| {
-                if (query_filter.flags.reversed) {
-                    assert(transfer.timestamp < timestamp_last);
+            for (results) |*result| {
+                if (filter.flags.reversed) {
+                    assert(result.timestamp < timestamp_previous);
                 } else {
-                    assert(transfer.timestamp > timestamp_last);
+                    assert(result.timestamp > timestamp_previous);
                 }
-                timestamp_last = transfer.timestamp;
+                timestamp_previous = result.timestamp;
+
+                if (filter.timestamp_min > 0) {
+                    assert(result.timestamp >= filter.timestamp_min);
+                }
+                if (filter.timestamp_max > 0) {
+                    assert(result.timestamp <= filter.timestamp_max);
+                }
+
+                assert(result.user_data_64 == filter.user_data_64);
+                assert(result.user_data_32 == filter.user_data_32);
+                assert(result.code == filter.code);
+
+                if (Object == tb.Transfer) {
+                    validate_transfer_checksum(result);
+                }
             }
         }
 
@@ -1254,6 +1355,9 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
 
         account_filter_invalid_account_probability: u8, // ≤ 100
         account_filter_timestamp_range_probability: u8, // ≤ 100
+
+        query_filter_not_found_probability: u8, // ≤ 100
+        query_filter_timestamp_range_probability: u8, // ≤ 100
 
         lookup_transfer: std.enums.EnumFieldStruct(enum {
             /// Query a transfer that has either been committed or rejected.
@@ -1325,6 +1429,9 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
 
                 .account_filter_invalid_account_probability = 1 + random.uintLessThan(u8, 20),
                 .account_filter_timestamp_range_probability = 1 + random.uintLessThan(u8, 80),
+
+                .query_filter_not_found_probability = 1 + random.uintLessThan(u8, 20),
+                .query_filter_timestamp_range_probability = 1 + random.uintLessThan(u8, 80),
 
                 .lookup_transfer = .{
                     .delivered = 1 + random.uintLessThan(usize, 10),
