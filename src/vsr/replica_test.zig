@@ -433,6 +433,21 @@ test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
     try c.request(1, 0);
 }
 
+test "Cluster: network: partition flexible quorum" {
+    // Two out of four replicas should be able to carry on as long the pair includes the primary.
+    const t = try TestContext.init(.{ .replica_count = 4 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+
+    t.run();
+    t.replica(.B2).stop();
+    t.replica(.B3).stop();
+    for (0..3) |_| t.run(); // Give enough time for the clocks to desync.
+
+    try c.request(4, 4);
+}
+
 test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     // A backup that has fallen behind by two checkpoints can catch up, without using state sync.
     const t = try TestContext.init(.{ .replica_count = 3 });
