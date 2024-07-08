@@ -1,13 +1,13 @@
-/// Runs a set of macro-benchmarks whose result is displayed at <https://tigerbeetle.github.io>.
-///
-/// Specifically:
-///
-/// - This script is run by the CI infrastructure on every merge to main.
-/// - It runs a set of "benchmarks", where a "benchmark" can be anything (eg, measuring the size of
-///   the binary).
-/// - The results of all measurements are serialized as a single JSON object, `Run`.
-/// - The key part: this JSON is then stored in a "distributed database" for our visualization
-///   front-end to pick up. This "database" is just a newline-delimited JSON file in a git repo
+//! Runs a set of macro-benchmarks whose result is displayed at <https://tigerbeetle.github.io>.
+//!
+//! Specifically:
+//!
+//! - This script is run by the CI infrastructure on every merge to main.
+//! - It runs a set of "benchmarks", where a "benchmark" can be anything (eg, measuring the size of
+//!   the binary).
+//! - The results of all measurements are serialized as a single JSON object, `Run`.
+//! - The key part: this JSON is then stored in a "distributed database" for our visualization
+//!   front-end to pick up. This "database" is just a newline-delimited JSON file in a git repo
 const std = @import("std");
 
 const stdx = @import("../stdx.zig");
