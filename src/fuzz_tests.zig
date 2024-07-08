@@ -9,7 +9,7 @@ const fatal = flags.fatal;
 const log = std.log.scoped(.fuzz);
 
 // NB: this changes values in `constants.zig`!
-pub const tigerbeetle_config = @import("config.zig").configs.fuzz_min;
+pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 comptime {
     assert(constants.storage_size_limit_max == tigerbeetle_config.process.storage_size_limit_max);
 }

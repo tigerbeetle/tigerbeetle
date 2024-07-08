@@ -134,14 +134,17 @@ pub fn main() !void {
         batch_size_limit_min +
             random.uintAtMost(u32, constants.message_body_size_max - batch_size_limit_min);
 
+    const MiB = 1024 * 1024;
+    const storage_size_limit = vsr.sector_floor(
+        200 * MiB - random.uintLessThan(u64, 20 * MiB),
+    );
+
     const cluster_options = Cluster.Options{
         .cluster_id = cluster_id,
         .replica_count = replica_count,
         .standby_count = standby_count,
         .client_count = client_count,
-        .storage_size_limit = vsr.sector_floor(
-            constants.storage_size_limit_max - random.uintLessThan(u64, constants.storage_size_limit_max / 10),
-        ),
+        .storage_size_limit = storage_size_limit,
         .seed = random.int(u64),
         .releases = &releases,
         .network = .{

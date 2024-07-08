@@ -207,8 +207,9 @@ test "Cluster: recovery: grid corruption (disjoint)" {
         t.replica(.R1),
         t.replica(.R2),
     }, 0..) |replica, i| {
+        const address_max = t.block_address_max();
         var address: u64 = 1 + i; // Addresses start at 1.
-        while (address <= Storage.grid_blocks_max) : (address += 3) {
+        while (address <= address_max) : (address += 3) {
             // Leave every third address un-corrupt.
             // Each block exists intact on exactly one replica.
             replica.corrupt(.{ .grid_block = address + 1 });
@@ -1367,8 +1368,9 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     // Note that we intentionally do *not* shut down B2 for this – the intent is to test the
     // scrubber, without leaning on Grid.read_block()'s `from_local_or_global_storage`.
     {
+        const address_max = t.block_address_max();
         var address: u64 = 1;
-        while (address <= Storage.grid_blocks_max) : (address += 1) {
+        while (address <= address_max) : (address += 1) {
             b2.corrupt(.{ .grid_block = address });
         }
     }
@@ -1393,8 +1395,9 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     }
 
     // Verify that B2 repaired all blocks.
+    const address_max = t.block_address_max();
     var address: u64 = 1;
-    while (address <= Storage.grid_blocks_max) : (address += 1) {
+    while (address <= address_max) : (address += 1) {
         if (a0_free_set.is_free(address)) {
             assert(b2_free_set.is_free(address));
             assert(b2_storage.area_faulty(.{ .grid = .{ .address = address } }));
@@ -1494,7 +1497,7 @@ const TestContext = struct {
             .replica_count = options.replica_count,
             .standby_count = options.standby_count,
             .client_count = options.client_count,
-            .storage_size_limit = vsr.sector_floor(constants.storage_size_limit_max),
+            .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
             .seed = random.int(u64),
             .releases = &releases,
             .network = .{
@@ -1581,6 +1584,14 @@ const TestContext = struct {
         while (tick_count < tick_max) : (tick_count += 1) {
             if (t.tick()) tick_count = 0;
         }
+    }
+
+    pub fn block_address_max(t: *TestContext) u64 {
+        const grid_blocks = t.cluster.storages[0].grid_blocks();
+        for (t.cluster.storages) |storage| {
+            assert(storage.grid_blocks() == grid_blocks);
+        }
+        return grid_blocks; // NB: no -1 needed, addresses start from 1.
     }
 
     /// Returns whether the cluster state advanced.
@@ -2035,8 +2046,9 @@ const TestReplicas = struct {
         for (got.replicas.const_slice()) |replica_index| {
             const got_replica: *const Cluster.Replica = &got.cluster.replicas[replica_index];
 
+            const address_max = want.context.block_address_max();
             var address: u64 = 1;
-            while (address <= Storage.grid_blocks_max) : (address += 1) {
+            while (address <= address_max) : (address += 1) {
                 const address_free = want_replica.grid.free_set.is_free(address);
                 assert(address_free == got_replica.grid.free_set.is_free(address));
                 if (address_free) continue;
