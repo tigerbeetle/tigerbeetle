@@ -197,15 +197,10 @@ typedef enum TB_OPERATION {
 typedef enum TB_PACKET_STATUS {
     TB_PACKET_OK = 0,
     TB_PACKET_TOO_MUCH_DATA = 1,
-    TB_PACKET_INVALID_OPERATION = 2,
-    TB_PACKET_INVALID_DATA_SIZE = 3,
+    TB_PACKET_CLIENT_SHUTDOWN = 2,
+    TB_PACKET_INVALID_OPERATION = 3,
+    TB_PACKET_INVALID_DATA_SIZE = 4,
 } TB_PACKET_STATUS;
-
-typedef enum TB_PACKET_ACQUIRE_STATUS {
-    TB_PACKET_ACQUIRE_OK = 0,
-    TB_PACKET_ACQUIRE_CONCURRENCY_MAX_EXCEEDED = 1,
-    TB_PACKET_ACQUIRE_SHUTDOWN = 2,
-} TB_PACKET_ACQUIRE_STATUS;
 
 typedef struct tb_packet_t {
     struct tb_packet_t* next;
@@ -228,9 +223,8 @@ typedef enum TB_STATUS {
     TB_STATUS_OUT_OF_MEMORY = 2,
     TB_STATUS_ADDRESS_INVALID = 3,
     TB_STATUS_ADDRESS_LIMIT_EXCEEDED = 4,
-    TB_STATUS_CONCURRENCY_MAX_INVALID = 5,
-    TB_STATUS_SYSTEM_RESOURCES = 6,
-    TB_STATUS_NETWORK_SUBSYSTEM = 7,
+    TB_STATUS_SYSTEM_RESOURCES = 5,
+    TB_STATUS_NETWORK_SUBSYSTEM = 6,
 } TB_STATUS;
 
 TB_STATUS tb_client_init(
@@ -238,7 +232,6 @@ TB_STATUS tb_client_init(
     tb_uint128_t cluster_id,
     const char* address_ptr,
     uint32_t address_len,
-    uint32_t packets_count,
     uintptr_t on_completion_ctx,
     void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
 );
@@ -248,19 +241,12 @@ TB_STATUS tb_client_init_echo(
     tb_uint128_t cluster_id,
     const char* address_ptr,
     uint32_t address_len,
-    uint32_t packets_count,
     uintptr_t on_completion_ctx,
     void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
 );
 
-TB_PACKET_ACQUIRE_STATUS tb_client_acquire_packet(
-    tb_client_t client,
-    tb_packet_t** out_packet
-);
-
-void tb_client_release_packet(
-    tb_client_t client,
-    tb_packet_t* packet
+uintptr_t tb_client_completion_context(
+    tb_client_t client
 );
 
 void tb_client_submit(
