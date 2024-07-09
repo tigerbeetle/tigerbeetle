@@ -788,21 +788,12 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             // Otherwise pick a random FuzzOp.
             fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
         fuzz_op.* = switch (fuzz_op_tag) {
-            .compact => compact: {
-                const compact_op = op;
+            .compact => action: {
+                const action = generate_compact(random, .{
+                    .op = op,
+                });
                 op += 1;
-                const is_checkpoint =
-                    // Can only checkpoint on the last beat of the bar.
-                    compact_op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-                    compact_op > constants.lsm_batch_multiple and
-                    // Checkpoint at roughly the same rate as log wraparound.
-                    random.uintLessThan(usize, compacts_per_checkpoint) == 0;
-                break :compact FuzzOp{
-                    .compact = .{
-                        .op = compact_op,
-                        .checkpoint = is_checkpoint,
-                    },
-                };
+                break :action action;
             },
             .put => FuzzOp{ .put = .{
                 .id = random_id(random, u64),
@@ -836,6 +827,22 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     }
 
     return fuzz_ops;
+}
+
+fn generate_compact(
+    random: std.rand.Random,
+    options: struct { op: u64 },
+) FuzzOp {
+    const checkpoint =
+        // Can only checkpoint on the last beat of the bar.
+        options.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
+        options.op > constants.lsm_batch_multiple and
+        // Checkpoint at roughly the same rate as log wraparound.
+        random.uintLessThan(usize, compacts_per_checkpoint) == 0;
+    return FuzzOp{ .compact = .{
+        .op = options.op,
+        .checkpoint = checkpoint,
+    } };
 }
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
