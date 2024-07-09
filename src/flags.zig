@@ -677,6 +677,13 @@ test "flags" {
             var tmp_dir = std.testing.tmpDir(.{});
             errdefer tmp_dir.cleanup();
 
+            const tmp_dir_path = try std.fs.path.join(gpa, &.{
+                ".zig-cache",
+                "tmp",
+                &tmp_dir.sub_path,
+            });
+            defer gpa.free(tmp_dir_path);
+
             const output_buf = std.ArrayList(u8).init(gpa);
             errdefer output_buf.deinit();
 
@@ -689,7 +696,7 @@ test "flags" {
                 const exec_result = try std.process.Child.run(.{
                     .allocator = gpa,
                     .argv = &argv,
-                    .cwd_dir = tmp_dir.dir,
+                    .cwd = tmp_dir_path,
                 });
                 defer gpa.free(exec_result.stdout);
                 defer gpa.free(exec_result.stderr);

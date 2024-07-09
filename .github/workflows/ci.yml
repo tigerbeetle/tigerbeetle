@@ -69,6 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: .\scripts\install_zig.bat
+      - run: .\zig\zig build test
       - run: .\zig\zig build clients:c:sample
 
   test_macos:
