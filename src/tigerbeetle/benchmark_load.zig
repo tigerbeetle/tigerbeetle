@@ -106,6 +106,10 @@ pub fn main(
     );
     defer batch_transfers.deinit(allocator);
 
+    var batch_account_ids =
+        try std.ArrayListUnmanaged(u128).initCapacity(allocator, cli_args.account_batch_size);
+    defer batch_account_ids.deinit(allocator);
+
     var statsd_opt: ?StatsD = null;
     defer if (statsd_opt) |*statsd| statsd.deinit(allocator);
 
@@ -161,6 +165,7 @@ pub fn main(
         .statsd = if (statsd_opt) |*statsd| statsd else null,
         .print_batch_timings = cli_args.print_batch_timings,
         .id_order = cli_args.id_order,
+        .batch_account_ids = batch_account_ids,
     };
 
     benchmark.client.register(Benchmark.register_callback, @intCast(@intFromPtr(&benchmark)));
@@ -171,6 +176,17 @@ pub fn main(
     benchmark.done = false;
 
     benchmark.create_accounts();
+
+    while (!benchmark.done) {
+        benchmark.client.tick();
+        try benchmark.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    }
+    benchmark.done = false;
+
+    // Reset our state so we can check our work.
+    benchmark.rng = rng;
+    benchmark.account_index = 0;
+    benchmark.validate_accounts();
 
     while (!benchmark.done) {
         benchmark.client.tick();
@@ -210,6 +226,7 @@ const Benchmark = struct {
     statsd: ?*StatsD,
     print_batch_timings: bool,
     id_order: cli.Command.Benchmark.IdOrder,
+    batch_account_ids: std.ArrayListUnmanaged(u128),
 
     fn create_accounts(b: *Benchmark) void {
         if (b.account_index >= b.account_count) {
@@ -481,6 +498,71 @@ const Benchmark = struct {
         print_percentiles_histogram(stdout, "query", b.query_latency_histogram);
 
         b.done = true;
+    }
+
+    fn validate_accounts(b: *Benchmark) void {
+        if (b.account_index >= b.account_count) {
+            b.done = true;
+            return;
+        }
+
+        const random = b.rng.random();
+
+        // Reset batch.
+        b.batch_accounts.clearRetainingCapacity();
+        b.batch_account_ids.clearRetainingCapacity();
+
+        // Fill batch.
+        while (b.account_index < b.account_count and
+            b.batch_accounts.items.len < b.batch_accounts.capacity)
+        {
+            const id = b.account_id_permutation.encode(b.account_index + 1);
+            b.batch_accounts.appendAssumeCapacity(.{
+                .id = id,
+                .user_data_128 = random.int(u128),
+                .user_data_64 = random.int(u64),
+                .user_data_32 = random.int(u32),
+                .reserved = 0,
+                .ledger = 2,
+                .code = 1,
+                .flags = .{
+                    .history = b.account_balances,
+                },
+                .debits_pending = 0,
+                .debits_posted = 0,
+                .credits_pending = 0,
+                .credits_posted = 0,
+            });
+            b.batch_account_ids.appendAssumeCapacity(id);
+            b.account_index += 1;
+        }
+
+        b.send(
+            validate_finish,
+            .lookup_accounts,
+            std.mem.sliceAsBytes(b.batch_account_ids.items),
+        );
+    }
+
+    fn validate_finish(
+        b: *Benchmark,
+        operation: StateMachine.Operation,
+        result: []const u8,
+    ) void {
+        std.debug.assert(operation == .lookup_accounts);
+
+        const accounts = std.mem.bytesAsSlice(tb.Account, result);
+
+        for (b.batch_accounts.items, accounts) |expected, actual| {
+            assert(expected.id == actual.id);
+            assert(expected.user_data_128 == actual.user_data_128);
+            assert(expected.user_data_64 == actual.user_data_64);
+            assert(expected.user_data_32 == actual.user_data_32);
+            assert(expected.code == actual.code);
+            assert(@as(u16, @bitCast(expected.flags)) == @as(u16, @bitCast(actual.flags)));
+        }
+
+        b.validate_accounts();
     }
 
     fn send(
