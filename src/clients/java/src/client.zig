@@ -388,7 +388,11 @@ const ReflectionHelper = struct {
             &[_]jni.JValue{jni.JValue.to_jvalue(@as(jni.JInt, @bitCast(@intFromEnum(status))))},
         ) orelse {
             // It's unexpected here: we did not initialize correctly or the JVM is out of memory.
-            JNIHelper.vm_panic(env, "Unexpected error creating a new InitializationException.", .{});
+            JNIHelper.vm_panic(
+                env,
+                "Unexpected error creating a new InitializationException.",
+                .{},
+            );
         };
         defer env.delete_local_ref(exception);
 

@@ -77,13 +77,25 @@ const type_mappings = .{
     .{ tb.Account, TypeMapping{
         .name = "AccountBatch",
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
+        .readonly_fields = &.{
+            "debits_pending",
+            "credits_pending",
+            "debits_posted",
+            "credits_posted",
+            "timestamp",
+        },
         .docs_link = "reference/account#",
     } },
     .{ tb.AccountBalance, TypeMapping{
         .name = "AccountBalanceBatch",
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
+        .readonly_fields = &.{
+            "debits_pending",
+            "credits_pending",
+            "debits_posted",
+            "credits_posted",
+            "timestamp",
+        },
         .docs_link = "reference/account-balances#",
     } },
     .{ tb.Transfer, TypeMapping{
@@ -624,7 +636,7 @@ fn emit_u128_batch_accessors(
             \\    {[visibility]s}BigInteger get{[property]s}() {{
             \\        final var index = at(Struct.{[property]s});
             \\        return UInt128.asBigInteger(
-            \\            getUInt128(index, UInt128.LeastSignificant), 
+            \\            getUInt128(index, UInt128.LeastSignificant),
             \\            getUInt128(index, UInt128.MostSignificant));
             \\    }}
             \\

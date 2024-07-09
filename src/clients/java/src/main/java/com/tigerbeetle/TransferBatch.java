@@ -214,7 +214,7 @@ public final class TransferBatch extends Batch {
     public BigInteger getAmount() {
         final var index = at(Struct.Amount);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 

@@ -741,7 +741,10 @@ public struct AccountFilter
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            if (value.Length != SIZE)
+            {
+                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            }
 
             fixed (void* ptr = raw)
             {
@@ -817,7 +820,10 @@ public struct AccountBalance
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            if (value.Length != SIZE)
+            {
+                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            }
 
             fixed (void* ptr = raw)
             {
@@ -953,7 +959,10 @@ internal unsafe struct TBPacket
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            if (value.Length != SIZE)
+            {
+                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            }
 
             fixed (void* ptr = raw)
             {
