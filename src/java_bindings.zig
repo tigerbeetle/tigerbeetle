@@ -77,13 +77,25 @@ const type_mappings = .{
     .{ tb.Account, TypeMapping{
         .name = "AccountBatch",
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
+        .readonly_fields = &.{
+            "debits_pending",
+            "credits_pending",
+            "debits_posted",
+            "credits_posted",
+            "timestamp",
+        },
         .docs_link = "reference/account#",
     } },
     .{ tb.AccountBalance, TypeMapping{
         .name = "AccountBalanceBatch",
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
+        .readonly_fields = &.{
+            "debits_pending",
+            "credits_pending",
+            "debits_posted",
+            "credits_posted",
+            "timestamp",
+        },
         .docs_link = "reference/account-balances#",
     } },
     .{ tb.Transfer, TypeMapping{
@@ -624,7 +636,7 @@ fn emit_u128_batch_accessors(
             \\    {[visibility]s}BigInteger get{[property]s}() {{
             \\        final var index = at(Struct.{[property]s});
             \\        return UInt128.asBigInteger(
-            \\            getUInt128(index, UInt128.LeastSignificant), 
+            \\            getUInt128(index, UInt128.LeastSignificant),
             \\            getUInt128(index, UInt128.MostSignificant));
             \\    }}
             \\
@@ -673,7 +685,8 @@ fn emit_u128_batch_accessors(
     // Get long:
     try buffer.writer().print(
         \\    /**
-        \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value is to be retrieved.
+        \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value
+        \\              is to be retrieved.
         \\     * @return a {{@code long}} representing the first 8 bytes of the 128-bit value if
         \\     *         {{@link UInt128#LeastSignificant}} is informed, or the last 8 bytes if
         \\     *         {{@link UInt128#MostSignificant}}.

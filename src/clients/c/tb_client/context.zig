@@ -450,7 +450,10 @@ pub fn ContextType(
                     while (it) |batched| {
                         it = batched.batch_next;
 
-                        const event_count = @divExact(batched.data_size, @sizeOf(StateMachine.Event(operation)));
+                        const event_count = @divExact(
+                            batched.data_size,
+                            @sizeOf(StateMachine.Event(operation)),
+                        );
                         const results = demuxer.decode(event_offset, event_count);
                         event_offset += event_count;
 
@@ -490,7 +493,10 @@ pub fn ContextType(
             return @alignCast(@fieldParentPtr("implementation", implementation));
         }
 
-        fn on_acquire_packet(implementation: *ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus {
+        fn on_acquire_packet(
+            implementation: *ContextImplementation,
+            out_packet: *?*Packet,
+        ) PacketAcquireStatus {
             const self = get_context(implementation);
 
             // During shutdown, no packet can be acquired by the application.

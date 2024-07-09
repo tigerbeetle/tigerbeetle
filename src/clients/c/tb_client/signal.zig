@@ -39,16 +39,27 @@ pub const Signal = struct {
         ) catch |err| {
             log.err("failed to create signal server socket: {}", .{err});
             return switch (err) {
-                error.PermissionDenied, error.ProtocolNotSupported, error.SocketTypeNotSupported, error.AddressFamilyNotSupported, error.ProtocolFamilyNotAvailable => error.NetworkSubsystemFailed,
-                error.ProcessFdQuotaExceeded, error.SystemFdQuotaExceeded, error.SystemResources => error.SystemResources,
+                error.PermissionDenied,
+                error.ProtocolNotSupported,
+                error.SocketTypeNotSupported,
+                error.AddressFamilyNotSupported,
+                error.ProtocolFamilyNotAvailable,
+                => error.NetworkSubsystemFailed,
+
+                error.ProcessFdQuotaExceeded,
+                error.SystemFdQuotaExceeded,
+                error.SystemResources,
+                => error.SystemResources,
+
                 error.Unexpected => error.Unexpected,
             };
         };
         errdefer self.io.close_socket(self.server_socket);
 
-        // Windows requires that the socket is bound before listening
+        // Windows requires that the socket is bound before listening.
         if (builtin.target.os.tag == .windows) {
-            const addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0); // zero port lets the OS choose
+            // Port zero lets the OS choose.
+            const addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0);
             std.posix.bind(self.server_socket, &addr.any, addr.getOsSockLen()) catch |err| {
                 log.err("failed to bind the server socket to a local random port: {}", .{err});
                 return switch (err) {
@@ -73,7 +84,9 @@ pub const Signal = struct {
                 error.FileDescriptorNotASocket => unreachable,
                 error.AlreadyConnected => unreachable,
                 error.SocketNotBound => unreachable,
-                error.OperationNotSupported, error.NetworkSubsystemFailed => error.NetworkSubsystemFailed,
+                error.OperationNotSupported,
+                error.NetworkSubsystemFailed,
+                => error.NetworkSubsystemFailed,
                 error.SystemResources => error.SystemResources,
                 error.Unexpected => error.Unexpected,
             };
@@ -102,7 +115,7 @@ pub const Signal = struct {
         };
         errdefer self.io.close_socket(self.connect_socket);
 
-        // Tracks when the connect_socket connects to the server_socket
+        // Tracks when the connect_socket connects to the server_socket.
         const DoConnect = struct {
             result: IO.ConnectError!void = undefined,
             completion: IO.Completion = undefined,
@@ -138,17 +151,28 @@ pub const Signal = struct {
                 return error.Unexpected;
             };
 
-            // Try to accept the connection from the connect_socket as the accept_socket
+            // Try to accept the connection from the connect_socket as the accept_socket.
             if (self.accept_socket == IO.INVALID_SOCKET) {
-                self.accept_socket = std.posix.accept(self.server_socket, null, null, 0) catch |e| switch (e) {
+                self.accept_socket = std.posix.accept(
+                    self.server_socket,
+                    null,
+                    null,
+                    0,
+                ) catch |e| switch (e) {
                     error.WouldBlock => continue,
                     error.ConnectionAborted => unreachable,
                     error.ConnectionResetByPeer => unreachable,
                     error.FileDescriptorNotASocket => unreachable,
-                    error.ProcessFdQuotaExceeded, error.SystemFdQuotaExceeded, error.SystemResources => return error.SystemResources,
+                    error.ProcessFdQuotaExceeded,
+                    error.SystemFdQuotaExceeded,
+                    error.SystemResources,
+                    => return error.SystemResources,
                     error.SocketNotListening => unreachable,
                     error.BlockedByFirewall => unreachable,
-                    error.ProtocolFailure, error.OperationNotSupported, error.NetworkSubsystemFailed => return error.NetworkSubsystemFailed,
+                    error.ProtocolFailure,
+                    error.OperationNotSupported,
+                    error.NetworkSubsystemFailed,
+                    => return error.NetworkSubsystemFailed,
                     error.Unexpected => return error.Unexpected,
                 };
             }
@@ -227,7 +251,7 @@ pub const Signal = struct {
             self,
             on_timeout,
             &self.completion,
-            0, // zero-timeout functions as a yield
+            0, // zero-timeout functions as a yield.
         );
     }
 

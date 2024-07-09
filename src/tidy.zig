@@ -98,7 +98,6 @@ const DeadDetector = struct {
     }
 
     fn deinit(detector: *DeadDetector) void {
-        assert(detector.files.count() == 0); // Sanity-check that `.finish` was called.
         detector.files.deinit();
     }
 
@@ -382,24 +381,6 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "clients/c/tb_client.zig",
-    "clients/c/tb_client/context.zig",
-    "clients/c/tb_client/signal.zig",
-    "clients/c/test.zig",
-    "clients/dotnet/docs.zig",
-    "dotnet_bindings.zig",
-    "go_bindings.zig",
-    "clients/java/docs.zig",
-    "java_bindings.zig",
-    "clients/java/src/client.zig",
-    "clients/java/src/jni_tests.zig",
-    "node_bindings.zig",
-    "node.zig",
-    "clients/node/src/translate.zig",
-    "config.zig",
-    "constants.zig",
-    "io/darwin.zig",
-    "io/windows.zig",
     "lsm/binary_search.zig",
     "lsm/binary_search_benchmark.zig",
     "lsm/forest_fuzz.zig",

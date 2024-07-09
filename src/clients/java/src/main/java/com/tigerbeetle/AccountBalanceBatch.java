@@ -48,12 +48,13 @@ public final class AccountBalanceBatch extends Batch {
     public BigInteger getDebitsPending() {
         final var index = at(Struct.DebitsPending);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 
     /**
-     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value
+              is to be retrieved.
      * @return a {@code long} representing the first 8 bytes of the 128-bit value if
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
@@ -103,12 +104,13 @@ public final class AccountBalanceBatch extends Batch {
     public BigInteger getDebitsPosted() {
         final var index = at(Struct.DebitsPosted);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 
     /**
-     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value
+              is to be retrieved.
      * @return a {@code long} representing the first 8 bytes of the 128-bit value if
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
@@ -158,12 +160,13 @@ public final class AccountBalanceBatch extends Batch {
     public BigInteger getCreditsPending() {
         final var index = at(Struct.CreditsPending);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 
     /**
-     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value
+              is to be retrieved.
      * @return a {@code long} representing the first 8 bytes of the 128-bit value if
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
@@ -213,12 +216,13 @@ public final class AccountBalanceBatch extends Batch {
     public BigInteger getCreditsPosted() {
         final var index = at(Struct.CreditsPosted);
         return UInt128.asBigInteger(
-            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.LeastSignificant),
             getUInt128(index, UInt128.MostSignificant));
     }
 
     /**
-     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value
+              is to be retrieved.
      * @return a {@code long} representing the first 8 bytes of the 128-bit value if
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
