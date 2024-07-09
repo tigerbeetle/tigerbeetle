@@ -382,8 +382,8 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "clients/java/docs.zig", // contains long XML.
-    "java_bindings.zig", // contains javadoc links.
+    "clients/java/docs.zig", // Contains long XML.
+    "java_bindings.zig", // Contains Javadoc links.
     "config.zig",
     "constants.zig",
     "io/darwin.zig",
