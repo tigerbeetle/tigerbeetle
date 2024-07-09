@@ -685,7 +685,8 @@ fn emit_u128_batch_accessors(
     // Get long:
     try buffer.writer().print(
         \\    /**
-        \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value is to be retrieved.
+        \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value
+        \\              is to be retrieved.
         \\     * @return a {{@code long}} representing the first 8 bytes of the 128-bit value if
         \\     *         {{@link UInt128#LeastSignificant}} is informed, or the last 8 bytes if
         \\     *         {{@link UInt128#MostSignificant}}.
