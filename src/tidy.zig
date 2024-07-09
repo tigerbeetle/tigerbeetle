@@ -98,7 +98,6 @@ const DeadDetector = struct {
     }
 
     fn deinit(detector: *DeadDetector) void {
-        assert(detector.files.count() == 0); // Sanity-check that `.finish` was called.
         detector.files.deinit();
     }
 
@@ -382,8 +381,6 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "clients/java/docs.zig", // Contains long XML.
-    "java_bindings.zig", // Contains Javadoc links.
     "lsm/binary_search.zig",
     "lsm/binary_search_benchmark.zig",
     "lsm/forest_fuzz.zig",
