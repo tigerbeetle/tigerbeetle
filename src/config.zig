@@ -172,10 +172,10 @@ const ConfigCluster = struct {
     // since each scan can read from `lsm_levels` in parallel.
     lsm_scans_max: comptime_int = 2,
 
-    /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them all to
-    /// a single torn write. A replica needs at least one valid redundant header to determine an
-    /// (untrusted) maximum op in recover_torn_prepare(), without which it cannot truncate a torn
-    /// prepare.
+    /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them
+    /// all to a single torn write. A replica needs at least one valid redundant header to
+    /// determine an (untrusted) maximum op in recover_torn_prepare(), without which it cannot
+    /// truncate a torn prepare.
     pub const journal_slot_count_min = 2 * @divExact(sector_size, @sizeOf(vsr.Header));
 
     pub const clients_max_min = 1;
@@ -259,7 +259,8 @@ pub const configs = struct {
     };
 
     /// Minimal test configuration — small WAL, small grid block size, etc.
-    /// Not suitable for production, but good for testing code that would be otherwise hard to reach.
+    /// Not suitable for production, but good for testing code that would be otherwise hard to
+    /// reach.
     pub const test_min = Config{
         .process = .{
             .storage_size_limit_max = 1 * 1024 * 1024 * 1024,
