@@ -911,7 +911,10 @@ public struct QueryFilter
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            if (value.Length != SIZE)
+            {
+                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            }
 
             fixed (void* ptr = raw)
             {
