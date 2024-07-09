@@ -3,8 +3,10 @@ const assert = std.debug.assert;
 const math = std.math;
 const builtin = @import("builtin");
 
-const binary_search_keys_upsert_index = @import("./binary_search.zig").binary_search_keys_upsert_index;
-const binary_search_values_upsert_index = @import("./binary_search.zig").binary_search_values_upsert_index;
+const binary_search_keys_upsert_index =
+    @import("./binary_search.zig").binary_search_keys_upsert_index;
+const binary_search_values_upsert_index =
+    @import("./binary_search.zig").binary_search_values_upsert_index;
 
 const log = std.log;
 
