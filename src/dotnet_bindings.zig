@@ -56,7 +56,13 @@ const type_mappings = .{
         .name = "Account",
         .visibility = .public,
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
+        .readonly_fields = &.{
+            "debits_pending",
+            "credits_pending",
+            "debits_posted",
+            "credits_posted",
+            "timestamp",
+        },
         .docs_link = "reference/account#",
     } },
     .{ tb.Transfer, TypeMapping{
@@ -122,7 +128,8 @@ const type_mappings = .{
 
 fn dotnet_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Enum, .Struct => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
+        .Enum, .Struct => return comptime get_mapped_type_name(Type) orelse
+            @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
@@ -142,7 +149,10 @@ fn dotnet_type(comptime Type: type) []const u8 {
             std.debug.assert(info.size != .Slice);
             std.debug.assert(!info.is_allowzero);
 
-            return if (comptime get_mapped_type_name(info.child)) |name| name ++ "*" else dotnet_type(info.child);
+            return if (comptime get_mapped_type_name(info.child)) |name|
+                name ++ "*"
+            else
+                dotnet_type(info.child);
         },
         .Void, .Opaque => return "IntPtr",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
@@ -281,7 +291,10 @@ fn emit_struct(
                     \\        public void SetData(byte[] value)
                     \\        {{
                     \\            if (value == null) throw new ArgumentNullException(nameof(value));
-                    \\            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+                    \\            if (value.Length != SIZE)
+                    \\            {{
+                    \\                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+                    \\            }}
                     \\
                     \\            fixed (void* ptr = raw)
                     \\            {{
@@ -412,13 +425,17 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
-                .auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
+                .auto => @compileError(
+                    "Only packed or extern structs are supported: " ++ @typeName(ZigType),
+                ),
                 .@"packed" => try emit_enum(
                     buffer,
                     ZigType,
                     info,
                     mapping,
-                    comptime dotnet_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
+                    comptime dotnet_type(
+                        std.meta.Int(.unsigned, @bitSizeOf(ZigType)),
+                    ),
                 ),
                 .@"extern" => try emit_struct(
                     buffer,
@@ -515,7 +532,11 @@ test "bindings dotnet" {
 
     try generate_bindings(&buffer);
 
-    const current = try std.fs.cwd().readFileAlloc(testing.allocator, output_file, std.math.maxInt(usize));
+    const current = try std.fs.cwd().readFileAlloc(
+        testing.allocator,
+        output_file,
+        std.math.maxInt(usize),
+    );
     defer testing.allocator.free(current);
 
     try testing.expectEqualStrings(current, buffer.items);

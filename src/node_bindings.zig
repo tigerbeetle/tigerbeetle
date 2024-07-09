@@ -78,10 +78,16 @@ const type_mappings = .{
 
 fn typescript_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Enum => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
+        .Enum => return comptime get_mapped_type_name(Type) orelse @compileError(
+            "Type " ++ @typeName(Type) ++ " not mapped.",
+        ),
         .Struct => |info| switch (info.layout) {
-            .@"packed" => return comptime typescript_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
-            else => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
+            .@"packed" => return comptime typescript_type(
+                std.meta.Int(.unsigned, @bitSizeOf(Type)),
+            ),
+            else => return comptime get_mapped_type_name(Type) orelse @compileError(
+                "Type " ++ @typeName(Type) ++ " not mapped.",
+            ),
         },
         .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
@@ -189,7 +195,12 @@ fn emit_struct(
     try buffer.writer().print("}}\n\n", .{});
 }
 
-fn emit_docs(buffer: anytype, comptime mapping: TypeMapping, comptime indent: comptime_int, comptime field: ?[]const u8) !void {
+fn emit_docs(
+    buffer: anytype,
+    comptime mapping: TypeMapping,
+    comptime indent: comptime_int,
+    comptime field: ?[]const u8,
+) !void {
     if (mapping.docs_link) |docs_link| {
         try buffer.writer().print(
             \\
@@ -225,7 +236,9 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
-                .auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
+                .auto => @compileError(
+                    "Only packed or extern structs are supported: " ++ @typeName(ZigType),
+                ),
                 .@"packed" => try emit_packed_struct(buffer, info, mapping),
                 .@"extern" => try emit_struct(buffer, info, mapping),
             },
@@ -253,7 +266,11 @@ test "bindings node" {
 
     try generate_bindings(&buffer);
 
-    const current = try std.fs.cwd().readFileAlloc(testing.allocator, output_file, std.math.maxInt(usize));
+    const current = try std.fs.cwd().readFileAlloc(
+        testing.allocator,
+        output_file,
+        std.math.maxInt(usize),
+    );
     defer testing.allocator.free(current);
 
     try testing.expectEqualStrings(current, buffer.items);

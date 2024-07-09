@@ -126,7 +126,8 @@ account balances have a few extension methods to make it easier
 to convert 128-bit little-endian unsigned integers between
 `BigInteger`, `byte[]`, and `Guid`.
 
-See the class [UInt128Extensions](/src/clients/dotnet/TigerBeetle/UInt128Extensions.cs) for more details.
+See the class [UInt128Extensions](/src/clients/dotnet/TigerBeetle/UInt128Extensions.cs)
+for more details.
 
 ### Account Flags
 

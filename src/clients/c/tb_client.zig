@@ -32,7 +32,8 @@ pub const tb_completion_t = *const fn (
 const constants = @import("../../constants.zig");
 const Storage = @import("../../storage.zig").Storage;
 const MessageBus = @import("../../message_bus.zig").MessageBusClient;
-const StateMachine = @import("../../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const StateMachineType = @import("../../state_machine.zig").StateMachineType;
+const StateMachine = StateMachineType(Storage, constants.state_machine_config);
 
 const ContextType = @import("tb_client/context.zig").ContextType;
 const ContextImplementation = @import("tb_client/context.zig").ContextImplementation;

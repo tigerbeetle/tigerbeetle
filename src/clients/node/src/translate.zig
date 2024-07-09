@@ -13,7 +13,12 @@ pub fn register_function(
         return throw(env, "Failed to create function " ++ name ++ "().");
     }
 
-    if (c.napi_set_named_property(env, exports, @as([*c]const u8, @ptrCast(name)), napi_function) != c.napi_ok) {
+    if (c.napi_set_named_property(
+        env,
+        exports,
+        @as([*c]const u8, @ptrCast(name)),
+        napi_function,
+    ) != c.napi_ok) {
         return throw(env, "Failed to add " ++ name ++ "() to exports.");
     }
 }
@@ -155,7 +160,8 @@ pub fn u16_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]
 }
 
 pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]const u8) !u128 {
-    // A BigInt's value (using ^ to mean exponent) is (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...)
+    // A BigInt's value (using ^ to mean exponent) is
+    // (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...).
 
     // V8 says that the words are little endian. If we were on a big endian machine
     // we would need to convert, but big endian is not supported by tigerbeetle.
@@ -207,7 +213,8 @@ pub fn u128_into_object(
     value: u128,
     comptime error_message: [:0]const u8,
 ) !void {
-    // A BigInt's value (using ^ to mean exponent) is (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...)
+    // A BigInt's value (using ^ to mean exponent) is
+    // (words[0] * (2^64)^0 + words[1] * (2^64)^1 + ...).
 
     // V8 says that the words are little endian. If we were on a big endian machine
     // we would need to convert, but big endian is not supported by tigerbeetle.
@@ -222,7 +229,12 @@ pub fn u128_into_object(
         return throw(env, error_message);
     }
 
-    if (c.napi_set_named_property(env, object, @as([*c]const u8, @ptrCast(key)), bigint) != c.napi_ok) {
+    if (c.napi_set_named_property(
+        env,
+        object,
+        @ptrCast(key),
+        bigint,
+    ) != c.napi_ok) {
         return throw(env, error_message);
     }
 }
@@ -239,7 +251,12 @@ pub fn u64_into_object(
         return throw(env, error_message);
     }
 
-    if (c.napi_set_named_property(env, object, @as([*c]const u8, @ptrCast(key)), result) != c.napi_ok) {
+    if (c.napi_set_named_property(
+        env,
+        object,
+        @ptrCast(key),
+        result,
+    ) != c.napi_ok) {
         return throw(env, error_message);
     }
 }
@@ -256,7 +273,7 @@ pub fn u32_into_object(
         return throw(env, error_message);
     }
 
-    if (c.napi_set_named_property(env, object, @as([*c]const u8, @ptrCast(key)), result) != c.napi_ok) {
+    if (c.napi_set_named_property(env, object, @ptrCast(key), result) != c.napi_ok) {
         return throw(env, error_message);
     }
 }
