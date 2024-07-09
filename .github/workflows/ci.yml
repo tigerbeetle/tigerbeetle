@@ -137,17 +137,17 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
           NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}
 
-      - uses: actions/upload-pages-artifact@v1
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: ./src/devhub
-      - uses: actions/deploy-pages@v1
+      - uses: actions/deploy-pages@v4
 
   kcov:
     if: github.ref == 'refs/heads/main'
