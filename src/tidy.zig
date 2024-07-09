@@ -381,7 +381,6 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "lsm/binary_search.zig",
     "lsm/binary_search_benchmark.zig",
     "lsm/forest_fuzz.zig",
     "lsm/groove.zig",
