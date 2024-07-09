@@ -398,8 +398,6 @@ const naughty_list = [_][]const u8{
     "clients/node/src/translate.zig",
     "config.zig",
     "constants.zig",
-    "io/darwin.zig",
-    "io/windows.zig",
     "lsm/binary_search.zig",
     "lsm/binary_search_benchmark.zig",
     "lsm/forest_fuzz.zig",
