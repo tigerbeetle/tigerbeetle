@@ -110,6 +110,10 @@ pub fn main(
         try std.ArrayListUnmanaged(u128).initCapacity(allocator, cli_args.account_batch_size);
     defer batch_account_ids.deinit(allocator);
 
+    var batch_transfer_ids =
+        try std.ArrayListUnmanaged(u128).initCapacity(allocator, cli_args.transfer_batch_size);
+    defer batch_transfer_ids.deinit(allocator);
+
     var statsd_opt: ?StatsD = null;
     defer if (statsd_opt) |*statsd| statsd.deinit(allocator);
 
@@ -166,6 +170,7 @@ pub fn main(
         .print_batch_timings = cli_args.print_batch_timings,
         .id_order = cli_args.id_order,
         .batch_account_ids = batch_account_ids,
+        .batch_transfer_ids = batch_transfer_ids,
     };
 
     benchmark.client.register(Benchmark.register_callback, @intCast(@intFromPtr(&benchmark)));
@@ -186,6 +191,7 @@ pub fn main(
     // Reset our state so we can check our work.
     benchmark.rng = rng;
     benchmark.account_index = 0;
+    benchmark.transfer_index = 0;
     benchmark.validate_accounts();
 
     while (!benchmark.done) {
@@ -227,14 +233,35 @@ const Benchmark = struct {
     print_batch_timings: bool,
     id_order: cli.Command.Benchmark.IdOrder,
     batch_account_ids: std.ArrayListUnmanaged(u128),
+    batch_transfer_ids: std.ArrayListUnmanaged(u128),
+
+    fn create_account(b: *Benchmark) tb.Account {
+        const random = b.rng.random();
+
+        defer b.account_index += 1;
+        return .{
+            .id = b.account_id_permutation.encode(b.account_index + 1),
+            .user_data_128 = random.int(u128),
+            .user_data_64 = random.int(u64),
+            .user_data_32 = random.int(u32),
+            .reserved = 0,
+            .ledger = 2,
+            .code = 1,
+            .flags = .{
+                .history = b.account_balances,
+            },
+            .debits_pending = 0,
+            .debits_posted = 0,
+            .credits_pending = 0,
+            .credits_posted = 0,
+        };
+    }
 
     fn create_accounts(b: *Benchmark) void {
         if (b.account_index >= b.account_count) {
             b.create_transfers();
             return;
         }
-
-        const random = b.rng.random();
 
         // Reset batch.
         b.batch_accounts.clearRetainingCapacity();
@@ -243,23 +270,7 @@ const Benchmark = struct {
         while (b.account_index < b.account_count and
             b.batch_accounts.items.len < b.batch_accounts.capacity)
         {
-            b.batch_accounts.appendAssumeCapacity(.{
-                .id = b.account_id_permutation.encode(b.account_index + 1),
-                .user_data_128 = random.int(u128),
-                .user_data_64 = random.int(u64),
-                .user_data_32 = random.int(u32),
-                .reserved = 0,
-                .ledger = 2,
-                .code = 1,
-                .flags = .{
-                    .history = b.account_balances,
-                },
-                .debits_pending = 0,
-                .debits_posted = 0,
-                .credits_pending = 0,
-                .credits_posted = 0,
-            });
-            b.account_index += 1;
+            b.batch_accounts.appendAssumeCapacity(b.create_account());
         }
 
         // Submit batch.
@@ -287,6 +298,50 @@ const Benchmark = struct {
         b.create_accounts();
     }
 
+    fn create_transfer(b: *Benchmark) tb.Transfer {
+        const random = b.rng.random();
+
+        const debit_account_hot = b.account_count_hot > 0 and
+            random.uintLessThan(u64, 100) < b.transfer_hot_percent;
+
+        const debit_account_index = if (debit_account_hot)
+            random.uintLessThan(u64, b.account_count_hot)
+        else
+            random.uintLessThan(u64, b.account_count);
+        const credit_account_index = index: {
+            var index = random.uintLessThan(u64, b.account_count);
+            if (index == debit_account_index) {
+                index = (index + 1) % b.account_count;
+            }
+            break :index index;
+        };
+
+        const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
+        const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
+        assert(debit_account_index != credit_account_index);
+
+        // 30% of pending transfers.
+        const pending = b.transfer_pending and random.intRangeAtMost(u8, 0, 9) < 3;
+
+        defer b.transfer_index += 1;
+        return .{
+            .id = b.account_id_permutation.encode(b.transfer_index + 1),
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
+            .user_data_128 = random.int(u128),
+            .user_data_64 = random.int(u64),
+            .user_data_32 = random.int(u32),
+            // TODO Benchmark posting/voiding pending transfers.
+            .pending_id = 0,
+            .ledger = 2,
+            .code = random.int(u16) +| 1,
+            .flags = .{ .pending = pending },
+            .timeout = if (pending) random.intRangeAtMost(u32, 1, 60) else 0,
+            .amount = random_int_exponential(random, u64, 10_000) +| 1,
+            .timestamp = 0,
+        };
+    }
+
     fn create_transfers(b: *Benchmark) void {
         if (b.transfer_index >= b.transfer_count) {
             b.summary_transfers();
@@ -299,8 +354,6 @@ const Benchmark = struct {
             b.transfer_next_arrival_ns = b.timer.read();
         }
 
-        const random = b.rng.random();
-
         b.batch_transfers.clearRetainingCapacity();
 
         b.batch_start_ns = b.timer.read();
@@ -309,46 +362,7 @@ const Benchmark = struct {
         while (b.transfer_index < b.transfer_count and
             b.batch_transfers.items.len < b.batch_transfers.capacity)
         {
-            const debit_account_hot = b.account_count_hot > 0 and
-                random.uintLessThan(u64, 100) < b.transfer_hot_percent;
-
-            const debit_account_index = if (debit_account_hot)
-                random.uintLessThan(u64, b.account_count_hot)
-            else
-                random.uintLessThan(u64, b.account_count);
-            const credit_account_index = index: {
-                var index = random.uintLessThan(u64, b.account_count);
-                if (index == debit_account_index) {
-                    index = (index + 1) % b.account_count;
-                }
-                break :index index;
-            };
-
-            const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
-            const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
-            assert(debit_account_index != credit_account_index);
-
-            // 30% of pending transfers.
-            const pending = b.transfer_pending and random.intRangeAtMost(u8, 0, 9) < 3;
-
-            b.batch_transfers.appendAssumeCapacity(.{
-                .id = b.account_id_permutation.encode(b.transfer_index + 1),
-                .debit_account_id = debit_account_id,
-                .credit_account_id = credit_account_id,
-                .user_data_128 = random.int(u128),
-                .user_data_64 = random.int(u64),
-                .user_data_32 = random.int(u32),
-                // TODO Benchmark posting/voiding pending transfers.
-                .pending_id = 0,
-                .ledger = 2,
-                .code = random.int(u16) +| 1,
-                .flags = .{ .pending = pending },
-                .timeout = if (pending) random.intRangeAtMost(u32, 1, 60) else 0,
-                .amount = random_int_exponential(random, u64, 10_000) +| 1,
-                .timestamp = 0,
-            });
-
-            b.transfer_index += 1;
+            b.batch_transfers.appendAssumeCapacity(b.create_transfer());
         }
 
         assert(b.batch_transfers.items.len > 0);
@@ -502,11 +516,9 @@ const Benchmark = struct {
 
     fn validate_accounts(b: *Benchmark) void {
         if (b.account_index >= b.account_count) {
-            b.done = true;
+            b.validate_transfers();
             return;
         }
-
-        const random = b.rng.random();
 
         // Reset batch.
         b.batch_accounts.clearRetainingCapacity();
@@ -516,35 +528,19 @@ const Benchmark = struct {
         while (b.account_index < b.account_count and
             b.batch_accounts.items.len < b.batch_accounts.capacity)
         {
-            const id = b.account_id_permutation.encode(b.account_index + 1);
-            b.batch_accounts.appendAssumeCapacity(.{
-                .id = id,
-                .user_data_128 = random.int(u128),
-                .user_data_64 = random.int(u64),
-                .user_data_32 = random.int(u32),
-                .reserved = 0,
-                .ledger = 2,
-                .code = 1,
-                .flags = .{
-                    .history = b.account_balances,
-                },
-                .debits_pending = 0,
-                .debits_posted = 0,
-                .credits_pending = 0,
-                .credits_posted = 0,
-            });
-            b.batch_account_ids.appendAssumeCapacity(id);
-            b.account_index += 1;
+            const account = b.create_account();
+            b.batch_accounts.appendAssumeCapacity(account);
+            b.batch_account_ids.appendAssumeCapacity(account.id);
         }
 
         b.send(
-            validate_finish,
+            validate_accounts_finish,
             .lookup_accounts,
             std.mem.sliceAsBytes(b.batch_account_ids.items),
         );
     }
 
-    fn validate_finish(
+    fn validate_accounts_finish(
         b: *Benchmark,
         operation: StateMachine.Operation,
         result: []const u8,
@@ -563,6 +559,63 @@ const Benchmark = struct {
         }
 
         b.validate_accounts();
+    }
+
+    fn validate_transfers(b: *Benchmark) void {
+        if (b.transfer_index >= b.transfer_count) {
+            b.done = true;
+            return;
+        }
+
+        b.batch_transfers.clearRetainingCapacity();
+        b.batch_transfer_ids.clearRetainingCapacity();
+
+        b.batch_start_ns = b.timer.read();
+
+        // Fill batch.
+        while (b.transfer_index < b.transfer_count and
+            b.batch_transfers.items.len < b.batch_transfers.capacity)
+        {
+            const transfer = b.create_transfer();
+            b.batch_transfers.appendAssumeCapacity(transfer);
+            b.batch_transfer_ids.appendAssumeCapacity(transfer.id);
+        }
+
+        assert(b.batch_transfer_ids.items.len > 0);
+
+        // Submit batch.
+        b.send(
+            validate_transfers_finish,
+            .lookup_transfers,
+            std.mem.sliceAsBytes(b.batch_transfer_ids.items),
+        );
+    }
+
+    fn validate_transfers_finish(
+        b: *Benchmark,
+        operation: StateMachine.Operation,
+        result: []const u8,
+    ) void {
+        std.debug.assert(operation == .lookup_transfers);
+
+        const transfers = std.mem.bytesAsSlice(tb.Transfer, result);
+
+        for (b.batch_transfers.items, transfers) |expected, actual| {
+            assert(expected.id == actual.id);
+            assert(expected.debit_account_id == actual.debit_account_id);
+            assert(expected.credit_account_id == actual.credit_account_id);
+            assert(expected.amount == actual.amount);
+            assert(expected.pending_id == actual.pending_id);
+            assert(expected.user_data_128 == actual.user_data_128);
+            assert(expected.user_data_64 == actual.user_data_64);
+            assert(expected.user_data_32 == actual.user_data_32);
+            assert(expected.timeout == actual.timeout);
+            assert(expected.ledger == actual.ledger);
+            assert(expected.code == actual.code);
+            assert(@as(u16, @bitCast(expected.flags)) == @as(u16, @bitCast(actual.flags)));
+        }
+
+        b.validate_transfers();
     }
 
     fn send(
