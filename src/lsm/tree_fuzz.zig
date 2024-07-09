@@ -18,7 +18,8 @@ const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const StateMachine =
+    @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const GridType = @import("../vsr/grid.zig").GridType;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
@@ -231,8 +232,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = next_state;
         }
 
-        fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
-            // Sometimes operations complete synchronously so we might already be in next_state before ticking.
+        fn tick_until_state_change(
+            env: *Environment,
+            current_state: State,
+            next_state: State,
+        ) void {
+            // Sometimes operations complete synchronously so we might already be in next_state
+            // before ticking.
             while (env.state == current_state) env.storage.tick();
             assert(env.state == next_state);
         }
@@ -306,7 +312,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         pub fn compact(env: *Environment, op: u64) void {
             const compaction_beat = op % constants.lsm_batch_multiple;
 
-            const last_half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2) - 1;
+            const last_half_beat =
+                compaction_beat == @divExact(constants.lsm_batch_multiple, 2) - 1;
             const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
 
             if (!last_beat and !last_half_beat) return;
@@ -522,14 +529,17 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
                 assert(env.state == .fuzzing);
-                log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
+                log.debug("Running fuzz_ops[{}/{}] == {}", .{
+                    fuzz_op_index, fuzz_ops.len, fuzz_op,
+                });
 
                 const storage_size_used = env.storage.size_used();
                 log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
                 const model_size = model.count() * @sizeOf(Value);
                 log.debug("space_amplification = {d:.2}", .{
-                    @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
+                    @as(f64, @floatFromInt(storage_size_used)) /
+                        @as(f64, @floatFromInt(model_size)),
                 });
 
                 // Apply fuzz_op to the tree and the model.
