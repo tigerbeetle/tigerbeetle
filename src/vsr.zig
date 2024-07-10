@@ -35,6 +35,7 @@ pub const testing = .{
     .cluster = @import("testing/cluster.zig"),
     .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
+    .parse_seed = @import("testing/fuzz.zig").parse_seed,
 };
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;

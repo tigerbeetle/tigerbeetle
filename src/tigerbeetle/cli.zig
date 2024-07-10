@@ -106,7 +106,7 @@ const CliArgs = union(enum) {
         id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
         addresses: ?[]const u8 = null,
-        seed: ?u64 = null,
+        seed: ?[]const u8 = null,
     },
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
@@ -314,7 +314,7 @@ pub const Command = union(enum) {
         id_order: IdOrder,
         statsd: bool,
         addresses: ?[]const net.Address,
-        seed: ?u64,
+        seed: ?[]const u8,
     };
 
     format: Format,
