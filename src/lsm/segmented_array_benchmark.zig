@@ -125,13 +125,16 @@ test "benchmark: segmented array" {
         }
         const time = timer.read() / repetitions / queries.len;
 
-        log.info("KeyType={} ValueCount={:_>7} ValueSize={:_>2}B NodeSize={:_>6}B LookupTime={:_>6}ns", .{
-            options.Key,
-            options.value_count,
-            options.value_size,
-            options.node_size,
-            time,
-        });
+        log.info(
+            "KeyType={} ValueCount={:_>7} ValueSize={:_>2}B NodeSize={:_>6}B LookupTime={:_>6}ns",
+            .{
+                options.Key,
+                options.value_count,
+                options.value_size,
+                options.node_size,
+                time,
+            },
+        );
     }
 }
 

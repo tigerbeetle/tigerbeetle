@@ -207,7 +207,10 @@ pub fn StateMachineType(
             // TODO(Snapshots) Pass in the target snapshot.
             state_machine.forest.grooves.things.prefetch_setup(null);
             state_machine.forest.grooves.things.prefetch_enqueue(op);
-            state_machine.forest.grooves.things.prefetch(prefetch_callback, &state_machine.prefetch_context);
+            state_machine.forest.grooves.things.prefetch(
+                prefetch_callback,
+                &state_machine.prefetch_context,
+            );
         }
 
         fn prefetch_callback(completion: *ThingGroove.PrefetchContext) void {

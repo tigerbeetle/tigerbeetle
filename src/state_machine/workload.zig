@@ -299,10 +299,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             };
 
             const size = switch (action) {
-                .create_accounts => @sizeOf(tb.Account) *
-                    self.build_create_accounts(client_index, self.batch(tb.Account, action, body)),
-                .create_transfers => @sizeOf(tb.Transfer) *
-                    self.build_create_transfers(client_index, self.batch(tb.Transfer, action, body)),
+                .create_accounts => @sizeOf(tb.Account) * self.build_create_accounts(
+                    client_index,
+                    self.batch(tb.Account, action, body),
+                ),
+                .create_transfers => @sizeOf(tb.Transfer) * self.build_create_transfers(
+                    client_index,
+                    self.batch(tb.Transfer, action, body),
+                ),
                 .lookup_accounts => @sizeOf(u128) *
                     self.build_lookup_accounts(self.batch(u128, action, body)),
                 .lookup_transfers => @sizeOf(u128) *
@@ -388,7 +392,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         fn build_create_accounts(self: *Self, client_index: usize, accounts: []tb.Account) usize {
             const results = self.auditor.expect_create_accounts(client_index);
             for (accounts, 0..) |*account, i| {
-                const account_index = self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
+                const account_index =
+                    self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
                 account.* = self.auditor.accounts[account_index];
                 account.debits_pending = 0;
                 account.debits_posted = 0;
@@ -412,7 +417,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return accounts.len;
         }
 
-        fn build_create_transfers(self: *Self, client_index: usize, transfers: []tb.Transfer) usize {
+        fn build_create_transfers(
+            self: *Self,
+            client_index: usize,
+            transfers: []tb.Transfer,
+        ) usize {
             const results = self.auditor.expect_create_transfers(client_index);
             var transfers_count: usize = transfers.len;
             var i: usize = 0;
@@ -483,7 +492,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     // Auditor must decode the id to check for a matching account.
                     id.* = self.auditor.account_index_to_id(self.random.int(usize));
                 } else {
-                    id.* = self.auditor.accounts[self.random.uintLessThanBiased(usize, self.auditor.accounts.len)].id;
+                    const account_index =
+                        self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
+                    id.* = self.auditor.accounts[account_index].id;
                 }
             }
             return lookup_ids.len;
@@ -587,7 +598,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         batch_max.get_account_balances);
                     break :batch_size batch_max.get_account_transfers;
                 };
-                account_filter.limit = switch (self.random.enumValue(enum { none, one, batch, max })) {
+                account_filter.limit = switch (self.random.enumValue(enum {
+                    none,
+                    one,
+                    batch,
+                    max,
+                })) {
                     .none => 0, // Testing invalid limit.
                     .one => 1,
                     .batch => batch_size,
@@ -705,7 +721,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     const dr = pending_transfer.debit_account_index;
                     const cr = pending_transfer.credit_account_index;
                     // Don't use the default '0' parameters because the StateMachine overwrites 0s
-                    // with the pending transfer's values, invalidating the post/void transfer checksum.
+                    // with the pending transfer's values, invalidating the post/void transfer
+                    // checksum.
                     transfer.debit_account_id = self.auditor.account_index_to_id(dr);
                     transfer.credit_account_id = self.auditor.account_index_to_id(cr);
                     if (method == .post_pending) {
@@ -728,7 +745,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return transfer_template.result;
         }
 
-        fn batch(self: *const Self, comptime T: type, action: Action, body: []align(@alignOf(vsr.Header)) u8) []T {
+        fn batch(
+            self: *const Self,
+            comptime T: type,
+            action: Action,
+            body: []align(@alignOf(vsr.Header)) u8,
+        ) []T {
             const batch_min = switch (action) {
                 .create_accounts, .lookup_accounts => self.options.accounts_batch_size_min,
                 .create_transfers, .lookup_transfers => self.options.transfers_batch_size_min,
@@ -860,7 +882,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     },
                     // An invalid transfer is never persisted.
                     .failure => assert(result == null),
-                    // Due to races and timeouts, these transfer types are not guaranteed to succeed.
+                    // Due to races and timeouts, these transfer types may not succeed.
                     .unknown => {},
                 }
             }
@@ -933,8 +955,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 assert(transfer_plan.valid);
                 assert(transfer_plan.outcome() != .failure);
                 if (transfer.flags.pending) assert(transfer_plan.method == .pending);
-                if (transfer.flags.post_pending_transfer) assert(transfer_plan.method == .post_pending);
-                if (transfer.flags.void_pending_transfer) assert(transfer_plan.method == .void_pending);
+                if (transfer.flags.post_pending_transfer) {
+                    assert(transfer_plan.method == .post_pending);
+                }
+                if (transfer.flags.void_pending_transfer) {
+                    assert(transfer_plan.method == .void_pending);
+                }
                 if (transfer_plan.method == .single_phase) assert(!transfer.flags.pending and
                     !transfer.flags.post_pending_transfer and
                     !transfer.flags.void_pending_transfer);
@@ -1182,7 +1208,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 .account_limit_probability = random.uintLessThan(u8, 80),
                 .account_history_probability = random.uintLessThan(u8, 80),
                 .linked_valid_probability = random.uintLessThan(u8, 101),
-                // 100% chance because this only applies to consecutive invalid transfers, which are rare.
+                // 100% chance: this only applies to consecutive invalid transfers, which are rare.
                 .linked_invalid_probability = 100,
                 // One second.
                 .pending_timeout_mean = 1,

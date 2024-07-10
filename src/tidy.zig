@@ -381,21 +381,8 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "lsm/manifest_level.zig",
-    "lsm/segmented_array_benchmark.zig",
-    "lsm/segmented_array.zig",
-    "lsm/table_data_iterator.zig",
-    "vopr.zig",
     "state_machine.zig",
-    "state_machine/auditor.zig",
-    "state_machine/workload.zig",
-    "testing/cluster/network.zig",
-    "testing/hash_log.zig",
     "testing/low_level_hash_vectors.zig",
-    "testing/packet_simulator.zig",
-    "testing/state_machine.zig",
-    "testing/time.zig",
-    "tigerbeetle/main.zig",
     "vsr/clock.zig",
     "vsr/journal.zig",
     "vsr/replica_test.zig",

@@ -385,7 +385,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         defer link_packet.packet.deinit();
 
                         if (self.links[self.path_index(path)].should_drop(&link_packet.packet)) {
-                            log.warn("dropped packet (different partitions): from={} to={}", .{ from, to });
+                            log.warn(
+                                "dropped packet (different partitions): from={} to={}",
+                                .{ from, to },
+                            );
                             continue;
                         }
 
@@ -395,7 +398,11 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         }
 
                         if (self.should_replay()) {
-                            self.submit_packet(link_packet.packet.clone(), link_packet.callback, path);
+                            self.submit_packet(
+                                link_packet.packet.clone(),
+                                link_packet.callback,
+                                path,
+                            );
                             log.debug("replayed packet from={} to={}", .{ from, to });
                         }
 
