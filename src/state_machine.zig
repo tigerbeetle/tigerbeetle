@@ -986,6 +986,7 @@ pub fn StateMachineType(
                 else
                     filter.timestamp_max,
             };
+            assert(timestamp_range.min <= timestamp_range.max);
 
             // This query may have 2 conditions:
             // `WHERE debit_account_id = $account_id OR credit_account_id = $account_id`.
@@ -3180,8 +3181,14 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == .query_accounts);
                 operation = .query_accounts;
 
-                const timestamp_min = if (f.timestamp_min_transfer_id) |id| accounts.get(id).?.timestamp else 0;
-                const timestamp_max = if (f.timestamp_max_transfer_id) |id| accounts.get(id).?.timestamp else 0;
+                const timestamp_min = if (f.timestamp_min_transfer_id) |id|
+                    accounts.get(id).?.timestamp
+                else
+                    0;
+                const timestamp_max = if (f.timestamp_max_transfer_id) |id|
+                    accounts.get(id).?.timestamp
+                else
+                    0;
 
                 const event = QueryFilter{
                     .user_data_128 = f.user_data_128,
@@ -3206,8 +3213,14 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == .query_transfers);
                 operation = .query_transfers;
 
-                const timestamp_min = if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max = if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_min = if (f.timestamp_min_transfer_id) |id|
+                    transfers.get(id).?.timestamp
+                else
+                    0;
+                const timestamp_max = if (f.timestamp_max_transfer_id) |id|
+                    transfers.get(id).?.timestamp
+                else
+                    0;
 
                 const event = QueryFilter{
                     .user_data_128 = f.user_data_128,

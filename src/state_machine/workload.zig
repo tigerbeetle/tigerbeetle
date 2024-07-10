@@ -328,8 +328,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     self.build_lookup_transfers(self.batch(u128, action, body)),
                 .get_account_transfers, .get_account_balances => @sizeOf(tb.AccountFilter) *
                     self.build_get_account_filter(self.batch(tb.AccountFilter, action, body)),
-                inline .query_accounts, .query_transfers => |action_comptime| @sizeOf(tb.QueryFilter) *
-                    self.build_query_filter(
+                inline .query_accounts,
+                .query_transfers,
+                => |action_comptime| @sizeOf(tb.QueryFilter) * self.build_query_filter(
                     action_comptime,
                     self.batch(tb.QueryFilter, action, body),
                 ),
@@ -686,7 +687,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     usize,
                     self.auditor.query_intersections.len,
                 );
-                const query_intersection = self.auditor.query_intersections[query_intersection_index];
+                const query_intersection =
+                    self.auditor.query_intersections[query_intersection_index];
 
                 query_filter.* = .{
                     .user_data_128 = 0,
