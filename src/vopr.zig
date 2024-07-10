@@ -207,8 +207,9 @@ pub fn main() !void {
     const workload_options = StateMachine.Workload.Options.generate(random, .{
         .batch_size_limit = batch_size_limit,
         .client_count = client_count,
-        // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity private.
-        // Also maybe make it dynamic (computed from the client_count instead of clients_max).
+        // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity
+        // private. Also maybe make it dynamic (computed from the client_count instead of
+        // clients_max).
         .in_flight_max = ReplySequence.stalled_queue_capacity,
     });
 
@@ -435,7 +436,11 @@ pub const Simulator = struct {
     requests_replied: usize = 0,
     requests_idle: bool = false,
 
-    pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Simulator {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        random: std.rand.Random,
+        options: Options,
+    ) !Simulator {
         assert(options.replica_crash_probability < 100.0);
         assert(options.replica_crash_probability >= 0.0);
         assert(options.replica_restart_probability < 100.0);
@@ -453,11 +458,17 @@ pub const Simulator = struct {
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
         errdefer workload.deinit(allocator);
 
-        const replica_releases = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        const replica_releases = try allocator.alloc(
+            usize,
+            options.cluster.replica_count + options.cluster.standby_count,
+        );
         errdefer allocator.free(replica_releases);
         @memset(replica_releases, 1);
 
-        const replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        const replica_stability = try allocator.alloc(
+            usize,
+            options.cluster.replica_count + options.cluster.standby_count,
+        );
         errdefer allocator.free(replica_stability);
         @memset(replica_stability, 0);
 
@@ -792,7 +803,8 @@ pub const Simulator = struct {
         request: *Message.Request,
         reply: *Message.Reply,
     ) void {
-        // TODO(Zig) Use @returnAddress to initialize the cluster, then this can just use @fieldParentPtr().
+        // TODO(Zig) Use @returnAddress to initialize the cluster, then this can just use
+        // @fieldParentPtr().
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
         simulator.reply_sequence.insert(reply_client, request, reply);
 
