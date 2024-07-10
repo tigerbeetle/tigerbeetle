@@ -341,8 +341,11 @@ const Command = struct {
         });
 
         if (constants.aof_recovery) {
-            log_main.warn("{}: started in AOF recovery mode. This is potentially dangerous - " ++
-                "if it's unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.", .{replica.replica});
+            log_main.warn(
+                "{}: started in AOF recovery mode. This is potentially dangerous - if it's" ++
+                    " unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.",
+                .{replica.replica},
+            );
         }
 
         if (constants.verify) {
@@ -399,12 +402,20 @@ const Command = struct {
             // Zig 0.10 doesn't see field_name as comptime if this `comptime` isn't used.
             try stdout.writeAll("\n");
             inline for (comptime std.meta.fieldNames(@TypeOf(config.cluster))) |field_name| {
-                try print_value(stdout, "cluster." ++ field_name, @field(config.cluster, field_name));
+                try print_value(
+                    stdout,
+                    "cluster." ++ field_name,
+                    @field(config.cluster, field_name),
+                );
             }
 
             try stdout.writeAll("\n");
             inline for (comptime std.meta.fieldNames(@TypeOf(config.process))) |field_name| {
-                try print_value(stdout, "process." ++ field_name, @field(config.process, field_name));
+                try print_value(
+                    stdout,
+                    "process." ++ field_name,
+                    @field(config.process, field_name),
+                );
             }
         }
         try stdout_buffer.flush();

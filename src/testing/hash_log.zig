@@ -1,4 +1,5 @@
-//! A tool for narrowing down the point of divergence between two executions that should be identical.
+//! A tool for narrowing down the point of divergence between two executions that should be
+//! identical.
 //! Sprinkle calls to `emit(some_hash)` throughout the code.
 //! With `-Dhash-log-mode=create`, all emitted hashes are written to ./hash_log.
 //! With `-Dhash-log-mode=check`, all emitted hashes are checked against the hashes in ./hash_log.
@@ -44,7 +45,10 @@ fn emit_never_inline(hash: u128) void {
             var buffer: [33]u8 = undefined;
             const bytes_read = file.?.readAll(&buffer) catch unreachable;
             if (bytes_read != 33) {
-                panic("Unexpected end of hash_log at hash_count={}. Expected EOF, found {x:0>32}.", .{ hash_count, hash });
+                panic(
+                    "Unexpected end of hash_log at hash_count={}. Expected EOF, found {x:0>32}.",
+                    .{ hash_count, hash },
+                );
             }
             const expected_hash = std.fmt.parseInt(u128, buffer[0..32], 16) catch unreachable;
             if (hash != expected_hash) {

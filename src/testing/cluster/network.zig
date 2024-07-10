@@ -63,15 +63,6 @@ pub const Network = struct {
     options: NetworkOptions,
     packet_simulator: PacketSimulator,
 
-    // TODO(Zig) If this stored a ?*MessageBus, then a process's bus could be set to `null` while
-    // the replica is crashed, and replaced when it is destroyed. But Zig complains:
-    //
-    //   ./src/test/message_bus.zig:20:24: error: struct 'test.message_bus.MessageBus' depends on itself
-    //   pub const MessageBus = struct {
-    //                          ^
-    //   ./src/test/message_bus.zig:21:5: note: while checking this field
-    //       network: *Network,
-    //       ^
     buses: std.ArrayListUnmanaged(*MessageBus),
     buses_enabled: std.ArrayListUnmanaged(bool),
     processes: std.ArrayListUnmanaged(u128),

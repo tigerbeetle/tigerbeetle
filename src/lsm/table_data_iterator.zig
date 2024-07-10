@@ -55,8 +55,8 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                 .context = .{
                     .grid = undefined,
                     // The zero-init here is important.
-                    // In other places we assume that we can call `next` on a fresh TableDataIterator
-                    // and get `null` rather than UB.
+                    // In other places we assume that we can call `next` on a fresh
+                    // TableDataIterator and get `null` rather than UB.
                     .addresses = &.{},
                     .checksums = &.{},
                     .direction = .ascending,

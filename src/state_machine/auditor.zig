@@ -14,7 +14,8 @@ const IdPermutation = @import("../testing/id.zig").IdPermutation;
 
 const PriorityQueue = std.PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const StateMachine =
+    @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
 pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult);
@@ -181,7 +182,10 @@ pub const AccountingAuditor = struct {
 
         var pending_transfers = std.AutoHashMapUnmanaged(u128, PendingTransfer){};
         errdefer pending_transfers.deinit(allocator);
-        try pending_transfers.ensureTotalCapacity(allocator, @intCast(options.transfers_pending_max));
+        try pending_transfers.ensureTotalCapacity(
+            allocator,
+            @intCast(options.transfers_pending_max),
+        );
 
         var pending_expiries = PendingExpiryQueue.init(allocator, {});
         errdefer pending_expiries.deinit();
@@ -411,8 +415,8 @@ pub const AccountingAuditor = struct {
                             .transfer_timestamp = transfer_timestamp,
                             .expires_at = transfer_timestamp + transfer.timeout_ns(),
                         }) catch unreachable;
-                        // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
-                        // created more pending transfers than permitted.
+                        // PriorityQueue lacks an "unmanaged" API, so verify that the workload
+                        // hasn't created more pending transfers than permitted.
                         assert(self.pending_expiries.count() <= self.options.transfers_pending_max);
                     }
                     dr.debits_pending += transfer.amount;
