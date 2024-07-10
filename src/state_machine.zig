@@ -56,12 +56,18 @@ pub fn StateMachineType(
 
             /// The maximum number of objects within a batch, by operation.
             pub const batch_max = struct {
-                pub const create_accounts = operation_batch_max(.create_accounts, config.message_body_size_max);
-                pub const create_transfers = operation_batch_max(.create_transfers, config.message_body_size_max);
-                pub const lookup_accounts = operation_batch_max(.lookup_accounts, config.message_body_size_max);
-                pub const lookup_transfers = operation_batch_max(.lookup_transfers, config.message_body_size_max);
-                pub const get_account_transfers = operation_batch_max(.get_account_transfers, config.message_body_size_max);
-                pub const get_account_balances = operation_batch_max(.get_account_balances, config.message_body_size_max);
+                pub const create_accounts =
+                    operation_batch_max(.create_accounts, config.message_body_size_max);
+                pub const create_transfers =
+                    operation_batch_max(.create_transfers, config.message_body_size_max);
+                pub const lookup_accounts =
+                    operation_batch_max(.lookup_accounts, config.message_body_size_max);
+                pub const lookup_transfers =
+                    operation_batch_max(.lookup_transfers, config.message_body_size_max);
+                pub const get_account_transfers =
+                    operation_batch_max(.get_account_transfers, config.message_body_size_max);
+                pub const get_account_balances =
+                    operation_batch_max(.get_account_balances, config.message_body_size_max);
 
                 comptime {
                     assert(create_accounts > 0);
@@ -146,7 +152,8 @@ pub fn StateMachineType(
                     const demuxed = blk: {
                         if (comptime batch_logical_allowed.get(operation)) {
                             // Count all results from out slice which match the Event range,
-                            // updating the result.indexes to be related to the EVent in the process.
+                            // updating the result.indexes to be related to the EVent in the
+                            // process.
                             for (self.results, 0..) |*result, i| {
                                 if (result.index < event_offset) break :blk i;
                                 if (result.index >= event_offset + event_count) break :blk i;
@@ -550,7 +557,11 @@ pub fn StateMachineType(
         }
 
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
-        pub fn prepare(self: *StateMachine, operation: Operation, input: []align(16) const u8) void {
+        pub fn prepare(
+            self: *StateMachine,
+            operation: Operation,
+            input: []align(16) const u8,
+        ) void {
             assert(self.input_valid(operation, input));
             assert(input.len <= self.batch_size_limit);
 
@@ -679,7 +690,9 @@ pub fn StateMachineType(
             );
         }
 
-        fn prefetch_create_transfers_callback_transfers(completion: *TransfersGroove.PrefetchContext) void {
+        fn prefetch_create_transfers_callback_transfers(
+            completion: *TransfersGroove.PrefetchContext,
+        ) void {
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             self.prefetch_context = .null;
 
@@ -907,7 +920,10 @@ pub fn StateMachineType(
                 );
         }
 
-        fn get_scan_from_filter(self: *StateMachine, filter: AccountFilter) ?*TransfersGroove.ScanBuilder.Scan {
+        fn get_scan_from_filter(
+            self: *StateMachine,
+            filter: AccountFilter,
+        ) ?*TransfersGroove.ScanBuilder.Scan {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -1127,7 +1143,11 @@ pub fn StateMachineType(
             return result;
         }
 
-        pub fn compact(self: *StateMachine, callback: *const fn (*StateMachine) void, op: u64) void {
+        pub fn compact(
+            self: *StateMachine,
+            callback: *const fn (*StateMachine) void,
+            op: u64,
+        ) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 
@@ -1265,7 +1285,8 @@ pub fn StateMachineType(
                                 count += 1;
                             }
                         } else {
-                            assert(result == .linked_event_failed or result == .linked_event_chain_open);
+                            assert(result == .linked_event_failed or
+                                result == .linked_event_chain_open);
                         }
                     }
                     results[count] = .{ .index = @intCast(index), .result = result };
@@ -1273,7 +1294,8 @@ pub fn StateMachineType(
                 }
                 if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
                     if (!chain_broken) {
-                        // We've finished this linked chain, and all events have applied successfully.
+                        // We've finished this linked chain, and all events have applied
+                        // successfully.
                         self.scope_close(operation, .persist);
                     }
 
@@ -1431,7 +1453,9 @@ pub fn StateMachineType(
 
         fn create_account_exists(a: *const Account, e: *const Account) CreateAccountResult {
             assert(a.id == e.id);
-            if (@as(u16, @bitCast(a.flags)) != @as(u16, @bitCast(e.flags))) return .exists_with_different_flags;
+            if (@as(u16, @bitCast(a.flags)) != @as(u16, @bitCast(e.flags))) {
+                return .exists_with_different_flags;
+            }
             if (a.user_data_128 != e.user_data_128) return .exists_with_different_user_data_128;
             if (a.user_data_64 != e.user_data_64) return .exists_with_different_user_data_64;
             if (a.user_data_32 != e.user_data_32) return .exists_with_different_user_data_32;
@@ -1454,9 +1478,13 @@ pub fn StateMachineType(
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
-            if (t.debit_account_id == math.maxInt(u128)) return .debit_account_id_must_not_be_int_max;
+            if (t.debit_account_id == math.maxInt(u128)) {
+                return .debit_account_id_must_not_be_int_max;
+            }
             if (t.credit_account_id == 0) return .credit_account_id_must_not_be_zero;
-            if (t.credit_account_id == math.maxInt(u128)) return .credit_account_id_must_not_be_int_max;
+            if (t.credit_account_id == math.maxInt(u128)) {
+                return .credit_account_id_must_not_be_int_max;
+            }
             if (t.credit_account_id == t.debit_account_id) return .accounts_must_be_different;
 
             if (t.pending_id != 0) return .pending_id_must_be_zero;
@@ -1475,17 +1503,22 @@ pub fn StateMachineType(
             // 2. standing for debit record and credit record, or
             // 3. relating to debtor and creditor.
             // We use them to distinguish between `cr` (credit account), and `c` (commit).
-            const dr_account = self.forest.grooves.accounts.get(t.debit_account_id) orelse return .debit_account_not_found;
-            const cr_account = self.forest.grooves.accounts.get(t.credit_account_id) orelse return .credit_account_not_found;
+            const dr_account = self.forest.grooves.accounts.get(t.debit_account_id) orelse
+                return .debit_account_not_found;
+            const cr_account = self.forest.grooves.accounts.get(t.credit_account_id) orelse
+                return .credit_account_not_found;
             assert(dr_account.id == t.debit_account_id);
             assert(cr_account.id == t.credit_account_id);
             assert(t.timestamp > dr_account.timestamp);
             assert(t.timestamp > cr_account.timestamp);
 
             if (dr_account.ledger != cr_account.ledger) return .accounts_must_have_the_same_ledger;
-            if (t.ledger != dr_account.ledger) return .transfer_must_have_the_same_ledger_as_accounts;
+            if (t.ledger != dr_account.ledger) {
+                return .transfer_must_have_the_same_ledger_as_accounts;
+            }
 
-            // If the transfer already exists, then it must not influence the overflow or limit checks.
+            // If the transfer already exists, then it must not influence the overflow or limit
+            // checks.
             if (self.get_transfer(t.id)) |e| return create_transfer_exists(t, e);
 
             const amount = amount: {
@@ -1511,20 +1544,42 @@ pub fn StateMachineType(
             };
 
             if (t.flags.pending) {
-                if (sum_overflows(u128, amount, dr_account.debits_pending)) return .overflows_debits_pending;
-                if (sum_overflows(u128, amount, cr_account.credits_pending)) return .overflows_credits_pending;
+                if (sum_overflows(u128, amount, dr_account.debits_pending)) {
+                    return .overflows_debits_pending;
+                }
+                if (sum_overflows(u128, amount, cr_account.credits_pending)) {
+                    return .overflows_credits_pending;
+                }
             }
-            if (sum_overflows(u128, amount, dr_account.debits_posted)) return .overflows_debits_posted;
-            if (sum_overflows(u128, amount, cr_account.credits_posted)) return .overflows_credits_posted;
+            if (sum_overflows(u128, amount, dr_account.debits_posted)) {
+                return .overflows_debits_posted;
+            }
+            if (sum_overflows(u128, amount, cr_account.credits_posted)) {
+                return .overflows_credits_posted;
+            }
             // We assert that the sum of the pending and posted balances can never overflow:
-            if (sum_overflows(u128, amount, dr_account.debits_pending + dr_account.debits_posted)) {
+            if (sum_overflows(
+                u128,
+                amount,
+                dr_account.debits_pending + dr_account.debits_posted,
+            )) {
                 return .overflows_debits;
             }
-            if (sum_overflows(u128, amount, cr_account.credits_pending + cr_account.credits_posted)) {
+            if (sum_overflows(
+                u128,
+                amount,
+                cr_account.credits_pending + cr_account.credits_posted,
+            )) {
                 return .overflows_credits;
             }
 
-            if (sum_overflows(u64, t.timestamp, @as(u64, @intCast(t.timeout)) * std.time.ns_per_s)) return .overflows_timeout;
+            if (sum_overflows(
+                u64,
+                t.timestamp,
+                @as(u64, t.timeout) * std.time.ns_per_s,
+            )) {
+                return .overflows_timeout;
+            }
             if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
             if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
 
@@ -1571,7 +1626,8 @@ pub fn StateMachineType(
 
         fn create_transfer_exists(t: *const Transfer, e: *const Transfer) CreateTransferResult {
             assert(t.id == e.id);
-            // The flags change the behavior of the remaining comparisons, so compare the flags first.
+            // The flags change the behavior of the remaining comparisons, so compare the flags
+            // first.
             if (@as(u16, @bitCast(t.flags)) != @as(u16, @bitCast(e.flags))) {
                 return .exists_with_different_flags;
             }
@@ -1611,7 +1667,10 @@ pub fn StateMachineType(
             return .exists;
         }
 
-        fn post_or_void_pending_transfer(self: *StateMachine, t: *const Transfer) CreateTransferResult {
+        fn post_or_void_pending_transfer(
+            self: *StateMachine,
+            t: *const Transfer,
+        ) CreateTransferResult {
             assert(t.id != 0);
             assert(t.flags.padding == 0);
             assert(t.timestamp > self.commit_timestamp);
@@ -1648,8 +1707,11 @@ pub fn StateMachineType(
             if (t.credit_account_id > 0 and t.credit_account_id != p.credit_account_id) {
                 return .pending_transfer_has_different_credit_account_id;
             }
-            // The user_data field is allowed to differ across pending and posting/voiding transfers.
-            if (t.ledger > 0 and t.ledger != p.ledger) return .pending_transfer_has_different_ledger;
+            // The user_data field is allowed to differ across pending and posting/voiding
+            // transfers.
+            if (t.ledger > 0 and t.ledger != p.ledger) {
+                return .pending_transfer_has_different_ledger;
+            }
             if (t.code > 0 and t.code != p.code) return .pending_transfer_has_different_code;
 
             const amount = if (t.amount > 0) t.amount else p.amount;
@@ -1717,7 +1779,8 @@ pub fn StateMachineType(
                 // In case the pending transfer's timeout is exactly the one we are using
                 // as flag, we need to zero the value to run the next `pulse`.
                 if (self.expire_pending_transfers.pulse_next_timestamp == expires_at) {
-                    self.expire_pending_transfers.pulse_next_timestamp = TimestampRange.timestamp_min;
+                    self.expire_pending_transfers.pulse_next_timestamp =
+                        TimestampRange.timestamp_min;
                 }
             }
 
@@ -1971,15 +2034,16 @@ pub fn StateMachineType(
                         2 * batch_transfers_limit, // create_transfer(), debit and credit accounts
                     ),
                     .cache_entries_max = options.cache_entries_accounts,
-                    .tree_options_object = .{ .batch_value_count_limit = batch_values_limit.accounts.timestamp },
-                    .tree_options_id = .{ .batch_value_count_limit = batch_values_limit.accounts.id },
-                    .tree_options_index = .{
-                        .user_data_128 = .{ .batch_value_count_limit = batch_values_limit.accounts.user_data_128 },
-                        .user_data_64 = .{ .batch_value_count_limit = batch_values_limit.accounts.user_data_64 },
-                        .user_data_32 = .{ .batch_value_count_limit = batch_values_limit.accounts.user_data_32 },
-                        .ledger = .{ .batch_value_count_limit = batch_values_limit.accounts.ledger },
-                        .code = .{ .batch_value_count_limit = batch_values_limit.accounts.code },
+                    .tree_options_object = .{
+                        .batch_value_count_limit = batch_values_limit.accounts.timestamp,
                     },
+                    .tree_options_id = .{
+                        .batch_value_count_limit = batch_values_limit.accounts.id,
+                    },
+                    .tree_options_index = index_tree_options(
+                        AccountsGroove.IndexTreeOptions,
+                        batch_values_limit.accounts,
+                    ),
                 },
                 .transfers = .{
                     // lookup_transfer() looks up 1 Transfer.
@@ -1988,41 +2052,53 @@ pub fn StateMachineType(
                     // create_transfer() updates a single Transfer.
                     .prefetch_entries_for_update_max = batch_transfers_limit,
                     .cache_entries_max = options.cache_entries_transfers,
-                    .tree_options_object = .{ .batch_value_count_limit = batch_values_limit.transfers.timestamp },
-                    .tree_options_id = .{ .batch_value_count_limit = batch_values_limit.transfers.id },
-                    .tree_options_index = .{
-                        .debit_account_id = .{ .batch_value_count_limit = batch_values_limit.transfers.debit_account_id },
-                        .credit_account_id = .{ .batch_value_count_limit = batch_values_limit.transfers.credit_account_id },
-                        .user_data_128 = .{ .batch_value_count_limit = batch_values_limit.transfers.user_data_128 },
-                        .user_data_64 = .{ .batch_value_count_limit = batch_values_limit.transfers.user_data_64 },
-                        .user_data_32 = .{ .batch_value_count_limit = batch_values_limit.transfers.user_data_32 },
-                        .pending_id = .{ .batch_value_count_limit = batch_values_limit.transfers.pending_id },
-                        .ledger = .{ .batch_value_count_limit = batch_values_limit.transfers.ledger },
-                        .code = .{ .batch_value_count_limit = batch_values_limit.transfers.code },
-                        .amount = .{ .batch_value_count_limit = batch_values_limit.transfers.amount },
-                        .expires_at = .{ .batch_value_count_limit = batch_values_limit.transfers.expires_at },
+                    .tree_options_object = .{
+                        .batch_value_count_limit = batch_values_limit.transfers.timestamp,
                     },
+                    .tree_options_id = .{
+                        .batch_value_count_limit = batch_values_limit.transfers.id,
+                    },
+                    .tree_options_index = index_tree_options(
+                        TransfersGroove.IndexTreeOptions,
+                        batch_values_limit.transfers,
+                    ),
                 },
                 .transfers_pending = .{
                     .prefetch_entries_for_read_max = batch_transfers_limit,
                     // create_transfer() posts/voids at most one transfer.
                     .prefetch_entries_for_update_max = batch_transfers_limit,
                     .cache_entries_max = options.cache_entries_posted,
-                    .tree_options_object = .{ .batch_value_count_limit = batch_values_limit.transfers_pending.timestamp },
-                    .tree_options_id = {},
-                    .tree_options_index = .{
-                        .status = .{ .batch_value_count_limit = batch_values_limit.transfers_pending.status },
+                    .tree_options_object = .{
+                        .batch_value_count_limit = batch_values_limit.transfers_pending.timestamp,
                     },
+                    .tree_options_id = {},
+                    .tree_options_index = index_tree_options(
+                        TransfersPendingGroove.IndexTreeOptions,
+                        batch_values_limit.transfers_pending,
+                    ),
                 },
                 .account_balances = .{
                     .prefetch_entries_for_read_max = 0,
                     .prefetch_entries_for_update_max = batch_transfers_limit,
                     .cache_entries_max = options.cache_entries_account_balances,
-                    .tree_options_object = .{ .batch_value_count_limit = batch_values_limit.account_balances.timestamp },
+                    .tree_options_object = .{
+                        .batch_value_count_limit = batch_values_limit.account_balances.timestamp,
+                    },
                     .tree_options_id = {},
                     .tree_options_index = .{},
                 },
             };
+        }
+
+        fn index_tree_options(
+            comptime IndexTreeOptions: type,
+            batch_limits: anytype,
+        ) IndexTreeOptions {
+            var result: IndexTreeOptions = undefined;
+            inline for (comptime std.meta.fieldNames(IndexTreeOptions)) |field| {
+                @field(result, field) = .{ .batch_value_count_limit = @field(batch_limits, field) };
+            }
+            return result;
         }
 
         fn batch_value_counts_limit(batch_size_limit: u32) struct {
@@ -2362,7 +2438,8 @@ const TestContext = struct {
 
         ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
             .batch_size_limit = message_body_size_max,
-            .lsm_forest_compaction_block_count = StateMachine.Forest.Options.compaction_block_count_min,
+            .lsm_forest_compaction_block_count = StateMachine.Forest.Options
+                .compaction_block_count_min,
             .lsm_forest_node_count = 1,
             .cache_entries_accounts = 0,
             .cache_entries_transfers = 0,
@@ -2756,8 +2833,10 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == .get_account_balances);
                 operation = .get_account_balances;
 
-                const timestamp_min = if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max = if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_min =
+                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_max =
+                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
 
                 const event = AccountFilter{
                     .account_id = f.account_id,
@@ -2789,8 +2868,10 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == .get_account_transfers);
                 operation = .get_account_transfers;
 
-                const timestamp_min = if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max = if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_min =
+                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_max =
+                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
 
                 const event = AccountFilter{
                     .account_id = f.account_id,
@@ -3815,7 +3896,8 @@ test "StateMachine: Demuxer" {
         try expect(StateMachine.batch_logical_allowed.get(operation));
 
         const Result = StateMachine.Result(operation);
-        var results: [@divExact(global_constants.message_body_size_max, @sizeOf(Result))]Result = undefined;
+        var results: [@divExact(global_constants.message_body_size_max, @sizeOf(Result))]Result =
+            undefined;
 
         for (0..100) |_| {
             // Generate Result errors to Events at random.
@@ -3828,12 +3910,21 @@ test "StateMachine: Demuxer" {
             }
 
             // Demux events of random strides from the generated results.
-            var demuxer = StateMachine.DemuxerType(operation).init(mem.sliceAsBytes(results[0..reply_len]));
-            const event_count: u32 = @intCast(@max(1, prng.random().uintAtMost(usize, results.len)));
+            var demuxer = StateMachine.DemuxerType(operation)
+                .init(mem.sliceAsBytes(results[0..reply_len]));
+            const event_count: u32 = @intCast(@max(
+                1,
+                prng.random().uintAtMost(usize, results.len),
+            ));
             var event_offset: u32 = 0;
             while (event_offset < event_count) {
-                const event_size = @max(1, prng.random().uintAtMost(u32, event_count - event_offset));
-                const reply: []Result = @alignCast(mem.bytesAsSlice(Result, demuxer.decode(event_offset, event_size)));
+                const event_size = @max(
+                    1,
+                    prng.random().uintAtMost(u32, event_count - event_offset),
+                );
+                const reply: []Result = @alignCast(
+                    mem.bytesAsSlice(Result, demuxer.decode(event_offset, event_size)),
+                );
                 defer event_offset += event_size;
 
                 for (reply) |*result| {

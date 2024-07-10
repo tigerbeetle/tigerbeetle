@@ -361,7 +361,16 @@ fn find_long_line(file_text: []const u8) !?usize {
             if (parse_multiline_string(line)) |string_value| {
                 const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
                 if (string_value_length <= 100) continue;
+
+                if (std.mem.startsWith(u8, string_value, " account A") or
+                    std.mem.startsWith(u8, string_value, " transfer T") or
+                    std.mem.startsWith(u8, string_value, " transfer   "))
+                {
+                    // Table tests from state_machine.zig. They are intentionally wide.
+                    continue;
+                }
             }
+
             return line_index;
         }
     }
@@ -381,7 +390,6 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "state_machine.zig",
     "testing/low_level_hash_vectors.zig",
     "vsr/clock.zig",
     "vsr/journal.zig",
