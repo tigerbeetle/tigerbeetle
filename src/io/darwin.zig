@@ -642,7 +642,13 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) WriteError!usize {
-                    return posix.pwrite(op.fd, op.buf[0..op.len], op.offset);
+                    // In the current implementation, Darwin file IO (namely, the posix.pwrite
+                    // below) is _synchronous_, so it's safe to call fs_sync after it has
+                    // completed.
+                    const result = posix.pwrite(op.fd, op.buf[0..op.len], op.offset);
+                    try fs_sync(op.fd);
+
+                    return result;
                 }
             },
         );
@@ -694,9 +700,10 @@ pub const IO = struct {
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
 
-        // Opening with O_DSYNC is essential for both durability and correctness.
-        // O_DSYNC enables us to omit fsync() calls in the data plane, since we sync to the disk
-        // on every write.
+        // Normally, O_DSYNC enables us to omit fsync() calls in the data plane, since we sync to
+        // the disk on every write, but that's not the case for Darwin:
+        // https://x.com/TigerBeetleDB/status/1536628729031581697
+        // To work around this, fs_sync() is explicitly called after writing in do_operation.
         var flags: posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDWR, .DSYNC = true };
         var mode: posix.mode_t = 0;
 
