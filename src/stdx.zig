@@ -745,3 +745,45 @@ pub fn EnumUnionType(
 pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @TypeOf(slice[0]) {
     return &@as([len]@TypeOf(slice[0]), slice[0..len].*);
 }
+
+/// Return a Formatter for a u64 value representing a file size.
+/// This formatter statically checks that the number is a multiple of 1024,
+/// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
+pub fn fmtIntSizeBinExact(comptime value: u64) std.fmt.Formatter(formatIntSizeBinExact) {
+    comptime assert(value % 1024 == 0);
+    return .{ .data = value };
+}
+
+fn formatIntSizeBinExact(
+    value: u64,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = fmt;
+    if (value == 0) {
+        return std.fmt.formatBuf("0B", options, writer);
+    }
+
+    // The worst case in terms of space needed is 4 bytes,
+    // since 1023 is the highest possible number,
+    // + 3 bytes for the unit suffix.
+    var buf: [7]u8 = undefined;
+
+    const mags_iec = " KMGTPEZY";
+    const magnitude = @min(std.math.log2(value) / 10, mags_iec.len - 1);
+    const suffix = mags_iec[magnitude];
+    const new_value = value / std.math.pow(u64, 1024, magnitude);
+
+    const i = std.fmt.formatIntBuf(&buf, new_value, 10, .lower, .{});
+    buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
+
+    return std.fmt.formatBuf(buf[0 .. i + 3], options, writer);
+}
+
+test fmtIntSizeBinExact {
+    try std.testing.expectFmt("0B", "{}", .{fmtIntSizeBinExact(0)});
+    try std.testing.expectFmt("8KiB", "{}", .{fmtIntSizeBinExact(8 * 1024)});
+    try std.testing.expectFmt("42MiB", "{}", .{fmtIntSizeBinExact(42 * 1024 * 1024)});
+    try std.testing.expectFmt("999GiB", "{}", .{fmtIntSizeBinExact(999 * 1024 * 1024 * 1024)});
+}
