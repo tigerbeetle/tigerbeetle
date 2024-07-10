@@ -603,7 +603,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             if (pipeline_limit > pipeline_limit_max) {
                 flags.fatal("--limit-pipeline-requests: count {} exceeds maximum: {}", .{
                     pipeline_limit,
-                    vsr.stdx.fmtIntSizeBinExact(pipeline_limit_max),
+                    pipeline_limit_max,
                 });
             }
             if (pipeline_limit < pipeline_limit_min) {
