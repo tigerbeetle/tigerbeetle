@@ -230,7 +230,7 @@ test "c_client tb_status" {
     try assert_status(1, "invalid", c.TB_STATUS_ADDRESS_INVALID);
     try assert_status(1, "", c.TB_STATUS_ADDRESS_INVALID);
 
-    // More addresses thant "replicas_max" should return "TB_STATUS_ADDRESS_LIMIT_EXCEEDED":
+    // More addresses than "replicas_max" should return "TB_STATUS_ADDRESS_LIMIT_EXCEEDED":
     try assert_status(
         1,
         ("3000," ** constants.replicas_max) ++ "3001",

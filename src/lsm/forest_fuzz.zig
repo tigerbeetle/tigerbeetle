@@ -857,7 +857,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // * See the state from that checkpoint.
         // * See the state from the previous checkpoint.
         // But this is difficult to test, so for now we'll avoid it.
-        const modifer_tag = if (action == .compact and !action.compact.checkpoint)
+        const modifier_tag = if (action == .compact and !action.compact.checkpoint)
             fuzz.random_enum(
                 random,
                 FuzzOpModifierTag,
@@ -865,7 +865,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             )
         else
             FuzzOpModifierTag.normal;
-        const modifier = switch (modifer_tag) {
+        const modifier = switch (modifier_tag) {
             .normal => FuzzOpModifier{ .normal = {} },
             .crash_after_ticks => FuzzOpModifier{
                 .crash_after_ticks = fuzz.random_int_exponential(random, usize, io_latency_mean),

@@ -246,7 +246,7 @@ pub const IO = struct {
     ) void {
         const onCompleteFn = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
-                // Perform the actual operaton
+                // Perform the actual operation
                 const op_data = &@field(_completion.operation, @tagName(operation_tag));
                 const result = OperationImpl.do_operation(op_data);
 

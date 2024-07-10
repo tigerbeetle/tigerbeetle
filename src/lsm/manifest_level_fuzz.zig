@@ -203,7 +203,7 @@ const GenerateContext = struct {
                     return ctx.next(.remove_invisible);
                 }
 
-                // Decide if all tables visible ot snapshot_latest should be removed.
+                // Decide if all tables visible to snapshot_latest should be removed.
                 const amount = if (ctx.random.boolean())
                     visible_latest
                 else

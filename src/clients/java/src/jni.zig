@@ -713,7 +713,7 @@ pub const JNIEnv = opaque {
         /// Index 230: GetDirectBufferAddress
         get_direct_buffer_address = 230,
 
-        /// GetDirectBufferCapacity - Index 231 in the JNIEnv interface function tabl
+        /// GetDirectBufferCapacity - Index 231 in the JNIEnv interface function table
         get_direct_buffer_capacity = 231,
 
         /// Index 232: GetObjectRefType

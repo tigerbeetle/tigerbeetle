@@ -128,8 +128,8 @@ const Environment = struct {
             // Compare from cache_map, if found:
             const cache_map_value = env.cache_map.get(kv.key_ptr.*);
             stdx.maybe(cache_map_value != null);
-            if (cache_map_value) |cache_map_value_unwraped| {
-                assert(std.meta.eql(kv.value_ptr.value, cache_map_value_unwraped.*));
+            if (cache_map_value) |cache_map_value_unwrapped| {
+                assert(std.meta.eql(kv.value_ptr.value, cache_map_value_unwrapped.*));
             } else {
                 // .compact() support:
                 assert(env.model.compacts > kv.value_ptr.op);

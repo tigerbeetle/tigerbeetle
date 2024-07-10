@@ -159,7 +159,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     //     });
     //     try shell.pushd_dir(tmp_dir.dir);
 
-    //     // Slice the output to supress the names.
+    //     // Slice the output to suppress the names.
     //     if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
     //         std.debug.panic("checksum mismatch - {s}: downloaded {s}, built {s}", .{
     //             artifact,

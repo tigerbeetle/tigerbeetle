@@ -284,7 +284,7 @@ test "JNI: LocalFrame" {
     const local_ref = env.alloc_object(boolean_class);
     try testing.expect(local_ref != null);
 
-    // All local references must be invalidated after this frame being droped,
+    // All local references must be invalidated after this frame being dropped,
     // except by the frame result.
     const pop_local_frame_result = env.pop_local_frame(local_ref);
     try testing.expect(pop_local_frame_result != null);
@@ -1534,17 +1534,17 @@ test "JNI: primitive arrays" {
                 }
 
                 pub fn assert(env: *JNIEnv) !void {
-                    const lenght = 32;
+                    const length = 32;
 
                     const array = switch (PrimitiveType) {
-                        jni.JBoolean => env.new_boolean_array(lenght),
-                        jni.JByte => env.new_byte_array(lenght),
-                        jni.JChar => env.new_char_array(lenght),
-                        jni.JShort => env.new_short_array(lenght),
-                        jni.JInt => env.new_int_array(lenght),
-                        jni.JLong => env.new_long_array(lenght),
-                        jni.JFloat => env.new_float_array(lenght),
-                        jni.JDouble => env.new_double_array(lenght),
+                        jni.JBoolean => env.new_boolean_array(length),
+                        jni.JByte => env.new_byte_array(length),
+                        jni.JChar => env.new_char_array(length),
+                        jni.JShort => env.new_short_array(length),
+                        jni.JInt => env.new_int_array(length),
+                        jni.JLong => env.new_long_array(length),
+                        jni.JFloat => env.new_float_array(length),
+                        jni.JDouble => env.new_double_array(length),
                         else => unreachable,
                     };
 
@@ -1552,7 +1552,7 @@ test "JNI: primitive arrays" {
                     defer env.delete_local_ref(array);
 
                     const len = env.get_array_length(array);
-                    try testing.expect(len == lenght);
+                    try testing.expect(len == length);
 
                     // Change the array:
                     {

@@ -649,7 +649,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             Parser.Error.BadKeyValuePair,
                             Parser.Error.MissingEqualBetweenKeyValuePair,
                             Parser.Error.NoSyntaxMatch,
-                            // TODO: This wil be more convenient to express
+                            // TODO: This will be more convenient to express
                             // once https://github.com/ziglang/zig/issues/2473 is
                             // in.
                             => std.posix.exit(1),

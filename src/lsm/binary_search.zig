@@ -697,7 +697,7 @@ test "binary search: random" {
 test "binary search: explicit range" {
     if (test_binary_search.log) std.debug.print("\n", .{});
 
-    // Exact inverval:
+    // Exact interval:
     try test_binary_search.explicit_range_search(
         &[_]u32{ 3, 4, 10, 15, 20, 25, 30, 100, 1000 },
         3,
@@ -708,7 +708,7 @@ test "binary search: explicit range" {
         },
     );
 
-    // Larger inverval:
+    // Larger interval:
     try test_binary_search.explicit_range_search(
         &[_]u32{ 3, 4, 10, 15, 20, 25, 30, 100, 1000 },
         2,
