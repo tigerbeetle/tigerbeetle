@@ -295,7 +295,7 @@ pub fn GrooveType(
             .is_tuple = false,
         },
     });
-    const IndexTreeOptions = @Type(.{
+    const _IndexTreeOptions = @Type(.{
         .Struct = .{
             .layout = .auto,
             .fields = index_options_fields,
@@ -315,7 +315,7 @@ pub fn GrooveType(
         std.meta.fields(@TypeOf(groove_options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
-    assert(indexes_count_actual == std.meta.fields(IndexTreeOptions).len);
+    assert(indexes_count_actual == std.meta.fields(_IndexTreeOptions).len);
 
     // Generate a helper function for interacting with an Index field type.
     const IndexTreeFieldHelperType = struct {
@@ -466,6 +466,8 @@ pub fn GrooveType(
         objects_cache: ObjectsCache,
 
         scan_builder: ScanBuilder,
+
+        pub const IndexTreeOptions = _IndexTreeOptions;
 
         pub const Options = struct {
             /// The maximum number of objects that might be prefetched and not modified by a batch.
