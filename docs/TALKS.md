@@ -45,7 +45,7 @@ This week on The Data Stack Show, Eric and Kostas chatted with Joran
 Greef, Founder & CEO of Tiger Beetle. During the episode, Joran
 discusses his journey from accounting to coding, why double-entry
 accounting is important for databases, safety issues in financial
-softwares, the need for low latency and high throughput, and more.
+software, the need for low latency and high throughput, and more.
 
 https://datastackshow.com/podcast/why-accounting-needs-its-own-database-with-joran-greef-of-tiger-beetle/
 

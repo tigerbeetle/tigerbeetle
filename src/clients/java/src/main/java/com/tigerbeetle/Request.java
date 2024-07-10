@@ -46,7 +46,7 @@ abstract class Request<TResponse extends Batch> {
         }
     }
 
-    // Used ony by the JNI side
+    // Used only by the JNI side
     @Native
     private final ByteBuffer sendBuffer;
 

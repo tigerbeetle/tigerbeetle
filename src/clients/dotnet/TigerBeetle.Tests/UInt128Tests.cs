@@ -12,7 +12,7 @@ namespace TigerBeetle.Tests;
 public class UInt128Tests
 {
     [TestMethod]
-    public void GuidConvertion()
+    public void GuidConversion()
     {
         Guid guid = Guid.Parse("A945C62A-4CC7-425B-B44A-893577632902");
         UInt128 value = guid.ToUInt128();
@@ -22,7 +22,7 @@ public class UInt128Tests
     }
 
     [TestMethod]
-    public void GuidMaxConvertion()
+    public void GuidMaxConversion()
     {
         Guid guid = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
         UInt128 value = guid.ToUInt128();
@@ -32,7 +32,7 @@ public class UInt128Tests
     }
 
     [TestMethod]
-    public void ArrayConvertion()
+    public void ArrayConversion()
     {
         byte[] array = new byte[16] { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10 };
         UInt128 value = array.ToUInt128();
@@ -44,7 +44,7 @@ public class UInt128Tests
 
     [TestMethod]
     [ExpectedException(typeof(ArgumentNullException))]
-    public void NullArrayConvertion()
+    public void NullArrayConversion()
     {
         byte[] array = null!;
         _ = array.ToUInt128();
@@ -52,7 +52,7 @@ public class UInt128Tests
 
     [TestMethod]
     [ExpectedException(typeof(ArgumentException))]
-    public void EmptyArrayConvertion()
+    public void EmptyArrayConversion()
     {
         byte[] array = new byte[0];
         _ = array.ToUInt128();
@@ -60,7 +60,7 @@ public class UInt128Tests
 
     [TestMethod]
     [ExpectedException(typeof(ArgumentException))]
-    public void InvalidArrayConvertion()
+    public void InvalidArrayConversion()
     {
         // Expected ArgumentException.
         byte[] array = new byte[17];
@@ -69,9 +69,9 @@ public class UInt128Tests
 
 
     [TestMethod]
-    public void BigIntegerConvertion()
+    public void BigIntegerConversion()
     {
-        var checkConvertion = (BigInteger bigInteger) =>
+        var checkConversion = (BigInteger bigInteger) =>
         {
             UInt128 uint128 = bigInteger.ToUInt128();
 
@@ -80,11 +80,11 @@ public class UInt128Tests
             Assert.IsTrue(uint128.Equals(bigInteger.ToUInt128()));
         };
 
-        checkConvertion(BigInteger.Parse("0"));
-        checkConvertion(BigInteger.Parse("1"));
-        checkConvertion(BigInteger.Parse("123456789012345678901234567890123456789"));
-        checkConvertion(new BigInteger(uint.MaxValue));
-        checkConvertion(new BigInteger(ulong.MaxValue));
+        checkConversion(BigInteger.Parse("0"));
+        checkConversion(BigInteger.Parse("1"));
+        checkConversion(BigInteger.Parse("123456789012345678901234567890123456789"));
+        checkConversion(new BigInteger(uint.MaxValue));
+        checkConversion(new BigInteger(ulong.MaxValue));
     }
 
 

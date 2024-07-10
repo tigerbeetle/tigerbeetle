@@ -1595,7 +1595,7 @@ pub fn StateMachineType(
             //
             // This is a special case in the idempotency check:
             // When _resubmitting_ the same balancing transfer, the amount will likely be different
-            // from what was previously commited, but as long it is within the range of possible
+            // from what was previously committed, but as long as it is within the range of possible
             // values it should fail with `exists` rather than `exists_with_different_amount`.
             if (t.flags.balancing_debit or t.flags.balancing_credit) {
                 if (t.amount > 0 and t.amount < e.amount) return .exists_with_different_amount;

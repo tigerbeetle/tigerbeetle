@@ -792,7 +792,7 @@ pub const Simulator = struct {
         request: *Message.Request,
         reply: *Message.Reply,
     ) void {
-        // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
+        // TODO(Zig) Use @returnAddress to initialize the cluster, then this can just use @fieldParentPtr().
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
         simulator.reply_sequence.insert(reply_client, request, reply);
 

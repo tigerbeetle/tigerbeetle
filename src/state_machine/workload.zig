@@ -1048,7 +1048,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 assert(result_count == @min(account_filter.limit, batch_size, transfer_count));
             } else {
                 // If timestamp range is set, then the limit is exactly the number of transfer
-                // at the time the filter was generated, but new transfers could heve been
+                // at the time the filter was generated, but new transfers could have been
                 // inserted since then.
                 assert(account_filter.limit <= transfer_count);
                 assert(account_filter.timestamp_max >= account_filter.timestamp_min);

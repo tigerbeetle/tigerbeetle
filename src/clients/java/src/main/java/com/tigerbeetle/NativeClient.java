@@ -64,7 +64,7 @@ final class NativeClient implements AutoCloseable {
                             Thread.onSpinWait();
                         }
 
-                        // This function waits until all submited requests are completed, and no
+                        // This function waits until all submitted requests are completed, and no
                         // more packets can be acquired after that.
                         clientDeinit(handle);
                     }

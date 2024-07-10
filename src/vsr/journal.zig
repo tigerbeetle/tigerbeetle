@@ -923,7 +923,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 //   * The requested op's slot is faulty, but the prepare is valid. Since the
                 //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on reading
                 //     this entry it turns out not to have the right op.
-                //   (This case (and the accompanying unnessary read) could be prevented by storing
+                //   (This case (and the accompanying unnecessary read) could be prevented by storing
                 //   the op along with the checksum in `prepare_checksums`.)
                 assert(slot == null);
 

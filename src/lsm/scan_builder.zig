@@ -317,7 +317,7 @@ pub fn ScanType(
         };
 
         /// Comptime dispatcher for all scan implementations that share the same interface.
-        /// Generates a tagged union with an specialized `ScanTreeType` for each queriable field in
+        /// Generates a tagged union with an specialized `ScanTreeType` for each queryable field in
         /// the `Groove` (e.g. `timestamp`, `id` if present, and secondary indexes), plus a
         /// `ScanMergeType` for each merge operation (e.g. union, intersection, and difference).
         ///
