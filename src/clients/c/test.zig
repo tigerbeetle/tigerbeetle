@@ -159,7 +159,6 @@ test "c_client echo" {
 
         // Checking if the received echo matches the data we sent:
         for (requests) |*request| {
-
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(tb_client, request.reply.?.tb_client);

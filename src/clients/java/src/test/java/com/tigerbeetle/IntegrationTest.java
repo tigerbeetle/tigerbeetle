@@ -146,15 +146,6 @@ public class IntegrationTest {
         }
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testConstructorNegativeConcurrencyMax() throws Throwable {
-        final var replicaAddresses = new String[] {"3001"};
-        final var concurrencyMax = -1;
-        try (final var client = new Client(clusterId, replicaAddresses, concurrencyMax)) {
-            assert false;
-        }
-    }
-
     @Test
     public void testCreateAccounts() throws Throwable {
         final var account1Id = UInt128.id();
@@ -896,14 +887,10 @@ public class IntegrationTest {
      */
     @Test
     public void testConcurrentTasks() throws Throwable {
-        // Defining the CONCURRENCY_MAX equals to TASKS_COUNT
-        // The goal here is to allow to all requests being submitted at once.
-        final int CONCURRENCY_MAX = 100;
-        final int TASKS_COUNT = CONCURRENCY_MAX;
+        final int TASKS_COUNT = 100_000;
         final var barrier = new CountDownLatch(TASKS_COUNT);
 
-        try (final var client =
-                new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
+        try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
@@ -948,77 +935,6 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that parallel threads will respect client's concurrencyMax.
-     */
-    @Test
-    public void testConcurrencyExceeded() throws Throwable {
-        // Defining a ratio between concurrent threads and client's concurrencyMax
-        // The goal here is to force to have more threads than the client can process
-        // simultaneously.
-        final int TASKS_COUNT = 32;
-        final int CONCURRENCY_MAX = 2;
-        final var barrier = new CountDownLatch(TASKS_COUNT);
-
-        try (final var client =
-                new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
-            final var account1Id = UInt128.id();
-            final var account2Id = UInt128.id();
-            final var accounts = generateAccounts(account1Id, account2Id);
-
-            final var createAccountErrors = client.createAccounts(accounts);
-            assertTrue(createAccountErrors.getLength() == 0);
-
-            final var tasks = new TransferTask[TASKS_COUNT];
-            for (int i = 0; i < TASKS_COUNT; i++) {
-                // Starting multiple threads submitting transfers.
-                tasks[i] = new TransferTask(client, account1Id, account2Id, barrier,
-                        new CountDownLatch(0));
-                tasks[i].start();
-            }
-
-            // Wait for all threads:
-            int succeededCount = 0;
-            int failedCount = 0;
-            for (int i = 0; i < TASKS_COUNT; i++) {
-                tasks[i].join();
-                if (tasks[i].exception == null) {
-                    assertTrue(tasks[i].result.getLength() == 0);
-                    succeededCount += 1;
-                } else {
-                    assertEquals(ConcurrencyExceededException.class, tasks[i].exception.getClass());
-                    failedCount += 1;
-                }
-            }
-
-            // At least max_concurrency tasks must succeed.
-            assertTrue(succeededCount >= CONCURRENCY_MAX);
-            assertTrue(succeededCount + failedCount == TASKS_COUNT);
-
-            // Asserting if all transfers were submitted correctly.
-            final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
-            assertEquals(2, lookupAccounts.getLength());
-
-            accounts.beforeFirst();
-
-            assertTrue(accounts.next());
-            assertTrue(lookupAccounts.next());
-            assertAccounts(accounts, lookupAccounts);
-
-            assertEquals(BigInteger.valueOf(100 * succeededCount),
-                    lookupAccounts.getCreditsPosted());
-            assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
-
-            assertTrue(accounts.next());
-            assertTrue(lookupAccounts.next());
-            assertAccounts(accounts, lookupAccounts);
-
-            assertEquals(BigInteger.valueOf(100 * succeededCount),
-                    lookupAccounts.getDebitsPosted());
-            assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
-        }
-    }
-
-    /**
      * This test asserts that client.close() will wait for all ongoing request to complete And new
      * threads trying to submit a request after the client was closed will fail with
      * IllegalStateException.
@@ -1038,8 +954,7 @@ public class IntegrationTest {
         final var enterBarrier = new CountDownLatch(TASKS_COUNT);
         final var exitBarrier = new CountDownLatch(1);
 
-        try (final var client =
-                new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
+        try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
@@ -1145,8 +1060,7 @@ public class IntegrationTest {
 
         final var executor = Executors.newFixedThreadPool(4);
 
-        try (final var client =
-                new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
+        try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();

@@ -56,6 +56,9 @@ abstract class Request<TResponse extends Batch> {
     private final long sendBufferLen;
 
     @Native
+    private final ByteBuffer packetBuffer;
+
+    @Native
     private byte[] replyBuffer;
 
     private final NativeClient nativeClient;
@@ -74,11 +77,15 @@ abstract class Request<TResponse extends Batch> {
         this.sendBufferLen = batch.getBufferLen();
         this.replyBuffer = null;
 
+        // sizeof(tb_packet_t) + alignof(tb_packet_t).
+        // Allows for enough room to compute an aligned tb_packet_t object pointer.
+        this.packetBuffer = ByteBuffer.allocateDirect(64 + 8);
+
         if (this.sendBufferLen == 0 || this.requestLen == 0)
             throw new IllegalArgumentException("Empty batch");
     }
 
-    public void beginRequest() throws ConcurrencyExceededException {
+    public void beginRequest() throws Exception {
         nativeClient.submit(this);
     }
 

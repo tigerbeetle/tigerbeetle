@@ -26,7 +26,7 @@ final class NativeClient implements AutoCloseable {
             this.atomicHandleReferences = new AtomicLong(0);
         }
 
-        public void submit(final Request<?> request) throws ConcurrencyExceededException {
+        public void submit(final Request<?> request) throws Exception {
             try {
                 atomicHandleReferences.incrementAndGet();
                 final var handle = atomicHandle.getAcquire();
@@ -34,15 +34,8 @@ final class NativeClient implements AutoCloseable {
                 if (handle == 0L)
                     throw new IllegalStateException("Client is closed");
 
-                final var packet_acquire_status = NativeClient.submit(handle, request);
-                if (packet_acquire_status == PacketAcquireStatus.ConcurrencyMaxExceeded.value) {
-                    throw new ConcurrencyExceededException();
-                } else if (packet_acquire_status == PacketAcquireStatus.Shutdown.value) {
-                    throw new IllegalStateException("Client is closing");
-                } else {
-                    assertTrue(packet_acquire_status == PacketAcquireStatus.Ok.value,
-                            "PacketAcquireStatus=%d is not implemented", packet_acquire_status);
-                }
+                NativeClient.submit(handle, request);
+
             } finally {
                 atomicHandleReferences.decrementAndGet();
             }
@@ -86,25 +79,21 @@ final class NativeClient implements AutoCloseable {
     private final NativeHandle handle;
     private final Cleaner.Cleanable cleanable;
 
-    public static NativeClient init(final byte[] clusterID, final String addresses,
-            final int concurrencyMax) {
-        assertArgs(clusterID, addresses, concurrencyMax);
-        final long contextHandle = clientInit(clusterID, addresses, concurrencyMax);
+    public static NativeClient init(final byte[] clusterID, final String addresses) {
+        assertArgs(clusterID, addresses);
+        final long contextHandle = clientInit(clusterID, addresses);
         return new NativeClient(contextHandle);
     }
 
-    public static NativeClient initEcho(final byte[] clusterID, final String addresses,
-            final int concurrencyMax) {
-        assertArgs(clusterID, addresses, concurrencyMax);
-        final long contextHandle = clientInitEcho(clusterID, addresses, concurrencyMax);
+    public static NativeClient initEcho(final byte[] clusterID, final String addresses) {
+        assertArgs(clusterID, addresses);
+        final long contextHandle = clientInitEcho(clusterID, addresses);
         return new NativeClient(contextHandle);
     }
 
-    private static void assertArgs(final byte[] clusterID, final String addresses,
-            final int concurrencyMax) {
+    private static void assertArgs(final byte[] clusterID, final String addresses) {
         assertTrue(clusterID.length == 16, "ClusterID must be a UInt128");
         assertTrue(addresses != null, "Replica addresses cannot be null");
-        assertTrue(concurrencyMax > 0, "Invalid concurrencyMax");
     }
 
     private NativeClient(final long contextHandle) {
@@ -117,7 +106,7 @@ final class NativeClient implements AutoCloseable {
         }
     }
 
-    public void submit(final Request<?> request) throws ConcurrencyExceededException {
+    public void submit(final Request<?> request) throws Exception {
         this.handle.submit(request);
     }
 
@@ -133,12 +122,11 @@ final class NativeClient implements AutoCloseable {
         cleanable.clean();
     }
 
-    private static native int submit(long contextHandle, Request<?> request);
+    private static native void submit(long contextHandle, Request<?> request);
 
-    private static native long clientInit(byte[] clusterID, String addresses, int concurrencyMax);
+    private static native long clientInit(byte[] clusterID, String addresses);
 
-    private static native long clientInitEcho(byte[] clusterID, String addresses,
-            int concurrencyMax);
+    private static native long clientInitEcho(byte[] clusterID, String addresses);
 
     private static native void clientDeinit(long contextHandle);
 }

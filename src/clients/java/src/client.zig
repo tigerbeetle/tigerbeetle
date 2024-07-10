@@ -50,7 +50,6 @@ const NativeClient = struct {
         env: *jni.JNIEnv,
         cluster_id: u128,
         addresses_obj: jni.JString,
-        max_concurrency: u32,
     ) ?*Context {
         const addresses = JNIHelper.get_string_utf(env, addresses_obj) orelse {
             ReflectionHelper.initialization_exception_throw(
@@ -72,7 +71,6 @@ const NativeClient = struct {
             global_allocator,
             cluster_id,
             addresses,
-            max_concurrency,
             @intFromPtr(context),
             on_completion,
         ) catch |err| {
@@ -99,7 +97,7 @@ const NativeClient = struct {
         env: *jni.JNIEnv,
         context: *Context,
         request_obj: jni.JObject,
-    ) tb.tb_packet_acquire_status_t {
+    ) void {
         assert(request_obj != null);
 
         const operation = ReflectionHelper.get_request_operation(env, request_obj);
@@ -111,27 +109,24 @@ const NativeClient = struct {
             return undefined;
         };
 
-        var out_packet: ?*tb.tb_packet_t = null;
-        const acquire_status = tb.acquire_packet(context.client, &out_packet);
+        // Compute a valid, aligned Packet pointer inside packet_buffer.
+        const packet_buffer: []u8 = ReflectionHelper.get_packet_buffer_slice(env, request_obj) orelse @panic("Request.packetBuffer somehow became null or invalid");
+        const packet_align_ptr =
+            std.mem.alignForward(usize, @intFromPtr(packet_buffer.ptr), @alignOf(tb.tb_packet_t));
+        assert(packet_align_ptr + @sizeOf(tb.tb_packet_t) <=
+            @intFromPtr(packet_buffer.ptr + packet_buffer.len));
 
-        if (out_packet) |packet| {
-            assert(acquire_status == .ok);
+        // Holds a global reference to prevent GC before the callback.
+        const global_ref = JNIHelper.new_global_reference(env, request_obj);
 
-            // Holds a global reference to prevent GC before the callback.
-            const global_ref = JNIHelper.new_global_reference(env, request_obj);
-
-            packet.operation = operation;
-            packet.user_data = global_ref;
-            packet.data = send_buffer.ptr;
-            packet.data_size = @intCast(send_buffer.len);
-            packet.next = null;
-            packet.status = .ok;
-            tb.submit(context.client, packet);
-        } else {
-            assert(acquire_status != .ok);
-        }
-
-        return acquire_status;
+        const packet: *tb.tb_packet_t = @ptrFromInt(packet_align_ptr);
+        packet.operation = operation;
+        packet.user_data = global_ref;
+        packet.data = send_buffer.ptr;
+        packet.data_size = @intCast(send_buffer.len);
+        packet.next = null;
+        packet.status = .ok;
+        tb.submit(context.client, packet);
     }
 
     /// Completion callback, always called from the native thread.
@@ -156,7 +151,7 @@ const NativeClient = struct {
         if (result_len > 0) {
             switch (packet_status) {
                 .ok => if (result_ptr) |ptr| {
-                    // Copying the reply before releasing the packet.
+                    // Copying the reply before returning from the callback.
                     ReflectionHelper.set_reply_buffer(
                         env,
                         request_obj,
@@ -166,7 +161,6 @@ const NativeClient = struct {
                 else => {},
             }
         }
-        tb.release_packet(context.client, packet);
 
         ReflectionHelper.end_request(
             env,
@@ -196,7 +190,6 @@ comptime {
             class: jni.JClass,
             cluster_id: jni.JByteArray,
             addresses: jni.JString,
-            max_concurrency: jni.JInt,
         ) callconv(jni.JNICALL) jni.JLong {
             _ = class;
             assert(env.get_array_length(cluster_id) == 16);
@@ -209,7 +202,6 @@ comptime {
                 env,
                 @bitCast(cluster_id_elements[0..16].*),
                 addresses,
-                @bitCast(max_concurrency),
             );
             return @bitCast(@intFromPtr(context));
         }
@@ -219,7 +211,6 @@ comptime {
             class: jni.JClass,
             cluster_id: jni.JByteArray,
             addresses: jni.JString,
-            max_concurrency: jni.JInt,
         ) callconv(jni.JNICALL) jni.JLong {
             _ = class;
             assert(env.get_array_length(cluster_id) == 16);
@@ -232,7 +223,6 @@ comptime {
                 env,
                 @as(u128, @bitCast(cluster_id_elements[0..16].*)),
                 addresses,
-                @bitCast(max_concurrency),
             );
             return @bitCast(@intFromPtr(context));
         }
@@ -252,16 +242,14 @@ comptime {
             class: jni.JClass,
             context_handle: jni.JLong,
             request_obj: jni.JObject,
-        ) callconv(jni.JNICALL) jni.JInt {
+        ) callconv(jni.JNICALL) void {
             _ = class;
             assert(context_handle != 0);
-            const packet_acquire_status = NativeClient.submit(
+            NativeClient.submit(
                 env,
                 @ptrFromInt(@as(usize, @bitCast(context_handle))),
                 request_obj,
             );
-
-            return @intCast(@intFromEnum(packet_acquire_status));
         }
     };
 
@@ -284,6 +272,7 @@ const ReflectionHelper = struct {
     var request_send_buffer_field_id: jni.JFieldID = null;
     var request_send_buffer_len_field_id: jni.JFieldID = null;
     var request_reply_buffer_field_id: jni.JFieldID = null;
+    var request_packet_buffer_field_id: jni.JFieldID = null;
     var request_operation_method_id: jni.JMethodID = null;
     var request_end_request_method_id: jni.JMethodID = null;
 
@@ -296,6 +285,7 @@ const ReflectionHelper = struct {
         assert(request_send_buffer_field_id == null);
         assert(request_send_buffer_len_field_id == null);
         assert(request_reply_buffer_field_id == null);
+        assert(request_packet_buffer_field_id == null);
         assert(request_operation_method_id == null);
         assert(request_end_request_method_id == null);
 
@@ -337,6 +327,12 @@ const ReflectionHelper = struct {
             "replyBuffer",
             "[B",
         );
+        request_packet_buffer_field_id = JNIHelper.find_field(
+            env,
+            request_class,
+            "packetBuffer",
+            "Ljava/nio/ByteBuffer;",
+        );
         request_operation_method_id = JNIHelper.find_method(
             env,
             request_class,
@@ -358,6 +354,7 @@ const ReflectionHelper = struct {
         assert(request_send_buffer_field_id != null);
         assert(request_send_buffer_len_field_id != null);
         assert(request_reply_buffer_field_id != null);
+        assert(request_packet_buffer_field_id != null);
         assert(request_operation_method_id != null);
         assert(request_end_request_method_id != null);
     }
@@ -374,6 +371,7 @@ const ReflectionHelper = struct {
         request_send_buffer_field_id = null;
         request_send_buffer_len_field_id = null;
         request_reply_buffer_field_id = null;
+        request_packet_buffer_field_id = null;
         request_operation_method_id = null;
         request_end_request_method_id = null;
     }
@@ -437,6 +435,17 @@ const ReflectionHelper = struct {
             return null;
 
         return direct_buffer[0..@as(usize, @intCast(buffer_len))];
+    }
+
+    pub fn get_packet_buffer_slice(env: *jni.JNIEnv, this_obj: jni.JObject) ?[]u8 {
+        assert(this_obj != null);
+        assert(request_packet_buffer_field_id != null);
+
+        const buffer_obj = env.get_object_field(this_obj, request_packet_buffer_field_id) orelse
+            return null;
+        defer env.delete_local_ref(buffer_obj);
+
+        return JNIHelper.get_direct_buffer(env, buffer_obj);
     }
 
     pub fn set_reply_buffer(env: *jni.JNIEnv, this_obj: jni.JObject, reply: []const u8) void {
