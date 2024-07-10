@@ -40,6 +40,9 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
     }
 
     var tigerbeetle_process: ?TigerBeetleProcess = null;
+    defer if (tigerbeetle_process) |*p| {
+        _ = p.deinit();
+    };
 
     var maybe_stat_empty: ?std.fs.File.Stat = null;
     if (args.addresses == null) {
@@ -62,6 +65,8 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
 
     if (tigerbeetle_process) |*p| {
         const rusage = p.deinit();
+        tigerbeetle_process = null;
+
         if (rusage.getMaxRss()) |max_rss_bytes| {
             std.io.getStdOut().writer().print("\nrss = {} bytes\n", .{max_rss_bytes}) catch {};
         }

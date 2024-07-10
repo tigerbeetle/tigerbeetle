@@ -160,6 +160,7 @@ pub fn main(
         .transfer_pending = cli_args.transfer_pending,
         .transfer_batch_size = cli_args.transfer_batch_size,
         .transfer_batch_delay_us = cli_args.transfer_batch_delay_us,
+        .validate = cli_args.validate,
         .batch_index = 0,
         .transfers_sent = 0,
         .transfer_index = 0,
@@ -187,6 +188,8 @@ pub fn main(
         try benchmark.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     benchmark.done = false;
+
+    if (!benchmark.validate) return;
 
     // Reset our state so we can check our work.
     benchmark.rng = rng;
@@ -224,6 +227,7 @@ const Benchmark = struct {
     transfer_pending: bool,
     transfer_batch_size: usize,
     transfer_batch_delay_us: usize,
+    validate: bool,
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
@@ -545,7 +549,7 @@ const Benchmark = struct {
         operation: StateMachine.Operation,
         result: []const u8,
     ) void {
-        std.debug.assert(operation == .lookup_accounts);
+        assert(operation == .lookup_accounts);
 
         const accounts = std.mem.bytesAsSlice(tb.Account, result);
 
@@ -563,7 +567,7 @@ const Benchmark = struct {
 
     fn validate_transfers(b: *Benchmark) void {
         if (b.transfer_index >= b.transfer_count) {
-            b.done = true;
+            b.summary_validate();
             return;
         }
 
@@ -596,7 +600,7 @@ const Benchmark = struct {
         operation: StateMachine.Operation,
         result: []const u8,
     ) void {
-        std.debug.assert(operation == .lookup_transfers);
+        assert(operation == .lookup_transfers);
 
         const transfers = std.mem.bytesAsSlice(tb.Transfer, result);
 
@@ -616,6 +620,17 @@ const Benchmark = struct {
         }
 
         b.validate_transfers();
+    }
+
+    fn summary_validate(b: *Benchmark) void {
+        const stdout = std.io.getStdOut().writer();
+
+        stdout.print("validated {d} accounts, {d} transfers\n", .{
+            b.account_count,
+            b.transfer_count,
+        }) catch unreachable;
+
+        b.done = true;
     }
 
     fn send(
