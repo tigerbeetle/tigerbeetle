@@ -213,9 +213,9 @@ pub const AccountingAuditor = struct {
         errdefer allocator.free(query_intersections);
         for (query_intersections, 1..) |*query_intersection, index| {
             query_intersection.* = .{
-                .user_data_64 = @truncate(index * 1_000_000),
-                .user_data_32 = @truncate(index * 1_000),
-                .code = @truncate(index), // will be used to recover the index
+                .user_data_64 = @intCast(index * 1_000_000),
+                .user_data_32 = @intCast(index * 1_000),
+                .code = @intCast(index), // It will be used to recover the index.
             };
         }
 

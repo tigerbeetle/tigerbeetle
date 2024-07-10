@@ -1173,6 +1173,7 @@ pub fn StateMachineType(
                 else
                     filter.timestamp_max,
             };
+            assert(timestamp_range.min <= timestamp_range.max);
 
             const indexes = [_]std.meta.FieldEnum(QueryFilter){
                 .user_data_128,
