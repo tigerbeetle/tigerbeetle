@@ -69,7 +69,8 @@ pub fn binary_search_values_upsert_index(
 
             // We need to use pointer arithmetic and disable runtime safety to avoid bounds checks,
             // otherwise prefetching would harm the performance instead of improving it.
-            // Since these pointers are never dereferenced, it's safe to dismiss this extra cost here.
+            // Since these pointers are never dereferenced, it's safe to dismiss this extra cost
+            // here.
             @setRuntimeSafety(constants.verify);
             const one_quarter = values.ptr + offset + half / 2;
             const three_quarters = one_quarter + half;
@@ -429,7 +430,11 @@ const test_binary_search = struct {
         }
     }
 
-    fn random_sequence(allocator: std.mem.Allocator, random: std.rand.Random, iter: usize) ![]const u32 {
+    fn random_sequence(
+        allocator: std.mem.Allocator,
+        random: std.rand.Random,
+        iter: usize,
+    ) ![]const u32 {
         const keys_count = @min(
             @as(usize, 1E6),
             fuzz.random_int_exponential(random, usize, iter),

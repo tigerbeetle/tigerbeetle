@@ -18,7 +18,8 @@ const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const StateMachine =
+    @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const GridType = @import("../vsr/grid.zig").GridType;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
@@ -231,8 +232,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = next_state;
         }
 
-        fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
-            // Sometimes operations complete synchronously so we might already be in next_state before ticking.
+        fn tick_until_state_change(
+            env: *Environment,
+            current_state: State,
+            next_state: State,
+        ) void {
+            // Sometimes operations complete synchronously so we might already be in next_state
+            // before ticking.
             while (env.state == current_state) env.storage.tick();
             assert(env.state == next_state);
         }
@@ -306,7 +312,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         pub fn compact(env: *Environment, op: u64) void {
             const compaction_beat = op % constants.lsm_batch_multiple;
 
-            const last_half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2) - 1;
+            const last_half_beat =
+                compaction_beat == @divExact(constants.lsm_batch_multiple, 2) - 1;
             const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
 
             if (!last_beat and !last_half_beat) return;
@@ -522,14 +529,17 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
                 assert(env.state == .fuzzing);
-                log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
+                log.debug("Running fuzz_ops[{}/{}] == {}", .{
+                    fuzz_op_index, fuzz_ops.len, fuzz_op,
+                });
 
                 const storage_size_used = env.storage.size_used();
                 log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
                 const model_size = model.count() * @sizeOf(Value);
                 log.debug("space_amplification = {d:.2}", .{
-                    @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
+                    @as(f64, @floatFromInt(storage_size_used)) /
+                        @as(f64, @floatFromInt(model_size)),
                 });
 
                 // Apply fuzz_op to the tree and the model.
@@ -788,21 +798,12 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             // Otherwise pick a random FuzzOp.
             fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
         fuzz_op.* = switch (fuzz_op_tag) {
-            .compact => compact: {
-                const compact_op = op;
+            .compact => action: {
+                const action = generate_compact(random, .{
+                    .op = op,
+                });
                 op += 1;
-                const is_checkpoint =
-                    // Can only checkpoint on the last beat of the bar.
-                    compact_op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-                    compact_op > constants.lsm_batch_multiple and
-                    // Checkpoint at roughly the same rate as log wraparound.
-                    random.uintLessThan(usize, compacts_per_checkpoint) == 0;
-                break :compact FuzzOp{
-                    .compact = .{
-                        .op = compact_op,
-                        .checkpoint = is_checkpoint,
-                    },
-                };
+                break :action action;
             },
             .put => FuzzOp{ .put = .{
                 .id = random_id(random, u64),
@@ -836,6 +837,22 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     }
 
     return fuzz_ops;
+}
+
+fn generate_compact(
+    random: std.rand.Random,
+    options: struct { op: u64 },
+) FuzzOp {
+    const checkpoint =
+        // Can only checkpoint on the last beat of the bar.
+        options.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
+        options.op > constants.lsm_batch_multiple and
+        // Checkpoint at roughly the same rate as log wraparound.
+        random.uintLessThan(usize, compacts_per_checkpoint) == 0;
+    return FuzzOp{ .compact = .{
+        .op = options.op,
+        .checkpoint = checkpoint,
+    } };
 }
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
