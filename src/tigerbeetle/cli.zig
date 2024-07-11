@@ -577,8 +577,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     start_limit_storage.suffix(),
                     vsr.stdx.fmtIntSizeBinExact(storage_size_limit_max),
                 });
-            }
-            if (storage_size_limit < storage_size_limit_min) {
+            } else if (storage_size_limit < storage_size_limit_min) {
                 flags.fatal("--limit-storage: size {}{s} is below minimum: {}", .{
                     start_limit_storage.value,
                     start_limit_storage.suffix(),
@@ -605,8 +604,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     pipeline_limit,
                     pipeline_limit_max,
                 });
-            }
-            if (pipeline_limit < pipeline_limit_min) {
+            } else if (pipeline_limit < pipeline_limit_min) {
                 flags.fatal("--limit-pipeline-requests: count {} is below minimum: {}", .{
                     pipeline_limit,
                     vsr.stdx.fmtIntSizeBinExact(pipeline_limit_min),
@@ -618,21 +616,12 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const request_size_limit_min = 4096;
             const request_size_limit_max = constants.message_size_max;
             if (request_size_limit.bytes() > request_size_limit_max) {
-                if (comptime (request_size_limit_max >= 1024 * 1024)) {
-                    flags.fatal("--limit-request: size {}{s} exceeds maximum: {}", .{
-                        request_size_limit.value,
-                        request_size_limit.suffix(),
-                        vsr.stdx.fmtIntSizeBinExact(request_size_limit_max),
-                    });
-                } else {
-                    flags.fatal("--limit-request: size {}{s} exceeds maximum: {}", .{
-                        request_size_limit.value,
-                        request_size_limit.suffix(),
-                        vsr.stdx.fmtIntSizeBinExact(request_size_limit_max),
-                    });
-                }
-            }
-            if (request_size_limit.bytes() < request_size_limit_min) {
+                flags.fatal("--limit-request: size {}{s} exceeds maximum: {}", .{
+                    request_size_limit.value,
+                    request_size_limit.suffix(),
+                    vsr.stdx.fmtIntSizeBinExact(request_size_limit_max),
+                });
+            } else if (request_size_limit.bytes() < request_size_limit_min) {
                 flags.fatal("--limit-request: size {}{s} is below minimum: {}", .{
                     request_size_limit.value,
                     request_size_limit.suffix(),
@@ -650,8 +639,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     start_memory_lsm_manifest.suffix(),
                     vsr.stdx.fmtIntSizeBinExact(lsm_manifest_memory_max),
                 });
-            }
-            if (lsm_manifest_memory < lsm_manifest_memory_min) {
+            } else if (lsm_manifest_memory < lsm_manifest_memory_min) {
                 flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
                     start_memory_lsm_manifest.value,
                     start_memory_lsm_manifest.suffix(),
@@ -678,8 +666,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     lsm_compaction_block_memory.suffix(),
                     vsr.stdx.fmtIntSizeBinExact(lsm_compaction_block_memory_max),
                 });
-            }
-            if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
+            } else if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
                 flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}", .{
                     lsm_compaction_block_memory.value,
                     lsm_compaction_block_memory.suffix(),
