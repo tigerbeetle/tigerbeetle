@@ -575,13 +575,14 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 flags.fatal("--limit-storage: size {}{s} exceeds maximum: {}", .{
                     start_limit_storage.value,
                     start_limit_storage.suffix(),
-                    vsr.stdx.fmtIntSizeBinExact(storage_size_limit_max),
+                    vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_max),
                 });
-            } else if (storage_size_limit < storage_size_limit_min) {
+            }
+            if (storage_size_limit < storage_size_limit_min) {
                 flags.fatal("--limit-storage: size {}{s} is below minimum: {}", .{
                     start_limit_storage.value,
                     start_limit_storage.suffix(),
-                    vsr.stdx.fmtIntSizeBinExact(storage_size_limit_min),
+                    vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_min),
                 });
             }
             if (storage_size_limit % constants.sector_size != 0) {
@@ -590,7 +591,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .{
                         start_limit_storage.value,
                         start_limit_storage.suffix(),
-                        vsr.stdx.fmtIntSizeBinExact(constants.sector_size),
+                        vsr.stdx.fmt_int_size_bin_exact(constants.sector_size),
                     },
                 );
             }
@@ -604,10 +605,11 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     pipeline_limit,
                     pipeline_limit_max,
                 });
-            } else if (pipeline_limit < pipeline_limit_min) {
+            }
+            if (pipeline_limit < pipeline_limit_min) {
                 flags.fatal("--limit-pipeline-requests: count {} is below minimum: {}", .{
                     pipeline_limit,
-                    vsr.stdx.fmtIntSizeBinExact(pipeline_limit_min),
+                    vsr.stdx.fmt_int_size_bin_exact(pipeline_limit_min),
                 });
             }
 
@@ -619,13 +621,14 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 flags.fatal("--limit-request: size {}{s} exceeds maximum: {}", .{
                     request_size_limit.value,
                     request_size_limit.suffix(),
-                    vsr.stdx.fmtIntSizeBinExact(request_size_limit_max),
+                    vsr.stdx.fmt_int_size_bin_exact(request_size_limit_max),
                 });
-            } else if (request_size_limit.bytes() < request_size_limit_min) {
+            }
+            if (request_size_limit.bytes() < request_size_limit_min) {
                 flags.fatal("--limit-request: size {}{s} is below minimum: {}", .{
                     request_size_limit.value,
                     request_size_limit.suffix(),
-                    vsr.stdx.fmtIntSizeBinExact(request_size_limit_min),
+                    vsr.stdx.fmt_int_size_bin_exact(request_size_limit_min),
                 });
             }
 
@@ -637,13 +640,14 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 flags.fatal("--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
                     start_memory_lsm_manifest.value,
                     start_memory_lsm_manifest.suffix(),
-                    vsr.stdx.fmtIntSizeBinExact(lsm_manifest_memory_max),
+                    vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_max),
                 });
-            } else if (lsm_manifest_memory < lsm_manifest_memory_min) {
+            }
+            if (lsm_manifest_memory < lsm_manifest_memory_min) {
                 flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
                     start_memory_lsm_manifest.value,
                     start_memory_lsm_manifest.suffix(),
-                    vsr.stdx.fmtIntSizeBinExact(lsm_manifest_memory_min),
+                    vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_min),
                 });
             }
             if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
@@ -652,7 +656,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .{
                         start_memory_lsm_manifest.value,
                         start_memory_lsm_manifest.suffix(),
-                        vsr.stdx.fmtIntSizeBinExact(lsm_manifest_memory_multiplier),
+                        vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_multiplier),
                     },
                 );
             }
@@ -664,13 +668,14 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 flags.fatal("--memory-lsm-compaction: size {}{s} exceeds maximum: {}", .{
                     lsm_compaction_block_memory.value,
                     lsm_compaction_block_memory.suffix(),
-                    vsr.stdx.fmtIntSizeBinExact(lsm_compaction_block_memory_max),
+                    vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_max),
                 });
-            } else if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
+            }
+            if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
                 flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}", .{
                     lsm_compaction_block_memory.value,
                     lsm_compaction_block_memory.suffix(),
-                    vsr.stdx.fmtIntSizeBinExact(lsm_compaction_block_memory_min),
+                    vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_min),
                 });
             }
             if (lsm_compaction_block_memory.bytes() % constants.block_size != 0) {
@@ -679,7 +684,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .{
                         lsm_compaction_block_memory.value,
                         lsm_compaction_block_memory.suffix(),
-                        vsr.stdx.fmtIntSizeBinExact(constants.block_size),
+                        vsr.stdx.fmt_int_size_bin_exact(constants.block_size),
                     },
                 );
             }
