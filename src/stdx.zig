@@ -749,12 +749,12 @@ pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @Typ
 /// Return a Formatter for a u64 value representing a file size.
 /// This formatter statically checks that the number is a multiple of 1024,
 /// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
-pub fn fmtIntSizeBinExact(comptime value: u64) std.fmt.Formatter(formatIntSizeBinExact) {
+pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
     comptime assert(value % 1024 == 0);
     return .{ .data = value };
 }
 
-fn formatIntSizeBinExact(
+fn format_int_size_bin_exact(
     value: u64,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
@@ -771,9 +771,9 @@ fn formatIntSizeBinExact(
     var buf: [7]u8 = undefined;
 
     const mags_iec = " KMGTPEZY";
-    const magnitude = @min(std.math.log2(value) / 10, mags_iec.len - 1);
+    const magnitude = @min(@divFloor(std.math.log2(value), 10), mags_iec.len - 1);
     const suffix = mags_iec[magnitude];
-    const new_value = value / std.math.pow(u64, 1024, magnitude);
+    const new_value = @divExact(value, std.math.pow(u64, 1024, magnitude));
 
     const i = std.fmt.formatIntBuf(&buf, new_value, 10, .lower, .{});
     buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
@@ -781,9 +781,9 @@ fn formatIntSizeBinExact(
     return std.fmt.formatBuf(buf[0 .. i + 3], options, writer);
 }
 
-test fmtIntSizeBinExact {
-    try std.testing.expectFmt("0B", "{}", .{fmtIntSizeBinExact(0)});
-    try std.testing.expectFmt("8KiB", "{}", .{fmtIntSizeBinExact(8 * 1024)});
-    try std.testing.expectFmt("42MiB", "{}", .{fmtIntSizeBinExact(42 * 1024 * 1024)});
-    try std.testing.expectFmt("999GiB", "{}", .{fmtIntSizeBinExact(999 * 1024 * 1024 * 1024)});
+test fmt_int_size_bin_exact {
+    try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
+    try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
+    try std.testing.expectFmt("42MiB", "{}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
+    try std.testing.expectFmt("999GiB", "{}", .{fmt_int_size_bin_exact(999 * 1024 * 1024 * 1024)});
 }
