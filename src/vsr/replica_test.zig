@@ -712,7 +712,10 @@ test "Cluster: repair: primary checkpoint, backup crash before checkpoint, prima
     b1.pass(.R_, .incoming, .commit);
     b1.stop();
     b1.corrupt(.{ .wal_prepare = 1 });
-    try c.request(checkpoint_1_trigger + constants.pipeline_prepare_queue_max, checkpoint_1_trigger);
+    try c.request(
+        checkpoint_1_trigger + constants.pipeline_prepare_queue_max,
+        checkpoint_1_trigger,
+    );
     try b1.open();
     t.run();
 
@@ -1635,12 +1638,18 @@ const TestContext = struct {
             .S3 => array.append_assume_capacity(.{ .replica = replica_count + 3 }),
             .S4 => array.append_assume_capacity(.{ .replica = replica_count + 4 }),
             .S5 => array.append_assume_capacity(.{ .replica = replica_count + 5 }),
-            .A0 => array.append_assume_capacity(.{ .replica = @intCast((view + 0) % replica_count) }),
-            .B1 => array.append_assume_capacity(.{ .replica = @intCast((view + 1) % replica_count) }),
-            .B2 => array.append_assume_capacity(.{ .replica = @intCast((view + 2) % replica_count) }),
-            .B3 => array.append_assume_capacity(.{ .replica = @intCast((view + 3) % replica_count) }),
-            .B4 => array.append_assume_capacity(.{ .replica = @intCast((view + 4) % replica_count) }),
-            .B5 => array.append_assume_capacity(.{ .replica = @intCast((view + 5) % replica_count) }),
+            .A0 => array
+                .append_assume_capacity(.{ .replica = @intCast((view + 0) % replica_count) }),
+            .B1 => array
+                .append_assume_capacity(.{ .replica = @intCast((view + 1) % replica_count) }),
+            .B2 => array
+                .append_assume_capacity(.{ .replica = @intCast((view + 2) % replica_count) }),
+            .B3 => array
+                .append_assume_capacity(.{ .replica = @intCast((view + 3) % replica_count) }),
+            .B4 => array
+                .append_assume_capacity(.{ .replica = @intCast((view + 4) % replica_count) }),
+            .B5 => array
+                .append_assume_capacity(.{ .replica = @intCast((view + 5) % replica_count) }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
                     for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
@@ -1906,14 +1915,16 @@ const TestReplicas = struct {
                 }
             },
             .wal_prepare => |slot| {
-                const fault_offset = vsr.Zone.wal_prepares.offset(slot * constants.message_size_max);
+                const fault_offset = vsr.Zone.wal_prepares.offset(slot *
+                    constants.message_size_max);
                 const fault_sector = @divExact(fault_offset, constants.sector_size);
                 for (t.replicas.const_slice()) |r| {
                     t.cluster.storages[r].faults.set(fault_sector);
                 }
             },
             .client_reply => |slot| {
-                const fault_offset = vsr.Zone.client_replies.offset(slot * constants.message_size_max);
+                const fault_offset = vsr.Zone.client_replies.offset(slot *
+                    constants.message_size_max);
                 const fault_sector = @divExact(fault_offset, constants.sector_size);
                 for (t.replicas.const_slice()) |r| {
                     t.cluster.storages[r].faults.set(fault_sector);

@@ -393,6 +393,5 @@ const naughty_list = [_][]const u8{
     "testing/low_level_hash_vectors.zig",
     "vsr/clock.zig",
     "vsr/journal.zig",
-    "vsr/replica_test.zig",
     "vsr/replica.zig",
 };
