@@ -16,7 +16,8 @@ balances.** This is off by default.
 
 ## Event
 
-The query filter. See [`AccountFilter`](../account-filter.md) for constraints.
+The account filter.
+See [`AccountFilter`](../account-filter.md) for constraints.
 
 ## Result
 

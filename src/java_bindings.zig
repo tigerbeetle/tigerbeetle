@@ -71,8 +71,12 @@ const type_mappings = .{
     .{ tb.AccountFilterFlags, TypeMapping{
         .name = "AccountFilterFlags",
         .private_fields = &.{"padding"},
-        .visibility = .public,
-        .docs_link = "reference/account-filter#flags",
+        .visibility = .internal,
+    } },
+    .{ tb.QueryFilterFlags, TypeMapping{
+        .name = "QueryFilterFlags",
+        .private_fields = &.{"padding"},
+        .visibility = .internal,
     } },
     .{ tb.Account, TypeMapping{
         .name = "AccountBatch",
@@ -122,6 +126,11 @@ const type_mappings = .{
     } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilterBatch",
+        .visibility = .internal,
+        .private_fields = &.{"reserved"},
+    } },
+    .{ tb.QueryFilter, TypeMapping{
+        .name = "QueryFilterBatch",
         .visibility = .internal,
         .private_fields = &.{"reserved"},
     } },

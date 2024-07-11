@@ -333,6 +333,7 @@ var transfer = new Transfer
     PendingId = 1,
     Flags = TransferFlags.PostPendingTransfer,
 };
+
 createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
 // error handling omitted
 ```
@@ -352,6 +353,7 @@ transfer = new Transfer
     PendingId = 1,
     Flags = TransferFlags.PostPendingTransfer,
 };
+
 createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
 // error handling omitted
 ```
@@ -396,6 +398,7 @@ var filter = new AccountFilter
         AccountFilterFlags.Credits | // Include transfer from the credit side.
         AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
+
 transfers = client.GetAccountTransfers(filter);
 ```
 
@@ -425,7 +428,62 @@ filter = new AccountFilter
         AccountFilterFlags.Credits | // Include transfer from the credit side.
         AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
+
 var account_balances = client.GetAccountBalances(filter);
+```
+
+## Query Accounts
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Query accounts by the intersection of some fields and by timestamp range.
+
+The accounts in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```cs
+var query_filter = new QueryFilter
+{
+    UserData128 = 1000, // Filter by UserData.
+    UserData64 = 100,
+    UserData32 = 10,
+    Code = 1, // Filter by Code.
+    Ledger = 0, // No filter by Ledger.
+    TimestampMin = 0, // No filter by Timestamp.
+    TimestampMax = 0, // No filter by Timestamp.
+    Limit = 10, // Limit to ten balances at most.
+    Flags = QueryFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+};
+
+var query_accounts = client.QueryAccounts(query_filter);
+```
+
+## Query Transfers
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Query transfers by the intersection of some fields and by timestamp range.
+
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```cs
+query_filter = new QueryFilter
+{
+    UserData128 = 1000, // Filter by UserData
+    UserData64 = 100,
+    UserData32 = 10,
+    Code = 1, // Filter by Code
+    Ledger = 0, // No filter by Ledger
+    TimestampMin = 0, // No filter by Timestamp.
+    TimestampMax = 0, // No filter by Timestamp.
+    Limit = 10, // Limit to ten balances at most.
+    Flags = QueryFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+};
+
+var query_transfers = client.QueryTransfers(query_filter);
 ```
 
 ## Linked Events

@@ -12,6 +12,7 @@ const type_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
     .{ tb.TransferFlags, "TransferFlags" },
     .{ tb.AccountFilterFlags, "AccountFilterFlags" },
+    .{ tb.QueryFilterFlags, "QueryFilterFlags" },
     .{ tb.Account, "Account" },
     .{ tb.Transfer, "Transfer" },
     .{ tb.CreateAccountResult, "CreateAccountResult", "Account" },
@@ -20,6 +21,7 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, "TransferEventResult" },
     .{ tb.AccountFilter, "AccountFilter" },
     .{ tb.AccountBalance, "AccountBalance" },
+    .{ tb.QueryFilter, "QueryFilter" },
 };
 
 fn go_type(comptime Type: type) []const u8 {
@@ -267,6 +269,8 @@ fn emit_struct(
             tb.TransferFlags
         else if (comptime std.mem.eql(u8, name, "AccountFilter"))
             tb.AccountFilterFlags
+        else if (comptime std.mem.eql(u8, name, "QueryFilter"))
+            tb.QueryFilterFlags
         else
             unreachable;
         // Conversion from packed to struct (e.g. Account.AccountFlags())

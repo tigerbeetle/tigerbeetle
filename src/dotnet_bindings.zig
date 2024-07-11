@@ -52,6 +52,12 @@ const type_mappings = .{
         .private_fields = &.{"padding"},
         .docs_link = "reference/account-filter#flags",
     } },
+    .{ tb.QueryFilterFlags, TypeMapping{
+        .name = "QueryFilterFlags",
+        .visibility = .public,
+        .private_fields = &.{"padding"},
+        .docs_link = "reference/query-filter#flags",
+    } },
     .{ tb.Account, TypeMapping{
         .name = "Account",
         .visibility = .public,
@@ -101,6 +107,12 @@ const type_mappings = .{
         .visibility = .public,
         .private_fields = &.{"reserved"},
         .docs_link = "reference/account-balances#",
+    } },
+    .{ tb.QueryFilter, TypeMapping{
+        .name = "QueryFilter",
+        .visibility = .public,
+        .private_fields = &.{"reserved"},
+        .docs_link = "reference/query-filter#",
     } },
     .{ tb_client.tb_status_t, TypeMapping{
         .name = "InitializationStatus",

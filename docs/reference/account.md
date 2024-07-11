@@ -97,6 +97,9 @@ Constraints:
 This is an optional 128-bit secondary identifier to link this account to an external entity or
 event.
 
+When set to zero, no secondary identifier will be associated with the account, therefore only
+non-zero values can be used as [query filter](./query-filter.md).
+
 As an example, you might use a
 [ULID](../coding/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties together
 a group of accounts.
@@ -111,6 +114,9 @@ Constraints:
 
 This is an optional 64-bit secondary identifier to link this account to an external entity or event.
 
+When set to zero, no secondary identifier will be associated with the account, therefore only
+non-zero values can be used as [query filter](./query-filter.md).
+
 As an example, you might use this field store an external timestamp.
 
 For more information, see [Data Modeling](../coding/data-modeling.md#user_data).
@@ -122,6 +128,9 @@ Constraints:
 ### `user_data_32`
 
 This is an optional 32-bit secondary identifier to link this account to an external entity or event.
+
+When set to zero, no secondary identifier will be associated with the account, therefore only
+non-zero values can be used as [query filter](./query-filter.md).
 
 As an example, you might use this field to store a timezone or locale.
 

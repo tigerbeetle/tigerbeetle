@@ -443,6 +443,7 @@ filter := AccountFilter{
 		Reversed: true, // Sort by timestamp in reverse-chronological order.
 	}.ToUint32(),
 }
+
 transfers, err = client.GetAccountTransfers(filter)
 if err != nil {
 	log.Printf("Could not fetch transfers: %s", err)
@@ -478,12 +479,79 @@ filter = AccountFilter{
 		Reversed: true, // Sort by timestamp in reverse-chronological order.
 	}.ToUint32(),
 }
+
 account_balances, err := client.GetAccountBalances(filter)
 if err != nil {
 	log.Printf("Could not fetch the history: %s", err)
 	return
 }
 log.Println(account_balances)
+```
+
+## Query Accounts
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Query accounts by the intersection of some fields and by timestamp range.
+
+The accounts in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```go
+query_filter := QueryFilter{
+	UserData128:  ToUint128(1000), // Filter by UserData
+	UserData64:   100,
+	UserData32:   10,
+	Code:         1,  // Filter by Code
+	Ledger:       0,  // No filter by Ledger
+	TimestampMin: 0,  // No filter by Timestamp.
+	TimestampMax: 0,  // No filter by Timestamp.
+	Limit:        10, // Limit to ten balances at most.
+	Flags: QueryFilterFlags{
+		Reversed: true, // Sort by timestamp in reverse-chronological order.
+	}.ToUint32(),
+}
+
+query_accounts, err := client.QueryAccounts(query_filter)
+if err != nil {
+	log.Printf("Could not query accounts: %s", err)
+	return
+}
+log.Println(query_accounts)
+```
+
+## Query Transfers
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Query transfers by the intersection of some fields and by timestamp range.
+
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```go
+query_filter = QueryFilter{
+	UserData128:  ToUint128(1000), // Filter by UserData.
+	UserData64:   100,
+	UserData32:   10,
+	Code:         1,  // Filter by Code.
+	Ledger:       0,  // No filter by Ledger.
+	TimestampMin: 0,  // No filter by Timestamp.
+	TimestampMax: 0,  // No filter by Timestamp.
+	Limit:        10, // Limit to ten balances at most.
+	Flags: QueryFilterFlags{
+		Reversed: true, // Sort by timestamp in reverse-chronological order.
+	}.ToUint32(),
+}
+
+query_transfers, err := client.QueryTransfers(query_filter)
+if err != nil {
+	log.Printf("Could not query transfers: %s", err)
+	return
+}
+log.Println(query_transfers)
 ```
 
 ## Linked Events

@@ -73,6 +73,8 @@ pub fn ContextType(
                 .lookup_transfers,
                 .get_account_transfers,
                 .get_account_balances,
+                .query_accounts,
+                .query_transfers,
             };
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
@@ -90,6 +92,8 @@ pub fn ContextType(
                 .lookup_transfers,
                 .get_account_transfers,
                 .get_account_balances,
+                .query_accounts,
+                .query_transfers,
             };
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {

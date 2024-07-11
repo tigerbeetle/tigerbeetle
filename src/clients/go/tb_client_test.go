@@ -92,7 +92,7 @@ func TestClient(t *testing.T) {
 }
 
 func doTestClient(t *testing.T, client Client) {
-	createTwoAccounts := func (t *testing.T) (types.Account, types.Account) {
+	createTwoAccounts := func(t *testing.T) (types.Account, types.Account) {
 		accountA := types.Account{
 			ID:     types.ID(),
 			Ledger: 1,
@@ -787,6 +787,546 @@ func doTestClient(t *testing.T, client Client) {
 
 		assert.Len(t, transfers_retrieved, 0)
 		assert.Len(t, account_balances, len(transfers_retrieved))
+	})
+
+	t.Run("can query accounts", func(t *testing.T) {
+		t.Parallel()
+
+		// Creating accounts:
+		accounts_created := make([]types.Account, 10)
+		for i := 0; i < 10; i++ {
+			account_id := types.ID()
+
+			if i%2 == 0 {
+				accounts_created[i] = types.Account{
+					ID:          account_id,
+					UserData128: types.ToUint128(1000),
+					UserData64:  100,
+					UserData32:  10,
+					Code:        999,
+					Ledger:      1,
+					Flags:       0,
+				}
+			} else {
+				accounts_created[i] = types.Account{
+					ID:          account_id,
+					UserData128: types.ToUint128(2000),
+					UserData64:  200,
+					UserData32:  20,
+					Code:        999,
+					Ledger:      1,
+					Flags:       0,
+				}
+			}
+		}
+		account_results, err := client.CreateAccounts(accounts_created)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, account_results, 0)
+
+		// Querying accounts where:
+		// `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
+		// AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
+		filter := types.QueryFilter{
+			UserData128:  types.ToUint128(1000),
+			UserData64:   100,
+			UserData32:   10,
+			Code:         999,
+			Ledger:       1,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		query, err := client.QueryAccounts(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 5)
+
+		timestamp := uint64(0)
+		for _, account := range query {
+			assert.True(t, timestamp < account.Timestamp)
+			timestamp = account.Timestamp
+
+			assert.True(t, account.UserData128 == filter.UserData128)
+			assert.True(t, account.UserData64 == filter.UserData64)
+			assert.True(t, account.UserData32 == filter.UserData32)
+			assert.True(t, account.Code == filter.Code)
+			assert.True(t, account.Ledger == filter.Ledger)
+		}
+
+		// Querying accounts where:
+		// `user_data_128=2000 AND user_data_64=200 AND user_data_32=20
+		// AND code=999 AND ledger=1 ORDER BY timestamp DESC`.
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(2000),
+			UserData64:   200,
+			UserData32:   20,
+			Code:         999,
+			Ledger:       1,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: true,
+			}.ToUint32(),
+		}
+		query, err = client.QueryAccounts(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 5)
+
+		timestamp = ^uint64(0) // ulong max value
+		for _, account := range query {
+			assert.True(t, timestamp > account.Timestamp)
+			timestamp = account.Timestamp
+
+			assert.True(t, account.UserData128 == filter.UserData128)
+			assert.True(t, account.UserData64 == filter.UserData64)
+			assert.True(t, account.UserData32 == filter.UserData32)
+			assert.True(t, account.Code == filter.Code)
+			assert.True(t, account.Ledger == filter.Ledger)
+		}
+
+		// Querying accounts where:
+		// `code=999 ORDER BY timestamp ASC`.
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Code:         999,
+			Ledger:       0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		query, err = client.QueryAccounts(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 10)
+
+		timestamp = uint64(0)
+		for _, account := range query {
+			assert.True(t, timestamp < account.Timestamp)
+			timestamp = account.Timestamp
+
+			assert.True(t, account.Code == filter.Code)
+		}
+
+		// Querying accounts where:
+		// `code=999 ORDER BY timestamp DESC LIMIT 5`.
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Code:         999,
+			Ledger:       0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        5,
+			Flags: types.QueryFilterFlags{
+				Reversed: true,
+			}.ToUint32(),
+		}
+
+		// First 5 items:
+		query, err = client.QueryAccounts(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 5)
+
+		timestamp = ^uint64(0) // ulong max value
+		for _, account := range query {
+			assert.True(t, timestamp > account.Timestamp)
+			timestamp = account.Timestamp
+
+			assert.True(t, account.Code == filter.Code)
+		}
+
+		// Next 5 items from this timestamp:
+		filter.TimestampMax = timestamp - 1
+		query, err = client.QueryAccounts(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 5)
+
+		for _, account := range query {
+			assert.True(t, timestamp > account.Timestamp)
+			timestamp = account.Timestamp
+
+			assert.True(t, account.Code == filter.Code)
+		}
+
+		// No more results:
+		filter.TimestampMax = timestamp - 1
+		query, err = client.QueryAccounts(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
+
+		// Not found:
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   200,
+			UserData32:   10,
+			Code:         0,
+			Ledger:       0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+
+		query, err = client.QueryAccounts(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
+	})
+
+	t.Run("can query transfers", func(t *testing.T) {
+		t.Parallel()
+		accountA, accountB := createTwoAccounts(t)
+
+		// Create a new account:
+		account := types.Account{
+			ID:     types.ID(),
+			Ledger: 1,
+			Code:   1,
+			Flags:  0,
+		}
+		account_results, err := client.CreateAccounts([]types.Account{account})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, account_results, 0)
+
+		// Creating transfers:
+		transfers_created := make([]types.Transfer, 10)
+		for i := 0; i < 10; i++ {
+			transfer_id := types.ID()
+
+			if i%2 == 0 {
+				transfers_created[i] = types.Transfer{
+					ID:              transfer_id,
+					CreditAccountID: accountA.ID,
+					DebitAccountID:  account.ID,
+					Amount:          types.ToUint128(100),
+					Flags:           0,
+					UserData128:     types.ToUint128(1000),
+					UserData64:      100,
+					UserData32:      10,
+					Code:            999,
+					Ledger:          1,
+				}
+			} else {
+				transfers_created[i] = types.Transfer{
+					ID:              transfer_id,
+					CreditAccountID: account.ID,
+					DebitAccountID:  accountB.ID,
+					Amount:          types.ToUint128(100),
+					Flags:           0,
+					UserData128:     types.ToUint128(2000),
+					UserData64:      200,
+					UserData32:      20,
+					Code:            999,
+					Ledger:          1,
+				}
+			}
+		}
+		transfer_results, err := client.CreateTransfers(transfers_created)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, transfer_results, 0)
+
+		// Querying transfers where:
+		// `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
+		// AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
+		filter := types.QueryFilter{
+			UserData128:  types.ToUint128(1000),
+			UserData64:   100,
+			UserData32:   10,
+			Code:         999,
+			Ledger:       1,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		query, err := client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 5)
+
+		timestamp := uint64(0)
+		for _, transfer := range query {
+			assert.True(t, timestamp < transfer.Timestamp)
+			timestamp = transfer.Timestamp
+
+			assert.True(t, transfer.UserData128 == filter.UserData128)
+			assert.True(t, transfer.UserData64 == filter.UserData64)
+			assert.True(t, transfer.UserData32 == filter.UserData32)
+			assert.True(t, transfer.Code == filter.Code)
+			assert.True(t, transfer.Ledger == filter.Ledger)
+		}
+
+		// Querying transfers where:
+		// `user_data_128=2000 AND user_data_64=200 AND user_data_32=20
+		// AND code=999 AND ledger=1 ORDER BY timestamp DESC`.
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(2000),
+			UserData64:   200,
+			UserData32:   20,
+			Code:         999,
+			Ledger:       1,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: true,
+			}.ToUint32(),
+		}
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 5)
+
+		timestamp = ^uint64(0) // ulong max value
+		for _, transfer := range query {
+			assert.True(t, timestamp > transfer.Timestamp)
+			timestamp = transfer.Timestamp
+
+			assert.True(t, transfer.UserData128 == filter.UserData128)
+			assert.True(t, transfer.UserData64 == filter.UserData64)
+			assert.True(t, transfer.UserData32 == filter.UserData32)
+			assert.True(t, transfer.Code == filter.Code)
+			assert.True(t, transfer.Ledger == filter.Ledger)
+		}
+
+		// Querying transfers where:
+		// `code=999 ORDER BY timestamp ASC`.
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Code:         999,
+			Ledger:       0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 10)
+
+		timestamp = uint64(0)
+		for _, transfer := range query {
+			assert.True(t, timestamp < transfer.Timestamp)
+			timestamp = transfer.Timestamp
+
+			assert.True(t, transfer.Code == filter.Code)
+		}
+
+		// Querying transfers where:
+		// `code=999 ORDER BY timestamp DESC LIMIT 5`.
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Code:         999,
+			Ledger:       0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        5,
+			Flags: types.QueryFilterFlags{
+				Reversed: true,
+			}.ToUint32(),
+		}
+
+		// First 5 items:
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 5)
+
+		timestamp = ^uint64(0) // ulong max value
+		for _, transfer := range query {
+			assert.True(t, timestamp > transfer.Timestamp)
+			timestamp = transfer.Timestamp
+
+			assert.True(t, transfer.Code == filter.Code)
+		}
+
+		// Next 5 items from this timestamp:
+		filter.TimestampMax = timestamp - 1
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 5)
+
+		for _, transfer := range query {
+			assert.True(t, timestamp > transfer.Timestamp)
+			timestamp = transfer.Timestamp
+
+			assert.True(t, transfer.Code == filter.Code)
+		}
+
+		// No more results:
+		filter.TimestampMax = timestamp - 1
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
+
+		// Not found:
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   200,
+			UserData32:   10,
+			Code:         0,
+			Ledger:       0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
+	})
+
+	t.Run("invalid query filters", func(t *testing.T) {
+		t.Parallel()
+
+		// Invalid timestamp min:
+		filter := types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Ledger:       0,
+			Code:         0,
+			TimestampMin: ^uint64(0), // ulong max value
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		query, err := client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
+
+		// Invalid timestamp max:
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Ledger:       0,
+			Code:         0,
+			TimestampMin: 0,
+			TimestampMax: ^uint64(0), // ulong max value,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
+
+		// Invalid timestamps:
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Ledger:       0,
+			Code:         0,
+			TimestampMin: (^uint64(0)) - 1, // ulong max - 1,
+			TimestampMax: 1,
+			Limit:        8190,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
+
+		// Zero limit:
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Ledger:       0,
+			Code:         0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        0,
+			Flags: types.QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
+
+		// Invalid flags:
+		filter = types.QueryFilter{
+			UserData128:  types.ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Ledger:       0,
+			Code:         0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags:        0xFFFF,
+		}
+		query, err = client.QueryTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, query, 0)
 	})
 
 }
