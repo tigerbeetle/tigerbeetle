@@ -1295,58 +1295,35 @@ pub fn ReplicaType(
             self.clock.tick();
             self.message_bus.tick();
 
-            self.ping_timeout.tick();
-            self.prepare_timeout.tick();
-            self.primary_abdicate_timeout.tick();
-            self.commit_message_timeout.tick();
-            self.normal_heartbeat_timeout.tick();
-            self.start_view_change_window_timeout.tick();
-            self.start_view_change_message_timeout.tick();
-            self.view_change_status_timeout.tick();
-            self.do_view_change_message_timeout.tick();
-            self.request_start_view_message_timeout.tick();
-            self.repair_timeout.tick();
-            self.repair_sync_timeout.tick();
-            self.grid_repair_message_timeout.tick();
-            self.upgrade_timeout.tick();
-            self.sync_message_timeout.tick();
-            self.pulse_timeout.tick();
-            self.grid_scrub_timeout.tick();
+            const timeouts = .{
+                .{ &self.ping_timeout, on_ping_timeout },
+                .{ &self.prepare_timeout, on_prepare_timeout },
+                .{ &self.primary_abdicate_timeout, on_primary_abdicate_timeout },
+                .{ &self.commit_message_timeout, on_commit_message_timeout },
+                .{ &self.normal_heartbeat_timeout, on_normal_heartbeat_timeout },
+                .{ &self.start_view_change_window_timeout, on_start_view_change_window_timeout },
+                .{ &self.start_view_change_message_timeout, on_start_view_change_message_timeout },
+                .{ &self.view_change_status_timeout, on_view_change_status_timeout },
+                .{ &self.do_view_change_message_timeout, on_do_view_change_message_timeout },
+                .{
+                    &self.request_start_view_message_timeout,
+                    on_request_start_view_message_timeout,
+                },
+                .{ &self.repair_timeout, on_repair_timeout },
+                .{ &self.repair_sync_timeout, on_repair_sync_timeout },
+                .{ &self.grid_repair_message_timeout, on_grid_repair_message_timeout },
+                .{ &self.upgrade_timeout, on_upgrade_timeout },
+                .{ &self.sync_message_timeout, on_sync_message_timeout },
+                .{ &self.pulse_timeout, on_pulse_timeout },
+                .{ &self.grid_scrub_timeout, on_grid_scrub_timeout },
+            };
 
-            if (self.ping_timeout.fired())
-                self.on_ping_timeout();
-            if (self.prepare_timeout.fired())
-                self.on_prepare_timeout();
-            if (self.primary_abdicate_timeout.fired())
-                self.on_primary_abdicate_timeout();
-            if (self.commit_message_timeout.fired())
-                self.on_commit_message_timeout();
-            if (self.normal_heartbeat_timeout.fired())
-                self.on_normal_heartbeat_timeout();
-            if (self.start_view_change_window_timeout.fired())
-                self.on_start_view_change_window_timeout();
-            if (self.start_view_change_message_timeout.fired())
-                self.on_start_view_change_message_timeout();
-            if (self.view_change_status_timeout.fired())
-                self.on_view_change_status_timeout();
-            if (self.do_view_change_message_timeout.fired())
-                self.on_do_view_change_message_timeout();
-            if (self.request_start_view_message_timeout.fired())
-                self.on_request_start_view_message_timeout();
-            if (self.repair_timeout.fired())
-                self.on_repair_timeout();
-            if (self.repair_sync_timeout.fired())
-                self.on_repair_sync_timeout();
-            if (self.grid_repair_message_timeout.fired())
-                self.on_grid_repair_message_timeout();
-            if (self.grid_scrub_timeout.fired())
-                self.on_grid_scrub_timeout();
-            if (self.sync_message_timeout.fired())
-                self.on_sync_message_timeout();
-            if (self.pulse_timeout.fired())
-                self.on_pulse_timeout();
-            if (self.upgrade_timeout.fired())
-                self.on_upgrade_timeout();
+            inline for (timeouts) |timeout| {
+                timeout[0].tick();
+            }
+            inline for (timeouts) |timeout| {
+                if (timeout[0].fired()) timeout[1](self);
+            }
 
             // None of the on_timeout() functions above should send a message to this replica.
             assert(self.loopback_queue == null);
