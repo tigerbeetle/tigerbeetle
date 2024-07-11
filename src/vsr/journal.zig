@@ -245,7 +245,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         /// We copy-on-write to these buffers, as the in-memory headers may change while writing.
         /// The buffers belong to the IOP at the corresponding index in IOPS.
-        headers_iops: *align(constants.sector_size) [constants.journal_iops_write_max][constants.sector_size]u8,
+        headers_iops: *align(constants.sector_size) [
+            constants.journal_iops_write_max
+        ][constants.sector_size]u8,
 
         /// A set bit indicates a chunk of redundant headers that no read has been issued to yet.
         header_chunks_requested: HeaderChunks = HeaderChunks.initFull(),
@@ -756,7 +758,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             if (journal.prepare_inhabited[slot.index] and
                 journal.prepare_checksums[slot.index] == checksum)
             {
-                journal.read_prepare_with_op_and_checksum(callback, op, checksum, destination_replica);
+                journal.read_prepare_with_op_and_checksum(
+                    callback,
+                    op,
+                    checksum,
+                    destination_replica,
+                );
             } else {
                 journal.read_prepare_log(op, checksum, "no matching prepare");
                 callback(replica, null, null);
@@ -874,7 +881,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
 
             const checksum_inhabited = journal.prepare_inhabited[journal.slot_for_op(op).index];
-            const checksum_match = journal.prepare_checksums[journal.slot_for_op(op).index] == checksum;
+            const checksum_match =
+                journal.prepare_checksums[journal.slot_for_op(op).index] == checksum;
             if (!checksum_inhabited or !checksum_match) {
                 journal.read_prepare_log(op, checksum, "prepare changed during read");
                 callback(replica, null, null);
@@ -923,8 +931,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 //   * The requested op's slot is faulty, but the prepare is valid. Since the
                 //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on reading
                 //     this entry it turns out not to have the right op.
-                //   (This case (and the accompanying unnecessary read) could be prevented by storing
-                //   the op along with the checksum in `prepare_checksums`.)
+                //   (This case (and the accompanying unnecessary read) could be prevented by
+                //   storing the op along with the checksum in `prepare_checksums`.)
                 assert(slot == null);
 
                 journal.read_prepare_log(op, checksum, "op changed during read");
@@ -1059,14 +1067,15 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 chunk_buffer.len,
             });
 
-            // Directly store all the redundant headers in `journal.headers_redundant` (including any
-            // that are invalid or corrupt). As the prepares are recovered, these will be replaced
-            // or removed as necessary.
+            // Directly store all the redundant headers in `journal.headers_redundant` (including
+            // any that are invalid or corrupt). As the prepares are recovered, these will be
+            // replaced or removed as necessary.
             const chunk_headers = std.mem.bytesAsSlice(Header.Prepare, chunk_buffer);
             stdx.copy_disjoint(
                 .exact,
                 Header.Prepare,
-                journal.headers_redundant[chunk_index * headers_per_message ..][0..chunk_headers.len],
+                journal
+                    .headers_redundant[chunk_index * headers_per_message ..][0..chunk_headers.len],
                 chunk_headers,
             );
 
@@ -1373,7 +1382,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.faulty.count == slot_count);
 
             const op_max = op_maximum_headers_untrusted(replica.cluster, journal.headers_redundant);
-            if (op_max != op_maximum_headers_untrusted(replica.cluster, journal.headers)) return null;
+            if (op_max != op_maximum_headers_untrusted(replica.cluster, journal.headers))
+                return null;
             if (op_max < replica.op_checkpoint()) return null;
             // We can't assume that the header at `op_max` is a prepare — an empty journal with a
             // corrupt root prepare (op_max=0) will be repaired later.
@@ -1386,7 +1396,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // The prepare is at least corrupt, possibly torn, but not valid and simply misdirected.
 
             const header_untrusted = &journal.headers_redundant[torn_slot.index];
-            const header = header_ok(replica.cluster, torn_slot, header_untrusted) orelse return null;
+            const header = header_ok(replica.cluster, torn_slot, header_untrusted) orelse
+                return null;
             // The redundant header is valid, also for the correct cluster and not misdirected.
 
             if (header.operation == .reserved) {
@@ -1472,7 +1483,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(header.?.operation == .reserved);
                     assert(prepare.?.operation == .reserved);
                     assert(header.?.checksum == prepare.?.checksum);
-                    assert(header.?.checksum == Header.Prepare.reserved(cluster, slot.index).checksum);
+                    assert(
+                        header.?.checksum == Header.Prepare.reserved(cluster, slot.index).checksum,
+                    );
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
                     journal.headers[slot.index] = header.?.*;
@@ -1617,7 +1630,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.status = .recovered;
 
             if (journal.headers[0].op == 0 and journal.headers[0].operation != .reserved) {
-                assert(journal.headers[0].checksum == Header.Prepare.root(replica.cluster).checksum);
+                assert(
+                    journal.headers[0].checksum == Header.Prepare.root(replica.cluster).checksum,
+                );
                 assert(!journal.faulty.bit(Slot{ .index = 0 }));
             }
 
@@ -1809,7 +1824,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 journal.prepare_checksums[slot.index] = message.header.checksum;
             }
 
-            if (journal.slot_with_op_and_checksum(message.header.op, message.header.checksum)) |slot| {
+            if (journal.slot_with_op_and_checksum(
+                message.header.op,
+                message.header.checksum,
+            )) |slot| {
                 journal.headers_redundant[slot.index] = message.header.*;
             } else {
                 journal.write_prepare_debug(message.header, "entry changed while writing sectors");
@@ -1892,7 +1910,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             if (!journal.prepare_inhabited[slot.index] or
                 journal.prepare_checksums[slot.index] != message.header.checksum)
             {
-                journal.write_prepare_debug(message.header, "entry changed twice while writing headers");
+                journal.write_prepare_debug(
+                    message.header,
+                    "entry changed twice while writing headers",
+                );
                 journal.write_prepare_release(write, null);
                 return;
             }
@@ -2087,9 +2108,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 @sizeOf(Journal.Write),
             );
 
-            // TODO The compiler should not need this align cast as the type of `headers_iops`
-            // ensures that each buffer is properly aligned.
-            const sector: Sector = @alignCast(&journal.headers_iops[write_index]);
+            const sector: Sector = &journal.headers_iops[write_index];
             const sector_headers = std.mem.bytesAsSlice(Header.Prepare, sector);
             assert(sector_headers.len == headers_per_sector);
 

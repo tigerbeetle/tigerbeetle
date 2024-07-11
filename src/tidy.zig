@@ -356,6 +356,10 @@ fn find_long_line(file_text: []const u8) !?usize {
         const line_length = try std.unicode.utf8CountCodepoints(line);
         if (line_length > 100) {
             if (has_link(line)) continue;
+
+            // Journal recovery table
+            if (std.mem.indexOf(u8, line, "Case.init(") != null) continue;
+
             // For multiline strings, we care that the _result_ fits 100 characters,
             // but we don't mind indentation in the source.
             if (parse_multiline_string(line)) |string_value| {
@@ -391,5 +395,4 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 
 const naughty_list = [_][]const u8{
     "testing/low_level_hash_vectors.zig",
-    "vsr/journal.zig",
 };
