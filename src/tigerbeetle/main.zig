@@ -257,9 +257,15 @@ const Command = struct {
         // `constants.block_size` and `SetAssociativeCache.value_count_max_multiple`,
         // and it may have been converted to zero if a smaller value is passed in.
         if (grid_cache_size == 0) {
-            fatal("Grid cache must be greater than {}MiB. See --cache-grid", .{
-                @divExact(grid_cache_size_min, 1024 * 1024),
-            });
+            if (comptime (grid_cache_size_min >= 1024 * 1024)) {
+                fatal("Grid cache must be greater than {}MiB. See --cache-grid", .{
+                    @divExact(grid_cache_size_min, 1024 * 1024),
+                });
+            } else {
+                fatal("Grid cache must be greater than {}KiB. See --cache-grid", .{
+                    @divExact(grid_cache_size_min, 1024),
+                });
+            }
         }
         assert(grid_cache_size >= grid_cache_size_min);
 
@@ -335,8 +341,11 @@ const Command = struct {
         });
 
         if (constants.aof_recovery) {
-            log_main.warn("{}: started in AOF recovery mode. This is potentially dangerous - " ++
-                "if it's unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.", .{replica.replica});
+            log_main.warn(
+                "{}: started in AOF recovery mode. This is potentially dangerous - if it's" ++
+                    " unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.",
+                .{replica.replica},
+            );
         }
 
         if (constants.verify) {
@@ -393,12 +402,20 @@ const Command = struct {
             // Zig 0.10 doesn't see field_name as comptime if this `comptime` isn't used.
             try stdout.writeAll("\n");
             inline for (comptime std.meta.fieldNames(@TypeOf(config.cluster))) |field_name| {
-                try print_value(stdout, "cluster." ++ field_name, @field(config.cluster, field_name));
+                try print_value(
+                    stdout,
+                    "cluster." ++ field_name,
+                    @field(config.cluster, field_name),
+                );
             }
 
             try stdout.writeAll("\n");
             inline for (comptime std.meta.fieldNames(@TypeOf(config.process))) |field_name| {
-                try print_value(stdout, "process." ++ field_name, @field(config.process, field_name));
+                try print_value(
+                    stdout,
+                    "process." ++ field_name,
+                    @field(config.process, field_name),
+                );
             }
         }
         try stdout_buffer.flush();

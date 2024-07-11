@@ -241,7 +241,7 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     log.info("dotnet version {s}", .{dotnet_version});
 
     try shell.zig(
-        \\build dotnet_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
+        \\build clients:dotnet -Drelease -Dconfig=production -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,
@@ -268,7 +268,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer shell.popd();
 
     try shell.zig(
-        \\build go_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
+        \\build clients:go -Drelease -Dconfig=production -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,
@@ -322,7 +322,7 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     log.info("java version {s}", .{java_version});
 
     try shell.zig(
-        \\build java_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
+        \\build clients:java -Drelease -Dconfig=production -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,
@@ -364,7 +364,7 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     log.info("node version {s}", .{node_version});
 
     try shell.zig(
-        \\build node_client -Drelease -Dconfig=production -Dconfig-release={release_triple}
+        \\build clients:node -Drelease -Dconfig=production -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,

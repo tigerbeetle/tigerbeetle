@@ -156,7 +156,7 @@ public static class ID
             // Increment the u80 stored in lastRandom using a u64 increment then u16 increment.
             // Throws an exception if the entire u80 represented with both overflows.
             // We rely on unsigned arithmetic wrapping on overflow by detecting for zero after inc.
-            // Unsigned types wrap by default but can be overriden by compiler flag so be explicit. 
+            // Unsigned types wrap by default but can be overridden by compiler flag so be explicit.
             unchecked
             {
                 randomLo += 1;

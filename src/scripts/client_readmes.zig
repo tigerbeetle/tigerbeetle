@@ -393,6 +393,34 @@ fn readme_root(ctx: *Context) !void {
     }
 
     {
+        ctx.header(2, "Query Accounts");
+        ctx.paragraph(
+            \\NOTE: This is a preview API that is subject to breaking changes once we have
+            \\a stable querying API.
+            \\
+            \\Query accounts by the intersection of some fields and by timestamp range.
+            \\
+            \\The accounts in the response are sorted by `timestamp` in chronological or
+            \\reverse-chronological order.
+        );
+        ctx.code_section("query-accounts");
+    }
+
+    {
+        ctx.header(2, "Query Transfers");
+        ctx.paragraph(
+            \\NOTE: This is a preview API that is subject to breaking changes once we have
+            \\a stable querying API.
+            \\
+            \\Query transfers by the intersection of some fields and by timestamp range.
+            \\
+            \\The transfers in the response are sorted by `timestamp` in chronological or
+            \\reverse-chronological order.
+        );
+        ctx.code_section("query-transfers");
+    }
+
+    {
         ctx.header(2, "Linked Events");
         ctx.paragraph(
             \\When the `linked` flag is specified for an account when creating accounts or

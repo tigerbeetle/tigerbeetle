@@ -94,9 +94,9 @@ pub fn ManifestLevelType(
             /// Excludes the specified range from the level's key range, i.e. if the specified range
             /// contributes to the level's key_min/key_max, find a new key_min/key_max.
             ///
-            /// This is achieved by querying the tables visible to snapshot_latest and updating level
-            /// key_min/key_max to the key_min/key_max of the first table returned by the iterator.
-            /// The query is guaranteed to only fetch non-snapshotted tables, since
+            /// This is achieved by querying the tables visible to snapshot_latest and updating
+            /// level key_min/key_max to the key_min/key_max of the first table returned by the
+            /// iterator. The query is guaranteed to only fetch non-snapshotted tables, since
             /// tables visible to old snapshots that users have retained would have
             /// snapshot_max set to a non math.maxInt(u64) value. Therefore, they wouldn't
             /// be visible to queries with snapshot_latest (math.maxInt(u64 - 1)).
@@ -574,6 +574,8 @@ pub fn ManifestLevelType(
                     snapshot,
                     max_overlapping_tables,
                 ) orelse continue;
+                assert(range.tables.count() <= max_overlapping_tables);
+
                 if (optimal == null or range.tables.count() < optimal.?.range.tables.count()) {
                     optimal = LeastOverlapTable{
                         .table = TableInfoReference{
@@ -723,6 +725,7 @@ pub fn ManifestLevelType(
             }
             assert(range.key_min <= range.key_max);
             assert(range.key_min <= key_min);
+            assert(range.tables.count() <= max_overlapping_tables);
             assert(key_max <= range.key_max);
 
             return range;

@@ -86,18 +86,21 @@ const CliArgs = union(enum) {
         cache_account_balances: ?[]const u8 = null,
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
+        account_count_hot: usize = 0,
         account_balances: bool = false,
         account_batch_size: usize = @divExact(
             constants.message_size_max - @sizeOf(vsr.Header),
             @sizeOf(tigerbeetle.Account),
         ),
         transfer_count: usize = 10_000_000,
+        transfer_hot_percent: usize = 100,
         transfer_pending: bool = false,
         transfer_batch_size: usize = @divExact(
             constants.message_size_max - @sizeOf(vsr.Header),
             @sizeOf(tigerbeetle.Transfer),
         ),
         transfer_batch_delay_us: usize = 0,
+        validate: bool = false,
         query_count: usize = 100,
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
@@ -220,7 +223,7 @@ const StartDefaults = struct {
 };
 
 const start_defaults_production = StartDefaults{
-    .limit_pipeline_requests = @divExact(constants.clients_max, 2) -
+    .limit_pipeline_requests = vsr.stdx.div_ceil(constants.clients_max, 2) -
         constants.pipeline_prepare_queue_max,
     .limit_request = .{ .value = constants.message_size_max },
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },
@@ -297,12 +300,15 @@ pub const Command = union(enum) {
         cache_account_balances: ?[]const u8,
         cache_grid: ?[]const u8,
         account_count: usize,
+        account_count_hot: usize,
         account_balances: bool,
         account_batch_size: usize,
         transfer_count: usize,
+        transfer_hot_percent: usize,
         transfer_pending: bool,
         transfer_batch_size: usize,
         transfer_batch_delay_us: usize,
+        validate: bool,
         query_count: usize,
         print_batch_timings: bool,
         id_order: IdOrder,
@@ -496,11 +502,19 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const request_size_limit_min = 4096;
             const request_size_limit_max = constants.message_size_max;
             if (request_size_limit.bytes() > request_size_limit_max) {
-                flags.fatal("--limit-request: size {}{s} exceeds maximum: {}MiB", .{
-                    request_size_limit.value,
-                    request_size_limit.suffix(),
-                    @divExact(request_size_limit_max, 1024 * 1024),
-                });
+                if (comptime (request_size_limit_max >= 1024 * 1024)) {
+                    flags.fatal("--limit-request: size {}{s} exceeds maximum: {}MiB", .{
+                        request_size_limit.value,
+                        request_size_limit.suffix(),
+                        @divExact(request_size_limit_max, 1024 * 1024),
+                    });
+                } else {
+                    flags.fatal("--limit-request: size {}{s} exceeds maximum: {}KiB", .{
+                        request_size_limit.value,
+                        request_size_limit.suffix(),
+                        @divExact(request_size_limit_max, 1024),
+                    });
+                }
             }
             if (request_size_limit.bytes() < request_size_limit_min) {
                 flags.fatal("--limit-request: size {}{s} is below minimum: {}B", .{
@@ -638,12 +652,15 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cache_account_balances = benchmark.cache_account_balances,
                     .cache_grid = benchmark.cache_grid,
                     .account_count = benchmark.account_count,
+                    .account_count_hot = benchmark.account_count_hot,
                     .account_balances = benchmark.account_balances,
                     .account_batch_size = benchmark.account_batch_size,
                     .transfer_count = benchmark.transfer_count,
+                    .transfer_hot_percent = benchmark.transfer_hot_percent,
                     .transfer_pending = benchmark.transfer_pending,
                     .transfer_batch_size = benchmark.transfer_batch_size,
                     .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
+                    .validate = benchmark.validate,
                     .query_count = benchmark.query_count,
                     .print_batch_timings = benchmark.print_batch_timings,
                     .id_order = benchmark.id_order,

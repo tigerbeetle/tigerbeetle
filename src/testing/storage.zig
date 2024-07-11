@@ -90,18 +90,6 @@ pub const Storage = struct {
         grid_checker: ?*GridChecker = null,
     };
 
-    /// Compile-time upper bound on the size of a testing Storage.
-    ///
-    /// For convenience, it is rounded to an even number of free set shards so that it is possible
-    /// to create a `FreeSet` covering exactly this amount of blocks.
-    pub const grid_blocks_max = grid_blocks_max: {
-        const free_set_shard_count = @divFloor(
-            constants.storage_size_limit_max - superblock.data_file_size_min,
-            constants.block_size * FreeSet.shard_bits,
-        );
-        break :grid_blocks_max free_set_shard_count * FreeSet.shard_bits;
-    };
-
     /// See usage in Journal.write_sectors() for details.
     /// TODO: allow testing in both modes.
     pub const synchronicity: enum {
@@ -194,7 +182,8 @@ pub const Storage = struct {
         errdefer reads.deinit();
         try reads.ensureTotalCapacity(constants.iops_read_max);
 
-        var writes = PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
+        var writes =
+            PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
         errdefer writes.deinit();
         try writes.ensureTotalCapacity(constants.iops_write_max);
 
@@ -240,6 +229,25 @@ pub const Storage = struct {
 
         storage.reads.items.len = 0;
         storage.next_tick_queue.reset();
+    }
+
+    /// Compile-time upper bound on the size of a grid of a testing Storage.
+    pub const grid_blocks_max =
+        grid_blocks_for_storage_size(constants.storage_size_limit_max);
+
+    /// Runtime bound on the size of the grid of a testing Storage.
+    pub fn grid_blocks(storage: *const Storage) u64 {
+        return grid_blocks_for_storage_size(storage.size);
+    }
+
+    /// How many grid blocks fit in the Storage of the specified size.
+    fn grid_blocks_for_storage_size(size: u64) u64 {
+        assert(size <= constants.storage_size_limit_max);
+        const free_set_shard_count = @divFloor(
+            size - superblock.data_file_size_min,
+            constants.block_size * FreeSet.shard_bits,
+        );
+        return free_set_shard_count * FreeSet.shard_bits;
     }
 
     /// Returns the number of bytes that have been written to, assuming that (the simulated)
@@ -468,7 +476,10 @@ pub const Storage = struct {
     }
 
     fn write_latency(storage: *Storage) u64 {
-        return storage.latency(storage.options.write_latency_min, storage.options.write_latency_mean);
+        return storage.latency(
+            storage.options.write_latency_min,
+            storage.options.write_latency_mean,
+        );
     }
 
     fn latency(storage: *Storage, min: u64, mean: u64) u64 {
@@ -481,7 +492,12 @@ pub const Storage = struct {
         return x > storage.prng.random().uintLessThan(u8, 100);
     }
 
-    fn fault_faulty_sectors(storage: *Storage, zone: vsr.Zone, offset_in_zone: u64, size: u64) void {
+    fn fault_faulty_sectors(
+        storage: *Storage,
+        zone: vsr.Zone,
+        offset_in_zone: u64,
+        size: u64,
+    ) void {
         const atlas = storage.options.fault_atlas orelse return;
         const replica_index = storage.options.replica_index.?;
         const faulty_sectors = switch (zone) {
@@ -660,7 +676,11 @@ pub const Storage = struct {
         const writes = storage.writes;
         for (writes.items) |write| {
             if (write.zone == zone) {
-                log.err("Pending write: {} {}\n{}", .{ write.offset, write.zone, write.stack_trace });
+                log.err("Pending write: {} {}\n{}", .{
+                    write.offset,
+                    write.zone,
+                    write.stack_trace,
+                });
                 assert_failed = true;
             }
         }

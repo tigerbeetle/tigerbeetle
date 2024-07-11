@@ -1300,6 +1300,437 @@ public class IntegrationTests
         }
     }
 
+    [TestMethod]
+    public void TestQueryAccounts()
+    {
+        {
+            // Creating accounts.
+            var accounts = new Account[10];
+            for (int i = 0; i < 10; i++)
+            {
+                accounts[i] = new Account
+                {
+                    Id = ID.Create()
+                };
+
+                if (i % 2 == 0)
+                {
+                    accounts[i].UserData128 = 1000L;
+                    accounts[i].UserData64 = 100;
+                    accounts[i].UserData32 = 10;
+                }
+                else
+                {
+                    accounts[i].UserData128 = 2000L;
+                    accounts[i].UserData64 = 200;
+                    accounts[i].UserData32 = 20;
+                }
+
+                accounts[i].Ledger = 1;
+                accounts[i].Code = 999;
+                accounts[i].Flags = AccountFlags.None;
+            }
+
+            var createAccountsErrors = client.CreateAccounts(accounts);
+            Assert.IsTrue(createAccountsErrors.Length == 0);
+        }
+
+        {
+            // Querying accounts where:
+            // `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
+            // AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
+            var filter = new QueryFilter
+            {
+                UserData128 = 1000,
+                UserData64 = 100,
+                UserData32 = 10,
+                Code = 999,
+                Ledger = 1,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Account[] query = client.QueryAccounts(filter);
+
+            Assert.IsTrue(query.Length == 5);
+
+            ulong timestamp = 0;
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp > timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.UserData128, transfer.UserData128);
+                Assert.AreEqual(filter.UserData64, transfer.UserData64);
+                Assert.AreEqual(filter.UserData32, transfer.UserData32);
+                Assert.AreEqual(filter.Ledger, transfer.Ledger);
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+        }
+
+        {
+            // Querying accounts where:
+            // `user_data_128=2000 AND user_data_64=200 AND user_data_32=20
+            // AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
+            var filter = new QueryFilter
+            {
+                UserData128 = 2000,
+                UserData64 = 200,
+                UserData32 = 20,
+                Code = 999,
+                Ledger = 1,
+                Limit = 254,
+                Flags = QueryFilterFlags.Reversed,
+            };
+            Account[] query = client.QueryAccounts(filter);
+
+            Assert.IsTrue(query.Length == 5);
+
+            ulong timestamp = ulong.MaxValue;
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp < timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.UserData128, transfer.UserData128);
+                Assert.AreEqual(filter.UserData64, transfer.UserData64);
+                Assert.AreEqual(filter.UserData32, transfer.UserData32);
+                Assert.AreEqual(filter.Ledger, transfer.Ledger);
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+        }
+
+        {
+            // Querying account where:
+            // code=999 ORDER BY timestamp ASC`.
+            var filter = new QueryFilter
+            {
+                Code = 999,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Account[] query = client.QueryAccounts(filter);
+
+            Assert.IsTrue(query.Length == 10);
+
+            ulong timestamp = 0;
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp > timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+        }
+
+        {
+            // Querying accounts where:
+            // code=999 ORDER BY timestamp DESC LIMIT 5`.
+            var filter = new QueryFilter
+            {
+                Code = 999,
+                Limit = 5,
+                Flags = QueryFilterFlags.Reversed,
+            };
+
+            // First 5 items:
+            Account[] query = client.QueryAccounts(filter);
+            Assert.IsTrue(query.Length == 5);
+
+            ulong timestamp = ulong.MaxValue;
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp < timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+
+            // Next 5 items:
+            filter.TimestampMax = timestamp - 1;
+            query = client.QueryAccounts(filter);
+            Assert.IsTrue(query.Length == 5);
+
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp < timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+
+            // No more results:
+            filter.TimestampMax = timestamp - 1;
+            query = client.QueryAccounts(filter);
+            Assert.IsTrue(query.Length == 0);
+        }
+
+        {
+            // Not found:
+            var filter = new QueryFilter
+            {
+                UserData64 = 200,
+                UserData32 = 10,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Account[] query = client.QueryAccounts(filter);
+            Assert.IsTrue(query.Length == 0);
+        }
+    }
+
+    [TestMethod]
+    public void TestQueryTransfers()
+    {
+        var accounts = GenerateAccounts();
+
+        {
+            var accountsResults = client.CreateAccounts(accounts);
+            Assert.IsTrue(accountsResults.Length == 0);
+        }
+
+        {
+            // Creating transfers.
+            var transfers = new Transfer[10];
+            for (int i = 0; i < 10; i++)
+            {
+                transfers[i] = new Transfer
+                {
+                    Id = ID.Create()
+                };
+
+                if (i % 2 == 0)
+                {
+                    transfers[i].CreditAccountId = accounts[0].Id;
+                    transfers[i].DebitAccountId = accounts[1].Id;
+                    transfers[i].UserData128 = 1000L;
+                    transfers[i].UserData64 = 100;
+                    transfers[i].UserData32 = 10;
+                }
+                else
+                {
+                    transfers[i].CreditAccountId = accounts[1].Id;
+                    transfers[i].DebitAccountId = accounts[0].Id;
+                    transfers[i].UserData128 = 2000L;
+                    transfers[i].UserData64 = 200;
+                    transfers[i].UserData32 = 20;
+                }
+
+                transfers[i].Ledger = 1;
+                transfers[i].Code = 999;
+                transfers[i].Flags = TransferFlags.None;
+                transfers[i].Amount = 100;
+            }
+
+            var createTransfersErrors = client.CreateTransfers(transfers);
+            Assert.IsTrue(createTransfersErrors.Length == 0);
+        }
+
+        {
+            // Querying transfers where:
+            // `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
+            // AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
+            var filter = new QueryFilter
+            {
+                UserData128 = 1000,
+                UserData64 = 100,
+                UserData32 = 10,
+                Code = 999,
+                Ledger = 1,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Transfer[] query = client.QueryTransfers(filter);
+
+            Assert.IsTrue(query.Length == 5);
+
+            ulong timestamp = 0;
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp > timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.UserData128, transfer.UserData128);
+                Assert.AreEqual(filter.UserData64, transfer.UserData64);
+                Assert.AreEqual(filter.UserData32, transfer.UserData32);
+                Assert.AreEqual(filter.Ledger, transfer.Ledger);
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+        }
+
+        {
+            // Querying transfers where:
+            // `user_data_128=2000 AND user_data_64=200 AND user_data_32=20
+            // AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
+            var filter = new QueryFilter
+            {
+                UserData128 = 2000,
+                UserData64 = 200,
+                UserData32 = 20,
+                Code = 999,
+                Ledger = 1,
+                Limit = 254,
+                Flags = QueryFilterFlags.Reversed,
+            };
+            Transfer[] query = client.QueryTransfers(filter);
+
+            Assert.IsTrue(query.Length == 5);
+
+            ulong timestamp = ulong.MaxValue;
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp < timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.UserData128, transfer.UserData128);
+                Assert.AreEqual(filter.UserData64, transfer.UserData64);
+                Assert.AreEqual(filter.UserData32, transfer.UserData32);
+                Assert.AreEqual(filter.Ledger, transfer.Ledger);
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+        }
+
+        {
+            // Querying transfers where:
+            // code=999 ORDER BY timestamp ASC`.
+            var filter = new QueryFilter
+            {
+                Code = 999,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Transfer[] query = client.QueryTransfers(filter);
+
+            Assert.IsTrue(query.Length == 10);
+
+            ulong timestamp = 0;
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp > timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+        }
+
+        {
+            // Querying transfers where:
+            // code=999 ORDER BY timestamp DESC LIMIT 5`.
+            var filter = new QueryFilter
+            {
+                Code = 999,
+                Limit = 5,
+                Flags = QueryFilterFlags.Reversed,
+            };
+
+            // First 5 items:
+            Transfer[] query = client.QueryTransfers(filter);
+            Assert.IsTrue(query.Length == 5);
+
+            ulong timestamp = ulong.MaxValue;
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp < timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+
+            // Next 5 items:
+            filter.TimestampMax = timestamp - 1;
+            query = client.QueryTransfers(filter);
+            Assert.IsTrue(query.Length == 5);
+
+            foreach (var transfer in query)
+            {
+                Assert.IsTrue(transfer.Timestamp < timestamp);
+                timestamp = transfer.Timestamp;
+
+                Assert.AreEqual(filter.Code, transfer.Code);
+            }
+
+            // No more results:
+            filter.TimestampMax = timestamp - 1;
+            query = client.QueryTransfers(filter);
+            Assert.IsTrue(query.Length == 0);
+        }
+
+        {
+            // Not found:
+            var filter = new QueryFilter
+            {
+                UserData64 = 200,
+                UserData32 = 10,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Transfer[] query = client.QueryTransfers(filter);
+            Assert.IsTrue(query.Length == 0);
+        }
+    }
+
+    [TestMethod]
+    public void TestInvalidQueryFilter()
+    {
+        {
+            // Empty filter with zero limit:
+            Assert.IsTrue(client.QueryAccounts(new QueryFilter { }).Length == 0);
+            Assert.IsTrue(client.QueryTransfers(new QueryFilter { }).Length == 0);
+
+        }
+
+        {
+            // Invalid timestamp min
+            var filter = new QueryFilter
+            {
+                TimestampMin = ulong.MaxValue,
+                TimestampMax = 0,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Assert.IsTrue(client.QueryAccounts(filter).Length == 0);
+            Assert.IsTrue(client.QueryTransfers(filter).Length == 0);
+        }
+
+        {
+            // Invalid timestamp max
+            var filter = new QueryFilter
+            {
+                TimestampMin = 0,
+                TimestampMax = ulong.MaxValue,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Assert.IsTrue(client.QueryAccounts(filter).Length == 0);
+            Assert.IsTrue(client.QueryTransfers(filter).Length == 0);
+        }
+
+        {
+            // Invalid timestamp range
+            var filter = new QueryFilter
+            {
+                TimestampMin = ulong.MaxValue - 1,
+                TimestampMax = 1,
+                Limit = 254,
+                Flags = QueryFilterFlags.None,
+            };
+            Assert.IsTrue(client.QueryAccounts(filter).Length == 0);
+            Assert.IsTrue(client.QueryTransfers(filter).Length == 0);
+        }
+
+        {
+            // Invalid flags
+            var filter = new QueryFilter
+            {
+                TimestampMin = 0,
+                TimestampMax = 0,
+                Limit = 254,
+                Flags = (QueryFilterFlags)0xFFFF,
+            };
+            Assert.IsTrue(client.QueryAccounts(filter).Length == 0);
+            Assert.IsTrue(client.QueryTransfers(filter).Length == 0);
+        }
+    }
+
     /// <summary>
     /// This test asserts that a single Client can be shared by multiple concurrent tasks
     /// </summary>
@@ -1363,9 +1794,9 @@ public class IntegrationTests
                 Code = 1,
             };
 
-            /// Starts multiple tasks.
-            var task = isAsync ? asyncAction(transfer) : Task.Run(() => syncAction(transfer));
-            tasks[i] = task;
+            // Starts multiple requests.
+            // Wraps the syncAction into a Task for unified logic handling both async and sync tests.
+            tasks[i] = isAsync ? asyncAction(transfer) : Task.Run(() => syncAction(transfer));
         }
 
         Task.WhenAll(tasks).Wait();

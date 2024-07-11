@@ -1,5 +1,96 @@
 # TigerBeetle Changelog
 
+## 2024-07-08 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#2035](https://github.com/tigerbeetle/tigerbeetle/pull/2035),
+  [#2042](https://github.com/tigerbeetle/tigerbeetle/pull/2042),
+  [#2069](https://github.com/tigerbeetle/tigerbeetle/pull/2069)
+
+  Strengthen LSM assertions.
+
+- [#2077](https://github.com/tigerbeetle/tigerbeetle/pull/2077)
+
+  Use flexible quorums for clock synchronization.
+
+### Features
+
+- [#2037](https://github.com/tigerbeetle/tigerbeetle/pull/2037)
+
+  Improve and clarify balancing transfer `amount` validation.
+
+### Internals
+
+- [#2063](https://github.com/tigerbeetle/tigerbeetle/pull/2063)
+
+  Add chaitanyabhandari to the list of release managers.
+
+- [#2075](https://github.com/tigerbeetle/tigerbeetle/pull/2075)
+
+  Update TigerStyle with advice for splitting long functions.
+
+- [#2068](https://github.com/tigerbeetle/tigerbeetle/pull/2068),
+  [#2074](https://github.com/tigerbeetle/tigerbeetle/pull/2074)
+
+  Fix flaky tests.
+
+- [#1995](https://github.com/tigerbeetle/tigerbeetle/pull/1995)
+
+  Add `--security-opt seccomp=unconfined` to Docker commands in docs, since newer versions of Docker
+  block access to io_uring.
+
+- [#2047](https://github.com/tigerbeetle/tigerbeetle/pull/2047),
+  [#2064](https://github.com/tigerbeetle/tigerbeetle/pull/2064),
+  [#2079](https://github.com/tigerbeetle/tigerbeetle/pull/2079)
+
+  Clean up github actions workflows.
+
+- [#2071](https://github.com/tigerbeetle/tigerbeetle/pull/2071)
+
+  Make cfo supervisor robust to network errors.
+
+### TigerTracks 🎧
+
+- [Линия жизни](https://open.spotify.com/track/2dpGc40PtSLEeNAGrTnJGI?si=9c3d6e45632147c4)
+
+## 2024-07-01 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#2058](https://github.com/tigerbeetle/tigerbeetle/pull/2058)
+
+  `tigerbeetle benchmark` command can now simulate few "hot" accounts which account for most of
+  transfers, the distribution expected in a typical deployment.
+
+### Features
+
+- [#2040](https://github.com/tigerbeetle/tigerbeetle/pull/2040)
+
+  Add a recipe for accounts with bounded balance
+
+### Internals
+
+- [#2033](https://github.com/tigerbeetle/tigerbeetle/pull/2033),
+  [#2041](https://github.com/tigerbeetle/tigerbeetle/pull/2041)
+
+  Rewrite `build.zig` to introduce a more regular naming scheme for top-level steps.
+
+- [#2057](https://github.com/tigerbeetle/tigerbeetle/pull/2057)
+
+  Our internal dashboard, [devhub](https://tigerbeetle.github.io/tigerbeetle/) now has dark mode 😎.
+
+- [#2052](https://github.com/tigerbeetle/tigerbeetle/pull/2052),
+  [#2032](https://github.com/tigerbeetle/tigerbeetle/pull/2032),
+  [#2044](https://github.com/tigerbeetle/tigerbeetle/pull/2044)
+
+  Ensure that the generated `tb_client.h` C header is in sync with Zig code.
+
+
+### TigerTracks 🎧
+
+- [Wish You Were Here](https://open.spotify.com/track/7aE5WXu5sFeNRh3Z05wwu4?si=317f6e0302cc4040)
+
 ## 2024-06-24 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
@@ -1244,7 +1335,7 @@ Welcome to 2024!
 
   Add example for setting up TigerBeetle as a systemd service.
 
-- [#1400 ](https://github.com/tigerbeetle/tigerbeetle/pull/1400)
+- [#1400](https://github.com/tigerbeetle/tigerbeetle/pull/1400)
 
   Drop support for .Net Standard 2.1.
 

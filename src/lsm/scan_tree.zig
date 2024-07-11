@@ -349,7 +349,7 @@ pub fn ScanTreeType(
                 .idle => {},
                 .seeking, .needs_data => {
                     for (&self.levels) |*level| {
-                        // Fowarding the `probe` to each level.
+                        // Forwarding the `probe` to each level.
                         level.probe(probe_key);
                     }
 

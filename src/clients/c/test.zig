@@ -136,7 +136,11 @@ test "c_client echo" {
         for (requests) |*request| {
             request.* = .{
                 .completion = &completion,
-                .sent_data_size = prng.random().intRangeAtMost(u32, 1, event_request_max) * event_size,
+                .sent_data_size = prng.random().intRangeAtMost(
+                    u32,
+                    1,
+                    event_request_max,
+                ) * event_size,
             };
             prng.random().bytes(request.sent_data[0..request.sent_data_size]);
 
@@ -145,7 +149,10 @@ test "c_client echo" {
                 const packet_acquire_status = c.tb_client_acquire_packet(tb_client, &out_packet);
 
                 if (out_packet) |packet| {
-                    try testing.expectEqual(@as(c_uint, c.TB_PACKET_ACQUIRE_OK), packet_acquire_status);
+                    try testing.expectEqual(
+                        @as(c_uint, c.TB_PACKET_ACQUIRE_OK),
+                        packet_acquire_status,
+                    );
 
                     packet.operation = create_accounts_operation;
                     packet.user_data = request;
@@ -171,7 +178,10 @@ test "c_client echo" {
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(tb_client, request.reply.?.tb_client);
             try testing.expectEqual(c.TB_PACKET_OK, request.packet.status);
-            try testing.expectEqual(@intFromPtr(request.packet), @intFromPtr(request.reply.?.tb_packet));
+            try testing.expectEqual(
+                @intFromPtr(request.packet),
+                @intFromPtr(request.reply.?.tb_packet),
+            );
             try testing.expect(request.reply.?.result != null);
             try testing.expectEqual(request.sent_data_size, request.reply.?.result_len);
 
@@ -220,7 +230,7 @@ test "c_client tb_status" {
     try assert_status(1, "invalid", c.TB_STATUS_ADDRESS_INVALID);
     try assert_status(1, "", c.TB_STATUS_ADDRESS_INVALID);
 
-    // More addresses thant "replicas_max" should return "TB_STATUS_ADDRESS_LIMIT_EXCEEDED":
+    // More addresses than "replicas_max" should return "TB_STATUS_ADDRESS_LIMIT_EXCEEDED":
     try assert_status(
         1,
         ("3000," ** constants.replicas_max) ++ "3001",
@@ -277,7 +287,10 @@ test "c_client tb_packet_status" {
                 const packet_acquire_status = c.tb_client_acquire_packet(client, &out_packet);
 
                 if (out_packet) |packet| {
-                    try testing.expectEqual(@as(c_uint, c.TB_PACKET_ACQUIRE_OK), packet_acquire_status);
+                    try testing.expectEqual(
+                        @as(c_uint, c.TB_PACKET_ACQUIRE_OK),
+                        packet_acquire_status,
+                    );
 
                     packet.operation = operation;
                     packet.user_data = &request;
@@ -297,7 +310,10 @@ test "c_client tb_packet_status" {
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(client, request.reply.?.tb_client);
-            try testing.expectEqual(@intFromPtr(request.packet), @intFromPtr(request.reply.?.tb_packet));
+            try testing.expectEqual(
+                @intFromPtr(request.packet),
+                @intFromPtr(request.reply.?.tb_packet),
+            );
             try testing.expectEqual(tb_packet_status_expected, request.packet.status);
         }
     }.action;

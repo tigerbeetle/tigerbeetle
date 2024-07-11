@@ -16,7 +16,8 @@ const tb = @import("../tigerbeetle.zig");
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const StateMachine = @import("../state_machine.zig")
+    .StateMachineType(Storage, constants.state_machine_config);
 const Reservation = @import("../vsr/free_set.zig").Reservation;
 const GridType = @import("../vsr/grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
@@ -543,13 +544,21 @@ const Environment = struct {
 
         for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
             assert(env.state == .fuzzing);
-            log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op.action });
+            log.debug("Running fuzz_ops[{}/{}] == {}", .{
+                fuzz_op_index,
+                fuzz_ops.len,
+                fuzz_op.action,
+            });
 
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = (model.log.readableLength() + model.checkpointed.count()) * @sizeOf(Account);
-            // NOTE: This isn't accurate anymore because the model can contain multiple copies of an account in the log
+            const model_size = brk: {
+                const account_count = model.log.readableLength() + model.checkpointed.count();
+                break :brk account_count * @sizeOf(Account);
+            };
+            // NOTE: This isn't accurate anymore because the model can contain multiple copies of
+            // an account in the log
             log.debug("space_amplification ~= {d:.2}", .{
                 @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
             });
@@ -606,7 +615,10 @@ const Environment = struct {
                         if (env.get_account(id)) |lsm_account| {
                             assert(stdx.equal_bytes(Account, lsm_account, checkpointed_account));
                         } else {
-                            std.debug.panic("Account checkpointed but not in lsm after crash.\n {}\n", .{checkpointed_account});
+                            std.debug.panic(
+                                "Account checkpointed but not in lsm after crash.\n {}\n",
+                                .{checkpointed_account},
+                            );
                         }
 
                         // There are strict limits around how many values can be prefetched by one
@@ -772,67 +784,32 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     var persisted_op: u64 = op;
     var puts_since_compact: usize = 0;
     for (fuzz_ops, 0..) |*fuzz_op, fuzz_op_index| {
-        const action_tag: FuzzOpActionTag = if (puts_since_compact >= Environment.puts_since_compact_max)
+        const too_many_puts = puts_since_compact >= Environment.puts_since_compact_max;
+        const action_tag: FuzzOpActionTag = if (too_many_puts)
             // We have to compact before doing any other operations.
             .compact
         else
             // Otherwise pick a random FuzzOp.
             fuzz.random_enum(random, FuzzOpActionTag, action_distribution);
         const action = switch (action_tag) {
-            .compact => compact: {
-                const compact_op = op;
+            .compact => action: {
+                const action = generate_compact(random, .{
+                    .op = op,
+                    .persisted_op = persisted_op,
+                });
                 op += 1;
-                const checkpoint =
-                    // Can only checkpoint on the last beat of the bar.
-                    compact_op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-                    compact_op > constants.lsm_batch_multiple and
-                    // Never checkpoint at the same op twice
-                    compact_op > persisted_op + constants.lsm_batch_multiple and
-                    // Checkpoint at roughly the same rate as log wraparound.
-                    random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
-                if (checkpoint) {
+                if (action.compact.checkpoint) {
                     persisted_op = op - constants.lsm_batch_multiple;
                 }
-                break :compact FuzzOpAction{
-                    .compact = .{
-                        .op = compact_op,
-                        .checkpoint = checkpoint,
-                    },
-                };
+                break :action action;
             },
-            .put_account => put_account: {
-                const id = random_id(random, u128);
-                var account = id_to_account.get(id) orelse Account{
-                    .id = id,
-                    // `timestamp` must be unique.
-                    .timestamp = fuzz_op_index,
-                    .user_data_128 = random_id(random, u128),
-                    .user_data_64 = random_id(random, u64),
-                    .user_data_32 = random_id(random, u32),
-                    .reserved = 0,
-                    .ledger = random_id(random, u32),
-                    .code = random_id(random, u16),
-                    .flags = .{
-                        .debits_must_not_exceed_credits = random.boolean(),
-                        .credits_must_not_exceed_debits = random.boolean(),
-                    },
-                    .debits_pending = 0,
-                    .debits_posted = 0,
-                    .credits_pending = 0,
-                    .credits_posted = 0,
-                };
-
-                // These are the only fields we are allowed to change on existing accounts.
-                account.debits_pending = random.int(u64);
-                account.debits_posted = random.int(u64);
-                account.credits_pending = random.int(u64);
-                account.credits_posted = random.int(u64);
-
-                try id_to_account.put(account.id, account);
-                break :put_account FuzzOpAction{ .put_account = .{
+            .put_account => action: {
+                const action = generate_put_account(random, &id_to_account, .{
                     .op = op,
-                    .account = account,
-                } };
+                    .timestamp = fuzz_op_index,
+                });
+                try id_to_account.put(action.put_account.account.id, action.put_account.account);
+                break :action action;
             },
             .get_account => FuzzOpAction{ .get_account = random_id(random, u128) },
             .scan_account => blk: {
@@ -880,7 +857,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // * See the state from that checkpoint.
         // * See the state from the previous checkpoint.
         // But this is difficult to test, so for now we'll avoid it.
-        const modifer_tag = if (action == .compact and !action.compact.checkpoint)
+        const modifier_tag = if (action == .compact and !action.compact.checkpoint)
             fuzz.random_enum(
                 random,
                 FuzzOpModifierTag,
@@ -888,7 +865,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             )
         else
             FuzzOpModifierTag.normal;
-        const modifier = switch (modifer_tag) {
+        const modifier = switch (modifier_tag) {
             .normal => FuzzOpModifier{ .normal = {} },
             .crash_after_ticks => FuzzOpModifier{
                 .crash_after_ticks = fuzz.random_int_exponential(random, usize, io_latency_mean),
@@ -905,6 +882,61 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     }
 
     return fuzz_ops;
+}
+
+fn generate_compact(
+    random: std.rand.Random,
+    options: struct { op: u64, persisted_op: u64 },
+) FuzzOpAction {
+    const checkpoint =
+        // Can only checkpoint on the last beat of the bar.
+        options.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
+        options.op > constants.lsm_batch_multiple and
+        // Never checkpoint at the same op twice
+        options.op > options.persisted_op + constants.lsm_batch_multiple and
+        // Checkpoint at roughly the same rate as log wraparound.
+        random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
+    return FuzzOpAction{ .compact = .{
+        .op = options.op,
+        .checkpoint = checkpoint,
+    } };
+}
+
+fn generate_put_account(
+    random: std.rand.Random,
+    id_to_account: *const std.AutoHashMap(u128, Account),
+    options: struct { op: u64, timestamp: u64 },
+) FuzzOpAction {
+    const id = random_id(random, u128);
+    var account = id_to_account.get(id) orelse Account{
+        .id = id,
+        // `timestamp` must be unique.
+        .timestamp = options.timestamp,
+        .user_data_128 = random_id(random, u128),
+        .user_data_64 = random_id(random, u64),
+        .user_data_32 = random_id(random, u32),
+        .reserved = 0,
+        .ledger = random_id(random, u32),
+        .code = random_id(random, u16),
+        .flags = .{
+            .debits_must_not_exceed_credits = random.boolean(),
+            .credits_must_not_exceed_debits = random.boolean(),
+        },
+        .debits_pending = 0,
+        .debits_posted = 0,
+        .credits_pending = 0,
+        .credits_posted = 0,
+    };
+
+    // These are the only fields we are allowed to change on existing accounts.
+    account.debits_pending = random.int(u64);
+    account.debits_posted = random.int(u64);
+    account.credits_pending = random.int(u64);
+    account.credits_posted = random.int(u64);
+    return FuzzOpAction{ .put_account = .{
+        .op = options.op,
+        .account = account,
+    } };
 }
 
 const io_latency_mean = 20;

@@ -74,7 +74,7 @@ test "repl integration" {
     defer context.deinit();
 
     try context.check(
-        \\create_accounts id=1 flags=linked code=10 ledger=700, id=2 code=10 ledger=700
+        \\create_accounts id=1 flags=linked|history code=10 ledger=700, id=2 code=10 ledger=700
     , snap(@src(), ""));
 
     try context.check(
@@ -96,7 +96,7 @@ test "repl integration" {
         \\  "user_data_32": "0",
         \\  "ledger": "700",
         \\  "code": "10",
-        \\  "flags": ["linked"],
+        \\  "flags": ["linked","history"],
         \\  "timestamp": "<snap:ignore>"
         \\}
         \\
@@ -105,6 +105,40 @@ test "repl integration" {
     try context.check(
         \\lookup_accounts id=2
     , snap(@src(),
+        \\{
+        \\  "id": "2",
+        \\  "debits_pending": "0",
+        \\  "debits_posted": "0",
+        \\  "credits_pending": "0",
+        \\  "credits_posted": "10",
+        \\  "user_data_128": "0",
+        \\  "user_data_64": "0",
+        \\  "user_data_32": "0",
+        \\  "ledger": "700",
+        \\  "code": "10",
+        \\  "flags": [],
+        \\  "timestamp": "<snap:ignore>"
+        \\}
+        \\
+    ));
+
+    try context.check(
+        \\query_accounts code=10 ledger=700
+    , snap(@src(),
+        \\{
+        \\  "id": "1",
+        \\  "debits_pending": "0",
+        \\  "debits_posted": "10",
+        \\  "credits_pending": "0",
+        \\  "credits_posted": "0",
+        \\  "user_data_128": "0",
+        \\  "user_data_64": "0",
+        \\  "user_data_32": "0",
+        \\  "ledger": "700",
+        \\  "code": "10",
+        \\  "flags": ["linked","history"],
+        \\  "timestamp": "<snap:ignore>"
+        \\}
         \\{
         \\  "id": "2",
         \\  "debits_pending": "0",
@@ -138,6 +172,61 @@ test "repl integration" {
         \\  "ledger": "700",
         \\  "code": "10",
         \\  "flags": [],
+        \\  "timestamp": "<snap:ignore>"
+        \\}
+        \\
+    ));
+
+    try context.check(
+        \\query_transfers code=10 ledger=700
+    , snap(@src(),
+        \\{
+        \\  "id": "1",
+        \\  "debit_account_id": "1",
+        \\  "credit_account_id": "2",
+        \\  "amount": "10",
+        \\  "pending_id": "0",
+        \\  "user_data_128": "0",
+        \\  "user_data_64": "0",
+        \\  "user_data_32": "0",
+        \\  "timeout": "0",
+        \\  "ledger": "700",
+        \\  "code": "10",
+        \\  "flags": [],
+        \\  "timestamp": "<snap:ignore>"
+        \\}
+        \\
+    ));
+
+    try context.check(
+        \\get_account_transfers account_id=2
+    , snap(@src(),
+        \\{
+        \\  "id": "1",
+        \\  "debit_account_id": "1",
+        \\  "credit_account_id": "2",
+        \\  "amount": "10",
+        \\  "pending_id": "0",
+        \\  "user_data_128": "0",
+        \\  "user_data_64": "0",
+        \\  "user_data_32": "0",
+        \\  "timeout": "0",
+        \\  "ledger": "700",
+        \\  "code": "10",
+        \\  "flags": [],
+        \\  "timestamp": "<snap:ignore>"
+        \\}
+        \\
+    ));
+
+    try context.check(
+        \\get_account_balances account_id=1
+    , snap(@src(),
+        \\{
+        \\  "debits_pending": "0",
+        \\  "debits_posted": "10",
+        \\  "credits_pending": "0",
+        \\  "credits_posted": "0",
         \\  "timestamp": "<snap:ignore>"
         \\}
         \\

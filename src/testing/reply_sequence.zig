@@ -122,7 +122,7 @@ pub const ReplySequence = struct {
     /// Copy the message from a Client's MessagePool to the ReplySequence's MessagePool.
     ///
     /// The client has a finite amount of messages in its pool, and the ReplySequence needs to hold
-    /// onto requests/replies until all preceeding requests/replies have arrived.
+    /// onto requests/replies until all preceding requests/replies have arrived.
     ///
     /// Returns the ReplySequence's message.
     fn clone_message(sequence: *ReplySequence, message_client: *const Message) *Message {

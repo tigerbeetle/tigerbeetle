@@ -7,7 +7,8 @@ const mem = std.mem;
 
 const stdx = @import("../stdx.zig");
 const div_ceil = @import("../stdx.zig").div_ceil;
-const binary_search_values_upsert_index = @import("binary_search.zig").binary_search_values_upsert_index;
+const binary_search_values_upsert_index =
+    @import("binary_search.zig").binary_search_values_upsert_index;
 const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 const Direction = @import("../direction.zig").Direction;
 
@@ -86,7 +87,8 @@ fn SegmentedArrayType(
             // We use u32 for indexes and counts.
             assert(element_count_max <= std.math.maxInt(u32));
 
-            // The buffers returned from the node_pool must be able to store T with correct alignment.
+            // The buffers returned from the node_pool must be able to store T with correct
+            // alignment.
             assert(NodePool.node_alignment >= @alignOf(T));
         }
 
@@ -189,7 +191,8 @@ fn SegmentedArrayType(
                 }
             }
             if (Key) |K| {
-                // If Key is not null then the elements must be sorted by key_from_value (but not necessarily unique).
+                // If Key is not null then the elements must be sorted by key_from_value (but not
+                // necessarily unique).
                 var key_prior_or_null: ?K = null;
                 for (array.nodes[0..array.node_count], 0..) |_, node_index| {
                     for (array.node_elements(@intCast(node_index))) |*value| {
@@ -537,7 +540,8 @@ fn SegmentedArrayType(
 
                 stdx.copy_disjoint(.inexact, T, a_pointer[a_remaining..], b_remaining);
 
-                array.indexes[b] = array.indexes[a] + a_remaining + @as(u32, @intCast(b_remaining.len));
+                array.indexes[b] =
+                    array.indexes[a] + a_remaining + @as(u32, @intCast(b_remaining.len));
                 array.decrement_indexes_after(b, remove_count);
 
                 array.remove_empty_node_at(node_pool, b);
@@ -897,8 +901,9 @@ fn SegmentedArrayType(
                     const mid = offset + half;
 
                     const node = &array.nodes[mid].?[0];
-                    // This trick seems to be what's needed to get llvm to emit branchless code for this,
-                    // a ternary-style if expression was generated as a jump here for whatever reason.
+                    // This trick seems to be what's needed to get llvm to emit branchless code for
+                    // this, a ternary-style if expression was generated as a jump here for whatever
+                    // reason.
                     const next_offsets = [_]usize{ offset, mid };
                     offset = next_offsets[@intFromBool(key_from_value(node) < key)];
 
@@ -1051,7 +1056,14 @@ fn FuzzContextType(
         // Test overaligned nodes to catch compile errors for missing @alignCast()
         const TestPool = NodePool(node_size, 2 * @alignOf(T));
         const TestArray = switch (element_order) {
-            .sorted => SortedSegmentedArray(T, TestPool, element_count_max, Key, key_from_value, options),
+            .sorted => SortedSegmentedArray(
+                T,
+                TestPool,
+                element_count_max,
+                Key,
+                key_from_value,
+                options,
+            ),
             .unsorted => SegmentedArray(T, TestPool, element_count_max, options),
         };
 
@@ -1127,7 +1139,8 @@ fn FuzzContextType(
                 }
                 assert(context.array.node_count >= TestArray.node_count_max - 1);
 
-                // Remove all-but-one elements from the last node and insert them into the first node.
+                // Remove all-but-one elements from the last node and insert them into the first
+                // node.
                 const element_count_last = context.array.count(context.array.node_count - 1);
                 var element_index: usize = 0;
                 while (element_index < element_count_last - 1) : (element_index += 1) {
@@ -1435,7 +1448,10 @@ pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Optio
                 test_options.node_size,
                 test_options.element_count_max,
                 if (test_options.element_type == u32) u32 else u64,
-                if (test_options.element_type == u32) CompareInt.key_from_value else CompareTable.key_from_value,
+                if (test_options.element_type == u32)
+                    CompareInt.key_from_value
+                else
+                    CompareTable.key_from_value,
                 order,
                 options,
             );
@@ -1445,7 +1461,9 @@ pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Optio
 
             try context.run();
 
-            if (test_options.node_size % @sizeOf(test_options.element_type) != 0) tested_padding = true;
+            if (test_options.node_size % @sizeOf(test_options.element_type) != 0) {
+                tested_padding = true;
+            }
             if (Context.TestArray.node_capacity == 2) tested_node_capacity_min = true;
         }
     }

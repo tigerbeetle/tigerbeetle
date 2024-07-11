@@ -492,15 +492,17 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             const manifest_level_a: *const Level = &manifest.levels[level_a];
             const manifest_level_b: *const Level = &manifest.levels[level_a + 1];
-            if (manifest_level_a.table_count_visible < table_count_visible_max) return null;
+
             // If even levels are compacted ahead of odd levels, then odd levels may burst.
             assert(manifest_level_a.table_count_visible <= table_count_visible_max + 1);
+            if (manifest_level_a.table_count_visible < table_count_visible_max) return null;
 
             const least_overlap_table = manifest_level_a.table_with_least_overlap(
                 manifest_level_b,
                 snapshot_latest,
                 growth_factor,
             ) orelse return null;
+            assert(least_overlap_table.range.tables.count() <= growth_factor);
 
             const compaction_table_range = CompactionTableRange{
                 .table_a = least_overlap_table.table,

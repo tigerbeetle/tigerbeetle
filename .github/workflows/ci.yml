@@ -1,0 +1,183 @@
+name: CI
+
+concurrency:
+  group: core-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  merge_group:
+  pull_request:
+  push:
+    branches: ["main"]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck ./scripts/install_zig.sh
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig fmt --check .
+      - run: ./zig/zig build check
+      - run: ./zig/zig build check -Dconfig=test_min
+      - run: ./.github/ci/docs_check.sh
+
+  test_alpine:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine
+      # Docker restricts io_uring by default, running unconfined then.
+      options: --security-opt seccomp=unconfined
+    steps:
+      - run: apk add -U git
+      # https://github.com/actions/checkout/issues/1169
+      - run: git config --system --add safe.directory '*'
+      - uses: actions/checkout@v4
+        # Fetch the entire history of the commit in question for tidy.
+        with:
+          fetch-depth: 2147483647
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build test
+
+  test_ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build test
+      - run: zig/zig build clients:c:sample -Drelease
+      - run: zig/zig build fuzz -- smoke
+      # Run simulator once for each state machine, using commit hash as a random, but also deterministic
+      # seed.
+      - run: zig/zig build vopr -Dvopr-state-machine=accounting -Drelease -- ${{ github.sha }}
+      - run: zig/zig build vopr -Dvopr-state-machine=testing    -Drelease -- ${{ github.sha }}
+      - run: zig/zig build -Dtracer-backend=tracy
+
+  test_aof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+      - run: ./scripts/install_zig.sh
+      - run: ./.github/ci/test_aof.sh
+
+  test_windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+      - run: .\scripts\install_zig.bat
+      - run: .\zig\zig build test
+      - run: .\zig\zig build clients:c:sample
+
+  test_macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build test
+      - run: ./zig/zig build clients:c:sample -Drelease
+
+
+  clients:
+    strategy:
+      matrix:
+        include:
+          - { os: 'ubuntu-latest',  language: 'dotnet',  language_version: '8.0.x' }
+          - { os: 'ubuntu-latest',  language: 'go',      language_version: '1.21'  }
+          - { os: 'ubuntu-latest',  language: 'java',    language_version: '11'    }
+          - { os: 'ubuntu-latest',  language: 'java',    language_version: '21'    }
+          - { os: 'ubuntu-latest',  language: 'node',    language_version: '18.x'  }
+          - { os: 'ubuntu-latest',  language: 'node',    language_version: '20.x'  }
+
+          - { os: 'windows-latest', language: 'dotnet',  language_version: '8.0.x' }
+          - { os: 'windows-latest', language: 'go',      language_version: '1.21'  }
+          - { os: 'windows-latest', language: 'java',    language_version: '11'    }
+          - { os: 'windows-latest', language: 'java',    language_version: '21'    }
+          - { os: 'windows-latest', language: 'node',    language_version: '18.x'  }
+          - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - if: matrix.language == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.language_version }}
+
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.language_version }}
+
+      - if: matrix.language == 'java'
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.language_version }}
+          distribution: 'temurin'
+
+      - if: matrix.language == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.language_version }}
+
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
+      - run: ./zig/zig build scripts -- ci --language=${{ matrix.language }}
+
+  devhub:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: devhub
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
+        env:
+          DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
+          NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./src/devhub
+      - uses: actions/deploy-pages@v4
+
+  kcov:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+      - run: sudo apt install kcov
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build scripts -- kcov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage-report
+          path: zig-out/kcov
+
+  # Work around GitHub considering Skipped jobs success for "Require status checks before merging"
+  # See also:
+  # https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging
+  # https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks#handling-skipped-but-required-checks
+  # https://stackoverflow.com/a/75250293
+  core-pipeline:
+    if: always() && github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    needs: [smoke, test_alpine, test_ubuntu, test_aof, test_windows, test_macos, clients]
+    steps:
+      - if: ${{ !(contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+        run: exit 0
+      - if: ${{  (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+        run: exit 1

@@ -25,8 +25,9 @@ First, create a directory for your project and `cd` into the directory.
 Then create `pom.xml` and copy this into it:
 
 ```xml
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.tigerbeetle</groupId>
@@ -455,6 +456,7 @@ the same as the order of `id`s in the request. You can refer to the
 ids = new IdBatch(2);
 ids.add(1);
 ids.add(2);
+
 transfers = client.lookupTransfers(ids);
 ```
 
@@ -478,6 +480,7 @@ filter.setLimit(10); // Limit to ten transfers at most.
 filter.setDebits(true); // Include transfer from the debit side.
 filter.setCredits(true); // Include transfer from the credit side.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+
 transfers = client.getAccountTransfers(filter);
 ```
 
@@ -505,7 +508,58 @@ filter.setLimit(10); // Limit to ten balances at most.
 filter.setDebits(true); // Include transfer from the debit side.
 filter.setCredits(true); // Include transfer from the credit side.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+
 AccountBalanceBatch account_balances = client.getAccountBalances(filter);
+```
+
+## Query Accounts
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Query accounts by the intersection of some fields and by timestamp range.
+
+The accounts in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```java
+var query_filter = new QueryFilter();
+query_filter.setUserData128(1000); // Filter by UserData.
+query_filter.setUserData64(100);
+query_filter.setUserData32(10);
+query_filter.setCode(1); // Filter by Code.
+query_filter.setLedger(0); // No filter by Ledger.
+query_filter.setTimestampMin(0); // No filter by Timestamp.
+query_filter.setTimestampMax(0); // No filter by Timestamp.
+query_filter.setLimit(10); // Limit to ten balances at most.
+query_filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+
+AccountBatch query_accounts = client.queryAccounts(query_filter);
+```
+
+## Query Transfers
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Query transfers by the intersection of some fields and by timestamp range.
+
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```java
+query_filter = new QueryFilter();
+query_filter.setUserData128(1000); // Filter by UserData.
+query_filter.setUserData64(100);
+query_filter.setUserData32(10);
+query_filter.setCode(1); // Filter by Code.
+query_filter.setLedger(0); // No filter by Ledger.
+query_filter.setTimestampMin(0); // No filter by Timestamp.
+query_filter.setTimestampMax(0); // No filter by Timestamp.
+query_filter.setLimit(10); // Limit to ten balances at most.
+query_filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+
+TransferBatch query_transfers = client.queryTransfers(query_filter);
 ```
 
 ## Linked Events

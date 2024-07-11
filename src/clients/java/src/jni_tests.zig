@@ -284,7 +284,7 @@ test "JNI: LocalFrame" {
     const local_ref = env.alloc_object(boolean_class);
     try testing.expect(local_ref != null);
 
-    // All local references must be invalidated after this frame being droped,
+    // All local references must be invalidated after this frame being dropped,
     // except by the frame result.
     const pop_local_frame_result = env.pop_local_frame(local_ref);
     try testing.expect(pop_local_frame_result != null);
@@ -648,8 +648,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read);
 
-        const read_non_virtual =
-            env.call_nonvirtual_byte_method(buffer, direct_buffer_class, non_virtual_method_id, null);
+        const read_non_virtual = env.call_nonvirtual_byte_method(
+            buffer,
+            direct_buffer_class,
+            non_virtual_method_id,
+            null,
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read_non_virtual);
     }
@@ -672,8 +676,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read);
 
-        const read_non_virtual =
-            env.call_nonvirtual_short_method(buffer, direct_buffer_class, non_virtual_method_id, null);
+        const read_non_virtual = env.call_nonvirtual_short_method(
+            buffer,
+            direct_buffer_class,
+            non_virtual_method_id,
+            null,
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read_non_virtual);
     }
@@ -696,8 +704,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read);
 
-        const read_non_virtual =
-            env.call_nonvirtual_char_method(buffer, direct_buffer_class, non_virtual_method_id, null);
+        const read_non_virtual = env.call_nonvirtual_char_method(
+            buffer,
+            direct_buffer_class,
+            non_virtual_method_id,
+            null,
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read_non_virtual);
     }
@@ -722,8 +734,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read);
 
-        const read_non_virtual =
-            env.call_nonvirtual_int_method(buffer, direct_buffer_class, non_virtual_method_id, null);
+        const read_non_virtual = env.call_nonvirtual_int_method(
+            buffer,
+            direct_buffer_class,
+            non_virtual_method_id,
+            null,
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read_non_virtual);
     }
@@ -752,8 +768,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read);
 
-        const read_non_virtual =
-            env.call_nonvirtual_long_method(buffer, direct_buffer_class, non_virtual_method_id, null);
+        const read_non_virtual = env.call_nonvirtual_long_method(
+            buffer,
+            direct_buffer_class,
+            non_virtual_method_id,
+            null,
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read_non_virtual);
     }
@@ -778,8 +798,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read);
 
-        const read_non_virtual =
-            env.call_nonvirtual_float_method(buffer, direct_buffer_class, non_virtual_method_id, null);
+        const read_non_virtual = env.call_nonvirtual_float_method(
+            buffer,
+            direct_buffer_class,
+            non_virtual_method_id,
+            null,
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read_non_virtual);
     }
@@ -808,8 +832,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read);
 
-        const read_non_virtual =
-            env.call_nonvirtual_double_method(buffer, direct_buffer_class, non_virtual_method_id, null);
+        const read_non_virtual = env.call_nonvirtual_double_method(
+            buffer,
+            direct_buffer_class,
+            non_virtual_method_id,
+            null,
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expectEqual(expected, read_non_virtual);
     }
@@ -819,7 +847,11 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         const method_id = env.get_method_id(buffer_class, "put", "(B)Ljava/nio/ByteBuffer;");
         try testing.expect(method_id != null);
 
-        const non_virtual_method_id = env.get_method_id(direct_buffer_class, "put", "(B)Ljava/nio/ByteBuffer;");
+        const non_virtual_method_id = env.get_method_id(
+            direct_buffer_class,
+            "put",
+            "(B)Ljava/nio/ByteBuffer;",
+        );
         try testing.expect(non_virtual_method_id != null);
 
         const put = env.call_object_method(buffer, method_id, &[_]jni.JValue{
@@ -1040,7 +1072,11 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseBoolean", "(Ljava/lang/String;)Z");
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_boolean_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_boolean_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(str)},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == .jni_false);
     }
@@ -1054,7 +1090,11 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseByte", "(Ljava/lang/String;)B");
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_byte_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_byte_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(str)},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 1);
     }
@@ -1068,7 +1108,11 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "toLowerCase", "(C)C");
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_char_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(@as(jni.JChar, 'A'))});
+        const ret = env.call_static_char_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(@as(jni.JChar, 'A'))},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 'a');
     }
@@ -1082,7 +1126,11 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseShort", "(Ljava/lang/String;)S");
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_short_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_short_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(str)},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 1);
     }
@@ -1096,7 +1144,11 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseInt", "(Ljava/lang/String;)I");
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_int_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_int_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(str)},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 1);
     }
@@ -1110,7 +1162,11 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseLong", "(Ljava/lang/String;)J");
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_long_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_long_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(str)},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 1);
     }
@@ -1124,7 +1180,11 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseFloat", "(Ljava/lang/String;)F");
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_float_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_float_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(str)},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 1.0);
     }
@@ -1138,7 +1198,11 @@ test "JNI: CallStatic<Type>Method" {
         const method_id = env.get_static_method_id(class, "parseDouble", "(Ljava/lang/String;)D");
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_double_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_double_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(str)},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         try testing.expect(ret == 1.0);
     }
@@ -1149,10 +1213,18 @@ test "JNI: CallStatic<Type>Method" {
         try testing.expect(class != null);
         defer env.delete_local_ref(class);
 
-        const method_id = env.get_static_method_id(class, "valueOf", "(Ljava/lang/Object;)Ljava/lang/String;");
+        const method_id = env.get_static_method_id(
+            class,
+            "valueOf",
+            "(Ljava/lang/Object;)Ljava/lang/String;",
+        );
         try testing.expect(method_id != null);
 
-        const ret = env.call_static_object_method(class, method_id, &[_]jni.JValue{jni.JValue.to_jvalue(str)});
+        const ret = env.call_static_object_method(
+            class,
+            method_id,
+            &[_]jni.JValue{jni.JValue.to_jvalue(str)},
+        );
         try testing.expect(env.exception_check() == .jni_false);
         defer env.delete_local_ref(ret);
         try testing.expect(env.is_instance_of(ret, class) == .jni_true);
@@ -1218,7 +1290,8 @@ test "JNI: strings utf" {
 test "JNI: GetStringRegion" {
     const env: *JNIEnv = get_testing_env();
 
-    const content: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("ABCDEFGHIJKLMNOPQRSTUVXYZ")[0..];
+    const content: []const u16 =
+        std.unicode.utf8ToUtf16LeStringLiteral("ABCDEFGHIJKLMNOPQRSTUVXYZ")[0..];
     const string = env.new_string(
         content.ptr,
         @intCast(content.len),
@@ -1254,7 +1327,8 @@ test "JNI: GetStringUTFRegion" {
 test "JNI: GetStringCritical" {
     const env: *JNIEnv = get_testing_env();
 
-    const content: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("ABCDEFGHIJKLMNOPQRSTUVXYZ")[0..];
+    const content: []const u16 =
+        std.unicode.utf8ToUtf16LeStringLiteral("ABCDEFGHIJKLMNOPQRSTUVXYZ")[0..];
     const str = env.new_string(content.ptr, @intCast(content.len));
     try testing.expect(str != null);
     defer env.delete_local_ref(str);
@@ -1369,21 +1443,63 @@ test "JNI: primitive arrays" {
                     };
                 }
 
-                fn release_array_elements(env: *jni.JNIEnv, array: jni.JArray, elements: [*]PrimitiveType) void {
+                fn release_array_elements(
+                    env: *jni.JNIEnv,
+                    array: jni.JArray,
+                    elements: [*]PrimitiveType,
+                ) void {
                     switch (PrimitiveType) {
-                        jni.JBoolean => env.release_boolean_array_elements(array, elements, .default),
-                        jni.JByte => env.release_byte_array_elements(array, elements, .default),
-                        jni.JShort => env.release_short_array_elements(array, elements, .default),
-                        jni.JChar => env.release_char_array_elements(array, elements, .default),
-                        jni.JInt => env.release_int_array_elements(array, elements, .default),
-                        jni.JLong => env.release_long_array_elements(array, elements, .default),
-                        jni.JFloat => env.release_float_array_elements(array, elements, .default),
-                        jni.JDouble => env.release_double_array_elements(array, elements, .default),
+                        jni.JBoolean => env.release_boolean_array_elements(
+                            array,
+                            elements,
+                            .default,
+                        ),
+                        jni.JByte => env.release_byte_array_elements(
+                            array,
+                            elements,
+                            .default,
+                        ),
+                        jni.JShort => env.release_short_array_elements(
+                            array,
+                            elements,
+                            .default,
+                        ),
+                        jni.JChar => env.release_char_array_elements(
+                            array,
+                            elements,
+                            .default,
+                        ),
+                        jni.JInt => env.release_int_array_elements(
+                            array,
+                            elements,
+                            .default,
+                        ),
+                        jni.JLong => env.release_long_array_elements(
+                            array,
+                            elements,
+                            .default,
+                        ),
+                        jni.JFloat => env.release_float_array_elements(
+                            array,
+                            elements,
+                            .default,
+                        ),
+                        jni.JDouble => env.release_double_array_elements(
+                            array,
+                            elements,
+                            .default,
+                        ),
                         else => unreachable,
                     }
                 }
 
-                fn get_array_region(env: *jni.JNIEnv, array: jni.JArray, start: jni.JSize, len: jni.JSize, buf: [*]PrimitiveType) void {
+                fn get_array_region(
+                    env: *jni.JNIEnv,
+                    array: jni.JArray,
+                    start: jni.JSize,
+                    len: jni.JSize,
+                    buf: [*]PrimitiveType,
+                ) void {
                     switch (PrimitiveType) {
                         jni.JBoolean => env.get_boolean_array_region(array, start, len, buf),
                         jni.JByte => env.get_byte_array_region(array, start, len, buf),
@@ -1397,7 +1513,13 @@ test "JNI: primitive arrays" {
                     }
                 }
 
-                fn set_array_region(env: *jni.JNIEnv, array: jni.JArray, start: jni.JSize, len: jni.JSize, buf: [*]PrimitiveType) void {
+                fn set_array_region(
+                    env: *jni.JNIEnv,
+                    array: jni.JArray,
+                    start: jni.JSize,
+                    len: jni.JSize,
+                    buf: [*]PrimitiveType,
+                ) void {
                     switch (PrimitiveType) {
                         jni.JBoolean => env.set_boolean_array_region(array, start, len, buf),
                         jni.JByte => env.set_byte_array_region(array, start, len, buf),
@@ -1412,17 +1534,17 @@ test "JNI: primitive arrays" {
                 }
 
                 pub fn assert(env: *JNIEnv) !void {
-                    const lenght = 32;
+                    const length = 32;
 
                     const array = switch (PrimitiveType) {
-                        jni.JBoolean => env.new_boolean_array(lenght),
-                        jni.JByte => env.new_byte_array(lenght),
-                        jni.JChar => env.new_char_array(lenght),
-                        jni.JShort => env.new_short_array(lenght),
-                        jni.JInt => env.new_int_array(lenght),
-                        jni.JLong => env.new_long_array(lenght),
-                        jni.JFloat => env.new_float_array(lenght),
-                        jni.JDouble => env.new_double_array(lenght),
+                        jni.JBoolean => env.new_boolean_array(length),
+                        jni.JByte => env.new_byte_array(length),
+                        jni.JChar => env.new_char_array(length),
+                        jni.JShort => env.new_short_array(length),
+                        jni.JInt => env.new_int_array(length),
+                        jni.JLong => env.new_long_array(length),
+                        jni.JFloat => env.new_float_array(length),
+                        jni.JDouble => env.new_double_array(length),
                         else => unreachable,
                     };
 
@@ -1430,7 +1552,7 @@ test "JNI: primitive arrays" {
                     defer env.delete_local_ref(array);
 
                     const len = env.get_array_length(array);
-                    try testing.expect(len == lenght);
+                    try testing.expect(len == length);
 
                     // Change the array:
                     {

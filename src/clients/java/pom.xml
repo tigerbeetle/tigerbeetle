@@ -165,6 +165,7 @@
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
               <exclude>com/tigerbeetle/AccountFilterFlags.class</exclude>
+              <exclude>com/tigerbeetle/QueryFilterFlags.class</exclude>
             </excludes>
           </configuration>
         </plugin>
@@ -190,6 +191,8 @@
               <exclude>com/tigerbeetle/AccountFilterFlags.java</exclude>
               <exclude>com/tigerbeetle/AccountFilterBatch.java</exclude>
               <exclude>com/tigerbeetle/AccountBalanceBatch.java</exclude>
+              <exclude>com/tigerbeetle/QueryFilterFlags.java</exclude>
+              <exclude>com/tigerbeetle/QueryFilterBatch.java</exclude>
             </excludes>
           </configuration>
         </plugin>

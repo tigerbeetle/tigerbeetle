@@ -31,7 +31,7 @@ zig/zig build
 Then create the TigerBeetle data file.
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 --development 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
 ```
 ```console
 info(io): creating "0_0.tigerbeetle"...
@@ -41,7 +41,7 @@ info(io): allocating 660.140625MiB...
 And start the replica.
 
 ```console
-./tigerbeetle start --addresses=3000 --development 0_0.tigerbeetle
+./tigerbeetle start --addresses=3000 0_0.tigerbeetle
 ```
 ```console
 info(io): opening "0_0.tigerbeetle"...
@@ -149,7 +149,7 @@ Check out [docs.tigerbeetle.com](https://docs.tigerbeetle.com/).
 Here are a few key pages you might be interested in:
 
 - Deployment
-  - [Hardware](https://docs.tigerbeetle.com/operating/hardware)
+  - [Hardware](https://docs.tigerbeetle.com/deploy/hardware/)
 - Usage
   - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
 - Reference

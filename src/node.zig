@@ -18,6 +18,8 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 const AccountFilter = tb.AccountFilter;
 const AccountFilterFlags = tb.AccountFilterFlags;
 const AccountBalance = tb.AccountBalance;
+const QueryFilter = tb.QueryFilter;
+const QueryFilterFlags = tb.QueryFilterFlags;
 
 const vsr = @import("vsr.zig");
 const Storage = vsr.storage.Storage;
@@ -111,10 +113,18 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
 
 // tb_client Logic
 
-fn create(env: c.napi_env, cluster_id: u128, concurrency: u32, addresses: []const u8) !c.napi_value {
+fn create(
+    env: c.napi_env,
+    cluster_id: u128,
+    concurrency: u32,
+    addresses: []const u8,
+) !c.napi_value {
     var tsfn_name: c.napi_value = undefined;
     if (c.napi_create_string_utf8(env, "tb_client", c.NAPI_AUTO_LENGTH, &tsfn_name) != c.napi_ok) {
-        return translate.throw(env, "Failed to create resource name for thread-safe function.");
+        return translate.throw(
+            env,
+            "Failed to create resource name for thread-safe function.",
+        );
     }
 
     var completion_tsfn: c.napi_threadsafe_function = undefined;
@@ -201,7 +211,10 @@ fn request(
         switch (tb.acquire_packet(client, &packet_ptr)) {
             .ok => break :blk packet_ptr.?,
             .shutdown => return translate.throw(env, "Client was shutdown."),
-            .concurrency_max_exceeded => return translate.throw(env, "Too many concurrent requests."),
+            .concurrency_max_exceeded => return translate.throw(
+                env,
+                "Too many concurrent requests.",
+            ),
         }
     };
     errdefer tb.release_packet(client, packet);
@@ -304,7 +317,9 @@ fn on_completion(
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
     switch (c.napi_call_threadsafe_function(completion_tsfn, packet, c.napi_tsfn_nonblocking)) {
         c.napi_ok => {},
-        c.napi_queue_full => @panic("ThreadSafe Function queue is full when created with no limit."),
+        c.napi_queue_full => @panic(
+            "ThreadSafe Function queue is full when created with no limit.",
+        ),
         else => unreachable,
     }
 }
@@ -375,7 +390,12 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
     for (events, 0..) |*event, i| {
         const object = try translate.array_element(env, array, @intCast(i));
         switch (Event) {
-            Account, Transfer, AccountFilter, AccountBalance => {
+            Account,
+            Transfer,
+            AccountFilter,
+            AccountBalance,
+            QueryFilter,
+            => {
                 inline for (std.meta.fields(Event)) |field| {
                     const value: field.type = switch (@typeInfo(field.type)) {
                         .Struct => |info| @bitCast(try @field(
@@ -443,7 +463,8 @@ fn encode_array(comptime Result: type, env: c.napi_env, results: []const Result)
                 object,
                 add_trailing_null(field.name),
                 value,
-                "Failed to set property \"" ++ field.name ++ "\" of " ++ @typeName(Result) ++ " object",
+                "Failed to set property \"" ++ field.name ++
+                    "\" of " ++ @typeName(Result) ++ " object",
             );
 
             try translate.set_array_element(
@@ -493,7 +514,10 @@ fn BufferType(comptime op: Operation) type {
             }
 
             const bytes = allocator.alignedAlloc(u8, max_align, max_bytes) catch |e| switch (e) {
-                error.OutOfMemory => return translate.throw(env, "Batch allocation ran out of memory."),
+                error.OutOfMemory => return translate.throw(
+                    env,
+                    "Batch allocation ran out of memory.",
+                ),
             };
             errdefer allocator.free(bytes);
 
@@ -525,7 +549,11 @@ fn BufferType(comptime op: Operation) type {
         fn event_count(operation: Operation, count: usize) usize {
             // TODO(batiati): Refine the way we handle events with asymmetric results.
             return switch (operation) {
-                .get_account_transfers, .get_account_balances => 8190,
+                .get_account_transfers,
+                .get_account_balances,
+                .query_accounts,
+                .query_transfers,
+                => 8190,
                 else => count,
             };
         }

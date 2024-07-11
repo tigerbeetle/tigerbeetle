@@ -134,7 +134,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             // committed (it might be left over from before sync).
             const checksum_b = if (commit_b == commit_root_op) commit_root else header_b.?.checksum;
 
-            assert(checksum_b != commit_root or replica.commit_min == replica.superblock.working.vsr_state.checkpoint.header.op);
+            assert(checksum_b != commit_root or
+                replica.commit_min == replica.superblock.working.vsr_state.checkpoint.header.op);
             assert((commit_a == commit_b) == (checksum_a == checksum_b));
 
             if (checksum_a == checksum_b) return;
@@ -142,7 +143,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             assert(commit_b < commit_a or commit_a + 1 == commit_b);
             state_checker.commit_mins[replica_index] = commit_b;
 
-            // If some other replica has already reached this state, then it will be in the commit history:
+            // If some other replica has already reached this state, then it will be in the commit
+            // history:
             if (replica.commit_min < state_checker.commits.items.len) {
                 const commit = &state_checker.commits.items[commit_b];
                 if (replica.op_checkpoint() < replica.commit_min) {
@@ -157,9 +159,9 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
                 assert(replica.commit_min < state_checker.commits.items.len);
                 // A replica may transition more than once to the same state, for example, when
-                // restarting after a crash and replaying the log. The more important invariant is that
-                // the cluster as a whole may not transition to the same state more than once, and once
-                // transitioned may not regress.
+                // restarting after a crash and replaying the log. The more important invariant is
+                // that the cluster as a whole may not transition to the same state more than once,
+                // and once transitioned may not regress.
                 return;
             }
 

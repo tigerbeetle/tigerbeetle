@@ -352,6 +352,7 @@ async function main() {
       AccountFilterFlags.credits | // Include transfer from the credit side.
       AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
   };
+
   const account_transfers = await client.getAccountTransfers(filter);
   // endsection:get-account-transfers
 
@@ -365,8 +366,43 @@ async function main() {
       AccountFilterFlags.credits | // Include transfer from the credit side.
       AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
   };
+
   const account_balances = await client.getAccountBalances(filter);
   // endsection:get-account-balances
+
+  // section:query-accounts
+  var query_filter = {
+    user_data_128: 1000n, // Filter by UserData.
+    user_data_64: 100n,
+    user_data_32: 10,
+    code: 1, // Filter by Code.
+    ledger: 0, // No filter by Ledger.
+    timestamp_min: 0n, // No filter by Timestamp.
+    timestamp_max: 0n, // No filter by Timestamp.
+    limit: 10, // Limit to ten balances at most.
+    flags: AccountFilterFlags.debits | // Include transfer from the debit side.
+      AccountFilterFlags.credits | // Include transfer from the credit side.
+      AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+  };
+  const query_accounts = await client.queryAccounts(query_filter);
+  // endsection:query-accounts
+
+  // section:query-transfers
+  query_filter = {
+    user_data_128: 1000n, // Filter by UserData.
+    user_data_64: 100n,
+    user_data_32: 10,
+    code: 1, // Filter by Code.
+    ledger: 0, // No filter by Ledger.
+    timestamp_min: 0n, // No filter by Timestamp.
+    timestamp_max: 0n, // No filter by Timestamp.
+    limit: 10, // Limit to ten balances at most.
+    flags: AccountFilterFlags.debits | // Include transfer from the debit side.
+      AccountFilterFlags.credits | // Include transfer from the credit side.
+      AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+  };
+  const query_transfers = await client.queryTransfers(query_filter);
+  // endsection:query-transfers
 
     try {
         // section:linked-events

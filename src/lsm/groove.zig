@@ -174,8 +174,10 @@ pub fn GrooveType(
         // See if we should ignore this field from the options.
         //
         // By default, we ignore the "timestamp" field since it's a special identifier.
-        // Since the "timestamp" is ignored by default, it shouldn't be provided in groove_options.ignored.
-        comptime var ignored = mem.eql(u8, field.name, "timestamp") or mem.eql(u8, field.name, "id");
+        // Since the "timestamp" is ignored by default, it shouldn't be provided
+        // in groove_options.ignored.
+        comptime var ignored =
+            mem.eql(u8, field.name, "timestamp") or mem.eql(u8, field.name, "id");
         for (groove_options.ignored) |ignored_field_name| {
             comptime assert(!std.mem.eql(u8, ignored_field_name, "timestamp"));
             comptime assert(!std.mem.eql(u8, ignored_field_name, "id"));
@@ -293,7 +295,7 @@ pub fn GrooveType(
             .is_tuple = false,
         },
     });
-    const IndexTreeOptions = @Type(.{
+    const _IndexTreeOptions = @Type(.{
         .Struct = .{
             .layout = .auto,
             .fields = index_options_fields,
@@ -313,7 +315,7 @@ pub fn GrooveType(
         std.meta.fields(@TypeOf(groove_options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
-    assert(indexes_count_actual == std.meta.fields(IndexTreeOptions).len);
+    assert(indexes_count_actual == std.meta.fields(_IndexTreeOptions).len);
 
     // Generate a helper function for interacting with an Index field type.
     const IndexTreeFieldHelperType = struct {
@@ -464,6 +466,8 @@ pub fn GrooveType(
         objects_cache: ObjectsCache,
 
         scan_builder: ScanBuilder,
+
+        pub const IndexTreeOptions = _IndexTreeOptions;
 
         pub const Options = struct {
             /// The maximum number of objects that might be prefetched and not modified by a batch.
@@ -789,7 +793,7 @@ pub fn GrooveType(
         pub const PrefetchWorker = struct {
             // Since lookup contexts are used one at a time, it's safe to access
             // the union's fields and reuse the same memory for all context instances.
-            // Can't use extern/packed union as the LookupContextes aren't ABI compliant.
+            // Can't use extern/packed union as the LookupContexts aren't ABI compliant.
             const LookupContext = union(enum) {
                 id: if (has_id) IdTree.LookupContext else void,
                 object: ObjectTree.LookupContext,

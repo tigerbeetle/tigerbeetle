@@ -582,6 +582,7 @@ let filter = {
     AccountFilterFlags.credits | // Include transfer from the credit side.
     AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
+
 const account_transfers = await client.getAccountTransfers(filter);
 ```
 
@@ -610,7 +611,62 @@ filter = {
     AccountFilterFlags.credits | // Include transfer from the credit side.
     AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
+
 const account_balances = await client.getAccountBalances(filter);
+```
+
+## Query Accounts
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Query accounts by the intersection of some fields and by timestamp range.
+
+The accounts in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```javascript
+var query_filter = {
+  user_data_128: 1000n, // Filter by UserData.
+  user_data_64: 100n,
+  user_data_32: 10,
+  code: 1, // Filter by Code.
+  ledger: 0, // No filter by Ledger.
+  timestamp_min: 0n, // No filter by Timestamp.
+  timestamp_max: 0n, // No filter by Timestamp.
+  limit: 10, // Limit to ten balances at most.
+  flags: AccountFilterFlags.debits | // Include transfer from the debit side.
+    AccountFilterFlags.credits | // Include transfer from the credit side.
+    AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+};
+const query_accounts = await client.queryAccounts(query_filter);
+```
+
+## Query Transfers
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Query transfers by the intersection of some fields and by timestamp range.
+
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```javascript
+query_filter = {
+  user_data_128: 1000n, // Filter by UserData.
+  user_data_64: 100n,
+  user_data_32: 10,
+  code: 1, // Filter by Code.
+  ledger: 0, // No filter by Ledger.
+  timestamp_min: 0n, // No filter by Timestamp.
+  timestamp_max: 0n, // No filter by Timestamp.
+  limit: 10, // Limit to ten balances at most.
+  flags: AccountFilterFlags.debits | // Include transfer from the debit side.
+    AccountFilterFlags.credits | // Include transfer from the credit side.
+    AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+};
+const query_transfers = await client.queryTransfers(query_filter);
 ```
 
 ## Linked Events

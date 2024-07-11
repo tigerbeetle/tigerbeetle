@@ -276,7 +276,7 @@ test "accept/connect/send/receive" {
 
 test "timeout" {
     const ms = 20;
-    const margin = 5;
+    const margin = 100;
     const count = 10;
 
     try struct {

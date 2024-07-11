@@ -12,6 +12,7 @@ const type_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
     .{ tb.TransferFlags, "TransferFlags" },
     .{ tb.AccountFilterFlags, "AccountFilterFlags" },
+    .{ tb.QueryFilterFlags, "QueryFilterFlags" },
     .{ tb.Account, "Account" },
     .{ tb.Transfer, "Transfer" },
     .{ tb.CreateAccountResult, "CreateAccountResult", "Account" },
@@ -20,15 +21,18 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, "TransferEventResult" },
     .{ tb.AccountFilter, "AccountFilter" },
     .{ tb.AccountBalance, "AccountBalance" },
+    .{ tb.QueryFilter, "QueryFilter" },
 };
 
 fn go_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
         .Bool => return "bool",
-        .Enum => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
+        .Enum => return comptime get_mapped_type_name(Type) orelse
+            @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         .Struct => |info| switch (info.layout) {
             .@"packed" => return comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
-            else => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
+            else => return comptime get_mapped_type_name(Type) orelse
+                @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         },
         .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
@@ -265,6 +269,8 @@ fn emit_struct(
             tb.TransferFlags
         else if (comptime std.mem.eql(u8, name, "AccountFilter"))
             tb.AccountFilterFlags
+        else if (comptime std.mem.eql(u8, name, "QueryFilter"))
+            tb.QueryFilterFlags
         else
             unreachable;
         // Conversion from packed to struct (e.g. Account.AccountFlags())
@@ -326,11 +332,24 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
-                .auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
-                .@"packed" => try emit_packed_struct(buffer, info, name, comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
+                .auto => @compileError(
+                    "Only packed or extern structs are supported: " ++ @typeName(ZigType),
+                ),
+                .@"packed" => try emit_packed_struct(
+                    buffer,
+                    info,
+                    name,
+                    comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
+                ),
                 .@"extern" => try emit_struct(buffer, info, name),
             },
-            .Enum => try emit_enum(buffer, ZigType, name, type_mapping[2], comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
+            .Enum => try emit_enum(
+                buffer,
+                ZigType,
+                name,
+                type_mapping[2],
+                comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
+            ),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
         }
     }
@@ -354,7 +373,11 @@ test "bindings go" {
 
     try generate_bindings(&buffer);
 
-    const current = try std.fs.cwd().readFileAlloc(testing.allocator, output_file, std.math.maxInt(usize));
+    const current = try std.fs.cwd().readFileAlloc(
+        testing.allocator,
+        output_file,
+        std.math.maxInt(usize),
+    );
     defer testing.allocator.free(current);
 
     try testing.expectEqualStrings(current, buffer.items);

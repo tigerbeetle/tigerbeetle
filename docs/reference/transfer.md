@@ -176,6 +176,9 @@ Constraints:
 This is an optional 128-bit secondary identifier to link this transfer to an external entity or
 event.
 
+When set to zero, no secondary identifier will be associated with the account, therefore only
+non-zero values can be used as [query filter](./query-filter.md).
+
 As an example, you might generate a
 [TigerBeetle Time-Based Identifier](../coding/data-modeling.md#tigerbeetle-time-based-identifiers-recommended)
 that ties together a group of transfers.
@@ -191,6 +194,9 @@ Constraints:
 This is an optional 64-bit secondary identifier to link this transfer to an external entity or
 event.
 
+When set to zero, no secondary identifier will be associated with the account, therefore only
+non-zero values can be used as [query filter](./query-filter.md).
+
 As an example, you might use this field store an external timestamp.
 
 For more information, see [Data Modeling](../coding/data-modeling.md#user_data).
@@ -203,6 +209,9 @@ Constraints:
 
 This is an optional 32-bit secondary identifier to link this transfer to an external entity or
 event.
+
+When set to zero, no secondary identifier will be associated with the account, therefore only
+non-zero values can be used as [query filter](./query-filter.md).
 
 As an example, you might use this field to store a timezone or locale.
 
@@ -330,12 +339,15 @@ such that
 If the highest amount transferable is `0`, returns
 [`exceeds_credits`](./requests/create_transfers.md#exceeds_credits).
 
-Retrying a balancing transfer will return
-[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount) if the
-amount of the retry differs from the amount that was actually transferred.
-
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
+
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount)
+only when the maximum amount passed to `create_transfers` is insufficient to fulfill the amount
+that was actually transferred.
+Otherwise it may return [`exists`](./requests/create_transfers.md#exists) even if the retry amount
+differs from the original value.
 
 `flags.balancing_debit` is exclusive with the
 `flags.post_pending_transfer`/`flags.void_pending_transfer` flags because posting or voiding a
@@ -357,12 +369,15 @@ such that
 If the highest amount transferable is `0`, returns
 [`exceeds_debits`](./requests/create_transfers.md#exceeds_debits).
 
-Retrying a balancing transfer will return
-[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount) if the
-amount of the retry differs from the amount that was actually transferred.
-
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
+
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./requests/create_transfers.md#exists_with_different_amount)
+only when the maximum amount passed to `create_transfers` is insufficient to fulfill the amount
+that was actually transferred.
+Otherwise it may return [`exists`](./requests/create_transfers.md#exists) even if the retry amount
+differs from the original value.
 
 `flags.balancing_credit` is exclusive with the
 `flags.post_pending_transfer`/`flags.void_pending_transfer` flags because posting or voiding a

@@ -33,6 +33,7 @@ function mainReleaseRotation() {
     const candidates = [
       "batiati",
       "cb22",
+      "chaitanyabhandari",
       "kprotty",
       "matklad",
       "sentientwaffle",

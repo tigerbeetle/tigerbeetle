@@ -11,17 +11,12 @@ git --version
 while true
 do
     rm -rf ./tigerbeetle
-    git clone https://github.com/tigerbeetle/tigerbeetle tigerbeetle
-    cd tigerbeetle
-
-    ./scripts/install_zig.sh
-
-    # `unshare --pid` ensures that, if the parent process dies, all children die as well.
-    # `unshare --user` is needed to make `--pid` work without root.
-    # `|| true` because we want to be resilient to bugs in `cfo` itself.
-    unshare --user -f --pid \
-        ./zig/zig build -Drelease scripts -- cfo \
-        || true
-
-    cd ../
+    (
+        git clone https://github.com/tigerbeetle/tigerbeetle tigerbeetle
+        cd tigerbeetle
+        ./scripts/install_zig.sh
+        # `unshare --pid` ensures that, if the parent process dies, all children die as well.
+        # `unshare --user` is needed to make `--pid` work without root.
+        unshare --user -f --pid ./zig/zig build -Drelease scripts -- cfo
+    ) || sleep 10 # Be resilient to cfo bugs and network errors, but avoid busy-loop retries.
 done

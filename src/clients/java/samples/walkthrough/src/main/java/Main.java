@@ -178,6 +178,7 @@ public final class Main {
             ids = new IdBatch(2);
             ids.add(1);
             ids.add(2);
+
             transfers = client.lookupTransfers(ids);
             // endsection:lookup-transfers
 
@@ -190,6 +191,7 @@ public final class Main {
             filter.setDebits(true); // Include transfer from the debit side.
             filter.setCredits(true); // Include transfer from the credit side.
             filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+
             transfers = client.getAccountTransfers(filter);
             // endsection:get-account-transfers
 
@@ -202,8 +204,39 @@ public final class Main {
             filter.setDebits(true); // Include transfer from the debit side.
             filter.setCredits(true); // Include transfer from the credit side.
             filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+
             AccountBalanceBatch account_balances = client.getAccountBalances(filter);
             // endsection:get-account-balances
+
+            // section:query-accounts
+            var query_filter = new QueryFilter();
+            query_filter.setUserData128(1000); // Filter by UserData.
+            query_filter.setUserData64(100);
+            query_filter.setUserData32(10);
+            query_filter.setCode(1); // Filter by Code.
+            query_filter.setLedger(0); // No filter by Ledger.
+            query_filter.setTimestampMin(0); // No filter by Timestamp.
+            query_filter.setTimestampMax(0); // No filter by Timestamp.
+            query_filter.setLimit(10); // Limit to ten balances at most.
+            query_filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+
+            AccountBatch query_accounts = client.queryAccounts(query_filter);
+            // endsection:query-accounts
+
+            // section:query-transfers
+            query_filter = new QueryFilter();
+            query_filter.setUserData128(1000); // Filter by UserData.
+            query_filter.setUserData64(100);
+            query_filter.setUserData32(10);
+            query_filter.setCode(1); // Filter by Code.
+            query_filter.setLedger(0); // No filter by Ledger.
+            query_filter.setTimestampMin(0); // No filter by Timestamp.
+            query_filter.setTimestampMax(0); // No filter by Timestamp.
+            query_filter.setLimit(10); // Limit to ten balances at most.
+            query_filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+
+            TransferBatch query_transfers = client.queryTransfers(query_filter);
+            // endsection:query-transfers
 
             // section:linked-events
             transfers = new TransferBatch(10);

@@ -21,6 +21,7 @@ const cfo = @import("./scripts/cfo.zig");
 const ci = @import("./scripts/ci.zig");
 const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
+const kcov = @import("./scripts/kcov.zig");
 const changelog = @import("./scripts/changelog.zig");
 
 const CliArgs = union(enum) {
@@ -28,6 +29,7 @@ const CliArgs = union(enum) {
     ci: ci.CliArgs,
     release: release.CliArgs,
     devhub: devhub.CliArgs,
+    kcov: kcov.CliArgs,
     changelog: void,
 };
 
@@ -53,6 +55,7 @@ pub fn main() !void {
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
         .release => |args_release| try release.main(shell, gpa, args_release),
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
+        .kcov => |args_kcov| try kcov.main(shell, gpa, args_kcov),
         .changelog => try changelog.main(shell, gpa),
     }
 }

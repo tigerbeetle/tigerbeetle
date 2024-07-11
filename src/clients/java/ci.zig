@@ -10,7 +10,8 @@ const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("pom.xml"));
 
-    try shell.zig("build java_client -Drelease -Dconfig=production", .{});
+    try shell.zig("build clients:java -Drelease -Dconfig=production", .{});
+    try shell.zig("build -Drelease -Dconfig=production", .{});
 
     try shell.zig("build test:jni", .{});
     // Java's maven doesn't support a separate test command, or a way to add dependency on a
@@ -29,6 +30,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
         defer tmp_beetle.deinit(gpa);
+        errdefer tmp_beetle.log_stderr();
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
         try shell.exec(
@@ -46,6 +48,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         .prebuilt = options.tigerbeetle,
     });
     defer tmp_beetle.deinit(gpa);
+    errdefer tmp_beetle.log_stderr();
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
 

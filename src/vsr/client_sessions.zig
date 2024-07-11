@@ -15,20 +15,20 @@ pub const ReplySlot = struct { index: usize };
 pub const ClientSessions = struct {
     /// We found two bugs in the VRR paper relating to the client table:
     ///
-    /// 1. a correctness bug, where successive client crashes may cause request numbers to collide for
-    /// different request payloads, resulting in requests receiving the wrong reply, and
+    /// 1. a correctness bug, where successive client crashes may cause request numbers to collide
+    /// for different request payloads, resulting in requests receiving the wrong reply, and
     ///
-    /// 2. a liveness bug, where if the client table is updated for request and prepare messages with
-    /// the client's latest request number, then the client may be locked out from the cluster if the
-    /// request is ever reordered through a view change.
+    /// 2. a liveness bug, where if the client table is updated for request and prepare messages
+    /// with the client's latest request number, then the client may be locked out from the cluster
+    /// if the request is ever reordered through a view change.
     ///
     /// We therefore take a different approach with the implementation of our client table, to:
     ///
-    /// 1. register client sessions explicitly through the state machine to ensure that client session
-    /// numbers always increase, and
+    /// 1. register client sessions explicitly through the state machine to ensure that
+    ///    session numbers always increase, and
     ///
     /// 2. make a more careful distinction between uncommitted and committed request numbers,
-    /// considering that uncommitted requests may not survive a view change.
+    ///    considering that uncommitted requests may not survive a view change.
     pub const Entry = struct {
         /// The client's session number as committed to the cluster by a register request.
         session: u64,
@@ -97,7 +97,10 @@ pub const ClientSessions = struct {
         break :blk size_max;
     };
 
-    pub fn encode(client_sessions: *const ClientSessions, target: []align(@alignOf(vsr.Header)) u8) u64 {
+    pub fn encode(
+        client_sessions: *const ClientSessions,
+        target: []align(@alignOf(vsr.Header)) u8,
+    ) u64 {
         assert(target.len >= encode_size);
 
         var size: u64 = 0;
@@ -128,7 +131,10 @@ pub const ClientSessions = struct {
         return size;
     }
 
-    pub fn decode(client_sessions: *ClientSessions, source: []align(@alignOf(vsr.Header)) const u8) void {
+    pub fn decode(
+        client_sessions: *ClientSessions,
+        source: []align(@alignOf(vsr.Header)) const u8,
+    ) void {
         assert(client_sessions.count() == 0);
         assert(client_sessions.entries_free.count() == constants.clients_max);
         for (client_sessions.entries) |*entry| {

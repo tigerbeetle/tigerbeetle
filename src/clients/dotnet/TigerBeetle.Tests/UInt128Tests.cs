@@ -70,7 +70,7 @@ public class UInt128Tests
     [TestMethod]
     public void BigIntegerConversion()
     {
-        var checkConvertion = (BigInteger bigInteger) =>
+        var checkConversion = (BigInteger bigInteger) =>
         {
             UInt128 uint128 = bigInteger.ToUInt128();
 
@@ -79,11 +79,11 @@ public class UInt128Tests
             Assert.IsTrue(uint128.Equals(bigInteger.ToUInt128()));
         };
 
-        checkConvertion(BigInteger.Parse("0"));
-        checkConvertion(BigInteger.Parse("1"));
-        checkConvertion(BigInteger.Parse("123456789012345678901234567890123456789"));
-        checkConvertion(new BigInteger(uint.MaxValue));
-        checkConvertion(new BigInteger(ulong.MaxValue));
+        checkConversion(BigInteger.Parse("0"));
+        checkConversion(BigInteger.Parse("1"));
+        checkConversion(BigInteger.Parse("123456789012345678901234567890123456789"));
+        checkConversion(new BigInteger(uint.MaxValue));
+        checkConversion(new BigInteger(ulong.MaxValue));
     }
 
     [TestMethod]

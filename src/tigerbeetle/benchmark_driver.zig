@@ -41,10 +41,7 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
 
     var tigerbeetle_process: ?TigerBeetleProcess = null;
     defer if (tigerbeetle_process) |*p| {
-        const rusage = p.deinit();
-        if (rusage.getMaxRss()) |max_rss_bytes| {
-            std.io.getStdOut().writer().print("\nrss = {} bytes\n", .{max_rss_bytes}) catch {};
-        }
+        _ = p.deinit();
     };
 
     var maybe_stat_empty: ?std.fs.File.Stat = null;
@@ -65,6 +62,15 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
 
     const addresses = args.addresses orelse &.{tigerbeetle_process.?.address};
     try benchmark_load.main(allocator, addresses, args);
+
+    if (tigerbeetle_process) |*p| {
+        const rusage = p.deinit();
+        tigerbeetle_process = null;
+
+        if (rusage.getMaxRss()) |max_rss_bytes| {
+            std.io.getStdOut().writer().print("\nrss = {} bytes\n", .{max_rss_bytes}) catch {};
+        }
+    }
 
     if (data_file_created) {
         const stat = try std.fs.cwd().statFile(data_file);

@@ -158,7 +158,7 @@ pub fn main() !void {
         \\#ifdef __cplusplus
         \\extern "C" {{
         \\#endif
-        \\ 
+        \\
         \\#include <stddef.h>
         \\#include <stdint.h>
         \\#include <stdbool.h>
@@ -248,5 +248,6 @@ pub fn main() !void {
         \\#endif // TB_CLIENT_H
         \\
     , .{});
-    try std.fs.cwd().writeFile(.{ .sub_path = "src/clients/c/tb_client.h", .data = buffer.items });
+
+    try std.io.getStdOut().writeAll(buffer.items);
 }

@@ -5,22 +5,10 @@
 
 package com.tigerbeetle;
 
-public interface AccountFilterFlags {
+interface AccountFilterFlags {
     int NONE = (int) 0;
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/account-filter#flagsdebits">debits</a>
-     */
     int DEBITS = (int) (1 << 0);
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/account-filter#flagscredits">credits</a>
-     */
     int CREDITS = (int) (1 << 1);
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/account-filter#flagsreversed">reversed</a>
-     */
     int REVERSED = (int) (1 << 2);
 
     static boolean hasDebits(final int flags) {

@@ -11,7 +11,7 @@ const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("package.json"));
 
-    try shell.zig("build node_client -Drelease -Dconfig=production", .{});
+    try shell.zig("build clients:node -Drelease -Dconfig=production", .{});
 
     // Integration tests.
 
@@ -23,6 +23,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
         defer tmp_beetle.deinit(gpa);
+        errdefer tmp_beetle.log_stderr();
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
         try shell.exec("node ./dist/{tester}", .{ .tester = tester });
@@ -36,6 +37,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
         defer tmp_beetle.deinit(gpa);
+        errdefer tmp_beetle.log_stderr();
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
         try shell.exec("npm install", .{});
@@ -77,6 +79,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         .prebuilt = options.tigerbeetle,
     });
     defer tmp_beetle.deinit(gpa);
+    errdefer tmp_beetle.log_stderr();
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
 

@@ -58,7 +58,7 @@ by our love of fuzzing over the years, by [Dropbox's Nucleus
 testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's
 deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
 
-*The VOPR* is [a deterministic simulator](/src/simulator.zig) that can fuzz many clusters of
+*The VOPR* is [a deterministic simulator](/src/vopr.zig) that can fuzz many clusters of
 TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus
 protocol, but all within a single developer machine process, with [a network
 simulator](/src/testing/packet_simulator.zig) to simulate all kinds of network faults, and with an
@@ -157,7 +157,7 @@ When submitting pull request, _assign_ a single person to be its reviewer. Unpac
 * Only a single person is assigned to any particular pull request, to avoid diffusion of
   responsibility and the bystander effect.
 
-* Pull request author choses the reviewer. The author ha the most context about who is the best
+* Pull request author chooses the reviewer. The author has the most context about who is the best
   person to request review from. When picking a reviewer, think about sharing knowledge, balancing
   review load, and maximizing correctness of the code.
 

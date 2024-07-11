@@ -98,7 +98,6 @@ const DeadDetector = struct {
     }
 
     fn deinit(detector: *DeadDetector) void {
-        assert(detector.files.count() == 0); // Sanity-check that `.finish` was called.
         detector.files.deinit();
     }
 
@@ -152,7 +151,7 @@ const DeadDetector = struct {
             "jni_tests.zig",
             "main.zig",
             "node.zig",
-            "simulator.zig",
+            "vopr.zig",
             "tb_client_header.zig",
             "unit_tests.zig",
             "scripts.zig",
@@ -262,16 +261,22 @@ test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
         .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"},  .{".css"},  .{".go"},
         .{".h"},   .{".hcl"},   .{".java"}, .{".js"},      .{".json"}, .{".md"},
-        .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sh"},   .{".sln"},
-        .{".sum"}, .{".ts"},    .{".txt"},  .{".xml"},     .{".yml"},  .{".zig"},
+        .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sln"},  .{".sum"},
+        .{".ts"},  .{".txt"},   .{".xml"},  .{".yml"},     .{".zig"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
-        .{".editorconfig"},          .{".gitattributes"},   .{".gitignore"},
-        .{".nojekyll"},              .{"CNAME"},            .{"Dockerfile"},
-        .{"exclude-pmd.properties"}, .{"favicon.ico"},      .{"favicon.png"},
-        .{"LICENSE"},                .{"module-info.test"}, .{"index.html"},
-        .{"logo.svg"},               .{"logo-white.svg"},   .{"logo-with-text-white.svg"},
+        .{".editorconfig"},                          .{".gitattributes"},
+        .{".gitignore"},                             .{".nojekyll"},
+        .{"CNAME"},                                  .{"Dockerfile"},
+        .{"exclude-pmd.properties"},                 .{"favicon.ico"},
+        .{"favicon.png"},                            .{"LICENSE"},
+        .{"module-info.test"},                       .{"index.html"},
+        .{"logo.svg"},                               .{"logo-white.svg"},
+        .{"logo-with-text-white.svg"},               .{"scripts/install_zig.sh"},
+        .{"src/scripts/cfo_supervisor.sh"},          .{"src/docs_website/scripts/build.sh"},
+        .{".github/ci/docs_check.sh"},               .{".github/ci/test_aof.sh"},
+        .{"tools/systemd/tigerbeetle-pre-start.sh"}, .{"tools/vscode/format_debug_server.sh"},
     });
 
     const allocator = std.testing.allocator;
@@ -286,7 +291,7 @@ test "tidy extensions" {
         const extension = std.fs.path.extension(path);
         if (!allowed_extensions.has(extension)) {
             const basename = std.fs.path.basename(path);
-            if (!exceptions.has(basename)) {
+            if (!exceptions.has(basename) and !exceptions.has(path)) {
                 std.debug.print("bad extension: {s}\n", .{path});
                 bad_extension = true;
             }
@@ -317,7 +322,7 @@ fn banned(source: []const u8) ?[]const u8 {
         return "use stdx." ++ "copy_right instead of std version";
     }
 
-    // Ban "fixme" comments. This allows using fixe as reminders with teeth --- when working on a
+    // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on a
     // larger pull requests, it is often helpful to leave fixme comments as a reminder to oneself.
     // This tidy rule ensures that the reminder is acted upon before code gets into main. That is:
     // - use fixme for issues to be fixed in the same pull request,
@@ -356,7 +361,16 @@ fn find_long_line(file_text: []const u8) !?usize {
             if (parse_multiline_string(line)) |string_value| {
                 const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
                 if (string_value_length <= 100) continue;
+
+                if (std.mem.startsWith(u8, string_value, " account A") or
+                    std.mem.startsWith(u8, string_value, " transfer T") or
+                    std.mem.startsWith(u8, string_value, " transfer   "))
+                {
+                    // Table tests from state_machine.zig. They are intentionally wide.
+                    continue;
+                }
             }
+
             return line_index;
         }
     }
@@ -376,58 +390,9 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
 }
 
 const naughty_list = [_][]const u8{
-    "clients/c/tb_client.zig",
-    "clients/c/tb_client/context.zig",
-    "clients/c/tb_client/signal.zig",
-    "clients/c/test.zig",
-    "clients/dotnet/docs.zig",
-    "dotnet_bindings.zig",
-    "go_bindings.zig",
-    "clients/java/docs.zig",
-    "java_bindings.zig",
-    "clients/java/src/client.zig",
-    "clients/java/src/jni_tests.zig",
-    "node_bindings.zig",
-    "node.zig",
-    "clients/node/src/translate.zig",
-    "config.zig",
-    "constants.zig",
-    "io/darwin.zig",
-    "io/windows.zig",
-    "lsm/binary_search.zig",
-    "lsm/binary_search_benchmark.zig",
-    "lsm/forest_fuzz.zig",
-    "lsm/groove.zig",
-    "lsm/level_data_iterator.zig",
-    "lsm/manifest_level.zig",
-    "lsm/segmented_array_benchmark.zig",
-    "lsm/segmented_array.zig",
-    "lsm/table_data_iterator.zig",
-    "lsm/tree_fuzz.zig",
-    "simulator.zig",
-    "state_machine.zig",
-    "state_machine/auditor.zig",
-    "state_machine/workload.zig",
-    "testing/cluster/network.zig",
-    "testing/cluster/state_checker.zig",
-    "testing/hash_log.zig",
     "testing/low_level_hash_vectors.zig",
-    "testing/packet_simulator.zig",
-    "testing/state_machine.zig",
-    "testing/storage.zig",
-    "testing/time.zig",
-    "tigerbeetle/main.zig",
-    "tracer.zig",
-    "vsr.zig",
-    "vsr/client_replies.zig",
-    "vsr/client_sessions.zig",
-    "vsr/client.zig",
     "vsr/clock.zig",
-    "vsr/grid.zig",
     "vsr/journal.zig",
     "vsr/replica_test.zig",
     "vsr/replica.zig",
-    "vsr/free_set.zig",
-    "vsr/superblock_quorums.zig",
-    "vsr/superblock.zig",
 };

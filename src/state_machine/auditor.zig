@@ -14,7 +14,8 @@ const IdPermutation = @import("../testing/id.zig").IdPermutation;
 
 const PriorityQueue = std.PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const StateMachine =
+    @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
 pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult);
@@ -41,6 +42,7 @@ const PendingTransfer = struct {
     amount: u128,
     debit_account_index: usize,
     credit_account_index: usize,
+    query_intersection_index: usize,
 };
 
 const PendingExpiry = struct {
@@ -129,6 +131,24 @@ pub const AccountingAuditor = struct {
         in_flight_max: usize,
     };
 
+    pub const QueryIntersection = struct {
+        user_data_64: u64,
+        user_data_32: u32,
+        code: u16,
+
+        accounts: QueryIntersectionState = .{},
+        transfers: QueryIntersectionState = .{},
+    };
+
+    pub const QueryIntersectionState = struct {
+        /// The number of objects recorded.
+        count: u32 = 0,
+        /// Timestamp of the first object recorded.
+        timestamp_min: u64 = 0,
+        /// Timestamp of the last object recorded.
+        timestamp_max: u64 = 0,
+    };
+
     random: std.rand.Random,
     options: Options,
 
@@ -141,6 +161,11 @@ pub const AccountingAuditor = struct {
 
     /// Additional account state. Keyed by account index.
     accounts_state: []AccountState,
+
+    /// Known intersection values for a particular combination of secondary indexes.
+    /// Counters are in sync with the remote StateMachine tracking the number of objects
+    /// with such fields.
+    query_intersections: []QueryIntersection,
 
     /// Map pending transfers to the (pending) amount and accounts.
     ///
@@ -179,9 +204,27 @@ pub const AccountingAuditor = struct {
         errdefer allocator.free(accounts_state);
         @memset(accounts_state, AccountState{});
 
+        // The number of known intersection values ​​for the secondary indices is kept
+        // low enough to explore different cardinalities.
+        const query_intersections = try allocator.alloc(
+            QueryIntersection,
+            options.accounts_max / 2,
+        );
+        errdefer allocator.free(query_intersections);
+        for (query_intersections, 1..) |*query_intersection, index| {
+            query_intersection.* = .{
+                .user_data_64 = @intCast(index * 1_000_000),
+                .user_data_32 = @intCast(index * 1_000),
+                .code = @intCast(index), // It will be used to recover the index.
+            };
+        }
+
         var pending_transfers = std.AutoHashMapUnmanaged(u128, PendingTransfer){};
         errdefer pending_transfers.deinit(allocator);
-        try pending_transfers.ensureTotalCapacity(allocator, @intCast(options.transfers_pending_max));
+        try pending_transfers.ensureTotalCapacity(
+            allocator,
+            @intCast(options.transfers_pending_max),
+        );
 
         var pending_expiries = PendingExpiryQueue.init(allocator, {});
         errdefer pending_expiries.deinit();
@@ -204,6 +247,7 @@ pub const AccountingAuditor = struct {
             .options = options,
             .accounts = accounts,
             .accounts_state = accounts_state,
+            .query_intersections = query_intersections,
             .pending_transfers = pending_transfers,
             .pending_expiries = pending_expiries,
             .in_flight = in_flight,
@@ -324,6 +368,17 @@ pub const AccountingAuditor = struct {
                 self.accounts_state[account_index].created = true;
                 self.accounts[account_index] = account.*;
                 self.accounts[account_index].timestamp = account_timestamp;
+
+                const query_intersection_index = account.code - 1;
+                const query_intersection = &self.query_intersections[query_intersection_index];
+                assert(account.user_data_64 == query_intersection.user_data_64);
+                assert(account.user_data_32 == query_intersection.user_data_32);
+                assert(account.code == query_intersection.code);
+                query_intersection.accounts.count += 1;
+                if (query_intersection.accounts.timestamp_min == 0) {
+                    query_intersection.accounts.timestamp_min = account_timestamp;
+                }
+                query_intersection.accounts.timestamp_max = account_timestamp;
             }
 
             if (account_index >= self.accounts.len) {
@@ -361,6 +416,17 @@ pub const AccountingAuditor = struct {
             }
 
             if (result_actual != .ok) continue;
+
+            const query_intersection_index = transfer.code - 1;
+            const query_intersection = &self.query_intersections[query_intersection_index];
+            assert(transfer.user_data_64 == query_intersection.user_data_64);
+            assert(transfer.user_data_32 == query_intersection.user_data_32);
+            assert(transfer.code == query_intersection.code);
+            query_intersection.transfers.count += 1;
+            if (query_intersection.transfers.timestamp_min == 0) {
+                query_intersection.transfers.timestamp_min = transfer_timestamp;
+            }
+            query_intersection.transfers.timestamp_max = transfer_timestamp;
 
             if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
                 const p = self.pending_transfers.get(transfer.pending_id).?;
@@ -405,14 +471,15 @@ pub const AccountingAuditor = struct {
                             .amount = transfer.amount,
                             .debit_account_index = dr_index,
                             .credit_account_index = cr_index,
+                            .query_intersection_index = transfer.code - 1,
                         });
                         self.pending_expiries.add(.{
                             .transfer_id = transfer.id,
                             .transfer_timestamp = transfer_timestamp,
                             .expires_at = transfer_timestamp + transfer.timeout_ns(),
                         }) catch unreachable;
-                        // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
-                        // created more pending transfers than permitted.
+                        // PriorityQueue lacks an "unmanaged" API, so verify that the workload
+                        // hasn't created more pending transfers than permitted.
                         assert(self.pending_expiries.count() <= self.options.transfers_pending_max);
                     }
                     dr.debits_pending += transfer.amount;

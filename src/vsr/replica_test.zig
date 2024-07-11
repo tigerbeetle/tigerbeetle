@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.test_replica);
 const expectEqual = std.testing.expectEqual;
-const expect = std.testing.expectEqual;
+const expect = std.testing.expect;
 const allocator = std.testing.allocator;
 
 const stdx = @import("../stdx.zig");
@@ -207,8 +207,9 @@ test "Cluster: recovery: grid corruption (disjoint)" {
         t.replica(.R1),
         t.replica(.R2),
     }, 0..) |replica, i| {
+        const address_max = t.block_address_max();
         var address: u64 = 1 + i; // Addresses start at 1.
-        while (address <= Storage.grid_blocks_max) : (address += 3) {
+        while (address <= address_max) : (address += 3) {
             // Leave every third address un-corrupt.
             // Each block exists intact on exactly one replica.
             replica.corrupt(.{ .grid_block = address + 1 });
@@ -346,7 +347,7 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, receive-only)
     // Prepares may be reordered by the network, and if B1 receives X+1 then X,
     // it will not forward X on, as it is a "repair".
     // And B2 is partitioned, so it cannot repair its hash chain.
-    try std.testing.expect(t.replica(.B2).commit() >= 2);
+    try expect(t.replica(.B2).commit() >= 2);
 }
 
 test "Cluster: network: partition 1-2 (isolate primary, symmetric)" {
@@ -433,6 +434,21 @@ test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
     try c.request(1, 0);
 }
 
+test "Cluster: network: partition flexible quorum" {
+    // Two out of four replicas should be able to carry on as long the pair includes the primary.
+    const t = try TestContext.init(.{ .replica_count = 4 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+
+    t.run();
+    t.replica(.B2).stop();
+    t.replica(.B3).stop();
+    for (0..3) |_| t.run(); // Give enough time for the clocks to desync.
+
+    try c.request(4, 4);
+}
+
 test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     // A backup that has fallen behind by two checkpoints can catch up, without using state sync.
     const t = try TestContext.init(.{ .replica_count = 3 });
@@ -443,7 +459,7 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(t.replica(.R_).commit(), 3);
 
     var r_lag = t.replica(.B2);
-    r_lag.drop_all(.__, .bidirectional);
+    r_lag.stop();
 
     // Commit enough ops to checkpoint once, and then nearly wrap around, leaving enough slack
     // that the lagging backup can repair (without state sync).
@@ -452,11 +468,11 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(t.replica(.A0).op_checkpoint(), checkpoint_1);
     try expectEqual(t.replica(.B1).op_checkpoint(), checkpoint_1);
 
+    try r_lag.open();
     try expectEqual(r_lag.status(), .normal);
     try expectEqual(r_lag.op_checkpoint(), 0);
 
     // Allow repair, but ensure that state sync doesn't run.
-    r_lag.pass_all(.__, .bidirectional);
     r_lag.drop(.__, .bidirectional, .sync_checkpoint);
     t.run();
 
@@ -1305,7 +1321,10 @@ test "Cluster: upgrade: state-sync to new release" {
     t.replica(.R_).stop();
     try t.replica(.R0).open_upgrade(&[_]u8{ 1, 2 });
     try t.replica(.R1).open_upgrade(&[_]u8{ 1, 2 });
-    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    t.run();
+    try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
+    try c.request(constants.vsr_checkpoint_interval, constants.vsr_checkpoint_interval);
+    try expectEqual(t.replica(.R0).commit(), checkpoint_2_trigger);
 
     // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
     try t.replica(.R2).open();
@@ -1349,8 +1368,9 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     // Note that we intentionally do *not* shut down B2 for this – the intent is to test the
     // scrubber, without leaning on Grid.read_block()'s `from_local_or_global_storage`.
     {
+        const address_max = t.block_address_max();
         var address: u64 = 1;
-        while (address <= Storage.grid_blocks_max) : (address += 1) {
+        while (address <= address_max) : (address += 1) {
             b2.corrupt(.{ .grid_block = address });
         }
     }
@@ -1375,8 +1395,9 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     }
 
     // Verify that B2 repaired all blocks.
+    const address_max = t.block_address_max();
     var address: u64 = 1;
-    while (address <= Storage.grid_blocks_max) : (address += 1) {
+    while (address <= address_max) : (address += 1) {
         if (a0_free_set.is_free(address)) {
             assert(b2_free_set.is_free(address));
             assert(b2_storage.area_faulty(.{ .grid = .{ .address = address } }));
@@ -1426,7 +1447,7 @@ test "Cluster: client: empty command=request operation=register body" {
     try expectEqual(reply.header.operation, .register);
     try expectEqual(reply.header.size, @sizeOf(Reply));
     try expectEqual(reply.header.request, 0);
-    try std.testing.expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
+    try expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
 }
 
 const ProcessSelector = enum {
@@ -1464,11 +1485,11 @@ const TestContext = struct {
         replica_count: u8,
         standby_count: u8 = 0,
         client_count: u8 = constants.clients_max,
+        seed: u64 = 123,
     }) !*TestContext {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
-
-        var prng = std.rand.DefaultPrng.init(123);
+        var prng = std.rand.DefaultPrng.init(options.seed);
         const random = prng.random();
 
         const cluster = try Cluster.init(allocator, TestContext.on_client_reply, .{
@@ -1476,7 +1497,7 @@ const TestContext = struct {
             .replica_count = options.replica_count,
             .standby_count = options.standby_count,
             .client_count = options.client_count,
-            .storage_size_limit = vsr.sector_floor(constants.storage_size_limit_max),
+            .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
             .seed = random.int(u64),
             .releases = &releases,
             .network = .{
@@ -1563,6 +1584,14 @@ const TestContext = struct {
         while (tick_count < tick_max) : (tick_count += 1) {
             if (t.tick()) tick_count = 0;
         }
+    }
+
+    pub fn block_address_max(t: *TestContext) u64 {
+        const grid_blocks = t.cluster.storages[0].grid_blocks();
+        for (t.cluster.storages) |storage| {
+            assert(storage.grid_blocks() == grid_blocks);
+        }
+        return grid_blocks; // NB: no -1 needed, addresses start from 1.
     }
 
     /// Returns whether the cluster state advanced.
@@ -2017,8 +2046,9 @@ const TestReplicas = struct {
         for (got.replicas.const_slice()) |replica_index| {
             const got_replica: *const Cluster.Replica = &got.cluster.replicas[replica_index];
 
+            const address_max = want.context.block_address_max();
             var address: u64 = 1;
-            while (address <= Storage.grid_blocks_max) : (address += 1) {
+            while (address <= address_max) : (address += 1) {
                 const address_free = want_replica.grid.free_set.is_free(address);
                 assert(address_free == got_replica.grid.free_set.is_free(address));
                 if (address_free) continue;

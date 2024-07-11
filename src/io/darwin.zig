@@ -246,7 +246,7 @@ pub const IO = struct {
     ) void {
         const onCompleteFn = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
-                // Perform the actual operaton
+                // Perform the actual operation
                 const op_data = &@field(_completion.operation, @tagName(operation_tag));
                 const result = OperationImpl.do_operation(op_data);
 
@@ -320,8 +320,9 @@ pub const IO = struct {
                     );
                     errdefer posix.close(fd);
 
-                    // Darwin doesn't support posix.MSG_NOSIGNAL to avoid getting SIGPIPE on socket send().
-                    // Instead, it uses the SO_NOSIGPIPE socket option which does the same for all send()s.
+                    // Darwin doesn't support posix.MSG_NOSIGNAL to avoid getting SIGPIPE on
+                    // socket send(). Instead, it uses the SO_NOSIGPIPE socket option which does
+                    // the same for all send()s.
                     posix.setsockopt(
                         fd,
                         posix.SOL.SOCKET,
@@ -413,7 +414,11 @@ pub const IO = struct {
                     // Instead, check the socket error to see if has been connected successfully.
                     const result = switch (op.initiated) {
                         true => posix.getsockoptError(op.socket),
-                        else => posix.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
+                        else => posix.connect(
+                            op.socket,
+                            &op.address.any,
+                            op.address.getOsSockLen(),
+                        ),
                     };
 
                     op.initiated = true;
@@ -637,7 +642,13 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) WriteError!usize {
-                    return posix.pwrite(op.fd, op.buf[0..op.len], op.offset);
+                    // In the current implementation, Darwin file IO (namely, the posix.pwrite
+                    // below) is _synchronous_, so it's safe to call fs_sync after it has
+                    // completed.
+                    const result = posix.pwrite(op.fd, op.buf[0..op.len], op.offset);
+                    try fs_sync(op.fd);
+
+                    return result;
                 }
             },
         );
@@ -689,8 +700,10 @@ pub const IO = struct {
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
 
-        // Opening with O_DSYNC is essential for both durability and correctness.
-        // O_DSYNC enables us to omit fsync() calls in the data plane, since we sync to the disk on every write.
+        // Normally, O_DSYNC enables us to omit fsync() calls in the data plane, since we sync to
+        // the disk on every write, but that's not the case for Darwin:
+        // https://x.com/TigerBeetleDB/status/1536628729031581697
+        // To work around this, fs_sync() is explicitly called after writing in do_operation.
         var flags: posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDWR, .DSYNC = true };
         var mode: posix.mode_t = 0;
 
@@ -761,7 +774,8 @@ pub const IO = struct {
         return fd;
     }
 
-    /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC instead.
+    /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC
+    /// instead.
     /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
     fn fs_sync(fd: posix.fd_t) !void {
         _ = posix.fcntl(fd, posix.F.FULLFSYNC, 1) catch return posix.fsync(fd);
@@ -815,7 +829,9 @@ pub const IO = struct {
             .NOLCK => unreachable, // F_SETLK or F_SETLKW
             .OVERFLOW => return error.FileTooBig,
             .SRCH => unreachable, // F_SETOWN
-            .OPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
+
+            // not reported but need same error union
+            .OPNOTSUPP => return error.OperationNotSupported,
             else => |errno| return posix.unexpectedErrno(errno),
         }
 

@@ -94,6 +94,18 @@ public enum AccountFilterFlags : uint
 
 }
 
+[Flags]
+public enum QueryFilterFlags : uint
+{
+    None = 0,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#flagsreversed
+    /// </summary>
+    Reversed = 1 << 0,
+
+}
+
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct Account
 {
@@ -741,7 +753,10 @@ public struct AccountFilter
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            if (value.Length != SIZE)
+            {
+                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            }
 
             fixed (void* ptr = raw)
             {
@@ -817,7 +832,10 @@ public struct AccountBalance
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            if (value.Length != SIZE)
+            {
+                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            }
 
             fixed (void* ptr = raw)
             {
@@ -867,6 +885,113 @@ public struct AccountBalance
     /// https://docs.tigerbeetle.com/reference/account-balances#reserved
     /// </summary>
     internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
+
+}
+
+[StructLayout(LayoutKind.Sequential, Size = SIZE)]
+public struct QueryFilter
+{
+    public const int SIZE = 64;
+
+    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    private unsafe struct ReservedData
+    {
+        public const int SIZE = 6;
+
+        private fixed byte raw[SIZE];
+
+        public byte[] GetData()
+        {
+            fixed (void* ptr = raw)
+            {
+                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+            }
+        }
+
+        public void SetData(byte[] value)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            if (value.Length != SIZE)
+            {
+                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            }
+
+            fixed (void* ptr = raw)
+            {
+                value.CopyTo(new Span<byte>(ptr, SIZE));
+            }
+        }
+    }
+
+    private UInt128 userData128;
+
+    private ulong userData64;
+
+    private uint userData32;
+
+    private uint ledger;
+
+    private ushort code;
+
+    private ReservedData reserved;
+
+    private ulong timestampMin;
+
+    private ulong timestampMax;
+
+    private uint limit;
+
+    private QueryFilterFlags flags;
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#user_data_128
+    /// </summary>
+    public UInt128 UserData128 { get => userData128; set => userData128 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#user_data_64
+    /// </summary>
+    public ulong UserData64 { get => userData64; set => userData64 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#user_data_32
+    /// </summary>
+    public uint UserData32 { get => userData32; set => userData32 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#ledger
+    /// </summary>
+    public uint Ledger { get => ledger; set => ledger = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#code
+    /// </summary>
+    public ushort Code { get => code; set => code = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#reserved
+    /// </summary>
+    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#timestamp_min
+    /// </summary>
+    public ulong TimestampMin { get => timestampMin; set => timestampMin = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#timestamp_max
+    /// </summary>
+    public ulong TimestampMax { get => timestampMax; set => timestampMax = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#limit
+    /// </summary>
+    public uint Limit { get => limit; set => limit = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/query-filter#flags
+    /// </summary>
+    public QueryFilterFlags Flags { get => flags; set => flags = value; }
 
 }
 
@@ -928,6 +1053,10 @@ internal enum TBOperation : byte
 
     GetAccountBalances = 134,
 
+    QueryAccounts = 135,
+
+    QueryTransfers = 136,
+
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
@@ -953,7 +1082,10 @@ internal unsafe struct TBPacket
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            if (value.Length != SIZE)
+            {
+                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+            }
 
             fixed (void* ptr = raw)
             {

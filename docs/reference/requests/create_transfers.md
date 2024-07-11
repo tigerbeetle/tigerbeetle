@@ -284,8 +284,9 @@ A transfer with the same `id` already exists, but with a different
 A transfer with the same `id` already exists, but with a different
 [`amount`](../transfer.md#amount).
 
-If the transfer has `flags.balancing_debit` or `flags.balancing_credit` set, this error refers to
-the actual amount transferred, not the original (possibly higher) balancing amount.
+If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the actual amount
+transferred exceeds this failed transfer's `amount`.
 
 ### `exists_with_different_pending_id`
 
@@ -318,7 +319,14 @@ A transfer with the same `id` already exists, but with a different [`code`](../t
 
 ### `exists`
 
-A transfer with the same `id` already exists, and is identical to the transfer in the request.
+A transfer with the same `id` already exists.
+
+If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
+transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
+(if non-zero) `amount` of the transfer in the request.
+
+Otherwise, the existing transfer is identical to the transfer in the request.
 
 To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
 many applications should handle `exists` exactly as [`ok`](#ok).

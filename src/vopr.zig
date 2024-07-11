@@ -12,8 +12,8 @@ const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
-const vsr_simulator_options = @import("vsr_simulator_options");
-const state_machine = vsr_simulator_options.state_machine;
+const vsr_vopr_options = @import("vsr_vopr_options");
+const state_machine = vsr_vopr_options.state_machine;
 const StateMachineType = switch (state_machine) {
     .accounting => @import("state_machine.zig").StateMachineType,
     .testing => @import("testing/state_machine.zig").StateMachineType,
@@ -53,7 +53,7 @@ pub const std_options = .{
     // The -Dsimulator-log=<full|short> build option selects two logging modes.
     // In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
     // "full" mode is the usual logging according to the level.
-    .log_level = if (vsr_simulator_options.log == .short) .info else .debug,
+    .log_level = if (vsr_vopr_options.log == .short) .info else .debug,
     .logFn = log_override,
 
     // Uncomment if you need per-scope control over the log levels.
@@ -105,7 +105,7 @@ pub fn main() !void {
             // If no seed is provided, than Debug is too slow and ReleaseSafe is much faster.
             @panic("no seed provided: the simulator must be run with -OReleaseSafe");
         }
-        if (vsr_simulator_options.log != .short) {
+        if (vsr_vopr_options.log != .short) {
             output.warn("no seed provided: full debug logs are enabled, this will be slow", .{});
         }
     }
@@ -134,14 +134,17 @@ pub fn main() !void {
         batch_size_limit_min +
             random.uintAtMost(u32, constants.message_body_size_max - batch_size_limit_min);
 
+    const MiB = 1024 * 1024;
+    const storage_size_limit = vsr.sector_floor(
+        200 * MiB - random.uintLessThan(u64, 20 * MiB),
+    );
+
     const cluster_options = Cluster.Options{
         .cluster_id = cluster_id,
         .replica_count = replica_count,
         .standby_count = standby_count,
         .client_count = client_count,
-        .storage_size_limit = vsr.sector_floor(
-            constants.storage_size_limit_max - random.uintLessThan(u64, constants.storage_size_limit_max / 10),
-        ),
+        .storage_size_limit = storage_size_limit,
         .seed = random.int(u64),
         .releases = &releases,
         .network = .{
@@ -204,8 +207,9 @@ pub fn main() !void {
     const workload_options = StateMachine.Workload.Options.generate(random, .{
         .batch_size_limit = batch_size_limit,
         .client_count = client_count,
-        // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity private.
-        // Also maybe make it dynamic (computed from the client_count instead of clients_max).
+        // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity
+        // private. Also maybe make it dynamic (computed from the client_count instead of
+        // clients_max).
         .in_flight_max = ReplySequence.stalled_queue_capacity,
     });
 
@@ -432,7 +436,11 @@ pub const Simulator = struct {
     requests_replied: usize = 0,
     requests_idle: bool = false,
 
-    pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Simulator {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        random: std.rand.Random,
+        options: Options,
+    ) !Simulator {
         assert(options.replica_crash_probability < 100.0);
         assert(options.replica_crash_probability >= 0.0);
         assert(options.replica_restart_probability < 100.0);
@@ -450,11 +458,17 @@ pub const Simulator = struct {
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
         errdefer workload.deinit(allocator);
 
-        const replica_releases = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        const replica_releases = try allocator.alloc(
+            usize,
+            options.cluster.replica_count + options.cluster.standby_count,
+        );
         errdefer allocator.free(replica_releases);
         @memset(replica_releases, 1);
 
-        const replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        const replica_stability = try allocator.alloc(
+            usize,
+            options.cluster.replica_count + options.cluster.standby_count,
+        );
         errdefer allocator.free(replica_stability);
         @memset(replica_stability, 0);
 
@@ -789,7 +803,6 @@ pub const Simulator = struct {
         request: *Message.Request,
         reply: *Message.Reply,
     ) void {
-        // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
         simulator.reply_sequence.insert(reply_client, request, reply);
 
@@ -1171,10 +1184,10 @@ fn log_override(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (vsr_simulator_options.log == .short and scope != .cluster) return;
+    if (vsr_vopr_options.log == .short and scope != .cluster) return;
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
-    const prefix = if (vsr_simulator_options.log == .short) "" else prefix_default;
+    const prefix = if (vsr_vopr_options.log == .short) "" else prefix_default;
 
     // Print the message to stderr using a buffer to avoid many small write() syscalls when
     // providing many format arguments. Silently ignore failure.
