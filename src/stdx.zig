@@ -750,16 +750,7 @@ pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @Typ
 /// This formatter statically checks that the number is a multiple of 1024,
 /// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
 pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
-    comptime {
-        if (value > 0) {
-            assert(value % 1024 == 0);
-            var val = value;
-            while (val % 1024 == 0) {
-                val = @divExact(val, 1024);
-            }
-            assert(val < 1024);
-        }
-    }
+    comptime assert(value % 1024 == 0);
     return .{ .data = value };
 }
 
@@ -774,17 +765,21 @@ fn format_int_size_bin_exact(
         return std.fmt.formatBuf("0B", options, writer);
     }
 
-    // The worst case in terms of space needed is 4 bytes,
-    // since 1023 is the highest possible number,
-    // + 3 bytes for the unit suffix.
-    var buf: [7]u8 = undefined;
+    // The worst case in terms of space needed is 20 bytes,
+    // since `maxInt(u64)` is the highest number,
+    // + 3 bytes for the measurement units suffix.
+    var buf: [23]u8 = undefined;
+
+    var magnitude: u8 = 0;
+    var val = value;
+    while (val % 1024 == 0) : (magnitude += 1) {
+        val = @divExact(val, 1024);
+    }
 
     const mags_iec = " KMGTPEZY";
-    const magnitude = @min(@divFloor(std.math.log2(value), 10), mags_iec.len - 1);
     const suffix = mags_iec[magnitude];
-    const new_value = @divExact(value, std.math.pow(u64, 1024, magnitude));
 
-    const i = std.fmt.formatIntBuf(&buf, new_value, 10, .lower, .{});
+    const i = std.fmt.formatIntBuf(&buf, val, 10, .lower, .{});
     buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
 
     return std.fmt.formatBuf(buf[0 .. i + 3], options, writer);
@@ -793,13 +788,7 @@ fn format_int_size_bin_exact(
 test fmt_int_size_bin_exact {
     try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
     try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
+    try std.testing.expectFmt("1025KiB", "{}", .{fmt_int_size_bin_exact(1025 * 1024)});
+    try std.testing.expectFmt("12345KiB", "{}", .{fmt_int_size_bin_exact(12345 * 1024)});
     try std.testing.expectFmt("42MiB", "{}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
-    try std.testing.expectFmt("1TiB", "{}", .{fmt_int_size_bin_exact(1024 * 1024 * 1024 * 1024)});
-    try std.testing.expectFmt("999GiB", "{}", .{fmt_int_size_bin_exact(999 * 1024 * 1024 * 1024)});
-
-    // These cases fail at compile-time.
-    // fmt_int_size_bin_exact(123);
-    // fmt_int_size_bin_exact(1025 * 1024);
-    // fmt_int_size_bin_exact(2047 * 1024 * 1024);
-    // fmt_int_size_bin_exact(3210 * 1024 * 1024 * 1024);
 }
