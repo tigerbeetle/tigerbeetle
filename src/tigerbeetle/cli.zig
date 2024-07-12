@@ -120,20 +120,20 @@ const CliArgs = union(enum) {
         },
         replies: struct {
             slot: ?usize = null,
-            superblock_copy: u8 = 0,
+            superblock_copy: ?u8 = null,
             positional: struct { path: []const u8 },
         },
         grid: struct {
             block: ?u64 = null,
-            superblock_copy: u8 = 0,
+            superblock_copy: ?u8 = null,
             positional: struct { path: []const u8 },
         },
         manifest: struct {
-            superblock_copy: u8 = 0,
+            superblock_copy: ?u8 = null,
             positional: struct { path: []const u8 },
         },
         tables: struct {
-            superblock_copy: u8 = 0,
+            superblock_copy: ?u8 = null,
             tree: []const u8,
             level: ?u6 = null,
             positional: struct { path: []const u8 },
@@ -159,7 +159,7 @@ const CliArgs = union(enum) {
             \\Options:
             \\
             \\  When `--superblock-copy` is set, use the trailer referenced by that superblock copy.
-            \\  Otherwise, copy=0 will be used by default.
+            \\  Otherwise, the current quorum will be used by default.
             \\
             \\  -h, --help
             \\        Print this help message and exit.
@@ -418,23 +418,23 @@ pub const Command = union(enum) {
         query: union(enum) {
             superblock,
             wal: struct {
-                slot: ?usize = null,
+                slot: ?usize,
             },
             replies: struct {
-                slot: ?usize = null,
-                superblock_copy: u8 = 0,
+                slot: ?usize,
+                superblock_copy: ?u8,
             },
             grid: struct {
-                block: ?u64 = null,
-                superblock_copy: u8 = 0,
+                block: ?u64,
+                superblock_copy: ?u8,
             },
             manifest: struct {
-                superblock_copy: u8 = 0,
+                superblock_copy: ?u8,
             },
             tables: struct {
-                superblock_copy: u8 = 0,
+                superblock_copy: ?u8,
                 tree: []const u8,
-                level: ?u6 = null,
+                level: ?u6,
             },
         },
     };

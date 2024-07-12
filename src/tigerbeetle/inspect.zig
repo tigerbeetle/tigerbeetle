@@ -14,6 +14,7 @@ const constants = vsr.constants;
 const tb = vsr.tigerbeetle;
 const Storage = vsr.storage.Storage;
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
+const SuperBlockQuorums = vsr.superblock.Quorums;
 const SuperBlock = vsr.SuperBlockType(Storage);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Grid = vsr.GridType(Storage);
@@ -57,7 +58,9 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
             }
         },
         .grid => |args| {
-            if (args.superblock_copy >= constants.superblock_copies) {
+            if (args.superblock_copy != null and
+                args.superblock_copy.? >= constants.superblock_copies)
+            {
                 return fatal(
                     "--superblock-copy: copy exceeds {}\n",
                     .{constants.superblock_copies - 1},
@@ -71,7 +74,9 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
             }
         },
         .manifest => |args| {
-            if (args.superblock_copy >= constants.superblock_copies) {
+            if (args.superblock_copy != null and
+                args.superblock_copy.? >= constants.superblock_copies)
+            {
                 return fatal(
                     "--superblock-copy: copy exceeds {}\n",
                     .{constants.superblock_copies - 1},
@@ -297,7 +302,11 @@ const Inspector = struct {
         }
     }
 
-    fn inspect_replies(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: u8) !void {
+    fn inspect_replies(
+        inspector: *Inspector,
+        output: std.io.AnyWriter,
+        superblock_copy: ?u8,
+    ) !void {
         const entries = try inspector.read_client_sessions(superblock_copy) orelse return;
 
         var label_buffer: [64]u8 = undefined;
@@ -337,7 +346,7 @@ const Inspector = struct {
     fn inspect_replies_slot(
         inspector: *Inspector,
         output: std.io.AnyWriter,
-        superblock_copy: u8,
+        superblock_copy: ?u8,
         slot: usize,
     ) !void {
         assert(slot < constants.clients_max);
@@ -371,7 +380,7 @@ const Inspector = struct {
         try print_reply_body(output, reply);
     }
 
-    fn inspect_grid(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: u8) !void {
+    fn inspect_grid(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: ?u8) !void {
         const superblock = try inspector.read_superblock(superblock_copy);
         const free_set_size = superblock.vsr_state.checkpoint.free_set_size;
         const free_set_buffer =
@@ -465,7 +474,11 @@ const Inspector = struct {
         try print_block(output, block);
     }
 
-    fn inspect_manifest(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: u8) !void {
+    fn inspect_manifest(
+        inspector: *Inspector,
+        output: std.io.AnyWriter,
+        superblock_copy: ?u8,
+    ) !void {
         const superblock = try inspector.read_superblock(superblock_copy);
         var manifest_block_address = superblock.vsr_state.checkpoint.manifest_newest_address;
         var manifest_block_checksum = superblock.vsr_state.checkpoint.manifest_newest_checksum;
@@ -515,10 +528,12 @@ const Inspector = struct {
         }
     }
 
-    fn inspect_tables(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: u8, filter: struct {
-        tree_id: u16,
-        level: ?u6,
-    }) !void {
+    fn inspect_tables(
+        inspector: *Inspector,
+        output: std.io.AnyWriter,
+        superblock_copy: ?u8,
+        filter: struct { tree_id: u16, level: ?u6 },
+    ) !void {
         var tables_latest =
             std.AutoHashMap(u128, ?schema.ManifestNode.TableInfo).init(inspector.allocator);
         defer tables_latest.deinit();
@@ -626,16 +641,36 @@ const Inspector = struct {
         return buffer[0..size];
     }
 
-    fn read_superblock(inspector: *Inspector, superblock_copy: u8) !SuperBlockHeader {
-        const superblock_buffer = try inspector.read_buffer(
-            .superblock,
-            @as(u64, superblock_copy) * vsr.superblock.superblock_copy_size,
-            @sizeOf(SuperBlockHeader),
-        );
-        defer inspector.allocator.free(superblock_buffer);
+    fn read_superblock(inspector: *Inspector, superblock_copy: ?u8) !SuperBlockHeader {
+        if (superblock_copy) |copy| {
+            const superblock_buffer = try inspector.read_buffer(
+                .superblock,
+                @as(u64, copy) * vsr.superblock.superblock_copy_size,
+                @sizeOf(SuperBlockHeader),
+            );
+            defer inspector.allocator.free(superblock_buffer);
 
-        const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
-        return superblock.*;
+            const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
+            return superblock.*;
+        } else {
+            var copies: [constants.superblock_copies]SuperBlockHeader = undefined;
+
+            for (0..constants.superblock_copies) |copy| {
+                const superblock_buffer = try inspector.read_buffer(
+                    .superblock,
+                    @as(u64, copy) * vsr.superblock.superblock_copy_size,
+                    @sizeOf(SuperBlockHeader),
+                );
+                defer inspector.allocator.free(superblock_buffer);
+
+                copies[copy] = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer).*;
+            }
+
+            var quorums = SuperBlockQuorums{};
+            const quorum = try quorums.working(&copies, .open);
+            if (!quorum.valid) return error.SuperBlockQuorumInvalid;
+            return quorum.header.*;
+        }
     }
 
     fn read_block(inspector: *Inspector, address: u64, checksum: ?u128) !BlockPtrConst {
@@ -680,7 +715,7 @@ const Inspector = struct {
         sessions: [constants.clients_max]u64,
     };
 
-    fn read_client_sessions(inspector: *Inspector, superblock_copy: u8) !?ClientSessions {
+    fn read_client_sessions(inspector: *Inspector, superblock_copy: ?u8) !?ClientSessions {
         const superblock = try inspector.read_superblock(superblock_copy);
 
         if (superblock.vsr_state.checkpoint.client_sessions_last_block_address == 0) {
