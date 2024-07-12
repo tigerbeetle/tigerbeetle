@@ -25,7 +25,7 @@ const log = std.log;
 pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !void {
     // Note: we intentionally don't use a temporary directory for this data file, and instead just
     // put it into CWD, as performance of TigerBeetle very much depends on a specific file system.
-    const data_file = data_file: {
+    const data_file = args.file orelse data_file: {
         var random_bytes: [4]u8 = undefined;
         std.crypto.random.bytes(&random_bytes);
         const random_suffix: [8]u8 = std.fmt.bytesToHex(random_bytes, .lower);
@@ -34,7 +34,7 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
 
     var data_file_created = false;
     defer {
-        if (data_file_created) {
+        if (data_file_created and args.file == null) {
             std.fs.cwd().deleteFile(data_file) catch {};
         }
     }

@@ -105,6 +105,8 @@ const CliArgs = union(enum) {
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
+        /// When set, don't delete the data file when the benchmark completes.
+        file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
         seed: ?[]const u8 = null,
     },
@@ -399,6 +401,7 @@ pub const Command = union(enum) {
         print_batch_timings: bool,
         id_order: IdOrder,
         statsd: bool,
+        file: ?[]const u8,
         addresses: ?[]const net.Address,
         seed: ?[]const u8,
     };
@@ -757,6 +760,10 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             else
                 null;
 
+            if (benchmark.addresses != null and benchmark.file != null) {
+                flags.fatal("--file: --addresses and --file are mutually exclusive", .{});
+            }
+
             return Command{
                 .benchmark = .{
                     .cache_accounts = benchmark.cache_accounts,
@@ -778,6 +785,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .print_batch_timings = benchmark.print_batch_timings,
                     .id_order = benchmark.id_order,
                     .statsd = benchmark.statsd,
+                    .file = benchmark.file,
                     .addresses = addresses,
                     .seed = benchmark.seed,
                 },
