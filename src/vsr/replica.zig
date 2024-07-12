@@ -5708,23 +5708,48 @@ pub fn ReplicaType(
 
             // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt or
             // if the replica restarts after state sync updates superblock.
-            if (self.op < self.op_checkpoint()) return false;
+            if (self.op < self.op_checkpoint()) {
+                log.warn("{}: op_head_certain: op < op_checkpoint op={} op_checkpoint={}", .{
+                    self.replica,
+                    self.op,
+                    self.op_checkpoint(),
+                });
+                return false;
+            }
 
             const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint());
             const slot_op_head = self.journal.slot_with_op(self.op).?;
             if (slot_op_head.index == slot_op_checkpoint.index) {
-                return self.journal.faulty.count == 0;
+                if (self.journal.faulty.count > 0) {
+                    log.warn("{}: op_head_certain: faulty slots count={}", .{
+                        self.replica,
+                        self.journal.faulty.count,
+                    });
+                    return false;
+                }
             }
 
             // For the op-head to be faulty, this must be a header that was restored from the
             // superblock VSR headers atop a corrupt slot. We can't trust the head: that corrupt
             // slot may have originally been op that is a wrap ahead.
-            if (self.journal.faulty.bit(slot_op_head)) return false;
+            if (self.journal.faulty.bit(slot_op_head)) {
+                log.warn("{}: op_head_certain: faulty head slot={}", .{
+                    self.replica,
+                    slot_op_head,
+                });
+                return false;
+            }
 
             // If faulty, this slot may hold either:
             // - op=op_checkpoint, or
             // - op=op_prepare_max
-            if (self.journal.faulty.bit(slot_op_checkpoint)) return false;
+            if (self.journal.faulty.bit(slot_op_checkpoint)) {
+                log.warn("{}: op_head_certain: faulty checkpoint slot={}", .{
+                    self.replica,
+                    slot_op_checkpoint,
+                });
+                return false;
+            }
 
             const slot_known_range = vsr.SlotRange{
                 .head = slot_op_checkpoint,
@@ -5733,7 +5758,10 @@ pub fn ReplicaType(
 
             var iterator = self.journal.faulty.bits.iterator(.{ .kind = .set });
             while (iterator.next()) |slot| {
-                if (!slot_known_range.contains(.{ .index = slot })) return false;
+                if (!slot_known_range.contains(.{ .index = slot })) {
+                    log.warn("{}: op_head_certain: faulty slot={}", .{ self.replica, slot });
+                    return false;
+                }
             }
             return true;
         }
