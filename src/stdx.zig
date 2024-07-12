@@ -750,7 +750,16 @@ pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @Typ
 /// This formatter statically checks that the number is a multiple of 1024,
 /// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
 pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
-    comptime assert(value % 1024 == 0);
+    comptime {
+        if (value > 0) {
+            assert(value % 1024 == 0);
+            var val = value;
+            while (val % 1024 == 0) {
+                val = @divExact(val, 1024);
+            }
+            assert(val < 1024);
+        }
+    }
     return .{ .data = value };
 }
 
@@ -785,5 +794,12 @@ test fmt_int_size_bin_exact {
     try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
     try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
     try std.testing.expectFmt("42MiB", "{}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
+    try std.testing.expectFmt("1TiB", "{}", .{fmt_int_size_bin_exact(1024 * 1024 * 1024 * 1024)});
     try std.testing.expectFmt("999GiB", "{}", .{fmt_int_size_bin_exact(999 * 1024 * 1024 * 1024)});
+
+    // These cases fail at compile-time.
+    // fmt_int_size_bin_exact(123);
+    // fmt_int_size_bin_exact(1025 * 1024);
+    // fmt_int_size_bin_exact(2047 * 1024 * 1024);
+    // fmt_int_size_bin_exact(3210 * 1024 * 1024 * 1024);
 }
