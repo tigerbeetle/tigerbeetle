@@ -383,7 +383,10 @@ const Inspector = struct {
         var free_set_addresses = std.ArrayList(u64).init(inspector.allocator);
         defer free_set_addresses.deinit();
 
-        {
+        if (superblock.vsr_state.checkpoint.free_set_size == 0) {
+            assert(superblock.vsr_state.checkpoint.free_set_last_block_address == 0);
+            assert(superblock.vsr_state.checkpoint.free_set_last_block_checksum == 0);
+        } else {
             var free_set_block: ?vsr.BlockReference = .{
                 .address = superblock.vsr_state.checkpoint.free_set_last_block_address,
                 .checksum = superblock.vsr_state.checkpoint.free_set_last_block_checksum,
@@ -414,7 +417,7 @@ const Inspector = struct {
         var free_set = try vsr.FreeSet.init(inspector.allocator, free_set_blocks_max);
         defer free_set.deinit(inspector.allocator);
         free_set.open(.{
-            .encoded = &.{free_set_buffer},
+            .encoded = if (free_set_buffer.len == 0) &.{} else &.{free_set_buffer},
             .block_addresses = free_set_addresses.items,
         });
 
