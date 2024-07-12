@@ -989,8 +989,11 @@ pub const Simulator = struct {
                 r.syncing == .idle);
         }
 
+        // To improve VOPR utilization, try to prevent the replica from going into
+        // `.recovering_head` state if the replica is needed to form a quorum.
         const fault = recoverable_count >= recoverable_count_min or replica.standby();
         simulator.restart_replica(replica.replica, fault);
+        maybe(!fault and replica.status == .recovering_head);
     }
 
     fn restart_replica(simulator: *Simulator, replica_index: u8, fault: bool) void {
@@ -1023,6 +1026,7 @@ pub const Simulator = struct {
             }
         }
 
+        var header_prepare_view_mismatch: bool = false;
         if (!fault) {
             // The journal writes redundant headers of faulty ops as zeroes to ensure
             // that they remain faulty after a crash/recover. Since that fault cannot
@@ -1038,6 +1042,10 @@ pub const Simulator = struct {
             ) |*wal_header, *wal_prepare| {
                 if (wal_header.checksum == 0) {
                     wal_header.* = wal_prepare.header;
+                } else {
+                    if (wal_header.view != wal_prepare.header.view) {
+                        header_prepare_view_mismatch = true;
+                    }
                 }
             }
         }
@@ -1066,7 +1074,8 @@ pub const Simulator = struct {
             // status=recovering_head.
             assert(fault or
                 replica.op < replica.op_checkpoint() or
-                replica.log_view < replica.superblock.working.vsr_state.sync_view);
+                replica.log_view < replica.superblock.working.vsr_state.sync_view or
+                header_prepare_view_mismatch);
         }
 
         replica_storage.faulty = true;
