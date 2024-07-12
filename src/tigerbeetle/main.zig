@@ -65,7 +65,10 @@ pub fn main() !void {
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
-        .inspect => |*args| try inspect.main(allocator, args),
+        .inspect => |*args| inspect.main(allocator, args) catch |err| {
+            // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
+            if (err != error.BrokenPipe) return err;
+        },
     }
 }
 
