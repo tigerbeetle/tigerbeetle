@@ -244,3 +244,38 @@ test "benchmark smoke" {
     );
     try std.testing.expect(status_ok);
 }
+
+test "inspect smoke" {
+    const shell = try Shell.create(std.testing.allocator);
+    defer shell.destroy();
+
+    const data_file = data_file: {
+        var random_bytes: [4]u8 = undefined;
+        std.crypto.random.bytes(&random_bytes);
+        const random_suffix: [8]u8 = std.fmt.bytesToHex(random_bytes, .lower);
+        break :data_file "0_0-" ++ random_suffix ++ ".tigerbeetle.inspect";
+    };
+    defer std.fs.cwd().deleteFile(data_file) catch {};
+
+    const tigerbeetle = try tigerbeetle_exe(shell);
+    const status_ok_format = try shell.exec_status_ok(
+        "{tigerbeetle} format --cluster=0 --replica=0 --replica-count=1 {path}",
+        .{ .tigerbeetle = tigerbeetle, .path = data_file },
+    );
+    try std.testing.expect(status_ok_format);
+
+    inline for (.{
+        "{tigerbeetle} inspect superblock              {path}",
+        "{tigerbeetle} inspect wal --slot=0            {path}",
+        "{tigerbeetle} inspect replies                 {path}",
+        "{tigerbeetle} inspect grid                    {path}",
+        "{tigerbeetle} inspect manifest                {path}",
+        "{tigerbeetle} inspect tables --tree=transfers {path}",
+    }) |command| {
+        const status_ok_inspect = try shell.exec_status_ok(
+            command,
+            .{ .tigerbeetle = tigerbeetle, .path = data_file },
+        );
+        try std.testing.expect(status_ok_inspect);
+    }
+}
