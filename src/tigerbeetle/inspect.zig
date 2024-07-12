@@ -24,8 +24,9 @@ const is_composite_key = vsr.lsm.composite_key.is_composite_key;
 
 pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
+    var stdout_writer = stdout_buffer.writer();
 
-    const stdout = stdout_buffer.writer();
+    const stdout = stdout_writer.any();
 
     var inspector = try Inspector.init(allocator, cli_args.path);
     defer inspector.deinit();
@@ -161,7 +162,7 @@ const Inspector = struct {
         inspector.busy = false;
     }
 
-    fn inspect_superblock(inspector: *Inspector, output: anytype) !void {
+    fn inspect_superblock(inspector: *Inspector, output: std.io.AnyWriter) !void {
         const buffer = try inspector.read_buffer(.superblock, 0, vsr.Zone.superblock.size().?);
         defer inspector.allocator.free(buffer);
 
@@ -199,7 +200,7 @@ const Inspector = struct {
         }
     }
 
-    fn inspect_wal(inspector: *Inspector, output: anytype) !void {
+    fn inspect_wal(inspector: *Inspector, output: std.io.AnyWriter) !void {
         const headers_buffer =
             try inspector.read_buffer(.wal_headers, 0, constants.journal_size_headers);
         defer inspector.allocator.free(headers_buffer);
@@ -251,7 +252,7 @@ const Inspector = struct {
         }
     }
 
-    fn inspect_wal_slot(inspector: *Inspector, output: anytype, slot: usize) !void {
+    fn inspect_wal_slot(inspector: *Inspector, output: std.io.AnyWriter, slot: usize) !void {
         assert(slot <= constants.journal_slot_count);
 
         const headers_buffer =
@@ -296,7 +297,7 @@ const Inspector = struct {
         }
     }
 
-    fn inspect_replies(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
+    fn inspect_replies(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: u8) !void {
         const entries = try inspector.read_client_sessions(superblock_copy) orelse return;
 
         var label_buffer: [64]u8 = undefined;
@@ -335,7 +336,7 @@ const Inspector = struct {
 
     fn inspect_replies_slot(
         inspector: *Inspector,
-        output: anytype,
+        output: std.io.AnyWriter,
         superblock_copy: u8,
         slot: usize,
     ) !void {
@@ -370,7 +371,7 @@ const Inspector = struct {
         try print_reply_body(output, reply);
     }
 
-    fn inspect_grid(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
+    fn inspect_grid(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: u8) !void {
         const superblock = try inspector.read_superblock(superblock_copy);
         const free_set_size = superblock.vsr_state.checkpoint.free_set_size;
         const free_set_buffer =
@@ -453,7 +454,7 @@ const Inspector = struct {
         }
     }
 
-    fn inspect_grid_block(inspector: *Inspector, output: anytype, address: u64) !void {
+    fn inspect_grid_block(inspector: *Inspector, output: std.io.AnyWriter, address: u64) !void {
         const block = try inspector.read_block(address, null);
         defer inspector.allocator.free(block);
 
@@ -464,7 +465,7 @@ const Inspector = struct {
         try print_block(output, block);
     }
 
-    fn inspect_manifest(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
+    fn inspect_manifest(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: u8) !void {
         const superblock = try inspector.read_superblock(superblock_copy);
         var manifest_block_address = superblock.vsr_state.checkpoint.manifest_newest_address;
         var manifest_block_checksum = superblock.vsr_state.checkpoint.manifest_newest_checksum;
@@ -514,7 +515,7 @@ const Inspector = struct {
         }
     }
 
-    fn inspect_tables(inspector: *Inspector, output: anytype, superblock_copy: u8, filter: struct {
+    fn inspect_tables(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: u8, filter: struct {
         tree_id: u16,
         level: ?u6,
     }) !void {
@@ -710,7 +711,7 @@ const Inspector = struct {
 };
 
 fn print_struct(
-    output: anytype,
+    output: std.io.AnyWriter,
     label: []const u8,
     value: anytype,
 ) !void {
@@ -776,7 +777,7 @@ fn print_struct(
     try output.writeAll("\n");
 }
 
-fn print_value(output: anytype, value: anytype) !void {
+fn print_value(output: std.io.AnyWriter, value: anytype) !void {
     const Type = @TypeOf(value);
     if (@typeInfo(Type) == .Struct) assert(std.meta.hasFn(Type, "format"));
     assert(@typeInfo(Type) != .Array);
@@ -801,7 +802,7 @@ fn print_value(output: anytype, value: anytype) !void {
     try output.print("{}", .{value});
 }
 
-fn print_block(writer: anytype, block: BlockPtrConst) !void {
+fn print_block(writer: std.io.AnyWriter, block: BlockPtrConst) !void {
     const header = schema.header_from_block(block);
     try print_struct(writer, "header", header);
 
@@ -958,7 +959,7 @@ const operation_schemas = list: {
     break :list list;
 };
 
-fn print_prepare_body(output: anytype, prepare: []const u8) !void {
+fn print_prepare_body(output: std.io.AnyWriter, prepare: []const u8) !void {
     const header = std.mem.bytesAsValue(vsr.Header.Prepare, prepare[0..@sizeOf(vsr.Header)]);
     inline for (operation_schemas) |operation_schema| {
         if (operation_schema.operation == header.operation) {
@@ -989,7 +990,7 @@ fn print_prepare_body(output: anytype, prepare: []const u8) !void {
     }
 }
 
-fn print_reply_body(output: anytype, reply: []const u8) !void {
+fn print_reply_body(output: std.io.AnyWriter, reply: []const u8) !void {
     const header = std.mem.bytesAsValue(vsr.Header.Reply, reply[0..@sizeOf(vsr.Header)]);
     inline for (operation_schemas) |operation_schema| {
         if (operation_schema.operation == header.operation) {
@@ -1021,7 +1022,7 @@ fn print_reply_body(output: anytype, reply: []const u8) !void {
 }
 
 fn print_table_info(
-    output: anytype,
+    output: std.io.AnyWriter,
     comptime tree_info: anytype,
     table: *const schema.ManifestNode.TableInfo,
 ) !void {
