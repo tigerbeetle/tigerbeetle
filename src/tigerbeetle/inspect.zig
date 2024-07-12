@@ -297,7 +297,7 @@ const Inspector = struct {
     }
 
     fn inspect_replies(inspector: *Inspector, output: anytype, superblock_copy: u8) !void {
-        const entries = try inspector.read_client_sessions(superblock_copy);
+        const entries = try inspector.read_client_sessions(superblock_copy) orelse return;
 
         var label_buffer: [64]u8 = undefined;
         for (&entries.headers, entries.sessions, 0..) |*session_header, session, slot| {
@@ -341,7 +341,11 @@ const Inspector = struct {
     ) !void {
         assert(slot < constants.clients_max);
 
-        const entries = try inspector.read_client_sessions(superblock_copy);
+        const entries = try inspector.read_client_sessions(superblock_copy) orelse {
+            try output.writeAll("error: no client sessions\n");
+            return;
+        };
+
         const reply = try inspector.read_buffer(
             .client_replies,
             constants.message_size_max * slot,
@@ -672,8 +676,14 @@ const Inspector = struct {
         sessions: [constants.clients_max]u64,
     };
 
-    fn read_client_sessions(inspector: *Inspector, superblock_copy: u8) !ClientSessions {
+    fn read_client_sessions(inspector: *Inspector, superblock_copy: u8) !?ClientSessions {
         const superblock = try inspector.read_superblock(superblock_copy);
+
+        if (superblock.vsr_state.checkpoint.client_sessions_last_block_address == 0) {
+            assert(superblock.vsr_state.checkpoint.client_sessions_last_block_checksum == 0);
+            return null;
+        }
+
         const block = try inspector.read_block(
             superblock.vsr_state.checkpoint.client_sessions_last_block_address,
             superblock.vsr_state.checkpoint.client_sessions_last_block_checksum,
