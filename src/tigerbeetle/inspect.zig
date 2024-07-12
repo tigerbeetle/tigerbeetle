@@ -1,5 +1,12 @@
 //! Decode a TigerBeetle data file without running a replica or modifying the data file.
-//! This tool adheres to the "be liberal in what you accept" side of Postel's Law.
+//!
+//! This tool is intended for TigerBeetle developers, for debugging and understanding data files.
+//!
+//! Principles:
+//! - Never modify the data file.
+//! - Adhere to the "be liberal in what you accept" side of Postel's Law.
+//!   When the data file is corrupt, decode as much as possible. (This is somewhat aspirational).
+//! - Outside of the "summary" commands, don't discard potentially useful information.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -29,13 +36,11 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
 
     const stdout = stdout_writer.any();
 
-    var inspector = try Inspector.init(allocator, cli_args.path);
-    defer inspector.deinit();
+    var inspector = try Inspector.create(allocator, cli_args.path);
+    defer inspector.destroy();
 
     switch (cli_args.query) {
-        .superblock => {
-            try inspector.inspect_superblock(stdout);
-        },
+        .superblock => try inspector.inspect_superblock(stdout),
         .wal => |args| {
             if (args.slot) |slot| {
                 if (slot >= constants.journal_slot_count) {
@@ -64,7 +69,7 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
                 args.superblock_copy.? >= constants.superblock_copies)
             {
                 return fatal(
-                    "--superblock-copy: copy exceeds {}\n",
+                    "--superblock-copy: copy exceeds {}",
                     .{constants.superblock_copies - 1},
                 );
             }
@@ -80,7 +85,7 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
                 args.superblock_copy.? >= constants.superblock_copies)
             {
                 return fatal(
-                    "--superblock-copy: copy exceeds {}\n",
+                    "--superblock-copy: copy exceeds {}",
                     .{constants.superblock_copies - 1},
                 );
             }
@@ -88,8 +93,17 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
             try inspector.inspect_manifest(stdout, args.superblock_copy);
         },
         .tables => |args| {
+            if (args.superblock_copy != null and
+                args.superblock_copy.? >= constants.superblock_copies)
+            {
+                return fatal(
+                    "--superblock-copy: copy exceeds {}",
+                    .{constants.superblock_copies - 1},
+                );
+            }
+
             const tree_id = parse_tree_id(args.tree) orelse {
-                return fatal("--tree: invalid tree name/id: {s}\n", .{args.tree});
+                return fatal("--tree: invalid tree name/id: {s}", .{args.tree});
             };
             try inspector.inspect_tables(stdout, args.superblock_copy, .{
                 .tree_id = tree_id,
@@ -111,7 +125,7 @@ const Inspector = struct {
     busy: bool = false,
     read: Storage.Read = undefined,
 
-    fn init(allocator: std.mem.Allocator, path: []const u8) !*Inspector {
+    fn create(allocator: std.mem.Allocator, path: []const u8) !*Inspector {
         var inspector = try allocator.create(Inspector);
         errdefer allocator.destroy(inspector);
 
@@ -146,11 +160,13 @@ const Inspector = struct {
         return inspector;
     }
 
-    fn deinit(inspector: *Inspector) void {
+    fn destroy(inspector: *Inspector) void {
         inspector.storage.deinit();
+        inspector.io.deinit();
         std.posix.close(inspector.fd);
         std.posix.close(inspector.dir_fd);
         inspector.allocator.destroy(inspector);
+        inspector.* = undefined;
     }
 
     fn work(inspector: *Inspector) !void {
@@ -322,6 +338,7 @@ const Inspector = struct {
         superblock_copy: ?u8,
     ) !void {
         const entries = try inspector.read_client_sessions(superblock_copy) orelse return;
+        defer inspector.allocator.destroy(entries);
 
         var label_buffer: [64]u8 = undefined;
         for (&entries.headers, entries.sessions, 0..) |*session_header, session, slot| {
@@ -373,6 +390,7 @@ const Inspector = struct {
             try output.writeAll("error: no client sessions\n");
             return;
         };
+        defer inspector.allocator.destroy(entries);
 
         const reply = try inspector.read_buffer(
             .client_replies,
@@ -702,16 +720,18 @@ const Inspector = struct {
         const header = std.mem.bytesAsValue(vsr.Header.Block, buffer[0..@sizeOf(vsr.Header)]);
         if (!header.valid_checksum()) {
             log.err(
-                "read_block: invalid block address={} checksum={?x:0>32} (bad checksum)",
-                .{ address, checksum },
+                "read_block: invalid block address={} checksum_expect={?x:0>32} " ++
+                    "checksum_actual={x:0>32} (bad checksum)",
+                .{ address, checksum, header.checksum },
             );
             return error.InvalidChecksum;
         }
 
         if (!header.valid_checksum_body(buffer[@sizeOf(vsr.Header)..header.size])) {
             log.err(
-                "read_block: invalid block address={} checksum={?x:0>32} (bad checksum_body)",
-                .{ address, checksum },
+                "read_block: invalid block address={} checksum_expect={?x:0>32} " ++
+                    "checksum_actual={x:0>32} (bad checksum_body)",
+                .{ address, checksum, header.checksum },
             );
             return error.InvalidChecksumBody;
         }
@@ -719,8 +739,9 @@ const Inspector = struct {
         if (checksum) |checksum_| {
             if (header.checksum != checksum_) {
                 log.err(
-                    "read_block: invalid block address={} checksum={?x:0>32} (wrong block)",
-                    .{ address, checksum },
+                    "read_block: invalid block address={} checksum_expect={?x:0>32} " ++
+                        "checksum_actual={x:0>32} (wrong block)",
+                    .{ address, checksum, header.checksum },
                 );
                 return error.WrongBlock;
             }
@@ -733,7 +754,7 @@ const Inspector = struct {
         sessions: [constants.clients_max]u64,
     };
 
-    fn read_client_sessions(inspector: *Inspector, superblock_copy: ?u8) !?ClientSessions {
+    fn read_client_sessions(inspector: *Inspector, superblock_copy: ?u8) !?*ClientSessions {
         const superblock = try inspector.read_superblock(superblock_copy);
 
         if (superblock.vsr_state.checkpoint.client_sessions_last_block_address == 0) {
@@ -755,11 +776,14 @@ const Inspector = struct {
 
         assert(@sizeOf(ClientSessions) == block_header.size - @sizeOf(vsr.Header));
 
-        const entries = std.mem.bytesAsValue(
+        const entries = try inspector.allocator.create(ClientSessions);
+        errdefer inspector.allocator.destroy(entries);
+
+        entries.* = std.mem.bytesAsValue(
             ClientSessions,
             block[@sizeOf(vsr.Header)..][0..@sizeOf(ClientSessions)],
-        );
-        return entries.*;
+        ).*;
+        return entries;
     }
 };
 
