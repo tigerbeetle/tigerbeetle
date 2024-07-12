@@ -29,6 +29,7 @@ const VSRState = vsr.VSRState;
 const SyncStage = vsr.SyncStage;
 const SyncTarget = vsr.SyncTarget;
 const ClientSessions = vsr.ClientSessions;
+const CheckpointQuorum = vsr.Checkpoint.Quorum;
 
 const log = marks.wrap_log(stdx.log.scoped(.replica));
 const tracer = @import("../tracer.zig");
@@ -447,6 +448,9 @@ pub fn ReplicaType(
         /// protocol.
         do_view_change_quorum: bool = false,
 
+        checkpoint_from_all_replicas: CheckpointQuorum = .{},
+        checkpoint_quorum: bool = false,
+
         /// The number of ticks before a primary or backup broadcasts a ping to other replicas.
         /// TODO Explain why we need this (MessageBus handshaking, leapfrogging faulty replicas,
         /// deciding whether starting a view change would be detrimental under some network
@@ -652,9 +656,15 @@ pub fn ReplicaType(
             self.opened = false;
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
+
+            if (self.op_checkpoint() == 0) self.checkpoint_quorum = true;
+
             for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
                 if (self.journal.faulty.bit(.{ .index = slot })) {
                     assert(header.operation == .reserved);
+                } else {
+                    // We had received a quorum for the current op_checkpoint() before crashing.
+                    if (header.op > self.op_prepare_max()) self.checkpoint_quorum = true;
                 }
             }
 
@@ -669,7 +679,7 @@ pub fn ReplicaType(
             // Given on-disk state, try to recover the head op after a restart.
             //
             // If the replica crashed in status == .normal (view == log_view), the head is generally
-            // the last record in WAL. As a special case, during  the first open the last (and the
+            // the last record in WAL. As a special case, during the first open the last (and the
             // only) record in WAL is the root prepare.
             //
             // Otherwise, the head is recovered from the superblock. When transitioning to a
@@ -1130,7 +1140,7 @@ pub fn ReplicaType(
                 .view = self.superblock.working.vsr_state.view,
                 .log_view = self.superblock.working.vsr_state.log_view,
                 .op = undefined,
-                .commit_min = self.superblock.working.vsr_state.checkpoint.header.op,
+                .commit_min = self.op_checkpoint(),
                 .commit_max = self.superblock.working.vsr_state.commit_max,
                 .pipeline = .{ .cache = .{
                     .capacity = constants.pipeline_prepare_queue_max +
@@ -1556,6 +1566,17 @@ pub fn ReplicaType(
                 .realtime = realtime,
             };
 
+            // self.op includes requests in the pipeline_queue, we must explicitly account for
+            // requests in the request_queue to decide whether to accept this request.
+            if (self.op + self.pipeline.queue.request_queue.count + 1 > self.op_prepare_max()) {
+                log.debug("{}: on_request: ignoring op={} (too far ahead, prepare_max={}).", .{
+                    self.replica,
+                    self.op + self.pipeline.queue.request_queue.count + 1,
+                    self.op_prepare_max(),
+                });
+                defer self.message_bus.unref(request.message);
+                return;
+            }
             if (self.pipeline.queue.prepare_queue.full()) {
                 self.pipeline.queue.push_request(request);
             } else {
@@ -3774,6 +3795,7 @@ pub fn ReplicaType(
 
         fn commit_pipeline_next(self: *Self) void {
             assert(self.commit_stage == .next_pipeline);
+            assert(self.commit_prepare == null);
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.syncing == .idle);
@@ -4112,6 +4134,8 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.checkpoint.header.op);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.checkpoint.header.op);
             self.grid.assert_only_repairing();
+
+            self.checkpoint_quorum = if (self.solo()) true else false;
 
             log.debug(
                 "{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})",
@@ -5814,7 +5838,14 @@ pub fn ReplicaType(
         /// doing so would overwrite a message (or the slot of a message) that has not yet been
         /// committed and checkpointed.
         fn op_prepare_max(self: *const Self) u64 {
-            return vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?;
+            const checkpoint = checkpoint: {
+                if (self.checkpoint_quorum) {
+                    break :checkpoint self.op_checkpoint_next();
+                } else {
+                    break :checkpoint self.op_checkpoint();
+                }
+            };
+            return vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint).?;
         }
 
         /// Returns checkpoint id associated with the op.
@@ -8958,6 +8989,7 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
             assert(self.release.value <=
                 self.superblock.working.vsr_state.checkpoint.release.value);
+            assert(!self.solo());
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
@@ -8969,7 +9001,9 @@ pub fn ReplicaType(
             ));
 
             const commit_min_previous = self.commit_min;
-            self.commit_min = self.superblock.working.vsr_state.checkpoint.header.op;
+            self.commit_min = self.op_checkpoint();
+
+            self.checkpoint_quorum = false;
 
             if (self.release.value <
                 self.superblock.working.vsr_state.checkpoint.release.value)
@@ -9458,8 +9492,49 @@ pub fn ReplicaType(
                 @panic("checkpoint diverged");
             }
 
+            if (!self.checkpoint_quorum) {
+                // If the primary has committed an operation past the prepare_max for
+                // the current op_checkpoint, a commit-quorum of replicas have done the same.
+                // The current op_checkpoint is guaranteed to be durable on a commit quorum of
+                // replicas.
+                if (header.into_const(.commit)) |h| {
+                    if (h.commit > self.op_prepare_max()) {
+                        log.debug("{}: found replication quorum (via commit) for checkpoint={}", .{
+                            self.replica,
+                            self.op_checkpoint(),
+                        });
+                        self.checkpoint_quorum = true;
+                    }
+                }
+
+                if (self.checkpoint_from_all_replicas.replace(header.replica, &.{
+                    .id = candidate.checkpoint_id,
+                    .op = candidate.checkpoint_op,
+                })) {
+                    const matching = self.checkpoint_from_all_replicas.count(&.{
+                        .op = self.op_checkpoint(),
+                        .id = self.superblock.working.checkpoint_id(),
+                    });
+
+                    assert(matching <= self.replica_count);
+
+                    // -1 because we already have the op_checkpoint durable.
+                    if (matching >= self.quorum_replication - 1) {
+                        log.debug("{}: found replication quorum (via pings) for checkpoint={}", .{
+                            self.replica,
+                            self.op_checkpoint(),
+                        });
+                        self.checkpoint_quorum = true;
+                    }
+                }
+            }
+
             // Don't sync backwards, or to our current checkpoint.
             if (candidate.checkpoint_op <= self.op_checkpoint()) return;
+
+            // If you discover a replica that has a bigger op_checkpoint, our op_checkpoint
+            // is guaranteed to be durable on a commit-quorum of replicas.
+            self.checkpoint_quorum = true;
 
             // Don't sync to the immediately-next checkpoint unless it has been committed atop.
             // - If the checkpoint has been committed atop, that guarantees that at least a
@@ -9477,7 +9552,7 @@ pub fn ReplicaType(
             // could lead to permanent unavailability.
             if (candidate.checkpoint_op == self.op_checkpoint_next()) {
                 if (header.into_const(.commit)) |h| {
-                    if (h.commit <= self.op_checkpoint_next_trigger()) return;
+                    if (h.commit <= self.op_prepare_max()) return;
                 } else {
                     return;
                 }
@@ -9684,7 +9759,7 @@ pub fn ReplicaType(
             }
 
             const latest_committed_entry = checksum: {
-                if (self.commit_max == self.superblock.working.vsr_state.checkpoint.header.op) {
+                if (self.commit_max == self.op_checkpoint()) {
                     break :checksum self.superblock.working.vsr_state.checkpoint.header.checksum;
                 } else {
                     break :checksum self.journal.header_with_op(self.commit_max).?.checksum;
@@ -9699,7 +9774,7 @@ pub fn ReplicaType(
                 .commit = self.commit_max,
                 .commit_checksum = latest_committed_entry,
                 .timestamp_monotonic = self.clock.monotonic(),
-                .checkpoint_op = self.superblock.working.vsr_state.checkpoint.header.op,
+                .checkpoint_op = self.op_checkpoint(),
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
             }));
         }
@@ -9733,7 +9808,9 @@ pub fn ReplicaType(
             assert(self.state_machine.pulse_needed(self.state_machine.prepare_timestamp));
 
             self.send_request_to_self(.pulse, &.{});
-            assert(self.pipeline.queue.contains_operation(.pulse));
+
+            // This request may be rejected in on_request due to lack of space in the WAL.
+            maybe(self.pipeline.queue.contains_operation(.pulse));
         }
 
         fn send_request_upgrade_to_self(self: *Self) void {
@@ -9744,7 +9821,9 @@ pub fn ReplicaType(
 
             const upgrade = vsr.UpgradeRequest{ .release = self.upgrade_release.? };
             self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
-            assert(self.pipeline.queue.contains_operation(.upgrade));
+
+            // This request may be rejected in on_request due to lack of space in the WAL.
+            maybe(self.pipeline.queue.contains_operation(.upgrade));
         }
 
         fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {

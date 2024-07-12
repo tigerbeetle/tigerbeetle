@@ -1452,7 +1452,7 @@ const ViewChangeHeadersArray = struct {
     }
 };
 
-/// For a replica with journal_slot_count=9, lsm_batch_multiple=2, pipeline_prepare_queue_max=1, and
+/// For a replica with journal_slot_count=10, lsm_batch_multiple=2, pipeline_prepare_queue_max=2,
 /// checkpoint_interval = journal_slot_count - (lsm_batch_multiple + pipeline_prepare_queue_max) = 6
 ///
 ///   checkpoint() call           0   1   2   3
@@ -1461,11 +1461,11 @@ const ViewChangeHeadersArray = struct {
 ///   op_checkpoint_next_trigger  7  13  19  25
 ///
 ///     commit log (ops)           │ write-ahead log (slots)
-///     0   4   8   2   6   0   4  │  0  -  -  -  4  -  -  -  8
-///   0 ─────✓·%                   │[ 0  1  2  3  4  ✓] 6  %  R
-///   1 ───────────✓·%             │  9 10  ✓]12  %  5[ 6  7  8
-///   2 ─────────────────✓·%       │ 18  % 11[12 13 14 15 16  ✓]
-///   3 ───────────────────────✓·% │[18 19 20 21 22  ✓]24  % 17
+///     0   4   8   2   6   0   4  │  0  -  -  -  4  -  -  -  -  9
+///   0 ─────✓·%                   │[ 0  1  2  3  4  ✓] 6  %  R  R
+///   1 ───────────✓·%             │  10 ✓] 12 %  4  5[ 6  7  8  9
+///   2 ─────────────────✓·%       │  10 11[12 13 14 15 16 ✓] 18 %
+///   3 ───────────────────────✓·% │  20 21 22 ✓] 24 %  16 17 [18 19
 ///
 /// Legend:
 ///
@@ -1480,6 +1480,52 @@ pub const Checkpoint = struct {
         assert(constants.journal_slot_count > constants.lsm_batch_multiple);
         assert(constants.journal_slot_count % constants.lsm_batch_multiple == 0);
     }
+    /// Checkpoint identifier.
+    id: u128,
+    /// The op_checkpoint() that corresponds to the checkpoint id.
+    op: u64,
+
+    pub const Quorum = struct {
+        /// The latest known checkpoint identifier from every *other* replica.
+        checkpoints: [constants.replicas_max]?Checkpoint =
+            [_]?Checkpoint{null} ** constants.replicas_max,
+
+        pub fn replace(
+            quorum: *Quorum,
+            replica: u8,
+            checkpoint: *const Checkpoint,
+        ) bool {
+            if (quorum.checkpoints[replica]) |checkpoint_existing| {
+                // Ignore old candidate.
+                if (checkpoint.op < checkpoint_existing.op) {
+                    return false;
+                }
+
+                // Ignore repeat candidate.
+                if (checkpoint.op == checkpoint_existing.op and
+                    checkpoint.id == checkpoint_existing.id)
+                {
+                    return false;
+                }
+            }
+            quorum.checkpoints[replica] = checkpoint.*;
+            return true;
+        }
+
+        pub fn count(quorum: *const Quorum, checkpoint: *const Checkpoint) usize {
+            var matching: usize = 0;
+            for (quorum.checkpoints) |checkpoint_existing| {
+                if (checkpoint_existing != null and
+                    checkpoint_existing.?.op == checkpoint.op and
+                    checkpoint_existing.?.id == checkpoint.id)
+                {
+                    assert(std.meta.eql(checkpoint.*, checkpoint_existing.?));
+                    matching += 1;
+                }
+            }
+            return matching;
+        }
+    };
 
     pub fn checkpoint_after(checkpoint: u64) u64 {
         assert(valid(checkpoint));
