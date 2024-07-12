@@ -125,7 +125,7 @@ const Inspector = struct {
             inspector.dir_fd,
             basename,
             vsr.superblock.data_file_size_min,
-            .open,
+            .open_read_only,
             .direct_io_optional,
         );
         errdefer std.posix.close(inspector.fd);
