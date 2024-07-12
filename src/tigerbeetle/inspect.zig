@@ -33,7 +33,9 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
     defer inspector.deinit();
 
     switch (cli_args.query) {
-        .superblock => try inspector.inspect_superblock(stdout),
+        .superblock => {
+            try inspector.inspect_superblock(stdout);
+        },
         .wal => |args| {
             if (args.slot) |slot| {
                 if (slot >= constants.journal_slot_count) {
@@ -168,6 +170,12 @@ const Inspector = struct {
     }
 
     fn inspect_superblock(inspector: *Inspector, output: std.io.AnyWriter) !void {
+        log.info("In the left column of the output, \"|\" denotes which copies have a " ++
+            "particular value.", .{});
+        log.info("\"||||\" means that all four superblock copies are in agreement.", .{});
+        log.info("\"|_|_\" means that the value matches in copies 0/2, but differs from copies " ++
+            "1/3.", .{});
+
         const buffer = try inspector.read_buffer(.superblock, 0, vsr.Zone.superblock.size().?);
         defer inspector.allocator.free(buffer);
 
@@ -206,6 +214,12 @@ const Inspector = struct {
     }
 
     fn inspect_wal(inspector: *Inspector, output: std.io.AnyWriter) !void {
+        log.info("In the left column of the output, \"|\" denotes which set of headers has " ++
+            "each value.", .{});
+        log.info("\"||\" denotes that the prepare and the redundant header match.", .{});
+        log.info("\"|_\" is the redundant header.", .{});
+        log.info("\"_|\" is the prepare's header.", .{});
+
         const headers_buffer =
             try inspector.read_buffer(.wal_headers, 0, constants.journal_size_headers);
         defer inspector.allocator.free(headers_buffer);
@@ -350,6 +364,10 @@ const Inspector = struct {
         slot: usize,
     ) !void {
         assert(slot < constants.clients_max);
+
+        log.info("\"||\" denotes that the client session header and reply header match.", .{});
+        log.info("\"|_\" is the client session header.", .{});
+        log.info("\"_|\" is the client reply's header.", .{});
 
         const entries = try inspector.read_client_sessions(superblock_copy) orelse {
             try output.writeAll("error: no client sessions\n");
