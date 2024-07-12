@@ -292,7 +292,7 @@ const Inspector = struct {
         try print_prepare_body(output, prepare_buffer);
 
         if (!prepare_body_valid) {
-            try output.writeAll("error: invalid prepare body!");
+            try output.writeAll("error: invalid prepare body!\n");
         }
     }
 
@@ -471,7 +471,7 @@ const Inspector = struct {
                 manifest_block_address,
                 manifest_block_checksum,
             ) catch {
-                try output.writeAll("error: manifest block not found");
+                try output.writeAll("error: manifest block not found\n");
                 break;
             };
             defer inspector.allocator.free(block);
