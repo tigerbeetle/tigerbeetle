@@ -17,7 +17,6 @@ internal sealed class NativeClient : IDisposable
                 UInt128Extensions.UnsafeU128 cluster_id,
                 byte* address_ptr,
                 uint address_len,
-                uint num_packets,
                 IntPtr on_completion_ctx,
                 delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
             );
@@ -34,26 +33,24 @@ internal sealed class NativeClient : IDisposable
         return Encoding.UTF8.GetBytes(string.Join(',', addresses) + "\0");
     }
 
-    public static NativeClient Init(UInt128 clusterID, string[] addresses, int concurrencyMax)
+    public static NativeClient Init(UInt128 clusterID, string[] addresses)
     {
         unsafe
         {
-            return CallInit(tb_client_init, clusterID, addresses, concurrencyMax);
+            return CallInit(tb_client_init, clusterID, addresses);
         }
     }
 
-    public static NativeClient InitEcho(UInt128 clusterID, string[] addresses, int concurrencyMax)
+    public static NativeClient InitEcho(UInt128 clusterID, string[] addresses)
     {
         unsafe
         {
-            return CallInit(tb_client_init_echo, clusterID, addresses, concurrencyMax);
+            return CallInit(tb_client_init_echo, clusterID, addresses);
         }
     }
 
-    private static NativeClient CallInit(InitFunction initFunction, UInt128Extensions.UnsafeU128 clusterID, string[] addresses, int concurrencyMax)
+    private static NativeClient CallInit(InitFunction initFunction, UInt128Extensions.UnsafeU128 clusterID, string[] addresses)
     {
-        if (concurrencyMax <= 0) throw new ArgumentOutOfRangeException(nameof(concurrencyMax), "Concurrency must be positive");
-
         var addresses_byte = GetBytes(addresses);
         unsafe
         {
@@ -66,7 +63,6 @@ internal sealed class NativeClient : IDisposable
                     clusterID,
                     addressPtr,
                     (uint)addresses_byte.Length - 1,
-                    (uint)concurrencyMax,
                     IntPtr.Zero,
                     &OnCompletionCallback
                 );
@@ -113,11 +109,7 @@ internal sealed class NativeClient : IDisposable
     {
         unsafe
         {
-            // It is unexpected for the client to be disposed here
-            // Since we wait for all acquired packets to be submitted and returned before disposing.
-            AssertTrue(client != IntPtr.Zero, "Client is closed");
-            AssertTrue(packet.Pointer != null, "Null packet pointer");
-            tb_client_release_packet(client, packet.Pointer);
+            Marshal.FreeCoTaskMem((IntPtr)packet.Pointer);
         }
     }
 
@@ -125,10 +117,20 @@ internal sealed class NativeClient : IDisposable
     {
         unsafe
         {
-            // It is unexpected for the client to be disposed here
-            // Since we wait for all acquired packets to be submitted and returned before disposing.
-            AssertTrue(client != IntPtr.Zero, "Client is closed");
-            tb_client_submit(client, packet.Pointer);
+            if (client != IntPtr.Zero)
+            {
+                lock (this)
+                {
+                    if (client != IntPtr.Zero)
+                    {
+                        tb_client_submit(client, packet.Pointer);
+                        return;
+                    }
+                }
+            }
+
+            packet.Pointer->status = PacketStatus.ClientShutdown;
+            OnComplete(packet.Pointer, null, 0);
         }
     }
 
@@ -136,22 +138,7 @@ internal sealed class NativeClient : IDisposable
     {
         unsafe
         {
-            if (client == IntPtr.Zero) throw new ObjectDisposedException("Client is closed");
-
-            TBPacket* packet;
-            var status = tb_client_acquire_packet(client, &packet);
-            switch (status)
-            {
-                case PacketAcquireStatus.Ok:
-                    AssertTrue(packet != null);
-                    return new Packet(packet);
-                case PacketAcquireStatus.ConcurrencyMaxExceeded:
-                    throw new ConcurrencyExceededException();
-                case PacketAcquireStatus.Shutdown:
-                    throw new ObjectDisposedException("Client is closing");
-                default:
-                    throw new NotImplementedException();
-            }
+            return new Packet((TBPacket*)Marshal.AllocCoTaskMem(sizeof(TBPacket)));
         }
     }
 
@@ -172,6 +159,9 @@ internal sealed class NativeClient : IDisposable
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
+        => OnComplete(packet, result, result_len);
+
+    private unsafe static void OnComplete(TBPacket* packet, byte* result, uint result_len)
     {
         var request = IRequest.FromUserData(packet->userData);
         if (request != null)

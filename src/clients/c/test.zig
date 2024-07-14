@@ -134,6 +134,7 @@ test "c_client echo" {
         // Submitting some random data to be echoed back:
         for (requests) |*request| {
             request.* = .{
+                .packet = undefined,
                 .completion = &completion,
                 .sent_data_size = prng.random().intRangeAtMost(
                     u32,
@@ -151,7 +152,7 @@ test "c_client echo" {
             packet.next = null;
             packet.status = c.TB_PACKET_OK;
 
-            assert(c.tb_client_submit(tb_client, packet));
+            c.tb_client_submit(tb_client, packet);
         }
 
         // Waiting until the c_client thread has processed all submitted requests:
@@ -181,7 +182,6 @@ test "c_client echo" {
 test "c_client tb_status" {
     const assert_status = struct {
         pub fn action(
-            concurrency_max: u32,
             addresses: []const u8,
             expected_status: c_uint,
         ) !void {
@@ -193,7 +193,6 @@ test "c_client tb_status" {
                 cluster_id,
                 addresses.ptr,
                 @intCast(addresses.len),
-                concurrency_max,
                 tb_context,
                 RequestContextType(0).on_complete,
             );
@@ -203,29 +202,23 @@ test "c_client tb_status" {
         }
     }.action;
 
-    // Valid addresses and concurrency max should return TB_STATUS_SUCCESS:
-    try assert_status(1, "3000", c.TB_STATUS_SUCCESS);
-    try assert_status(32, "127.0.0.1", c.TB_STATUS_SUCCESS);
-    try assert_status(128, "127.0.0.1:3000", c.TB_STATUS_SUCCESS);
-    try assert_status(512, "3000,3001,3002", c.TB_STATUS_SUCCESS);
-    try assert_status(1024, "127.0.0.1,127.0.0.2,172.0.0.3", c.TB_STATUS_SUCCESS);
-    try assert_status(8192, "127.0.0.1:3000,127.0.0.1:3002,127.0.0.1:3003", c.TB_STATUS_SUCCESS);
+    // Valid addresses should return TB_STATUS_SUCCESS:
+    try assert_status("3000", c.TB_STATUS_SUCCESS);
+    try assert_status("127.0.0.1", c.TB_STATUS_SUCCESS);
+    try assert_status("127.0.0.1:3000", c.TB_STATUS_SUCCESS);
+    try assert_status("3000,3001,3002", c.TB_STATUS_SUCCESS);
+    try assert_status("127.0.0.1,127.0.0.2,172.0.0.3", c.TB_STATUS_SUCCESS);
+    try assert_status("127.0.0.1:3000,127.0.0.1:3002,127.0.0.1:3003", c.TB_STATUS_SUCCESS);
 
     // Invalid or empty address should return "TB_STATUS_ADDRESS_INVALID":
-    try assert_status(1, "invalid", c.TB_STATUS_ADDRESS_INVALID);
-    try assert_status(1, "", c.TB_STATUS_ADDRESS_INVALID);
+    try assert_status("invalid", c.TB_STATUS_ADDRESS_INVALID);
+    try assert_status("", c.TB_STATUS_ADDRESS_INVALID);
 
     // More addresses than "replicas_max" should return "TB_STATUS_ADDRESS_LIMIT_EXCEEDED":
     try assert_status(
-        1,
         ("3000," ** constants.replicas_max) ++ "3001",
         c.TB_STATUS_ADDRESS_LIMIT_EXCEEDED,
     );
-
-    // ConcurrencyMax Zero or greater than 4096 should return "TB_STATUS_CONCURRENCY_MAX_INVALID":
-    try assert_status(0, "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
-    try assert_status(8193, "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
-    try assert_status(std.math.maxInt(u32), "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
 
     // All other status are not testable.
 }
@@ -261,6 +254,7 @@ test "c_client tb_packet_status" {
         ) !void {
             var completion = Completion{ .pending = 1 };
             var request = RequestContext{
+                .packet = undefined,
                 .completion = &completion,
                 .sent_data_size = request_size,
             };
@@ -273,7 +267,7 @@ test "c_client tb_packet_status" {
             packet.next = null;
             packet.status = c.TB_PACKET_OK;
 
-            assert(c.tb_client_submit(client, packet));
+            c.tb_client_submit(client, packet);
 
             completion.wait_pending();
 

@@ -12,7 +12,7 @@ public class RequestTests
     [ExpectedException(typeof(AssertionException))]
     public async Task UnexpectedOperation()
     {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
+        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" });
 
         var callback = new CallbackSimulator<Account, UInt128>(
             nativeClient,
@@ -34,7 +34,7 @@ public class RequestTests
     [ExpectedException(typeof(AssertionException))]
     public async Task InvalidSizeOperation()
     {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
+        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" });
 
         var buffer = new byte[Account.SIZE + 1];
         var callback = new CallbackSimulator<Account, UInt128>(
@@ -57,7 +57,7 @@ public class RequestTests
     [TestMethod]
     public async Task RequestException()
     {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
+        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" });
 
         foreach (var isAsync in new bool[] { true, false })
         {
@@ -89,7 +89,7 @@ public class RequestTests
     [TestMethod]
     public async Task Success()
     {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
+        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" });
 
         foreach (var isAsync in new bool[] { true, false })
         {
