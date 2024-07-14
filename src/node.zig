@@ -54,14 +54,13 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     }) catch return null;
 
     const cluster = translate.u128_from_object(env, args[0], "cluster_id") catch return null;
-    const concurrency = translate.u32_from_object(env, args[0], "concurrency") catch return null;
     const addresses = translate.slice_from_object(
         env,
         args[0],
         "replica_addresses",
     ) catch return null;
 
-    return create(env, cluster, concurrency, addresses) catch null;
+    return create(env, cluster, addresses) catch null;
 }
 
 fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
@@ -116,7 +115,6 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
 fn create(
     env: c.napi_env,
     cluster_id: u128,
-    concurrency: u32,
     addresses: []const u8,
 ) !c.napi_value {
     var tsfn_name: c.napi_value = undefined;
@@ -158,7 +156,6 @@ fn create(
         allocator,
         cluster_id,
         addresses,
-        concurrency,
         @intFromPtr(completion_tsfn),
         on_completion,
     ) catch |err| switch (err) {
@@ -166,7 +163,6 @@ fn create(
         error.Unexpected => return translate.throw(env, "Unexpected error occurred on Client."),
         error.AddressInvalid => return translate.throw(env, "Invalid replica address."),
         error.AddressLimitExceeded => return translate.throw(env, "Too many replica addresses."),
-        error.ConcurrencyMaxInvalid => return translate.throw(env, "Concurrency is too high."),
         error.SystemResources => return translate.throw(env, "Failed to reserve system resources."),
         error.NetworkSubsystemFailed => return translate.throw(env, "Network stack failure."),
     };
@@ -206,19 +202,6 @@ fn request(
     );
     const client: tb.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
 
-    const packet = blk: {
-        var packet_ptr: ?*tb.tb_packet_t = undefined;
-        switch (tb.acquire_packet(client, &packet_ptr)) {
-            .ok => break :blk packet_ptr.?,
-            .shutdown => return translate.throw(env, "Client was shutdown."),
-            .concurrency_max_exceeded => return translate.throw(
-                env,
-                "Too many concurrent requests.",
-            ),
-        }
-    };
-    errdefer tb.release_packet(client, packet);
-
     // Create a reference to the callback so it stay alive until the packet completes.
     var callback_ref: c.napi_ref = undefined;
     if (c.napi_create_reference(env, callback, 1, &callback_ref) != c.napi_ok) {
@@ -233,7 +216,7 @@ fn request(
         return translate.throw(env, "Batch must contain at least one event.");
     }
 
-    const packet_data = switch (operation) {
+    const packet, const packet_data = switch (operation) {
         inline else => |op| blk: {
             const buffer = try BufferType(op).alloc(
                 env,
@@ -243,7 +226,9 @@ fn request(
 
             const events = buffer.events();
             try decode_array(StateMachine.Event(op), env, array, events);
-            break :blk std.mem.sliceAsBytes(events);
+
+            const packet = buffer.packet();
+            break :blk .{ packet, std.mem.sliceAsBytes(events) };
         },
         .pulse => unreachable,
     };
@@ -280,8 +265,10 @@ fn on_completion(
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void {
+    _ = client;
+
     switch (packet.status) {
-        .ok => {},
+        .ok, .client_shutdown => {}, // Handled on the JS side to throw exception.
         .too_much_data => unreachable, // We limit packet data size during request().
         .invalid_operation => unreachable, // We check the operation during request().
         .invalid_data_size => unreachable, // We set correct data size during request().
@@ -291,7 +278,7 @@ fn on_completion(
         inline else => |op| {
             const event_count = @divExact(packet.data_size, @sizeOf(StateMachine.Event(op)));
             const buffer: BufferType(op) = .{
-                .ptr = @ptrCast(packet.data.?),
+                .ptr = @ptrCast(packet),
                 .count = event_count,
             };
 
@@ -309,9 +296,6 @@ fn on_completion(
         },
         .pulse => unreachable,
     }
-
-    // Stuff client pointer into packet.next to store it until the packet arrives on the JS thread.
-    @as(*usize, @ptrCast(&packet.next)).* = @intFromPtr(client);
 
     // Queue the packet to be processed on the JS thread to invoke its JS callback.
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
@@ -333,29 +317,33 @@ fn on_completion_js(
     _ = unused_js_cb;
     _ = unused_context;
 
+    // Extract the remaining packet information from the packet before it's freed.
     const packet: *tb.tb_packet_t = @ptrCast(@alignCast(packet_argument.?));
-    assert(packet.status == .ok);
+    const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet.user_data.?));
 
-    // Decode the packet's Buffer results into an array then free the Buffer.
+    // Decode the packet's Buffer results into an array then free the packet/Buffer.
     const array_or_error = switch (@as(Operation, @enumFromInt(packet.operation))) {
         inline else => |op| blk: {
             const buffer_size: BufferSize = @bitCast(packet.data_size);
             const buffer: BufferType(op) = .{
-                .ptr = @ptrCast(packet.data.?),
+                .ptr = @ptrCast(packet),
                 .count = buffer_size.event_count,
             };
             defer buffer.free();
 
-            const results = buffer.results()[0..buffer_size.result_count];
-            break :blk encode_array(StateMachine.Result(op), env, results);
+            switch (packet.status) {
+                .ok => {
+                    const results = buffer.results()[0..buffer_size.result_count];
+                    break :blk encode_array(StateMachine.Result(op), env, results);
+                },
+                .client_shutdown => {
+                    break :blk translate.throw(env, "Client was shutdown.");
+                },
+                else => unreachable, // all other packet status' handled in previous callback.
+            }
         },
         .pulse => unreachable,
     };
-
-    // Extract the remaining packet information and release it back to the client.
-    const client: tb.tb_client_t = @ptrFromInt(@as(*usize, @ptrCast(&packet.next)).*);
-    const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet.user_data.?));
-    tb.release_packet(client, packet);
 
     // Parse Result array out of packet data, freeing it in the process.
     // NOTE: Ensure this is called before anything that could early-return to avoid a alloc leak.
@@ -498,20 +486,25 @@ fn BufferType(comptime op: Operation) type {
         const Buffer = @This();
         const Event = StateMachine.Event(op);
         const Result = StateMachine.Result(op);
-        const max_align: u29 = @max(@alignOf(Event), @alignOf(Result));
+
+        const body_align = @max(@alignOf(Event), @alignOf(Result));
+        const body_offset = std.mem.alignForward(usize, @sizeOf(tb.tb_packet_t), body_align);
 
         ptr: [*]u8,
         count: u32,
 
         fn alloc(env: c.napi_env, count: u32) !Buffer {
             // Allocate enough bytes to hold memory for the Events and the Results.
-            const max_bytes = @max(
+            const body_size = @max(
                 @sizeOf(Event) * count,
                 @sizeOf(Result) * event_count(op, count),
             );
-            if (@sizeOf(vsr.Header) + max_bytes > constants.message_size_max) {
+            if (@sizeOf(vsr.Header) + body_size > constants.message_size_max) {
                 return translate.throw(env, "Batch is larger than the maximum message size.");
             }
+
+            const max_align = @max(body_align, @alignOf(tb.tb_packet_t));
+            const max_bytes = body_offset + body_size;
 
             const bytes = allocator.alignedAlloc(u8, max_align, max_bytes) catch |e| switch (e) {
                 error.OutOfMemory => return translate.throw(
@@ -528,21 +521,30 @@ fn BufferType(comptime op: Operation) type {
         }
 
         fn free(buffer: Buffer) void {
-            const max_bytes = @max(
+            const body_size = @max(
                 @sizeOf(Event) * buffer.count,
                 @sizeOf(Result) * event_count(op, buffer.count),
             );
+
+            const max_align = @max(body_align, @alignOf(tb.tb_packet_t));
+            const max_bytes = body_offset + body_size;
+
             const bytes: []align(max_align) u8 = @alignCast(buffer.ptr[0..max_bytes]);
             allocator.free(bytes);
         }
 
+        fn packet(buffer: Buffer) *tb.tb_packet_t {
+            return @alignCast(@ptrCast(buffer.ptr));
+        }
+
         fn events(buffer: Buffer) []Event {
-            const event_bytes = buffer.ptr[0 .. @sizeOf(Event) * buffer.count];
+            const event_bytes = buffer.ptr[body_offset..][0 .. @sizeOf(Event) * buffer.count];
             return @alignCast(std.mem.bytesAsSlice(Event, event_bytes));
         }
 
         fn results(buffer: Buffer) []Result {
-            const result_bytes = buffer.ptr[0 .. @sizeOf(Result) * event_count(op, buffer.count)];
+            const result_size = @sizeOf(Result) * event_count(op, buffer.count);
+            const result_bytes = buffer.ptr[body_offset..][0..result_size];
             return @alignCast(std.mem.bytesAsSlice(Result, result_bytes));
         }
 
