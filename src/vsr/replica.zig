@@ -659,7 +659,9 @@ pub fn ReplicaType(
 
             // A replication quorum of replicas have committed atop op_prepare_max, op_checkpoint
             // is guaranteed to be durable on a commit quorum of replicas.
-            if (self.op_checkpoint() == 0 or self.commit_max > self.op_prepare_max()) {
+            if (self.op_checkpoint() == 0 or self.solo() or
+                self.commit_max > self.op_prepare_max())
+            {
                 self.checkpoint_quorum = true;
             }
 
