@@ -657,7 +657,11 @@ pub fn ReplicaType(
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
 
-            if (self.op_checkpoint() == 0) self.checkpoint_quorum = true;
+            // A replication quorum of replicas have committed atop op_prepare_max, op_checkpoint
+            // is guaranteed to be durable on a commit quorum of replicas.
+            if (self.op_checkpoint() == 0 or self.commit_max > self.op_prepare_max()) {
+                self.checkpoint_quorum = true;
+            }
 
             for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
                 if (self.journal.faulty.bit(.{ .index = slot })) {
@@ -2152,6 +2156,19 @@ pub fn ReplicaType(
                 assert(!self.do_view_change_quorum);
                 self.do_view_change_quorum = true;
 
+                if (!self.checkpoint_quorum) {
+                    // In both of these cases, the canonical DVC prepared or committed beyond
+                    // the current op_prepare_max, which signals that the replica with the
+                    // canonical DVC received a replication quorum for the current op_checkpoint.
+                    // We proactively advance our op_prepare_max here, the alternative would be to
+                    // give up becoming primary and waiting to receive a replication quorum for the
+                    // current checkpoint via pings/commits.
+                    if (op_checkpoint_max > self.op_checkpoint() or
+                        op_head > self.op_prepare_max())
+                    {
+                        self.checkpoint_quorum = true;
+                    }
+                }
                 self.primary_set_log_from_do_view_change_messages();
                 // We aren't status=normal yet, but our headers from our prior log_view may have
                 // been replaced. If we participate in another DVC (before reaching status=normal,
@@ -9496,7 +9513,7 @@ pub fn ReplicaType(
                 // If the primary has committed an operation past the prepare_max for
                 // the current op_checkpoint, a commit-quorum of replicas have done the same.
                 // The current op_checkpoint is guaranteed to be durable on a commit quorum of
-                // replicas.
+                // replicas and we can advance our op_prepare_max.
                 if (header.into_const(.commit)) |h| {
                     if (h.commit > self.op_prepare_max()) {
                         log.debug("{}: found replication quorum (via commit) for checkpoint={}", .{
