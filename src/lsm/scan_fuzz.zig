@@ -109,15 +109,19 @@ const Thing = extern struct {
 
     /// Creates a struct from a template, setting all zeroed fields with random values and
     /// calculating the checksum of the resulting struct.
-    fn from_template(template: Thing, random: std.rand.Random, id: u128, timestamp: u64) Thing {
+    fn from_template(
+        template: Thing,
+        random: std.rand.Random,
+        init: struct { id: u128, timestamp: u64 },
+    ) Thing {
         assert(template.id == 0);
         assert(template.timestamp == 0);
-        assert(id != 0);
-        assert(timestamp != 0);
+        assert(init.id != 0);
+        assert(init.timestamp != 0);
 
         var thing: Thing = template;
-        thing.id = id;
-        thing.timestamp = timestamp;
+        thing.id = init.id;
+        thing.timestamp = init.timestamp;
         for (std.enums.values(Index)) |index| {
             const value = thing.get_index(index);
             if (value == 0) {
@@ -374,7 +378,7 @@ const QuerySpecFuzzer = struct {
         for (0..query_spec_count) |prefix| {
             var fuzzer = QuerySpecFuzzer{
                 .random = random,
-                .prefix = @truncate(prefix + 1),
+                .prefix = @intCast(prefix + 1),
             };
 
             query_specs.append_assume_capacity(fuzzer.generate_query_spec());
@@ -819,8 +823,10 @@ const Environment = struct {
                 var dummy = Thing.zeroed();
                 env.forest.grooves.things.insert(&dummy.from_template(
                     env.random,
-                    env.random.int(u128),
-                    env.object_count,
+                    .{
+                        .id = env.random.int(u128),
+                        .timestamp = env.object_count,
+                    },
                 ));
 
                 continue;
@@ -837,11 +843,13 @@ const Environment = struct {
             query_spec.expected_results += 1; // Expected objects that match the spec.
             env.forest.grooves.things.insert(&template.from_template(
                 env.random,
-                prefix_combine(
-                    query_spec.prefix,
-                    query_spec.expected_results,
-                ),
-                env.object_count,
+                .{
+                    .id = prefix_combine(
+                        query_spec.prefix,
+                        query_spec.expected_results,
+                    ),
+                    .timestamp = env.object_count,
+                },
             ));
         }
 
@@ -1135,7 +1143,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     );
     defer storage.deinit(allocator);
 
-    const repeat: u32 = @truncate(
+    const repeat: u32 = @intCast(
         fuzz_args.events_max orelse
             random.intRangeAtMostBiased(u32, 1, 32),
     );
