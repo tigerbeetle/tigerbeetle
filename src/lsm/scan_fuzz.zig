@@ -107,6 +107,12 @@ const Thing = extern struct {
         }
     }
 
+    fn merge_all(things: []const Thing) Thing {
+        var result = Thing.zeroed();
+        for (things) |thing| result.merge(thing);
+        return result;
+    }
+
     /// Creates a struct from a template, setting all zeroed fields with random values and
     /// calculating the checksum of the resulting struct.
     fn from_template(
@@ -207,37 +213,18 @@ const ScanLookup = ScanLookupType(
 
 const Scan = ThingsGroove.ScanBuilder.Scan;
 
+/// The max number of indexes in a query.
+const index_max: comptime_int = @min(constants.lsm_scans_max, std.enums.values(Index).len);
+
 /// The max number of query parts.
-/// If `lsm_scans_max == x`, then we can have at most x fields and x - 1 merge operations.
-const query_part_max = (constants.lsm_scans_max * 2) - 1;
-
-/// The max number of combinations all indexes can produce.
-/// Combinations Formula: `C(n,r) = n! / (r! * (n - r)!)`,
-/// where `n == lsm_scans_max` and `r == 2` (either assigned or zeroed).
-const template_max: u32 = template_max: {
-    assert(constants.lsm_scans_max >= 2);
-
-    const factorial = struct {
-        fn factorial(comptime n: comptime_int) comptime_int {
-            var result = 1;
-            for (1..n + 1) |i| {
-                result *= i;
-            }
-            return result;
-        }
-    }.factorial;
-
-    break :template_max factorial(constants.lsm_scans_max) /
-        (2 * factorial(constants.lsm_scans_max - 2));
-};
+/// If `index_max == x`, then we can have at most x fields and x - 1 merge operations.
+const query_part_max = (index_max * 2) - 1;
 
 /// The max number of query specs generated per run.
 /// Always generate more than one query spec, since multiple queries can
 /// test both the positive space (results must match the query) and the
 /// negative space (results from other queries must not match).
 const query_spec_max = 8;
-
-const Templates = stdx.BoundedArray(Thing, template_max);
 
 const QueryPart = union(enum) {
     const Field = struct { index: Index, value: u64 };
@@ -273,21 +260,18 @@ const QuerySpec = struct {
     query: Query,
     // Ascending or descending.
     reversed: bool,
-    // Matching templates to populate the database.
-    // Zeroed fields are not part of the condition and can be filled with random values.
-    templates: Templates,
     // Number of expected results.
     expected_results: u32,
 
     /// Formats the array of `QueryPart`, for debugging purposes.
-    /// E.g. ((a OR b) and c)
+    /// E.g. "((a OR b) and c)".
     pub fn format(
         self: *const QuerySpec,
         comptime _: []const u8,
         _: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        var stack: stdx.BoundedArray(QueryPart.Merge, constants.lsm_scans_max - 1) = .{};
+        var stack: stdx.BoundedArray(QueryPart.Merge, index_max - 1) = .{};
         var print_operator: bool = false;
         for (0..self.query.count()) |index| {
             // Reverse the RPN array in order to print in the natual order.
@@ -349,7 +333,8 @@ const QuerySpec = struct {
 ///
 /// Some limitations in place:
 ///
-/// - Limited up to the max number of scans defined at `constants.lsm_scans_max`.
+/// - Limited up to the max number of scans defined at `constants.lsm_scans_max`
+///   or the number of indexed fields in `Thing`.
 ///
 /// - The next operator must be the opposite of the previous one,
 ///   avoiding unnecessary use of parenthesis, such as `(a AND b) AND c`.
@@ -390,14 +375,12 @@ const QuerySpecFuzzer = struct {
     fn generate_query_spec(
         self: *QuerySpecFuzzer,
     ) QuerySpec {
-        const field_max = self.random.intRangeAtMostBiased(u32, 1, constants.lsm_scans_max);
+        const field_max = self.random.intRangeAtMostBiased(u32, 1, index_max);
         const query = self.generate_query(field_max);
-        const templates = get_templates(query.const_slice());
 
         return QuerySpec{
             .prefix = self.prefix,
             .query = query,
-            .templates = templates,
             .reversed = self.random.boolean(),
             .expected_results = 0,
         };
@@ -408,7 +391,7 @@ const QuerySpecFuzzer = struct {
         field_max: u32,
     ) Query {
         assert(field_max > 0);
-        assert(field_max <= constants.lsm_scans_max);
+        assert(field_max <= index_max);
 
         const QueryPartTag = std.meta.Tag(QueryPart);
         const MergeStack = struct {
@@ -435,7 +418,7 @@ const QuerySpecFuzzer = struct {
         }
 
         // Multi field queries must start with a merge.
-        var stack: stdx.BoundedArray(MergeStack, constants.lsm_scans_max - 1) = .{};
+        var stack: stdx.BoundedArray(MergeStack, index_max - 1) = .{};
         stack.append_assume_capacity(.{
             .index = 0,
             .operand_count = 0,
@@ -451,7 +434,7 @@ const QuerySpecFuzzer = struct {
 
         // Limiting the maximum number of merges upfront produces both simple and complex
         // queries with the same probability.
-        // Otherwise, simple queries would be rare and limited to have few fields.
+        // Otherwise, simple queries would be rare or limited to have few fields.
         const merge_max = self.random.intRangeAtMostBiased(u32, 1, field_max - 1);
 
         var field_remain: u32 = field_max;
@@ -552,7 +535,7 @@ const QuerySpecFuzzer = struct {
 
     fn index_random(self: *QuerySpecFuzzer) Index {
         const index_count = comptime std.enums.values(Index).len;
-        comptime assert(index_count >= constants.lsm_scans_max);
+        comptime assert(index_count >= index_max);
         assert(self.indexes_used.count() < index_count);
         while (true) {
             const index = self.random.enumValue(Index);
@@ -561,87 +544,6 @@ const QuerySpecFuzzer = struct {
             self.indexes_used.insert(index);
             return index;
         }
-    }
-
-    /// Templates are objects that match the condition, such as:
-    /// - The condition `a=1` (from now on represented only as `a` for brevity)
-    ///   generates a template with the field `a` set to `1`, so when inserting
-    ///   objects based on this template, they're expected to match.
-    ///
-    /// - The condition `(a OR b)` generates two templates, one with the
-    ///   field `a` and another one with the field `b` set, so both of them
-    ///   can satisfy the OR clause.
-    ///
-    /// - The condition `(a AND b)` generates only a single template that
-    ///   matches the criteria with both fields `a` and `b` set to the
-    ///   corresponding value.
-    ///
-    /// More complex queries like `(a OR b) AND (c OR d)` need to combine the
-    /// templates generated by each individual condition in such a way any of
-    /// them can satisfy the OR and AND clauses: {a,c},{a,d},{b,c}, and {b,d}.
-    fn get_templates(
-        query_parts: []const QueryPart,
-    ) Templates {
-        var stack = stdx.BoundedArray(Templates, query_part_max){};
-        for (query_parts) |query_part| {
-            switch (query_part) {
-                .field => |field| {
-                    var template = Thing.zeroed();
-                    template.set_index(field.index, field.value);
-
-                    var templates: Templates = .{};
-                    templates.append_assume_capacity(template);
-                    stack.append_assume_capacity(templates);
-                },
-                .merge => |merge| {
-                    var templates: Templates = .{};
-                    const templates_to_merge =
-                        stack.slice()[stack.count() - merge.operand_count ..];
-
-                    switch (merge.operator) {
-                        .union_set => {
-                            // Templates should be added on unions.
-                            for (templates_to_merge) |operand_templates| {
-                                for (operand_templates.const_slice()) |template| {
-                                    templates.append_assume_capacity(template);
-                                }
-                            }
-                        },
-                        .intersection_set => {
-                            // Templates should be merged on intersections,
-                            // see the documentation above for more details.
-                            var matrix_indexes = [_]u32{0} ** query_part_max;
-                            while (matrix_indexes[0] < templates_to_merge[0].count()) {
-                                var template = Thing.zeroed();
-                                for (templates_to_merge, 0..) |template_to_merge, i| {
-                                    template.merge(template_to_merge.get(matrix_indexes[i]));
-                                }
-                                templates.append_assume_capacity(template);
-
-                                for (0..merge.operand_count) |i| {
-                                    const reverse_index = merge.operand_count - 1 - i;
-                                    if (reverse_index == 0 or
-                                        matrix_indexes[reverse_index] <
-                                        templates_to_merge[reverse_index].count() - 1)
-                                    {
-                                        matrix_indexes[reverse_index] += 1;
-                                    } else {
-                                        matrix_indexes[reverse_index] = 0;
-                                        matrix_indexes[reverse_index - 1] += 1;
-                                    }
-                                }
-                            }
-                        },
-                    }
-
-                    stack.truncate(stack.count() - merge.operand_count);
-                    stack.append_assume_capacity(templates);
-                },
-            }
-        }
-
-        assert(stack.count() == 1);
-        return stack.get(0);
     }
 };
 
@@ -811,8 +713,6 @@ const Environment = struct {
 
     // TODO: sometimes update and delete things.
     fn populate_things(env: *Environment, query_spec: *QuerySpec) !void {
-        assert(query_spec.templates.count() > 0);
-
         for (0..batch_max) |_| {
             // Total number of objects inserted.
             env.object_count += 1;
@@ -832,16 +732,9 @@ const Environment = struct {
                 continue;
             }
 
-            const template = query_spec.templates.slice()[
-                env.random.intRangeAtMostBiased(
-                    usize,
-                    0,
-                    query_spec.templates.count() - 1,
-                )
-            ];
-
+            const template = env.template_matching_query(query_spec);
             query_spec.expected_results += 1; // Expected objects that match the spec.
-            env.forest.grooves.things.insert(&template.from_template(
+            const thing = template.from_template(
                 env.random,
                 .{
                     .id = prefix_combine(
@@ -850,10 +743,68 @@ const Environment = struct {
                     ),
                     .timestamp = env.object_count,
                 },
-            ));
+            );
+            env.forest.grooves.things.insert(&thing);
         }
 
         try env.commit();
+    }
+
+    /// Templates are objects that match the condition, such as:
+    /// - The condition `a=1` (from now on represented only as `a` for brevity)
+    ///   generates a template with the field `a` set to `1`, so when inserting
+    ///   objects based on this template, they're expected to match.
+    ///
+    /// - The condition `(a OR b)` generates two templates, one with the
+    ///   field `a` and another one with the field `b` set, so both of them
+    ///   can satisfy the OR clause.
+    ///
+    /// - The condition `(a AND b)` generates only a single template that
+    ///   matches the criteria with both fields `a` and `b` set to the
+    ///   corresponding value.
+    ///
+    /// More complex queries like `(a OR b) AND (c OR d)` need to combine the
+    /// templates generated by each individual condition in such a way any of
+    /// them can satisfy the OR and AND clauses: {a,c},{a,d},{b,c}, and {b,d}.
+    fn template_matching_query(env: *const Environment, query_spec: *const QuerySpec) Thing {
+        var stack: [query_part_max]Thing = undefined;
+        var stack_top: usize = 0;
+        for (query_spec.query.const_slice()) |query_part| {
+            switch (query_part) {
+                .field => |field| {
+                    var thing = Thing.zeroed();
+                    thing.set_index(field.index, field.value);
+                    stack[stack_top] = thing;
+                    stack_top += 1;
+                },
+                .merge => |merge| {
+                    const operands = stack[stack_top - merge.operand_count .. stack_top];
+                    const result = switch (merge.operator) {
+                        .union_set => union_set: {
+                            const index = env.random.uintLessThan(usize, operands.len);
+                            break :union_set if (env.random.boolean())
+                                operands[index]
+                            else
+                                // Union `(a OR B)` should also match if the element contains
+                                // both `a` and `b`.
+                                Thing.merge_all(operands[index..][0..env.random.intRangeAtMost(
+                                    usize,
+                                    1,
+                                    operands.len - index,
+                                )]);
+                        },
+                        // Intersection matches only when the element contains all conditions.
+                        .intersection_set => Thing.merge_all(operands),
+                    };
+                    stack_top -= merge.operand_count;
+                    stack[stack_top] = result;
+                    stack_top += 1;
+                },
+            }
+        }
+
+        assert(stack_top == 1);
+        return stack[0];
     }
 
     fn run_query(env: *Environment, query_spec: *QuerySpec) !void {
@@ -942,7 +893,7 @@ const Environment = struct {
         const things_groove = &env.forest.grooves.things;
         const scan_builder: *ThingsGroove.ScanBuilder = &things_groove.scan_builder;
 
-        var stack = stdx.BoundedArray(*Scan, constants.lsm_scans_max){};
+        var stack = stdx.BoundedArray(*Scan, index_max){};
         for (query.const_slice()) |query_part| {
             switch (query_part) {
                 .field => |field| {
@@ -953,6 +904,7 @@ const Environment = struct {
                         TimestampRange.lte(timestamp_last - 1)
                     else
                         TimestampRange.gte(timestamp_last + 1);
+                    assert(timestamp_range.min <= timestamp_range.max);
 
                     const scan = switch (field.index) {
                         inline else => |comptime_index| scan_builder.scan_prefix(
@@ -981,6 +933,7 @@ const Environment = struct {
                 },
             }
         }
+
         assert(stack.count() == 1);
         return stack.get(0);
     }
