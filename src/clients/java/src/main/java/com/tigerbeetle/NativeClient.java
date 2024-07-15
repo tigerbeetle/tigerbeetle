@@ -18,50 +18,55 @@ final class NativeClient implements AutoCloseable {
         // Keeping the contextHandle and a reference counter guarded by
         // atomics in order to prevent the client from using a disposed
         // context during `close()`.
-        private final AtomicLong atomicHandle;
+        private long handle;
         private final AtomicLong atomicHandleReferences;
+        private final AtomicLong atomicHandleClosePending;
+
+        private static final long REF_CLOSED = 1 << 0;
+        private static final long REF_ACCESS = 1 << 1;
 
         public NativeHandle(long handle) {
-            this.atomicHandle = new AtomicLong(handle);
+            this.handle = handle;
             this.atomicHandleReferences = new AtomicLong(0);
+            this.atomicHandleClosePending = new AtomicLong(0);
         }
 
         public void submit(final Request<?> request) throws Exception {
+            // Bump refs to access. Bail if REF_CLOSED bit was set.
+            // After observing REF_CLOSED, any other modifications which dont unset it don't matter.
+            if ((atomicHandleReferences.addAndGet(REF_ACCESS) & REF_CLOSED) != 0) {
+                throw new IllegalStateException("Client is closed");
+            }
+
             try {
-                atomicHandleReferences.incrementAndGet();
-                final var handle = atomicHandle.getAcquire();
-
-                if (handle == 0L)
-                    throw new IllegalStateException("Client is closed");
-
                 NativeClient.submit(handle, request);
-
             } finally {
-                atomicHandleReferences.decrementAndGet();
+                // After accessing the handle, remove our access from the ref.
+                // Observing REF_CLOSED bit set means close() happened during the submit()
+                // so remove an access from ClosePending. First thread to make ClosePending
+                // equal to zero knows no other thread is accessing the handle and can free it.
+                if ((atomicHandleReferences.addAndGet(-REF_ACCESS) & REF_CLOSED) != 0) {
+                    if (atomicHandleClosePending.addAndGet(-REF_ACCESS) == 0) {
+                        clientDeinit(handle);
+                    }
+                }
             }
         }
 
         public void close() {
-            if (atomicHandle.getAcquire() != 0L) {
-                synchronized (this) {
-                    final var handle = atomicHandle.getAcquire();
-                    if (handle != 0L) {
-                        // Signalize that this client is closed by setting the handler to 0,
-                        // and spin wait until all references that might be using the old handle
-                        // could be released.
-                        atomicHandle.setRelease(0L);
-                        while (atomicHandleReferences.getAcquire() > 0L) {
-                            // Thread::onSpinWait method to give JVM a hint that the following code
-                            // is in a spin loop. This has no side-effect and only provides a hint
-                            // to optimize spin loops in a processor specific manner.
-                            Thread.onSpinWait();
-                        }
+            // Observe all REF_ACCESS' while resetting them and setting the REF_CLOSED bit.
+            // Seeing the REF_CLOSED bit already set implies close() has already started so bail.
+            final var refs = atomicHandleReferences.getAndSet(REF_CLOSED);
+            if ((refs & REF_CLOSED) != 0) {
+                return;
+            }
 
-                        // This function waits until all submitted requests are completed, and no
-                        // more packets can be acquired after that.
-                        clientDeinit(handle);
-                    }
-                }
+            // Add the REF_ACCESS' observed when setting REF_CLOSED to ClosePending.
+            // That many threads are still accessing the handle. When they decrement and see
+            // REF_CLOSED, they will decrement ClosePending to cancel out our matching addition.
+            // First of either the accessing threads or us to make ClosePending 0 frees the handle.
+            if (atomicHandleClosePending.addAndGet(refs) == 0) {
+                clientDeinit(handle);
             }
         }
 

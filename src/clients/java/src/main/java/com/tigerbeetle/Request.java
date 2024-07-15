@@ -111,7 +111,11 @@ abstract class Request<TResponse extends Batch> {
 
             } else if (status != PacketStatus.Ok.value) {
 
-                exception = new RequestException(status);
+                if (status == PacketStatus.ClientShutdown.value) {
+                    exception = new IllegalStateException("Client is closed");
+                } else {
+                    exception = new RequestException(status);
+                }
 
             } else {
 

@@ -267,12 +267,9 @@ public final class Client implements AutoCloseable {
      * @return a read-only {@link com.tigerbeetle.AccountBatch batch} containing all accounts that
      *         match the query parameters.
      * @throws NullPointerException if {@code filter} is null.
-     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
-     *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
-    public AccountBatch queryAccounts(final QueryFilter filter)
-            throws ConcurrencyExceededException {
+    public AccountBatch queryAccounts(final QueryFilter filter) throws Exception {
         final var request = BlockingRequest.queryAccounts(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -285,12 +282,10 @@ public final class Client implements AutoCloseable {
      * @param filter a {@link com.tigerbeetle.QueryFilter} containing all query parameters.
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws NullPointerException if {@code filter} is null.
-     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
-     *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<AccountBatch> queryAccountsAsync(final QueryFilter filter)
-            throws ConcurrencyExceededException {
+            throws Exception {
         final var request = AsyncRequest.queryAccounts(this.nativeClient, filter);
         request.beginRequest();
         return request.getFuture();
@@ -303,12 +298,9 @@ public final class Client implements AutoCloseable {
      * @return a read-only {@link com.tigerbeetle.TransferBatch batch} containing all transfers that
      *         match the query parameters.
      * @throws NullPointerException if {@code filter} is null.
-     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
-     *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
-    public TransferBatch queryTransfers(final QueryFilter filter)
-            throws ConcurrencyExceededException {
+    public TransferBatch queryTransfers(final QueryFilter filter) throws Exception {
         final var request = BlockingRequest.queryTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -321,12 +313,10 @@ public final class Client implements AutoCloseable {
      * @param filter a {@link com.tigerbeetle.QueryFilter} containing all query parameters.
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws NullPointerException if {@code filter} is null.
-     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
-     *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<TransferBatch> queryTransfersAsync(final QueryFilter filter)
-            throws ConcurrencyExceededException {
+            throws Exception {
         final var request = AsyncRequest.queryTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.getFuture();
