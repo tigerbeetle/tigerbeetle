@@ -110,11 +110,12 @@ const NativeClient = struct {
         };
 
         // Compute a valid, aligned Packet pointer inside packet_buffer.
-        const packet_buffer: []u8 = ReflectionHelper.get_packet_buffer_slice(env, request_obj) orelse @panic("Request.packetBuffer somehow became null or invalid");
+        const packet_buf: []u8 = ReflectionHelper.get_packet_buffer_slice(env, request_obj) orelse
+            @panic("Request.packetBuffer somehow became null or invalid");
         const packet_align_ptr =
-            std.mem.alignForward(usize, @intFromPtr(packet_buffer.ptr), @alignOf(tb.tb_packet_t));
+            std.mem.alignForward(usize, @intFromPtr(packet_buf.ptr), @alignOf(tb.tb_packet_t));
         assert(packet_align_ptr + @sizeOf(tb.tb_packet_t) <=
-            @intFromPtr(packet_buffer.ptr + packet_buffer.len));
+            @intFromPtr(packet_buf.ptr + packet_buf.len));
 
         // Holds a global reference to prevent GC before the callback.
         const global_ref = JNIHelper.new_global_reference(env, request_obj);
@@ -126,6 +127,7 @@ const NativeClient = struct {
         packet.data_size = @intCast(send_buffer.len);
         packet.next = null;
         packet.status = .ok;
+
         tb.submit(context.client, packet);
     }
 
