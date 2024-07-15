@@ -563,7 +563,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
                 var range = range_overlap;
                 outer: for ([_]Direction{ .descending, .ascending }) |direction| {
-                    inner: for (0..constants.lsm_growth_factor + 1) |_| {
+                    inner: for (0..constants.lsm_growth_factor) |_| {
                         if (range.tables.full()) break :outer;
                         if (value_count_output >= value_count_target) break :outer;
 

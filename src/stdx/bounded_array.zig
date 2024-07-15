@@ -53,15 +53,15 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
             return array.inner.addOneAssumeCapacity();
         }
 
-        pub fn insert_assume_capacity(self: *Self, i: usize, item: T) void {
+        pub fn insert_assume_capacity(self: *Self, index: usize, item: T) void {
             assert(self.inner.len < capacity);
-            assert(i <= self.inner.len);
+            assert(index <= self.inner.len);
 
             self.inner.len += 1;
 
-            var s = self.slice();
-            stdx.copy_right(.exact, T, s[i + 1 ..], s[i .. s.len - 1]);
-            s[i] = item;
+            var slice_ = self.slice();
+            stdx.copy_right(.exact, T, slice_[index + 1 ..], slice_[index .. slice_.len - 1]);
+            slice_[index] = item;
         }
 
         pub inline fn append_assume_capacity(array: *Self, item: T) void {
