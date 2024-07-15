@@ -4614,7 +4614,9 @@ test "StateMachine: Demuxer" {
 }
 
 test "StateMachine: ref all decls" {
-    const Storage = @import("storage.zig").Storage;
+    const IO = @import("io.zig").IO;
+    const Storage = @import("storage.zig").Storage(IO);
+
     const StateMachine = StateMachineType(Storage, .{
         .message_body_size_max = global_constants.message_body_size_max,
         .lsm_batch_multiple = 1,
