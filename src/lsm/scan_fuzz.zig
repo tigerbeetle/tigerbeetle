@@ -290,10 +290,7 @@ const QuerySpec = struct {
             switch (query_part) {
                 .field => |field| {
                     print_operator = true;
-                    try writer.print("{s}={}", .{
-                        std.enums.tagName(Index, field.index).?,
-                        field.value,
-                    });
+                    try writer.print("{s}", .{std.enums.tagName(Index, field.index).?});
 
                     if (merge_current) |merge| {
                         merge.operand_count -= 1;
