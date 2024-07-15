@@ -122,6 +122,9 @@ const Inspector = struct {
     io: vsr.io.IO,
     storage: Storage,
 
+    superblock_buffer: []align(constants.sector_size) u8,
+    superblock_headers: [constants.superblock_copies]*const SuperBlockHeader,
+
     busy: bool = false,
     read: Storage.Read = undefined,
 
@@ -135,6 +138,8 @@ const Inspector = struct {
             .fd = undefined,
             .io = undefined,
             .storage = undefined,
+            .superblock_buffer = undefined,
+            .superblock_headers = undefined,
         };
 
         const dirname = std.fs.path.dirname(path) orelse ".";
@@ -157,10 +162,28 @@ const Inspector = struct {
         inspector.storage = try Storage.init(&inspector.io, inspector.fd);
         errdefer inspector.storage.deinit();
 
+        inspector.superblock_buffer = try allocator.alignedAlloc(
+            u8,
+            constants.sector_size,
+            vsr.superblock.superblock_zone_size,
+        );
+        errdefer allocator.free(inspector.superblock_buffer);
+
+        try inspector.read_buffer(inspector.superblock_buffer, .superblock, 0);
+
+        for (&inspector.superblock_headers, 0..) |*superblock_header, copy| {
+            const offset = @as(u64, copy) * vsr.superblock.superblock_copy_size;
+            superblock_header.* = @alignCast(std.mem.bytesAsValue(
+                SuperBlockHeader,
+                inspector.superblock_buffer[offset..][0..@sizeOf(SuperBlockHeader)],
+            ));
+        }
+
         return inspector;
     }
 
     fn destroy(inspector: *Inspector) void {
+        inspector.allocator.free(inspector.superblock_buffer);
         inspector.storage.deinit();
         inspector.io.deinit();
         std.posix.close(inspector.fd);
@@ -192,29 +215,21 @@ const Inspector = struct {
         log.info("\"|_|_\" means that the value matches in copies 0/2, but differs from copies " ++
             "1/3.", .{});
 
-        const buffer = try inspector.read_buffer(.superblock, 0, vsr.Zone.superblock.size().?);
-        defer inspector.allocator.free(buffer);
-
-        const copies = std.mem.bytesAsSlice(
-            extern struct {
-                header: SuperBlockHeader,
-                padding: [vsr.superblock.superblock_copy_size - @sizeOf(SuperBlockHeader)]u8,
-            },
-            buffer,
-        );
-        assert(copies.len == constants.superblock_copies);
-
         var header_valid: [constants.superblock_copies]bool = undefined;
-        for (copies, 0..) |*copy, i| header_valid[i] = copy.header.valid_checksum();
+        for (&inspector.superblock_headers, 0..) |header, i| {
+            header_valid[i] = header.valid_checksum();
+        }
 
         inline for (std.meta.fields(SuperBlockHeader)) |field| {
             var group_by = GroupByType(constants.superblock_copies){};
-            for (copies) |copy| group_by.compare(std.mem.asBytes(&@field(copy.header, field.name)));
+            for (inspector.superblock_headers) |header| {
+                group_by.compare(std.mem.asBytes(&@field(header, field.name)));
+            }
 
             var label_buffer: [128]u8 = undefined;
             for (group_by.groups()) |group| {
                 const header_index = group.findFirstSet().?;
-                const header = copies[header_index].header;
+                const header = &inspector.superblock_headers[header_index];
                 const header_mark: u8 = if (header_valid[header_index]) '|' else 'X';
 
                 var label_stream = std.io.fixedBufferStream(&label_buffer);
@@ -224,7 +239,7 @@ const Inspector = struct {
                 try label_stream.writer().writeByte(' ');
                 try label_stream.writer().writeAll(field.name);
 
-                try print_struct(output, label_stream.getWritten(), &@field(header, field.name));
+                try print_struct(output, label_stream.getWritten(), &@field(header.*, field.name));
             }
         }
     }
@@ -236,15 +251,25 @@ const Inspector = struct {
         log.info("\"|_\" is the redundant header.", .{});
         log.info("\"_|\" is the prepare's header.", .{});
 
-        const headers_buffer =
-            try inspector.read_buffer(.wal_headers, 0, constants.journal_size_headers);
+        const headers_buffer = try inspector.allocator.alignedAlloc(
+            u8,
+            constants.sector_size,
+            constants.journal_size_headers,
+        );
         defer inspector.allocator.free(headers_buffer);
+
+        const prepare_buffer = try inspector.allocator.alignedAlloc(
+            u8,
+            constants.sector_size,
+            constants.message_size_max,
+        );
+        defer inspector.allocator.free(prepare_buffer);
+
+        try inspector.read_buffer(headers_buffer, .wal_headers, 0);
 
         for (std.mem.bytesAsSlice(vsr.Header.Prepare, headers_buffer), 0..) |*wal_header, slot| {
             const offset = slot * constants.message_size_max;
-            const prepare_buffer =
-                try inspector.read_buffer(.wal_prepares, offset, constants.message_size_max);
-            defer inspector.allocator.free(prepare_buffer);
+            try inspector.read_buffer(prepare_buffer, .wal_prepares, offset);
 
             const wal_prepare = std.mem.bytesAsValue(
                 vsr.Header.Prepare,
@@ -290,16 +315,22 @@ const Inspector = struct {
     fn inspect_wal_slot(inspector: *Inspector, output: std.io.AnyWriter, slot: usize) !void {
         assert(slot <= constants.journal_slot_count);
 
-        const headers_buffer =
-            try inspector.read_buffer(.wal_headers, 0, constants.journal_size_headers);
+        const headers_buffer = try inspector.allocator.alignedAlloc(
+            u8,
+            constants.sector_size,
+            constants.journal_size_headers,
+        );
         defer inspector.allocator.free(headers_buffer);
 
-        const prepare_buffer = try inspector.read_buffer(
-            .wal_prepares,
-            slot * constants.message_size_max,
+        const prepare_buffer = try inspector.allocator.alignedAlloc(
+            u8,
+            constants.sector_size,
             constants.message_size_max,
         );
         defer inspector.allocator.free(prepare_buffer);
+
+        try inspector.read_buffer(headers_buffer, .wal_headers, 0);
+        try inspector.read_buffer(prepare_buffer, .wal_prepares, slot * constants.message_size_max);
 
         const headers = std.mem.bytesAsSlice(vsr.Header.Prepare, headers_buffer);
         const prepare_header =
@@ -337,17 +368,23 @@ const Inspector = struct {
         output: std.io.AnyWriter,
         superblock_copy: ?u8,
     ) !void {
-        const entries = try inspector.read_client_sessions(superblock_copy) orelse return;
-        defer inspector.allocator.destroy(entries);
+        const entries_block = try allocate_block(inspector.allocator);
+        defer inspector.allocator.free(entries_block);
+
+        const reply_sector =
+            try inspector.allocator.alignedAlloc(u8, constants.sector_size, constants.sector_size);
+        defer inspector.allocator.free(reply_sector);
+
+        const entries =
+            try inspector.read_client_sessions(entries_block, superblock_copy) orelse return;
 
         var label_buffer: [64]u8 = undefined;
-        for (&entries.headers, entries.sessions, 0..) |*session_header, session, slot| {
-            const reply_sector = try inspector.read_buffer(
+        for (&entries.headers, &entries.sessions, 0..) |*session_header, session, slot| {
+            try inspector.read_buffer(
+                reply_sector,
                 .client_replies,
                 constants.message_size_max * slot,
-                constants.sector_size,
             );
-            defer inspector.allocator.free(reply_sector);
 
             const reply_header =
                 std.mem.bytesAsValue(vsr.Header.Reply, reply_sector[0..@sizeOf(vsr.Header)]);
@@ -382,22 +419,30 @@ const Inspector = struct {
     ) !void {
         assert(slot < constants.clients_max);
 
+        const block = try allocate_block(inspector.allocator);
+        defer inspector.allocator.free(block);
+
+        const reply = try inspector.allocator.alignedAlloc(
+            u8,
+            constants.sector_size,
+            constants.message_size_max,
+        );
+        defer inspector.allocator.free(reply);
+
         log.info("\"||\" denotes that the client session header and reply header match.", .{});
         log.info("\"|_\" is the client session header.", .{});
         log.info("\"_|\" is the client reply's header.", .{});
 
-        const entries = try inspector.read_client_sessions(superblock_copy) orelse {
+        const entries = try inspector.read_client_sessions(block, superblock_copy) orelse {
             try output.writeAll("error: no client sessions\n");
             return;
         };
-        defer inspector.allocator.destroy(entries);
 
-        const reply = try inspector.read_buffer(
+        try inspector.read_buffer(
+            reply,
             .client_replies,
             constants.message_size_max * slot,
-            constants.message_size_max,
         );
-        defer inspector.allocator.free(reply);
 
         const reply_header = std.mem.bytesAsValue(vsr.Header.Reply, reply[0..@sizeOf(vsr.Header)]);
         const copies: [2]*const vsr.Header.Reply = .{ &entries.headers[slot], reply_header };
@@ -418,15 +463,28 @@ const Inspector = struct {
 
     fn inspect_grid(inspector: *Inspector, output: std.io.AnyWriter, superblock_copy: ?u8) !void {
         const superblock = try inspector.read_superblock(superblock_copy);
+
+        const block = try allocate_block(inspector.allocator);
+        defer inspector.allocator.free(block);
+
         const free_set_size = superblock.vsr_state.checkpoint.free_set_size;
         const free_set_buffer =
             try inspector.allocator.alignedAlloc(u8, @alignOf(vsr.FreeSet.Word), free_set_size);
         defer inspector.allocator.free(free_set_buffer);
 
-        var free_set_references = std.ArrayList(vsr.BlockReference).init(inspector.allocator);
+        const free_set_block_count = stdx.div_ceil(
+            superblock.vsr_state.checkpoint.free_set_size,
+            constants.block_size - @sizeOf(vsr.Header),
+        );
+
+        var free_set_references = try std.ArrayList(vsr.BlockReference).initCapacity(
+            inspector.allocator,
+            free_set_block_count,
+        );
         defer free_set_references.deinit();
 
-        var free_set_addresses = std.ArrayList(u64).init(inspector.allocator);
+        var free_set_addresses =
+            try std.ArrayList(u64).initCapacity(inspector.allocator, free_set_block_count);
         defer free_set_addresses.deinit();
 
         if (superblock.vsr_state.checkpoint.free_set_size == 0) {
@@ -440,28 +498,31 @@ const Inspector = struct {
 
             var free_set_cursor: usize = free_set_size;
             while (free_set_block) |free_set_reference| {
-                const block = try inspector.read_block(
+                try inspector.read_block(
+                    block,
                     free_set_reference.address,
                     free_set_reference.checksum,
                 );
-                defer inspector.allocator.free(block);
 
                 const encoded_words = schema.TrailerNode.body(block);
                 free_set_cursor -= encoded_words.len;
                 stdx.copy_disjoint(.inexact, u8, free_set_buffer[free_set_cursor..], encoded_words);
 
-                try free_set_references.append(free_set_reference);
-                try free_set_addresses.append(free_set_reference.address);
+                free_set_references.appendAssumeCapacity(free_set_reference);
+                free_set_addresses.appendAssumeCapacity(free_set_reference.address);
                 free_set_block = schema.TrailerNode.previous(block);
             }
             assert(free_set_cursor == 0);
         }
+        assert(free_set_references.items.len == free_set_block_count);
+        assert(free_set_addresses.items.len == free_set_block_count);
 
         // This is not exact, but is an overestimate:
-        const free_set_blocks_max =
+        const grid_blocks_max =
             @divFloor(constants.storage_size_limit_max, constants.block_size);
-        var free_set = try vsr.FreeSet.init(inspector.allocator, free_set_blocks_max);
+        var free_set = try vsr.FreeSet.init(inspector.allocator, grid_blocks_max);
         defer free_set.deinit(inspector.allocator);
+
         free_set.open(.{
             .encoded = if (free_set_buffer.len == 0) &.{} else &.{free_set_buffer},
             .block_addresses = free_set_addresses.items,
@@ -500,8 +561,10 @@ const Inspector = struct {
     }
 
     fn inspect_grid_block(inspector: *Inspector, output: std.io.AnyWriter, address: u64) !void {
-        const block = try inspector.read_block(address, null);
+        const block = try allocate_block(inspector.allocator);
         defer inspector.allocator.free(block);
+
+        try inspector.read_block(block, address, null);
 
         // If this is an unexpected (but valid) block, log an error but keep going.
         const header = schema.header_from_block(block);
@@ -516,6 +579,10 @@ const Inspector = struct {
         superblock_copy: ?u8,
     ) !void {
         const superblock = try inspector.read_superblock(superblock_copy);
+
+        const block = try allocate_block(inspector.allocator);
+        defer inspector.allocator.free(block);
+
         var manifest_block_address = superblock.vsr_state.checkpoint.manifest_newest_address;
         var manifest_block_checksum = superblock.vsr_state.checkpoint.manifest_newest_checksum;
         for (0..superblock.vsr_state.checkpoint.manifest_block_count) |i| {
@@ -524,14 +591,14 @@ const Inspector = struct {
                 .{ i, manifest_block_address, manifest_block_checksum },
             );
 
-            const block = inspector.read_block(
+            inspector.read_block(
+                block,
                 manifest_block_address,
                 manifest_block_checksum,
             ) catch {
                 try output.writeAll("error: manifest block not found\n");
                 break;
             };
-            defer inspector.allocator.free(block);
 
             var entry_counts = std.enums.EnumArray(
                 schema.ManifestNode.Event,
@@ -574,13 +641,15 @@ const Inspector = struct {
             std.AutoHashMap(u128, ?schema.ManifestNode.TableInfo).init(inspector.allocator);
         defer tables_latest.deinit();
 
+        const block = try allocate_block(inspector.allocator);
+        defer inspector.allocator.free(block);
+
         // Construct a set of all active tables.
         const superblock = try inspector.read_superblock(superblock_copy);
         var manifest_block_address = superblock.vsr_state.checkpoint.manifest_newest_address;
         var manifest_block_checksum = superblock.vsr_state.checkpoint.manifest_newest_checksum;
         for (0..superblock.vsr_state.checkpoint.manifest_block_count) |_| {
-            const block = try inspector.read_block(manifest_block_address, manifest_block_checksum);
-            defer inspector.allocator.free(block);
+            try inspector.read_block(block, manifest_block_address, manifest_block_checksum);
 
             const manifest_node = schema.ManifestNode.from(block);
             const tables = manifest_node.tables_const(block);
@@ -659,13 +728,10 @@ const Inspector = struct {
 
     fn read_buffer(
         inspector: *Inspector,
+        buffer: []align(constants.sector_size) u8,
         zone: vsr.Zone,
         offset_in_zone: u64,
-        comptime size: usize,
-    ) !*align(constants.sector_size) const [size]u8 {
-        const buffer = try inspector.allocator.alignedAlloc(u8, constants.sector_size, size);
-        errdefer inspector.allocator.free(buffer);
-
+    ) !void {
         inspector.storage.read_sectors(
             inspector_read_callback,
             &inspector.read,
@@ -674,48 +740,29 @@ const Inspector = struct {
             offset_in_zone,
         );
         try inspector.work();
-        return buffer[0..size];
     }
 
-    fn read_superblock(inspector: *Inspector, superblock_copy: ?u8) !SuperBlockHeader {
+    fn read_superblock(inspector: *const Inspector, superblock_copy: ?u8) !*const SuperBlockHeader {
         if (superblock_copy) |copy| {
-            const superblock_buffer = try inspector.read_buffer(
-                .superblock,
-                @as(u64, copy) * vsr.superblock.superblock_copy_size,
-                @sizeOf(SuperBlockHeader),
-            );
-            defer inspector.allocator.free(superblock_buffer);
-
-            const superblock = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer);
-            return superblock.*;
+            return inspector.superblock_headers[copy];
         } else {
             var copies: [constants.superblock_copies]SuperBlockHeader = undefined;
-
-            for (0..constants.superblock_copies) |copy| {
-                const superblock_buffer = try inspector.read_buffer(
-                    .superblock,
-                    @as(u64, copy) * vsr.superblock.superblock_copy_size,
-                    @sizeOf(SuperBlockHeader),
-                );
-                defer inspector.allocator.free(superblock_buffer);
-
-                copies[copy] = std.mem.bytesAsValue(SuperBlockHeader, superblock_buffer).*;
-            }
+            for (&copies, inspector.superblock_headers) |*copy, header| copy.* = header.*;
 
             var quorums = SuperBlockQuorums{};
             const quorum = try quorums.working(&copies, .open);
             if (!quorum.valid) return error.SuperBlockQuorumInvalid;
-            return quorum.header.*;
+            return inspector.superblock_headers[quorum.copies.findFirstSet().?];
         }
     }
 
-    fn read_block(inspector: *Inspector, address: u64, checksum: ?u128) !BlockPtrConst {
-        const buffer = try inspector.read_buffer(
-            .grid,
-            (address - 1) * constants.block_size,
-            constants.block_size,
-        );
-        errdefer inspector.allocator.free(buffer);
+    fn read_block(
+        inspector: *Inspector,
+        buffer: BlockPtr,
+        address: u64,
+        checksum: ?u128,
+    ) !void {
+        try inspector.read_buffer(buffer, .grid, (address - 1) * constants.block_size);
 
         const header = std.mem.bytesAsValue(vsr.Header.Block, buffer[0..@sizeOf(vsr.Header)]);
         if (!header.valid_checksum()) {
@@ -746,7 +793,6 @@ const Inspector = struct {
                 return error.WrongBlock;
             }
         }
-        return buffer;
     }
 
     const ClientSessions = extern struct {
@@ -754,36 +800,35 @@ const Inspector = struct {
         sessions: [constants.clients_max]u64,
     };
 
-    fn read_client_sessions(inspector: *Inspector, superblock_copy: ?u8) !?*ClientSessions {
+    fn read_client_sessions(
+        inspector: *Inspector,
+        block: BlockPtr,
+        superblock_copy: ?u8,
+    ) !?*ClientSessions {
         const superblock = try inspector.read_superblock(superblock_copy);
 
-        if (superblock.vsr_state.checkpoint.client_sessions_last_block_address == 0) {
+        if (superblock.vsr_state.checkpoint.client_sessions_size == 0) {
+            assert(superblock.vsr_state.checkpoint.client_sessions_last_block_address == 0);
             assert(superblock.vsr_state.checkpoint.client_sessions_last_block_checksum == 0);
             return null;
         }
+        assert(superblock.vsr_state.checkpoint.client_sessions_size == @sizeOf(ClientSessions));
 
-        const block = try inspector.read_block(
+        try inspector.read_block(
+            block,
             superblock.vsr_state.checkpoint.client_sessions_last_block_address,
             superblock.vsr_state.checkpoint.client_sessions_last_block_checksum,
         );
-        defer inspector.allocator.free(block);
 
         const block_header = schema.header_from_block(block);
-        assert(block_header.size ==
-            @sizeOf(vsr.Header) + superblock.vsr_state.checkpoint.client_sessions_size);
+        assert(block_header.size == @sizeOf(vsr.Header) + @sizeOf(ClientSessions));
         assert(vsr.checksum(block[@sizeOf(vsr.Header)..block_header.size]) ==
             superblock.vsr_state.checkpoint.client_sessions_checksum);
 
-        assert(@sizeOf(ClientSessions) == block_header.size - @sizeOf(vsr.Header));
-
-        const entries = try inspector.allocator.create(ClientSessions);
-        errdefer inspector.allocator.destroy(entries);
-
-        entries.* = std.mem.bytesAsValue(
+        return std.mem.bytesAsValue(
             ClientSessions,
             block[@sizeOf(vsr.Header)..][0..@sizeOf(ClientSessions)],
-        ).*;
-        return entries;
+        );
     }
 };
 
