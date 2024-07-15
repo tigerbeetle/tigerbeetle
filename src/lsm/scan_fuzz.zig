@@ -8,7 +8,7 @@ const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const allocator = fuzz.allocator;
 
-const log = std.log.scoped(.lsm_forest_fuzz);
+const log = std.log.scoped(.lsm_scan_fuzz);
 const lsm = @import("tree.zig");
 
 const Storage = @import("../testing/storage.zig").Storage;
@@ -290,10 +290,7 @@ const QuerySpec = struct {
             switch (query_part) {
                 .field => |field| {
                     print_operator = true;
-                    try writer.print("{s}={}", .{
-                        std.enums.tagName(Index, field.index).?,
-                        field.value,
-                    });
+                    try writer.print("{s}", .{std.enums.tagName(Index, field.index).?});
 
                     if (merge_current) |merge| {
                         merge.operand_count -= 1;
@@ -360,13 +357,18 @@ const QuerySpecFuzzer = struct {
             query_specs.inner.capacity(),
         );
 
+        log.info("query_spec_count = {}", .{query_spec_count});
+
         for (0..query_spec_count) |prefix| {
             var fuzzer = QuerySpecFuzzer{
                 .random = random,
                 .prefix = @intCast(prefix + 1),
             };
 
-            query_specs.append_assume_capacity(fuzzer.generate_query_spec());
+            const query_spec = fuzzer.generate_query_spec();
+            log.info("query_specs[{}]: {}", .{ prefix, query_spec });
+
+            query_specs.append_assume_capacity(query_spec);
         }
 
         return query_specs;
@@ -656,6 +658,7 @@ const Environment = struct {
         repeat: u32,
     ) !void {
         assert(repeat > 0);
+        log.info("repeat = {}", .{repeat});
 
         var env: Environment = undefined;
         try env.init(storage, random);
@@ -1106,6 +1109,8 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
         random,
         repeat,
     );
+
+    log.info("Passed!", .{});
 }
 
 fn prefix_combine(prefix: u32, suffix: u32) u64 {
