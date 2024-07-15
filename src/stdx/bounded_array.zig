@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 
 /// A version of standard `BoundedArray` with TigerBeetle-idiomatic APIs.
@@ -52,6 +53,17 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
             return array.inner.addOneAssumeCapacity();
         }
 
+        pub fn insert_assume_capacity(self: *Self, index: usize, item: T) void {
+            assert(self.inner.len < capacity);
+            assert(index <= self.inner.len);
+
+            self.inner.len += 1;
+
+            var slice_ = self.slice();
+            stdx.copy_right(.exact, T, slice_[index + 1 ..], slice_[index .. slice_.len - 1]);
+            slice_[index] = item;
+        }
+
         pub inline fn append_assume_capacity(array: *Self, item: T) void {
             array.inner.appendAssumeCapacity(item);
         }
@@ -73,4 +85,37 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
             array.inner.len = 0;
         }
     };
+}
+
+test "BoundedArray.insert_assume_capacity" {
+    const items_max = 32;
+    const BoundedArrayU64 = BoundedArray(u64, items_max);
+
+    // Test lists of every size (less than the capacity).
+    for (0..items_max) |len| {
+        var list_base = BoundedArrayU64{};
+        for (0..len) |i| {
+            list_base.append_assume_capacity(i);
+        }
+
+        // Test an insert at every possible position (including an append).
+        for (0..list_base.count() + 1) |i| {
+            var list = list_base;
+
+            list.insert_assume_capacity(i, 12345);
+
+            // Verify the result:
+
+            try std.testing.expectEqual(list.count(), list_base.count() + 1);
+            try std.testing.expectEqual(list.get(i), 12345);
+
+            for (0..i) |j| {
+                try std.testing.expectEqual(list.get(j), j);
+            }
+
+            for (i + 1..list.count()) |j| {
+                try std.testing.expectEqual(list.get(j), j - 1);
+            }
+        }
+    }
 }
