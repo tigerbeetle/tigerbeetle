@@ -22,6 +22,7 @@ pub const std_options = .{
 };
 
 const Fuzzers = .{
+    .scan = @import("./lsm/scan_fuzz.zig"),
     .ewah = @import("./ewah_fuzz.zig"),
     .lsm_cache_map = @import("./lsm/cache_map_fuzz.zig"),
     .lsm_forest = @import("./lsm/forest_fuzz.zig"),
@@ -73,6 +74,7 @@ fn main_smoke() !void {
             .smoke => continue,
             .canary => continue,
 
+            .scan => 16,
             .lsm_cache_map => 20_000,
             .lsm_forest => 10_000,
             .lsm_manifest_log => 2_000,

@@ -69,6 +69,7 @@ const Fuzzer = enum {
     lsm_manifest_log,
     lsm_segmented_array,
     lsm_tree,
+    scan,
     vsr_free_set,
     vsr_journal_format,
     vsr_superblock_quorums,
