@@ -126,7 +126,11 @@ pub fn main(
     }
 
     // If no seed was given, use a default seed for reproducibility.
-    const seed: usize = cli_args.seed orelse 42;
+    const seed = seed_from_arg: {
+        const seed_argument = cli_args.seed orelse break :seed_from_arg 42;
+        break :seed_from_arg vsr.testing.parse_seed(seed_argument);
+    };
+
     log.info("Benchmark seed = {}", .{seed});
 
     var rng = std.rand.DefaultPrng.init(seed);

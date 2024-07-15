@@ -239,7 +239,7 @@ test "benchmark smoke" {
 
     const tigerbeetle = try tigerbeetle_exe(shell);
     const status_ok = try shell.exec_status_ok(
-        "{tigerbeetle} benchmark --transfer-count=4000",
+        "{tigerbeetle} benchmark --transfer-count=10_000 --transfer-batch-size=10 --validate",
         .{ .tigerbeetle = tigerbeetle },
     );
     try std.testing.expect(status_ok);

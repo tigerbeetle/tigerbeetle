@@ -32,7 +32,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
 
-    const benchmark_result = try shell.exec_stdout("./tigerbeetle benchmark", .{});
+    const benchmark_result = try shell.exec_stdout("./tigerbeetle benchmark --validate", .{});
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
     const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
     const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
