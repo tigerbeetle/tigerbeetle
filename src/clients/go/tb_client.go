@@ -32,6 +32,7 @@ import (
 	"runtime"
 	"strings"
 	"unsafe"
+	"sync/atomic"
 
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
@@ -60,6 +61,8 @@ type request struct {
 
 type c_client struct {
 	tb_client C.tb_client_t
+	ref_count atomic.Int64
+	ref_pending atomic.Int64
 }
 
 func NewClient(
@@ -110,7 +113,8 @@ func NewClient(
 }
 
 func (c *c_client) Close() {
-	if c.tb_client != nil {
+	refs := c.ref_count.Add(1) - 1
+	if (refs & 1 == 0) && (c.ref_pending.Add(refs) == 0) {
 		C.tb_client_deinit(c.tb_client)
 		c.tb_client = nil
 	}
@@ -172,9 +176,16 @@ func (c *c_client) doRequest(
 		return 0, errors.ErrEmptyBatch{}
 	}
 
-	if c.tb_client == nil {
+	if c.ref_count.Add(2) & 1 != 0 {
 		return 0, errors.ErrClientClosed{}
 	}
+
+	defer func(){
+		if (c.ref_count.Add(-2) & 1 != 0) && (c.ref_pending.Add(-2) == 0) {
+			C.tb_client_deinit(c.tb_client)
+			c.tb_client = nil
+		}
+	}()
 
 	var req request
 	req.result = result
