@@ -267,11 +267,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (clients[0..i]) |*c| c.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
-                    client_id_permutation.encode(i + client_id_permutation_shift),
-                    options.cluster_id,
-                    options.replica_count,
-                    &client_pools[i],
-                    .{ .network = network },
+                    .{
+                        .id = client_id_permutation.encode(i + client_id_permutation_shift),
+                        .cluster = options.cluster_id,
+                        .replica_count = options.replica_count,
+                        .message_pool = &client_pools[i],
+                        .message_bus_options = .{ .network = network },
+                    },
                 );
                 client.release = options.releases[0].release;
             }

@@ -111,42 +111,44 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub fn init(
             allocator: mem.Allocator,
-            id: u128,
-            cluster: u128,
-            replica_count: u8,
-            message_pool: *MessagePool,
-            message_bus_options: MessageBus.Options,
+            options: struct {
+                id: u128,
+                cluster: u128,
+                replica_count: u8,
+                message_pool: *MessagePool,
+                message_bus_options: MessageBus.Options,
+            },
         ) !Self {
-            assert(id > 0);
-            assert(replica_count > 0);
+            assert(options.id > 0);
+            assert(options.replica_count > 0);
 
             var message_bus = try MessageBus.init(
                 allocator,
-                cluster,
-                .{ .client = id },
-                message_pool,
+                options.cluster,
+                .{ .client = options.id },
+                options.message_pool,
                 Self.on_message,
-                message_bus_options,
+                options.message_bus_options,
             );
             errdefer message_bus.deinit(allocator);
 
             var self = Self{
                 .allocator = allocator,
                 .message_bus = message_bus,
-                .id = id,
-                .cluster = cluster,
-                .replica_count = replica_count,
+                .id = options.id,
+                .cluster = options.cluster,
+                .replica_count = options.replica_count,
                 .request_timeout = .{
                     .name = "request_timeout",
-                    .id = id,
+                    .id = options.id,
                     .after = constants.rtt_ticks * constants.rtt_multiple,
                 },
                 .ping_timeout = .{
                     .name = "ping_timeout",
-                    .id = id,
+                    .id = options.id,
                     .after = 30000 / constants.tick_ms,
                 },
-                .prng = std.rand.DefaultPrng.init(@as(u64, @truncate(id))),
+                .prng = std.rand.DefaultPrng.init(@as(u64, @truncate(options.id))),
             };
 
             self.ping_timeout.start();

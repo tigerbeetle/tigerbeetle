@@ -169,13 +169,15 @@ pub fn ContextType(
             });
             context.client = try Client.init(
                 allocator,
-                context.client_id,
-                cluster_id,
-                @intCast(context.addresses.len),
-                &context.message_pool,
                 .{
-                    .configuration = context.addresses,
-                    .io = &context.io,
+                    .id = context.client_id,
+                    .cluster = cluster_id,
+                    .replica_count = @intCast(context.addresses.len),
+                    .message_pool = &context.message_pool,
+                    .message_bus_options = .{
+                        .configuration = context.addresses,
+                        .io = &context.io,
+                    },
                 },
             );
             errdefer context.client.deinit(context.allocator);
