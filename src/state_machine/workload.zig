@@ -408,7 +408,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     std.mem.bytesAsSlice(tb.Transfer, reply_body),
                 ),
                 //Not handled by the client.
-                .pulse => unreachable,
+                .pulse, .import_accounts, .import_transfers => unreachable,
             }
         }
 

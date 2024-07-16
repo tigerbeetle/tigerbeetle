@@ -738,15 +738,15 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_accounts, .create_transfers => "create",
                 .get_account_transfers, .get_account_balances => "get",
                 .lookup_accounts, .lookup_transfers => "lookup",
-                .pulse => unreachable,
                 .query_accounts, .query_transfers => "query",
+                .pulse, .import_accounts, .import_transfers => unreachable,
             };
             const object_type = switch (operation) {
                 .create_accounts, .lookup_accounts, .query_accounts => "accounts",
                 .create_transfers, .lookup_transfers, .query_transfers => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
-                .pulse => unreachable,
+                .pulse, .import_accounts, .import_transfers => unreachable,
             };
 
             if (arguments.len == 0) {
@@ -903,7 +903,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                     }
                 },
-                .pulse => unreachable,
+                .pulse, .import_accounts, .import_transfers => unreachable,
             }
         }
 

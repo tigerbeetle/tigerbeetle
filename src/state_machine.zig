@@ -128,7 +128,9 @@ pub fn StateMachineType(
         pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
             .pulse = false,
             .create_accounts = true,
+            .import_accounts = true,
             .create_transfers = true,
+            .import_transfers = true,
             // Don't batch lookups/queries for now.
             .lookup_accounts = false,
             .lookup_transfers = false,
@@ -332,6 +334,8 @@ pub fn StateMachineType(
             get_account_balances = config.vsr_operations_reserved + 6,
             query_accounts = config.vsr_operations_reserved + 7,
             query_transfers = config.vsr_operations_reserved + 8,
+            import_accounts = config.vsr_operations_reserved + 9,
+            import_transfers = config.vsr_operations_reserved + 10,
         };
 
         pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
@@ -501,8 +505,8 @@ pub fn StateMachineType(
         pub fn Event(comptime operation: Operation) type {
             return switch (operation) {
                 .pulse => void,
-                .create_accounts => Account,
-                .create_transfers => Transfer,
+                .create_accounts, .import_accounts => Account,
+                .create_transfers, .import_transfers => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
                 .get_account_transfers => AccountFilter,
@@ -515,8 +519,8 @@ pub fn StateMachineType(
         pub fn Result(comptime operation: Operation) type {
             return switch (operation) {
                 .pulse => void,
-                .create_accounts => CreateAccountsResult,
-                .create_transfers => CreateTransfersResult,
+                .create_accounts, .import_accounts => CreateAccountsResult,
+                .create_transfers, .import_transfers => CreateTransfersResult,
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
@@ -593,8 +597,8 @@ pub fn StateMachineType(
 
             self.prepare_timestamp += switch (operation) {
                 .pulse => 0,
-                .create_accounts => mem.bytesAsSlice(Account, input).len,
-                .create_transfers => mem.bytesAsSlice(Transfer, input).len,
+                .create_accounts, .import_accounts => mem.bytesAsSlice(Account, input).len,
+                .create_transfers, .import_transfers => mem.bytesAsSlice(Transfer, input).len,
                 .lookup_accounts => 0,
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
@@ -645,10 +649,10 @@ pub fn StateMachineType(
                     assert(input.len == 0);
                     self.prefetch_expire_pending_transfers();
                 },
-                .create_accounts => {
+                .create_accounts, .import_accounts => {
                     self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
                 },
-                .create_transfers => {
+                .create_transfers, .import_transfers => {
                     self.prefetch_create_transfers(mem.bytesAsSlice(Transfer, input));
                 },
                 .lookup_accounts => {
@@ -1341,8 +1345,18 @@ pub fn StateMachineType(
 
             const result = switch (operation) {
                 .pulse => self.execute_expire_pending_transfers(timestamp),
-                .create_accounts => self.execute(.create_accounts, timestamp, input, output),
-                .create_transfers => self.execute(.create_transfers, timestamp, input, output),
+                inline .create_accounts, .import_accounts => |operation_comptime| self.execute(
+                    operation_comptime,
+                    timestamp,
+                    input,
+                    output,
+                ),
+                inline .create_transfers, .import_transfers => |operation_comptime| self.execute(
+                    operation_comptime,
+                    timestamp,
+                    input,
+                    output,
+                ),
                 .lookup_accounts => self.execute_lookup_accounts(input, output),
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
                 .get_account_transfers => self.execute_get_account_transfers(input, output),
@@ -1442,7 +1456,8 @@ pub fn StateMachineType(
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            comptime assert(operation == .create_accounts or operation == .create_transfers);
+            comptime assert(operation == .create_accounts or operation == .create_transfers or
+                operation == .import_accounts or operation == .import_transfers);
 
             const events = mem.bytesAsSlice(Event(operation), input);
             var results = mem.bytesAsSlice(Result(operation), output);
@@ -1466,15 +1481,31 @@ pub fn StateMachineType(
                     }
 
                     if (chain_broken) break :blk .linked_event_failed;
-                    if (event.timestamp != 0) break :blk .timestamp_must_be_zero;
-
-                    event.timestamp = timestamp - events.len + index + 1;
+                    switch (operation) {
+                        .create_accounts, .create_transfers => {
+                            if (event.timestamp != 0) break :blk .timestamp_must_be_zero;
+                            event.timestamp = timestamp - events.len + index + 1;
+                        },
+                        .import_accounts, .import_transfers => {
+                            if (event.timestamp == 0) {
+                                break :blk .import_timestamp_must_not_be_zero;
+                            }
+                            if (event.timestamp >= self.commit_timestamp) {
+                                break :blk .import_timestamp_must_not_be_in_the_future;
+                            }
+                        },
+                        else => unreachable,
+                    }
                     assert(event.timestamp >= TimestampRange.timestamp_min);
                     assert(event.timestamp <= TimestampRange.timestamp_max);
 
                     break :blk switch (operation) {
-                        .create_accounts => self.create_account(&event),
-                        .create_transfers => self.create_transfer(&event),
+                        .create_accounts,
+                        .import_accounts,
+                        => self.create_account(operation, &event),
+                        .create_transfers,
+                        .import_transfers,
+                        => self.create_transfer(operation, &event),
                         else => unreachable,
                     };
                 };
@@ -1525,6 +1556,55 @@ pub fn StateMachineType(
             assert(chain_broken == false);
 
             return @sizeOf(Result(operation)) * count;
+        }
+
+        /// - When `operation == .create_{accounts, transfers}`:
+        ///   It validates if the event's timestamp regressed in relation to the
+        ///   `commit_timestamp`.
+        ///   Panics in a past timestamp is found (except in aof_recovery mode).
+        ///
+        /// - When `operation == .import_{accounts, transfers}`:
+        ///   Allows past timestamps, but it validates if it regressed in relation
+        ///   to the last inserted object's timestamp.
+        ///   Panics if a future timestamp is found.
+        ///
+        /// This validation must be called _after_ the idempotency checks so the user can handle
+        /// `exists_*` results with the same behavior in both `create_*` and `import_*` operations.
+        /// Otherwise, `import_timestamp_must_not_regress` would have precedence over `exists` in
+        /// the case of retries with imported events. Also, idempotency checks don't include the
+        /// timestamp field, e.g. there is no "exists with different timestamp" result code.
+        fn validate_regressed_timestamp(
+            self: *const StateMachine,
+            comptime operation: Operation,
+            event: *const Event(operation),
+        ) bool {
+            switch (operation) {
+                .create_accounts, .create_transfers => {
+                    assert(event.timestamp > self.commit_timestamp or
+                        global_constants.aof_recovery);
+                    return true;
+                },
+                .import_accounts, .import_transfers => {
+                    // When importing past events with user-defined timestamp field, the "global"
+                    // timestamp cannot regress or repeat. It needs to be checked against the max
+                    // timestamp from both Accounts and Transfers.
+                    // If we ever have add a new groove keyed by timestamp, it must be included.
+                    const timestamp_max = @max(
+                        if (self.forest.grooves.accounts.objects.key_range) |*key_range|
+                            key_range.key_max
+                        else
+                            0,
+                        if (self.forest.grooves.transfers.objects.key_range) |*key_range|
+                            key_range.key_max
+                        else
+                            0,
+                    );
+
+                    assert(event.timestamp < self.commit_timestamp);
+                    return event.timestamp > timestamp_max;
+                },
+                else => unreachable,
+            }
         }
 
         // Accounts that do not fit in the response are omitted.
@@ -1690,8 +1770,12 @@ pub fn StateMachineType(
             return result_size;
         }
 
-        fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
-            assert(a.timestamp > self.commit_timestamp or global_constants.aof_recovery);
+        fn create_account(
+            self: *StateMachine,
+            comptime operation: Operation,
+            a: *const Account,
+        ) CreateAccountResult {
+            comptime assert(operation == .create_accounts or operation == .import_accounts);
 
             if (a.reserved != 0) return .reserved_field;
             if (a.flags.padding != 0) return .reserved_flag;
@@ -1714,8 +1798,16 @@ pub fn StateMachineType(
                 return create_account_exists(a, e);
             }
 
+            if (!self.validate_regressed_timestamp(operation, a)) {
+                assert(operation == .import_accounts);
+                return .import_timestamp_must_not_regress;
+            }
+
             self.forest.grooves.accounts.insert(a);
-            self.commit_timestamp = a.timestamp;
+
+            // Don't update `commit_timestamp` with past timestamps when importing.
+            if (operation == .create_accounts) self.commit_timestamp = a.timestamp;
+
             return .ok;
         }
 
@@ -1733,8 +1825,12 @@ pub fn StateMachineType(
             return .exists;
         }
 
-        fn create_transfer(self: *StateMachine, t: *const Transfer) CreateTransferResult {
-            assert(t.timestamp > self.commit_timestamp or global_constants.aof_recovery);
+        fn create_transfer(
+            self: *StateMachine,
+            comptime operation: Operation,
+            t: *const Transfer,
+        ) CreateTransferResult {
+            comptime assert(operation == .create_transfers or operation == .import_transfers);
 
             if (t.flags.padding != 0) return .reserved_flag;
 
@@ -1742,7 +1838,7 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                return self.post_or_void_pending_transfer(t);
+                return self.post_or_void_pending_transfer(operation, t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
@@ -1777,8 +1873,6 @@ pub fn StateMachineType(
                 return .credit_account_not_found;
             assert(dr_account.id == t.debit_account_id);
             assert(cr_account.id == t.credit_account_id);
-            assert(t.timestamp > dr_account.timestamp);
-            assert(t.timestamp > cr_account.timestamp);
 
             if (dr_account.ledger != cr_account.ledger) return .accounts_must_have_the_same_ledger;
             if (t.ledger != dr_account.ledger) {
@@ -1788,6 +1882,20 @@ pub fn StateMachineType(
             // If the transfer already exists, then it must not influence the overflow or limit
             // checks.
             if (self.get_transfer(t.id)) |e| return create_transfer_exists(t, e);
+
+            if (!self.validate_regressed_timestamp(operation, t)) {
+                assert(operation == .import_transfers);
+                return .import_timestamp_must_not_regress;
+            }
+
+            // Imported transfers with past timestamp cannot set a timeout for expiration.
+            if (operation == .import_transfers and t.timeout != 0) {
+                assert(t.flags.pending);
+                return .import_timeout_must_be_zero;
+            }
+
+            assert(t.timestamp > dr_account.timestamp);
+            assert(t.timestamp > cr_account.timestamp);
 
             const amount = amount: {
                 var amount = t.amount;
@@ -1861,45 +1969,53 @@ pub fn StateMachineType(
             if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
             if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
 
-            // After this point, the transfer must succeed.
-            defer assert(self.commit_timestamp == t.timestamp);
+            // After this point, the transfer must succeed atomically.
+            var result: CreateTransferResult = undefined;
+            defer assert(result == .ok);
+            defer if (operation == .create_transfers) assert(self.commit_timestamp == t.timestamp);
+            result = completed_atomically: {
+                var t2 = t.*;
+                t2.amount = amount;
+                self.forest.grooves.transfers.insert(&t2);
 
-            var t2 = t.*;
-            t2.amount = amount;
-            self.forest.grooves.transfers.insert(&t2);
+                var dr_account_new = dr_account.*;
+                var cr_account_new = cr_account.*;
+                if (t.flags.pending) {
+                    dr_account_new.debits_pending += amount;
+                    cr_account_new.credits_pending += amount;
 
-            var dr_account_new = dr_account.*;
-            var cr_account_new = cr_account.*;
-            if (t.flags.pending) {
-                dr_account_new.debits_pending += amount;
-                cr_account_new.credits_pending += amount;
-
-                self.forest.grooves.transfers_pending.insert(&.{
-                    .timestamp = t2.timestamp,
-                    .status = .pending,
-                });
-            } else {
-                dr_account_new.debits_posted += amount;
-                cr_account_new.credits_posted += amount;
-            }
-            self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
-            self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
-
-            self.historical_balance(.{
-                .transfer = &t2,
-                .dr_account = &dr_account_new,
-                .cr_account = &cr_account_new,
-            });
-
-            if (t.timeout > 0) {
-                const expires_at = t.timestamp + t.timeout_ns();
-                if (expires_at < self.expire_pending_transfers.pulse_next_timestamp) {
-                    self.expire_pending_transfers.pulse_next_timestamp = expires_at;
+                    self.forest.grooves.transfers_pending.insert(&.{
+                        .timestamp = t2.timestamp,
+                        .status = .pending,
+                    });
+                } else {
+                    dr_account_new.debits_posted += amount;
+                    cr_account_new.credits_posted += amount;
                 }
-            }
+                self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
-            self.commit_timestamp = t.timestamp;
-            return .ok;
+                self.historical_balance(.{
+                    .transfer = &t2,
+                    .dr_account = &dr_account_new,
+                    .cr_account = &cr_account_new,
+                });
+
+                if (t.timeout > 0) {
+                    assert(t.flags.pending);
+                    assert(operation == .create_transfers);
+                    const expires_at = t.timestamp + t.timeout_ns();
+                    if (expires_at < self.expire_pending_transfers.pulse_next_timestamp) {
+                        self.expire_pending_transfers.pulse_next_timestamp = expires_at;
+                    }
+                }
+
+                // Don't update `commit_timestamp` with past timestamps when importing.
+                if (operation == .create_transfers) self.commit_timestamp = t2.timestamp;
+
+                break :completed_atomically .ok;
+            };
+            return result;
         }
 
         fn create_transfer_exists(t: *const Transfer, e: *const Transfer) CreateTransferResult {
@@ -1947,11 +2063,11 @@ pub fn StateMachineType(
 
         fn post_or_void_pending_transfer(
             self: *StateMachine,
+            comptime operation: Operation,
             t: *const Transfer,
         ) CreateTransferResult {
             assert(t.id != 0);
             assert(t.flags.padding == 0);
-            assert(t.timestamp > self.commit_timestamp);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
 
             if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
@@ -2001,6 +2117,11 @@ pub fn StateMachineType(
 
             if (self.get_transfer(t.id)) |e| return post_or_void_pending_transfer_exists(t, e, p);
 
+            if (!self.validate_regressed_timestamp(operation, t)) {
+                assert(operation == .import_transfers);
+                return .import_timestamp_must_not_regress;
+            }
+
             const transfer_pending = self.get_transfer_pending(p.timestamp).?;
             assert(p.timestamp == transfer_pending.timestamp);
             switch (transfer_pending.status) {
@@ -2027,71 +2148,76 @@ pub fn StateMachineType(
                 break :expires_at expires_at;
             };
 
-            // After this point, the transfer must succeed.
-            defer assert(self.commit_timestamp == t.timestamp);
+            // After this point, the transfer must succeed atomically.
+            var result: CreateTransferResult = undefined;
+            defer assert(result == .ok);
+            defer if (operation == .create_transfers) assert(self.commit_timestamp == t.timestamp);
+            result = completed_atomically: {
+                const t2 = Transfer{
+                    .id = t.id,
+                    .debit_account_id = p.debit_account_id,
+                    .credit_account_id = p.credit_account_id,
+                    .user_data_128 = if (t.user_data_128 > 0) t.user_data_128 else p.user_data_128,
+                    .user_data_64 = if (t.user_data_64 > 0) t.user_data_64 else p.user_data_64,
+                    .user_data_32 = if (t.user_data_32 > 0) t.user_data_32 else p.user_data_32,
+                    .ledger = p.ledger,
+                    .code = p.code,
+                    .pending_id = t.pending_id,
+                    .timeout = 0,
+                    .timestamp = t.timestamp,
+                    .flags = t.flags,
+                    .amount = amount,
+                };
+                self.forest.grooves.transfers.insert(&t2);
 
-            const t2 = Transfer{
-                .id = t.id,
-                .debit_account_id = p.debit_account_id,
-                .credit_account_id = p.credit_account_id,
-                .user_data_128 = if (t.user_data_128 > 0) t.user_data_128 else p.user_data_128,
-                .user_data_64 = if (t.user_data_64 > 0) t.user_data_64 else p.user_data_64,
-                .user_data_32 = if (t.user_data_32 > 0) t.user_data_32 else p.user_data_32,
-                .ledger = p.ledger,
-                .code = p.code,
-                .pending_id = t.pending_id,
-                .timeout = 0,
-                .timestamp = t.timestamp,
-                .flags = t.flags,
-                .amount = amount,
-            };
-            self.forest.grooves.transfers.insert(&t2);
+                if (expires_at_maybe) |expires_at| {
+                    // Removing the pending `expires_at` index.
+                    self.forest.grooves.transfers.indexes.expires_at.remove(&.{
+                        .field = expires_at,
+                        .timestamp = p.timestamp,
+                    });
 
-            if (expires_at_maybe) |expires_at| {
-                // Removing the pending `expires_at` index.
-                self.forest.grooves.transfers.indexes.expires_at.remove(&.{
-                    .field = expires_at,
-                    .timestamp = p.timestamp,
+                    // In case the pending transfer's timeout is exactly the one we are using
+                    // as flag, we need to zero the value to run the next `pulse`.
+                    if (self.expire_pending_transfers.pulse_next_timestamp == expires_at) {
+                        self.expire_pending_transfers.pulse_next_timestamp =
+                            TimestampRange.timestamp_min;
+                    }
+                }
+
+                self.transfer_update_pending_status(transfer_pending, status: {
+                    if (t.flags.post_pending_transfer) break :status .posted;
+                    if (t.flags.void_pending_transfer) break :status .voided;
+                    unreachable;
                 });
 
-                // In case the pending transfer's timeout is exactly the one we are using
-                // as flag, we need to zero the value to run the next `pulse`.
-                if (self.expire_pending_transfers.pulse_next_timestamp == expires_at) {
-                    self.expire_pending_transfers.pulse_next_timestamp =
-                        TimestampRange.timestamp_min;
+                var dr_account_new = dr_account.*;
+                var cr_account_new = cr_account.*;
+                dr_account_new.debits_pending -= p.amount;
+                cr_account_new.credits_pending -= p.amount;
+
+                if (t.flags.post_pending_transfer) {
+                    assert(amount > 0);
+                    assert(amount <= p.amount);
+                    dr_account_new.debits_posted += amount;
+                    cr_account_new.credits_posted += amount;
                 }
-            }
 
-            self.transfer_update_pending_status(transfer_pending, status: {
-                if (t.flags.post_pending_transfer) break :status .posted;
-                if (t.flags.void_pending_transfer) break :status .voided;
-                unreachable;
-            });
+                self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
-            var dr_account_new = dr_account.*;
-            var cr_account_new = cr_account.*;
-            dr_account_new.debits_pending -= p.amount;
-            cr_account_new.credits_pending -= p.amount;
+                self.historical_balance(.{
+                    .transfer = &t2,
+                    .dr_account = &dr_account_new,
+                    .cr_account = &cr_account_new,
+                });
 
-            if (t.flags.post_pending_transfer) {
-                assert(amount > 0);
-                assert(amount <= p.amount);
-                dr_account_new.debits_posted += amount;
-                cr_account_new.credits_posted += amount;
-            }
+                // Don't update `commit_timestamp` with past timestamps when importing.
+                if (operation == .create_transfers) self.commit_timestamp = t2.timestamp;
 
-            self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
-            self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
-
-            self.historical_balance(.{
-                .transfer = &t2,
-                .dr_account = &dr_account_new,
-                .cr_account = &cr_account_new,
-            });
-
-            self.commit_timestamp = t.timestamp;
-
-            return .ok;
+                break :completed_atomically .ok;
+            };
+            return result;
         }
 
         fn post_or_void_pending_transfer_exists(
@@ -2783,7 +2909,7 @@ const TestAction = union(enum) {
 
     tick: struct {
         value: i64,
-        unit: enum { seconds },
+        unit: enum { nanoseconds, seconds },
     },
 
     commit: TestContext.StateMachine.Operation,
@@ -2804,6 +2930,7 @@ const TestAction = union(enum) {
         data: union(enum) {
             exists: bool,
             amount: u128,
+            timestamp: u64,
         },
     },
 
@@ -3044,10 +3171,12 @@ fn check(test_table: []const u8) !void {
 
             .tick => |ticks| {
                 assert(ticks.value != 0);
+
                 const interval_ns: u64 = @abs(ticks.value) *
-                    switch (ticks.unit) {
+                    @as(u64, switch (ticks.unit) {
+                    .nanoseconds => 1,
                     .seconds => std.time.ns_per_s,
-                };
+                });
 
                 // The `parse` logic already computes `maxInt - value` when a unsigned int is
                 // represented as a negative number. However, we need to use a signed int and
@@ -3123,6 +3252,11 @@ fn check(test_table: []const u8) !void {
                     .amount => |amount| {
                         var transfer = transfers.get(t.id).?;
                         transfer.amount = amount;
+                        try reply.appendSlice(std.mem.asBytes(&transfer));
+                    },
+                    .timestamp => |timestamp| {
+                        var transfer = transfers.get(t.id).?;
+                        transfer.timestamp = timestamp;
                         try reply.appendSlice(std.mem.asBytes(&transfer));
                     },
                 }
@@ -3254,7 +3388,11 @@ fn check(test_table: []const u8) !void {
                 try reply.appendSlice(std.mem.asBytes(&transfers.get(id).?));
             },
             .commit => |commit_operation| {
-                assert(operation == null or operation.? == commit_operation);
+                assert(operation == null or switch (commit_operation) {
+                    .create_accounts, .import_accounts => operation.? == .create_accounts,
+                    .create_transfers, .import_transfers => operation.? == .create_transfers,
+                    else => operation.? == commit_operation,
+                });
                 assert(!context.busy);
 
                 const reply_actual_buffer = try allocator.alignedAlloc(
@@ -3264,6 +3402,7 @@ fn check(test_table: []const u8) !void {
                 );
                 defer allocator.free(reply_actual_buffer);
 
+                context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
                 context.state_machine.prepare_timestamp += 1;
                 context.state_machine.prepare(commit_operation, request.items);
 
@@ -3928,6 +4067,50 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
     );
 }
 
+// The goal is to ensure that import_{accounts,transfers} timestamp validations are covered.
+test "import_account/import_transfers" {
+    try check(
+        \\ tick 10 nanoseconds
+        \\
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _   2 ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _   3 ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _   3 exists
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _   4 exists
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _   0 import_timestamp_must_not_be_zero
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _   1 import_timestamp_must_not_regress
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _   2 import_timestamp_must_not_regress
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _   3 import_timestamp_must_not_regress
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _  10 import_timestamp_must_not_be_in_the_future
+        \\ account A3  0  0  0  0  _  _  _ _ L2 C2   _   _   _ _ _   4 ok
+        \\ commit import_accounts
+        \\
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  _  10 ok
+        \\ transfer   T2 A2 A1    4   _  _  _  _    _ L1 C2   _   _   _   _   _   _  _  11 ok
+        \\ transfer   T3 A1 A2   10   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _  12 ok
+        \\ transfer   T4 A1 A2   10   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _  _  13 import_timeout_must_be_zero
+        \\ transfer   T4 A1 A2    5   _  _  _  _    _ L1 C2   _   _   _   _   _   _  _   0 import_timestamp_must_not_be_zero
+        \\ transfer   T4 A1 A2    5   _  _  _  _    _ L1 C2   _   _   _   _   _   _  _   1 import_timestamp_must_not_regress
+        \\ transfer   T4 A1 A2    5   _  _  _  _    _ L1 C2   _   _   _   _   _   _  _  12 import_timestamp_must_not_regress
+        \\ transfer   T4 A1 A2    5   _  _  _  _    _ L1 C2   _   _   _   _   _   _  _  21 import_timestamp_must_not_be_in_the_future
+        \\ commit import_transfers
+        \\
+        \\ transfer   T5 A1 A2   10  T3 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _  13 ok
+        \\ commit import_transfers
+        \\
+        \\ lookup_account A1 0 13  0  4
+        \\ lookup_account A2 0  4  0 13
+        \\ lookup_account A3 0  0  0  0
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 timestamp 10
+        \\ lookup_transfer T2 timestamp 11
+        \\ lookup_transfer T3 timestamp 12
+        \\ lookup_transfer T4 exists false
+        \\ lookup_transfer T5 timestamp 13
+        \\ commit lookup_transfers
+    );
+}
+
 test "get_account_transfers: single-phase" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
@@ -4478,13 +4661,13 @@ test "StateMachine: input_valid" {
                     .max = 0,
                     .size = 0,
                 }},
-                .create_accounts => array ++ [_]Event{.{
+                .create_accounts, .import_accounts => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(Account),
                 }},
-                .create_transfers => array ++ [_]Event{.{
+                .create_transfers, .import_transfers => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
