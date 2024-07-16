@@ -31,8 +31,25 @@ to the next operation).
 
 ### `timestamp_must_be_zero`
 
-The account was not created. The [`Account.timestamp`](../account.md#timestamp) is nonzero, but must
-be zero. The cluster is responsible for setting this field.
+The account was not created.
+The [`Account.timestamp`](../account.md#timestamp) is nonzero, but must be zero.
+The cluster is responsible for setting this field when
+[creating a new `Account`](create_accounts.md).
+
+### `import_timestamp_must_not_be_zero`
+
+This result only applies to the [import_accounts](./import_accounts.md) operation.
+
+The account was not created.
+The [`Account.timestamp`](../account.md#timestamp) is zero, but must be a unique nonzero value defined by the user.
+
+### `import_timestamp_must_not_be_in_the_future`
+
+This result only applies to the [import_accounts](./import_accounts.md) operation.
+
+The account was not created.
+The user-defined [`Account.timestamp`](../account.md#timestamp) is greater than the current [cluster time](../../coding/time.md),
+but it must be a past timestamp.
 
 ### `reserved_field`
 
@@ -139,6 +156,14 @@ account in the request:
 
 To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
 many applications should handle `exists` exactly as [`ok`](#ok).
+
+### `import_timestamp_must_not_regress`
+
+This result only applies to the [import_accounts](./import_accounts.md) operation.
+
+The account was not created.
+The user-defined [`Account.timestamp`](../account.md#timestamp) regressed, but it must be greater than the last
+timestamp assigned to any `Account` or `Transfer` in the cluster.
 
 ## Client libraries
 

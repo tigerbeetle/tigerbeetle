@@ -393,14 +393,14 @@ pending transfer will never exceed/overflow either account's limits.
 
 This is the time the transfer was created, as nanoseconds since UNIX epoch.
 
-It is set by TigerBeetle to the moment the transfer arrives at the cluster.
-
 You can read more about [Time in TigerBeetle](../coding/time.md).
 
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be set to `0` by the user when the `Transfer` is created
+- Must be set to `0` for transfers in [`create_transfers`](./requests/create_transfers.md).
+- Must be set to a user-defined unique timestamp for transfers in
+  [`import_transfers`](./requests/import_transfers.md).
 
 ## Internals
 

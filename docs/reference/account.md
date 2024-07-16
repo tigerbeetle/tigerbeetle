@@ -219,14 +219,14 @@ accounts with this flag set.
 
 This is the time the account was created, as nanoseconds since UNIX epoch.
 
-It is set by TigerBeetle to the moment the account arrives at the cluster.
-
 You can read more about [Time in TigerBeetle](../coding/time.md).
 
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be set to `0` by the user when the `Account` is created
+- Must be set to `0` for accounts in [`create_accounts`](./requests/create_accounts.md).
+- Must be set to a user-defined unique timestamp for accounts in
+  [`import_accounts`](./requests/import_accounts.md).
 
 ## Internals
 
