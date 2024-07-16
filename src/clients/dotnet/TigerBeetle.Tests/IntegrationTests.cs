@@ -211,6 +211,74 @@ public class IntegrationTests
         AssertAccounts(accounts, lookupAccounts);
     }
 
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void ImportAccounts()
+    {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = GetTimestampLast();
+        Thread.Sleep(10);
+
+        var accounts = GenerateAccounts();
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            accounts[i].Timestamp = timestamp + (ulong)(i + 1);
+        }
+
+        var results = client.ImportAccounts(accounts);
+        Assert.IsTrue(results.Length == 0);
+
+        var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            Assert.AreEqual(accounts[i].Timestamp, timestamp + (ulong)(i + 1));
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task ImportAccountsAsync()
+    {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = GetTimestampLast();
+        Thread.Sleep(10);
+
+        var accounts = GenerateAccounts();
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            accounts[i].Timestamp = timestamp + (ulong)(i + 1);
+        }
+
+        var results = await client.ImportAccountsAsync(accounts);
+        Assert.IsTrue(results.Length == 0);
+
+        var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            Assert.AreEqual(accounts[i].Timestamp, timestamp + (ulong)(i + 1));
+        }
+    }
+
+    private static ulong GetTimestampLast()
+    {
+        // Inserts a dummy transfer just to retrieve the lastest timestamp
+        // recorded by the cluster.
+        // Must be used only in "DoNotParallelize" tests.
+        var dummy_account = GenerateAccounts()[0];
+        var okResult = client.CreateAccount(dummy_account);
+        Assert.IsTrue(okResult == CreateAccountResult.Ok);
+
+        var lookup = client.LookupAccount(dummy_account.Id);
+        Assert.IsNotNull(lookup);
+
+        return lookup.Value.Timestamp;
+    }
+
     [TestMethod]
     public void CreateTransfers()
     {
@@ -1751,7 +1819,6 @@ public class IntegrationTests
         var accounts = GenerateAccounts();
         var accountResults = client.CreateAccounts(accounts);
         Assert.IsTrue(accountResults.Length == 0);
-
 
         var tasks = new Task<CreateTransferResult>[TASKS_QTY];
         var semaphore = new SemaphoreSlim(CONCURRENCY_MAX);

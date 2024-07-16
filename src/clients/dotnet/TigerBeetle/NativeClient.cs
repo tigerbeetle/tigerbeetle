@@ -174,6 +174,8 @@ internal sealed class NativeClient : IDisposable
     private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
     {
         var request = IRequest.FromUserData(packet->userData);
+        AssertTrue(request != null, "Request GCHandle not allocated");
+
         if (request != null)
         {
             var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
