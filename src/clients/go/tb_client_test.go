@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"os"
 	"os/exec"
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/tigerbeetle/tigerbeetle-go/assert"
@@ -45,7 +47,7 @@ func WithClient(t testing.TB, withClient func(Client)) {
 	replicaCountArg := fmt.Sprintf("--replica-count=%d", TIGERBEETLE_REPLICA_COUNT)
 	clusterArg := fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID)
 
-	fileName := fmt.Sprintf("./%d_%d.tigerbeetle", TIGERBEETLE_CLUSTER_ID, TIGERBEETLE_REPLICA_ID)
+	fileName := fmt.Sprintf("./%d_%d_%d.tigerbeetle", TIGERBEETLE_CLUSTER_ID, TIGERBEETLE_REPLICA_ID, rand.Int())
 	_ = os.Remove(fileName)
 
 	tbInit := exec.Command(tigerbeetlePath, "format", clusterArg, replicaArg, replicaCountArg, fileName)
@@ -1327,6 +1329,92 @@ func doTestClient(t *testing.T, client Client) {
 			t.Fatal(err)
 		}
 		assert.Len(t, query, 0)
+	})
+
+}
+
+func TestImportEvents(t *testing.T) {
+	WithClient(t, func(client Client) {
+		// This test cannot run in parallel with the others because it needs an
+		// stable "timestamp max" reference.
+		t.Run("can import accounts and transfers", func(t *testing.T) {
+			tmpAccount := types.ID()
+			tmpResults, err := client.CreateAccounts([]types.Account{
+				{
+					ID:     tmpAccount,
+					Ledger: 1,
+					Code:   2,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Empty(t, tmpResults)
+
+			tmpAccounts, err := client.LookupAccounts([]types.Uint128{tmpAccount})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, tmpAccounts, 1)
+
+			// Wait 10 ms so we can use the account's timestamp as the reference for past time
+			// after the last object inserted.
+			time.Sleep(10 * time.Millisecond)
+			timestampMax := tmpAccounts[0].Timestamp
+
+			accountA := types.ID()
+			accountB := types.ID()
+			transferA := types.ID()
+
+			accountResults, err := client.ImportAccounts([]types.Account{
+				{
+					ID:        accountA,
+					Ledger:    1,
+					Code:      1,
+					Timestamp: timestampMax + 1,
+				},
+				{
+					ID:        accountB,
+					Ledger:    1,
+					Code:      2,
+					Timestamp: timestampMax + 2,
+				}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Empty(t, accountResults)
+
+			transfersResults, err := client.ImportTransfers([]types.Transfer{
+				{
+					ID:              transferA,
+					CreditAccountID: accountA,
+					DebitAccountID:  accountB,
+					Amount:          types.ToUint128(100),
+					Ledger:          1,
+					Code:            1,
+					Timestamp:       timestampMax + 3,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Empty(t, transfersResults)
+
+			accounts, err := client.LookupAccounts([]types.Uint128{accountA, accountB})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 2)
+			assert.Equal(t, timestampMax+1, accounts[0].Timestamp)
+			assert.Equal(t, timestampMax+2, accounts[1].Timestamp)
+
+			transfers, err := client.LookupTransfers([]types.Uint128{transferA})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 1)
+			assert.Equal(t, timestampMax+3, transfers[0].Timestamp)
+		})
 	})
 
 }

@@ -298,6 +298,66 @@ func main() {
 	transfersRes, err = client.CreateTransfers(batch)
 	// endsection:linked-events
 
+	// External source of time.
+	var historicalTimestamp uint64 = 0
+
+	// section:import-events
+	accounts = []Account{
+		{
+			ID:             ToUint128(1001),
+			DebitsPending:  ToUint128(0),
+			DebitsPosted:   ToUint128(0),
+			CreditsPending: ToUint128(0),
+			CreditsPosted:  ToUint128(0),
+			UserData128:    ToUint128(0),
+			UserData64:     0,
+			UserData32:     0,
+			Reserved:       0,
+			Ledger:         1,
+			Code:           718,
+			Flags:          0,
+			Timestamp:      historicalTimestamp + 1, // User-defined timestamp.
+		},
+		{
+			ID:             ToUint128(1002),
+			DebitsPending:  ToUint128(0),
+			DebitsPosted:   ToUint128(0),
+			CreditsPending: ToUint128(0),
+			CreditsPosted:  ToUint128(0),
+			UserData128:    ToUint128(0),
+			UserData64:     0,
+			UserData32:     0,
+			Reserved:       0,
+			Ledger:         1,
+			Code:           718,
+			Flags:          0,
+			Timestamp:      historicalTimestamp + 2, // User-defined timestamp.
+		},
+	}
+
+	// Same error handling as CreateAccounts
+	accountsRes, err = client.ImportAccounts(accounts)
+
+	transfers = []Transfer{{
+		ID:              ToUint128(100),
+		DebitAccountID:  ToUint128(1001),
+		CreditAccountID: ToUint128(2001),
+		Amount:          ToUint128(10),
+		PendingID:       ToUint128(0),
+		UserData128:     ToUint128(0),
+		UserData64:      0,
+		UserData32:      0,
+		Timeout:         0,
+		Ledger:          1,
+		Code:            1,
+		Flags:           0,
+		Timestamp:       historicalTimestamp + 3, // User-defined timestamp.
+	}}
+
+	// Same error handling as CreateTransfers
+	transfersRes, err = client.ImportTransfers(transfers)
+	// endsection:import-events
+
 	// section:imports
 }
 

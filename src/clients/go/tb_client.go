@@ -42,6 +42,8 @@ import (
 type Client interface {
 	CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
 	CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
+	ImportAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
+	ImportTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
 	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
 	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
 	GetAccountTransfers(filter types.AccountFilter) ([]types.Transfer, error)
@@ -123,9 +125,9 @@ func (c *c_client) Close() {
 
 func getEventSize(op C.TB_OPERATION) uintptr {
 	switch op {
-	case C.TB_OPERATION_CREATE_ACCOUNTS:
+	case C.TB_OPERATION_CREATE_ACCOUNTS, C.TB_OPERATION_IMPORT_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
-	case C.TB_OPERATION_CREATE_TRANSFERS:
+	case C.TB_OPERATION_CREATE_TRANSFERS, C.TB_OPERATION_IMPORT_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		fallthrough
@@ -146,9 +148,9 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 
 func getResultSize(op C.TB_OPERATION) uintptr {
 	switch op {
-	case C.TB_OPERATION_CREATE_ACCOUNTS:
+	case C.TB_OPERATION_CREATE_ACCOUNTS, C.TB_OPERATION_IMPORT_ACCOUNTS:
 		return unsafe.Sizeof(types.AccountEventResult{})
-	case C.TB_OPERATION_CREATE_TRANSFERS:
+	case C.TB_OPERATION_CREATE_TRANSFERS, C.TB_OPERATION_IMPORT_TRANSFERS:
 		return unsafe.Sizeof(types.TransferEventResult{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
@@ -305,7 +307,7 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEven
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.TransferEventResult{}))
+	resultCount := wrote / int(unsafe.Sizeof(types.AccountEventResult{}))
 	return results[0:resultCount], nil
 }
 
@@ -314,6 +316,42 @@ func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.Transfer
 	results := make([]types.TransferEventResult, count)
 	wrote, err := c.doRequest(
 		C.TB_OPERATION_CREATE_TRANSFERS,
+		count,
+		unsafe.Pointer(&transfers[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resultCount := wrote / int(unsafe.Sizeof(types.TransferEventResult{}))
+	return results[0:resultCount], nil
+}
+
+func (c *c_client) ImportAccounts(accounts []types.Account) ([]types.AccountEventResult, error) {
+	count := len(accounts)
+	results := make([]types.AccountEventResult, count)
+	wrote, err := c.doRequest(
+		C.TB_OPERATION_IMPORT_ACCOUNTS,
+		count,
+		unsafe.Pointer(&accounts[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resultCount := wrote / int(unsafe.Sizeof(types.AccountEventResult{}))
+	return results[0:resultCount], nil
+}
+
+func (c *c_client) ImportTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error) {
+	count := len(transfers)
+	results := make([]types.TransferEventResult, count)
+	wrote, err := c.doRequest(
+		C.TB_OPERATION_IMPORT_TRANSFERS,
 		count,
 		unsafe.Pointer(&transfers[0]),
 		unsafe.Pointer(&results[0]),
