@@ -211,7 +211,7 @@ fn run_fuzzers(
                         args.clearRetainingCapacity();
                         try args.appendSlice(&.{ "build", "-Drelease" });
                         try seed_record.fuzzer.fill_args_build(&args);
-                        shell.exec("{zig} {args}", .{
+                        shell.exec_options(.{ .echo = false }, "{zig} {args}", .{
                             .zig = shell.zig_exe.?,
                             .args = args.items,
                         }) catch {
