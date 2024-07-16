@@ -105,8 +105,96 @@ const CliArgs = union(enum) {
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
+        /// When set, don't delete the data file when the benchmark completes.
+        file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
         seed: ?[]const u8 = null,
+    },
+
+    // Experimental: the interface is subject to change.
+    inspect: union(enum) {
+        superblock: struct {
+            positional: struct { path: []const u8 },
+        },
+        wal: struct {
+            slot: ?usize = null,
+            positional: struct { path: []const u8 },
+        },
+        replies: struct {
+            slot: ?usize = null,
+            superblock_copy: ?u8 = null,
+            positional: struct { path: []const u8 },
+        },
+        grid: struct {
+            block: ?u64 = null,
+            superblock_copy: ?u8 = null,
+            positional: struct { path: []const u8 },
+        },
+        manifest: struct {
+            superblock_copy: ?u8 = null,
+            positional: struct { path: []const u8 },
+        },
+        tables: struct {
+            superblock_copy: ?u8 = null,
+            tree: []const u8,
+            level: ?u6 = null,
+            positional: struct { path: []const u8 },
+        },
+
+        pub const help =
+            \\Usage:
+            \\
+            \\  tigerbeetle inspect [-h | --help]
+            \\
+            \\  tigerbeetle inspect superblock <path>
+            \\
+            \\  tigerbeetle inspect wal [--slot=<slot>] <path>
+            \\
+            \\  tigerbeetle inspect replies [--slot=<slot>] <path>
+            \\
+            \\  tigerbeetle inspect grid [--block=<address>] <path>
+            \\
+            \\  tigerbeetle inspect manifest <path>
+            \\
+            \\  tigerbeetle inspect tables --tree=<name|id> [--level=<integer>] <path>
+            \\
+            \\Options:
+            \\
+            \\  When `--superblock-copy` is set, use the trailer referenced by that superblock copy.
+            \\  Otherwise, the current quorum will be used by default.
+            \\
+            \\  -h, --help
+            \\        Print this help message and exit.
+            \\
+            \\  superblock
+            \\        Inspect the superblock header copies.
+            \\
+            \\  wal
+            \\        Inspect the WAL headers and prepares.
+            \\
+            \\  wal --slot=<slot>
+            \\        Inspect the WAL header/prepare in the given slot.
+            \\
+            \\  replies [--superblock-copy=<copy>]
+            \\        Inspect the client reply headers and session numbers.
+            \\
+            \\  replies --slot=<slot> [--superblock-copy=<copy>]
+            \\        Inspect a particular client reply.
+            \\
+            \\  grid [--superblock-copy=<copy>]
+            \\        Inspect the free set.
+            \\
+            \\  grid --block=<address>
+            \\        Inspect the block at the given address.
+            \\
+            \\  manifest [--superblock-copy=<copy>]
+            \\        Inspect the LSM manifest.
+            \\
+            \\  tables --tree=<name|id> [--level=<integer>] [--superblock-copy=<copy>]
+            \\        List the tables matching the given tree/level.
+            \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
+            \\
+        ;
     },
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
@@ -313,8 +401,35 @@ pub const Command = union(enum) {
         print_batch_timings: bool,
         id_order: IdOrder,
         statsd: bool,
+        file: ?[]const u8,
         addresses: ?[]const net.Address,
         seed: ?[]const u8,
+    };
+
+    pub const Inspect = struct {
+        path: []const u8,
+        query: union(enum) {
+            superblock,
+            wal: struct {
+                slot: ?usize,
+            },
+            replies: struct {
+                slot: ?usize,
+                superblock_copy: ?u8,
+            },
+            grid: struct {
+                block: ?u64,
+                superblock_copy: ?u8,
+            },
+            manifest: struct {
+                superblock_copy: ?u8,
+            },
+            tables: struct {
+                superblock_copy: ?u8,
+                tree: []const u8,
+                level: ?u6,
+            },
+        },
     };
 
     format: Format,
@@ -324,6 +439,7 @@ pub const Command = union(enum) {
     },
     repl: Repl,
     benchmark: Benchmark,
+    inspect: Inspect,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
@@ -644,6 +760,10 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             else
                 null;
 
+            if (benchmark.addresses != null and benchmark.file != null) {
+                flags.fatal("--file: --addresses and --file are mutually exclusive", .{});
+            }
+
             return Command{
                 .benchmark = .{
                     .cache_accounts = benchmark.cache_accounts,
@@ -665,8 +785,40 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .print_batch_timings = benchmark.print_batch_timings,
                     .id_order = benchmark.id_order,
                     .statsd = benchmark.statsd,
+                    .file = benchmark.file,
                     .addresses = addresses,
                     .seed = benchmark.seed,
+                },
+            };
+        },
+        .inspect => |inspect| {
+            const path = switch (inspect) {
+                inline else => |args| args.positional.path,
+            };
+
+            return Command{
+                .inspect = .{
+                    .path = path,
+                    .query = switch (inspect) {
+                        .superblock => .superblock,
+                        .wal => |args| .{ .wal = .{ .slot = args.slot } },
+                        .replies => |args| .{ .replies = .{
+                            .slot = args.slot,
+                            .superblock_copy = args.superblock_copy,
+                        } },
+                        .grid => |args| .{ .grid = .{
+                            .block = args.block,
+                            .superblock_copy = args.superblock_copy,
+                        } },
+                        .manifest => |args| .{ .manifest = .{
+                            .superblock_copy = args.superblock_copy,
+                        } },
+                        .tables => |args| .{ .tables = .{
+                            .superblock_copy = args.superblock_copy,
+                            .tree = args.tree,
+                            .level = args.level,
+                        } },
+                    },
                 },
             };
         },

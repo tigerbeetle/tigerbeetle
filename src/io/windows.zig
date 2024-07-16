@@ -990,10 +990,11 @@ pub const IO = struct {
 
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
+    // TODO open_read_only should open the file as read-only.
     fn open_file_handle(
         dir_handle: std.posix.fd_t,
         relative_path: []const u8,
-        method: enum { create, open },
+        method: enum { create, open, open_read_only },
     ) !std.posix.fd_t {
         const path_w = try os.windows.sliceToPrefixedFileW(dir_handle, relative_path);
 
@@ -1004,7 +1005,7 @@ pub const IO = struct {
                 creation_disposition = os.windows.FILE_CREATE;
                 log.info("creating \"{s}\"...", .{relative_path});
             },
-            .open => {
+            .open, .open_read_only => {
                 creation_disposition = os.windows.OPEN_EXISTING;
                 log.info("opening \"{s}\"...", .{relative_path});
             },
@@ -1071,7 +1072,7 @@ pub const IO = struct {
         dir_handle: std.posix.fd_t,
         relative_path: []const u8,
         size: u64,
-        method: enum { create, create_or_open, open },
+        method: enum { create, create_or_open, open, open_read_only },
         direct_io: DirectIO,
     ) !std.posix.fd_t {
         assert(relative_path.len > 0);
@@ -1081,6 +1082,7 @@ pub const IO = struct {
 
         const handle = switch (method) {
             .open => try open_file_handle(dir_handle, relative_path, .open),
+            .open_read_only => try open_file_handle(dir_handle, relative_path, .open_read_only),
             .create => try open_file_handle(dir_handle, relative_path, .create),
             .create_or_open => open_file_handle(
                 dir_handle,

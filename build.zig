@@ -295,8 +295,12 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/integration_tests.zig"),
             .target = target,
             .optimize = mode,
+            .filters = b.args orelse &.{},
         });
         const run_integration_tests = b.addRunArtifact(integration_tests);
+        if (b.args != null) { // Don't cache test results if running a specific test.
+            run_integration_tests.has_side_effects = true;
+        }
         // Ensure integration test have tigerbeetle binary.
         run_integration_tests.step.dependOn(b.getInstallStep());
         build_steps.test_integration.dependOn(&run_integration_tests.step);

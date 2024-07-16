@@ -1180,7 +1180,7 @@ pub const IO = struct {
         dir_fd: posix.fd_t,
         relative_path: []const u8,
         size: u64,
-        method: enum { create, create_or_open, open },
+        method: enum { create, create_or_open, open, open_read_only },
         direct_io: DirectIO,
     ) !posix.fd_t {
         assert(relative_path.len > 0);
@@ -1188,7 +1188,11 @@ pub const IO = struct {
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
 
-        var flags: posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDWR, .DSYNC = true };
+        var flags: posix.O = .{
+            .CLOEXEC = true,
+            .ACCMODE = if (method == .open_read_only) .RDONLY else .RDWR,
+            .DSYNC = true,
+        };
         var mode: posix.mode_t = 0;
 
         const kind: enum { file, block_device } = blk: {
@@ -1293,7 +1297,7 @@ pub const IO = struct {
                         mode = 0o666;
                         log.info("opening or creating \"{s}\"...", .{relative_path});
                     },
-                    .open => {
+                    .open, .open_read_only => {
                         log.info("opening \"{s}\"...", .{relative_path});
                     },
                 }

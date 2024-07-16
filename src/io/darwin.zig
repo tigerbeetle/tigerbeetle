@@ -691,7 +691,7 @@ pub const IO = struct {
         dir_fd: posix.fd_t,
         relative_path: []const u8,
         size: u64,
-        method: enum { create, create_or_open, open },
+        method: enum { create, create_or_open, open, open_read_only },
         direct_io: DirectIO,
     ) !posix.fd_t {
         assert(relative_path.len > 0);
@@ -704,7 +704,11 @@ pub const IO = struct {
         // the disk on every write, but that's not the case for Darwin:
         // https://x.com/TigerBeetleDB/status/1536628729031581697
         // To work around this, fs_sync() is explicitly called after writing in do_operation.
-        var flags: posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDWR, .DSYNC = true };
+        var flags: posix.O = .{
+            .CLOEXEC = true,
+            .ACCMODE = if (method == .open_read_only) .RDONLY else .RDWR,
+            .DSYNC = true,
+        };
         var mode: posix.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
@@ -722,7 +726,7 @@ pub const IO = struct {
                 mode = 0o666;
                 log.info("opening or creating \"{s}\"...", .{relative_path});
             },
-            .open => {
+            .open, .open_read_only => {
                 log.info("opening \"{s}\"...", .{relative_path});
             },
         }
