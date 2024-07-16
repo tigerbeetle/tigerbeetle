@@ -693,7 +693,7 @@ fn node_client(
         \\    }
         \\}
         \\
-        \\fs.writeFileSync('./node.def', 'EXPORTS\n    ' + Array.from(allSymbols).join('\n    '))
+        \\process.stdout.write('EXPORTS\n    ' + Array.from(allSymbols).join('\n    '))
     });
     write_def_file.cwd = b.path("./src/clients/node");
     write_def_file.step.dependOn(&npm_install.step);
@@ -702,11 +702,11 @@ fn node_client(
         b.graph.zig_exe, "dlltool",
         "-m",            "i386:x86-64",
         "-D",            "node.exe",
-        "-d",            "node.def",
         "-l",            "node.lib",
+        "-d",
     });
+    run_dll_tool.addFileArg(write_def_file.captureStdOut());
     run_dll_tool.cwd = b.path("./src/clients/node");
-    run_dll_tool.step.dependOn(&write_def_file.step);
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
