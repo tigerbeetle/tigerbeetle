@@ -442,6 +442,19 @@ fn readme_root(ctx: *Context) !void {
         ctx.code_section("linked-events");
     }
 
+    {
+        ctx.header(2, "Importing historical events");
+        ctx.paragraph(
+            \\Allows the ingestion of historical accounts and transfers with their original
+            \\timestamp into TigerBeetle.
+            \\
+            \\See details for [import_accounts](https://docs.tigerbeetle.com/reference/requests/import_accounts)
+            \\and [import_transfers](https://docs.tigerbeetle.com/reference/requests/import_transfers)
+            \\reference.
+        );
+        ctx.code_section("import-events");
+    }
+
     ctx.ensure_final_newline();
 }
 

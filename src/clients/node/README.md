@@ -259,7 +259,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```javascript
-const accounts = await client.lookupAccounts([137n, 138n]);
+let accounts = await client.lookupAccounts([137n, 138n]);
 console.log(accounts);
 /*
  * [{
@@ -727,4 +727,68 @@ const errors = await client.createTransfers(batch);
  *  { index: 7, error: 1 },  // linked_event_failed
  * ]
  */
+```
+
+## Importing historical events
+
+Allows the ingestion of historical accounts and transfers with their original
+timestamp into TigerBeetle.
+
+See details for [import_accounts](https://docs.tigerbeetle.com/reference/requests/import_accounts)
+and [import_transfers](https://docs.tigerbeetle.com/reference/requests/import_transfers)
+reference.
+
+```javascript
+accounts = [{
+  id: 1001n,
+  debits_pending: 0n,
+  debits_posted: 0n,
+  credits_pending: 0n,
+  credits_posted: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  reserved: 0,
+  ledger: 1,
+  code: 718,
+  flags: 0,
+  timestamp: historicalTimestamp + 1n, // User-defined timestamp.
+},
+{
+  id: 2001n,
+  debits_pending: 0n,
+  debits_posted: 0n,
+  credits_pending: 0n,
+  credits_posted: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  reserved: 0,
+  ledger: 1,
+  code: 718,
+  flags: 0,
+  timestamp: historicalTimestamp + 2n, // User-defined timestamp.
+}];
+
+// Same error handling as createAccounts
+accountErrors = await client.importAccounts([account]);
+
+transfers = [{
+  id: 100n,
+  debit_account_id: 1001n,
+  credit_account_id: 2001n,
+  amount: 10n,
+  pending_id: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  timeout: 0,
+  ledger: 1,
+  code: 720,
+  flags: 0,
+  timestamp: historicalTimestamp + 3n, // User-defined timestamp.
+}];
+
+// Same error handling as createTransfers
+transferErrors = await client.importTransfers(transfers);
 ```

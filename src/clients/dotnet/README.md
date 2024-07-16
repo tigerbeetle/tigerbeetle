@@ -531,3 +531,48 @@ batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ });
 createTransfersError = client.CreateTransfers(batch.ToArray());
 // error handling omitted
 ```
+
+## Importing historical events
+
+Allows the ingestion of historical accounts and transfers with their original
+timestamp into TigerBeetle.
+
+See details for [import_accounts](https://docs.tigerbeetle.com/reference/requests/import_accounts)
+and [import_transfers](https://docs.tigerbeetle.com/reference/requests/import_transfers)
+reference.
+
+```cs
+accounts = new[] {
+    new Account
+    {
+        Id = 1001,
+        Ledger = 1,
+        Code = 718,
+        Timestamp = historicalTimestamp + 1, // User-defined timestamp
+    },
+    new Account
+    {
+        Id = 2001,
+        Ledger = 1,
+        Code = 718,
+        Timestamp = historicalTimestamp + 2, // User-defined timestamp
+    },
+};
+
+// Same error handling as CreateAccounts
+createAccountsError = client.ImportAccounts(accounts);
+
+transfer = new Transfer
+{
+    Id = 100,
+    DebitAccountId = 1001,
+    CreditAccountId = 2001,
+    Amount = 10,
+    Ledger = 1,
+    Code = 1,
+    Timestamp = historicalTimestamp + 3, // User-defined timestamp
+};
+
+// Same error handling as CreateTransfers
+createTransfersError = client.ImportTransfers(new Transfer[] { transfer });
+```

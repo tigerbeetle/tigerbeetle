@@ -627,3 +627,43 @@ transfers.setId(4);
 
 transferErrors = client.createTransfers(transfers);
 ```
+
+## Importing historical events
+
+Allows the ingestion of historical accounts and transfers with their original
+timestamp into TigerBeetle.
+
+See details for [import_accounts](https://docs.tigerbeetle.com/reference/requests/import_accounts)
+and [import_transfers](https://docs.tigerbeetle.com/reference/requests/import_transfers)
+reference.
+
+```java
+accounts = new AccountBatch(2);
+accounts.add();
+accounts.setId(1001);
+accounts.setLedger(1);
+accounts.setCode(718);
+accounts.setTimestamp(historicalTimestamp + 1); // User-defined timestamp.
+
+accounts.add();
+accounts.setId(2001);
+accounts.setLedger(1);
+accounts.setCode(718);
+accounts.setTimestamp(historicalTimestamp + 2); // User-defined timestamp.
+
+// Same error handling as createAccounts
+accountErrors = client.importAccounts(accounts);
+
+transfers = new TransferBatch(1);
+transfers.add();
+transfers.setId(100);
+transfers.setDebitAccountId(1001);
+transfers.setCreditAccountId(2001);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
+transfers.setTimestamp(historicalTimestamp + 3); // User-defined timestamp.
+
+// Same error handling as createTransfers
+transferErrors = client.importTransfers(transfers);
+```
