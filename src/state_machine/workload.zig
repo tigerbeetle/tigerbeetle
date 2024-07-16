@@ -806,6 +806,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .flags = .{},
                 // +1 to avoid `.amount_must_not_be_zero`.
                 .amount = 1 + @as(u128, self.random.int(u8)),
+                .timestamp = 0,
             };
 
             switch (method) {
