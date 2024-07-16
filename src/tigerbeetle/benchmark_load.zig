@@ -262,6 +262,7 @@ const Benchmark = struct {
             .debits_posted = 0,
             .credits_pending = 0,
             .credits_posted = 0,
+            .timestamp = 0,
         };
     }
 

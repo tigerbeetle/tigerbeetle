@@ -1421,10 +1421,10 @@ pub fn StateMachineType(
 
         fn scope_open(self: *StateMachine, operation: Operation) void {
             switch (operation) {
-                .create_accounts => {
+                .create_accounts, .import_accounts => {
                     self.forest.grooves.accounts.scope_open();
                 },
-                .create_transfers => {
+                .create_transfers, .import_transfers => {
                     self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
                     self.forest.grooves.transfers_pending.scope_open();
@@ -1436,10 +1436,10 @@ pub fn StateMachineType(
 
         fn scope_close(self: *StateMachine, operation: Operation, mode: ScopeCloseMode) void {
             switch (operation) {
-                .create_accounts => {
+                .create_accounts, .import_accounts => {
                     self.forest.grooves.accounts.scope_close(mode);
                 },
-                .create_transfers => {
+                .create_transfers, .import_transfers => {
                     self.forest.grooves.accounts.scope_close(mode);
                     self.forest.grooves.transfers.scope_close(mode);
                     self.forest.grooves.transfers_pending.scope_close(mode);

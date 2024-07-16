@@ -61,6 +61,8 @@ pub const Parser = struct {
         get_account_balances,
         query_accounts,
         query_transfers,
+        import_accounts,
+        import_transfers,
     };
 
     pub const LookupSyntaxTree = struct {
@@ -204,8 +206,7 @@ pub const Parser = struct {
                     if (std.mem.eql(u8, active_value_field.name, key_to_validate)) {
                         // Handle everything but flags, skip reserved and timestamp.
                         if (comptime (!std.mem.eql(u8, active_value_field.name, "flags") and
-                            !std.mem.eql(u8, active_value_field.name, "reserved") and
-                            !std.mem.eql(u8, active_value_field.name, "timestamp")))
+                            !std.mem.eql(u8, active_value_field.name, "reserved")))
                         {
                             @field(
                                 @field(out.*, object_syntax_tree_field.name),
@@ -266,8 +267,12 @@ pub const Parser = struct {
     ) !void {
         const default: ObjectSyntaxTree = switch (operation) {
             .help, .none => return,
-            .create_accounts => .{ .account = std.mem.zeroInit(tb.Account, .{}) },
-            .create_transfers => .{ .transfer = std.mem.zeroInit(tb.Transfer, .{}) },
+            .create_accounts, .import_accounts => .{
+                .account = std.mem.zeroInit(tb.Account, .{}),
+            },
+            .create_transfers, .import_transfers => .{
+                .transfer = std.mem.zeroInit(tb.Transfer, .{}),
+            },
             .lookup_accounts, .lookup_transfers => .{ .id = .{ .id = 0 } },
             .get_account_transfers, .get_account_balances => .{ .account_filter = tb.AccountFilter{
                 .account_id = 0,
@@ -506,6 +511,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
+                .import_accounts,
+                .import_transfers,
                 => |operation| {
                     const state_machine_operation =
                         std.meta.stringToEnum(StateMachine.Operation, @tagName(operation));
@@ -739,14 +746,23 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .get_account_transfers, .get_account_balances => "get",
                 .lookup_accounts, .lookup_transfers => "lookup",
                 .query_accounts, .query_transfers => "query",
-                .pulse, .import_accounts, .import_transfers => unreachable,
+                .import_accounts, .import_transfers => "import",
+                .pulse => unreachable,
             };
             const object_type = switch (operation) {
-                .create_accounts, .lookup_accounts, .query_accounts => "accounts",
-                .create_transfers, .lookup_transfers, .query_transfers => "transfers",
+                .create_accounts,
+                .lookup_accounts,
+                .query_accounts,
+                .import_accounts,
+                => "accounts",
+                .create_transfers,
+                .lookup_transfers,
+                .query_transfers,
+                .import_transfers,
+                => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
-                .pulse, .import_accounts, .import_transfers => unreachable,
+                .pulse => unreachable,
             };
 
             if (arguments.len == 0) {
@@ -831,7 +847,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
 
             switch (operation) {
-                .create_accounts => {
+                .create_accounts, .import_accounts => {
                     const create_account_results = std.mem.bytesAsSlice(
                         tb.CreateAccountsResult,
                         result,
@@ -860,7 +876,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                     }
                 },
-                .create_transfers => {
+                .create_transfers, .import_transfers => {
                     const create_transfer_results = std.mem.bytesAsSlice(
                         tb.CreateTransfersResult,
                         result,
@@ -903,7 +919,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                     }
                 },
-                .pulse, .import_accounts, .import_transfers => unreachable,
+                .pulse => unreachable,
             }
         }
 
@@ -931,10 +947,12 @@ const null_printer = Printer{
 
 test "repl.zig: Parser single transfer successfully" {
     const tests = [_]struct {
+        operation: Parser.Operation,
         in: []const u8 = "",
         want: tb.Transfer,
     }{
         .{
+            .operation = .create_transfers,
             .in = "create_transfers id=1",
             .want = tb.Transfer{
                 .id = 1,
@@ -953,6 +971,26 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
+            .operation = .import_transfers,
+            .in = "import_transfers id=1 timestamp=100",
+            .want = tb.Transfer{
+                .id = 1,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 0,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 100,
+            },
+        },
+        .{
+            .operation = .create_transfers,
             .in =
             \\create_transfers id=32 amount=65 ledger=12 code=9999 pending_id=7
             \\ credit_account_id=2121 debit_account_id=77 user_data_128=2
@@ -975,6 +1013,7 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
+            .operation = .create_transfers,
             .in =
             \\create_transfers flags=
             \\ post_pending_transfer |
@@ -1019,17 +1058,19 @@ test "repl.zig: Parser single transfer successfully" {
             null_printer,
         );
 
-        try std.testing.expectEqual(statement.operation, .create_transfers);
+        try std.testing.expectEqual(statement.operation, t.operation);
         try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
     }
 }
 
 test "repl.zig: Parser multiple transfers successfully" {
     const tests = [_]struct {
+        operation: Parser.Operation,
         in: []const u8 = "",
         want: [2]tb.Transfer,
     }{
         .{
+            .operation = .create_transfers,
             .in = "create_transfers id=1 debit_account_id=2, id=2 credit_account_id = 1;",
             .want = [2]tb.Transfer{
                 tb.Transfer{
@@ -1064,6 +1105,45 @@ test "repl.zig: Parser multiple transfers successfully" {
                 },
             },
         },
+        .{
+            .operation = .import_transfers,
+            .in =
+            \\import_transfers id=1 timestamp=100 debit_account_id=2,
+            \\id=2 timestamp = 200 credit_account_id = 1;"
+            ,
+            .want = [2]tb.Transfer{
+                tb.Transfer{
+                    .id = 1,
+                    .debit_account_id = 2,
+                    .credit_account_id = 0,
+                    .amount = 0,
+                    .pending_id = 0,
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .timeout = 0,
+                    .ledger = 0,
+                    .code = 0,
+                    .flags = .{},
+                    .timestamp = 100,
+                },
+                tb.Transfer{
+                    .id = 2,
+                    .debit_account_id = 0,
+                    .credit_account_id = 1,
+                    .amount = 0,
+                    .pending_id = 0,
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .timeout = 0,
+                    .ledger = 0,
+                    .code = 0,
+                    .flags = .{},
+                    .timestamp = 200,
+                },
+            },
+        },
     };
 
     for (tests) |t| {
@@ -1076,17 +1156,19 @@ test "repl.zig: Parser multiple transfers successfully" {
             null_printer,
         );
 
-        try std.testing.expectEqual(statement.operation, .create_transfers);
+        try std.testing.expectEqual(statement.operation, t.operation);
         try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.sliceAsBytes(&t.want));
     }
 }
 
 test "repl.zig: Parser single account successfully" {
     const tests = [_]struct {
+        operation: Parser.Operation,
         in: []const u8,
         want: tb.Account,
     }{
         .{
+            .operation = .create_accounts,
             .in = "create_accounts id=1",
             .want = tb.Account{
                 .id = 1,
@@ -1101,9 +1183,30 @@ test "repl.zig: Parser single account successfully" {
                 .ledger = 0,
                 .code = 0,
                 .flags = .{},
+                .timestamp = 0,
             },
         },
         .{
+            .operation = .import_accounts,
+            .in = "import_accounts id=1 timestamp=100",
+            .want = tb.Account{
+                .id = 1,
+                .debits_pending = 0,
+                .debits_posted = 0,
+                .credits_pending = 0,
+                .credits_posted = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .reserved = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 100,
+            },
+        },
+        .{
+            .operation = .create_accounts,
             .in =
             \\create_accounts id=32 credits_posted=344 ledger=12 credits_pending=18
             \\ code=9999 flags=linked | debits_must_not_exceed_credits debits_posted=3390
@@ -1122,9 +1225,11 @@ test "repl.zig: Parser single account successfully" {
                 .ledger = 12,
                 .code = 9999,
                 .flags = .{ .linked = true, .debits_must_not_exceed_credits = true },
+                .timestamp = 0,
             },
         },
         .{
+            .operation = .create_accounts,
             .in =
             \\create_accounts flags=credits_must_not_exceed_debits|
             \\ linked|debits_must_not_exceed_credits id =1
@@ -1146,6 +1251,7 @@ test "repl.zig: Parser single account successfully" {
                     .linked = true,
                     .debits_must_not_exceed_credits = true,
                 },
+                .timestamp = 0,
             },
         },
     };
@@ -1160,8 +1266,103 @@ test "repl.zig: Parser single account successfully" {
             null_printer,
         );
 
-        try std.testing.expectEqual(statement.operation, .create_accounts);
+        try std.testing.expectEqual(statement.operation, t.operation);
         try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
+    }
+}
+
+test "repl.zig: Parser multiple accounts successfully" {
+    const tests = [_]struct {
+        operation: Parser.Operation,
+        in: []const u8,
+        want: [2]tb.Account,
+    }{
+        .{
+            .operation = .create_accounts,
+            .in = "create_accounts id=1, id=2",
+            .want = [2]tb.Account{
+                tb.Account{
+                    .id = 1,
+                    .debits_pending = 0,
+                    .debits_posted = 0,
+                    .credits_pending = 0,
+                    .credits_posted = 0,
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .reserved = 0,
+                    .ledger = 0,
+                    .code = 0,
+                    .flags = .{},
+                    .timestamp = 0,
+                },
+                tb.Account{
+                    .id = 2,
+                    .debits_pending = 0,
+                    .debits_posted = 0,
+                    .credits_pending = 0,
+                    .credits_posted = 0,
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .reserved = 0,
+                    .ledger = 0,
+                    .code = 0,
+                    .flags = .{},
+                    .timestamp = 0,
+                },
+            },
+        },
+        .{
+            .operation = .import_accounts,
+            .in = "import_accounts id=1 timestamp=100, id=2 timestamp = 200",
+            .want = [2]tb.Account{
+                tb.Account{
+                    .id = 1,
+                    .debits_pending = 0,
+                    .debits_posted = 0,
+                    .credits_pending = 0,
+                    .credits_posted = 0,
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .reserved = 0,
+                    .ledger = 0,
+                    .code = 0,
+                    .flags = .{},
+                    .timestamp = 100,
+                },
+                tb.Account{
+                    .id = 2,
+                    .debits_pending = 0,
+                    .debits_posted = 0,
+                    .credits_pending = 0,
+                    .credits_posted = 0,
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .reserved = 0,
+                    .ledger = 0,
+                    .code = 0,
+                    .flags = .{},
+                    .timestamp = 200,
+                },
+            },
+        },
+    };
+
+    for (tests) |t| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        const statement = try Parser.parse_statement(
+            &arena,
+            t.in,
+            null_printer,
+        );
+
+        try std.testing.expectEqual(statement.operation, t.operation);
+        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.sliceAsBytes(&t.want));
     }
 }
 
@@ -1284,61 +1485,6 @@ test "repl.zig: Parser query filter successfully" {
 
         try std.testing.expectEqual(statement.operation, t.operation);
         try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
-    }
-}
-
-test "repl.zig: Parser multiple accounts successfully" {
-    const tests = [_]struct {
-        in: []const u8,
-        want: [2]tb.Account,
-    }{
-        .{
-            .in = "create_accounts id=1, id=2",
-            .want = [2]tb.Account{
-                tb.Account{
-                    .id = 1,
-                    .debits_pending = 0,
-                    .debits_posted = 0,
-                    .credits_pending = 0,
-                    .credits_posted = 0,
-                    .user_data_128 = 0,
-                    .user_data_64 = 0,
-                    .user_data_32 = 0,
-                    .reserved = 0,
-                    .ledger = 0,
-                    .code = 0,
-                    .flags = .{},
-                },
-                tb.Account{
-                    .id = 2,
-                    .debits_pending = 0,
-                    .debits_posted = 0,
-                    .credits_pending = 0,
-                    .credits_posted = 0,
-                    .user_data_128 = 0,
-                    .user_data_64 = 0,
-                    .user_data_32 = 0,
-                    .reserved = 0,
-                    .ledger = 0,
-                    .code = 0,
-                    .flags = .{},
-                },
-            },
-        },
-    };
-
-    for (tests) |t| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
-
-        const statement = try Parser.parse_statement(
-            &arena,
-            t.in,
-            null_printer,
-        );
-
-        try std.testing.expectEqual(statement.operation, .create_accounts);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.sliceAsBytes(&t.want));
     }
 }
 

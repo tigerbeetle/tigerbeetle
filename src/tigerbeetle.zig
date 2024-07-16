@@ -20,7 +20,7 @@ pub const Account = extern struct {
     /// A chart of accounts code describing the type of account (e.g. clearing, settlement).
     code: u16,
     flags: AccountFlags,
-    timestamp: u64 = 0,
+    timestamp: u64,
 
     comptime {
         assert(stdx.no_padding(Account));
@@ -95,7 +95,7 @@ pub const Transfer = extern struct {
     /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement).
     code: u16,
     flags: TransferFlags,
-    timestamp: u64 = 0,
+    timestamp: u64,
 
     // Converts the timeout from seconds to ns.
     pub fn timeout_ns(self: *const Transfer) u64 {
