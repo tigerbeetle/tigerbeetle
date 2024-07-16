@@ -37,6 +37,8 @@ abstract class Request<TResponse extends Batch> {
         GET_ACCOUNT_BALANCES(134),
         QUERY_ACCOUNTS(135),
         QUERY_TRANSFERS(136),
+        IMPORT_ACCOUNTS(137),
+        IMPORT_TRANSFERS(138),
 
         ECHO_ACCOUNTS(129),
         ECHO_TRANSFERS(130);
@@ -109,14 +111,16 @@ abstract class Request<TResponse extends Batch> {
             } else {
 
                 switch (operation) {
-                    case CREATE_ACCOUNTS: {
+                    case CREATE_ACCOUNTS:
+                    case IMPORT_ACCOUNTS: {
                         result = replyBuffer == null ? CreateAccountResultBatch.EMPTY
                                 : new CreateAccountResultBatch(ByteBuffer.wrap(replyBuffer));
                         exception = checkResultLength(result);
                         break;
                     }
 
-                    case CREATE_TRANSFERS: {
+                    case CREATE_TRANSFERS:
+                    case IMPORT_TRANSFERS: {
                         result = replyBuffer == null ? CreateTransferResultBatch.EMPTY
                                 : new CreateTransferResultBatch(ByteBuffer.wrap(replyBuffer));
                         exception = checkResultLength(result);
@@ -164,7 +168,7 @@ abstract class Request<TResponse extends Batch> {
                     }
 
                     default: {
-                        exception = new AssertionError("Unknown operation %d", operation);
+                        exception = new AssertionError("Unknown operation %d", operation.value);
                         break;
                     }
                 }

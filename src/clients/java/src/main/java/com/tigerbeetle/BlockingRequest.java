@@ -45,6 +45,12 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
                 Request.Operations.CREATE_ACCOUNTS, batch);
     }
 
+    public static BlockingRequest<CreateAccountResultBatch> importAccounts(
+            final NativeClient nativeClient, final AccountBatch batch) {
+        return new BlockingRequest<CreateAccountResultBatch>(nativeClient,
+                Request.Operations.IMPORT_ACCOUNTS, batch);
+    }
+
     public static BlockingRequest<AccountBatch> lookupAccounts(final NativeClient nativeClient,
             final IdBatch batch) {
         return new BlockingRequest<AccountBatch>(nativeClient, Request.Operations.LOOKUP_ACCOUNTS,
@@ -55,6 +61,12 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
             final NativeClient nativeClient, final TransferBatch batch) {
         return new BlockingRequest<CreateTransferResultBatch>(nativeClient,
                 Request.Operations.CREATE_TRANSFERS, batch);
+    }
+
+    public static BlockingRequest<CreateTransferResultBatch> importTransfers(
+            final NativeClient nativeClient, final TransferBatch batch) {
+        return new BlockingRequest<CreateTransferResultBatch>(nativeClient,
+                Request.Operations.IMPORT_TRANSFERS, batch);
     }
 
     public static BlockingRequest<TransferBatch> lookupTransfers(final NativeClient nativeClient,

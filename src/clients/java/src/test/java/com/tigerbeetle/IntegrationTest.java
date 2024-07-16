@@ -32,26 +32,19 @@ public class IntegrationTest {
     private static Server server;
     private static Client client;
 
-    private static AccountBatch generateAccounts(final byte[] id1, final byte[] id2) {
-        final var accounts = new AccountBatch(2);
+    private static AccountBatch generateAccounts(final byte[]... ids) {
+        final var accounts = new AccountBatch(ids.length);
 
-        accounts.add();
-        accounts.setId(id1);
-        accounts.setUserData128(100, 0);
-        accounts.setUserData64(101);
-        accounts.setUserData32(102);
-        accounts.setLedger(720);
-        accounts.setCode(1);
-        accounts.setFlags(AccountFlags.NONE);
-
-        accounts.add();
-        accounts.setId(id2);
-        accounts.setUserData128(200, 0);
-        accounts.setUserData64(201);
-        accounts.setUserData32(202);
-        accounts.setLedger(720);
-        accounts.setCode(2);
-        accounts.setFlags(AccountFlags.NONE);
+        for (var id : ids) {
+            accounts.add();
+            accounts.setId(id);
+            accounts.setUserData128(100, 0);
+            accounts.setUserData64(101);
+            accounts.setUserData32(102);
+            accounts.setLedger(720);
+            accounts.setCode(1);
+            accounts.setFlags(AccountFlags.NONE);
+        }
 
         accounts.beforeFirst();
         return accounts;
@@ -218,8 +211,7 @@ public class IntegrationTest {
     public void testCreateTransfers() throws Throwable {
         final var account1Id = UInt128.id();
         final var account2Id = UInt128.id();
-        final var transfer1Id = UInt128.id();
-        final var transfer2Id = UInt128.id();
+        final var transferId = UInt128.id();
 
         final var accounts = generateAccounts(account1Id, account2Id);
 
@@ -228,10 +220,10 @@ public class IntegrationTest {
         assertTrue(createAccountErrors.getLength() == 0);
 
         // Creating a transfer.
-        final var transfers = new TransferBatch(2);
+        final var transfers = new TransferBatch(1);
 
         transfers.add();
-        transfers.setId(transfer1Id);
+        transfers.setId(transferId);
         transfers.setCreditAccountId(account1Id);
         transfers.setDebitAccountId(account2Id);
         transfers.setLedger(720);
@@ -269,7 +261,7 @@ public class IntegrationTest {
         assertEquals(BigInteger.valueOf(100), lookupAccounts.getDebitsPosted());
 
         // Looking up and asserting the transfer.
-        final var lookupTransfers = client.lookupTransfers(new IdBatch(transfer1Id, transfer2Id));
+        final var lookupTransfers = client.lookupTransfers(new IdBatch(transferId));
         assertEquals(1, lookupTransfers.getLength());
 
         transfers.beforeFirst();
@@ -284,8 +276,7 @@ public class IntegrationTest {
     public void testCreateTransfersAsync() throws Throwable {
         final var account1Id = UInt128.id();
         final var account2Id = UInt128.id();
-        final var transfer1Id = UInt128.id();
-        final var transfer2Id = UInt128.id();
+        final var transferId = UInt128.id();
 
         final var accounts = generateAccounts(account1Id, account2Id);
 
@@ -296,10 +287,10 @@ public class IntegrationTest {
         assertTrue(createAccountErrors.getLength() == 0);
 
         // Creating a transfer.
-        final var transfers = new TransferBatch(2);
+        final var transfers = new TransferBatch(1);
 
         transfers.add();
-        transfers.setId(transfer1Id);
+        transfers.setId(transferId);
         transfers.setCreditAccountId(account1Id);
         transfers.setDebitAccountId(account2Id);
         transfers.setLedger(720);
@@ -341,7 +332,7 @@ public class IntegrationTest {
 
         // Looking up and asserting the transfer.
         CompletableFuture<TransferBatch> lookupTransfersFuture =
-                client.lookupTransfersAsync(new IdBatch(transfer1Id, transfer2Id));
+                client.lookupTransfersAsync(new IdBatch(transferId));
         final var lookupTransfers = lookupTransfersFuture.get();
         assertEquals(1, lookupTransfers.getLength());
 
@@ -350,7 +341,7 @@ public class IntegrationTest {
         assertTrue(transfers.next());
         assertTrue(lookupTransfers.next());
         assertTransfers(transfers, lookupTransfers);
-        assertNotEquals(BigInteger.ZERO, lookupTransfers.getTimestamp());
+        assertNotEquals(0L, lookupTransfers.getTimestamp());
     }
 
     @Test
@@ -889,6 +880,201 @@ public class IntegrationTest {
             final var requestException = (RequestException) executionException.getCause();
             assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
         }
+    }
+
+    @Test
+    public void testImportAccounts() throws Throwable {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = getTimestampLast();
+        Thread.sleep(10);
+
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        final var accounts = generateAccounts(account1Id, account2Id);
+
+        while (accounts.next()) {
+            accounts.setTimestamp(timestamp + accounts.getPosition() + 1);
+        }
+        accounts.beforeFirst();
+
+        final var createAccountErrors = client.importAccounts(accounts);
+        assertTrue(createAccountErrors.getLength() == 0);
+
+        final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
+        assertEquals(2, lookupAccounts.getLength());
+
+        assertTrue(accounts.next());
+        assertTrue(lookupAccounts.next());
+        assertAccounts(accounts, lookupAccounts);
+
+        assertTrue(accounts.next());
+        assertTrue(lookupAccounts.next());
+        assertAccounts(accounts, lookupAccounts);
+
+        lookupAccounts.beforeFirst();
+        while (lookupAccounts.next()) {
+            assertEquals(lookupAccounts.getTimestamp(),
+                    timestamp + lookupAccounts.getPosition() + 1);
+        }
+    }
+
+    @Test
+    public void testImportAccountsAsync() throws Throwable {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = getTimestampLast();
+        Thread.sleep(10);
+
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        final var accounts = generateAccounts(account1Id, account2Id);
+
+        while (accounts.next()) {
+            accounts.setTimestamp(timestamp + accounts.getPosition() + 1);
+        }
+        accounts.beforeFirst();
+
+        CompletableFuture<CreateAccountResultBatch> accountsFuture =
+                client.importAccountsAsync(accounts);
+
+        final var createAccountErrors = accountsFuture.get();
+        assertTrue(createAccountErrors.getLength() == 0);
+
+        CompletableFuture<AccountBatch> lookupFuture =
+                client.lookupAccountsAsync(new IdBatch(account1Id, account2Id));
+
+        final var lookupAccounts = lookupFuture.get();
+        assertEquals(2, lookupAccounts.getLength());
+
+        assertTrue(accounts.next());
+        assertTrue(lookupAccounts.next());
+        assertAccounts(accounts, lookupAccounts);
+
+        assertTrue(accounts.next());
+        assertTrue(lookupAccounts.next());
+        assertAccounts(accounts, lookupAccounts);
+
+        lookupAccounts.beforeFirst();
+        while (lookupAccounts.next()) {
+            assertEquals(lookupAccounts.getTimestamp(),
+                    timestamp + lookupAccounts.getPosition() + 1);
+        }
+    }
+
+    @Test
+    public void testImportTransfers() throws Throwable {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = getTimestampLast();
+        Thread.sleep(10);
+
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        final var transferId = UInt128.id();
+
+        final var accounts = generateAccounts(account1Id, account2Id);
+        while (accounts.next()) {
+            accounts.setTimestamp(timestamp + accounts.getPosition() + 1);
+        }
+        accounts.beforeFirst();
+
+        // Creating the accounts.
+        final var createAccountErrors = client.importAccounts(accounts);
+        assertTrue(createAccountErrors.getLength() == 0);
+
+        // Creating a transfer.
+        final var transfers = new TransferBatch(1);
+
+        transfers.add();
+        transfers.setId(transferId);
+        transfers.setCreditAccountId(account1Id);
+        transfers.setDebitAccountId(account2Id);
+        transfers.setLedger(720);
+        transfers.setCode((short) 1);
+        transfers.setFlags(TransferFlags.NONE);
+        transfers.setAmount(100);
+        transfers.setTimestamp(timestamp + accounts.getLength() + 1);
+
+        final var createTransferErrors = client.importTransfers(transfers);
+        assertTrue(createTransferErrors.getLength() == 0);
+
+        // Looking up and asserting the transfer.
+        final var lookupTransfers = client.lookupTransfers(new IdBatch(transferId));
+        assertEquals(1, lookupTransfers.getLength());
+
+        transfers.beforeFirst();
+
+        assertTrue(transfers.next());
+        assertTrue(lookupTransfers.next());
+        assertTransfers(transfers, lookupTransfers);
+        assertEquals(timestamp + accounts.getLength() + 1, lookupTransfers.getTimestamp());
+    }
+
+    @Test
+    public void testImportTransfersAsync() throws Throwable {
+        var timestamp = getTimestampLast();
+        Thread.sleep(10);
+
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        final var transferId = UInt128.id();
+
+        final var accounts = generateAccounts(account1Id, account2Id);
+        while (accounts.next()) {
+            accounts.setTimestamp(timestamp + accounts.getPosition() + 1);
+        }
+        accounts.beforeFirst();
+
+        // Creating the accounts.
+        CompletableFuture<CreateAccountResultBatch> future = client.importAccountsAsync(accounts);
+
+        final var createAccountErrors = future.get();
+        assertTrue(createAccountErrors.getLength() == 0);
+
+        // Creating a transfer.
+        final var transfers = new TransferBatch(1);
+
+        transfers.add();
+        transfers.setId(transferId);
+        transfers.setCreditAccountId(account1Id);
+        transfers.setDebitAccountId(account2Id);
+        transfers.setLedger(720);
+        transfers.setCode((short) 1);
+        transfers.setAmount(100);
+        transfers.setTimestamp(timestamp + accounts.getLength() + 1);
+
+        CompletableFuture<CreateTransferResultBatch> transfersFuture =
+                client.importTransfersAsync(transfers);
+        final var createTransferErrors = transfersFuture.get();
+        assertTrue(createTransferErrors.getLength() == 0);
+
+        // Looking up and asserting the transfer.
+        CompletableFuture<TransferBatch> lookupTransfersFuture =
+                client.lookupTransfersAsync(new IdBatch(transferId));
+        final var lookupTransfers = lookupTransfersFuture.get();
+        assertEquals(1, lookupTransfers.getLength());
+
+        transfers.beforeFirst();
+
+        assertTrue(transfers.next());
+        assertTrue(lookupTransfers.next());
+        assertTransfers(transfers, lookupTransfers);
+        assertEquals(timestamp + accounts.getLength() + 1, lookupTransfers.getTimestamp());
+    }
+
+    private long getTimestampLast() throws ConcurrencyExceededException {
+        final var id = UInt128.id();
+        final var accounts = generateAccounts(id);
+
+        final var createAccountErrors = client.createAccounts(accounts);
+        assertTrue(createAccountErrors.getLength() == 0);
+
+        final var lookupAccounts = client.lookupAccounts(new IdBatch(id));
+        assertEquals(1, lookupAccounts.getLength());
+
+        assertTrue(lookupAccounts.next());
+        return lookupAccounts.getTimestamp();
     }
 
     /**

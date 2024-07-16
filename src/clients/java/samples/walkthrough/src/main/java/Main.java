@@ -285,6 +285,41 @@ public final class Main {
 
             transferErrors = client.createTransfers(transfers);
             // endsection:linked-events
+
+            // External source of time
+            long historicalTimestamp = 0L;
+
+            // section:import-events
+            accounts = new AccountBatch(2);
+            accounts.add();
+            accounts.setId(1001);
+            accounts.setLedger(1);
+            accounts.setCode(718);
+            accounts.setTimestamp(historicalTimestamp + 1); // User-defined timestamp.
+
+            accounts.add();
+            accounts.setId(2001);
+            accounts.setLedger(1);
+            accounts.setCode(718);
+            accounts.setTimestamp(historicalTimestamp + 2); // User-defined timestamp.
+
+            // Same error handling as createAccounts
+            accountErrors = client.importAccounts(accounts);
+
+            transfers = new TransferBatch(1);
+            transfers.add();
+            transfers.setId(100);
+            transfers.setDebitAccountId(1001);
+            transfers.setCreditAccountId(2001);
+            transfers.setAmount(10);
+            transfers.setLedger(1);
+            transfers.setCode(1);
+            transfers.setTimestamp(historicalTimestamp + 3); // User-defined timestamp.
+
+            // Same error handling as createTransfers
+            transferErrors = client.importTransfers(transfers);
+            // endsection:import-events
+
         }
         // section:imports
     }
