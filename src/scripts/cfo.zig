@@ -67,17 +67,17 @@ const Fuzzer = enum {
     lsm_forest,
     lsm_manifest_level,
     lsm_manifest_log,
+    lsm_scan,
     lsm_segmented_array,
     lsm_tree,
-    lsm_scan,
+    vopr_lite,
+    vopr_testing_lite,
+    vopr_testing,
+    vopr,
     vsr_free_set,
     vsr_journal_format,
     vsr_superblock_quorums,
     vsr_superblock,
-    vopr,
-    vopr_testing,
-    vopr_lite,
-    vopr_testing_lite,
 
     fn fill_args_build(fuzzer: Fuzzer, accumulator: *std.ArrayList([]const u8)) !void {
         switch (fuzzer) {
