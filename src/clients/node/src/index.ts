@@ -94,6 +94,8 @@ export interface ClientInitArgs {
 export interface Client {
   createAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
   createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
+  importAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
+  importTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
   getAccountTransfers: (filter: AccountFilter) => Promise<Transfer[]>
@@ -132,6 +134,8 @@ export function createClient (args: ClientInitArgs): Client {
   return {
     createAccounts(batch) { return request(Operation.create_accounts, batch) },
     createTransfers(batch) { return request(Operation.create_transfers, batch) },
+    importAccounts(batch) { return request(Operation.import_accounts, batch) },
+    importTransfers(batch) { return request(Operation.import_transfers, batch) },
     lookupAccounts(batch) { return request(Operation.lookup_accounts, batch) },
     lookupTransfers(batch) { return request(Operation.lookup_transfers, batch) },
     getAccountTransfers(filter) { return request(Operation.get_account_transfers, [filter]) },

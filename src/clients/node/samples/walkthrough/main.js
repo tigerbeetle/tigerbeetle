@@ -139,7 +139,7 @@ async function main() {
   // endsection:create-accounts-errors
 
   // section:lookup-accounts
-  const accounts = await client.lookupAccounts([137n, 138n]);
+  let accounts = await client.lookupAccounts([137n, 138n]);
   console.log(accounts);
   /*
    * [{
@@ -452,6 +452,65 @@ async function main() {
         // for the example, but for the time being lets prioritize a readable example and just
         // swallow the error.
     }
+
+  // External source of time.
+  let historicalTimestamp = 0n
+
+  // section:import-events
+  accounts = [{
+    id: 1001n,
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 718,
+    flags: 0,
+    timestamp: historicalTimestamp + 1n, // User-defined timestamp.
+  },
+  {
+    id: 2001n,
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 718,
+    flags: 0,
+    timestamp: historicalTimestamp + 2n, // User-defined timestamp.
+  }];
+
+  // Same error handling as createAccounts
+  accountErrors = await client.importAccounts([account]);
+
+  transfers = [{
+    id: 100n,
+    debit_account_id: 1001n,
+    credit_account_id: 2001n,
+    amount: 10n,
+    pending_id: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    timeout: 0,
+    ledger: 1,
+    code: 720,
+    flags: 0,
+    timestamp: historicalTimestamp + 3n, // User-defined timestamp.
+  }];
+
+  // Same error handling as createTransfers
+  transferErrors = await client.importTransfers(transfers);
+  // endsection:import-events
+
 }
 
 main()

@@ -20,8 +20,6 @@ const client = createClient({
 })
 
 // Test data
-const Zeroed32Bytes = Buffer.alloc(32, 0)
-const Zeroed48Bytes = Buffer.alloc(48, 0)
 const accountA: Account = {
   id: 17n,
   debits_pending: 0n,
@@ -407,6 +405,79 @@ test('cannot void an expired transfer', async (): Promise<void> => {
   const errors = await client.createTransfers([reject])
   assert.strictEqual(errors.length, 1)
   assert.deepStrictEqual(errors[0], { index: 0, result: CreateTransferError.pending_transfer_expired })
+})
+
+test('can import accounts and transfers', async (): Promise<void> => {
+  const accountA: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 718,
+    flags: 0,
+    timestamp: 0n // this will be set correctly by the TigerBeetle server
+  }
+  let accountsErrors = await client.createAccounts([accountA])
+  assert.deepStrictEqual(accountsErrors, [])
+
+  let accountLookup = await client.lookupAccounts([accountA.id])
+  assert.strictEqual(accountLookup.length, 1)
+  const timestampMax = accountLookup[0].timestamp
+
+  // Wait 10 ms so we can use the account's timestamp as the reference for past time
+  // after the last object inserted.
+  await new Promise(_ => setTimeout(_, 10));
+
+  const accountB: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 718,
+    flags: 0,
+    timestamp: timestampMax + 1n // user-defined timestamp
+  }
+  accountsErrors = await client.importAccounts([accountB])
+  assert.deepStrictEqual(accountsErrors, [])
+
+  accountLookup = await client.lookupAccounts([accountB.id])
+  assert.strictEqual(accountLookup.length, 1)
+  assert.strictEqual(accountLookup[0].timestamp, timestampMax + 1n)
+
+  const transfer: Transfer = {
+    id: id(),
+    debit_account_id: accountA.id,
+    credit_account_id: accountB.id,
+    amount: 100n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: 0,
+    timestamp: timestampMax + 2n, // user-defined timestamp.
+  }
+
+  const errors = await client.importTransfers([transfer])
+  assert.deepStrictEqual(errors, [])
+
+  const transfers = await client.lookupTransfers([transfer.id])
+  assert.strictEqual(transfers.length, 1)
+  assert.strictEqual(transfers[0].timestamp, timestampMax + 2n)
 })
 
 test('can get account transfers', async (): Promise<void> => {
