@@ -90,13 +90,13 @@ pub fn Storage(comptime IO: type) type {
         pub const NextTickSource = enum { lsm, vsr };
 
         io: *IO,
-        fd: std.posix.fd_t,
+        fd: IO.fd_t,
 
         next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 
-        pub fn init(io: *IO, fd: std.posix.fd_t) !Self {
+        pub fn init(io: *IO, fd: IO.fd_t) !Self {
             return .{
                 .io = io,
                 .fd = fd,
@@ -463,7 +463,7 @@ test "storage with mocked io layer" {
         .larger_than_logical_sector_read_fault_probability = 25,
     });
 
-    var storage = try StorageWithMockedIO.init(&io, io.file_at_index(0));
+    var storage = try StorageWithMockedIO.init(&io, 0);
 
     var data_prng = std.rand.DefaultPrng.init(seed);
 

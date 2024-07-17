@@ -14,6 +14,8 @@ const DirectIO = @import("../io.zig").DirectIO;
 
 /// A very simple mock IO implementation that only implements what is needed to test Storage.
 pub const IO = struct {
+    pub const fd_t = u32;
+
     /// Options for fault injection during fuzz testing.
     pub const Options = struct {
         /// Seed for the storage PRNG.
@@ -58,28 +60,18 @@ pub const IO = struct {
 
     const Operation = union(enum) {
         read: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
             buf: [*]u8,
             len: u32,
             offset: u64,
         },
         write: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
             buf: [*]const u8,
             len: u32,
             offset: u64,
         },
     };
-
-    fn get_file_data(io: *IO, fd: posix.fd_t) []u8 {
-        return io.files[
-            switch (posix.fd_t) {
-                i32, c_int => @intCast(fd),
-                *anyopaque => @intFromPtr(fd) - 1,
-                else => unreachable,
-            }
-        ];
-    }
 
     /// Return true with probability x/100.
     fn x_in_100(io: *IO, x: u8) bool {
@@ -143,7 +135,7 @@ pub const IO = struct {
             result: ReadError!usize,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
         buffer: []u8,
         offset: u64,
     ) void {
@@ -167,7 +159,7 @@ pub const IO = struct {
                         return error.InputOutput;
                     }
 
-                    const data = io.get_file_data(op.fd);
+                    const data = io.files[op.fd];
                     stdx.copy_disjoint(.exact, u8, op.buf[0..op.len], data[op.offset..][0..op.len]);
                     return op.len;
                 }
@@ -187,7 +179,7 @@ pub const IO = struct {
             result: WriteError!usize,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
         buffer: []const u8,
         offset: u64,
     ) void {
@@ -204,7 +196,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(io: *IO, op: anytype) WriteError!usize {
-                    const data = io.get_file_data(op.fd);
+                    const data = io.files[op.fd];
                     if (op.offset + op.len >= data.len) {
                         @panic("write beyond simulated file size");
                     }
@@ -213,15 +205,5 @@ pub const IO = struct {
                 }
             },
         );
-    }
-
-    pub fn file_at_index(io: *IO, index: u31) posix.fd_t {
-        assert(index < io.files.len);
-
-        return switch (posix.fd_t) {
-            i32, c_int => @intCast(index),
-            *anyopaque => @ptrFromInt(index + 1),
-            else => unreachable,
-        };
     }
 };

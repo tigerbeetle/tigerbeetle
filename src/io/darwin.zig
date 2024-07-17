@@ -12,7 +12,7 @@ const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
-    kq: posix.fd_t,
+    kq: fd_t,
     time: Time = .{},
     io_inflight: usize = 0,
     timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
@@ -201,7 +201,7 @@ pub const IO = struct {
             socket: posix.socket_t,
         },
         close: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
         },
         connect: struct {
             socket: posix.socket_t,
@@ -209,7 +209,7 @@ pub const IO = struct {
             initiated: bool,
         },
         read: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
             buf: [*]u8,
             len: u32,
             offset: u64,
@@ -228,7 +228,7 @@ pub const IO = struct {
             expires: u64,
         },
         write: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
             buf: [*]const u8,
             len: u32,
             offset: u64,
@@ -359,7 +359,7 @@ pub const IO = struct {
             result: CloseError!void,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
     ) void {
         self.submit(
             context,
@@ -450,7 +450,7 @@ pub const IO = struct {
             result: ReadError!usize,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
         buffer: []u8,
         offset: u64,
     ) void {
@@ -625,7 +625,7 @@ pub const IO = struct {
             result: WriteError!usize,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
         buffer: []const u8,
         offset: u64,
     ) void {
@@ -673,11 +673,12 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !posix.fd_t {
+    pub fn open_dir(dir_path: []const u8) !fd_t {
         return posix.open(dir_path, .{ .CLOEXEC = true, .ACCMODE = .RDONLY }, 0);
     }
 
-    pub const INVALID_FILE: posix.fd_t = -1;
+    pub const fd_t = posix.fd_t;
+    pub const INVALID_FILE: fd_t = -1;
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
@@ -688,12 +689,12 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        dir_fd: posix.fd_t,
+        dir_fd: fd_t,
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open, open_read_only },
         direct_io: DirectIO,
-    ) !posix.fd_t {
+    ) !fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
 
@@ -781,13 +782,13 @@ pub const IO = struct {
     /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC
     /// instead.
     /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
-    fn fs_sync(fd: posix.fd_t) !void {
+    fn fs_sync(fd: fd_t) !void {
         _ = posix.fcntl(fd, posix.F.FULLFSYNC, 1) catch return posix.fsync(fd);
     }
 
     /// Allocates a file contiguously using fallocate() if supported.
     /// Alternatively, writes to the last sector so that at least the file size is correct.
-    fn fs_allocate(fd: posix.fd_t, size: u64) !void {
+    fn fs_allocate(fd: fd_t, size: u64) !void {
         log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
 
         // Darwin doesn't have fallocate() but we can simulate it using fcntl()s.
