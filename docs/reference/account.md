@@ -224,9 +224,9 @@ You can read more about [Time in TigerBeetle](../coding/time.md).
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be set to `0` for accounts in [`create_accounts`](./requests/create_accounts.md).
-- Must be set to a user-defined unique timestamp for accounts in
-  [`import_accounts`](./requests/import_accounts.md).
+- Must be set to `0` for accounts in [`create_accounts`](./requests/create_accounts.md)
+- Must be greater than `0` and less than `2^63` for accounts in
+  [`import_accounts`](./requests/import_accounts.md)
 
 ## Internals
 

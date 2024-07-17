@@ -398,9 +398,9 @@ You can read more about [Time in TigerBeetle](../coding/time.md).
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be set to `0` for transfers in [`create_transfers`](./requests/create_transfers.md).
-- Must be set to a user-defined unique timestamp for transfers in
-  [`import_transfers`](./requests/import_transfers.md).
+- Must be set to `0` for transfers in [`create_transfers`](./requests/create_transfers.md)
+- Must be greater than `0` and less than `2^63` for transfers in
+  [`import_transfers`](./requests/import_transfers.md)
 
 ## Internals
 
