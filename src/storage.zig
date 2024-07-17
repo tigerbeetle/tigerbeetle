@@ -445,14 +445,14 @@ test "storage with mocked io layer" {
 
     const storage_size = constants.sector_size * 64;
 
-    var written_storage_data: [storage_size]u8 align(constants.sector_size) = undefined;
-    @memset(&written_storage_data, 0);
-    var stored_storage_data: [storage_size]u8 align(constants.sector_size) = undefined;
-    @memset(&stored_storage_data, 0);
-    var read_storage_data: [storage_size]u8 align(constants.sector_size) = undefined;
-    @memset(&read_storage_data, 0);
+    var storage_data_written: [storage_size]u8 align(constants.sector_size) = undefined;
+    @memset(&storage_data_written, 0);
+    var storage_data_stored: [storage_size]u8 align(constants.sector_size) = undefined;
+    @memset(&storage_data_stored, 0);
+    var storage_data_read: [storage_size]u8 align(constants.sector_size) = undefined;
+    @memset(&storage_data_read, 0);
 
-    var io = IO.init(&.{&stored_storage_data}, .{
+    var io = IO.init(&.{&storage_data_stored}, .{
         .seed = seed,
         // Probability set to 0 as the logic for "simple" read faults is
         // very obvious: zero out the returned buffer and return then.
@@ -467,24 +467,24 @@ test "storage with mocked io layer" {
 
     var data_prng = std.rand.DefaultPrng.init(seed);
 
-    const n = 10_000;
+    const iterations = 10_000;
 
-    for (0..n) |_| {
+    for (0..iterations) |_| {
         const zone = zones[data_prng.random().int(u2)];
 
-        const len = std.mem.alignBackward(
+        const length = std.mem.alignBackward(
             u64,
             data_prng.random().uintLessThan(u64, zone.size().? - constants.sector_size),
             constants.sector_size,
         ) + constants.sector_size;
         const offset_in_zone = std.mem.alignBackward(
             u64,
-            data_prng.random().uintLessThan(u64, zone.size().? - len),
+            data_prng.random().uintLessThan(u64, zone.size().? - length),
             constants.sector_size,
         );
 
-        const write_buf = written_storage_data[zone.start() + offset_in_zone ..][0..len];
-        data_prng.fill(write_buf);
+        const write_buffer = storage_data_written[zone.start() + offset_in_zone ..][0..length];
+        data_prng.fill(write_buffer);
 
         var write_completion: StorageWithMockedIO.Write = undefined;
 
@@ -495,7 +495,7 @@ test "storage with mocked io layer" {
                 }
             }.callback,
             &write_completion,
-            write_buf,
+            write_buffer,
             zone,
             offset_in_zone,
         );
@@ -506,7 +506,7 @@ test "storage with mocked io layer" {
     for (zones) |zone| {
         const ReadDetail = struct {
             offset_in_zone: u64,
-            read_len: u64,
+            read_length: u64,
         };
 
         var read_details: [32]ReadDetail = undefined;
@@ -515,29 +515,29 @@ test "storage with mocked io layer" {
         assert(sector_count <= read_details.len);
 
         var index: u64 = 0;
-        var read_detail_len: usize = 0;
+        var read_detail_length: usize = 0;
 
-        while (index < sector_count) : (read_detail_len += 1) {
+        while (index < sector_count) : (read_detail_length += 1) {
             const n_sectors = data_prng.random().intRangeAtMost(
                 u64,
                 1,
                 @min(4, sector_count - index),
             );
 
-            read_details[read_detail_len] = .{
+            read_details[read_detail_length] = .{
                 .offset_in_zone = index * constants.sector_size,
-                .read_len = n_sectors * constants.sector_size,
+                .read_length = n_sectors * constants.sector_size,
             };
 
             index += n_sectors;
         }
 
-        data_prng.random().shuffle(ReadDetail, read_details[0..read_detail_len]);
+        data_prng.random().shuffle(ReadDetail, read_details[0..read_detail_length]);
 
-        for (read_details[0..read_detail_len]) |read_detail| {
+        for (read_details[0..read_detail_length]) |read_detail| {
             const sector_offset = read_detail.offset_in_zone;
-            const read_len = read_detail.read_len;
-            const read_buf = read_storage_data[zone.start() + sector_offset ..][0..read_len];
+            const read_length = read_detail.read_length;
+            const read_buffer = storage_data_read[zone.start() + sector_offset ..][0..read_length];
 
             var read_completion: StorageWithMockedIO.Read = undefined;
             storage.read_sectors(
@@ -547,7 +547,7 @@ test "storage with mocked io layer" {
                     }
                 }.callback,
                 &read_completion,
-                read_buf,
+                read_buffer,
                 zone,
                 sector_offset,
             );
@@ -556,6 +556,6 @@ test "storage with mocked io layer" {
         }
     }
 
-    try std.testing.expectEqualSlices(u8, &written_storage_data, &stored_storage_data);
-    try std.testing.expectEqualSlices(u8, &stored_storage_data, &read_storage_data);
+    try std.testing.expectEqualSlices(u8, &storage_data_written, &storage_data_stored);
+    try std.testing.expectEqualSlices(u8, &storage_data_stored, &storage_data_read);
 }
