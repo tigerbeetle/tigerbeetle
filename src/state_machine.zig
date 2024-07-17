@@ -1219,7 +1219,7 @@ pub fn StateMachineType(
             assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
-            assert(self.prefetch_timestamp != TimestampRange.timestamp_max);
+            assert(self.prefetch_timestamp <= TimestampRange.timestamp_max);
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @divFloor(
@@ -1469,6 +1469,8 @@ pub fn StateMachineType(
                     if (event.timestamp != 0) break :blk .timestamp_must_be_zero;
 
                     event.timestamp = timestamp - events.len + index + 1;
+                    assert(event.timestamp >= TimestampRange.timestamp_min);
+                    assert(event.timestamp <= TimestampRange.timestamp_max);
 
                     break :blk switch (operation) {
                         .create_accounts => self.create_account(&event),
@@ -1839,13 +1841,23 @@ pub fn StateMachineType(
                 return .overflows_credits;
             }
 
+            // Comptime asserts that the max value of the timeout expressed in seconds cannot
+            // overflow a `u63` when converted to nanoseconds.
+            // It is `u63` because the most significant bit of the `u64` timestamp
+            // is used as the tombstone flag.
+            comptime assert(!std.meta.isError(std.math.mul(
+                u63,
+                @as(u63, std.math.maxInt(@TypeOf(t.timeout))),
+                std.time.ns_per_s,
+            )));
             if (sum_overflows(
-                u64,
-                t.timestamp,
-                @as(u64, t.timeout) * std.time.ns_per_s,
+                u63,
+                @intCast(t.timestamp),
+                @as(u63, t.timeout) * std.time.ns_per_s,
             )) {
                 return .overflows_timeout;
             }
+
             if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
             if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
 
@@ -3043,7 +3055,7 @@ fn check(test_table: []const u8) !void {
                 context.state_machine.prepare_timestamp += if (ticks.value > 0)
                     interval_ns
                 else
-                    std.math.maxInt(u64) - interval_ns;
+                    TimestampRange.timestamp_max - interval_ns;
             },
 
             .account => |a| {
