@@ -1841,6 +1841,15 @@ pub fn StateMachineType(
                 return .overflows_credits;
             }
 
+            // Comptime asserts that the max value of the timeout expressed in seconds cannot
+            // overflow a `u63` when converted to nanoseconds.
+            // It is `u63` because the most significant bit of the `u64` timestamp
+            // is used as the tombstone flag.
+            comptime assert(!std.meta.isError(std.math.mul(
+                u63,
+                @as(u63, std.math.maxInt(@TypeOf(t.timeout))),
+                std.time.ns_per_s,
+            )));
             if (sum_overflows(
                 u63,
                 @intCast(t.timestamp),
@@ -1848,6 +1857,7 @@ pub fn StateMachineType(
             )) {
                 return .overflows_timeout;
             }
+
             if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
             if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
 
