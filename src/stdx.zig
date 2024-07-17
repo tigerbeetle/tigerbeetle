@@ -768,6 +768,7 @@ fn format_int_size_bin_exact(
     // The worst case in terms of space needed is 20 bytes,
     // since `maxInt(u64)` is the highest number,
     // + 3 bytes for the measurement units suffix.
+    comptime assert(std.fmt.comptimePrint("{}GiB", .{std.math.maxInt(u64)}).len == 23);
     var buf: [23]u8 = undefined;
 
     var magnitude: u8 = 0;
@@ -791,4 +792,7 @@ test fmt_int_size_bin_exact {
     try std.testing.expectFmt("1025KiB", "{}", .{fmt_int_size_bin_exact(1025 * 1024)});
     try std.testing.expectFmt("12345KiB", "{}", .{fmt_int_size_bin_exact(12345 * 1024)});
     try std.testing.expectFmt("42MiB", "{}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
+    try std.testing.expectFmt("18014398509481983KiB", "{}", .{
+        fmt_int_size_bin_exact(std.math.maxInt(u64) - 1023),
+    });
 }
