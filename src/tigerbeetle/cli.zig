@@ -609,7 +609,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             if (pipeline_limit < pipeline_limit_min) {
                 flags.fatal("--limit-pipeline-requests: count {} is below minimum: {}", .{
                     pipeline_limit,
-                    vsr.stdx.fmt_int_size_bin_exact(pipeline_limit_min),
+                    pipeline_limit_min,
                 });
             }
 
