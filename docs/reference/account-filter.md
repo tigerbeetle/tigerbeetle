@@ -27,7 +27,7 @@ Optional; set to zero to disable the lower-bound filter.
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must not be `2^64 - 1`
+- Must not overflow a 64-bit signed integer (`2^63 - 1`).
 
 ### `timestamp_max`
 
@@ -37,7 +37,7 @@ Optional; set to zero to disable the upper-bound filter.
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must not be `2^64 - 1`
+- Must not overflow a 64-bit signed integer (`2^63 - 1`).
 
 ### `limit`
 
