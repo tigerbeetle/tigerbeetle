@@ -1219,7 +1219,7 @@ pub fn StateMachineType(
             assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
-            assert(self.prefetch_timestamp != TimestampRange.timestamp_max);
+            assert(self.prefetch_timestamp < TimestampRange.timestamp_max);
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @divFloor(
@@ -1840,9 +1840,9 @@ pub fn StateMachineType(
             }
 
             if (sum_overflows(
-                u64,
-                t.timestamp,
-                @as(u64, t.timeout) * std.time.ns_per_s,
+                u63,
+                @intCast(t.timestamp),
+                @as(u63, t.timeout) * std.time.ns_per_s,
             )) {
                 return .overflows_timeout;
             }
@@ -3043,7 +3043,8 @@ fn check(test_table: []const u8) !void {
                 context.state_machine.prepare_timestamp += if (ticks.value > 0)
                     interval_ns
                 else
-                    std.math.maxInt(u64) - interval_ns;
+                    // The last bit is the tombstone flag.
+                    std.math.maxInt(u63) - interval_ns;
             },
 
             .account => |a| {
