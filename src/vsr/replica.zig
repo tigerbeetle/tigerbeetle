@@ -660,7 +660,7 @@ pub fn ReplicaType(
             // A replication quorum of replicas have committed atop op_prepare_max, op_checkpoint
             // is guaranteed to be durable on a commit quorum of replicas.
             if (self.op_checkpoint() == 0 or self.solo() or
-                self.commit_max > self.op_prepare_max())
+                self.commit_max > vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?)
             {
                 self.checkpoint_quorum = true;
             }
@@ -2247,7 +2247,6 @@ pub fn ReplicaType(
 
             for (view_headers.slice) |*header| {
                 assert(header.commit <= message.header.commit);
-
                 if (header.op <= self.op_prepare_max()) {
                     if (self.log_view < self.view or
                         (self.log_view == self.view and header.op >= self.op))
@@ -9526,14 +9525,12 @@ pub fn ReplicaType(
                     }
                 }
 
-                if (self.checkpoint_from_all_replicas.replace(header.replica, &.{
-                    .id = candidate.checkpoint_id,
-                    .op = candidate.checkpoint_op,
-                })) {
-                    const matching = self.checkpoint_from_all_replicas.count(&.{
-                        .op = self.op_checkpoint(),
-                        .id = self.superblock.working.checkpoint_id(),
-                    });
+                if (self.checkpoint_from_all_replicas.replace(
+                    header.replica,
+                    candidate.checkpoint_op,
+                )) {
+                    const matching =
+                        self.checkpoint_from_all_replicas.count(self.op_checkpoint());
 
                     assert(matching <= self.replica_count);
 
