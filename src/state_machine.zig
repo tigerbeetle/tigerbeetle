@@ -1219,7 +1219,7 @@ pub fn StateMachineType(
             assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
-            assert(self.prefetch_timestamp < TimestampRange.timestamp_max);
+            assert(self.prefetch_timestamp <= TimestampRange.timestamp_max);
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @divFloor(
