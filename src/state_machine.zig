@@ -1469,6 +1469,8 @@ pub fn StateMachineType(
                     if (event.timestamp != 0) break :blk .timestamp_must_be_zero;
 
                     event.timestamp = timestamp - events.len + index + 1;
+                    assert(event.timestamp >= TimestampRange.timestamp_min);
+                    assert(event.timestamp <= TimestampRange.timestamp_max);
 
                     break :blk switch (operation) {
                         .create_accounts => self.create_account(&event),
@@ -3043,8 +3045,7 @@ fn check(test_table: []const u8) !void {
                 context.state_machine.prepare_timestamp += if (ticks.value > 0)
                     interval_ns
                 else
-                    // The last bit is the tombstone flag.
-                    std.math.maxInt(u63) - interval_ns;
+                    TimestampRange.timestamp_max - interval_ns;
             },
 
             .account => |a| {
