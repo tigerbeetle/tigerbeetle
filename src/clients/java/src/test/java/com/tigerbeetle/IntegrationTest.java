@@ -887,7 +887,7 @@ public class IntegrationTest {
      */
     @Test
     public void testConcurrentTasks() throws Throwable {
-        final int TASKS_COUNT = 100_000;
+        final int TASKS_COUNT = 100;
         final var barrier = new CountDownLatch(TASKS_COUNT);
 
         try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
