@@ -109,18 +109,14 @@ const NativeClient = struct {
             return undefined;
         };
 
-        // Compute a valid, aligned Packet pointer inside packet_buffer.
-        const packet_buf: []u8 = ReflectionHelper.get_packet_buffer_slice(env, request_obj) orelse
-            @panic("Request.packetBuffer somehow became null or invalid");
-        const packet_align_ptr =
-            std.mem.alignForward(usize, @intFromPtr(packet_buf.ptr), @alignOf(tb.tb_packet_t));
-        assert(packet_align_ptr + @sizeOf(tb.tb_packet_t) <=
-            @intFromPtr(packet_buf.ptr + packet_buf.len));
+        const packet = global_allocator.create(tb.tb_packet_t) catch {
+            ReflectionHelper.assertion_error_throw(env, "Request could not allocate a packet");
+            return undefined;
+        };
 
         // Holds a global reference to prevent GC before the callback.
         const global_ref = JNIHelper.new_global_reference(env, request_obj);
 
-        const packet: *tb.tb_packet_t = @ptrFromInt(packet_align_ptr);
         packet.operation = operation;
         packet.user_data = global_ref;
         packet.data = send_buffer.ptr;
@@ -148,8 +144,11 @@ const NativeClient = struct {
         const request_obj: jni.JObject = @ptrCast(packet.user_data);
         defer env.delete_global_ref(request_obj);
 
+        // Extract the packet details before freeing it.
         const packet_operation = packet.operation;
         const packet_status = packet.status;
+        global_allocator.destroy(packet);
+
         if (result_len > 0) {
             switch (packet_status) {
                 .ok => if (result_ptr) |ptr| {
@@ -274,7 +273,6 @@ const ReflectionHelper = struct {
     var request_send_buffer_field_id: jni.JFieldID = null;
     var request_send_buffer_len_field_id: jni.JFieldID = null;
     var request_reply_buffer_field_id: jni.JFieldID = null;
-    var request_packet_buffer_field_id: jni.JFieldID = null;
     var request_operation_method_id: jni.JMethodID = null;
     var request_end_request_method_id: jni.JMethodID = null;
 
@@ -287,7 +285,6 @@ const ReflectionHelper = struct {
         assert(request_send_buffer_field_id == null);
         assert(request_send_buffer_len_field_id == null);
         assert(request_reply_buffer_field_id == null);
-        assert(request_packet_buffer_field_id == null);
         assert(request_operation_method_id == null);
         assert(request_end_request_method_id == null);
 
@@ -329,12 +326,6 @@ const ReflectionHelper = struct {
             "replyBuffer",
             "[B",
         );
-        request_packet_buffer_field_id = JNIHelper.find_field(
-            env,
-            request_class,
-            "packetBuffer",
-            "Ljava/nio/ByteBuffer;",
-        );
         request_operation_method_id = JNIHelper.find_method(
             env,
             request_class,
@@ -356,7 +347,6 @@ const ReflectionHelper = struct {
         assert(request_send_buffer_field_id != null);
         assert(request_send_buffer_len_field_id != null);
         assert(request_reply_buffer_field_id != null);
-        assert(request_packet_buffer_field_id != null);
         assert(request_operation_method_id != null);
         assert(request_end_request_method_id != null);
     }
@@ -373,7 +363,6 @@ const ReflectionHelper = struct {
         request_send_buffer_field_id = null;
         request_send_buffer_len_field_id = null;
         request_reply_buffer_field_id = null;
-        request_packet_buffer_field_id = null;
         request_operation_method_id = null;
         request_end_request_method_id = null;
     }
@@ -437,17 +426,6 @@ const ReflectionHelper = struct {
             return null;
 
         return direct_buffer[0..@as(usize, @intCast(buffer_len))];
-    }
-
-    pub fn get_packet_buffer_slice(env: *jni.JNIEnv, this_obj: jni.JObject) ?[]u8 {
-        assert(this_obj != null);
-        assert(request_packet_buffer_field_id != null);
-
-        const buffer_obj = env.get_object_field(this_obj, request_packet_buffer_field_id) orelse
-            return null;
-        defer env.delete_local_ref(buffer_obj);
-
-        return JNIHelper.get_direct_buffer(env, buffer_obj);
     }
 
     pub fn set_reply_buffer(env: *jni.JNIEnv, this_obj: jni.JObject, reply: []const u8) void {
