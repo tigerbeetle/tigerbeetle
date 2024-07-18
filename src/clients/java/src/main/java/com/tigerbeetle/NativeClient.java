@@ -31,6 +31,8 @@ final class NativeClient implements AutoCloseable {
             this.atomicHandleClosePending = new AtomicLong(0);
         }
 
+        // Silence PMD hint on `if (x) { if (y) {} }`. It is cleaner than `if (x && y)` here.
+        @SuppressWarnings("PMD.CollapsibleIfStatements")
         public void submit(final Request<?> request) throws Exception {
             // Bump refs to access. Bail if REF_CLOSED bit was set.
             // After observing REF_CLOSED, any other modifications which dont unset it don't matter.
