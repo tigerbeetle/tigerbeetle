@@ -15,26 +15,29 @@ const DirectIO = @import("../io.zig").DirectIO;
 pub const IO = struct {
     pub const fd_t = u32;
 
+    pub const File = struct {
+        buffer: []u8,
+        /// Each bit of the fault map represents a sector that will fault consistently.
+        fault_map: ?[]const u8,
+    };
+
     /// Options for fault injection during fuzz testing.
     pub const Options = struct {
         /// Seed for the storage PRNG.
         seed: u64 = 0,
-
-        /// Chance out of 100 that any read will return an error.InputOutput.
-        read_fault_probability: u8 = 0,
 
         /// Chance out of 100 that a read larger than a logical sector
         /// will return an error.InputOutput.
         larger_than_logical_sector_read_fault_probability: u8 = 0,
     };
 
-    files: []const []u8,
+    files: []const File,
     options: Options,
     prng: std.rand.DefaultPrng,
 
     completed: FIFO(Completion) = .{ .name = "io_completed" },
 
-    pub fn init(files: []const []u8, options: Options) IO {
+    pub fn init(files: []const File, options: Options) IO {
         return .{
             .options = options,
             .prng = std.rand.DefaultPrng.init(options.seed),
@@ -153,14 +156,26 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(io: *IO, op: anytype) ReadError!usize {
-                    if (io.x_in_100(io.options.read_fault_probability) or
+                    const sector_marked_in_fault_map = if (io.files[op.fd].fault_map) |fault_map|
+                        std.mem.readPackedIntNative(
+                            u1,
+                            fault_map,
+                            @divExact(op.offset, constants.sector_size),
+                        ) != 0
+                    else
+                        false;
+
+                    const sector_has_larger_than_logical_sector_read_fault =
                         (op.len > constants.sector_size and
-                        io.x_in_100(io.options.larger_than_logical_sector_read_fault_probability)))
+                        io.x_in_100(io.options.larger_than_logical_sector_read_fault_probability));
+
+                    if (sector_marked_in_fault_map or
+                        sector_has_larger_than_logical_sector_read_fault)
                     {
                         return error.InputOutput;
                     }
 
-                    const data = io.files[op.fd];
+                    const data = io.files[op.fd].buffer;
                     stdx.copy_disjoint(.exact, u8, op.buf[0..op.len], data[op.offset..][0..op.len]);
                     return op.len;
                 }
@@ -199,7 +214,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(io: *IO, op: anytype) WriteError!usize {
-                    const data = io.files[op.fd];
+                    const data = io.files[op.fd].buffer;
                     if (op.offset + op.len >= data.len) {
                         @panic("write beyond simulated file size");
                     }
