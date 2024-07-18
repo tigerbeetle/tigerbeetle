@@ -70,6 +70,7 @@ const Fuzzer = enum {
     lsm_scan,
     lsm_segmented_array,
     lsm_tree,
+    storage,
     vopr_lite,
     vopr_testing_lite,
     vopr_testing,

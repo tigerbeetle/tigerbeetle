@@ -8,7 +8,6 @@ const log = std.log.scoped(.io);
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
-const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
@@ -89,7 +88,7 @@ pub const IO = struct {
         comptime OperationImpl: type,
     ) void {
         const on_complete_fn = struct {
-            fn onComplete(io: *IO, _completion: *Completion) void {
+            fn on_complete(io: *IO, _completion: *Completion) void {
                 // Perform the actual operation.
                 const op_data = &@field(_completion.operation, @tagName(operation_tag));
                 const result = OperationImpl.do_operation(io, op_data);
@@ -101,7 +100,7 @@ pub const IO = struct {
                     result,
                 );
             }
-        }.onComplete;
+        }.on_complete;
 
         completion.* = .{
             .next = null,
@@ -139,6 +138,8 @@ pub const IO = struct {
         buffer: []u8,
         offset: u64,
     ) void {
+        assert(fd < self.files.len);
+
         self.submit(
             context,
             callback,
@@ -183,6 +184,8 @@ pub const IO = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
+        assert(fd < self.files.len);
+
         self.submit(
             context,
             callback,

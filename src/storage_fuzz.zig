@@ -41,7 +41,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 
     var data_prng = std.rand.DefaultPrng.init(args.seed);
 
-    const iterations = 10_000;
+    const iterations = args.events_max orelse 10_000;
 
     for (0..iterations) |_| {
         const zone = zones[data_prng.random().int(u2)];
