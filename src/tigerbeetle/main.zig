@@ -69,7 +69,12 @@ pub fn main() !void {
             // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
             if (err != error.BrokenPipe) return err;
         },
-        .multiversion => |*args| try vsr.multiversioning.validate(allocator, args.path),
+        .multiversion => |*args| {
+            var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
+            const stdout = stdout_buffer.writer();
+            try vsr.multiversioning.print_information(allocator, args.path, stdout);
+            try stdout_buffer.flush();
+        },
     }
 }
 
@@ -292,11 +297,7 @@ const Command = struct {
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
         var multiversion: ?vsr.multiversioning.Multiversion =
-            if (builtin.target.os.tag != .linux)
-        blk: {
-            log.info("multiversioning: currently only supported on linux.", .{});
-            break :blk null;
-        } else if (constants.config.process.release.value ==
+            if (constants.config.process.release.value ==
             vsr.multiversioning.Release.minimum.value)
         blk: {
             log.info(
@@ -317,18 +318,14 @@ const Command = struct {
             allocator,
             &command.io,
             command.self_exe_path,
+            .native,
         );
 
         defer if (multiversion != null) multiversion.?.deinit(allocator);
 
-        // This might seem redundant, but it's needed to build on non-Linux platforms. Otherwise,
-        // the compiler will still try to compile into multiversion.start(), which contains
-        // platform specific methods that cause compile errors.
         // The error from .open_sync() is ignored - timeouts and checking for new binaries are still
         // enabled even if the first version fails to load.
-        if (multiversion != null and builtin.target.os.tag == .linux) {
-            multiversion.?.open_sync() catch {};
-        }
+        if (multiversion != null) multiversion.?.open_sync() catch {};
 
         var releases_bundled_baseline: vsr.multiversioning.ReleaseList = .{};
         releases_bundled_baseline.append_assume_capacity(constants.config.process.release);
@@ -380,7 +377,8 @@ const Command = struct {
             else => |e| return e,
         };
 
-        // Enable checking for new binaries on disk after the replica has been opened.
+        // Enable checking for new binaries on disk after the replica has been opened. Only
+        // supported on Linux.
         if (multiversion != null and builtin.target.os.tag == .linux) {
             multiversion.?.timeout_enable();
         }
@@ -480,7 +478,9 @@ const Command = struct {
             }
 
             try stdout.writeAll("\n");
-            try vsr.multiversioning.print_information(allocator, stdout);
+            const self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
+            defer allocator.free(self_exe_path);
+            vsr.multiversioning.print_information(allocator, self_exe_path, stdout) catch {};
         }
         try stdout_buffer.flush();
     }
@@ -496,11 +496,6 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != vsr.Release.zero.value);
     assert(release.value != vsr.Release.minimum.value);
 
-    // This might seem redundant, but it's needed to build on non-Linux platforms. Otherwise, the
-    // compiler will still try to compile the code below it, which contains platform specific
-    // methods that cause compile errors.
-    if (builtin.os.tag != .linux) @panic("replica_release_execute unsupported");
-
     const multiversion = replica.multiversion orelse {
         @panic("replica_release_execute unsupported");
     };
@@ -514,6 +509,22 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
             release,
         });
         @panic("release not available");
+    }
+
+    if (builtin.os.tag == .windows) {
+        // Unlike on Linux / macOS which use `execve{at,z}` for multiversion binaries,
+        // Windows has to use CreateProcess. This is a problem, because it's a race between
+        // the parent process exiting and the new process starting. Work around this by
+        // deinit'ing Replica and storage before continuing.
+        // We don't need to clean up all resources here, since the process will be terminated
+        // in any case; only the ones that would block a new process from starting up.
+        const storage = replica.superblock.storage;
+        const fd = storage.fd;
+        replica.deinit(replica.static_allocator.parent_allocator);
+        storage.deinit();
+
+        // FD is managed by Command, normally. Shut it down explicitly.
+        std.posix.close(fd);
     }
 
     // We have two paths here, depending on if we're upgrading or downgrading. If we're downgrading

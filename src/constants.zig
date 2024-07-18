@@ -104,7 +104,14 @@ pub const vsr_releases_max = config.cluster.vsr_releases_max;
 
 /// The maximum cumulative size of a final TigerBeetle output binary - including potential past
 /// releases and metadata.
-pub const multiversion_binary_size_max = config.process.multiversion_binary_size_max;
+pub const multiversion_binary_platform_size_max =
+    config.process.multiversion_binary_platform_size_max;
+
+/// The maximum size, like above, but for any platform.
+pub const multiversion_binary_size_max = 256 * 1024 * 1024;
+comptime {
+    assert(multiversion_binary_platform_size_max <= multiversion_binary_size_max);
+}
 
 pub const multiversion_poll_interval_ms = config.process.multiversion_poll_interval_ms;
 

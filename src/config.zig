@@ -141,7 +141,13 @@ const ConfigProcess = struct {
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
     grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
-    multiversion_binary_size_max: u64 = 64 * 1024 * 1024,
+    multiversion_binary_platform_size_max: u64 = blk: {
+        // {Linux, Windows} get 64MB. macOS gets 128MB since it has universal binaries. Both of
+        // these are doubled in debug.
+        var size_max_mb = if (builtin.target.os.tag == .macos) 128 else 64;
+        if (builtin.mode != .ReleaseSafe) size_max_mb *= 2;
+        break :blk size_max_mb;
+    } * 1024 * 1024,
     multiversion_poll_interval_ms: u64 = 1000,
 };
 

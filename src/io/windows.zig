@@ -765,6 +765,8 @@ pub const IO = struct {
         );
     }
 
+    pub const OpenatError = std.posix.OpenError || std.posix.UnexpectedError;
+
     pub const ReadError = error{
         WouldBlock,
         NotOpenForReading,
