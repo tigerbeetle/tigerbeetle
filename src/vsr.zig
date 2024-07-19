@@ -1480,24 +1480,48 @@ pub const Checkpoint = struct {
         assert(constants.journal_slot_count > constants.lsm_batch_multiple);
         assert(constants.journal_slot_count % constants.lsm_batch_multiple == 0);
     }
-    pub const Quorum = struct {
-        /// The latest known checkpoint operation from every *other* replica.
-        checkpoints: [constants.replicas_max]u128 = [_]u128{0} ** constants.replicas_max,
+    /// Checkpoint identifier.
+    id: u128,
+    /// The op_checkpoint() that corresponds to the checkpoint id.
+    op: u64,
 
-        pub fn replace(quorum: *Quorum, replica: u8, checkpoint_op: u128) bool {
-            const checkpoint_op_existing: u128 = quorum.checkpoints[replica];
-            // Ignore old and repeat checkpoints.
-            if (checkpoint_op < checkpoint_op_existing or checkpoint_op == checkpoint_op_existing) {
-                return false;
+    pub const Quorum = struct {
+        /// The latest known checkpoint identifier from every *other* replica.
+        checkpoints: [constants.replicas_max]?Checkpoint =
+            [_]?Checkpoint{null} ** constants.replicas_max,
+
+        pub fn replace(
+            quorum: *Quorum,
+            replica: u8,
+            checkpoint: *const Checkpoint,
+        ) bool {
+            if (quorum.checkpoints[replica]) |checkpoint_existing| {
+                // Ignore old candidate.
+                if (checkpoint.op < checkpoint_existing.op) {
+                    return false;
+                }
+
+                // Ignore repeat candidate.
+                if (checkpoint.op == checkpoint_existing.op and
+                    checkpoint.id == checkpoint_existing.id)
+                {
+                    return false;
+                }
             }
-            quorum.checkpoints[replica] = checkpoint_op;
+            quorum.checkpoints[replica] = checkpoint.*;
             return true;
         }
 
-        pub fn count(quorum: *const Quorum, checkpoint_op: u128) u8 {
-            var matching: u8 = 0;
-            for (quorum.checkpoints) |checkpoint_op_existing| {
-                if (checkpoint_op_existing == checkpoint_op) matching += 1;
+        pub fn count(quorum: *const Quorum, checkpoint: *const Checkpoint) usize {
+            var matching: usize = 0;
+            for (quorum.checkpoints) |checkpoint_existing| {
+                if (checkpoint_existing != null and
+                    checkpoint_existing.?.op == checkpoint.op and
+                    checkpoint_existing.?.id == checkpoint.id)
+                {
+                    assert(std.meta.eql(checkpoint.*, checkpoint_existing.?));
+                    matching += 1;
+                }
             }
             return matching;
         }

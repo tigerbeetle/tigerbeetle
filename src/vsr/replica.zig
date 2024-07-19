@@ -5856,13 +5856,10 @@ pub fn ReplicaType(
         /// doing so would overwrite a message (or the slot of a message) that has not yet been
         /// committed and checkpointed.
         fn op_prepare_max(self: *const Self) u64 {
-            const checkpoint = checkpoint: {
-                if (self.checkpoint_quorum) {
-                    break :checkpoint self.op_checkpoint_next();
-                } else {
-                    break :checkpoint self.op_checkpoint();
-                }
-            };
+            const checkpoint = if (self.checkpoint_quorum)
+                self.op_checkpoint_next()
+            else
+                self.op_checkpoint();
             return vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint).?;
         }
 
@@ -9527,10 +9524,13 @@ pub fn ReplicaType(
 
                 if (self.checkpoint_from_all_replicas.replace(
                     header.replica,
-                    candidate.checkpoint_op,
+                    &.{ .id = candidate.checkpoint_id, .op = candidate.checkpoint_op },
                 )) {
                     const matching =
-                        self.checkpoint_from_all_replicas.count(self.op_checkpoint());
+                        self.checkpoint_from_all_replicas.count(&.{
+                        .id = self.superblock.working.checkpoint_id(),
+                        .op = self.op_checkpoint(),
+                    });
 
                     assert(matching <= self.replica_count);
 
