@@ -667,31 +667,14 @@ public class IntegrationTest {
         assertTransfers(transfers, lookupTransfers);
         assertNotEquals(0L, lookupTransfers.getTimestamp());
 
-        // We need to wait 1s for the server to expire the transfer,
-        // however `Thread.sleep` does not have nanoseconds resolution and may finish earlier than
-        // the server timeout, so adding an extra delay to avoid flaky tests.
+        // We need to wait 1s for the server to expire the transfer, however the
+        // server can pulse the expiry operation anytime after the timeout,
+        // so adding an extra delay to avoid flaky tests.
         final var timeout_ms = TimeUnit.SECONDS.toMillis(lookupTransfers.getTimeout());
         final var currentMilis = System.currentTimeMillis();
-        Thread.sleep(timeout_ms + 1);
+        final var extra_wait_time = 250L;
+        Thread.sleep(timeout_ms + extra_wait_time);
         assertTrue(System.currentTimeMillis() - currentMilis > timeout_ms);
-
-        // Creating a void_pending transfer.
-        final var voidTransfers = new TransferBatch(1);
-        voidTransfers.add();
-        voidTransfers.setId(transfer2Id);
-        voidTransfers.setCreditAccountId(account1Id);
-        voidTransfers.setDebitAccountId(account2Id);
-        voidTransfers.setLedger(720);
-        voidTransfers.setCode(1);
-        voidTransfers.setAmount(100);
-        voidTransfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
-        voidTransfers.setPendingId(transfer1Id);
-
-        final var createVoidTransfersErrors = client.createTransfers(voidTransfers);
-        assertEquals(1, createVoidTransfersErrors.getLength());
-        assertTrue(createVoidTransfersErrors.next());
-        assertEquals(CreateTransferResult.PendingTransferExpired,
-                createVoidTransfersErrors.getResult());
 
         // Looking up the accounts again for the updated balance.
         lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -718,6 +701,24 @@ public class IntegrationTest {
         assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
         assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
         assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
+
+        // Creating a void_pending transfer.
+        final var voidTransfers = new TransferBatch(1);
+        voidTransfers.add();
+        voidTransfers.setId(transfer2Id);
+        voidTransfers.setCreditAccountId(account1Id);
+        voidTransfers.setDebitAccountId(account2Id);
+        voidTransfers.setLedger(720);
+        voidTransfers.setCode(1);
+        voidTransfers.setAmount(100);
+        voidTransfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
+        voidTransfers.setPendingId(transfer1Id);
+
+        final var createVoidTransfersErrors = client.createTransfers(voidTransfers);
+        assertEquals(1, createVoidTransfersErrors.getLength());
+        assertTrue(createVoidTransfersErrors.next());
+        assertEquals(CreateTransferResult.PendingTransferExpired,
+                createVoidTransfersErrors.getResult());
     }
 
     @Test
