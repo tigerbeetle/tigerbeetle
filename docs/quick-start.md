@@ -36,6 +36,10 @@ zig/zig build
 ./tigerbeetle version
 ```
 
+Notes:
+- Building from source is not recommended for production deployments.
+- If you build TigerBeetle from source, it is only compatible with clients that were also built from source.
+
 #### Direct Download
 
 You can download prebuilt binaries here:
