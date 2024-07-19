@@ -1140,7 +1140,8 @@ pub fn GrooveType(
 
 test "Groove" {
     const Transfer = @import("../tigerbeetle.zig").Transfer;
-    const Storage = @import("../storage.zig").Storage;
+    const IO = @import("../io.zig").IO;
+    const Storage = @import("../storage.zig").Storage(IO);
 
     const Groove = GrooveType(
         Storage,

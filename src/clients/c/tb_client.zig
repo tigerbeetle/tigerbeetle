@@ -30,7 +30,8 @@ pub const tb_completion_t = *const fn (
 ) callconv(.C) void;
 
 const constants = @import("../../constants.zig");
-const Storage = @import("../../storage.zig").Storage;
+const IO = @import("../../io.zig").IO;
+const Storage = @import("../../storage.zig").Storage(IO);
 const MessageBus = @import("../../message_bus.zig").MessageBusClient;
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const StateMachine = StateMachineType(Storage, constants.state_machine_config);

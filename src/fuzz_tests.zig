@@ -31,6 +31,7 @@ const Fuzzers = .{
     .lsm_manifest_level = @import("./lsm/manifest_level_fuzz.zig"),
     .lsm_segmented_array = @import("./lsm/segmented_array_fuzz.zig"),
     .lsm_tree = @import("./lsm/tree_fuzz.zig"),
+    .storage = @import("./storage_fuzz.zig"),
     .vsr_free_set = @import("./vsr/free_set_fuzz.zig"),
     .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
@@ -87,6 +88,7 @@ fn main_smoke() !void {
             .vsr_journal_format,
             .vsr_superblock_quorums,
             .lsm_scan,
+            .storage,
             => null,
         };
 

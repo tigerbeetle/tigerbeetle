@@ -21,9 +21,10 @@ const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
-const Grid = vsr.GridType(vsr.storage.Storage);
+const Storage = vsr.storage.Storage(vsr.io.IO);
+const Grid = vsr.GridType(Storage);
 const StateMachine = vsr.state_machine.StateMachineType(
-    vsr.storage.Storage,
+    Storage,
     constants.state_machine_config,
 );
 
