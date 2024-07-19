@@ -9718,6 +9718,8 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(!self.pipeline.queue.full());
             assert(!self.pipeline.queue.contains_operation(.pulse));
+            assert(self.pulse_enabled());
+            assert(self.state_machine.pulse_needed(self.state_machine.prepare_timestamp));
 
             self.send_request_to_self(.pulse, &.{});
             assert(self.pipeline.queue.contains_operation(.pulse));
