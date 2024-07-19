@@ -3178,16 +3178,20 @@ pub fn ReplicaType(
 
             self.pulse_timeout.reset();
             if (self.pipeline.queue.full()) return;
-            if (!self.pulse_needed()) return;
+            if (!self.pulse_enabled()) return;
 
             // To decide whether or not to `pulse` a time-dependant
             // operation, the State Machine needs an updated `prepare_timestamp`.
             const realtime = self.clock.realtime();
-            self.state_machine.prepare_timestamp = @max(
+            const timestamp = @max(
                 self.state_machine.prepare_timestamp,
                 @as(u64, @intCast(realtime)),
             );
-            self.send_request_pulse_to_self();
+
+            if (self.state_machine.pulse_needed(timestamp)) {
+                self.state_machine.prepare_timestamp = timestamp;
+                self.send_request_pulse_to_self();
+            }
         }
 
         fn on_upgrade_timeout(self: *Self) void {
@@ -3872,7 +3876,9 @@ pub fn ReplicaType(
                     self.primary_pipeline_prepare(request);
                 }
 
-                if (self.pulse_needed()) {
+                if (self.pulse_enabled() and
+                    self.state_machine.pulse_needed(self.state_machine.prepare_timestamp))
+                {
                     assert(self.upgrade_release == null);
                     self.send_request_pulse_to_self();
                 }
@@ -3897,7 +3903,7 @@ pub fn ReplicaType(
 
                 if (self.upgrade_release) |upgrade_release| {
                     assert(self.release.value < upgrade_release.value);
-                    assert(!self.pulse_needed());
+                    assert(!self.pulse_enabled());
 
                     const release_next = self.release_for_next_checkpoint();
                     if (release_next == null or release_next.?.value == self.release.value) {
@@ -9687,15 +9693,13 @@ pub fn ReplicaType(
             }));
         }
 
-        fn pulse_needed(self: *Self) bool {
+        fn pulse_enabled(self: *Self) bool {
             assert(self.status == .normal);
             assert(self.primary());
             assert(!self.pipeline.queue.full());
 
             // Pulses are replayed during `aof recovery`.
             if (constants.aof_recovery) return false;
-            // The state machine does not need a pulse.
-            if (!self.state_machine.pulse()) return false;
             // There's a pulse already in progress.
             if (self.pipeline.queue.contains_operation(.pulse)) return false;
             // Solo replicas only change views immediately when they start up,
