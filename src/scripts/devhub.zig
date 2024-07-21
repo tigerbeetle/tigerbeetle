@@ -26,11 +26,15 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = cli_args.sha });
     const commit_timestamp = try std.fmt.parseInt(u64, commit_timestamp_str, 10);
 
+    // Only build the TigerBeetle binary to test build speed and build size. Throw it away once
+    // done, and use a release build from `dist/` to run the benchmark.
     var timer = try std.time.Timer.start();
     try shell.zig("build -Drelease -Dconfig=production install", .{});
     const build_time_ms = timer.lap() / std.time.ns_per_ms;
-
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
+    try shell.project_root.deleteFile("tigerbeetle");
+
+    try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
 
     const benchmark_result = try shell.exec_stdout("./tigerbeetle benchmark --validate", .{});
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
