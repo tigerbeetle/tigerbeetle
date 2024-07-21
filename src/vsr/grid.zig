@@ -26,7 +26,7 @@ pub const BlockPtrConst = *align(constants.sector_size) const [constants.block_s
 pub fn allocate_block(
     allocator: mem.Allocator,
 ) error{OutOfMemory}!*align(constants.sector_size) [constants.block_size]u8 {
-    const block = try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
+    const block = allocator.alignedAlloc(u8, constants.sector_size, constants.block_size) catch @panic("OOM");
     @memset(block, 0);
     return block[0..constants.block_size];
 }
