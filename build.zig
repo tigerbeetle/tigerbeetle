@@ -484,15 +484,15 @@ pub fn build(b: *std.Build) !void {
     }
 }
 
-// Zig cross-targets plus Dotnet RID (Runtime Identifier):
+// Zig cross-targets, Dotnet RID (Runtime Identifier), CPU features.
 const platforms = .{
-    .{ "x86_64-linux-gnu.2.27", "linux-x64" },
-    .{ "x86_64-linux-musl", "linux-musl-x64" },
-    .{ "x86_64-macos", "osx-x64" },
-    .{ "aarch64-linux-gnu.2.27", "linux-arm64" },
-    .{ "aarch64-linux-musl", "linux-musl-arm64" },
-    .{ "aarch64-macos", "osx-arm64" },
-    .{ "x86_64-windows", "win-x64" },
+    .{ "x86_64-linux-gnu.2.27", "linux-x64", "x86_64_v3+aes" },
+    .{ "x86_64-linux-musl", "linux-musl-x64", "x86_64_v3+aes" },
+    .{ "x86_64-macos", "osx-x64", "x86_64_v3+aes" },
+    .{ "aarch64-linux-gnu.2.27", "linux-arm64", "baseline+aes+neon" },
+    .{ "aarch64-linux-musl", "linux-musl-arm64", "baseline+aes+neon" },
+    .{ "aarch64-macos", "osx-arm64", "baseline+aes+neon" },
+    .{ "x86_64-windows", "win-x64", "x86_64_v3+aes" },
 };
 
 fn strip_glibc_version(triple: []const u8) []const u8 {
@@ -541,7 +541,7 @@ fn go_client(
 
         const cross_target = CrossTarget.parse(.{
             .arch_os_abi = name,
-            .cpu_features = "baseline",
+            .cpu_features = platform[2],
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(cross_target);
 
@@ -584,7 +584,7 @@ fn java_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{
             .arch_os_abi = platform[0],
-            .cpu_features = "baseline",
+            .cpu_features = platform[2],
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(cross_target);
 
@@ -631,7 +631,7 @@ fn dotnet_client(
     const bindings_step = b.addRunArtifact(bindings);
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = platform[2] }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(cross_target);
 
         const lib = b.addSharedLibrary(.{
@@ -713,7 +713,7 @@ fn node_client(
     run_dll_tool.cwd = b.path("./src/clients/node");
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = platform[2] }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(cross_target);
 
         const lib = b.addSharedLibrary(.{
@@ -771,7 +771,7 @@ fn c_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{
             .arch_os_abi = platform[0],
-            .cpu_features = "baseline",
+            .cpu_features = platform[2],
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(cross_target);
 

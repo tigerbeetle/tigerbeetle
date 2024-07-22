@@ -193,6 +193,25 @@ pub fn main(
     }
     benchmark.done = false;
 
+    if (cli_args.checksum_performance) {
+        const stdout = std.io.getStdOut().writer();
+        stdout.print("\nmessage size max = {} bytes\n", .{
+            constants.message_size_max,
+        }) catch unreachable;
+
+        const buffer = try allocator.alloc(u8, constants.message_size_max);
+        defer allocator.free(buffer);
+        benchmark.rng.fill(buffer);
+
+        benchmark.timer.reset();
+        _ = vsr.checksum(buffer);
+        const checksum_duration_ns = benchmark.timer.read();
+
+        stdout.print("checksum message size max = {} us\n", .{
+            @divTrunc(checksum_duration_ns, std.time.ns_per_us),
+        }) catch unreachable;
+    }
+
     if (!benchmark.validate) return;
 
     // Reset our state so we can check our work.
