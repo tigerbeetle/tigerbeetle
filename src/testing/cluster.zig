@@ -110,6 +110,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         replica_times: []Time,
         replica_health: []ReplicaHealth,
         replica_upgrades: []?vsr.Release,
+        replica_pipeline_requests_limit: u32,
         replica_count: u8,
         standby_count: u8,
 
@@ -219,7 +220,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer allocator.free(replica_pools);
 
             const pipeline_requests_limit =
-                options.client_count -| constants.pipeline_prepare_queue_max;
+                @min(options.client_count, constants.clients_max) -|
+                constants.pipeline_prepare_queue_max;
 
             for (replica_pools, 0..) |*pool, i| {
                 errdefer for (replica_pools[0..i]) |*p| p.deinit(allocator);
@@ -336,6 +338,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .replica_times = replica_times,
                 .replica_health = replica_health,
                 .replica_upgrades = replica_upgrades,
+                .replica_pipeline_requests_limit = pipeline_requests_limit,
                 .replica_count = options.replica_count,
                 .standby_count = options.standby_count,
                 .clients = clients,
@@ -511,9 +514,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 }
             } else unreachable;
 
-            const pipeline_requests_limit =
-                cluster.options.client_count -| constants.pipeline_prepare_queue_max;
-
             cluster.releases_bundled[replica_index] = options.releases_bundled.*;
 
             var replica = &cluster.replicas[replica_index];
@@ -521,7 +521,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.allocator,
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
-                    .pipeline_requests_limit = pipeline_requests_limit,
+                    .pipeline_requests_limit = cluster.replica_pipeline_requests_limit,
                     .storage = &cluster.storages[replica_index],
                     .aof = &cluster.aofs[replica_index],
                     // TODO Test restarting with a higher storage limit.

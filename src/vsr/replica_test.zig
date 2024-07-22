@@ -1481,8 +1481,8 @@ const ProcessSelector = enum {
 const TestContext = struct {
     cluster: *Cluster,
     log_level: std.log.Level,
-    client_requests: [constants.clients_max]usize = [_]usize{0} ** constants.clients_max,
-    client_replies: [constants.clients_max]usize = [_]usize{0} ** constants.clients_max,
+    client_requests: []usize,
+    client_replies: []usize,
 
     pub fn init(options: struct {
         replica_count: u8,
@@ -1537,12 +1537,22 @@ const TestContext = struct {
 
         for (cluster.storages) |*storage| storage.faulty = true;
 
+        const client_requests = try allocator.alloc(usize, options.client_count);
+        errdefer allocator.free(client_requests);
+        @memset(client_requests, 0);
+
+        const client_replies = try allocator.alloc(usize, options.client_count);
+        errdefer allocator.free(client_replies);
+        @memset(client_replies, 0);
+
         const context = try allocator.create(TestContext);
         errdefer allocator.destroy(context);
 
         context.* = .{
             .cluster = cluster,
             .log_level = log_level_original,
+            .client_requests = client_requests,
+            .client_replies = client_replies,
         };
         cluster.context = context;
 
@@ -1551,6 +1561,8 @@ const TestContext = struct {
 
     pub fn deinit(t: *TestContext) void {
         std.testing.log_level = t.log_level;
+        allocator.free(t.client_replies);
+        allocator.free(t.client_requests);
         t.cluster.deinit();
         allocator.destroy(t);
     }
