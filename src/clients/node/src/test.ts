@@ -383,9 +383,37 @@ test('cannot void an expired transfer', async (): Promise<void> => {
   const transferErrors = await client.createTransfers([transfer])
   assert.deepStrictEqual(transferErrors, [])
 
-  // Wait for the transfer to expire.
+  var accounts = await client.lookupAccounts([accountA.id, accountB.id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].credits_posted, 150n)
+  assert.strictEqual(accounts[0].credits_pending, 50n)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].debits_pending, 0n)
+
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_pending, 0n)
+  assert.strictEqual(accounts[1].debits_posted, 150n)
+  assert.strictEqual(accounts[1].debits_pending, 50n)
+
+  // We need to wait 1s for the server to expire the transfer, however the
+  // server can pulse the expiry operation anytime after the timeout,
+  // so adding an extra delay to avoid flaky tests.
   // TODO: Use `await setTimeout(1000)` when upgrade to Node > 15.
-  await new Promise(_ => setTimeout(_, 1000));
+  const extra_wait_time = 250;
+  await new Promise(_ => setTimeout(_, (transfer.timeout * 1000) + extra_wait_time));
+
+  // Looking up the accounts again for the updated balance.
+  accounts = await client.lookupAccounts([accountA.id, accountB.id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].credits_posted, 150n)
+  assert.strictEqual(accounts[0].credits_pending, 0n)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].debits_pending, 0n)
+
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_pending, 0n)
+  assert.strictEqual(accounts[1].debits_posted, 150n)
+  assert.strictEqual(accounts[1].debits_pending, 0n)
 
   // send in the reject
   const reject: Transfer = {
