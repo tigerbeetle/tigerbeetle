@@ -689,9 +689,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(reply_message.header.command == .reply);
             assert(reply_message.header.operation == request_message.header.operation);
 
-            const client_index = for (cluster.clients, 0..) |*c, i| {
-                if (client == c) break i;
-            } else unreachable;
+            const client_index =
+                cluster.client_id_permutation.decode(client.id) - client_id_permutation_shift;
+            assert(&cluster.clients[client_index] == client);
 
             cluster.on_cluster_reply(cluster, client_index, request_message, reply_message);
         }
