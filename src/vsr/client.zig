@@ -13,7 +13,7 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const IOPS = @import("../iops.zig").IOPS;
 const FIFO = @import("../fifo.zig").FIFO;
 
-const log = std.log.scoped(.client);
+const log = stdx.log.scoped(.client);
 
 pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {

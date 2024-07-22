@@ -2137,6 +2137,20 @@ const TestClients = struct {
         for (t.clients.const_slice()) |c| replies_total += t.context.client_replies[c];
         return replies_total;
     }
+
+    pub fn eviction_reason(t: *const TestClients) ?vsr.Header.Eviction.Reason {
+        var evicted_all: ?vsr.Header.Eviction.Reason = null;
+        for (t.clients.const_slice(), 0..) |r, i| {
+            const client_eviction_reason = t.cluster.client_eviction_reasons[r];
+            if (i == 0) {
+                assert(evicted_all == null);
+            } else {
+                assert(evicted_all == client_eviction_reason);
+            }
+            evicted_all = client_eviction_reason;
+        }
+        return evicted_all;
+    }
 };
 
 /// TestClientBus supports tests which require fine-grained control of the client protocol.

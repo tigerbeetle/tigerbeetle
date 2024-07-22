@@ -116,6 +116,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         clients: []Client,
         client_pools: []MessagePool,
+        /// Updated when the *client* is informed of the eviction.
+        /// (Which may be some time after the client is actually evicted by the cluster.)
+        client_eviction_reasons: []?vsr.Header.Eviction.Reason,
         client_id_permutation: IdPermutation,
 
         state_checker: StateChecker,
@@ -261,6 +264,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
             errdefer for (client_pools) |*pool| pool.deinit(allocator);
 
+            const client_eviction_reasons =
+                try allocator.alloc(?vsr.Header.Eviction.Reason, options.client_count);
+            errdefer allocator.free(client_eviction_reasons);
+            @memset(client_eviction_reasons, null);
+
             const client_id_permutation = IdPermutation.generate(random);
             var clients = try allocator.alloc(Client, options.client_count);
             errdefer allocator.free(clients);
@@ -275,6 +283,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         .replica_count = options.replica_count,
                         .message_pool = &client_pools[i],
                         .message_bus_options = .{ .network = network },
+                        .eviction_callback = client_on_eviction,
                     },
                 );
                 client.release = options.releases[0].release;
@@ -343,6 +352,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .standby_count = options.standby_count,
                 .clients = clients,
                 .client_pools = client_pools,
+                .client_eviction_reasons = client_eviction_reasons,
                 .client_id_permutation = client_id_permutation,
                 .state_checker = state_checker,
                 .storage_checker = storage_checker,
@@ -399,6 +409,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.grid_checker.deinit(); // (Storage references this.)
 
             cluster.allocator.free(cluster.clients);
+            cluster.allocator.free(cluster.client_eviction_reasons);
             cluster.allocator.free(cluster.client_pools);
             cluster.allocator.free(cluster.replicas);
             cluster.allocator.free(cluster.replica_upgrades);
@@ -417,7 +428,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn tick(cluster: *Self) void {
             cluster.network.tick();
 
-            for (cluster.clients) |*client| client.tick();
+            for (cluster.clients, cluster.client_eviction_reasons) |*client, eviction_reason| {
+                if (eviction_reason == null) client.tick();
+            }
+
             for (cluster.storages) |*storage| storage.tick();
 
             // Upgrades immediately follow storage.tick(), since upgrades occur at checkpoint
@@ -640,6 +654,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             request_message: *Message,
             request_body_size: usize,
         ) void {
+            assert(cluster.client_eviction_reasons[client_index] == null);
+
             const client = &cluster.clients[client_index];
             const message = request_message.build(.request);
 
@@ -692,8 +708,25 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const client_index =
                 cluster.client_id_permutation.decode(client.id) - client_id_permutation_shift;
             assert(&cluster.clients[client_index] == client);
+            assert(cluster.client_eviction_reasons[client_index] == null);
 
             cluster.on_cluster_reply(cluster, client_index, request_message, reply_message);
+        }
+
+        fn client_on_eviction(client: *Client, eviction: *const Message.Eviction) void {
+            const cluster: *Self = @ptrCast(@alignCast(client.on_reply_context.?));
+            assert(eviction.header.invalid() == null);
+            assert(eviction.header.cluster == cluster.options.cluster_id);
+            assert(eviction.header.client == client.id);
+            assert(eviction.header.command == .eviction);
+
+            const client_index =
+                cluster.client_id_permutation.decode(client.id) - client_id_permutation_shift;
+            assert(&cluster.clients[client_index] == client);
+            assert(cluster.client_eviction_reasons[client_index] == null);
+
+            cluster.client_eviction_reasons[client_index] = eviction.header.reason;
+            cluster.network.process_disable(.{ .client = client.id });
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
