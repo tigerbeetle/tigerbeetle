@@ -1697,7 +1697,7 @@ const TestReplicas = struct {
             log.info("{}: restart replica", .{r});
             t.cluster.restart_replica(
                 r,
-                t.cluster.replicas[r].releases_bundled.const_slice(),
+                t.cluster.replicas[r].releases_bundled,
             ) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
@@ -1721,7 +1721,7 @@ const TestReplicas = struct {
 
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(r, releases_bundled.const_slice()) catch |err| {
+            t.cluster.restart_replica(r, &releases_bundled) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,

@@ -199,6 +199,13 @@ const CliArgs = union(enum) {
         ;
     },
 
+    // Internal: used to validate multiversion binaries.
+    multiversion: struct {
+        positional: struct {
+            path: [:0]const u8,
+        },
+    },
+
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
     pub const help = fmt.comptimePrint(
@@ -435,6 +442,10 @@ pub const Command = union(enum) {
         },
     };
 
+    pub const Multiversion = struct {
+        path: [:0]const u8,
+    };
+
     format: Format,
     start: Start,
     version: struct {
@@ -443,6 +454,7 @@ pub const Command = union(enum) {
     repl: Repl,
     benchmark: Benchmark,
     inspect: Inspect,
+    multiversion: Multiversion,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
@@ -792,29 +804,34 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 inline else => |args| args.positional.path,
             };
 
+            return Command{ .inspect = .{
+                .path = path,
+                .query = switch (inspect) {
+                    .superblock => .superblock,
+                    .wal => |args| .{ .wal = .{ .slot = args.slot } },
+                    .replies => |args| .{ .replies = .{
+                        .slot = args.slot,
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .grid => |args| .{ .grid = .{
+                        .block = args.block,
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .manifest => |args| .{ .manifest = .{
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .tables => |args| .{ .tables = .{
+                        .superblock_copy = args.superblock_copy,
+                        .tree = args.tree,
+                        .level = args.level,
+                    } },
+                },
+            } };
+        },
+        .multiversion => |multiversion| {
             return Command{
-                .inspect = .{
-                    .path = path,
-                    .query = switch (inspect) {
-                        .superblock => .superblock,
-                        .wal => |args| .{ .wal = .{ .slot = args.slot } },
-                        .replies => |args| .{ .replies = .{
-                            .slot = args.slot,
-                            .superblock_copy = args.superblock_copy,
-                        } },
-                        .grid => |args| .{ .grid = .{
-                            .block = args.block,
-                            .superblock_copy = args.superblock_copy,
-                        } },
-                        .manifest => |args| .{ .manifest = .{
-                            .superblock_copy = args.superblock_copy,
-                        } },
-                        .tables => |args| .{ .tables = .{
-                            .superblock_copy = args.superblock_copy,
-                            .tree = args.tree,
-                            .level = args.level,
-                        } },
-                    },
+                .multiversion = .{
+                    .path = multiversion.positional.path,
                 },
             };
         },

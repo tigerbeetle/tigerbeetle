@@ -1152,7 +1152,7 @@ pub const IO = struct {
     /// Creates a socket that can be used for async operations with the IO instance.
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !posix.socket_t {
         _ = self;
-        return posix.socket(family, sock_type, protocol);
+        return posix.socket(family, sock_type | posix.SOCK.CLOEXEC, protocol);
     }
 
     /// Closes a socket opened by the IO instance.

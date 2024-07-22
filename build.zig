@@ -428,12 +428,14 @@ pub fn build(b: *std.Build) !void {
     }
 
     { // zig build scripts -- ci --language=java
-        const scripts_run = b.addRunArtifact(b.addExecutable(.{
+        const scripts = b.addExecutable(.{
             .name = "scripts",
             .root_source_file = b.path("src/scripts.zig"),
             .target = target,
             .optimize = mode,
-        }));
+        });
+        scripts.root_module.addOptions("vsr_options", vsr_options);
+        const scripts_run = b.addRunArtifact(scripts);
         scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
         if (b.args) |args| scripts_run.addArgs(args);
         build_steps.scripts.dependOn(&scripts_run.step);
