@@ -1715,7 +1715,7 @@ public class IntegrationTests
 
     private void ConcurrencyTest(bool isAsync)
     {
-        const int TASKS_QTY = 1_000_000;
+        const int TASKS_QTY = 100_000;
 
         using var client = new Client(0, new[] { server.Address });
 

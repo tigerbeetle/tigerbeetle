@@ -71,6 +71,7 @@ internal abstract class Request<TResult, TBody> : IRequest
         {
             TResult[]? array = null;
             Exception? exception = null;
+            PacketStatus status = packet.Pointer->status;
 
             try
             {
@@ -117,13 +118,17 @@ internal abstract class Request<TResult, TBody> : IRequest
             }
             else
             {
-                if (packet.Pointer->status == PacketStatus.Ok)
+                if (status == PacketStatus.Ok)
                 {
                     SetResult(array!);
                 }
+                else if (status == PacketStatus.ClientShutdown)
+                {
+                    SetException(new ObjectDisposedException("Client shutdown."));
+                }
                 else
                 {
-                    SetException(new RequestException(packet.Pointer->status));
+                    SetException(new RequestException(status));
                 }
             }
         }

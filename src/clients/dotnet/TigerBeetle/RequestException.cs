@@ -19,7 +19,6 @@ public sealed class RequestException : Exception
             {
                 case PacketStatus.TooMuchData: return "Too much data provided on this batch.";
                 case PacketStatus.InvalidOperation: return "Invalid operation.";
-                case PacketStatus.ClientShutdown: return "Client shutdown.";
                 case PacketStatus.InvalidDataSize: return "Invalid data size.";
                 default: return "Unknown error status " + Status;
             }
