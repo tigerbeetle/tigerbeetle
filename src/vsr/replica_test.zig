@@ -47,7 +47,6 @@ const releases = .{
     },
 };
 
-// TODO Test client eviction once it no longer triggers a client panic.
 // TODO Detect when cluster has stabilized and stop run() early, rather than just running for a
 //      fixed number of ticks.
 
@@ -1451,6 +1450,28 @@ test "Cluster: client: empty command=request operation=register body" {
     try expectEqual(reply.header.size, @sizeOf(Reply));
     try expectEqual(reply.header.request, 0);
     try expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
+}
+
+test "Cluster: eviction: no_session" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(0, 1);
+    var c = t.clients(1, constants.clients_max);
+
+    // Register a single client.
+    try c0.request(1, 1);
+    // Register clients_max other clients.
+    // This evicts the "extra" client, though the eviction message has not been sent yet.
+    try c.request(constants.clients_max, constants.clients_max);
+
+    // Try to send one last request -- which fails, since this client has been evicted.
+    try c0.request(2, 1);
+    try expectEqual(c0.eviction_reason(), .no_session);
+    try expectEqual(c.eviction_reason(), null);
 }
 
 const ProcessSelector = enum {
