@@ -81,8 +81,8 @@ jobs:
         with:
           fetch-depth: 2147483647
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build test
-      - run: ./zig/zig build clients:c:sample -Drelease
+      - run: ./zig/zig build test -Dcpu=baseline+neon+aes
+      - run: ./zig/zig build clients:c:sample -Drelease -Dcpu=baseline+neon+aes
 
 
   clients:
