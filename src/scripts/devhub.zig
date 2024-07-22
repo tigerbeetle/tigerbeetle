@@ -36,13 +36,21 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
 
-    const benchmark_result = try shell.exec_stdout("./tigerbeetle benchmark --validate", .{});
+    const benchmark_result = try shell.exec_stdout(
+        "./tigerbeetle benchmark --validate --checksum-performance",
+        .{},
+    );
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
     const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
     const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
     const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
     const datafile_bytes = try get_measurement(benchmark_result, "datafile", "bytes");
     const datafile_empty_bytes = try get_measurement(benchmark_result, "datafile empty", "bytes");
+    const checksum_message_size_max_us = try get_measurement(
+        benchmark_result,
+        "checksum message size max",
+        "us",
+    );
 
     const batch = MetricBatch{
         .timestamp = commit_timestamp,
@@ -60,6 +68,11 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
             .{ .name = "datafile", .value = datafile_bytes, .unit = "bytes" },
             .{ .name = "datafile empty", .value = datafile_empty_bytes, .unit = "bytes" },
+            .{
+                .name = "checksum(message_size_max)",
+                .value = checksum_message_size_max_us,
+                .unit = "us",
+            },
         },
     };
 
