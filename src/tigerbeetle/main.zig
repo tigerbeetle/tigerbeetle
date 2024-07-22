@@ -18,13 +18,13 @@ const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const Storage = vsr.storage.Storage;
+const Storage = vsr.storage.Storage(IO);
 const AOF = vsr.aof.AOF;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
-const Grid = vsr.GridType(vsr.storage.Storage);
+const Grid = vsr.GridType(Storage);
 
 const AOFType = if (constants.aof_record) AOF else void;
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOFType);

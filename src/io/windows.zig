@@ -210,19 +210,19 @@ pub const IO = struct {
             send: Transfer,
             recv: Transfer,
             read: struct {
-                fd: std.posix.fd_t,
+                fd: fd_t,
                 buf: [*]u8,
                 len: u32,
                 offset: u64,
             },
             write: struct {
-                fd: std.posix.fd_t,
+                fd: fd_t,
                 buf: [*]const u8,
                 len: u32,
                 offset: u64,
             },
             close: struct {
-                fd: std.posix.fd_t,
+                fd: fd_t,
             },
             timeout: struct {
                 deadline: u64,
@@ -787,7 +787,7 @@ pub const IO = struct {
             result: ReadError!usize,
         ) void,
         completion: *Completion,
-        fd: std.posix.fd_t,
+        fd: fd_t,
         buffer: []u8,
         offset: u64,
     ) void {
@@ -835,7 +835,7 @@ pub const IO = struct {
             result: WriteError!usize,
         ) void,
         completion: *Completion,
-        fd: std.posix.fd_t,
+        fd: fd_t,
         buffer: []const u8,
         offset: u64,
     ) void {
@@ -870,7 +870,7 @@ pub const IO = struct {
             result: CloseError!void,
         ) void,
         completion: *Completion,
-        fd: std.posix.fd_t,
+        fd: fd_t,
     ) void {
         self.submit(
             context,
@@ -983,19 +983,20 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !std.posix.fd_t {
+    pub fn open_dir(dir_path: []const u8) !fd_t {
         const dir = try std.fs.cwd().openDir(dir_path, .{});
         return dir.fd;
     }
 
+    pub const fd_t = std.posix.fd_t;
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
     // TODO open_read_only should open the file as read-only.
     fn open_file_handle(
-        dir_handle: std.posix.fd_t,
+        dir_handle: fd_t,
         relative_path: []const u8,
         method: enum { create, open, open_read_only },
-    ) !std.posix.fd_t {
+    ) !fd_t {
         const path_w = try os.windows.sliceToPrefixedFileW(dir_handle, relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL
@@ -1069,12 +1070,12 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        dir_handle: std.posix.fd_t,
+        dir_handle: fd_t,
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open, open_read_only },
         direct_io: DirectIO,
-    ) !std.posix.fd_t {
+    ) !fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
         // On windows, assume that Direct IO is always available.
@@ -1142,7 +1143,7 @@ pub const IO = struct {
         return handle;
     }
 
-    fn fs_lock(handle: std.posix.fd_t, size: u64) !void {
+    fn fs_lock(handle: fd_t, size: u64) !void {
         // TODO: Look into using SetFileIoOverlappedRange() for better unbuffered async IO perf
         // NOTE: Requires SeLockMemoryPrivilege.
 
@@ -1186,7 +1187,7 @@ pub const IO = struct {
         }
     }
 
-    fn fs_allocate(handle: std.posix.fd_t, size: u64) !void {
+    fn fs_allocate(handle: fd_t, size: u64) !void {
         // TODO: Look into using SetFileValidData() instead
         // NOTE: Requires SE_MANAGE_VOLUME_NAME privilege
 

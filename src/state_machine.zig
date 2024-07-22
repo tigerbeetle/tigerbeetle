@@ -604,13 +604,12 @@ pub fn StateMachineType(
             };
         }
 
-        pub fn pulse(self: *const StateMachine) bool {
+        pub fn pulse_needed(self: *const StateMachine, timestamp: u64) bool {
             assert(!global_constants.aof_recovery);
             assert(self.expire_pending_transfers.pulse_next_timestamp >=
                 TimestampRange.timestamp_min);
 
-            return self.expire_pending_transfers.pulse_next_timestamp <=
-                self.prepare_timestamp;
+            return self.expire_pending_transfers.pulse_next_timestamp <= timestamp;
         }
 
         pub fn prefetch(
@@ -3267,7 +3266,7 @@ fn check(test_table: []const u8) !void {
                 context.state_machine.prepare_timestamp += 1;
                 context.state_machine.prepare(commit_operation, request.items);
 
-                if (context.state_machine.pulse()) {
+                if (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
                     const pulse_size = context.execute(
                         op,
                         vsr.Operation.pulse.cast(TestContext.StateMachine),
@@ -4626,7 +4625,9 @@ test "StateMachine: Demuxer" {
 }
 
 test "StateMachine: ref all decls" {
-    const Storage = @import("storage.zig").Storage;
+    const IO = @import("io.zig").IO;
+    const Storage = @import("storage.zig").Storage(IO);
+
     const StateMachine = StateMachineType(Storage, .{
         .message_body_size_max = global_constants.message_body_size_max,
         .lsm_batch_multiple = 1,

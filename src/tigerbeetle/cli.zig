@@ -21,9 +21,10 @@ const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
-const Grid = vsr.GridType(vsr.storage.Storage);
+const Storage = vsr.storage.Storage(vsr.io.IO);
+const Grid = vsr.GridType(Storage);
 const StateMachine = vsr.state_machine.StateMachineType(
-    vsr.storage.Storage,
+    Storage,
     constants.state_machine_config,
 );
 
@@ -101,6 +102,7 @@ const CliArgs = union(enum) {
         ),
         transfer_batch_delay_us: usize = 0,
         validate: bool = false,
+        checksum_performance: bool = false,
         query_count: usize = 100,
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
@@ -397,6 +399,7 @@ pub const Command = union(enum) {
         transfer_batch_size: usize,
         transfer_batch_delay_us: usize,
         validate: bool,
+        checksum_performance: bool,
         query_count: usize,
         print_batch_timings: bool,
         id_order: IdOrder,
@@ -773,6 +776,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .transfer_batch_size = benchmark.transfer_batch_size,
                     .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
                     .validate = benchmark.validate,
+                    .checksum_performance = benchmark.checksum_performance,
                     .query_count = benchmark.query_count,
                     .print_batch_timings = benchmark.print_batch_timings,
                     .id_order = benchmark.id_order,

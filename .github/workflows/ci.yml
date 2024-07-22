@@ -81,8 +81,8 @@ jobs:
         with:
           fetch-depth: 2147483647
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build test
-      - run: ./zig/zig build clients:c:sample -Drelease
+      - run: ./zig/zig build test -Dcpu=baseline+neon+aes
+      - run: ./zig/zig build clients:c:sample -Drelease -Dcpu=baseline+neon+aes
 
 
   clients:
@@ -141,7 +141,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
       - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build scripts -- release --build --run-number=${{ github.run_number }} --sha=${{ github.sha }} --language=zig
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}

@@ -406,7 +406,7 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .openat => {
-                    const result: anyerror!posix.fd_t = blk: {
+                    const result: anyerror!fd_t = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -637,20 +637,20 @@ pub const IO = struct {
             address_size: posix.socklen_t = @sizeOf(posix.sockaddr),
         },
         close: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
         },
         connect: struct {
             socket: posix.socket_t,
             address: std.net.Address,
         },
         openat: struct {
-            dir_fd: posix.fd_t,
+            dir_fd: fd_t,
             file_path: [*:0]const u8,
             flags: posix.O,
             mode: posix.mode_t,
         },
         read: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
             buffer: []u8,
             offset: u64,
         },
@@ -663,7 +663,7 @@ pub const IO = struct {
             buffer: []const u8,
         },
         statx: struct {
-            dir_fd: posix.fd_t,
+            dir_fd: fd_t,
             file_path: [*:0]const u8,
             flags: u32,
             mask: u32,
@@ -673,7 +673,7 @@ pub const IO = struct {
             timespec: os.linux.kernel_timespec,
         },
         write: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
             buffer: []const u8,
             offset: u64,
         },
@@ -745,7 +745,7 @@ pub const IO = struct {
             result: CloseError!void,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
     ) void {
         completion.* = .{
             .io = self,
@@ -829,10 +829,10 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: OpenatError!posix.fd_t,
+            result: OpenatError!fd_t,
         ) void,
         completion: *Completion,
-        dir_fd: posix.fd_t,
+        dir_fd: fd_t,
         file_path: [*:0]const u8,
         flags: posix.O,
         mode: posix.mode_t,
@@ -848,7 +848,7 @@ pub const IO = struct {
                     callback(
                         @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const OpenatError!posix.fd_t, @ptrCast(@alignCast(res))).*,
+                        @as(*const OpenatError!fd_t, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -886,7 +886,7 @@ pub const IO = struct {
             result: ReadError!usize,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
         buffer: []u8,
         offset: u64,
     ) void {
@@ -1022,7 +1022,7 @@ pub const IO = struct {
             result: StatxError!void,
         ) void,
         completion: *Completion,
-        dir_fd: posix.fd_t,
+        dir_fd: fd_t,
         file_path: [*:0]const u8,
         flags: u32,
         mask: u32,
@@ -1120,7 +1120,7 @@ pub const IO = struct {
             result: WriteError!usize,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
         buffer: []const u8,
         offset: u64,
     ) void {
@@ -1162,11 +1162,12 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !posix.fd_t {
+    pub fn open_dir(dir_path: []const u8) !fd_t {
         return posix.open(dir_path, .{ .CLOEXEC = true, .ACCMODE = .RDONLY }, 0);
     }
 
-    pub const INVALID_FILE: posix.fd_t = -1;
+    pub const fd_t = posix.fd_t;
+    pub const INVALID_FILE: fd_t = -1;
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
@@ -1177,12 +1178,12 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        dir_fd: posix.fd_t,
+        dir_fd: fd_t,
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open, open_read_only },
         direct_io: DirectIO,
-    ) !posix.fd_t {
+    ) !fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
@@ -1435,7 +1436,7 @@ pub const IO = struct {
 
     /// Detects whether the underlying file system for a given directory fd is tmpfs. This is used
     /// to relax our Direct I/O check - running on tmpfs for benchmarking is useful.
-    fn fs_is_tmpfs(dir_fd: posix.fd_t) !bool {
+    fn fs_is_tmpfs(dir_fd: fd_t) !bool {
         var statfs: stdx.StatFs = undefined;
 
         while (true) {
@@ -1452,7 +1453,7 @@ pub const IO = struct {
 
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
-    fn fs_supports_direct_io(dir_fd: posix.fd_t) !bool {
+    fn fs_supports_direct_io(dir_fd: fd_t) !bool {
         if (!@hasField(posix.O, "DIRECT")) return false;
 
         const path = "fs_supports_direct_io";
@@ -1479,7 +1480,7 @@ pub const IO = struct {
 
     /// Allocates a file contiguously using fallocate() if supported.
     /// Alternatively, writes to the last sector so that at least the file size is correct.
-    fn fs_allocate(fd: posix.fd_t, size: u64) !void {
+    fn fs_allocate(fd: fd_t, size: u64) !void {
         const mode: i32 = 0;
         const offset: i64 = 0;
         const length: i64 = @intCast(size);

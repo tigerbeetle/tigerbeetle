@@ -20,7 +20,7 @@ const stdx = vsr.stdx;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
-const Storage = vsr.storage.Storage;
+const Storage = vsr.storage.Storage(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
@@ -192,6 +192,25 @@ pub fn main(
         try benchmark.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     benchmark.done = false;
+
+    if (cli_args.checksum_performance) {
+        const stdout = std.io.getStdOut().writer();
+        stdout.print("\nmessage size max = {} bytes\n", .{
+            constants.message_size_max,
+        }) catch unreachable;
+
+        const buffer = try allocator.alloc(u8, constants.message_size_max);
+        defer allocator.free(buffer);
+        benchmark.rng.fill(buffer);
+
+        benchmark.timer.reset();
+        _ = vsr.checksum(buffer);
+        const checksum_duration_ns = benchmark.timer.read();
+
+        stdout.print("checksum message size max = {} us\n", .{
+            @divTrunc(checksum_duration_ns, std.time.ns_per_us),
+        }) catch unreachable;
+    }
 
     if (!benchmark.validate) return;
 

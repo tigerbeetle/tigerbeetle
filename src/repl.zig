@@ -6,7 +6,7 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
-const Storage = vsr.storage.Storage;
+const Storage = vsr.storage.Storage(IO);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,
     constants.state_machine_config,
