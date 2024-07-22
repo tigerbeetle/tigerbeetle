@@ -585,7 +585,7 @@ const SeedRecord = struct {
             order_by_field(a.fuzzer, b.fuzzer) orelse
             order_by_field(a.ok, b.ok) orelse
             order_by_field(a.seed_duration(), b.seed_duration()) orelse // Coarse seed minimization.
-            order_by_field(a.seed_timestamp_start, b.seed_timestamp_start) orelse // Stability.
+            order_by_seed_timestamp_start(a, b) orelse
             order_by_field(a.seed_timestamp_end, b.seed_timestamp_end) orelse
             order_by_field(a.seed, b.seed) orelse
             .eq;
@@ -600,6 +600,15 @@ const SeedRecord = struct {
             else => std.math.order(lhs, rhs),
         };
         return if (full_order == .eq) null else full_order;
+    }
+
+    fn order_by_seed_timestamp_start(a: SeedRecord, b: SeedRecord) ?std.math.Order {
+        // For canaries, prefer newer seeds to show that the canary is alive.
+        // For other fuzzers, prefer older seeds to keep them stable.
+        return if (std.mem.eql(u8, a.fuzzer, "canary"))
+            order_by_field(b.seed_timestamp_start, a.seed_timestamp_start)
+        else
+            order_by_field(a.seed_timestamp_start, b.seed_timestamp_start);
     }
 
     fn less_than(_: void, a: SeedRecord, b: SeedRecord) bool {
@@ -1001,6 +1010,73 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 10,
             \\    "seed": 10,
             \\    "command": "fuzz ewah",
+            \\    "branch": "main"
+            \\  }
+            \\]
+        ),
+    );
+
+    // Prefer newer seeds for canary (special case).
+    try T.check(
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "canary",
+                .ok = false,
+                .seed_timestamp_start = 10,
+                .seed_timestamp_end = 10,
+                .seed = 3,
+                .command = "fuzz canary",
+                .branch = "main",
+            },
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "canary",
+                .ok = false,
+                .seed_timestamp_start = 30,
+                .seed_timestamp_end = 30,
+                .seed = 2,
+                .command = "fuzz canary",
+                .branch = "main",
+            },
+        },
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "canary",
+                .ok = false,
+                .seed_timestamp_start = 20,
+                .seed_timestamp_end = 20,
+                .seed = 1,
+                .command = "fuzz canary",
+                .branch = "main",
+            },
+        },
+        snap(@src(),
+            \\[
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "canary",
+            \\    "ok": false,
+            \\    "seed_timestamp_start": 30,
+            \\    "seed_timestamp_end": 30,
+            \\    "seed": 2,
+            \\    "command": "fuzz canary",
+            \\    "branch": "main"
+            \\  },
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "canary",
+            \\    "ok": false,
+            \\    "seed_timestamp_start": 20,
+            \\    "seed_timestamp_end": 20,
+            \\    "seed": 1,
+            \\    "command": "fuzz canary",
             \\    "branch": "main"
             \\  }
             \\]
