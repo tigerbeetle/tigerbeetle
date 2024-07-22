@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-using static TigerBeetle.AssertionException;
 using static TigerBeetle.TBClient;
 
 namespace TigerBeetle;
@@ -105,41 +104,22 @@ internal sealed class NativeClient : IDisposable
         }
     }
 
-    public void ReleasePacket(Packet packet)
+    public unsafe void Submit(TBPacket* packet)
     {
-        unsafe
+        if (client != IntPtr.Zero)
         {
-            Marshal.FreeCoTaskMem((IntPtr)packet.Pointer);
-        }
-    }
-
-    public void Submit(Packet packet)
-    {
-        unsafe
-        {
-            if (client != IntPtr.Zero)
+            lock (this)
             {
-                lock (this)
+                if (client != IntPtr.Zero)
                 {
-                    if (client != IntPtr.Zero)
-                    {
-                        tb_client_submit(client, packet.Pointer);
-                        return;
-                    }
+                    tb_client_submit(client, packet);
+                    return;
                 }
             }
-
-            packet.Pointer->status = PacketStatus.ClientShutdown;
-            OnComplete(packet.Pointer, null, 0);
         }
-    }
 
-    public Packet AcquirePacket()
-    {
-        unsafe
-        {
-            return new Packet((TBPacket*)Marshal.AllocCoTaskMem(sizeof(TBPacket)));
-        }
+        packet->status = PacketStatus.ClientShutdown;
+        OnComplete(packet, null, 0);
     }
 
     public void Dispose()
@@ -167,7 +147,7 @@ internal sealed class NativeClient : IDisposable
         if (request != null)
         {
             var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
-            request.Complete(new Packet(packet), span);
+            request.Complete(packet, span);
         }
     }
 }

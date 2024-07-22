@@ -136,7 +136,6 @@ public class RequestTests
         where TBody : unmanaged
     {
         private readonly Request<TResult, TBody> request;
-        private readonly Packet packet;
         private readonly byte receivedOperation;
         private readonly Memory<byte> buffer;
         private readonly PacketStatus status;
@@ -147,7 +146,6 @@ public class RequestTests
             unsafe
             {
                 this.request = isAsync ? new AsyncRequest<TResult, TBody>(nativeClient, operation) : new BlockingRequest<TResult, TBody>(nativeClient, operation);
-                this.packet = nativeClient.AcquirePacket();
                 this.receivedOperation = receivedOperation;
                 this.buffer = buffer;
                 this.status = status;
@@ -162,9 +160,7 @@ public class RequestTests
                 unsafe
                 {
                     Task.Delay(delay).Wait();
-                    packet.Pointer->operation = receivedOperation;
-                    packet.Pointer->status = status;
-                    request.Complete(packet, buffer.Span);
+                    request.TestCompletion(receivedOperation, status, buffer.Span);
                 }
             });
 

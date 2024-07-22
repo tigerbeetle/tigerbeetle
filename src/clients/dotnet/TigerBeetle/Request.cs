@@ -6,17 +6,7 @@ using static TigerBeetle.AssertionException;
 
 namespace TigerBeetle;
 
-internal struct Packet
-{
-    public readonly unsafe TBPacket* Pointer;
-
-    public unsafe Packet(TBPacket* pointer)
-    {
-        Pointer = pointer;
-    }
-}
-
-internal interface IRequest
+internal unsafe interface IRequest
 {
     public static IRequest? FromUserData(IntPtr userData)
     {
@@ -24,7 +14,7 @@ internal interface IRequest
         return handle.IsAllocated ? handle.Target as IRequest : null;
     }
 
-    void Complete(Packet packet, ReadOnlySpan<byte> result);
+    unsafe void Complete(TBPacket* packet, ReadOnlySpan<byte> result);
 }
 
 internal abstract class Request<TResult, TBody> : IRequest
@@ -37,6 +27,8 @@ internal abstract class Request<TResult, TBody> : IRequest
     private readonly NativeClient nativeClient;
     private readonly TBOperation operation;
     private readonly GCHandle requestGCHandle;
+
+    private GCHandle packetGCHandle;
 
     public Request(NativeClient nativeClient, TBOperation operation)
     {
@@ -51,65 +43,66 @@ internal abstract class Request<TResult, TBody> : IRequest
         AssertTrue(pointer != null);
         AssertTrue(len > 0);
         AssertTrue(requestGCHandle.IsAllocated, "Request GCHandle not allocated");
+        AssertTrue(!packetGCHandle.IsAllocated, "Packet GCHandle already allocated");
 
-        var packet = this.nativeClient.AcquirePacket();
+        packetGCHandle = GCHandle.Alloc(new TBPacket
+        {
+            next = null,
+            userData = (IntPtr)requestGCHandle,
+            operation = (byte)operation,
+            data = new nint(pointer),
+            dataSize = (uint)(len * BODY_SIZE),
+            status = PacketStatus.Ok,
+        }, GCHandleType.Pinned);
 
-        var ptr = packet.Pointer;
-        ptr->next = null;
-        ptr->userData = (IntPtr)requestGCHandle;
-        ptr->operation = (byte)operation;
-        ptr->data = new nint(pointer);
-        ptr->dataSize = (uint)(len * BODY_SIZE);
-        ptr->status = PacketStatus.Ok;
-
-        this.nativeClient.Submit(packet);
+        this.nativeClient.Submit((TBPacket*)packetGCHandle.AddrOfPinnedObject().ToPointer());
     }
 
-    public void Complete(Packet packet, ReadOnlySpan<byte> result)
+    public unsafe void Complete(TBPacket* packet, ReadOnlySpan<byte> result)
     {
         unsafe
         {
             TResult[]? array = null;
             Exception? exception = null;
-            PacketStatus status = packet.Pointer->status;
+            PacketStatus? status = null;
 
             try
             {
-                AssertTrue(packet.Pointer != null, "Null callback packet pointer");
+                AssertTrue(packet != null, "Null callback packet pointer");
+                AssertTrue(requestGCHandle.IsAllocated, "Request GCHandle not allocated");
+                AssertTrue(packetGCHandle.IsAllocated, "Packet GCHandle not allocated");
+                AssertTrue((byte)operation == packet->operation, "Unexpected callback operation: expected={0}, actual={1}", (byte)operation, packet->operation);
 
-                try
+                status = packet->status;
+
+                if (status == PacketStatus.Ok && result.Length > 0)
                 {
-                    AssertTrue((byte)operation == packet.Pointer->operation, "Unexpected callback operation: expected={0}, actual={1}", (byte)operation, packet.Pointer->operation);
+                    AssertTrue(result.Length % RESULT_SIZE == 0,
+                        "Invalid received data: result.Length={0}, SizeOf({1})={2}",
+                        result.Length,
+                        typeof(TResult).Name,
+                        RESULT_SIZE
+                    );
 
-                    if (packet.Pointer->status == PacketStatus.Ok && result.Length > 0)
-                    {
-                        AssertTrue(result.Length % RESULT_SIZE == 0,
-                            "Invalid received data: result.Length={0}, SizeOf({1})={2}",
-                            result.Length,
-                            typeof(TResult).Name,
-                            RESULT_SIZE
-                        );
+                    array = new TResult[result.Length / RESULT_SIZE];
 
-                        array = new TResult[result.Length / RESULT_SIZE];
-
-                        var span = MemoryMarshal.Cast<byte, TResult>(result);
-                        span.CopyTo(array);
-                    }
-                    else
-                    {
-                        array = Array.Empty<TResult>();
-                    }
+                    var span = MemoryMarshal.Cast<byte, TResult>(result);
+                    span.CopyTo(array);
                 }
-                finally
+                else
                 {
-                    nativeClient.ReleasePacket(packet);
-
-                    if (requestGCHandle.IsAllocated) requestGCHandle.Free();
+                    array = Array.Empty<TResult>();
                 }
+
             }
             catch (Exception any)
             {
                 exception = any;
+            }
+            finally
+            {
+                if (packetGCHandle.IsAllocated) packetGCHandle.Free();
+                if (requestGCHandle.IsAllocated) requestGCHandle.Free();
             }
 
             if (exception != null)
@@ -128,10 +121,31 @@ internal abstract class Request<TResult, TBody> : IRequest
                 }
                 else
                 {
-                    SetException(new RequestException(status));
+                    SetException(new RequestException(status!.Value));
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// This is a helper for testing only
+    /// Simulates calling Submit, with synchronous completion.
+    /// </summary>
+    internal unsafe void TestCompletion(byte operation, PacketStatus status, ReadOnlySpan<byte> result)
+    {
+        AssertTrue(requestGCHandle.IsAllocated, "Request GCHandle not allocated");
+        AssertTrue(!packetGCHandle.IsAllocated, "Packet GCHandle already allocated");
+
+        packetGCHandle = GCHandle.Alloc(new TBPacket
+        {
+            next = null,
+            userData = IntPtr.Zero,
+            operation = operation,
+            data = 0,
+            dataSize = 0,
+            status = status,
+        }, GCHandleType.Pinned);
+        this.Complete((TBPacket*)packetGCHandle.AddrOfPinnedObject().ToPointer(), result);
     }
 
     protected abstract void SetResult(TResult[] result);
