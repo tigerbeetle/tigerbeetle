@@ -449,7 +449,6 @@ pub fn ReplicaType(
         do_view_change_quorum: bool = false,
 
         checkpoint_from_all_replicas: CheckpointQuorum = .{},
-        checkpoint_quorum: bool = false,
 
         /// The number of ticks before a primary or backup broadcasts a ping to other replicas.
         /// TODO Explain why we need this (MessageBus handshaking, leapfrogging faulty replicas,
@@ -657,20 +656,9 @@ pub fn ReplicaType(
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
 
-            // A replication quorum of replicas have committed atop op_prepare_max, op_checkpoint
-            // is guaranteed to be durable on a commit quorum of replicas.
-            if (self.op_checkpoint() == 0 or self.solo() or
-                self.commit_max > vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?)
-            {
-                self.checkpoint_quorum = true;
-            }
-
             for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
                 if (self.journal.faulty.bit(.{ .index = slot })) {
                     assert(header.operation == .reserved);
-                } else {
-                    // We had received a quorum for the current op_checkpoint() before crashing.
-                    if (header.op > self.op_prepare_max()) self.checkpoint_quorum = true;
                 }
             }
 
@@ -1572,13 +1560,20 @@ pub fn ReplicaType(
                 .realtime = realtime,
             };
 
+            // If the primary has not heard from a commit quorum of replicas on the current
+            // checkpoint, it must not allow preparing beyond the current checkpoint's prepare_max.
+            const primary_prepare_max = if (self.checkpoint_quorum())
+                vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?
+            else
+                vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
+
             // self.op includes requests in the pipeline_queue, we must explicitly account for
             // requests in the request_queue to decide whether to accept this request.
-            if (self.op + self.pipeline.queue.request_queue.count + 1 > self.op_prepare_max()) {
+            if (self.op + self.pipeline.queue.request_queue.count + 1 > primary_prepare_max) {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, prepare_max={}).", .{
                     self.replica,
                     self.op + self.pipeline.queue.request_queue.count + 1,
-                    self.op_prepare_max(),
+                    primary_prepare_max,
                 });
                 defer self.message_bus.unref(request.message);
                 return;
@@ -1732,10 +1727,17 @@ pub fn ReplicaType(
                 message.header.parent,
                 message.header.checksum,
             });
+
             assert(message.header.op == self.op + 1);
             assert(message.header.op <= self.op_prepare_max());
-            assert(message.header.op - self.op_repair_min() < constants.journal_slot_count);
+
             self.op = message.header.op;
+
+            // Must be asserted *after* we advance our head op. Advancing the head past the current
+            // checkpoint's prepare_max advances op_repair_min, which is required to maintain this
+            // invariant.
+            assert(message.header.op - self.op_repair_min() < constants.journal_slot_count);
+
             self.journal.set_header_as_dirty(message.header);
 
             self.replicate(message);
@@ -2158,19 +2160,6 @@ pub fn ReplicaType(
                 assert(!self.do_view_change_quorum);
                 self.do_view_change_quorum = true;
 
-                if (!self.checkpoint_quorum) {
-                    // In both of these cases, the canonical DVC prepared or committed beyond
-                    // the current op_prepare_max, which signals that the replica with the
-                    // canonical DVC received a replication quorum for the current op_checkpoint.
-                    // We proactively advance our op_prepare_max here, the alternative would be to
-                    // give up becoming primary and waiting to receive a replication quorum for the
-                    // current checkpoint via pings/commits.
-                    if (op_checkpoint_max > self.op_checkpoint() or
-                        op_head > self.op_prepare_max())
-                    {
-                        self.checkpoint_quorum = true;
-                    }
-                }
                 self.primary_set_log_from_do_view_change_messages();
                 // We aren't status=normal yet, but our headers from our prior log_view may have
                 // been replaced. If we participate in another DVC (before reaching status=normal,
@@ -4153,8 +4142,6 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.checkpoint.header.op);
             self.grid.assert_only_repairing();
 
-            self.checkpoint_quorum = if (self.solo()) true else false;
-
             log.debug(
                 "{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})",
                 .{ self.replica, self.op, self.op_checkpoint() },
@@ -5856,11 +5843,50 @@ pub fn ReplicaType(
         /// doing so would overwrite a message (or the slot of a message) that has not yet been
         /// committed and checkpointed.
         fn op_prepare_max(self: *const Self) u64 {
-            const checkpoint = if (self.checkpoint_quorum)
-                self.op_checkpoint_next()
-            else
-                self.op_checkpoint();
-            return vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint).?;
+            return vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?;
+        }
+
+        /// Return True if the current checkpoint_op is durable on a commit quorum of replicas.
+        ///
+        /// We special case for replicas in recovering_head/view_change:
+        /// If we allow checking checkpoint_from_all_replicas for quorum, we may set op_repair_max()
+        /// to op_checkpoint() + 1, disallowing a recovering primary during view change/a replica
+        /// in recovering_head to recover op_checkpoint in its WAL. Therefore, we only return True
+        /// if the head op/commit_max is past the prepare_max for the current checkpoint.
+        fn checkpoint_quorum(self: *const Self) bool {
+            if (self.solo() or self.op_checkpoint() == 0) return true;
+
+            // If the cluster has committed or prepared an operation past the prepare_max for
+            // the current op_checkpoint, a commit-quorum of replicas have done the same.
+            // The current op_checkpoint is guaranteed to be durable on a commit quorum of replicas.
+            const prepare_max_for_current_checkpoint =
+                vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
+            if (self.commit_max > prepare_max_for_current_checkpoint or
+                self.op > prepare_max_for_current_checkpoint)
+            {
+                return true;
+            }
+
+            if (self.status == .recovering_head or self.status == .view_change) return false;
+
+            assert(self.status == .normal);
+            const matching =
+                self.checkpoint_from_all_replicas.count(&.{
+                .id = self.superblock.working.checkpoint_id(),
+                .op = self.op_checkpoint(),
+            });
+
+            assert(matching <= self.replica_count);
+
+            // -1 because we already have the op_checkpoint durable.
+            if (matching >= self.quorum_replication - 1) {
+                log.debug("{}: found replication quorum (via pings) for checkpoint={}", .{
+                    self.replica,
+                    self.op_checkpoint(),
+                });
+                return true;
+            }
+            return false;
         }
 
         /// Returns checkpoint id associated with the op.
@@ -5908,9 +5934,8 @@ pub fn ReplicaType(
         /// Availability condition: each committed op must be present either in a quorum of WALs or
         /// in a quorum of checkpoints.
         ///
-        /// If op=trigger+1 is committed, the corresponding checkpoint is durably present on
-        /// a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
-        /// both conditions.
+        /// Repairing all ops since the latest checkpoint durable on a commit-quorum of replicas
+        /// satisfies both conditions.
         ///
         /// When called from status=recovering_head or status=recovering, the caller is responsible
         /// for ensuring that replica.op is valid.
@@ -5925,15 +5950,9 @@ pub fn ReplicaType(
                     break :repair_min 0;
                 }
 
-                const op_checkpoint_trigger =
-                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
-                // After state sync, commit_max might lag behind checkpoint_op.
-                maybe(self.commit_max < op_checkpoint_trigger);
-                if (self.commit_max > op_checkpoint_trigger) {
-                    if (self.op == self.op_checkpoint()) {
-                        // Don't allow "op_repair_min > op_head".
-                        break :repair_min self.op_checkpoint();
-                    }
+                if (self.checkpoint_quorum()) {
+                    assert(self.commit_min >= self.op_checkpoint());
+                    assert(self.op >= self.commit_min);
                     break :repair_min self.op_checkpoint() + 1;
                 } else {
                     break :repair_min (self.op_checkpoint() + 1) -|
@@ -9018,8 +9037,6 @@ pub fn ReplicaType(
             const commit_min_previous = self.commit_min;
             self.commit_min = self.op_checkpoint();
 
-            self.checkpoint_quorum = false;
-
             if (self.release.value <
                 self.superblock.working.vsr_state.checkpoint.release.value)
             {
@@ -9507,50 +9524,13 @@ pub fn ReplicaType(
                 @panic("checkpoint diverged");
             }
 
-            if (!self.checkpoint_quorum) {
-                // If the primary has committed an operation past the prepare_max for
-                // the current op_checkpoint, a commit-quorum of replicas have done the same.
-                // The current op_checkpoint is guaranteed to be durable on a commit quorum of
-                // replicas and we can advance our op_prepare_max.
-                if (header.into_const(.commit)) |h| {
-                    if (h.commit > self.op_prepare_max()) {
-                        log.debug("{}: found replication quorum (via commit) for checkpoint={}", .{
-                            self.replica,
-                            self.op_checkpoint(),
-                        });
-                        self.checkpoint_quorum = true;
-                    }
-                }
-
-                if (self.checkpoint_from_all_replicas.replace(
-                    header.replica,
-                    &.{ .id = candidate.checkpoint_id, .op = candidate.checkpoint_op },
-                )) {
-                    const matching =
-                        self.checkpoint_from_all_replicas.count(&.{
-                        .id = self.superblock.working.checkpoint_id(),
-                        .op = self.op_checkpoint(),
-                    });
-
-                    assert(matching <= self.replica_count);
-
-                    // -1 because we already have the op_checkpoint durable.
-                    if (matching >= self.quorum_replication - 1) {
-                        log.debug("{}: found replication quorum (via pings) for checkpoint={}", .{
-                            self.replica,
-                            self.op_checkpoint(),
-                        });
-                        self.checkpoint_quorum = true;
-                    }
-                }
-            }
+            _ = self.checkpoint_from_all_replicas.replace(
+                header.replica,
+                &.{ .id = candidate.checkpoint_id, .op = candidate.checkpoint_op },
+            );
 
             // Don't sync backwards, or to our current checkpoint.
             if (candidate.checkpoint_op <= self.op_checkpoint()) return;
-
-            // If you discover a replica that has a bigger op_checkpoint, our op_checkpoint
-            // is guaranteed to be durable on a commit-quorum of replicas.
-            self.checkpoint_quorum = true;
 
             // Don't sync to the immediately-next checkpoint unless it has been committed atop.
             // - If the checkpoint has been committed atop, that guarantees that at least a
