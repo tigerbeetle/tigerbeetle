@@ -12,10 +12,7 @@ public class RequestTests
     [ExpectedException(typeof(AssertionException))]
     public async Task UnexpectedOperation()
     {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" });
-
         var callback = new CallbackSimulator<Account, UInt128>(
-            nativeClient,
             TBOperation.LookupAccounts,
             (byte)99,
             null,
@@ -34,11 +31,8 @@ public class RequestTests
     [ExpectedException(typeof(AssertionException))]
     public async Task InvalidSizeOperation()
     {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" });
-
         var buffer = new byte[Account.SIZE + 1];
         var callback = new CallbackSimulator<Account, UInt128>(
-            nativeClient,
             TBOperation.LookupAccounts,
             (byte)TBOperation.LookupAccounts,
             buffer,
@@ -57,12 +51,10 @@ public class RequestTests
     [TestMethod]
     public async Task RequestException()
     {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" });
-
         foreach (var isAsync in new bool[] { true, false })
         {
             var buffer = new byte[Account.SIZE];
-            var callback = new CallbackSimulator<Account, UInt128>(nativeClient,
+            var callback = new CallbackSimulator<Account, UInt128>(
                 TBOperation.LookupAccounts,
                 (byte)TBOperation.LookupAccounts,
                 buffer,
@@ -89,8 +81,6 @@ public class RequestTests
     [TestMethod]
     public async Task Success()
     {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" });
-
         foreach (var isAsync in new bool[] { true, false })
         {
             var buffer = MemoryMarshal.Cast<Account, byte>(new Account[]
@@ -107,7 +97,7 @@ public class RequestTests
                     }
             }).ToArray();
 
-            var callback = new CallbackSimulator<Account, UInt128>(nativeClient,
+            var callback = new CallbackSimulator<Account, UInt128>(
                 TBOperation.LookupAccounts,
                 (byte)TBOperation.LookupAccounts,
                 buffer,
@@ -136,18 +126,16 @@ public class RequestTests
         where TBody : unmanaged
     {
         private readonly Request<TResult, TBody> request;
-        private readonly Packet packet;
         private readonly byte receivedOperation;
         private readonly Memory<byte> buffer;
         private readonly PacketStatus status;
         private readonly int delay;
 
-        public CallbackSimulator(NativeClient nativeClient, TBOperation operation, byte receivedOperation, Memory<byte> buffer, PacketStatus status, int delay, bool isAsync)
+        public CallbackSimulator(TBOperation operation, byte receivedOperation, Memory<byte> buffer, PacketStatus status, int delay, bool isAsync)
         {
             unsafe
             {
-                this.request = isAsync ? new AsyncRequest<TResult, TBody>(nativeClient, operation) : new BlockingRequest<TResult, TBody>(nativeClient, operation);
-                this.packet = nativeClient.AcquirePacket();
+                this.request = isAsync ? new AsyncRequest<TResult, TBody>(operation) : new BlockingRequest<TResult, TBody>(operation);
                 this.receivedOperation = receivedOperation;
                 this.buffer = buffer;
                 this.status = status;
@@ -162,9 +150,7 @@ public class RequestTests
                 unsafe
                 {
                     Task.Delay(delay).Wait();
-                    packet.Pointer->operation = receivedOperation;
-                    packet.Pointer->status = status;
-                    request.Complete(packet, buffer.Span);
+                    request.Complete(status, receivedOperation, buffer.Span);
                 }
             });
 

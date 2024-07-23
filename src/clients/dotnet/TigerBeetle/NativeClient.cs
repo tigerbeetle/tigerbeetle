@@ -81,8 +81,8 @@ internal sealed class NativeClient : IDisposable
         {
             fixed (void* pointer = batch)
             {
-                var blockingRequest = new BlockingRequest<TResult, TBody>(this, operation);
-                blockingRequest.Submit(pointer, batch.Length);
+                var blockingRequest = new BlockingRequest<TResult, TBody>(operation);
+                blockingRequest.Submit(this, pointer, batch.Length);
                 return blockingRequest.Wait();
             }
         }
@@ -94,26 +94,18 @@ internal sealed class NativeClient : IDisposable
     {
         using (var memoryHandler = batch.Pin())
         {
-            var asyncRequest = new AsyncRequest<TResult, TBody>(this, operation);
+            var asyncRequest = new AsyncRequest<TResult, TBody>(operation);
 
             unsafe
             {
-                asyncRequest.Submit(memoryHandler.Pointer, batch.Length);
+                asyncRequest.Submit(this, memoryHandler.Pointer, batch.Length);
             }
 
             return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
         }
     }
 
-    public void ReleasePacket(Packet packet)
-    {
-        unsafe
-        {
-            Marshal.FreeCoTaskMem((IntPtr)packet.Pointer);
-        }
-    }
-
-    public void Submit(Packet packet)
+    public unsafe void Submit(TBPacket* packet)
     {
         unsafe
         {
@@ -123,22 +115,14 @@ internal sealed class NativeClient : IDisposable
                 {
                     if (client != IntPtr.Zero)
                     {
-                        tb_client_submit(client, packet.Pointer);
+                        tb_client_submit(client, packet);
                         return;
                     }
                 }
             }
 
-            packet.Pointer->status = PacketStatus.ClientShutdown;
-            OnComplete(packet.Pointer, null, 0);
-        }
-    }
-
-    public Packet AcquirePacket()
-    {
-        unsafe
-        {
-            return new Packet((TBPacket*)Marshal.AllocCoTaskMem(sizeof(TBPacket)));
+            packet->status = PacketStatus.ClientShutdown;
+            OnComplete(packet, null, 0);
         }
     }
 
@@ -158,16 +142,15 @@ internal sealed class NativeClient : IDisposable
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
-        => OnComplete(packet, result, result_len);
-
-    private unsafe static void OnComplete(TBPacket* packet, byte* result, uint result_len)
+    private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint resultLen)
     {
-        var request = IRequest.FromUserData(packet->userData);
-        if (request != null)
-        {
-            var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
-            request.Complete(new Packet(packet), span);
-        }
+        AssertTrue(ctx == IntPtr.Zero);
+        OnComplete(packet, result, resultLen);
+    }
+
+    private unsafe static void OnComplete(TBPacket* packet, byte* result, uint resultLen)
+    {
+        var span = resultLen > 0 ? new ReadOnlySpan<byte>(result, (int)resultLen) : ReadOnlySpan<byte>.Empty;
+        NativeRequest.OnComplete(packet, span);
     }
 }
