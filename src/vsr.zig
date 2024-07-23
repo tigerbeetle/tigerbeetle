@@ -1480,7 +1480,7 @@ pub const Checkpoint = struct {
         assert(constants.journal_slot_count > constants.lsm_batch_multiple);
         assert(constants.journal_slot_count % constants.lsm_batch_multiple == 0);
     }
-    /// Checkpoint identifier.
+    /// Checksum of the CheckpointState in the superblock.
     id: u128,
     /// The op_checkpoint() that corresponds to the checkpoint id.
     op: u64,
@@ -1502,9 +1502,8 @@ pub const Checkpoint = struct {
                 }
 
                 // Ignore repeat candidate.
-                if (checkpoint.op == checkpoint_existing.op and
-                    checkpoint.id == checkpoint_existing.id)
-                {
+                if (checkpoint.op == checkpoint_existing.op) {
+                    assert(checkpoint.id == checkpoint_existing.id);
                     return false;
                 }
             }
@@ -1515,10 +1514,8 @@ pub const Checkpoint = struct {
         pub fn count(quorum: *const Quorum, checkpoint: *const Checkpoint) usize {
             var matching: usize = 0;
             for (quorum.checkpoints) |checkpoint_existing| {
-                if (checkpoint_existing != null and
-                    checkpoint_existing.?.op == checkpoint.op and
-                    checkpoint_existing.?.id == checkpoint.id)
-                {
+                if (checkpoint_existing != null and checkpoint_existing.?.op == checkpoint.op) {
+                    assert(checkpoint_existing.?.id == checkpoint.id);
                     assert(std.meta.eql(checkpoint.*, checkpoint_existing.?));
                     matching += 1;
                 }

@@ -3242,6 +3242,7 @@ pub fn ReplicaType(
                 // Already upgrading.
                 // Normally we chain send-upgrade-to-self via the commit chain.
                 // But there are a couple special cases where we need to restart the chain:
+                // - The request-to-self might have been dropped due to lack of space in the WAL.
                 // - The request-to-self might have been dropped if the clock is not synchronized.
                 // - Alternatively, if a primary starts a new view, and an upgrade is already in
                 //   progress, it needs to start preparing more upgrades.
@@ -5859,6 +5860,7 @@ pub fn ReplicaType(
                 return true;
             }
 
+            assert(self.checkpoint_from_all_replicas.checkpoints[self.replica] == null);
             const matching =
                 self.checkpoint_from_all_replicas.count(&.{
                 .id = self.superblock.working.checkpoint_id(),
