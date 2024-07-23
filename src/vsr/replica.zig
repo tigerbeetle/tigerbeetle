@@ -5846,30 +5846,19 @@ pub fn ReplicaType(
             return vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
-        /// Return True if the current checkpoint_op is durable on a commit quorum of replicas.
-        ///
-        /// We special case for replicas in recovering_head/view_change:
-        /// If we allow checking checkpoint_from_all_replicas for quorum, we may set op_repair_max()
-        /// to op_checkpoint() + 1, disallowing a recovering primary during view change/a replica
-        /// in recovering_head to recover op_checkpoint in its WAL. Therefore, we only return True
-        /// if the head op/commit_max is past the prepare_max for the current checkpoint.
+        /// Returns True if the current checkpoint_op is durable on a commit quorum of replicas.
         fn checkpoint_quorum(self: *const Self) bool {
+            assert(self.status == .normal);
+            assert(self.primary());
+
             if (self.solo() or self.op_checkpoint() == 0) return true;
 
-            // If the cluster has committed or prepared an operation past the prepare_max for
-            // the current op_checkpoint, a commit-quorum of replicas have done the same.
-            // The current op_checkpoint is guaranteed to be durable on a commit quorum of replicas.
-            const prepare_max_for_current_checkpoint =
-                vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
-            if (self.commit_max > prepare_max_for_current_checkpoint or
-                self.op > prepare_max_for_current_checkpoint)
-            {
+            // The current checkpoint is guaranteed to be durable on a commit-quorum of replicas
+            // if we have prepared past its prepare_max (see on_request).
+            if (self.op > vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?) {
                 return true;
             }
 
-            if (self.status == .recovering_head or self.status == .view_change) return false;
-
-            assert(self.status == .normal);
             const matching =
                 self.checkpoint_from_all_replicas.count(&.{
                 .id = self.superblock.working.checkpoint_id(),
@@ -5949,8 +5938,9 @@ pub fn ReplicaType(
                 if (self.op_checkpoint() == 0) {
                     break :repair_min 0;
                 }
-
-                if (self.checkpoint_quorum()) {
+                // The current checkpoint is guaranteed to be durable on a commit-quorum of replicas
+                // if we have prepared past its prepare_max (see on_request).
+                if (self.op > vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?) {
                     assert(self.commit_min >= self.op_checkpoint());
                     assert(self.op >= self.commit_min);
                     break :repair_min self.op_checkpoint() + 1;
@@ -9532,11 +9522,14 @@ pub fn ReplicaType(
             // Don't sync backwards, or to our current checkpoint.
             if (candidate.checkpoint_op <= self.op_checkpoint()) return;
 
-            // Don't sync to the immediately-next checkpoint unless it has been committed atop.
-            // - If the checkpoint has been committed atop, that guarantees that at least a
-            //   commit-quorum of replicas has reached that exact checkpoint.
-            // - If the next checkpoint has *not* been committed atop yet, then we can (and should)
-            //   sync via WAL replay instead to maximize durability.
+            // Don't sync to the immediately-next checkpoint unless a commit-quorum of replicas has
+            // reached that checkpoint.
+            // - If the primary has committed atop the prepare_max for a checkpoint, that guarantees
+            //   that at least a commit-quorum of replicas has reached that exact checkpoint (see
+            //   on_request; the actual condition is weaker, the primary only needs to *prepare*
+            //   past the prepare_max for a checkpoint, so *commit* works as well).
+            // - If the primary has *not* committed past the prepare_max for a checkpoint, we
+            //   can (and should) sync via WAL replay instead to maximize durability.
             //
             // To understand why this is critical, consider the case (R=3) where:
             // 1. R₀ is primary.
