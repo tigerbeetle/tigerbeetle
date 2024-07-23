@@ -7,11 +7,10 @@ const Mode = std.builtin.Mode;
 const config = @import("./src/config.zig");
 
 // TigerBeetle binary requires certain CPU feature and supports a closed set of CPUs. Here, we
-// specify exactly which features the binary needs. Client shared libraries might be more lax with
-// CPU features required.
-const supported_targets: []const CrossTarget = supported_targets: {
-    @setEvalBranchQuota(100_000);
-    var result: []const CrossTarget = &.{};
+// specify exactly which features the binary needs.
+fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.ResolvedTarget {
+    const target_host = @tagName(builtin.target.cpu.arch) ++ "-" ++ @tagName(builtin.target.os.tag);
+    const target = target_requested orelse target_host;
     const triples = .{
         "aarch64-linux",
         "aarch64-macos",
@@ -26,23 +25,23 @@ const supported_targets: []const CrossTarget = supported_targets: {
         "x86_64_v3+aes",
         "x86_64_v3+aes",
     };
-    for (triples, cpus) |triple, cpu| {
-        result = result ++ .{CrossTarget.parse(.{
-            .arch_os_abi = triple,
-            .cpu_features = cpu,
-        }) catch unreachable};
-    }
-    break :supported_targets result;
-};
+
+    const arch_os, const cpu = inline for (triples, cpus) |triple, cpu| {
+        if (std.mem.eql(u8, target, triple)) break .{ triple, cpu };
+    } else {
+        std.log.err("unsupported target: '{s}'", .{target});
+        return error.UnsupportedTarget;
+    };
+    const query = try CrossTarget.parse(.{
+        .arch_os_abi = arch_os,
+        .cpu_features = cpu,
+    });
+    return b.resolveTargetQuery(query);
+}
 
 pub fn build(b: *std.Build) !void {
     // A compile error stack trace of 10 is arbitrary in size but helps with debugging.
     b.reference_trace = 10;
-
-    var target = b.standardTargetOptions(.{});
-    set_cpu_features(&target, supported_targets);
-    const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
-    const emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false;
 
     // Top-level steps you can invoke on the command line.
     const build_steps = .{
@@ -70,6 +69,7 @@ pub fn build(b: *std.Build) !void {
 
     // Build options passed with `-D` flags.
     const build_options = .{
+        .target = b.option([]const u8, "target", "The CPU architecture and OS to build for"),
         .config = b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
         .config_aof_record = b.option(
             bool,
@@ -90,6 +90,7 @@ pub fn build(b: *std.Build) !void {
         ),
         // We run extra checks in "CI-mode" build.
         .ci = b.graph.env_map.get("CI") != null,
+        .emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false,
         // The "tigerbeetle version" command includes the build-time commit hash.
         .git_commit = b.option(
             []const u8,
@@ -117,6 +118,8 @@ pub fn build(b: *std.Build) !void {
             "Which backend to use for tracing.",
         ) orelse .none,
     };
+    const target = try resolve_target(b, build_options.target);
+    const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
 
     const vsr_options = b.addOptions();
     assert(build_options.git_commit.len == 40);
@@ -218,7 +221,7 @@ pub fn build(b: *std.Build) !void {
         }
         // Ensure that we get stack traces even in release builds.
         tigerbeetle.root_module.omit_frame_pointer = false;
-        if (emit_llvm_ir) {
+        if (build_options.emit_llvm_ir) {
             _ = tigerbeetle.getEmittedLlvmIr();
         }
 
@@ -353,8 +356,10 @@ pub fn build(b: *std.Build) !void {
                 );
 
                 if (std.mem.indexOf(u8, ldd_result, "musl") != null) {
+                    tests.root_module.resolved_target.?.query.abi = .musl;
                     tests.root_module.resolved_target.?.result.abi = .musl;
                 } else if (std.mem.indexOf(u8, ldd_result, "libc") != null) {
+                    tests.root_module.resolved_target.?.query.abi = .gnu;
                     tests.root_module.resolved_target.?.result.abi = .gnu;
                 } else {
                     std.log.err("{s}", .{ldd_result});
