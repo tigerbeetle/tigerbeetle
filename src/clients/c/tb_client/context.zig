@@ -218,18 +218,21 @@ pub fn ContextType(
         }
 
         pub fn deinit(self: *Context) void {
-            const is_shutdown = self.shutdown.swap(true, .monotonic);
-            if (!is_shutdown) {
-                self.thread.join();
-                self.signal.deinit();
+            // Only one thread calls deinit() and it's UB for any further Context interaction.
+            assert(!self.shutdown.swap(true, .release));
 
-                self.client.deinit(self.allocator);
-                self.message_pool.deinit(self.allocator);
-                self.io.deinit();
+            // Wake up the run() thread for it to observe shutdowm=true, cancel inflight/pending
+            // packets, and finish running.
+            self.signal.notify();
+            self.thread.join();
 
-                self.allocator.free(self.addresses);
-                self.allocator.destroy(self);
-            }
+            self.signal.deinit();
+            self.client.deinit(self.allocator);
+            self.message_pool.deinit(self.allocator);
+            self.io.deinit();
+
+            self.allocator.free(self.addresses);
+            self.allocator.destroy(self);
         }
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
@@ -240,7 +243,7 @@ pub fn ContextType(
 
             self.batch_size_limit = result.batch_size_limit;
             // Some requests may have queued up while the client was registering.
-            self.signal.notify();
+            on_signal(&self.signal);
         }
 
         pub fn tick(self: *Context) void {
@@ -248,12 +251,7 @@ pub fn ContextType(
         }
 
         pub fn run(self: *Context) void {
-            while (true) {
-                // Keep running until shutdown. On shutdown, wait for inflight request to finish.
-                // Shutdown being false prevents further requests from becoming inflight.
-                const is_shutdown = self.shutdown.load(.acquire);
-                if (is_shutdown and self.client.request_inflight == null) break;
-
+            while (!self.shutdown.load(.acquire)) {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
@@ -263,6 +261,18 @@ pub fn ContextType(
                     @panic("IO.run() failed");
                 };
             }
+
+            // Cancel the request_inflight packet if any.
+            if (self.client.request_inflight) |*inflight| {
+                if (inflight.message.header.operation != .register) {
+                    const packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                    self.cancel(packet);
+                }
+            }
+
+            // Cancel pending and submitted packets.
+            while (self.pending.pop()) |packet| self.cancel(packet);
+            while (self.submitted.pop()) |packet| self.cancel(packet);
         }
 
         fn on_signal(signal: *Signal) void {
@@ -319,7 +329,7 @@ pub fn ContextType(
 
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
             if (self.shutdown.load(.acquire)) {
-                return self.on_complete(packet, error.ClientShutdown);
+                return self.cancel(packet);
             }
 
             // Nothing inflight means the packet should be submitted right now.
@@ -356,11 +366,7 @@ pub fn ContextType(
 
             // On shutdown, cancel this packet as well as any others batched onto it.
             if (self.shutdown.load(.acquire)) {
-                var it: ?*Packet = packet;
-                while (it) |batched| {
-                    it = batched.batch_next;
-                    self.on_complete(batched, error.ClientShutdown);
-                }
+                self.cancel(packet);
                 return;
             }
 
@@ -452,6 +458,14 @@ pub fn ContextType(
             }
         }
 
+        fn cancel(self: *Context, packet: *Packet) void {
+            var it: ?*Packet = packet;
+            while (it) |batched| {
+                it = batched.batch_next;
+                self.on_complete(batched, error.ClientShutdown);
+            }
+        }
+
         fn on_complete(
             self: *Context,
             packet: *Packet,
@@ -481,6 +495,7 @@ pub fn ContextType(
 
         fn on_submit(implementation: *ContextImplementation, packet: *Packet) void {
             const self = get_context(implementation);
+            assert(!self.shutdown.load(.acquire));
             self.submitted.push(packet);
             self.signal.notify();
         }
