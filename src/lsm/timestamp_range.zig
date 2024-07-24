@@ -1,8 +1,13 @@
 const std = @import("std");
 
 pub const TimestampRange = struct {
+    /// The minimum timestamp allowed (inclusive).
     pub const timestamp_min = 1;
-    pub const timestamp_max = std.math.maxInt(u64) - 1;
+
+    /// The maximum timestamp allowed (inclusive).
+    /// It is `maxInt(u63)` because the most significant bit of the `u64` timestamp
+    /// is used as the tombstone flag.
+    pub const timestamp_max = std.math.maxInt(u63);
 
     min: u64, // Inclusive.
     max: u64, // Inclusive.

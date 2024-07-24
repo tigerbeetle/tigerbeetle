@@ -38,11 +38,12 @@
 //! - Prefer fresher commits (based on commit time stamp).
 //! - For each commit and fuzzer combination, keep at most `seed_count_max` seeds.
 //! - Prefer failing seeds to successful seeds.
+//! - Prefer seeds that failed faster
 //! - Prefer older seeds.
+//! - When dropping a non-failing seed, add its count to some other non-failing seeds.
 //!
-//! These rules ensure that in the steady state (assuming fuzzer's clock doesn't fail) the set of
-//! seeds is stable. If the clock goes backwards, there might be churn in the set of a seed, but the
-//! number of failing seeds will never decrease.
+//! The idea here is that we want to keep the set of failing seeds stable, while maintaining some
+//! measure of how much fuzzing work was done in total.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -67,16 +68,18 @@ const Fuzzer = enum {
     lsm_forest,
     lsm_manifest_level,
     lsm_manifest_log,
+    lsm_scan,
     lsm_segmented_array,
     lsm_tree,
+    storage,
+    vopr_lite,
+    vopr_testing_lite,
+    vopr_testing,
+    vopr,
     vsr_free_set,
     vsr_journal_format,
     vsr_superblock_quorums,
     vsr_superblock,
-    vopr,
-    vopr_testing,
-    vopr_lite,
-    vopr_testing_lite,
 
     fn fill_args_build(fuzzer: Fuzzer, accumulator: *std.ArrayList([]const u8)) !void {
         switch (fuzzer) {
@@ -164,7 +167,7 @@ fn run_fuzzers(
         log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
             seed_record.commit_sha[0..7],
             seed_record.commit_timestamp,
-            @tagName(seed_record.fuzzer),
+            seed_record.fuzzer,
             seed_record.branch,
             weight,
         });
@@ -177,9 +180,9 @@ fn run_fuzzers(
         seed: SeedRecord,
     };
 
-    const fuzzers = try shell.arena.allocator().alloc(?FuzzerChild, options.concurrency);
-    @memset(fuzzers, null);
-    defer for (fuzzers) |*fuzzer_or_null| {
+    const children = try shell.arena.allocator().alloc(?FuzzerChild, options.concurrency);
+    @memset(children, null);
+    defer for (children) |*fuzzer_or_null| {
         if (fuzzer_or_null.*) |*fuzzer| {
             _ = fuzzer.child.kill() catch {};
             fuzzer_or_null.* = null;
@@ -193,11 +196,12 @@ fn run_fuzzers(
 
         if (second < options.budget_seconds) {
             // Start new fuzzer processes if we have more time.
-            for (fuzzers) |*fuzzer_or_null| {
-                if (fuzzer_or_null.* == null) {
+            for (children) |*child_or_null| {
+                if (child_or_null.* == null) {
                     const task_index = random.weightedIndex(u32, tasks.weight);
                     const working_directory = tasks.working_directory[task_index];
                     var seed_record = tasks.seed_record[task_index];
+                    const fuzzer = std.meta.stringToEnum(Fuzzer, seed_record.fuzzer).?;
 
                     try shell.pushd(working_directory);
                     defer shell.popd();
@@ -209,8 +213,8 @@ fn run_fuzzers(
                         // recorded timings.
                         args.clearRetainingCapacity();
                         try args.appendSlice(&.{ "build", "-Drelease" });
-                        try seed_record.fuzzer.fill_args_build(&args);
-                        shell.exec("{zig} {args}", .{
+                        try fuzzer.fill_args_build(&args);
+                        shell.exec_options(.{ .echo = false }, "{zig} {args}", .{
                             .zig = shell.zig_exe.?,
                             .args = args.items,
                         }) catch {
@@ -223,7 +227,7 @@ fn run_fuzzers(
 
                     args.clearRetainingCapacity();
                     try args.appendSlice(&.{ "build", "-Drelease" });
-                    try seed_record.fuzzer.fill_args_run(&args);
+                    try fuzzer.fill_args_run(&args);
                     try args.append(try shell.fmt("{d}", .{seed_record.seed}));
 
                     var command = std.ArrayList(u8).init(shell.arena.allocator());
@@ -236,20 +240,23 @@ fn run_fuzzers(
                     seed_record.command = command.items;
 
                     log.debug("will start '{s}'", .{seed_record.command});
+                    child_or_null.* = .{
+                        .seed = seed_record,
+                        .child = try shell.spawn(
+                            .{ .stdin_behavior = .Pipe },
+                            "{zig} {args}",
+                            .{ .zig = shell.zig_exe.?, .args = args.items },
+                        ),
+                    };
+
                     // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
                     // on writing to child's stdin to detect if a child is dead in a non-blocking
                     // manner.
-                    const child = try shell.spawn(
-                        .{ .stdin_behavior = .Pipe },
-                        "{zig} {args}",
-                        .{ .zig = shell.zig_exe.?, .args = args.items },
-                    );
                     _ = try std.posix.fcntl(
-                        child.stdin.?.handle,
+                        child_or_null.*.?.child.stdin.?.handle,
                         std.posix.F.SETFL,
                         @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
                     );
-                    fuzzer_or_null.* = .{ .seed = seed_record, .child = child };
                 }
             }
         }
@@ -258,7 +265,7 @@ fn run_fuzzers(
         std.time.sleep(1 * std.time.ns_per_s);
 
         var running_count: u32 = 0;
-        for (fuzzers) |*fuzzer_or_null| {
+        for (children) |*fuzzer_or_null| {
             // Poll for completed fuzzers.
             if (fuzzer_or_null.*) |*fuzzer| {
                 running_count += 1;
@@ -324,7 +331,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
             try seed_record.append(.{
                 .commit_timestamp = commit.timestamp,
                 .commit_sha = commit.sha,
-                .fuzzer = fuzzer,
+                .fuzzer = @tagName(fuzzer),
                 .branch = "https://github.com/tigerbeetle/tigerbeetle",
             });
         }
@@ -386,7 +393,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
                     try seed_record.append(.{
                         .commit_timestamp = commit.timestamp,
                         .commit_sha = commit.sha,
-                        .fuzzer = fuzzer,
+                        .fuzzer = @tagName(fuzzer),
                         .branch = try shell.fmt(
                             "https://github.com/tigerbeetle/tigerbeetle/pull/{d}",
                             .{pr.number},
@@ -416,8 +423,9 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
     }
 
     for (weight, seed_record.items) |*weight_ptr, seed| {
-        if (seed.fuzzer == .vopr or seed.fuzzer == .vopr_lite or
-            seed.fuzzer == .vopr_testing or seed.fuzzer == .vopr_testing_lite)
+        const fuzzer = std.meta.stringToEnum(Fuzzer, seed.fuzzer).?;
+        if (fuzzer == .vopr or fuzzer == .vopr_lite or
+            fuzzer == .vopr_testing or fuzzer == .vopr_testing_lite)
         {
             weight_ptr.* *= 2; // Bump relative priority of VOPR runs.
         }
@@ -517,35 +525,18 @@ fn upload_results(
             max_size,
         );
 
-        const seeds_old = try std.json.parseFromSliceLeaky(
-            []SeedRecord,
-            arena.allocator(),
-            data,
-            .{},
-        );
-
-        switch (try SeedRecord.merge(arena.allocator(), .{}, seeds_old, seeds_new)) {
-            .up_to_date => {
-                log.info("seeds already up to date", .{});
-                break;
-            },
-            .updated => |seeds_merged| {
-                const json = try std.json.stringifyAlloc(
-                    shell.arena.allocator(),
-                    seeds_merged,
-                    .{ .whitespace = .indent_2 },
-                );
-                try shell.cwd.writeFile(.{ .sub_path = "./fuzzing/data.json", .data = json });
-                try shell.exec("git add ./fuzzing/data.json", .{});
-                try shell.git_env_setup();
-                try shell.exec("git commit -m 🌱", .{});
-                if (shell.exec("git push", .{})) {
-                    log.info("seeds updated", .{});
-                    break;
-                } else |_| {
-                    log.info("conflict, retrying", .{});
-                }
-            },
+        const seeds_old = try SeedRecord.from_json(arena.allocator(), data);
+        const seeds_merged = try SeedRecord.merge(arena.allocator(), .{}, seeds_old, seeds_new);
+        const json = try SeedRecord.to_json(arena.allocator(), seeds_merged);
+        try shell.cwd.writeFile(.{ .sub_path = "./fuzzing/data.json", .data = json });
+        try shell.exec("git add ./fuzzing/data.json", .{});
+        try shell.git_env_setup();
+        try shell.exec("git commit -m 🌱", .{});
+        if (shell.exec("git push", .{})) {
+            log.info("seeds updated", .{});
+            break;
+        } else |_| {
+            log.info("conflict, retrying", .{});
         }
     } else {
         log.err("can't push new data to devhub", .{});
@@ -561,7 +552,8 @@ const SeedRecord = struct {
 
     commit_timestamp: u64,
     commit_sha: [40]u8,
-    fuzzer: Fuzzer,
+    // NB: Use []const u8 rather than Fuzzer to support deserializing unknown fuzzers.
+    fuzzer: []const u8,
     ok: bool = false,
     seed_timestamp_start: u64 = 0,
     seed_timestamp_end: u64 = 0,
@@ -570,6 +562,8 @@ const SeedRecord = struct {
     command: []const u8 = "",
     // Branch is an GitHub URL. It only affects the UI, where the seeds are grouped by the branch.
     branch: []const u8,
+    // Counts the number of seeds merged into the current one.
+    count: u32 = 1,
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
         return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse // NB: reverse order.
@@ -577,7 +571,7 @@ const SeedRecord = struct {
             order_by_field(a.fuzzer, b.fuzzer) orelse
             order_by_field(a.ok, b.ok) orelse
             order_by_field(a.seed_duration(), b.seed_duration()) orelse // Coarse seed minimization.
-            order_by_field(a.seed_timestamp_start, b.seed_timestamp_start) orelse // Stability.
+            order_by_seed_timestamp_start(a, b) orelse
             order_by_field(a.seed_timestamp_end, b.seed_timestamp_end) orelse
             order_by_field(a.seed, b.seed) orelse
             .eq;
@@ -585,6 +579,7 @@ const SeedRecord = struct {
 
     fn order_by_field(lhs: anytype, rhs: @TypeOf(lhs)) ?std.math.Order {
         const full_order = switch (@TypeOf(lhs)) {
+            []const u8 => std.mem.order(u8, lhs, rhs),
             [40]u8 => std.mem.order(u8, &lhs, &rhs),
             bool => std.math.order(@intFromBool(lhs), @intFromBool(rhs)),
             Fuzzer => std.math.order(@intFromEnum(lhs), @intFromEnum(rhs)),
@@ -593,12 +588,31 @@ const SeedRecord = struct {
         return if (full_order == .eq) null else full_order;
     }
 
+    fn order_by_seed_timestamp_start(a: SeedRecord, b: SeedRecord) ?std.math.Order {
+        // For canaries, prefer newer seeds to show that the canary is alive.
+        // For other fuzzers, prefer older seeds to keep them stable.
+        return if (std.mem.eql(u8, a.fuzzer, "canary"))
+            order_by_field(b.seed_timestamp_start, a.seed_timestamp_start)
+        else
+            order_by_field(a.seed_timestamp_start, b.seed_timestamp_start);
+    }
+
     fn less_than(_: void, a: SeedRecord, b: SeedRecord) bool {
         return a.order(b) == .lt;
     }
 
     fn seed_duration(record: SeedRecord) u64 {
         return record.seed_timestamp_end - record.seed_timestamp_start;
+    }
+
+    fn from_json(arena: std.mem.Allocator, json_str: []const u8) ![]SeedRecord {
+        return try std.json.parseFromSliceLeaky([]SeedRecord, arena, json_str, .{});
+    }
+
+    fn to_json(arena: std.mem.Allocator, records: []const SeedRecord) ![]const u8 {
+        return try std.json.stringifyAlloc(arena, records, .{
+            .whitespace = .indent_2,
+        });
     }
 
     // Merges two sets of seeds keeping the more interesting one. A direct way to write this would
@@ -610,7 +624,7 @@ const SeedRecord = struct {
         options: MergeOptions,
         current: []const SeedRecord,
         new: []const SeedRecord,
-    ) !union(enum) { updated: []const SeedRecord, up_to_date } {
+    ) ![]const SeedRecord {
         const current_and_new = try std.mem.concat(arena, SeedRecord, &.{ current, new });
         std.mem.sort(SeedRecord, current_and_new, {}, SeedRecord.less_than);
 
@@ -619,7 +633,7 @@ const SeedRecord = struct {
         var commit_sha_previous: ?[40]u8 = null;
         var commit_count: u32 = 0;
 
-        var fuzzer_previous: ?Fuzzer = null;
+        var fuzzer_previous: ?[]const u8 = null;
 
         var seed_previous: ?u64 = null;
         var seed_count: u32 = 0;
@@ -638,7 +652,7 @@ const SeedRecord = struct {
             }
 
             if (fuzzer_previous == null or
-                fuzzer_previous.? != record.fuzzer)
+                !std.mem.eql(u8, fuzzer_previous.?, record.fuzzer))
             {
                 fuzzer_previous = record.fuzzer;
                 seed_previous = null;
@@ -653,25 +667,69 @@ const SeedRecord = struct {
             seed_count += 1;
             if (seed_count <= options.seed_count_max) {
                 try result.append(record);
+            } else {
+                if (record.ok and result.getLast().ok) {
+                    assert(std.mem.eql(
+                        u8,
+                        result.items[result.items.len - 1].fuzzer,
+                        record.fuzzer,
+                    ));
+                    result.items[result.items.len - 1].count += record.count;
+                }
             }
         }
 
-        if (result.items.len != current.len) {
-            return .{ .updated = result.items };
-        }
-        for (result.items, current) |new_record, current_record| {
-            if (new_record.order(current_record) != .eq) {
-                return .{ .updated = result.items };
-            }
-        }
-        return .up_to_date;
+        return result.items;
     }
 };
 
-test "cfo: SeedRecord.merge" {
-    const Snap = @import("../testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+const Snap = @import("../testing/snaptest.zig").Snap;
+const snap = Snap.snap;
 
+test "cfo: deserialization" {
+    // Smoke test that we can still deserialize&migrate old devhub data.
+    // Handy when adding new fields!
+    const old_json =
+        \\[{
+        \\    "commit_timestamp": 1721095881,
+        \\    "commit_sha": "c4bb1eaa658b77c37646d3854dd911adba71b764",
+        \\    "fuzzer": "canary",
+        \\    "ok": false,
+        \\    "seed_timestamp_start": 1721096948,
+        \\    "seed_timestamp_end": 1721096949,
+        \\    "seed": 17154947449604939200,
+        \\    "command": "./zig/zig build -Drelease fuzz -- canary 17154947449604939200",
+        \\    "branch": "https://github.com/tigerbeetle/tigerbeetle/pull/2104"
+        \\}]
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const old_records = try SeedRecord.from_json(arena.allocator(), old_json);
+
+    const new_records = try SeedRecord.merge(arena.allocator(), .{}, old_records, &.{});
+    const new_json = try SeedRecord.to_json(arena.allocator(), new_records);
+
+    try snap(@src(),
+        \\[
+        \\  {
+        \\    "commit_timestamp": 1721095881,
+        \\    "commit_sha": "c4bb1eaa658b77c37646d3854dd911adba71b764",
+        \\    "fuzzer": "canary",
+        \\    "ok": false,
+        \\    "seed_timestamp_start": 1721096948,
+        \\    "seed_timestamp_end": 1721096949,
+        \\    "seed": 17154947449604939200,
+        \\    "command": "./zig/zig build -Drelease fuzz -- canary 17154947449604939200",
+        \\    "branch": "https://github.com/tigerbeetle/tigerbeetle/pull/2104",
+        \\    "count": 1
+        \\  }
+        \\]
+    ).diff(new_json);
+}
+
+test "cfo: SeedRecord.merge" {
     const T = struct {
         fn check(current: []const SeedRecord, new: []const SeedRecord, want: Snap) !void {
             var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -681,10 +739,7 @@ test "cfo: SeedRecord.merge" {
                 .commit_count_max = 2,
                 .seed_count_max = 2,
             };
-            const got = switch (try SeedRecord.merge(arena.allocator(), options, current, new)) {
-                .up_to_date => current,
-                .updated => |updated| updated,
-            };
+            const got = try SeedRecord.merge(arena.allocator(), options, current, new);
             try want.diff_json(got, .{ .whitespace = .indent_2 });
         }
     };
@@ -699,7 +754,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 1,
                 .seed_timestamp_end = 1,
@@ -711,7 +766,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 2,
                 .commit_sha = .{'2'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = true,
                 .seed_timestamp_start = 1,
                 .seed_timestamp_end = 1,
@@ -722,7 +777,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 2,
                 .commit_sha = .{'2'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = true,
                 .seed_timestamp_start = 2,
                 .seed_timestamp_end = 2,
@@ -736,7 +791,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 2,
                 .seed_timestamp_end = 2,
@@ -747,7 +802,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 3,
                 .seed_timestamp_end = 3,
@@ -759,7 +814,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 2,
                 .commit_sha = .{'2'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 4,
                 .seed_timestamp_end = 4,
@@ -779,7 +834,8 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 4,
             \\    "seed": 4,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 1
             \\  },
             \\  {
             \\    "commit_timestamp": 2,
@@ -790,7 +846,8 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 2
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
@@ -801,7 +858,8 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 1
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
@@ -812,7 +870,8 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 2,
             \\    "seed": 2,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 1
             \\  }
             \\]
         ),
@@ -824,7 +883,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 1,
                 .seed_timestamp_end = 1,
@@ -835,7 +894,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 2,
                 .commit_sha = .{'2'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 1,
                 .seed_timestamp_end = 1,
@@ -849,7 +908,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 3,
                 .commit_sha = .{'3'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = true,
                 .seed_timestamp_start = 1,
                 .seed_timestamp_end = 1,
@@ -869,7 +928,8 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 1
             \\  },
             \\  {
             \\    "commit_timestamp": 2,
@@ -880,7 +940,8 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 1
             \\  }
             \\]
         ),
@@ -892,7 +953,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 1,
                 .seed_timestamp_end = 1,
@@ -905,7 +966,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 1,
                 .seed_timestamp_end = 1,
@@ -925,7 +986,8 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 1
             \\  }
             \\]
         ),
@@ -937,7 +999,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 10,
                 .seed_timestamp_end = 10,
@@ -948,7 +1010,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 20,
                 .seed_timestamp_end = 20,
@@ -961,7 +1023,7 @@ test "cfo: SeedRecord.merge" {
             .{
                 .commit_timestamp = 1,
                 .commit_sha = .{'1'} ** 40,
-                .fuzzer = .ewah,
+                .fuzzer = "ewah",
                 .ok = false,
                 .seed_timestamp_start = 5,
                 .seed_timestamp_end = 5,
@@ -981,7 +1043,8 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 5,
             \\    "seed": 999,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 1
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
@@ -992,7 +1055,207 @@ test "cfo: SeedRecord.merge" {
             \\    "seed_timestamp_end": 10,
             \\    "seed": 10,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main"
+            \\    "branch": "main",
+            \\    "count": 1
+            \\  }
+            \\]
+        ),
+    );
+
+    // Prefer newer seeds for canary (special case).
+    try T.check(
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "canary",
+                .ok = false,
+                .seed_timestamp_start = 10,
+                .seed_timestamp_end = 10,
+                .seed = 3,
+                .command = "fuzz canary",
+                .branch = "main",
+            },
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "canary",
+                .ok = false,
+                .seed_timestamp_start = 30,
+                .seed_timestamp_end = 30,
+                .seed = 2,
+                .command = "fuzz canary",
+                .branch = "main",
+            },
+        },
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "canary",
+                .ok = false,
+                .seed_timestamp_start = 20,
+                .seed_timestamp_end = 20,
+                .seed = 1,
+                .command = "fuzz canary",
+                .branch = "main",
+            },
+        },
+        snap(@src(),
+            \\[
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "canary",
+            \\    "ok": false,
+            \\    "seed_timestamp_start": 30,
+            \\    "seed_timestamp_end": 30,
+            \\    "seed": 2,
+            \\    "command": "fuzz canary",
+            \\    "branch": "main",
+            \\    "count": 1
+            \\  },
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "canary",
+            \\    "ok": false,
+            \\    "seed_timestamp_start": 20,
+            \\    "seed_timestamp_end": 20,
+            \\    "seed": 1,
+            \\    "command": "fuzz canary",
+            \\    "branch": "main",
+            \\    "count": 1
+            \\  }
+            \\]
+        ),
+    );
+
+    // Tolerates unknown fuzzers
+    try T.check(
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "ewah",
+                .ok = false,
+                .seed_timestamp_start = 1,
+                .seed_timestamp_end = 1,
+                .seed = 1,
+                .command = "fuzz ewah",
+                .branch = "main",
+            },
+        },
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "American Fuzzy Lop",
+                .ok = false,
+                .seed_timestamp_start = 1,
+                .seed_timestamp_end = 1,
+                .seed = 1,
+                .command = "very fluffy",
+                .branch = "main",
+            },
+        },
+        snap(@src(),
+            \\[
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "American Fuzzy Lop",
+            \\    "ok": false,
+            \\    "seed_timestamp_start": 1,
+            \\    "seed_timestamp_end": 1,
+            \\    "seed": 1,
+            \\    "command": "very fluffy",
+            \\    "branch": "main",
+            \\    "count": 1
+            \\  },
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "ewah",
+            \\    "ok": false,
+            \\    "seed_timestamp_start": 1,
+            \\    "seed_timestamp_end": 1,
+            \\    "seed": 1,
+            \\    "command": "fuzz ewah",
+            \\    "branch": "main",
+            \\    "count": 1
+            \\  }
+            \\]
+        ),
+    );
+
+    // Sums up counts
+    try T.check(
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "ewah",
+                .ok = true,
+                .seed_timestamp_start = 1,
+                .seed_timestamp_end = 1,
+                .seed = 1,
+                .command = "fuzz ewah",
+                .branch = "main",
+                .count = 1,
+            },
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "ewah",
+                .ok = true,
+                .seed_timestamp_start = 1,
+                .seed_timestamp_end = 1,
+                .seed = 2,
+                .command = "fuzz ewah",
+                .branch = "main",
+                .count = 2,
+            },
+        },
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = "ewah",
+                .ok = true,
+                .seed_timestamp_start = 1,
+                .seed_timestamp_end = 1,
+                .seed = 3,
+                .command = "fuzz ewah",
+                .branch = "main",
+                .count = 3,
+            },
+        },
+        snap(@src(),
+            \\[
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "ewah",
+            \\    "ok": true,
+            \\    "seed_timestamp_start": 1,
+            \\    "seed_timestamp_end": 1,
+            \\    "seed": 1,
+            \\    "command": "fuzz ewah",
+            \\    "branch": "main",
+            \\    "count": 1
+            \\  },
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "ewah",
+            \\    "ok": true,
+            \\    "seed_timestamp_start": 1,
+            \\    "seed_timestamp_end": 1,
+            \\    "seed": 2,
+            \\    "command": "fuzz ewah",
+            \\    "branch": "main",
+            \\    "count": 5
             \\  }
             \\]
         ),

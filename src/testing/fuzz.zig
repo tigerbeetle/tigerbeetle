@@ -71,3 +71,23 @@ pub const FuzzArgs = struct {
     seed: u64,
     events_max: ?usize,
 };
+
+pub fn parse_seed(bytes: []const u8) u64 {
+    if (bytes.len == 40) {
+        // Normally, a seed is specified as a base-10 integer. However, as a special case, we allow
+        // using a Git hash (a hex string 40 character long). This is used by our CI, which passes
+        // current commit hash as a seed --- that way, we run simulator on CI, we run it with
+        // different, "random" seeds, but the failures remain reproducible just from the commit
+        // hash!
+        const commit_hash = std.fmt.parseUnsigned(u160, bytes, 16) catch |err| switch (err) {
+            error.Overflow => unreachable,
+            error.InvalidCharacter => @panic("commit hash seed contains an invalid character"),
+        };
+        return @truncate(commit_hash);
+    }
+
+    return std.fmt.parseUnsigned(u64, bytes, 10) catch |err| switch (err) {
+        error.Overflow => @panic("seed exceeds a 64-bit unsigned integer"),
+        error.InvalidCharacter => @panic("seed contains an invalid character"),
+    };
+}

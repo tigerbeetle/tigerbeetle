@@ -141,6 +141,8 @@ const ConfigProcess = struct {
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
     grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
+    multiversion_binary_size_max: u64 = 64 * 1024 * 1024,
+    multiversion_poll_interval_ms: u64 = 1000,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -165,9 +167,10 @@ const ConfigCluster = struct {
     lsm_batch_multiple: comptime_int = 32,
     lsm_snapshots_max: usize = 32,
     lsm_manifest_compact_extra_blocks: comptime_int = 1,
+    lsm_table_coalescing_threshold_percent: comptime_int = 50,
     vsr_releases_max: usize = 64,
 
-    // Minimal value.
+    /// Minimal value.
     // TODO(batiati): Maybe this constant should be derived from `grid_iops_read_max`,
     // since each scan can read from `lsm_levels` in parallel.
     lsm_scans_max: comptime_int = 5,
@@ -289,6 +292,8 @@ pub const configs = struct {
             .lsm_growth_factor = 4,
             // (This is higher than the production default value because the block size is smaller.)
             .lsm_manifest_compact_extra_blocks = 5,
+            // (We need to fuzz more scans merge than in production.)
+            .lsm_scans_max = 12,
         },
     };
 

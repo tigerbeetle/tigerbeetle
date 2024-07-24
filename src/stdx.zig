@@ -745,3 +745,54 @@ pub fn EnumUnionType(
 pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @TypeOf(slice[0]) {
     return &@as([len]@TypeOf(slice[0]), slice[0..len].*);
 }
+
+/// Return a Formatter for a u64 value representing a file size.
+/// This formatter statically checks that the number is a multiple of 1024,
+/// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
+pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
+    comptime assert(value % 1024 == 0);
+    return .{ .data = value };
+}
+
+fn format_int_size_bin_exact(
+    value: u64,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = fmt;
+    if (value == 0) {
+        return std.fmt.formatBuf("0B", options, writer);
+    }
+
+    // The worst case in terms of space needed is 20 bytes,
+    // since `maxInt(u64)` is the highest number,
+    // + 3 bytes for the measurement units suffix.
+    comptime assert(std.fmt.comptimePrint("{}GiB", .{std.math.maxInt(u64)}).len == 23);
+    var buf: [23]u8 = undefined;
+
+    var magnitude: u8 = 0;
+    var val = value;
+    while (val % 1024 == 0) : (magnitude += 1) {
+        val = @divExact(val, 1024);
+    }
+
+    const mags_iec = " KMGTPEZY";
+    const suffix = mags_iec[magnitude];
+
+    const i = std.fmt.formatIntBuf(&buf, val, 10, .lower, .{});
+    buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
+
+    return std.fmt.formatBuf(buf[0 .. i + 3], options, writer);
+}
+
+test fmt_int_size_bin_exact {
+    try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
+    try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
+    try std.testing.expectFmt("1025KiB", "{}", .{fmt_int_size_bin_exact(1025 * 1024)});
+    try std.testing.expectFmt("12345KiB", "{}", .{fmt_int_size_bin_exact(12345 * 1024)});
+    try std.testing.expectFmt("42MiB", "{}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
+    try std.testing.expectFmt("18014398509481983KiB", "{}", .{
+        fmt_int_size_bin_exact(std.math.maxInt(u64) - 1023),
+    });
+}

@@ -22,6 +22,7 @@ pub const time = @import("time.zig");
 pub const tracer = @import("tracer.zig");
 pub const stdx = @import("stdx.zig");
 pub const flags = @import("flags.zig");
+pub const grid = @import("vsr/grid.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
 pub const repl = @import("repl.zig");
@@ -30,11 +31,14 @@ pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .groove = @import("lsm/groove.zig"),
     .forest = @import("lsm/forest.zig"),
+    .schema = @import("lsm/schema.zig"),
+    .composite_key = @import("lsm/composite_key.zig"),
 };
 pub const testing = .{
     .cluster = @import("testing/cluster.zig"),
     .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
+    .parse_seed = @import("testing/fuzz.zig").parse_seed,
 };
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
@@ -67,107 +71,10 @@ pub const CountingAllocator = @import("counting_allocator.zig");
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u16 = 0;
 
-/// A ReleaseList is ordered from lowest-to-highest version.
-pub const ReleaseList = stdx.BoundedArray(Release, constants.vsr_releases_max);
-
-pub const Release = extern struct {
-    value: u32,
-
-    comptime {
-        assert(@sizeOf(Release) == 4);
-        assert(@sizeOf(Release) == @sizeOf(ReleaseTriple));
-        assert(stdx.no_padding(Release));
-    }
-
-    pub const zero = Release.from(.{ .major = 0, .minor = 0, .patch = 0 });
-    // Minimum is used for all development builds, to distinguish them from production deployments.
-    pub const minimum = Release.from(.{ .major = 0, .minor = 0, .patch = 1 });
-
-    pub fn from(release_triple: ReleaseTriple) Release {
-        return std.mem.bytesAsValue(Release, std.mem.asBytes(&release_triple)).*;
-    }
-
-    pub fn triple(release: *const Release) ReleaseTriple {
-        return std.mem.bytesAsValue(ReleaseTriple, std.mem.asBytes(release)).*;
-    }
-
-    pub fn format(
-        release: Release,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        const release_triple = release.triple();
-        return writer.print("{}.{}.{}", .{
-            release_triple.major,
-            release_triple.minor,
-            release_triple.patch,
-        });
-    }
-
-    pub fn max(a: Release, b: Release) Release {
-        if (a.value > b.value) {
-            return a;
-        } else {
-            return b;
-        }
-    }
-};
-
-pub const ReleaseTriple = extern struct {
-    patch: u8,
-    minor: u8,
-    major: u16,
-
-    comptime {
-        assert(@sizeOf(ReleaseTriple) == 4);
-        assert(stdx.no_padding(ReleaseTriple));
-    }
-
-    pub fn parse(string: []const u8) error{InvalidRelease}!ReleaseTriple {
-        var parts = std.mem.splitScalar(u8, string, '.');
-        const major = parts.first();
-        const minor = parts.next() orelse return error.InvalidRelease;
-        const patch = parts.next() orelse return error.InvalidRelease;
-        if (parts.next() != null) return error.InvalidRelease;
-        return .{
-            .major = std.fmt.parseUnsigned(u16, major, 10) catch return error.InvalidRelease,
-            .minor = std.fmt.parseUnsigned(u8, minor, 10) catch return error.InvalidRelease,
-            .patch = std.fmt.parseUnsigned(u8, patch, 10) catch return error.InvalidRelease,
-        };
-    }
-};
-
-test "ReleaseTriple.parse" {
-    const tests = [_]struct {
-        string: []const u8,
-        result: error{InvalidRelease}!ReleaseTriple,
-    }{
-        // Valid:
-        .{ .string = "0.0.1", .result = .{ .major = 0, .minor = 0, .patch = 1 } },
-        .{ .string = "0.1.0", .result = .{ .major = 0, .minor = 1, .patch = 0 } },
-        .{ .string = "1.0.0", .result = .{ .major = 1, .minor = 0, .patch = 0 } },
-
-        // Invalid characters:
-        .{ .string = "v0.0.1", .result = error.InvalidRelease },
-        .{ .string = "0.0.1v", .result = error.InvalidRelease },
-        // Invalid separators:
-        .{ .string = "0.0.0.1", .result = error.InvalidRelease },
-        .{ .string = "0..0.1", .result = error.InvalidRelease },
-        // Overflow (and near-overflow):
-        .{ .string = "0.0.255", .result = .{ .major = 0, .minor = 0, .patch = 255 } },
-        .{ .string = "0.0.256", .result = error.InvalidRelease },
-        .{ .string = "0.255.0", .result = .{ .major = 0, .minor = 255, .patch = 0 } },
-        .{ .string = "0.256.0", .result = error.InvalidRelease },
-        .{ .string = "65535.0.0", .result = .{ .major = 65535, .minor = 0, .patch = 0 } },
-        .{ .string = "65536.0.0", .result = error.InvalidRelease },
-    };
-    for (tests) |t| {
-        try std.testing.expectEqualDeep(ReleaseTriple.parse(t.string), t.result);
-    }
-}
+pub const multiversioning = @import("multiversioning.zig");
+pub const ReleaseList = multiversioning.ReleaseList;
+pub const Release = multiversioning.Release;
+pub const ReleaseTriple = multiversioning.ReleaseTriple;
 
 pub const ProcessType = enum { replica, client };
 
@@ -1145,6 +1052,7 @@ pub fn quorums(replica_count: u8) struct {
 
     const quorum_majority =
         stdx.div_ceil(replica_count, 2) + @intFromBool(@mod(replica_count, 2) == 0);
+    assert(quorum_majority <= replica_count);
     assert(quorum_majority > @divFloor(replica_count, 2));
 
     // A majority quorum (i.e. `max(quorum_commit, quorum_view_change)`) is required
@@ -1154,6 +1062,7 @@ pub fn quorums(replica_count: u8) struct {
     // upgrading all replicas together would be a mistake (leading to replicas lagging and needing
     // to state sync). The -1 allows for a single broken/recovering replica before the upgrade.
     const quorum_upgrade = @max(replica_count - 1, quorum_majority);
+    assert(quorum_upgrade <= replica_count);
     assert(quorum_upgrade >= quorum_replication);
     assert(quorum_upgrade >= quorum_view_change);
 

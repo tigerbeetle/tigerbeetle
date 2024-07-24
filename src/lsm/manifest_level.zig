@@ -604,7 +604,7 @@ pub fn ManifestLevelType(
             key_max: Key,
             key_exclusive: ?Key,
             direction: Direction,
-        }) ?*const TableInfo {
+        }) ?TableInfoReference {
             const key_min = parameters.key_min;
             const key_max = parameters.key_max;
             const key_exclusive = parameters.key_exclusive;
@@ -621,7 +621,14 @@ pub fn ManifestLevelType(
                     direction,
                     KeyRange{ .key_min = key_min, .key_max = key_max },
                 );
-                return it.next();
+                if (it.next()) |table_info| {
+                    return .{
+                        .table_info = table_info,
+                        .generation = self.generation,
+                    };
+                } else {
+                    return null;
+                }
             }
 
             assert(key_min <= key_exclusive.?);
@@ -655,15 +662,22 @@ pub fn ManifestLevelType(
                     .ascending => table.key_min > key_exclusive.?,
                     .descending => table.key_max < key_exclusive.?,
                 };
-                if (next) return table;
+                if (next) {
+                    return .{
+                        .table_info = table,
+                        .generation = self.generation,
+                    };
+                }
             }
 
             return null;
         }
 
         /// Returns the smallest visible range of tables in the given level
-        /// that overlap with the given range: [key_min, key_max], or null
-        /// if the number of tables that intersect with the range is > max_overlapping_tables.
+        /// that overlap with the given range: [key_min, key_max]
+        ///
+        /// Returns null if the number of tables that intersect with the range intersects more than
+        /// max_overlapping_tables tables.
         ///
         /// The range keys are guaranteed to encompass all the relevant level A and level B tables:
         ///   range.key_min = min(a.key_min, b.key_min)

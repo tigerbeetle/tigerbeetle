@@ -36,6 +36,10 @@ zig/zig build
 ./tigerbeetle version
 ```
 
+Notes:
+- Building from source is not recommended for production deployments.
+- If you build TigerBeetle from source, it is only compatible with clients that were also built from source.
+
 #### Direct Download
 
 You can download prebuilt binaries here:
@@ -64,7 +68,7 @@ Each TigerBeetle node uses a single data file to store its state. Create the dat
 `format` command:
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 --development 0_0.tigerbeetle
 ```
 
 ```console
@@ -77,7 +81,7 @@ info(io): allocating 660.140625MiB...
 Now we'll run the TigerBeetle server.
 
 ```console
-./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+./tigerbeetle start --addresses=3000 --development 0_0.tigerbeetle
 ```
 
 ```console
@@ -181,9 +185,9 @@ Here, we will show you how to run a 3-node cluster (the idea is the same for 6 n
 First, create the data files for each node:
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 --development 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 --development 0_1.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 --development 0_2.tigerbeetle
 ```
 
 Note that the data file stores which replica in the cluster the file belongs to.
@@ -191,15 +195,15 @@ Note that the data file stores which replica in the cluster the file belongs to.
 Start each server in a new terminal window:
 
 ```console
-./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_0.tigerbeetle
+./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 --development 0_0.tigerbeetle
 ```
 
 ```console
-./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_1.tigerbeetle
+./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 --development 0_1.tigerbeetle
 ```
 
 ```console
-./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_2.tigerbeetle
+./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 --development 0_2.tigerbeetle
 ```
 
 TigerBeetle uses the `--replica` that's stored in the data file as an index into the `--addresses`

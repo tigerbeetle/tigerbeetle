@@ -1,5 +1,75 @@
 # TigerBeetle Changelog
 
+## 2024-07-15 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#2078](https://github.com/tigerbeetle/tigerbeetle/pull/2078)
+
+  Fix an incorrect `assert` that was too tight, crashing the replica after state sync,
+  when the replica's operation number lags behind checkpoint.
+
+- [#2103](https://github.com/tigerbeetle/tigerbeetle/pull/2103),
+  [#2056](https://github.com/tigerbeetle/tigerbeetle/pull/2056),
+  [#2072](https://github.com/tigerbeetle/tigerbeetle/pull/2072)
+
+  Fixes and improvements to tests and simulator.
+
+- [#2088](https://github.com/tigerbeetle/tigerbeetle/pull/2088)
+
+  Improve the benchmark to verify the state after execution and enable tests in Windows CI!
+
+- [#2090](https://github.com/tigerbeetle/tigerbeetle/pull/2090)
+
+  Call `fs_sync` on macOS/Darwin after each write to properly deal with Darwin's `O_DSYNC` which
+  [doesn't behave like `O_DSYNC` on Linux](https://x.com/TigerBeetleDB/status/1536628729031581697).
+
+### Features
+
+- [#2080](https://github.com/tigerbeetle/tigerbeetle/pull/2080)
+
+  New operations `query accounts` and `query transfers` as a stopgap API to add some degree of
+  user-defined query capabilities.
+  This is an experimental feature meant to be replaced by a proper querying API.
+
+
+### Internals
+
+- [#2067](https://github.com/tigerbeetle/tigerbeetle/pull/2067)
+
+  Simplify the comptime configuration by merging `config.test_min` and `config.fuzz_min`.
+
+- [#2091](https://github.com/tigerbeetle/tigerbeetle/pull/2091)
+
+  Fixed many typos and misspellings, thanks to [Jora Troosh](https://github.com/tensorush).
+
+- [#2099](https://github.com/tigerbeetle/tigerbeetle/pull/2099),
+  [#2097](https://github.com/tigerbeetle/tigerbeetle/pull/2097),
+  [#2098](https://github.com/tigerbeetle/tigerbeetle/pull/2098),
+  [#2100](https://github.com/tigerbeetle/tigerbeetle/pull/2100),
+  [#2092](https://github.com/tigerbeetle/tigerbeetle/pull/2092),
+  [#2094](https://github.com/tigerbeetle/tigerbeetle/pull/2094),
+  [#2089](https://github.com/tigerbeetle/tigerbeetle/pull/2089),
+  [#2073](https://github.com/tigerbeetle/tigerbeetle/pull/2073),
+  [#2087](https://github.com/tigerbeetle/tigerbeetle/pull/2087),
+  [#2086](https://github.com/tigerbeetle/tigerbeetle/pull/2086),
+  [#2083](https://github.com/tigerbeetle/tigerbeetle/pull/2083),
+  [#2085](https://github.com/tigerbeetle/tigerbeetle/pull/2085)
+
+  Multiple and varied changes to conform **all** line lengths to not more than 100 columns,
+  according to
+  [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md#style-by-the-numbers)!
+
+- [#2081](https://github.com/tigerbeetle/tigerbeetle/pull/2081)
+
+  Run `kcov` during CI as a code coverage sanity check. No automated action is taken regarding the
+  results. We're not focused on tracking the quantitative coverage metric, but rather on surfacing
+  blind spots qualitatively.
+
+### TigerTracks 🎧
+
+- [Sultans Of Swing](https://www.youtube.com/watch?v=h0ffIJ7ZO4U)
+
 ## 2024-07-08 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance

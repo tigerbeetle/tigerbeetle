@@ -806,7 +806,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .put_account => action: {
                 const action = generate_put_account(random, &id_to_account, .{
                     .op = op,
-                    .timestamp = fuzz_op_index,
+                    .timestamp = fuzz_op_index + 1, // Timestamp cannot be zero.
                 });
                 try id_to_account.put(action.put_account.account.id, action.put_account.account);
                 break :action action;

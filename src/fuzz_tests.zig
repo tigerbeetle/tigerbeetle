@@ -23,6 +23,7 @@ pub const std_options = .{
 
 const Fuzzers = .{
     .ewah = @import("./ewah_fuzz.zig"),
+    .lsm_scan = @import("./lsm/scan_fuzz.zig"),
     .lsm_cache_map = @import("./lsm/cache_map_fuzz.zig"),
     .lsm_forest = @import("./lsm/forest_fuzz.zig"),
     .lsm_manifest_log = @import("./lsm/manifest_log_fuzz.zig"),
@@ -30,6 +31,7 @@ const Fuzzers = .{
     .lsm_manifest_level = @import("./lsm/manifest_level_fuzz.zig"),
     .lsm_segmented_array = @import("./lsm/segmented_array_fuzz.zig"),
     .lsm_tree = @import("./lsm/tree_fuzz.zig"),
+    .storage = @import("./storage_fuzz.zig"),
     .vsr_free_set = @import("./vsr/free_set_fuzz.zig"),
     .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
@@ -85,6 +87,8 @@ fn main_smoke() !void {
             .lsm_manifest_level,
             .vsr_journal_format,
             .vsr_superblock_quorums,
+            .lsm_scan,
+            .storage,
             => null,
         };
 

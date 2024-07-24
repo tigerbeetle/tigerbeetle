@@ -177,7 +177,7 @@ pub const TableIndex = struct {
         return index;
     }
 
-    fn metadata(index_block: BlockPtrConst) *const Metadata {
+    pub fn metadata(index_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(index_block);
         assert(header.command == .block);
         assert(header.block_type == .index);
@@ -339,7 +339,7 @@ pub const TableData = struct {
         });
     }
 
-    fn metadata(data_block: BlockPtrConst) *const Metadata {
+    pub fn metadata(data_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(data_block);
         assert(header.command == .block);
         assert(header.block_type == .data);
@@ -412,7 +412,7 @@ pub const TrailerNode = struct {
         }
     };
 
-    fn metadata(free_set_block: BlockPtrConst) *const Metadata {
+    pub fn metadata(free_set_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(free_set_block);
         assert(header.command == .block);
         assert(header.block_type == .free_set or header.block_type == .client_sessions);

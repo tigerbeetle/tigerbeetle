@@ -21,9 +21,10 @@ const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
-const Grid = vsr.GridType(vsr.storage.Storage);
+const Storage = vsr.storage.Storage(vsr.io.IO);
+const Grid = vsr.GridType(Storage);
 const StateMachine = vsr.state_machine.StateMachineType(
-    vsr.storage.Storage,
+    Storage,
     constants.state_machine_config,
 );
 
@@ -101,12 +102,108 @@ const CliArgs = union(enum) {
         ),
         transfer_batch_delay_us: usize = 0,
         validate: bool = false,
+        checksum_performance: bool = false,
         query_count: usize = 100,
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
+        /// When set, don't delete the data file when the benchmark completes.
+        file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
-        seed: ?u64 = null,
+        seed: ?[]const u8 = null,
+    },
+
+    // Experimental: the interface is subject to change.
+    inspect: union(enum) {
+        superblock: struct {
+            positional: struct { path: []const u8 },
+        },
+        wal: struct {
+            slot: ?usize = null,
+            positional: struct { path: []const u8 },
+        },
+        replies: struct {
+            slot: ?usize = null,
+            superblock_copy: ?u8 = null,
+            positional: struct { path: []const u8 },
+        },
+        grid: struct {
+            block: ?u64 = null,
+            superblock_copy: ?u8 = null,
+            positional: struct { path: []const u8 },
+        },
+        manifest: struct {
+            superblock_copy: ?u8 = null,
+            positional: struct { path: []const u8 },
+        },
+        tables: struct {
+            superblock_copy: ?u8 = null,
+            tree: []const u8,
+            level: ?u6 = null,
+            positional: struct { path: []const u8 },
+        },
+
+        pub const help =
+            \\Usage:
+            \\
+            \\  tigerbeetle inspect [-h | --help]
+            \\
+            \\  tigerbeetle inspect superblock <path>
+            \\
+            \\  tigerbeetle inspect wal [--slot=<slot>] <path>
+            \\
+            \\  tigerbeetle inspect replies [--slot=<slot>] <path>
+            \\
+            \\  tigerbeetle inspect grid [--block=<address>] <path>
+            \\
+            \\  tigerbeetle inspect manifest <path>
+            \\
+            \\  tigerbeetle inspect tables --tree=<name|id> [--level=<integer>] <path>
+            \\
+            \\Options:
+            \\
+            \\  When `--superblock-copy` is set, use the trailer referenced by that superblock copy.
+            \\  Otherwise, the current quorum will be used by default.
+            \\
+            \\  -h, --help
+            \\        Print this help message and exit.
+            \\
+            \\  superblock
+            \\        Inspect the superblock header copies.
+            \\
+            \\  wal
+            \\        Inspect the WAL headers and prepares.
+            \\
+            \\  wal --slot=<slot>
+            \\        Inspect the WAL header/prepare in the given slot.
+            \\
+            \\  replies [--superblock-copy=<copy>]
+            \\        Inspect the client reply headers and session numbers.
+            \\
+            \\  replies --slot=<slot> [--superblock-copy=<copy>]
+            \\        Inspect a particular client reply.
+            \\
+            \\  grid [--superblock-copy=<copy>]
+            \\        Inspect the free set.
+            \\
+            \\  grid --block=<address>
+            \\        Inspect the block at the given address.
+            \\
+            \\  manifest [--superblock-copy=<copy>]
+            \\        Inspect the LSM manifest.
+            \\
+            \\  tables --tree=<name|id> [--level=<integer>] [--superblock-copy=<copy>]
+            \\        List the tables matching the given tree/level.
+            \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
+            \\
+        ;
+    },
+
+    // Internal: used to validate multiversion binaries.
+    multiversion: struct {
+        positional: struct {
+            path: [:0]const u8,
+        },
     },
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
@@ -309,12 +406,44 @@ pub const Command = union(enum) {
         transfer_batch_size: usize,
         transfer_batch_delay_us: usize,
         validate: bool,
+        checksum_performance: bool,
         query_count: usize,
         print_batch_timings: bool,
         id_order: IdOrder,
         statsd: bool,
+        file: ?[]const u8,
         addresses: ?[]const net.Address,
-        seed: ?u64,
+        seed: ?[]const u8,
+    };
+
+    pub const Inspect = struct {
+        path: []const u8,
+        query: union(enum) {
+            superblock,
+            wal: struct {
+                slot: ?usize,
+            },
+            replies: struct {
+                slot: ?usize,
+                superblock_copy: ?u8,
+            },
+            grid: struct {
+                block: ?u64,
+                superblock_copy: ?u8,
+            },
+            manifest: struct {
+                superblock_copy: ?u8,
+            },
+            tables: struct {
+                superblock_copy: ?u8,
+                tree: []const u8,
+                level: ?u6,
+            },
+        },
+    };
+
+    pub const Multiversion = struct {
+        path: [:0]const u8,
     };
 
     format: Format,
@@ -324,6 +453,8 @@ pub const Command = union(enum) {
     },
     repl: Repl,
     benchmark: Benchmark,
+    inspect: Inspect,
+    multiversion: Multiversion,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
@@ -456,26 +587,26 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const storage_size_limit_min = data_file_size_min;
             const storage_size_limit_max = constants.storage_size_limit_max;
             if (storage_size_limit > storage_size_limit_max) {
-                flags.fatal("--limit-storage: size {}{s} exceeds maximum: {}MiB", .{
+                flags.fatal("--limit-storage: size {}{s} exceeds maximum: {}", .{
                     start_limit_storage.value,
                     start_limit_storage.suffix(),
-                    @divExact(storage_size_limit_max, 1024 * 1024),
+                    vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_max),
                 });
             }
             if (storage_size_limit < storage_size_limit_min) {
-                flags.fatal("--limit-storage: size {}{s} is below minimum: {}KiB", .{
+                flags.fatal("--limit-storage: size {}{s} is below minimum: {}", .{
                     start_limit_storage.value,
                     start_limit_storage.suffix(),
-                    @divExact(storage_size_limit_min, 1024),
+                    vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_min),
                 });
             }
             if (storage_size_limit % constants.sector_size != 0) {
                 flags.fatal(
-                    "--limit-storage: size {}{s} must be a multiple of sector size ({}KiB)",
+                    "--limit-storage: size {}{s} must be a multiple of sector size ({})",
                     .{
                         start_limit_storage.value,
                         start_limit_storage.suffix(),
-                        @divExact(constants.sector_size, 1024),
+                        vsr.stdx.fmt_int_size_bin_exact(constants.sector_size),
                     },
                 );
             }
@@ -502,25 +633,17 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const request_size_limit_min = 4096;
             const request_size_limit_max = constants.message_size_max;
             if (request_size_limit.bytes() > request_size_limit_max) {
-                if (comptime (request_size_limit_max >= 1024 * 1024)) {
-                    flags.fatal("--limit-request: size {}{s} exceeds maximum: {}MiB", .{
-                        request_size_limit.value,
-                        request_size_limit.suffix(),
-                        @divExact(request_size_limit_max, 1024 * 1024),
-                    });
-                } else {
-                    flags.fatal("--limit-request: size {}{s} exceeds maximum: {}KiB", .{
-                        request_size_limit.value,
-                        request_size_limit.suffix(),
-                        @divExact(request_size_limit_max, 1024),
-                    });
-                }
-            }
-            if (request_size_limit.bytes() < request_size_limit_min) {
-                flags.fatal("--limit-request: size {}{s} is below minimum: {}B", .{
+                flags.fatal("--limit-request: size {}{s} exceeds maximum: {}", .{
                     request_size_limit.value,
                     request_size_limit.suffix(),
-                    request_size_limit_min,
+                    vsr.stdx.fmt_int_size_bin_exact(request_size_limit_max),
+                });
+            }
+            if (request_size_limit.bytes() < request_size_limit_min) {
+                flags.fatal("--limit-request: size {}{s} is below minimum: {}", .{
+                    request_size_limit.value,
+                    request_size_limit.suffix(),
+                    vsr.stdx.fmt_int_size_bin_exact(request_size_limit_min),
                 });
             }
 
@@ -529,26 +652,26 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
             const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
             if (lsm_manifest_memory > lsm_manifest_memory_max) {
-                flags.fatal("--memory-lsm-manifest: size {}{s} exceeds maximum: {}MiB", .{
+                flags.fatal("--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
                     start_memory_lsm_manifest.value,
                     start_memory_lsm_manifest.suffix(),
-                    @divExact(lsm_manifest_memory_max, 1024 * 1024),
+                    vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_max),
                 });
             }
             if (lsm_manifest_memory < lsm_manifest_memory_min) {
-                flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}MiB", .{
+                flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
                     start_memory_lsm_manifest.value,
                     start_memory_lsm_manifest.suffix(),
-                    @divExact(lsm_manifest_memory_min, 1024 * 1024),
+                    vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_min),
                 });
             }
             if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
                 flags.fatal(
-                    "--memory-lsm-manifest: size {}{s} must be a multiple of {}MiB",
+                    "--memory-lsm-manifest: size {}{s} must be a multiple of {}",
                     .{
                         start_memory_lsm_manifest.value,
                         start_memory_lsm_manifest.suffix(),
-                        @divExact(lsm_manifest_memory_multiplier, 1024 * 1024),
+                        vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_multiplier),
                     },
                 );
             }
@@ -557,26 +680,26 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 start.memory_lsm_compaction orelse defaults.memory_lsm_compaction;
             const lsm_compaction_block_memory_max = constants.compaction_block_memory_size_max;
             if (lsm_compaction_block_memory.bytes() > lsm_compaction_block_memory_max) {
-                flags.fatal("--memory-lsm-compaction: size {}{s} exceeds maximum: {}GiB", .{
+                flags.fatal("--memory-lsm-compaction: size {}{s} exceeds maximum: {}", .{
                     lsm_compaction_block_memory.value,
                     lsm_compaction_block_memory.suffix(),
-                    @divFloor(lsm_compaction_block_memory_max, 1024 * 1024 * 1024),
+                    vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_max),
                 });
             }
             if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
-                flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}KiB", .{
+                flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}", .{
                     lsm_compaction_block_memory.value,
                     lsm_compaction_block_memory.suffix(),
-                    @divExact(lsm_compaction_block_memory_min, 1024),
+                    vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_min),
                 });
             }
             if (lsm_compaction_block_memory.bytes() % constants.block_size != 0) {
                 flags.fatal(
-                    "--memory-lsm-compaction: size {}{s} must be a multiple of {}KiB",
+                    "--memory-lsm-compaction: size {}{s} must be a multiple of {}",
                     .{
                         lsm_compaction_block_memory.value,
                         lsm_compaction_block_memory.suffix(),
-                        @divExact(constants.block_size, 1024),
+                        vsr.stdx.fmt_int_size_bin_exact(constants.block_size),
                     },
                 );
             }
@@ -644,6 +767,10 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             else
                 null;
 
+            if (benchmark.addresses != null and benchmark.file != null) {
+                flags.fatal("--file: --addresses and --file are mutually exclusive", .{});
+            }
+
             return Command{
                 .benchmark = .{
                     .cache_accounts = benchmark.cache_accounts,
@@ -661,12 +788,50 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .transfer_batch_size = benchmark.transfer_batch_size,
                     .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
                     .validate = benchmark.validate,
+                    .checksum_performance = benchmark.checksum_performance,
                     .query_count = benchmark.query_count,
                     .print_batch_timings = benchmark.print_batch_timings,
                     .id_order = benchmark.id_order,
                     .statsd = benchmark.statsd,
+                    .file = benchmark.file,
                     .addresses = addresses,
                     .seed = benchmark.seed,
+                },
+            };
+        },
+        .inspect => |inspect| {
+            const path = switch (inspect) {
+                inline else => |args| args.positional.path,
+            };
+
+            return Command{ .inspect = .{
+                .path = path,
+                .query = switch (inspect) {
+                    .superblock => .superblock,
+                    .wal => |args| .{ .wal = .{ .slot = args.slot } },
+                    .replies => |args| .{ .replies = .{
+                        .slot = args.slot,
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .grid => |args| .{ .grid = .{
+                        .block = args.block,
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .manifest => |args| .{ .manifest = .{
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .tables => |args| .{ .tables = .{
+                        .superblock_copy = args.superblock_copy,
+                        .tree = args.tree,
+                        .level = args.level,
+                    } },
+                },
+            } };
+        },
+        .multiversion => |multiversion| {
+            return Command{
+                .multiversion = .{
+                    .path = multiversion.positional.path,
                 },
             };
         },

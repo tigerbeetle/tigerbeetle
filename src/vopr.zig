@@ -92,7 +92,7 @@ pub fn main() !void {
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
         const seed_argument = cli_args.positional.seed orelse break :seed_from_arg seed_random;
-        break :seed_from_arg parse_seed(seed_argument);
+        break :seed_from_arg vsr.testing.parse_seed(seed_argument);
     };
 
     if (builtin.mode == .ReleaseFast or builtin.mode == .ReleaseSmall) {
@@ -989,8 +989,11 @@ pub const Simulator = struct {
                 r.syncing == .idle);
         }
 
+        // To improve VOPR utilization, try to prevent the replica from going into
+        // `.recovering_head` state if the replica is needed to form a quorum.
         const fault = recoverable_count >= recoverable_count_min or replica.standby();
         simulator.restart_replica(replica.replica, fault);
+        maybe(!fault and replica.status == .recovering_head);
     }
 
     fn restart_replica(simulator: *Simulator, replica_index: u8, fault: bool) void {
@@ -1023,6 +1026,7 @@ pub const Simulator = struct {
             }
         }
 
+        var header_prepare_view_mismatch: bool = false;
         if (!fault) {
             // The journal writes redundant headers of faulty ops as zeroes to ensure
             // that they remain faulty after a crash/recover. Since that fault cannot
@@ -1038,6 +1042,10 @@ pub const Simulator = struct {
             ) |*wal_header, *wal_prepare| {
                 if (wal_header.checksum == 0) {
                     wal_header.* = wal_prepare.header;
+                } else {
+                    if (wal_header.view != wal_prepare.header.view) {
+                        header_prepare_view_mismatch = true;
+                    }
                 }
             }
         }
@@ -1057,7 +1065,7 @@ pub const Simulator = struct {
         replica_storage.faulty = fault;
         simulator.cluster.restart_replica(
             replica_index,
-            replica_releases.const_slice(),
+            &replica_releases,
         ) catch unreachable;
 
         if (replica.status == .recovering_head) {
@@ -1066,7 +1074,8 @@ pub const Simulator = struct {
             // status=recovering_head.
             assert(fault or
                 replica.op < replica.op_checkpoint() or
-                replica.log_view < replica.superblock.working.vsr_state.sync_view);
+                replica.log_view < replica.superblock.working.vsr_state.sync_view or
+                header_prepare_view_mismatch);
         }
 
         replica_storage.faulty = true;
@@ -1151,26 +1160,6 @@ fn random_core(random: std.rand.Random, replica_count: u8, standby_count: u8) Co
     assert(result.count() == replica_core_count + standby_core_count);
 
     return result;
-}
-
-pub fn parse_seed(bytes: []const u8) u64 {
-    if (bytes.len == 40) {
-        // Normally, a seed is specified as a base-10 integer. However, as a special case, we allow
-        // using a Git hash (a hex string 40 character long). This is used by our CI, which passes
-        // current commit hash as a seed --- that way, we run simulator on CI, we run it with
-        // different, "random" seeds, but the failures remain reproducible just from the commit
-        // hash!
-        const commit_hash = std.fmt.parseUnsigned(u160, bytes, 16) catch |err| switch (err) {
-            error.Overflow => unreachable,
-            error.InvalidCharacter => @panic("commit hash seed contains an invalid character"),
-        };
-        return @truncate(commit_hash);
-    }
-
-    return std.fmt.parseUnsigned(u64, bytes, 10) catch |err| switch (err) {
-        error.Overflow => @panic("seed exceeds a 64-bit unsigned integer"),
-        error.InvalidCharacter => @panic("seed contains an invalid character"),
-    };
 }
 
 var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{

@@ -75,7 +75,13 @@ jobs:
       - run: .\zig\zig build clients:c:sample
 
   test_macos:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - { os: 'macos-latest' }
+          - { os: 'macos-13' }
+
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,6 +108,13 @@ jobs:
           - { os: 'windows-latest', language: 'java',    language_version: '21'    }
           - { os: 'windows-latest', language: 'node',    language_version: '18.x'  }
           - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
+
+          # Limited matrix for macOS - runners are concurrency limited.
+          - { os: 'macos-latest',   language: 'go',      language_version: '1.21'  }
+          - { os: 'macos-latest',   language: 'node',    language_version: '20.x'  }
+
+          - { os: 'macos-13',       language: 'go',      language_version: '1.21'  }
+          - { os: 'macos-13',       language: 'node',    language_version: '20.x'  }
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -141,11 +154,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
           NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-pages-artifact@v3
         with:

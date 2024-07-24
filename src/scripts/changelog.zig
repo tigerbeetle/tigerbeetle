@@ -59,7 +59,7 @@ fn format_changelog(buffer: std.ArrayList(u8).Writer, options: struct {
 
     var merges_left = options.merges;
     // TODO Shrink this down after we release again.
-    for (0..256) |_| {
+    for (0..512) |_| {
         const merge = try format_changelog_cut_single_merge(&merges_left) orelse break;
 
         try buffer.print(

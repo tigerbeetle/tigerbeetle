@@ -12,7 +12,7 @@ const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
-    kq: posix.fd_t,
+    kq: fd_t,
     time: Time = .{},
     io_inflight: usize = 0,
     timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
@@ -201,7 +201,7 @@ pub const IO = struct {
             socket: posix.socket_t,
         },
         close: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
         },
         connect: struct {
             socket: posix.socket_t,
@@ -209,7 +209,7 @@ pub const IO = struct {
             initiated: bool,
         },
         read: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
             buf: [*]u8,
             len: u32,
             offset: u64,
@@ -228,7 +228,7 @@ pub const IO = struct {
             expires: u64,
         },
         write: struct {
-            fd: posix.fd_t,
+            fd: fd_t,
             buf: [*]const u8,
             len: u32,
             offset: u64,
@@ -359,7 +359,7 @@ pub const IO = struct {
             result: CloseError!void,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
     ) void {
         self.submit(
             context,
@@ -450,7 +450,7 @@ pub const IO = struct {
             result: ReadError!usize,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
         buffer: []u8,
         offset: u64,
     ) void {
@@ -625,7 +625,7 @@ pub const IO = struct {
             result: WriteError!usize,
         ) void,
         completion: *Completion,
-        fd: posix.fd_t,
+        fd: fd_t,
         buffer: []const u8,
         offset: u64,
     ) void {
@@ -661,8 +661,12 @@ pub const IO = struct {
         const fd = try posix.socket(family, sock_type | posix.SOCK.NONBLOCK, protocol);
         errdefer self.close_socket(fd);
 
+        // darwin doesn't support SOCK_CLOEXEC.
+        _ = try posix.fcntl(fd, posix.F.SETFD, posix.FD_CLOEXEC);
+
         // darwin doesn't support posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try posix.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+
         return fd;
     }
 
@@ -673,11 +677,12 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !posix.fd_t {
+    pub fn open_dir(dir_path: []const u8) !fd_t {
         return posix.open(dir_path, .{ .CLOEXEC = true, .ACCMODE = .RDONLY }, 0);
     }
 
-    pub const INVALID_FILE: posix.fd_t = -1;
+    pub const fd_t = posix.fd_t;
+    pub const INVALID_FILE: fd_t = -1;
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
@@ -688,12 +693,12 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        dir_fd: posix.fd_t,
+        dir_fd: fd_t,
         relative_path: []const u8,
         size: u64,
-        method: enum { create, create_or_open, open },
+        method: enum { create, create_or_open, open, open_read_only },
         direct_io: DirectIO,
-    ) !posix.fd_t {
+    ) !fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
 
@@ -704,7 +709,11 @@ pub const IO = struct {
         // the disk on every write, but that's not the case for Darwin:
         // https://x.com/TigerBeetleDB/status/1536628729031581697
         // To work around this, fs_sync() is explicitly called after writing in do_operation.
-        var flags: posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDWR, .DSYNC = true };
+        var flags: posix.O = .{
+            .CLOEXEC = true,
+            .ACCMODE = if (method == .open_read_only) .RDONLY else .RDWR,
+            .DSYNC = true,
+        };
         var mode: posix.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
@@ -722,7 +731,7 @@ pub const IO = struct {
                 mode = 0o666;
                 log.info("opening or creating \"{s}\"...", .{relative_path});
             },
-            .open => {
+            .open, .open_read_only => {
                 log.info("opening \"{s}\"...", .{relative_path});
             },
         }
@@ -777,13 +786,13 @@ pub const IO = struct {
     /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC
     /// instead.
     /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
-    fn fs_sync(fd: posix.fd_t) !void {
+    fn fs_sync(fd: fd_t) !void {
         _ = posix.fcntl(fd, posix.F.FULLFSYNC, 1) catch return posix.fsync(fd);
     }
 
     /// Allocates a file contiguously using fallocate() if supported.
     /// Alternatively, writes to the last sector so that at least the file size is correct.
-    fn fs_allocate(fd: posix.fd_t, size: u64) !void {
+    fn fs_allocate(fd: fd_t, size: u64) !void {
         log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
 
         // Darwin doesn't have fallocate() but we can simulate it using fcntl()s.

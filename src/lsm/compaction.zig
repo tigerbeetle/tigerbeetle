@@ -360,7 +360,7 @@ pub fn CompactionType(
                     move_to_level_b,
                 },
                 table: TableInfo,
-            }, constants.lsm_growth_factor + 1) = .{},
+            }, compaction_tables_output_max) = .{},
 
             table_builder: Table.Builder = .{},
         };
@@ -576,6 +576,7 @@ pub fn CompactionType(
                 const range_b = tree.manifest.immutable_table_compaction_range(
                     tree.table_immutable.key_min(),
                     tree.table_immutable.key_max(),
+                    .{ .value_count = tree.table_immutable.count() },
                 );
 
                 // +1 to count the immutable table (level A).

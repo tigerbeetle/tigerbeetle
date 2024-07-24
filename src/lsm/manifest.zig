@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
+const log = std.log.scoped(.manifest);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
@@ -470,13 +471,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }) ?*const TreeTableInfo {
             assert(parameters.level < constants.lsm_levels);
             assert(parameters.key_min <= parameters.key_max);
-            return manifest.levels[parameters.level].next_table(.{
+
+            const table_info_reference = manifest.levels[parameters.level].next_table(.{
                 .snapshot = parameters.snapshot,
                 .key_min = parameters.key_min,
                 .key_max = parameters.key_max,
                 .key_exclusive = parameters.key_exclusive,
                 .direction = parameters.direction,
-            });
+            }) orelse return null;
+
+            return table_info_reference.table_info;
         }
 
         /// Returns the most optimal table from a level that is due for compaction.
@@ -521,24 +525,114 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest: *const Manifest,
             key_min: Key,
             key_max: Key,
+            options: struct { value_count: u32 },
         ) CompactionRange {
             assert(key_min <= key_max);
+            assert(options.value_count > 0);
+            assert(options.value_count <= Table.value_count_max);
+
             const level_b = 0;
             const manifest_level: *const Level = &manifest.levels[level_b];
+            assert(manifest_level.table_count_visible <= growth_factor);
 
             // We are guaranteed to get a non-null range because Level 0 has
             // lsm_growth_factor number of tables, so the number of tables that intersect
             // with the immutable table can be no more than lsm_growth_factor.
-            const range = manifest_level.tables_overlapping_with_key_range(
+            const range_overlap = manifest_level.tables_overlapping_with_key_range(
                 key_min,
                 key_max,
                 snapshot_latest,
                 growth_factor,
             ).?;
 
+            // Attempt to coalesce with adjacent tables in level 0.
+            const range_coalesced = range: {
+                const value_count_target = stdx.div_ceil((Table.value_count_max *
+                    constants.lsm_table_coalescing_threshold_percent), 100);
+                assert(value_count_target > 1);
+                assert(value_count_target < Table.value_count_max);
+
+                var value_count_output: u32 = options.value_count;
+                for (range_overlap.tables.const_slice()) |*table| {
+                    value_count_output += table.table_info.value_count;
+                }
+
+                // Set to true when we encounter a coalesce-able table that is small enough to
+                // warrant coalescing.
+                var coalesced_small_table: bool = value_count_output < value_count_target;
+
+                var range = range_overlap;
+                outer: for ([_]Direction{ .descending, .ascending }) |direction| {
+                    inner: for (0..constants.lsm_growth_factor) |_| {
+                        if (range.tables.full()) break :outer;
+                        if (value_count_output >= value_count_target) break :outer;
+
+                        const table_next = manifest_level.next_table(.{
+                            .snapshot = snapshot_latest,
+                            .key_min = 0,
+                            .key_max = std.math.maxInt(Key),
+                            .key_exclusive = switch (direction) {
+                                .descending => range.key_min,
+                                .ascending => range.key_max,
+                            },
+                            .direction = direction,
+                        }) orelse break :inner;
+
+                        const table_next_value_count = table_next.table_info.value_count;
+                        assert(table_next_value_count > 0);
+
+                        if (value_count_output + table_next_value_count <= Table.value_count_max) {
+                            value_count_output += table_next_value_count;
+                            coalesced_small_table = coalesced_small_table or
+                                table_next.table_info.value_count < value_count_target;
+
+                            switch (direction) {
+                                .descending => range.key_min = table_next.table_info.key_min,
+                                .ascending => range.key_max = table_next.table_info.key_max,
+                            }
+
+                            switch (direction) {
+                                .descending => range.tables.insert_assume_capacity(0, table_next),
+                                .ascending => range.tables.append_assume_capacity(table_next),
+                            }
+                        } else {
+                            break :inner;
+                        }
+                    } else unreachable;
+                }
+
+                if (range.tables.count() != range_overlap.tables.count() and
+                    coalesced_small_table)
+                {
+                    break :range range;
+                } else {
+                    // None of the tables benefit much from coalescing, so just use the overlap.
+                    break :range null;
+                }
+            };
+
+            if (range_coalesced) |range| {
+                log.debug("{}: {s}: manifest: coalesced with {} adjacent tables", .{
+                    manifest.manifest_log.?.grid.superblock.replica_index.?,
+                    manifest.config.name,
+                    range.tables.count() - range_overlap.tables.count(),
+                });
+            }
+
+            const range = range_coalesced orelse range_overlap;
+            assert(range.tables.count() >= range_overlap.tables.count());
             assert(range.key_min <= range.key_max);
             assert(range.key_min <= key_min);
             assert(key_max <= range.key_max);
+
+            if (range.tables.count() > 1) {
+                for (
+                    range.tables.const_slice()[0 .. range.tables.count() - 1],
+                    range.tables.const_slice()[1..],
+                ) |a, b| {
+                    assert(a.table_info.key_max < b.table_info.key_min);
+                }
+            }
 
             return .{
                 .key_min = range.key_min,

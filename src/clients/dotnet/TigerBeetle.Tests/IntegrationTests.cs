@@ -627,8 +627,26 @@ public class IntegrationTests
         Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
         Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
 
-        // Waiting for the transfer to expire:
-        Thread.Sleep(TimeSpan.FromSeconds(transfer.Timeout).Add(TimeSpan.FromMilliseconds(1)));
+        // We need to wait 1s for the server to expire the transfer, however the
+        // server can pulse the expiry operation anytime after the timeout,
+        // so adding an extra delay to avoid flaky tests.
+        const long EXTRA_WAIT_TIME = 250;
+        Thread.Sleep(TimeSpan.FromSeconds(transfer.Timeout)
+            .Add(TimeSpan.FromMilliseconds(EXTRA_WAIT_TIME)));
+
+        // Looking up the accounts again for the updated balance.
+        lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+
+        Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+
+        Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
 
         var postTransfer = new Transfer
         {
@@ -644,19 +662,6 @@ public class IntegrationTests
 
         var postResult = client.CreateTransfer(postTransfer);
         Assert.IsTrue(postResult == CreateTransferResult.PendingTransferExpired);
-
-        lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-        AssertAccounts(accounts, lookupAccounts);
-
-        Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
-        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
-        Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
-        Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
-
-        Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
-        Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
-        Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
-        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
     }
 
     [TestMethod]

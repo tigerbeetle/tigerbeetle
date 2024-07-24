@@ -366,7 +366,7 @@ The transfer was not created.
 ### `overflows_timeout`
 
 The transfer was not created. `transfer.timestamp + (transfer.timeout * 1_000_000_000)` would
-overflow a 64-bit unsigned integer.
+exceed `2^63`.
 
 [`Transfer.timeout`](../transfer.md#timeout) is converted to nanoseconds.
 

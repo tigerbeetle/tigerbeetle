@@ -58,26 +58,15 @@ fn tidy_banned(file: SourceFile) !void {
 }
 
 fn tidy_long_line(file: SourceFile) !void {
+    if (std.mem.endsWith(u8, file.path, "low_level_hash_vectors.zig")) return;
     const long_line = try find_long_line(file.text);
     if (long_line) |line_index| {
-        if (!is_naughty(file.path)) {
-            std.debug.print(
-                "{s}:{d} error: line exceeds 100 columns\n",
-                .{ file.path, line_index + 1 },
-            );
-            return error.LineTooLong;
-        }
-    } else {
-        if (is_naughty(file.path)) {
-            std.debug.print(
-                "{s}: error: no longer contains long lines, " ++
-                    "remove from the `naughty_list`\n",
-                .{file.path},
-            );
-            return error.OutdatedNaughtyList;
-        }
+        std.debug.print(
+            "{s}:{d} error: line exceeds 100 columns\n",
+            .{ file.path, line_index + 1 },
+        );
+        return error.LineTooLong;
     }
-    assert((long_line != null) == is_naughty(file.path));
 }
 
 // Zig's lazy compilation model makes it too easy to forget to include a file into the build --- if
@@ -187,23 +176,6 @@ test "tidy changelog" {
             std.debug.print("CHANGELOG.md:{d} line exceeds 100 columns\n", .{line_index + 1});
             return error.LineTooLong;
         }
-    }
-}
-
-test "tidy naughty list" {
-    var src = try fs.cwd().openDir("src", .{});
-    defer src.close();
-
-    for (naughty_list) |naughty_path| {
-        _ = src.statFile(naughty_path) catch |err| {
-            if (err == error.FileNotFound) {
-                std.debug.print(
-                    "path does not exist: src/{s}\n",
-                    .{naughty_path},
-                );
-            }
-            return err;
-        };
     }
 }
 
@@ -322,7 +294,7 @@ fn banned(source: []const u8) ?[]const u8 {
         return "use stdx." ++ "copy_right instead of std version";
     }
 
-    // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on a
+    // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on
     // larger pull requests, it is often helpful to leave fixme comments as a reminder to oneself.
     // This tidy rule ensures that the reminder is acted upon before code gets into main. That is:
     // - use fixme for issues to be fixed in the same pull request,
@@ -334,21 +306,6 @@ fn banned(source: []const u8) ?[]const u8 {
     return null;
 }
 
-fn is_naughty(path: []const u8) bool {
-    for (naughty_list) |naughty_path| {
-        // Separator-agnostic path comparison.
-        if (naughty_path.len == path.len) {
-            var equal_paths = true;
-            for (naughty_path, 0..) |c, i| {
-                equal_paths = equal_paths and
-                    (path[i] == c or (path[i] == fs.path.sep and c == fs.path.sep_posix));
-            }
-            if (equal_paths) return true;
-        }
-    }
-    return false;
-}
-
 fn find_long_line(file_text: []const u8) !?usize {
     var line_iterator = mem.split(u8, file_text, "\n");
     var line_index: usize = 0;
@@ -356,6 +313,10 @@ fn find_long_line(file_text: []const u8) !?usize {
         const line_length = try std.unicode.utf8CountCodepoints(line);
         if (line_length > 100) {
             if (has_link(line)) continue;
+
+            // Journal recovery table
+            if (std.mem.indexOf(u8, line, "Case.init(") != null) continue;
+
             // For multiline strings, we care that the _result_ fits 100 characters,
             // but we don't mind indentation in the source.
             if (parse_multiline_string(line)) |string_value| {
@@ -388,11 +349,3 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
     for (cut.prefix) |c| if (c != ' ') return null;
     return cut.suffix;
 }
-
-const naughty_list = [_][]const u8{
-    "testing/low_level_hash_vectors.zig",
-    "vsr/clock.zig",
-    "vsr/journal.zig",
-    "vsr/replica_test.zig",
-    "vsr/replica.zig",
-};

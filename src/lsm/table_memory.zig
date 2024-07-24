@@ -15,7 +15,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         const TableMemory = @This();
 
         pub const ValueContext = struct {
-            count: usize = 0,
+            count: u32 = 0,
             sorted: bool = true,
         };
 
@@ -29,7 +29,6 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         values: []Value,
-        value_count_limit: u32,
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
@@ -49,7 +48,6 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             return TableMemory{
                 .values = values,
-                .value_count_limit = options.value_count_limit,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = name,
@@ -68,14 +66,13 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
-                .value_count_limit = table.value_count_limit,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = table.name,
             };
         }
 
-        pub fn count(table: *const TableMemory) usize {
+        pub fn count(table: *const TableMemory) u32 {
             return table.value_context.count;
         }
 
@@ -85,7 +82,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn put(table: *TableMemory, value: *const Value) void {
             assert(table.mutability == .mutable);
-            assert(table.value_context.count < table.value_count_limit);
+            assert(table.value_context.count < table.values.len);
             if (table.value_context.sorted) {
                 table.value_context.sorted = table.value_context.count == 0 or
                     key_from_value(&table.values[table.value_context.count - 1]) <=
@@ -100,7 +97,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         /// This must be called on sorted tables.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
-            assert(table.value_context.count <= table.value_count_limit);
+            assert(table.value_context.count <= table.values.len);
             assert(table.value_context.sorted);
 
             return binary_search.binary_search_values(
@@ -115,7 +112,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
-            assert(table.value_context.count <= table.value_count_limit);
+            assert(table.value_context.count <= table.values.len);
             defer assert(table.value_context.sorted);
 
             // Sort all the values. In future, this will be done incrementally, and use
@@ -132,12 +129,11 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn make_mutable(table: *TableMemory) void {
             assert(table.mutability == .immutable);
             assert(table.mutability.immutable.flushed == true);
-            assert(table.value_context.count <= table.value_count_limit);
+            assert(table.value_context.count <= table.values.len);
             assert(table.value_context.sorted);
 
             table.* = .{
                 .values = table.values,
-                .value_count_limit = table.value_count_limit,
                 .value_context = .{},
                 .mutability = .mutable,
                 .name = table.name,

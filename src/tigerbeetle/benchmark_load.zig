@@ -20,7 +20,7 @@ const stdx = vsr.stdx;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
-const Storage = vsr.storage.Storage;
+const Storage = vsr.storage.Storage(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
@@ -126,7 +126,11 @@ pub fn main(
     }
 
     // If no seed was given, use a default seed for reproducibility.
-    const seed: usize = cli_args.seed orelse 42;
+    const seed = seed_from_arg: {
+        const seed_argument = cli_args.seed orelse break :seed_from_arg 42;
+        break :seed_from_arg vsr.testing.parse_seed(seed_argument);
+    };
+
     log.info("Benchmark seed = {}", .{seed});
 
     var rng = std.rand.DefaultPrng.init(seed);
@@ -188,6 +192,25 @@ pub fn main(
         try benchmark.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     benchmark.done = false;
+
+    if (cli_args.checksum_performance) {
+        const stdout = std.io.getStdOut().writer();
+        stdout.print("\nmessage size max = {} bytes\n", .{
+            constants.message_size_max,
+        }) catch unreachable;
+
+        const buffer = try allocator.alloc(u8, constants.message_size_max);
+        defer allocator.free(buffer);
+        benchmark.rng.fill(buffer);
+
+        benchmark.timer.reset();
+        _ = vsr.checksum(buffer);
+        const checksum_duration_ns = benchmark.timer.read();
+
+        stdout.print("checksum message size max = {} us\n", .{
+            @divTrunc(checksum_duration_ns, std.time.ns_per_us),
+        }) catch unreachable;
+    }
 
     if (!benchmark.validate) return;
 

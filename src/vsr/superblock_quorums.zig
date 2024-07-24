@@ -87,7 +87,7 @@ pub fn QuorumsType(comptime options: Options) type {
         ///   TODO Re-examine this now that there are no superblock trailers to worry about.
         pub fn working(
             quorums: *Quorums,
-            copies: []SuperBlockHeader,
+            copies: []const SuperBlockHeader,
             threshold: Threshold,
         ) Error!Quorum {
             assert(copies.len == options.superblock_copies);

@@ -8,6 +8,7 @@ const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 
 const TableType = @import("table.zig").TableType;
+const TimestampRange = @import("timestamp_range.zig").TimestampRange;
 const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
@@ -914,6 +915,8 @@ pub fn GrooveType(
         /// Insert the value into the objects tree and associated index trees. It's up to the
         /// caller to ensure it doesn't already exist.
         pub fn insert(groove: *Groove, object: *const Object) void {
+            assert(object.timestamp >= TimestampRange.timestamp_min);
+            assert(object.timestamp <= TimestampRange.timestamp_max);
             if (constants.verify) {
                 assert(!groove.objects_cache.has(@field(object, primary_field)));
             }
@@ -964,6 +967,8 @@ pub fn GrooveType(
 
             if (has_id) assert(old.id == new.id);
             assert(old.timestamp == new.timestamp);
+            assert(new.timestamp >= TimestampRange.timestamp_min);
+            assert(new.timestamp <= TimestampRange.timestamp_max);
 
             // The ID can't change, so no need to update the ID tree. Update the object tree entry
             // if any of the fields (even ignored) are different. We assume the caller will pass in
@@ -1017,6 +1022,8 @@ pub fn GrooveType(
             assert(false);
 
             const object = groove.objects_cache.get(key).?;
+            assert(object.timestamp >= TimestampRange.timestamp_min);
+            assert(object.timestamp <= TimestampRange.timestamp_max);
 
             groove.objects.remove(object);
             if (has_id) {
@@ -1133,7 +1140,8 @@ pub fn GrooveType(
 
 test "Groove" {
     const Transfer = @import("../tigerbeetle.zig").Transfer;
-    const Storage = @import("../storage.zig").Storage;
+    const IO = @import("../io.zig").IO;
+    const Storage = @import("../storage.zig").Storage(IO);
 
     const Groove = GrooveType(
         Storage,

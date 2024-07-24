@@ -14,16 +14,17 @@ const tracer = vsr.tracer;
 const benchmark_driver = @import("benchmark_driver.zig");
 const cli = @import("cli.zig");
 const fatal = vsr.flags.fatal;
+const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const Storage = vsr.storage.Storage;
+const Storage = vsr.storage.Storage(IO);
 const AOF = vsr.aof.AOF;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
-const Grid = vsr.GridType(vsr.storage.Storage);
+const Grid = vsr.GridType(Storage);
 
 const AOFType = if (constants.aof_record) AOF else void;
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOFType);
@@ -64,6 +65,11 @@ pub fn main() !void {
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
+        .inspect => |*args| inspect.main(allocator, args) catch |err| {
+            // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
+            if (err != error.BrokenPipe) return err;
+        },
+        .multiversion => |*args| try vsr.multiversioning.validate(allocator, args.path),
     }
 }
 
@@ -140,9 +146,11 @@ const Command = struct {
     fd: std.posix.fd_t,
     io: IO,
     storage: Storage,
+    self_exe_path: [:0]const u8,
 
     fn init(
         command: *Command,
+        allocator: mem.Allocator,
         path: [:0]const u8,
         options: struct {
             must_create: bool,
@@ -177,9 +185,13 @@ const Command = struct {
 
         command.storage = try Storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
+
+        command.self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
+        errdefer allocator.free(command.self_exe_path);
     }
 
-    fn deinit(command: *Command) void {
+    fn deinit(command: *Command, allocator: mem.Allocator) void {
+        allocator.free(command.self_exe_path);
         command.storage.deinit();
         command.io.deinit();
         std.posix.close(command.fd);
@@ -192,11 +204,11 @@ const Command = struct {
         options: SuperBlock.FormatOptions,
     ) !void {
         var command: Command = undefined;
-        try command.init(args.path, .{
+        try command.init(allocator, args.path, .{
             .must_create = true,
             .development = args.development,
         });
-        defer command.deinit();
+        defer command.deinit(allocator);
 
         var superblock = try SuperBlock.init(
             allocator,
@@ -230,11 +242,11 @@ const Command = struct {
         const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
-        try command.init(args.path, .{
+        try command.init(allocator, args.path, .{
             .must_create = false,
             .development = args.development,
         });
-        defer command.deinit();
+        defer command.deinit(allocator);
 
         var message_pool = try MessagePool.init(allocator, .{ .replica = .{
             .members_count = @intCast(args.addresses.len),
@@ -279,11 +291,56 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
-        const releases_bundled = &[_]vsr.Release{config.process.release};
+        var multiversion: ?vsr.multiversioning.Multiversion =
+            if (builtin.target.os.tag != .linux)
+        blk: {
+            log_main.info("multiversioning: currently only supported on linux.", .{});
+            break :blk null;
+        } else if (constants.config.process.release.value ==
+            vsr.multiversioning.Release.minimum.value)
+        blk: {
+            log_main.info(
+                "multiversioning: disabled for development ({}) release.",
+                .{constants.config.process.release},
+            );
+            break :blk null;
+        } else if (args.development) blk: {
+            log_main.info("multiversioning: disabled due to --development.", .{});
+            break :blk null;
+        } else if (args.experimental) blk: {
+            log_main.info("multiversioning: disabled due to --experimental.", .{});
+            break :blk null;
+        } else if (constants.aof_recovery) blk: {
+            log_main.info("multiversioning: disabled due to aof_recovery.", .{});
+            break :blk null;
+        } else try vsr.multiversioning.Multiversion.init(
+            allocator,
+            &command.io,
+            command.self_exe_path,
+        );
+
+        defer if (multiversion != null) multiversion.?.deinit(allocator);
+
+        // This might seem redundant, but it's needed to build on non-Linux platforms. Otherwise,
+        // the compiler will still try to compile into multiversion.start(), which contains
+        // platform specific methods that cause compile errors.
+        // The error from .open_sync() is ignored - timeouts and checking for new binaries are still
+        // enabled even if the first version fails to load.
+        if (multiversion != null and builtin.target.os.tag == .linux) {
+            multiversion.?.open_sync() catch {};
+        }
+
+        var releases_bundled_baseline: vsr.multiversioning.ReleaseList = .{};
+        releases_bundled_baseline.append_assume_capacity(constants.config.process.release);
+
+        const releases_bundled = if (multiversion != null)
+            &multiversion.?.releases_bundled
+        else
+            &releases_bundled_baseline;
 
         log_main.info("release={}", .{config.process.release});
         log_main.info("release_client_min={}", .{config.process.release_client_min});
-        log_main.info("releases_bundled={any}", .{releases_bundled.*});
+        log_main.info("releases_bundled={any}", .{releases_bundled.const_slice()});
         log_main.info("git_commit={?s}", .{config.process.git_commit});
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
@@ -295,6 +352,7 @@ const Command = struct {
             .release_client_min = config.process.release_client_min,
             .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
+            .multiversion = if (multiversion) |*multiversion_| multiversion_ else null,
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
@@ -321,6 +379,11 @@ const Command = struct {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => |e| return e,
         };
+
+        // Enable checking for new binaries on disk after the replica has been opened.
+        if (multiversion != null and builtin.target.os.tag == .linux) {
+            multiversion.?.timeout_enable();
+        }
 
         // Note that this does not account for the fact that any allocations will be rounded up to
         // the nearest page by `std.heap.page_allocator`.
@@ -387,8 +450,6 @@ const Command = struct {
     }
 
     pub fn version(allocator: mem.Allocator, verbose: bool) !void {
-        _ = allocator;
-
         var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
         const stdout = stdout_buffer.writer();
         try std.fmt.format(stdout, "TigerBeetle version {}\n", .{constants.semver});
@@ -417,6 +478,9 @@ const Command = struct {
                     @field(config.process, field_name),
                 );
             }
+
+            try stdout.writeAll("\n");
+            try vsr.multiversioning.print_information(allocator, stdout);
         }
         try stdout_buffer.flush();
     }
@@ -429,18 +493,50 @@ const Command = struct {
 
 fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != replica.release.value);
+    assert(release.value != vsr.Release.zero.value);
+    assert(release.value != vsr.Release.minimum.value);
+
+    // This might seem redundant, but it's needed to build on non-Linux platforms. Otherwise, the
+    // compiler will still try to compile the code below it, which contains platform specific
+    // methods that cause compile errors.
+    if (builtin.os.tag != .linux) @panic("replica_release_execute unsupported");
+
+    const multiversion = replica.multiversion orelse {
+        @panic("replica_release_execute unsupported");
+    };
 
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
     } else {
-        log_main.err("{}: release_execute: release {} is not available; upgrade the binary", .{
+        log_main.err("{}: release_execute: release {} is not available;" ++
+            "upgrade (or downgrade) the binary", .{
             replica.replica,
             release,
         });
-        @panic("release_execute: binary missing required version");
+        @panic("release not available");
     }
 
-    // TODO(Multiversioning) Exec into the new release.
+    // We have two paths here, depending on if we're upgrading or downgrading. If we're downgrading
+    // the invariant is that this code is running _before_ we've finished opening, that is,
+    // release_transition is called in open().
+    if (release.value < replica.release.value) {
+        assert(replica.release.value ==
+            replica.releases_bundled.get(replica.releases_bundled.count() - 1).value);
+
+        multiversion.exec_release(
+            release,
+        ) catch |err| {
+            std.debug.panic("failed to execute previous release: {}", .{err});
+        };
+    } else {
+        // For the upgrade case, re-run the latest binary in place. If we need something older
+        // than the latest, that'll be handled when the case above is hit when re-execing:
+        // (current version v1) -> (latest version v4) -> (desired version v2)
+        multiversion.exec_latest() catch |err| {
+            std.debug.panic("failed to execute latest release: {}", .{err});
+        };
+    }
+
     unreachable;
 }
 

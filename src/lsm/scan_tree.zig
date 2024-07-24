@@ -310,16 +310,15 @@ pub fn ScanTreeType(
                 return;
             }
 
-            // Probe should not be called when the scan has already moved, however it's allowed
-            // to probe multiple times with the same `probe_key` when the scan needs to read.
-            // During the iteration, buffered scans are probed first, followed by drained ones,
-            // it may happen that the same scan is probed twice, both as buffered and drained.
+            // It's allowed to probe multiple times with the same `probe_key`.
             // In this case, there's no need to move since the key range was already set.
             if (switch (self.direction) {
                 .ascending => self.key_min == probe_key,
                 .descending => self.key_max == probe_key,
             }) {
-                assert(self.state == .idle or self.state == .needs_data);
+                assert(self.state == .idle or
+                    self.state == .seeking or
+                    self.state == .needs_data);
                 return;
             }
 
@@ -327,12 +326,12 @@ pub fn ScanTreeType(
             switch (self.direction) {
                 .ascending => {
                     assert(self.key_min < probe_key);
-                    assert(probe_key < self.key_max);
+                    assert(probe_key <= self.key_max);
                     self.key_min = probe_key;
                 },
                 .descending => {
                     assert(probe_key < self.key_max);
-                    assert(self.key_min < probe_key);
+                    assert(self.key_min <= probe_key);
                     self.key_max = probe_key;
                 },
             }

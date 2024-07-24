@@ -448,7 +448,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 /// with peer set to `.none`.
                 accepting,
                 /// The peer is a replica and a connect operation has been started
-                /// but not yet competed.
+                /// but not yet completed.
                 connecting,
                 /// The peer is fully connected and may be a client, replica, or unknown.
                 connected,
