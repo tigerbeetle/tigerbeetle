@@ -269,3 +269,22 @@ test "benchmark/inspect smoke" {
         try std.testing.expect(status_ok_inspect);
     }
 }
+
+test "help/version smoke" {
+    const shell = try Shell.create(std.testing.allocator);
+    defer shell.destroy();
+
+    const tigerbeetle = try tigerbeetle_exe(shell);
+
+    inline for (.{
+        "{tigerbeetle} --help",
+        "{tigerbeetle} inspect --help",
+        "{tigerbeetle} version",
+        // TODO(Multiversioning): Uncomment once this is fixed.
+        // "{tigerbeetle} version --verbose",
+    }) |command| {
+        const status_ok =
+            try shell.exec_status_ok(command, .{ .tigerbeetle = tigerbeetle });
+        try std.testing.expect(status_ok);
+    }
+}
