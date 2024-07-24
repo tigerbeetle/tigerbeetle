@@ -92,6 +92,7 @@ pub const ReplicaEvent = union(enum) {
     /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
     checkpoint_completed,
     sync_stage_changed,
+    client_evicted: u128,
 };
 
 const Nonce = u128;
@@ -4534,6 +4535,10 @@ pub fn ReplicaType(
                     constants.clients_max,
                     evictee,
                 });
+
+                if (self.event_callback) |hook| {
+                    hook(self, .{ .client_evicted = evictee });
+                }
             }
 
             log.debug("{}: client_table_entry_create: write (client={} session={} request={})", .{
