@@ -555,6 +555,8 @@ const SeedRecord = struct {
     // NB: Use []const u8 rather than Fuzzer to support deserializing unknown fuzzers.
     fuzzer: []const u8,
     ok: bool = false,
+    // Counts the number of seeds merged into the current one.
+    count: u32 = 1,
     seed_timestamp_start: u64 = 0,
     seed_timestamp_end: u64 = 0,
     seed: u64 = 0,
@@ -562,14 +564,13 @@ const SeedRecord = struct {
     command: []const u8 = "",
     // Branch is an GitHub URL. It only affects the UI, where the seeds are grouped by the branch.
     branch: []const u8,
-    // Counts the number of seeds merged into the current one.
-    count: u32 = 1,
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
         return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse // NB: reverse order.
             order_by_field(a.commit_sha, b.commit_sha) orelse
             order_by_field(a.fuzzer, b.fuzzer) orelse
             order_by_field(a.ok, b.ok) orelse
+            order_by_field(b.count, a.count) orelse // NB: reverse order.
             order_by_field(a.seed_duration(), b.seed_duration()) orelse // Coarse seed minimization.
             order_by_seed_timestamp_start(a, b) orelse
             order_by_field(a.seed_timestamp_end, b.seed_timestamp_end) orelse
@@ -668,13 +669,21 @@ const SeedRecord = struct {
             if (seed_count <= options.seed_count_max) {
                 try result.append(record);
             } else {
-                if (record.ok and result.getLast().ok) {
-                    assert(std.mem.eql(
-                        u8,
-                        result.items[result.items.len - 1].fuzzer,
-                        record.fuzzer,
-                    ));
-                    result.items[result.items.len - 1].count += record.count;
+                if (record.ok) {
+                    // Merge counts with the first ok record for this fuzzer/commit, to make it
+                    // easy for the front-end to show the total count by displaying just the first
+                    // record
+                    var last_ok_index = result.items.len;
+                    while (last_ok_index > 0 and
+                        result.items[last_ok_index - 1].ok and
+                        std.mem.eql(u8, result.items[last_ok_index - 1].fuzzer, record.fuzzer) and
+                        std.meta.eql(result.items[last_ok_index - 1].commit_sha, record.commit_sha))
+                    {
+                        last_ok_index -= 1;
+                    }
+                    if (last_ok_index != result.items.len) {
+                        result.items[last_ok_index].count += record.count;
+                    }
                 }
             }
         }
@@ -699,7 +708,8 @@ test "cfo: deserialization" {
         \\    "seed_timestamp_end": 1721096949,
         \\    "seed": 17154947449604939200,
         \\    "command": "./zig/zig build -Drelease fuzz -- canary 17154947449604939200",
-        \\    "branch": "https://github.com/tigerbeetle/tigerbeetle/pull/2104"
+        \\    "branch": "https://github.com/tigerbeetle/tigerbeetle/pull/2104",
+        \\    "count": 1
         \\}]
     ;
 
@@ -718,12 +728,12 @@ test "cfo: deserialization" {
         \\    "commit_sha": "c4bb1eaa658b77c37646d3854dd911adba71b764",
         \\    "fuzzer": "canary",
         \\    "ok": false,
+        \\    "count": 1,
         \\    "seed_timestamp_start": 1721096948,
         \\    "seed_timestamp_end": 1721096949,
         \\    "seed": 17154947449604939200,
         \\    "command": "./zig/zig build -Drelease fuzz -- canary 17154947449604939200",
-        \\    "branch": "https://github.com/tigerbeetle/tigerbeetle/pull/2104",
-        \\    "count": 1
+        \\    "branch": "https://github.com/tigerbeetle/tigerbeetle/pull/2104"
         \\  }
         \\]
     ).diff(new_json);
@@ -830,48 +840,48 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "2222222222222222222222222222222222222222",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 4,
             \\    "seed_timestamp_end": 4,
             \\    "seed": 4,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  },
             \\  {
             \\    "commit_timestamp": 2,
             \\    "commit_sha": "2222222222222222222222222222222222222222",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
+            \\    "count": 2,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 2
+            \\    "branch": "main"
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 2,
             \\    "seed_timestamp_end": 2,
             \\    "seed": 2,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  }
             \\]
         ),
@@ -924,24 +934,24 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "3333333333333333333333333333333333333333",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  },
             \\  {
             \\    "commit_timestamp": 2,
             \\    "commit_sha": "2222222222222222222222222222222222222222",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  }
             \\]
         ),
@@ -982,12 +992,12 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  }
             \\]
         ),
@@ -1039,24 +1049,24 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 5,
             \\    "seed_timestamp_end": 5,
             \\    "seed": 999,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 10,
             \\    "seed_timestamp_end": 10,
             \\    "seed": 10,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  }
             \\]
         ),
@@ -1108,24 +1118,24 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "canary",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 30,
             \\    "seed_timestamp_end": 30,
             \\    "seed": 2,
             \\    "command": "fuzz canary",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "canary",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 20,
             \\    "seed_timestamp_end": 20,
             \\    "seed": 1,
             \\    "command": "fuzz canary",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  }
             \\]
         ),
@@ -1166,24 +1176,24 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "American Fuzzy Lop",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "very fluffy",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
+            \\    "count": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  }
             \\]
         ),
@@ -1202,7 +1212,7 @@ test "cfo: SeedRecord.merge" {
                 .seed = 1,
                 .command = "fuzz ewah",
                 .branch = "main",
-                .count = 1,
+                .count = 2,
             },
             .{
                 .commit_timestamp = 1,
@@ -1214,7 +1224,7 @@ test "cfo: SeedRecord.merge" {
                 .seed = 2,
                 .command = "fuzz ewah",
                 .branch = "main",
-                .count = 2,
+                .count = 1,
             },
         },
         &.{
@@ -1238,24 +1248,24 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
+            \\    "count": 4,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
-            \\    "seed": 1,
+            \\    "seed": 3,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 1
+            \\    "branch": "main"
             \\  },
             \\  {
             \\    "commit_timestamp": 1,
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
+            \\    "count": 2,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
-            \\    "seed": 2,
+            \\    "seed": 1,
             \\    "command": "fuzz ewah",
-            \\    "branch": "main",
-            \\    "count": 5
+            \\    "branch": "main"
             \\  }
             \\]
         ),
