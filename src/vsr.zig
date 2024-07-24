@@ -1452,20 +1452,22 @@ const ViewChangeHeadersArray = struct {
     }
 };
 
-/// For a replica with journal_slot_count=9, lsm_batch_multiple=2, pipeline_prepare_queue_max=1, and
-/// checkpoint_interval = journal_slot_count - (lsm_batch_multiple + pipeline_prepare_queue_max) = 6
+/// For a replica with journal_slot_count=10, lsm_batch_multiple=2, pipeline_prepare_queue_max=2,
+/// and checkpoint_interval=4, which can be computed as follows:
+/// journal_slot_count - (lsm_batch_multiple + 2 * pipeline_prepare_queue_max) = 4
 ///
-///   checkpoint() call           0   1   2   3
-///   op_checkpoint               0   5  11  17
-///   op_checkpoint_next          5  11  17  23
-///   op_checkpoint_next_trigger  7  13  19  25
+///   checkpoint() call           0   1   2   3   4
+///   op_checkpoint               0   3   7  11  15
+///   op_checkpoint_next          3   7  11  15  19
+///   op_checkpoint_next_trigger  5   9  13  17  21
 ///
 ///     commit log (ops)           │ write-ahead log (slots)
-///     0   4   8   2   6   0   4  │  0  -  -  -  4  -  -  -  8
-///   0 ─────✓·%                   │[ 0  1  2  3  4  ✓] 6  %  R
-///   1 ───────────✓·%             │  9 10  ✓]12  %  5[ 6  7  8
-///   2 ─────────────────✓·%       │ 18  % 11[12 13 14 15 16  ✓]
-///   3 ───────────────────────✓·% │[18 19 20 21 22  ✓]24  % 17
+///     0   4   8   2   6   0   4  │  0  -  -  -  4  -  -  -  -  9
+///   0 ───✓·%                     │[ 0  1  2  ✓] 4  %  R  R  R  R
+///   1 ───────✓·%                 │  0  1  2  3[ 4  5  6  ✓] 8  %
+///   2 ───────────✓·%             │  10 ✓] 12 %  4  5  6  7[ 8  %
+///   3 ───────────────✓·%         │  10 11[12 13 14 ✓] 16 %  8  9
+///   4 ───────────────────✓·%     │  20 %  12 13 14 15[16 17 18 19]
 ///
 /// Legend:
 ///
