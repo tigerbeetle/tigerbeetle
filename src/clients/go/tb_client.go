@@ -32,7 +32,7 @@ import (
 	"runtime"
 	"strings"
 	"unsafe"
-	"sync/atomic"
+	"sync"
 
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
@@ -61,8 +61,7 @@ type request struct {
 
 type c_client struct {
 	tb_client C.tb_client_t
-	ref_count atomic.Int64
-	ref_pending atomic.Int64
+	mutex sync.Mutex
 }
 
 func NewClient(
@@ -113,8 +112,10 @@ func NewClient(
 }
 
 func (c *c_client) Close() {
-	refs := c.ref_count.Add(1) - 1
-	if (refs & 1 == 0) && (c.ref_pending.Add(refs) == 0) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if c.tb_client != nil {
 		C.tb_client_deinit(c.tb_client)
 		c.tb_client = nil
 	}
@@ -176,20 +177,9 @@ func (c *c_client) doRequest(
 		return 0, errors.ErrEmptyBatch{}
 	}
 
-	if c.ref_count.Add(2) & 1 != 0 {
-		return 0, errors.ErrClientClosed{}
-	}
-
-	defer func(){
-		if (c.ref_count.Add(-2) & 1 != 0) && (c.ref_pending.Add(-2) == 0) {
-			C.tb_client_deinit(c.tb_client)
-			c.tb_client = nil
-		}
-	}()
-
 	var req request
 	req.result = result
-	req.ready = make(chan struct{})
+	req.ready = make(chan struct{}, 1) // buffered chan prevents completion handler blocking for Go.
 	
 	// NOTE: packet must be its own allocation and cannot live in request as then CGO is unable to
 	// correctly track it (panic: runtime error: cgo argument has Go pointer to unpinned Go pointer)
@@ -202,13 +192,21 @@ func (c *c_client) doRequest(
 	
 	// NOTE: Pin all go-allocated refs that will be accessed by onGoPacketCompletion after submit(). 
 	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	pinner.Pin(&req)
 	pinner.Pin(data)
 	pinner.Pin(result)
 	pinner.Pin(packet)
-	defer pinner.Unpin()
 	
-	C.tb_client_submit(c.tb_client, packet)
+	// Lock the mutex when accessing the `c.tb_client` handle. 
+	c.mutex.Lock()
+	if c.tb_client != nil {
+		C.tb_client_submit(c.tb_client, packet)
+		c.mutex.Unlock()
+	} else {
+		c.mutex.Unlock()
+		return 0, errors.ErrClientClosed{}
+	}
 
 	// Wait for the request to complete.
 	<-req.ready
@@ -248,7 +246,7 @@ func onGoPacketCompletion(
 	// Get the request from the packet user data.
 	req := (*request)(unsafe.Pointer(packet.user_data))
 
-	var wrote C.uint32_t
+	var wrote C.uint32_t = 0
 	if result_len > 0 && result_ptr != nil {
 		op := C.TB_OPERATION(packet.operation)
 

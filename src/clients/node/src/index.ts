@@ -102,6 +102,8 @@ export interface Client {
 }
 
 export function createClient (args: ClientInitArgs): Client {
+  // Context becomes null when `destroy` is called. After that point, further `request` Promises
+  // throw a shutdown Error. This prevents tb_client calls from happening after tb_client_deinit().
   let context: Context | null = binding.init({
     cluster_id: args.cluster_id,
     replica_addresses: Buffer.from(args.replica_addresses.join(',')),
