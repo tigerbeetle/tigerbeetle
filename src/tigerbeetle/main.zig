@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const fmt = std.fmt;
 const mem = std.mem;
 const os = std.os;
-const log_main = std.log.scoped(.main);
+const log = std.log.scoped(.main);
 
 const vsr = @import("vsr");
 const constants = vsr.constants;
@@ -221,7 +221,7 @@ const Command = struct {
 
         try vsr.format(Storage, allocator, options, &command.storage, &superblock);
 
-        log_main.info("{}: formatted: cluster={} replica_count={}", .{
+        log.info("{}: formatted: cluster={} replica_count={}", .{
             options.replica,
             options.cluster,
             options.replica_count,
@@ -283,7 +283,7 @@ const Command = struct {
 
         const grid_cache_size_warn = 1024 * 1024 * 1024;
         if (grid_cache_size < grid_cache_size_warn) {
-            log_main.warn("Grid cache size of {}MiB is small. See --cache-grid", .{
+            log.warn("Grid cache size of {}MiB is small. See --cache-grid", .{
                 @divExact(grid_cache_size, 1024 * 1024),
             });
         }
@@ -294,24 +294,24 @@ const Command = struct {
         var multiversion: ?vsr.multiversioning.Multiversion =
             if (builtin.target.os.tag != .linux)
         blk: {
-            log_main.info("multiversioning: currently only supported on linux.", .{});
+            log.info("multiversioning: currently only supported on linux.", .{});
             break :blk null;
         } else if (constants.config.process.release.value ==
             vsr.multiversioning.Release.minimum.value)
         blk: {
-            log_main.info(
+            log.info(
                 "multiversioning: disabled for development ({}) release.",
                 .{constants.config.process.release},
             );
             break :blk null;
         } else if (args.development) blk: {
-            log_main.info("multiversioning: disabled due to --development.", .{});
+            log.info("multiversioning: disabled due to --development.", .{});
             break :blk null;
         } else if (args.experimental) blk: {
-            log_main.info("multiversioning: disabled due to --experimental.", .{});
+            log.info("multiversioning: disabled due to --experimental.", .{});
             break :blk null;
         } else if (constants.aof_recovery) blk: {
-            log_main.info("multiversioning: disabled due to aof_recovery.", .{});
+            log.info("multiversioning: disabled due to aof_recovery.", .{});
             break :blk null;
         } else try vsr.multiversioning.Multiversion.init(
             allocator,
@@ -338,10 +338,10 @@ const Command = struct {
         else
             &releases_bundled_baseline;
 
-        log_main.info("release={}", .{config.process.release});
-        log_main.info("release_client_min={}", .{config.process.release_client_min});
-        log_main.info("releases_bundled={any}", .{releases_bundled.const_slice()});
-        log_main.info("git_commit={?s}", .{config.process.git_commit});
+        log.info("release={}", .{config.process.release});
+        log.info("release_client_min={}", .{config.process.release_client_min});
+        log.info("releases_bundled={any}", .{releases_bundled.const_slice()});
+        log.info("git_commit={?s}", .{config.process.git_commit});
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
@@ -387,24 +387,24 @@ const Command = struct {
 
         // Note that this does not account for the fact that any allocations will be rounded up to
         // the nearest page by `std.heap.page_allocator`.
-        log_main.info("{}: Allocated {}MiB during replica init", .{
+        log.info("{}: Allocated {}MiB during replica init", .{
             replica.replica,
             @divFloor(counting_allocator.size, 1024 * 1024),
         });
-        log_main.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
+        log.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
             replica.replica,
             @divFloor(grid_cache_size, 1024 * 1024),
             @divFloor(args.lsm_forest_node_count * constants.lsm_manifest_node_size, 1024 * 1024),
         });
 
-        log_main.info("{}: cluster={}: listening on {}", .{
+        log.info("{}: cluster={}: listening on {}", .{
             replica.replica,
             replica.cluster,
             replica.message_bus.process.accept_address,
         });
 
         if (constants.aof_recovery) {
-            log_main.warn(
+            log.warn(
                 "{}: started in AOF recovery mode. This is potentially dangerous - if it's" ++
                     " unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.",
                 .{replica.replica},
@@ -412,7 +412,7 @@ const Command = struct {
         }
 
         if (constants.verify) {
-            log_main.warn("{}: started with constants.verify - expect reduced performance. " ++
+            log.warn("{}: started with constants.verify - expect reduced performance. " ++
                 "Recompile with -Dconfig=production if unexpected.", .{replica.replica});
         }
 
@@ -436,7 +436,7 @@ const Command = struct {
                 fn thread_main() void {
                     var buf: [1]u8 = .{0};
                     _ = std.io.getStdIn().read(&buf) catch {};
-                    log_main.info("stdin closed, exiting", .{});
+                    log.info("stdin closed, exiting", .{});
                     std.process.exit(0);
                 }
             }.thread_main, .{});
@@ -508,7 +508,7 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
     } else {
-        log_main.err("{}: release_execute: release {} is not available;" ++
+        log.err("{}: release_execute: release {} is not available;" ++
             "upgrade (or downgrade) the binary", .{
             replica.replica,
             release,
