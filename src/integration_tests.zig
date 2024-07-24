@@ -276,15 +276,17 @@ test "help/version smoke" {
 
     const tigerbeetle = try tigerbeetle_exe(shell);
 
+    // The substring is chosen to be mostly stable, but from (near) the end of the output, to catch
+    // a missed buffer flush.
     inline for (.{
-        "{tigerbeetle} --help",
-        "{tigerbeetle} inspect --help",
-        "{tigerbeetle} version",
+        .{ .command = "{tigerbeetle} --help", .substring = "tigerbeetle repl" },
+        .{ .command = "{tigerbeetle} inspect --help", .substring = "tables --tree" },
+        .{ .command = "{tigerbeetle} version", .substring = "TigerBeetle version" },
         // TODO(Multiversioning): Uncomment once this is fixed.
-        // "{tigerbeetle} version --verbose",
-    }) |command| {
-        const status_ok =
-            try shell.exec_status_ok(command, .{ .tigerbeetle = tigerbeetle });
-        try std.testing.expect(status_ok);
+        // .{ .command = "{tigerbeetle} version --verbose", .substring = "process.aof_recovery=" },
+    }) |check| {
+        const output = try shell.exec_stdout(check.command, .{ .tigerbeetle = tigerbeetle });
+        try std.testing.expect(output.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, output, check.substring) != null);
     }
 }
