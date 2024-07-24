@@ -1474,6 +1474,32 @@ test "Cluster: eviction: no_session" {
     try expectEqual(c.eviction_reason(), null);
 }
 
+test "Cluster: eviction: session_too_low" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(0, 1);
+    var c = t.clients(1, constants.clients_max);
+
+    t.replica(.R_).record(.C0, .incoming, .request);
+    try c0.request(1, 1);
+
+    // Evict C0. (C0 doesn't know this yet, though).
+    try c.request(constants.clients_max, constants.clients_max);
+    try expectEqual(c0.eviction_reason(), null);
+
+    // Replay C0's register message.
+    t.replica(.R_).replay_recorded();
+    t.run();
+
+    // C0 now has a session again, but the client only knows the old (evicted) session number.
+    try c0.request(2, 1);
+    try expectEqual(c0.eviction_reason(), .session_too_low);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
@@ -1497,6 +1523,7 @@ const ProcessSelector = enum {
     B4,
     B5,
     C_, // all clients
+    C0,
 };
 
 const TestContext = struct {
@@ -1683,6 +1710,7 @@ const TestContext = struct {
                 .append_assume_capacity(.{ .replica = @intCast((view + 4) % replica_count) }),
             .B5 => array
                 .append_assume_capacity(.{ .replica = @intCast((view + 5) % replica_count) }),
+            .C0 => array.append_assume_capacity(.{ .client = t.cluster.clients[0].id }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
                     for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
