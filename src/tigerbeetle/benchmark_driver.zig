@@ -14,6 +14,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
+const vsr = @import("vsr");
 const assert = std.debug.assert;
 const ChildProcess = std.process.Child;
 
@@ -23,6 +24,9 @@ const benchmark_load = @import("./benchmark_load.zig");
 const log = std.log;
 
 pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !void {
+    if (args.napkin) {
+        return try vsr.napkin.print_napkin_math_to_stdout();
+    }
     // Note: we intentionally don't use a temporary directory for this data file, and instead just
     // put it into CWD, as performance of TigerBeetle very much depends on a specific file system.
     const data_file = args.file orelse data_file: {
