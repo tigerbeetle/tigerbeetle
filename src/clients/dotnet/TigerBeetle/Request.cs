@@ -10,48 +10,45 @@ namespace TigerBeetle;
 
 internal abstract class NativeRequest
 {
-    private Tuple<IMemoryOwner<TBPacket>, MemoryHandle>? packetMemory = null;
+    private GCHandle? packetHandle = null;
 
     protected unsafe void Submit(NativeClient nativeClient, TBOperation operation, void* data, int len)
     {
-        AssertTrue(packetMemory == null);
-
-        var packetOwner = MemoryPool<TBPacket>.Shared.Rent(1);
-        var packetHandle = packetOwner.Memory.Pin();
-        packetMemory = Tuple.Create(packetOwner, packetHandle);
-
+        // Create a handle to the request to ensure it's not GC'd while the packet is submitted.
         var requestHandle = GCHandle.Alloc(this, GCHandleType.Normal);
 
-        var packet = (TBPacket*)packetHandle.Pointer;
-        packet->next = null;
-        packet->userData = GCHandle.ToIntPtr(requestHandle);
-        packet->operation = (byte)operation;
-        packet->data = (IntPtr)data;
-        packet->dataSize = (uint)len;
-        packet->status = PacketStatus.Ok;
+        // Create a handle to the packet itself to keep it pinned in memory for the C client.
+        AssertTrue(packetHandle == null, "Submitting from an already pending NativeRequest");
+        packetHandle = GCHandle.Alloc(new TBPacket
+        {
+            next = null,
+            userData = GCHandle.ToIntPtr(requestHandle),
+            operation = (byte)operation,
+            data = (IntPtr)data,
+            dataSize = (uint)len,
+            status = PacketStatus.Ok,
+        }, GCHandleType.Pinned);
 
-        nativeClient.Submit(packet);
+        nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
     }
 
     public static unsafe void OnComplete(TBPacket* packet, ReadOnlySpan<byte> result)
     {
+        // Extract info from the packet before freeing it.
         var status = packet->status;
         var operation = packet->operation;
         var requestHandle = GCHandle.FromIntPtr(packet->userData);
 
-        AssertTrue(requestHandle.IsAllocated && requestHandle.Target != null, "Invalid GCHandle given to NativeRequest.Complete packet");
-        var self = (NativeRequest)requestHandle.Target!;
+        // Extract the request from the requestHandle.
+        var request = (NativeRequest)requestHandle.Target!;
         requestHandle.Free();
 
-        AssertTrue(self.packetMemory != null, "NativeRequest completed without pinned packet memory");
-        (var packetOwner, var packetHandle) = self.packetMemory!;
-        self.packetMemory = null;
+        // Free the packet.
+        AssertTrue((IntPtr)packet == (request.packetHandle!).Value.AddrOfPinnedObject());
+        request.packetHandle.Value.Free();
+        request.packetHandle = null;
 
-        AssertTrue(packet == (TBPacket*)packetHandle.Pointer, "Mismatching pointer given to NativeRequest.Complete handler");
-        packetHandle.Dispose();
-        packetOwner.Dispose();
-
-        self.Complete(status, operation, result);
+        request.Complete(status, operation, result);
     }
 
     public abstract void Complete(PacketStatus status, byte operation, ReadOnlySpan<byte> result);
