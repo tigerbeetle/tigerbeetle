@@ -50,7 +50,7 @@ cwd_stack_count: usize,
 // ChildProcess's cwd, which is required to be a path, rather than a file descriptor. This buffer
 // is used to materialize the path to cwd when spawning a new process.
 //   <https://github.com/ziglang/zig/issues/5190>
-cwd_path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined,
+cwd_path_buffer: [std.fs.max_path_bytes]u8 = undefined,
 
 env: std.process.EnvMap,
 
