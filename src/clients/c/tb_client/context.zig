@@ -219,7 +219,8 @@ pub fn ContextType(
 
         pub fn deinit(self: *Context) void {
             // Only one thread calls deinit() and it's UB for any further Context interaction.
-            assert(!self.shutdown.swap(true, .release));
+            const already_shutdown = self.shutdown.swap(true, .release);
+            assert(!already_shutdown);
 
             // Wake up the run() thread for it to observe shutdowm=true, cancel inflight/pending
             // packets, and finish running.
@@ -263,9 +264,14 @@ pub fn ContextType(
             }
 
             // Cancel the request_inflight packet if any.
+            //
+            // TODO: Look into completing the inflight packet with a different error than 
+            // `error.ClientShutdown`, allow the client user to make a more informed decision 
+            // e.g. retrying the inflight packet and just abandoning the ClientShutdown ones.
             if (self.client.request_inflight) |*inflight| {
                 if (inflight.message.header.operation != .register) {
                     const packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                    assert(packet.next == null); // Inflight packet should not be pending.
                     self.cancel(packet);
                 }
             }
@@ -414,6 +420,7 @@ pub fn ContextType(
             const user_data: UserData = @bitCast(raw_user_data);
             const self = user_data.self;
             const packet = user_data.packet;
+            assert(packet.next == null); // (previously) inflight packet should not be pending.
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             // The submit() call may complete it inline so keep submitting until theres an inflight.
@@ -495,7 +502,10 @@ pub fn ContextType(
 
         fn on_submit(implementation: *ContextImplementation, packet: *Packet) void {
             const self = get_context(implementation);
-            assert(!self.shutdown.load(.acquire));
+
+            const already_shutdown = self.shutdown.load(.acquire);
+            assert(!already_shutdown);
+
             self.submitted.push(packet);
             self.signal.notify();
         }

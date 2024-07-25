@@ -171,6 +171,7 @@ fn create(
     return try translate.create_external(env, client);
 }
 
+// Javascript is single threaded so no synchronization is necessary for closing/accessing a client.
 fn destroy(env: c.napi_env, context: c.napi_value) !void {
     const client_ptr = try translate.value_external(
         env,
