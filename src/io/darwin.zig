@@ -428,6 +428,8 @@ pub const IO = struct {
         );
     }
 
+    pub const OpenatError = posix.OpenError || posix.UnexpectedError;
+
     pub const ReadError = error{
         WouldBlock,
         NotOpenForReading,

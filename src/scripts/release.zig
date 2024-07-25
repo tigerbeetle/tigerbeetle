@@ -25,7 +25,9 @@ const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
+
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
+const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
@@ -57,6 +59,11 @@ const multiversion_epoch = "0.15.3";
 
 /// This commit references https://github.com/tigerbeetle/tigerbeetle/pull/1935.
 const multiversion_epoch_commit = "035c895bf85f5106d94f08cac49719994344880e";
+
+/// This tag references https://github.com/tigerbeetle/tigerbeetle/pull/1935. Have it as an explicit
+/// tag in addition to multiversion_epoch_commit, so it's not just a random commit SHA that's
+/// important. This is later asserted to resolve to the same commit.
+const multiversion_epoch_tag = "0.15.3-multiversion-1";
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     assert(builtin.target.os.tag == .linux);
@@ -182,6 +189,11 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         fatal("can't find llvm-objcopy", .{});
     };
 
+    shell.project_root.deleteTree("multiversion-build") catch {};
+    var multiversion_build_dir = try shell.project_root.makeOpenPath("multiversion-build", .{});
+    defer shell.project_root.deleteTree("multiversion-build") catch {};
+    defer multiversion_build_dir.close();
+
     // We shell out to `zip` for creating archives, so we need an absolute path here.
     const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
 
@@ -204,11 +216,20 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         "aarch64-linux",
     };
 
+    // Explicitly write out zeros for the header, to compute the checksum.
+    var header = std.mem.zeroes(multiversioning.MultiversionHeader);
+
+    var header_file_empty = try shell.project_root.createFile(
+        "multiversion-build/multiversion-empty.header",
+        .{ .exclusive = true },
+    );
+    try header_file_empty.writeAll(std.mem.asBytes(&header));
+    header_file_empty.close();
+
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`. MacOS is special cased below --- we use an extra step to merge x86 and arm binaries
     // into one.
     // TODO: use std.Target here
-    defer shell.project_root.deleteFile("dist/tigerbeetle-multiversion-test") catch {};
     inline for (.{ true, false }) |debug| {
         const debug_suffix = if (debug) "-debug" else "";
         inline for (targets) |target| {
@@ -245,109 +266,88 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             );
             defer shell.project_root.deleteFile(exe_name) catch {};
 
-            if (!windows) {
-                const allocator = shell.arena.allocator();
-                const current_checksum: u128 = blk: {
-                    const current_binary = try shell.project_root.openFile(exe_name, .{
-                        .mode = .read_only,
-                    });
-                    defer current_binary.close();
+            const current_checksum = try checksum_file(
+                shell,
+                exe_name,
+                multiversion_binary_size_max,
+            );
 
-                    const current_binary_contents = try current_binary.readToEndAlloc(
-                        allocator,
-                        multiversion_binary_size_max,
-                    );
-                    break :blk multiversioning.checksum.checksum(current_binary_contents);
-                };
+            const header_path = "multiversion-build/multiversion-" ++ target ++ debug_suffix ++
+                ".header";
+            const body_path = "multiversion-build/multiversion-" ++ target ++ debug_suffix ++
+                ".body";
 
-                const past_versions = try build_multiversion_body(
-                    shell,
-                    target,
-                    debug,
-                    "multiversion.body",
-                );
-                defer shell.project_root.deleteFile("multiversion.body") catch {};
+            const past_versions = try build_multiversion_body(
+                shell,
+                target,
+                debug,
+                body_path,
+            );
 
-                // Explicitly write out zeros for the header, to compute the checksum.
-                var header = std.mem.zeroes(multiversioning.MultiversionHeader);
+            // Use objcopy to add in our new body, as well as its header - even though the
+            // header is still zero!
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined" ++
+                " --add-section .tb_mvb={body_path}" ++
+                " --set-section-flags .tb_mvb=contents,noload,readonly" ++
+                " --add-section .tb_mvh=multiversion-build/multiversion-empty.header" ++
+                " --set-section-flags .tb_mvh=contents,noload,readonly {exe_name}", .{
+                .body_path = body_path,
+                .llvm_objcopy = llvm_objcopy,
+                .exe_name = exe_name,
+            });
 
-                var header_file = try shell.project_root.createFile("multiversion.header", .{
-                    .truncate = true,
-                });
-                defer shell.project_root.deleteFile("multiversion.header") catch {};
-                try header_file.writeAll(std.mem.asBytes(&header));
-                header_file.close();
+            // Take the checksum of the binary, with the zeroed header.
+            const checksum_binary_without_header = try checksum_file(
+                shell,
+                exe_name,
+                multiversion_binary_size_max,
+            );
 
-                // Use objcopy to add in our new body, as well as its header - even though the
-                // header is still zero!
-                try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined" ++
-                    " --add-section .tb_mvb=multiversion.body" ++
-                    " --set-section-flags .tb_mvb=contents,noload,readonly" ++
-                    " --add-section .tb_mvh=multiversion.header" ++
-                    " --set-section-flags .tb_mvh=contents,noload,readonly {exe_name}", .{
-                    .llvm_objcopy = llvm_objcopy,
-                    .exe_name = exe_name,
-                });
+            header = multiversioning.MultiversionHeader{
+                .current_release = (try multiversioning.Release.parse(
+                    info.release_triple,
+                )).value,
+                .current_checksum = current_checksum,
+                .current_flags = .{
+                    .debug = debug,
+                    .visit = true,
+                },
+                .past = past_versions,
+                .checksum_binary_without_header = checksum_binary_without_header,
+            };
+            header.checksum_header = header.calculate_header_checksum();
 
-                // Take the checksum of the binary, with the zero'd header.
-                const checksum_binary_without_header: u128 = blk: {
-                    const current_binary = try shell.project_root.openFile(exe_name, .{
-                        .mode = .read_only,
-                    });
-                    defer current_binary.close();
+            const header_file = try shell.project_root.createFile(header_path, .{
+                .exclusive = true,
+            });
 
-                    const current_binary_contents = try current_binary.readToEndAlloc(
-                        allocator,
-                        multiversion_binary_size_max,
-                    );
-                    break :blk multiversioning.checksum.checksum(current_binary_contents);
-                };
+            try header_file.writeAll(std.mem.asBytes(&header));
+            header_file.close();
 
-                header = multiversioning.MultiversionHeader{
-                    .current_release = (try multiversioning.Release.parse(
-                        info.release_triple,
-                    )).value,
-                    .current_checksum = current_checksum,
-                    .current_flags = .{
-                        .debug = debug,
-                        .visit = true,
-                    },
-                    .past = past_versions,
-                    .checksum_binary_without_header = checksum_binary_without_header,
-                };
-                header.checksum_header = header.calculate_header_checksum();
+            // Replace the header with the final version.
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined" ++
+                " --remove-section .tb_mvh --add-section .tb_mvh={header_path}" ++
+                " --set-section-flags .tb_mvh=contents,noload,readonly {exe_name}", .{
+                .header_path = header_path,
+                .llvm_objcopy = llvm_objcopy,
+                .exe_name = exe_name,
+            });
+            shell.project_root.deleteFile("multiversion.header") catch {};
 
-                header_file = try shell.project_root.createFile("multiversion.header", .{
-                    .truncate = true,
-                });
-                // Cleaned up by a defer higher up.
-
-                try header_file.writeAll(std.mem.asBytes(&header));
-                header_file.close();
-
-                // Replace the header with the final version.
-                try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined" ++
-                    " --remove-section .tb_mvh --add-section .tb_mvh=multiversion.header" ++
-                    " --set-section-flags .tb_mvh=contents,noload,readonly {exe_name}", .{
-                    .llvm_objcopy = llvm_objcopy,
-                    .exe_name = exe_name,
-                });
-
-                // If running on x86_64-linux (our only supported CI system, asserted in main())
-                // copy the binary somewhere to use it to test built multiversion binaries.
-                if (std.mem.eql(u8, target, "x86_64-linux")) {
-                    try shell.exec("cp {exe_name} dist/tigerbeetle-multiversion-test", .{
-                        .exe_name = exe_name,
-                    });
-                }
-
-                // Finally, check the binary produced using both the old and new versions.
-                // TODO(multiversioning): Do the check with the old binary downloaded, if it wasn't
-                // the epoch.
-                try shell.exec("dist/tigerbeetle-multiversion-test multiversion {exe_name}", .{
+            // If running on x86_64-linux (our only supported CI system, asserted in main())
+            // copy the binary somewhere to use it to test built multiversion binaries.
+            if (std.mem.eql(u8, target, "x86_64-linux")) {
+                try shell.exec("cp {exe_name} multiversion-build/tigerbeetle", .{
                     .exe_name = exe_name,
                 });
             }
+
+            // Finally, check the binary produced using both the old and new versions.
+            // TODO(multiversioning): Do the check with the old binary downloaded, if it wasn't
+            // the epoch.
+            try shell.exec("multiversion-build/tigerbeetle multiversion {exe_name}", .{
+                .exe_name = exe_name,
+            });
 
             const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
             try shell.exec("zip -9 {zip_path} {exe_name}", .{
@@ -382,9 +382,102 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 shell.project_root,
                 "tigerbeetle-" ++ target,
             );
+            try shell.project_root.deleteFile("tigerbeetle");
         }
 
-        try build_macos_universal_binary(shell, "tigerbeetle", &.{
+        const past_versions_aarch64 = try build_multiversion_body(
+            shell,
+            "aarch64-macos",
+            debug,
+            "multiversion-build/multiversion-aarch64-macos" ++ debug_suffix ++ ".body",
+        );
+
+        const past_versions_x86_64 = try build_multiversion_body(
+            shell,
+            "x86_64-macos",
+            debug,
+            "multiversion-build/multiversion-x86_64-macos" ++ debug_suffix ++ ".body",
+        );
+
+        try macos_universal_binary_build(
+            shell,
+            "multiversion-build/tigerbeetle-macos-empty-headers" ++ debug_suffix,
+            &.{
+                .{
+                    .cpu_type = std.macho.CPU_TYPE_ARM64,
+                    .cpu_subtype = std.macho.CPU_SUBTYPE_ARM_ALL,
+                    .path = "tigerbeetle-aarch64-macos",
+                },
+                .{
+                    .cpu_type = std.macho.CPU_TYPE_X86_64,
+                    .cpu_subtype = std.macho.CPU_SUBTYPE_X86_64_ALL,
+                    .path = "tigerbeetle-x86_64-macos",
+                },
+                .{
+                    .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64),
+                    .cpu_subtype = 0x00000000,
+                    .path = "multiversion-build/multiversion-aarch64-macos" ++ debug_suffix ++
+                        ".body",
+                },
+                .{
+                    .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64),
+                    .cpu_subtype = 0x00000000,
+                    .path = "multiversion-build/multiversion-empty.header",
+                },
+                .{
+                    .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64),
+                    .cpu_subtype = 0x00000000,
+                    .path = "multiversion-build/multiversion-x86_64-macos" ++ debug_suffix ++
+                        ".body",
+                },
+                .{
+                    .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64),
+                    .cpu_subtype = 0x00000000,
+                    .path = "multiversion-build/multiversion-empty.header",
+                },
+            },
+        );
+        const checksum_binary_without_header = try checksum_file(
+            shell,
+            "multiversion-build/tigerbeetle-macos-empty-headers" ++ debug_suffix,
+            multiversion_binary_size_max,
+        );
+
+        inline for (
+            .{ "aarch64-macos", "x86_64-macos" },
+            .{ past_versions_aarch64, past_versions_x86_64 },
+        ) |target, past_versions| {
+            const current_checksum = try checksum_file(
+                shell,
+                "tigerbeetle-" ++ target,
+                multiversion_binary_size_max,
+            );
+
+            const header_name = "multiversion-build/multiversion-" ++ target ++ debug_suffix ++
+                ".header";
+            const header_file = try shell.project_root.createFile(header_name, .{
+                .exclusive = true,
+            });
+
+            header = multiversioning.MultiversionHeader{
+                .current_release = (try multiversioning.Release.parse(
+                    info.release_triple,
+                )).value,
+                .current_checksum = current_checksum,
+                .current_flags = .{
+                    .debug = debug,
+                    .visit = true,
+                },
+                .past = past_versions,
+                .checksum_binary_without_header = checksum_binary_without_header,
+            };
+            header.checksum_header = header.calculate_header_checksum();
+
+            try header_file.writeAll(std.mem.asBytes(&header));
+            header_file.close();
+        }
+
+        try macos_universal_binary_build(shell, "tigerbeetle", &.{
             .{
                 .cpu_type = std.macho.CPU_TYPE_ARM64,
                 .cpu_subtype = std.macho.CPU_SUBTYPE_ARM_ALL,
@@ -395,8 +488,33 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 .cpu_subtype = std.macho.CPU_SUBTYPE_X86_64_ALL,
                 .path = "tigerbeetle-x86_64-macos",
             },
+            .{
+                .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64),
+                .cpu_subtype = 0x00000000,
+                .path = "multiversion-build/multiversion-aarch64-macos" ++ debug_suffix ++ ".body",
+            },
+            .{
+                .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64),
+                .cpu_subtype = 0x00000000,
+                .path = "multiversion-build/multiversion-aarch64-macos" ++ debug_suffix ++
+                    ".header",
+            },
+            .{
+                .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64),
+                .cpu_subtype = 0x00000000,
+                .path = "multiversion-build/multiversion-x86_64-macos" ++ debug_suffix ++ ".body",
+            },
+            .{
+                .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64),
+                .cpu_subtype = 0x00000000,
+                .path = "multiversion-build/multiversion-x86_64-macos" ++ debug_suffix ++ ".header",
+            },
         });
-        defer shell.project_root.deleteFile("tigerbeetle") catch {};
+
+        // Finally, check the binary produced using both the old and new versions.
+        // TODO(multiversioning): Do the check with the old binary downloaded, if it wasn't
+        // the epoch.
+        try shell.exec("multiversion-build/tigerbeetle multiversion tigerbeetle", .{});
 
         try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
         try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
@@ -417,14 +535,20 @@ fn build_tigerbeetle_epoch(shell: *Shell) !void {
     var section = try shell.open_section("build tigerbeetle epoch");
     defer section.close();
 
-    try shell.exec("git clone https://github.com/tigerbeetle/tigerbeetle.git tigerbeetle-epoch", .{});
+    try shell.exec(
+        "git clone https://github.com/tigerbeetle/tigerbeetle.git tigerbeetle-epoch",
+        .{},
+    );
 
     try shell.pushd("./tigerbeetle-epoch");
     defer shell.popd();
 
-    try shell.exec("git checkout {commit}", .{
-        .commit = multiversion_epoch_commit,
+    try shell.exec("git checkout {tag}", .{
+        .tag = multiversion_epoch_tag,
     });
+    const multiversion_epoch_tag_commit = try shell.exec_stdout("git rev-parse HEAD", .{});
+    assert(std.mem.eql(u8, multiversion_epoch_commit, multiversion_epoch_tag_commit));
+
     try shell.exec("scripts/install_zig.sh", .{});
     try shell.exec("zig/zig build scripts -- release --run-number={run_number} --sha={commit} " ++
         "--language=zig --build", .{
@@ -443,23 +567,25 @@ fn build_multiversion_body(
     debug: bool,
     body_path: []const u8,
 ) !multiversioning.MultiversionHeader.PastReleases {
-    assert(std.mem.indexOf(u8, target, "-linux") != null);
-
     var section = try shell.open_section("build multiversion body");
     defer section.close();
+
+    const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
+    const macos = comptime std.mem.indexOf(u8, target, "macos") != null;
+    const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
 
     // TODO(multiversioning): Normally this would download and extract the last published release
     // of TigerBeetle. For the 0.15.4 release, it uses the custom build provided in
     // `tigerbeetle-epoch/` by build_tigerbeetle_epoch().
     try shell.exec("unzip -d tigerbeetle-epoch/dist/extracted " ++
         "tigerbeetle-epoch/dist/tigerbeetle/tigerbeetle-{target}{debug}.zip", .{
-        .target = target,
+        .target = if (macos) "universal-macos" else target,
         .debug = if (debug) "-debug" else "",
     });
     defer shell.project_root.deleteTree("tigerbeetle-epoch/dist/extracted") catch {};
 
     const past_binary = try shell.project_root
-        .openFile("./tigerbeetle-epoch/dist/extracted/tigerbeetle", .{ .mode = .read_only });
+        .openFile("./tigerbeetle-epoch/dist/extracted/" ++ exe_name, .{ .mode = .read_only });
     defer past_binary.close();
 
     const past_binary_contents = try past_binary.readToEndAlloc(
@@ -469,7 +595,7 @@ fn build_multiversion_body(
 
     const checksum: u128 = multiversioning.checksum.checksum(past_binary_contents);
 
-    const body_file = try shell.project_root.createFile(body_path, .{ .truncate = true });
+    const body_file = try shell.project_root.createFile(body_path, .{ .exclusive = true });
     defer body_file.close();
 
     try body_file.writeAll(past_binary_contents);
@@ -511,12 +637,15 @@ fn build_multiversion_body(
 /// deprecated architectures hold the multiversion header and body.
 /// It's much easier to embed and read them here, then to do it in the inner MachO binary, like
 /// we do with ELF or PE.
-fn build_macos_universal_binary(
+fn macos_universal_binary_build(
     shell: *Shell,
     output_path: []const u8,
     binaries: []const struct { cpu_type: i32, cpu_subtype: i32, path: []const u8 },
 ) !void {
-    var section = try shell.open_section("build macos universal binary");
+    // Needed to compile, because of the .mode lower down.
+    if (builtin.target.os.tag != .linux) @panic("unsupported platform");
+
+    var section = try shell.open_section("macos universal binary build");
     defer section.close();
 
     // The offset start is relative to the end of the headers, rounded up to the alignment.
@@ -552,7 +681,10 @@ fn build_macos_universal_binary(
         current_offset = std.mem.alignForward(u32, current_offset, alignment);
     }
 
-    var output_file = try shell.project_root.createFile(output_path, .{ .truncate = false });
+    var output_file = try shell.project_root.createFile(output_path, .{
+        .exclusive = true,
+        .mode = 0o777,
+    });
     defer output_file.close();
 
     const fat_header = std.macho.fat_header{
@@ -581,6 +713,70 @@ fn build_macos_universal_binary(
 
         try output_file.writeAll(binary_contents);
     }
+}
+
+/// Does the opposite of macos_universal_binary_build: allows extracting inner binaries from a
+/// universal binary.
+fn macos_universal_binary_extract(
+    shell: *Shell,
+    input_path: []const u8,
+    filter: struct { cpu_type: i32, cpu_subtype: i32 },
+    output_path: []const u8,
+) !void {
+    var section = try shell.open_section("macos universal binary extract");
+    defer section.close();
+
+    const input_file = try shell.project_root.openFile(input_path, .{ .mode = .read_only });
+    defer input_file.close();
+    const binary_contents = try input_file.readToEndAlloc(
+        shell.arena.allocator(),
+        multiversion_binary_size_max,
+    );
+
+    const fat_header = std.mem.bytesAsValue(
+        std.macho.fat_header,
+        binary_contents[0..@sizeOf(std.macho.fat_header)],
+    );
+    assert(fat_header.magic == std.macho.FAT_CIGAM);
+
+    for (0..@byteSwap(fat_header.nfat_arch)) |i| {
+        const header_offset = @sizeOf(std.macho.fat_header) + @sizeOf(std.macho.fat_arch) * i;
+        const fat_arch = std.mem.bytesAsValue(
+            std.macho.fat_arch,
+            binary_contents[header_offset..][0..@sizeOf(std.macho.fat_arch)],
+        );
+        assert(@byteSwap(fat_arch.@"align") == 14);
+
+        if (@byteSwap(fat_arch.cputype) == filter.cpu_type and
+            @byteSwap(fat_arch.cpusubtype) == filter.cpu_subtype)
+        {
+            const offset = @byteSwap(fat_arch.offset);
+            const size = @byteSwap(fat_arch.size);
+
+            const output_file = try shell.project_root.openFile(output_path, .{
+                .mode = .read_only,
+            });
+            defer output_file.close();
+            try output_file.writeAll(binary_contents[offset..][0..size]);
+
+            break;
+        }
+    } else {
+        @panic("no matching inner binary found.");
+    }
+}
+
+fn checksum_file(shell: *Shell, path: []const u8, size_max: u32) !u128 {
+    const file = try shell.project_root.openFile(path, .{
+        .mode = .read_only,
+    });
+    defer file.close();
+
+    const contents = try file.readToEndAlloc(
+        shell.arena.allocator(),
+        size_max,
+    );
+    return multiversioning.checksum.checksum(contents);
 }
 
 fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
