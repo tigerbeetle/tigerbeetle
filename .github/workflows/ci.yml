@@ -12,6 +12,7 @@ on:
 
 jobs:
   smoke:
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +24,7 @@ jobs:
       - run: ./.github/ci/docs_check.sh
 
   test_alpine:
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     container:
       image: alpine
@@ -40,6 +42,7 @@ jobs:
       - run: zig/zig build test
 
   test_ubuntu:
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +59,7 @@ jobs:
       - run: zig/zig build -Dtracer-backend=tracy
 
   test_aof:
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,6 +69,7 @@ jobs:
       - run: ./.github/ci/test_aof.sh
 
   test_windows:
+    if: github.ref != 'refs/heads/main'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +80,7 @@ jobs:
       - run: .\zig\zig build clients:c:sample
 
   test_macos:
+    if: github.ref != 'refs/heads/main'
     strategy:
       matrix:
         include:
@@ -92,6 +98,7 @@ jobs:
 
 
   clients:
+    if: github.ref != 'refs/heads/main'
     strategy:
       matrix:
         include:
