@@ -144,8 +144,17 @@ internal sealed class NativeClient : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint resultLen)
     {
-        AssertTrue(ctx == IntPtr.Zero);
-        OnComplete(packet, result, resultLen);
+        try
+        {
+            AssertTrue(ctx == IntPtr.Zero);
+            OnComplete(packet, result, resultLen);
+        }
+        catch (Exception e)
+        {
+            // The caller is unmanaged code, so if an exception occurs here we should force panic.
+            Console.WriteLine(e);
+            Environment.FailFast("Failed to process a packet in the OnCompletionCallback", e);
+        }
     }
 
     private unsafe static void OnComplete(TBPacket* packet, byte* result, uint resultLen)
