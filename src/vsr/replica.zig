@@ -1695,6 +1695,17 @@ pub fn ReplicaType(
                 self.panic_if_hash_chain_would_break_in_the_same_view(previous, message.header);
             }
 
+            // If we are going to overwrite an op from the previous WAL wrap, assert that it's part
+            // of a checkpoint that is durable on a commit quorum of replicas. See `op_repair_min`
+            // for why op=prepare_max+1 being committed implies that.
+            const op_overwritten = (self.op + 1) -| constants.journal_slot_count;
+            const op_checkpoint_previous = self.op_checkpoint() -|
+                constants.vsr_checkpoint_interval;
+            if (op_overwritten > op_checkpoint_previous) {
+                assert(self.commit_max >
+                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?);
+            }
+
             // We must advance our op and set the header as dirty before replicating and
             // journalling. The primary needs this before its journal is outrun by any
             // prepare_ok quorum:
@@ -5862,8 +5873,9 @@ pub fn ReplicaType(
         /// Availability condition: each committed op must be present either in a quorum of WALs or
         /// in a quorum of checkpoints.
         ///
-        /// If op=trigger+1 is committed, the corresponding checkpoint is durably present on
-        /// a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
+        /// If op=prepare_max+1 is committed, a quorum of replicas have moved to the next
+        /// prepare_max, which in turn signals that the corresponding checkpoint is durably present
+        /// on a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
         /// both conditions.
         ///
         /// When called from status=recovering_head or status=recovering, the caller is responsible
@@ -5879,13 +5891,15 @@ pub fn ReplicaType(
                     break :repair_min 0;
                 }
 
-                const op_checkpoint_trigger =
-                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+                const prepare_max_for_current_checkpoint =
+                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
                 // After state sync, commit_max might lag behind checkpoint_op.
-                maybe(self.commit_max < op_checkpoint_trigger);
-                if (self.commit_max > op_checkpoint_trigger) {
+                maybe(self.commit_max < prepare_max_for_current_checkpoint);
+                if (self.commit_max > prepare_max_for_current_checkpoint) {
                     if (self.op == self.op_checkpoint()) {
                         // Don't allow "op_repair_min > op_head".
+                        // See https://github.com/tigerbeetle/tigerbeetle/pull/1589 for why
+                        // this is required.
                         break :repair_min self.op_checkpoint();
                     }
                     break :repair_min self.op_checkpoint() + 1;
@@ -9477,7 +9491,7 @@ pub fn ReplicaType(
             // could lead to permanent unavailability.
             if (candidate.checkpoint_op == self.op_checkpoint_next()) {
                 if (header.into_const(.commit)) |h| {
-                    if (h.commit <= self.op_checkpoint_next_trigger()) return;
+                    if (h.commit <= self.op_prepare_max()) return;
                 } else {
                     return;
                 }
