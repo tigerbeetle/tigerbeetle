@@ -5,6 +5,8 @@ zig-out/
 tb
 zigcc*
 *.tigerbeetle
+main
+main.exe
 
 pkg/native/aarch64-linux/
 pkg/native/aarch64-macos/

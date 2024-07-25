@@ -21,7 +21,6 @@ public sealed class InitializationException : Exception
                 case InitializationStatus.OutOfMemory: return "Internal client ran out of memory";
                 case InitializationStatus.AddressInvalid: return "Replica addresses format is invalid";
                 case InitializationStatus.AddressLimitExceeded: return "Replica addresses limit exceeded";
-                case InitializationStatus.ConcurrencyMaxInvalid: return "Invalid concurrencyMax";
                 case InitializationStatus.SystemResources: return "Internal client ran out of system resources";
                 case InitializationStatus.NetworkSubsystem: return "Internal client had unexpected networking issues";
                 default: return "Unknown error status " + Status;

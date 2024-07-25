@@ -96,17 +96,13 @@ tbAddress := os.Getenv("TB_ADDRESS")
 if len(tbAddress) == 0 {
 	tbAddress = "3000"
 }
-client, err := NewClient(ToUint128(0), []string{tbAddress}, 256)
+client, err := NewClient(ToUint128(0), []string{tbAddress})
 if err != nil {
 	log.Printf("Error creating client: %s", err)
 	return
 }
 defer client.Close()
 ```
-
-The third argument to `NewClient` is a `uint` max concurrency
-setting. `256` is a good default and can increase to `8192`
-as you need increased throughput.
 
 The following are valid addresses:
 * `3000` (interpreted as `127.0.0.1:3000`)

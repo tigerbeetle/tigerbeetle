@@ -20,7 +20,6 @@ const (
 	TIGERBEETLE_CLUSTER_ID      uint64 = 0
 	TIGERBEETLE_REPLICA_ID      uint32 = 0
 	TIGERBEETLE_REPLICA_COUNT   uint32 = 1
-	TIGERBEETLE_CONCURRENCY_MAX uint   = 8192
 )
 
 func HexStringToUint128(value string) types.Uint128 {
@@ -73,7 +72,7 @@ func WithClient(t testing.TB, withClient func(Client)) {
 	})
 
 	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
-	client, err := NewClient(types.ToUint128(TIGERBEETLE_CLUSTER_ID), addresses, TIGERBEETLE_CONCURRENCY_MAX)
+	client, err := NewClient(types.ToUint128(TIGERBEETLE_CLUSTER_ID), addresses)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +252,6 @@ func doTestClient(t *testing.T, client Client) {
 
 		// NB: this test is _not_ parallel, so can use up all the concurrency.
 		const TRANSFERS_MAX = 1_000_000
-		concurrencyMax := make(chan struct{}, TIGERBEETLE_CONCURRENCY_MAX)
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
@@ -270,7 +268,6 @@ func doTestClient(t *testing.T, client Client) {
 			go func(i int) {
 				defer waitGroup.Done()
 
-				concurrencyMax <- struct{}{}
 				results, err := client.CreateTransfers([]types.Transfer{
 					{
 						ID:              types.ID(),
@@ -281,7 +278,7 @@ func doTestClient(t *testing.T, client Client) {
 						Code:            1,
 					},
 				})
-				<-concurrencyMax
+
 				if err != nil {
 					t.Fatal(err)
 				}

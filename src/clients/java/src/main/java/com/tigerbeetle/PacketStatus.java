@@ -8,8 +8,9 @@ package com.tigerbeetle;
 public enum PacketStatus {
     Ok((byte) 0),
     TooMuchData((byte) 1),
-    InvalidOperation((byte) 2),
-    InvalidDataSize((byte) 3);
+    ClientShutdown((byte) 2),
+    InvalidOperation((byte) 3),
+    InvalidDataSize((byte) 4);
 
     public final byte value;
 
