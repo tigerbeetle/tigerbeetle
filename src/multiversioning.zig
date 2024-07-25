@@ -1118,7 +1118,7 @@ pub const Multiversion = struct {
             },
             .windows => {
                 // Includes the null byte, that utf8ToUtf16LeWithNull needs.
-                var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+                var buffer: [std.fs.max_path_bytes]u8 = undefined;
                 var fixed_allocator = std.heap.FixedBufferAllocator.init(&buffer);
                 const allocator = fixed_allocator.allocator();
 
@@ -1169,7 +1169,7 @@ pub const Multiversion = struct {
 };
 
 pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     const native_self_exe_path = try std.fs.selfExePath(&buf);
 
     if (builtin.target.os.tag == .linux and std.mem.eql(
