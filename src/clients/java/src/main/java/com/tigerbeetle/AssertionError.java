@@ -1,7 +1,5 @@
 package com.tigerbeetle;
 
-// Silence PMD lint when overloading java.lang.*
-@SuppressWarnings("PMD.UnnecessaryFullyQualifiedName")
 public final class AssertionError extends java.lang.AssertionError {
     AssertionError(String format, Object... args) {
         super(String.format(format, args));

@@ -52,8 +52,6 @@ final class JNILoader {
         gnu,
         musl;
 
-        // Silence PMD lint for IOException (common pattern: https://github.com/pmd/pmd/issues/1904)
-        @SuppressWarnings("PMD.EmptyCatchBlock")
         public static Abi getAbi(OS os) {
             if (os != OS.linux)
                 return Abi.none;
