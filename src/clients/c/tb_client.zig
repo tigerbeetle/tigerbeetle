@@ -21,13 +21,18 @@ pub const tb_status_t = enum(c_int) {
 };
 
 pub const tb_operation_t = StateMachine.Operation;
-pub const tb_completion_t = *const fn (
+pub const tb_completion_t = ?*const fn (
     context: usize,
     client: tb_client_t,
     packet: *tb_packet_t,
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void;
+
+pub const tb_sync_submit_result_t = extern struct {
+    result_ptr: ?[*]const u8,
+    result_len: u32,
+};
 
 const constants = @import("../../constants.zig");
 const IO = @import("../../io.zig").IO;
@@ -137,6 +142,14 @@ pub fn submit(
 ) callconv(.C) void {
     const context = client_to_context(client);
     (context.submit_fn)(context, packet);
+}
+
+pub fn submit_sync(
+    client: tb_client_t,
+    packet: *tb_packet_t,
+) callconv(.C) tb_sync_submit_result_t {
+    const context = client_to_context(client);
+    return context.submit_sync_fn(context, packet);
 }
 
 pub fn deinit(

@@ -222,6 +222,11 @@ typedef struct tb_packet_t {
 
 typedef void* tb_client_t; 
 
+typedef struct tb_sync_submit_result_t {
+    uint8_t* result_ptr;
+    uint32_t result_len;
+} tb_sync_submit_result_t;
+
 typedef enum TB_STATUS {
     TB_STATUS_SUCCESS = 0,
     TB_STATUS_UNEXPECTED = 1,
@@ -264,6 +269,11 @@ void tb_client_release_packet(
 );
 
 void tb_client_submit(
+    tb_client_t client,
+    tb_packet_t* packet
+);
+
+tb_sync_submit_result_t tb_client_submit_sync(
     tb_client_t client,
     tb_packet_t* packet
 );

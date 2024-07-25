@@ -21,6 +21,7 @@ const type_mappings = .{
     .{ tb_client.tb_packet_acquire_status_t, "TB_PACKET_ACQUIRE_STATUS" },
     .{ tb_client.tb_packet_t, "tb_packet_t" },
     .{ tb_client.tb_client_t, "tb_client_t" },
+    .{ tb_client.tb_sync_submit_result_t, "tb_sync_submit_result_t" },
     .{ tb_client.tb_status_t, "TB_STATUS" },
 };
 
@@ -229,6 +230,11 @@ pub fn main() !void {
         \\);
         \\
         \\void tb_client_submit(
+        \\    tb_client_t client,
+        \\    tb_packet_t* packet
+        \\);
+        \\
+        \\void tb_client_submit_sync(
         \\    tb_client_t client,
         \\    tb_packet_t* packet
         \\);

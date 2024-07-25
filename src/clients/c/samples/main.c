@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
         strlen(address),      //
         32,                   // ConcurrencyMax, could be 1, since it's a single-threaded example.
         (uintptr_t)NULL,      // No need for a global context.
-        &on_completion        // Completion callback.
+        NULL        // Completion callback.
     );
 
     if (status != TB_STATUS_SUCCESS) {
@@ -302,9 +302,15 @@ void send_request(
         exit(-1);
     }
 
-    // Submits the request asynchronously:
+    // Submits the request SYNChronously:
     ctx->completed = false;
-    tb_client_submit(client, packet);
+    tb_sync_submit_result_t response = tb_client_submit_sync(client, packet);
+    printf("response ptr: ");
+    for (int i = 0; i< response.result_len; i++) {
+        printf("%u ", response.result_ptr[i]);
+    }
+    printf("\n");
+    printf("response len: %d\n", response.result_len);
 
     // Uses a condvar to sync this thread with the callback:
     while (!ctx->completed) {
@@ -379,7 +385,7 @@ void send_request(
 
     // Submits the request asynchronously:
     ctx->completed = false;
-    tb_client_submit(client, packet);
+    tb_client_submit_sync(client, packet);
 
     // Uses a condvar to sync this thread with the callback:
     while (!ctx->completed) {

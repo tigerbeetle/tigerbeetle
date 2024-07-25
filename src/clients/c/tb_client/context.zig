@@ -31,6 +31,7 @@ pub const ContextImplementation = struct {
     acquire_packet_fn: *const fn (*ContextImplementation, out: *?*Packet) PacketAcquireStatus,
     release_packet_fn: *const fn (*ContextImplementation, *Packet) void,
     submit_fn: *const fn (*ContextImplementation, *Packet) void,
+    submit_sync_fn: *const fn (*ContextImplementation, *Packet) api.tb_sync_submit_result_t,
     deinit_fn: *const fn (*ContextImplementation) void,
 };
 
@@ -48,6 +49,11 @@ pub const PacketAcquireStatus = enum(c_int) {
     concurrency_max_exceeded,
     shutdown,
 };
+
+var sync_mutex = std.Thread.Mutex{};
+var sync_condition = std.Thread.Condition{};
+var sync_result_bytes: [(1024 * 1024) - 256]u8 = undefined;
+var sync_result: api.tb_sync_submit_result_t = undefined;
 
 pub fn ContextType(
     comptime Client: type,
@@ -208,12 +214,31 @@ pub fn ContextType(
             );
             errdefer context.client.deinit(context.allocator);
 
-            context.completion_fn = completion_fn;
+            if (completion_fn == null) {
+                context.completion_fn = struct {
+                    fn completion_fn_sync(_: usize, _: tb_client_t, _: *Packet, bytes: ?[*]const u8, len: u32) callconv(.C) void {
+                        std.log.info("Inside sync completion handler - response len: {}", .{len});
+                        std.log.info("bytes: {any}", .{bytes.?[0..len]});
+                        sync_mutex.lock();
+                        stdx.copy_disjoint(.exact, u8, sync_result_bytes[0..len], bytes.?[0..len]);
+                        sync_result = .{
+                            .result_len = len,
+                            .result_ptr = &sync_result_bytes,
+                        };
+                        sync_mutex.unlock();
+                        sync_condition.signal();
+                    }
+                }.completion_fn_sync;
+            } else {
+                context.completion_fn = completion_fn;
+            }
+
             context.implementation = .{
                 .completion_ctx = completion_ctx,
                 .acquire_packet_fn = Context.on_acquire_packet,
                 .release_packet_fn = Context.on_release_packet,
                 .submit_fn = Context.on_submit,
+                .submit_sync_fn = Context.on_submit_sync,
                 .deinit_fn = Context.on_deinit,
             };
 
@@ -485,12 +510,12 @@ pub fn ContextType(
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,
                 };
-                return (self.completion_fn)(completion_ctx, tb_client, packet, null, 0);
+                return (self.completion_fn.?)(completion_ctx, tb_client, packet, null, 0);
             };
 
             // The packet completed normally.
             packet.status = .ok;
-            (self.completion_fn)(completion_ctx, tb_client, packet, bytes.ptr, @intCast(bytes.len));
+            (self.completion_fn.?)(completion_ctx, tb_client, packet, bytes.ptr, @intCast(bytes.len));
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {
@@ -524,6 +549,18 @@ pub fn ContextType(
             const self = get_context(implementation);
             self.submitted.push(packet);
             self.signal.notify();
+        }
+
+        fn on_submit_sync(implementation: *ContextImplementation, packet: *Packet) api.tb_sync_submit_result_t {
+            std.log.info("on_submit_sync: calling on_submit and locking mutex", .{});
+            on_submit(implementation, packet);
+
+            sync_mutex.lock();
+            defer sync_mutex.unlock();
+            sync_condition.wait(&sync_mutex);
+
+            std.log.info("on_submit_sync: condition unlocked", .{});
+            return sync_result;
         }
 
         fn on_deinit(implementation: *ContextImplementation) void {

@@ -16,6 +16,7 @@ comptime {
     @export(tb.acquire_packet, .{ .name = "tb_client_acquire_packet", .linkage = .strong });
     @export(tb.release_packet, .{ .name = "tb_client_release_packet", .linkage = .strong });
     @export(tb.submit, .{ .name = "tb_client_submit", .linkage = .strong });
+    @export(tb.submit_sync, .{ .name = "tb_client_submit_sync", .linkage = .strong });
     @export(tb.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
 }
 
