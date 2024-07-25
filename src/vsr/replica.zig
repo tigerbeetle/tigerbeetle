@@ -9493,7 +9493,7 @@ pub fn ReplicaType(
             // could lead to permanent unavailability.
             if (candidate.checkpoint_op == self.op_checkpoint_next()) {
                 if (header.into_const(.commit)) |h| {
-                    if (h.commit <= self.op_checkpoint_next_trigger()) return;
+                    if (h.commit <= self.op_prepare_max()) return;
                 } else {
                     return;
                 }
