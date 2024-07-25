@@ -15,27 +15,32 @@ final class NativeClient implements AutoCloseable {
      */
     private static final class NativeHandle implements Runnable {
         private long handle;
+        private final Object lock = new Object();
 
         public NativeHandle(long handle) {
             assert handle != 0;
             this.handle = handle;
         }
 
-        public synchronized void submit(final Request<?> request) throws Exception {
-            if (handle == 0) {
-                throw new IllegalStateException("Client is closed");
-            }
+        public void submit(final Request<?> request) throws Exception {
+            synchronized (lock) {
+                if (handle == 0) {
+                    throw new IllegalStateException("Client is closed");
+                }
 
-            NativeClient.submit(handle, request);
+                NativeClient.submit(handle, request);
+            }
         }
 
         public synchronized void close() {
-            if (handle == 0) {
-                return;
-            }
+            synchronized (lock) {
+                if (handle == 0) {
+                    return;
+                }
 
-            clientDeinit(handle);
-            handle = 0;
+                clientDeinit(handle);
+                handle = 0;
+            }
         }
 
         @Override

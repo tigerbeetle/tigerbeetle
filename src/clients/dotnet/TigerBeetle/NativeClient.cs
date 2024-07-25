@@ -11,6 +11,7 @@ namespace TigerBeetle;
 internal sealed class NativeClient : IDisposable
 {
     private volatile IntPtr client;
+    private readonly object syncRoot = new object();
 
     private unsafe delegate InitializationStatus InitFunction(
                 IntPtr* out_client,
@@ -109,15 +110,12 @@ internal sealed class NativeClient : IDisposable
     {
         unsafe
         {
-            if (client != IntPtr.Zero)
+            lock (syncRoot)
             {
-                lock (this)
+                if (client != IntPtr.Zero)
                 {
-                    if (client != IntPtr.Zero)
-                    {
-                        tb_client_submit(client, packet);
-                        return;
-                    }
+                    tb_client_submit(client, packet);
+                    return;
                 }
             }
 
@@ -128,15 +126,12 @@ internal sealed class NativeClient : IDisposable
 
     public void Dispose()
     {
-        if (client != IntPtr.Zero)
+        lock (syncRoot)
         {
-            lock (this)
+            if (client != IntPtr.Zero)
             {
-                if (client != IntPtr.Zero)
-                {
-                    tb_client_deinit(client);
-                    this.client = IntPtr.Zero;
-                }
+                tb_client_deinit(client);
+                this.client = IntPtr.Zero;
             }
         }
     }
