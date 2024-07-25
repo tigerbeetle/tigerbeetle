@@ -250,11 +250,11 @@ const CliArgs = union(enum) {
         \\        Set the number of replicas participating in replication.
         \\
         \\  --addresses=<addresses>
-        \\        Set the addresses of all replicas in the cluster.
+        \\        The addresses of all replicas in the cluster.
         \\        Accepts a comma-separated list of IPv4/IPv6 addresses with port numbers.
+        \\        The order is significant and must match across all replicas and clients.
         \\        Either the address or port number (but not both) may be omitted,
-        \\        in which case a default of {[default_address]s} or {[default_port]d}
-        \\        will be used.
+        \\        in which case a default of {[default_address]s} or {[default_port]d} will be used.
         \\        "addresses[i]" corresponds to replica "i".
         \\
         \\  --cache-grid=<size><KiB|MiB|GiB>
