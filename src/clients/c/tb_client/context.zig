@@ -265,8 +265,8 @@ pub fn ContextType(
 
             // Cancel the request_inflight packet if any.
             //
-            // TODO: Look into completing the inflight packet with a different error than 
-            // `error.ClientShutdown`, allow the client user to make a more informed decision 
+            // TODO: Look into completing the inflight packet with a different error than
+            // `error.ClientShutdown`, allow the client user to make a more informed decision
             // e.g. retrying the inflight packet and just abandoning the ClientShutdown ones.
             if (self.client.request_inflight) |*inflight| {
                 if (inflight.message.header.operation != .register) {

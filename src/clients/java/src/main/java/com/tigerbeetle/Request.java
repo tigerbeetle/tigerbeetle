@@ -78,7 +78,7 @@ abstract class Request<TResponse extends Batch> {
             throw new IllegalArgumentException("Empty batch");
     }
 
-    public void beginRequest() throws Exception {
+    public void beginRequest() {
         nativeClient.submit(this);
     }
 

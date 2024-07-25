@@ -22,7 +22,7 @@ final class NativeClient implements AutoCloseable {
             this.handle = handle;
         }
 
-        public void submit(final Request<?> request) throws Exception {
+        public void submit(final Request<?> request) {
             synchronized (lock) {
                 if (handle == 0) {
                     throw new IllegalStateException("Client is closed");
@@ -84,7 +84,7 @@ final class NativeClient implements AutoCloseable {
         }
     }
 
-    public void submit(final Request<?> request) throws Exception {
+    public void submit(final Request<?> request) {
         this.handle.submit(request);
     }
 

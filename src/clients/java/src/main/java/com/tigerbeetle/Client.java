@@ -70,7 +70,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CreateAccountResultBatch createAccounts(final AccountBatch batch) throws Exception {
+    public CreateAccountResultBatch createAccounts(final AccountBatch batch) {
         final var request = BlockingRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -87,8 +87,8 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<CreateAccountResultBatch> createAccountsAsync(final AccountBatch batch)
-            throws Exception {
+    public CompletableFuture<CreateAccountResultBatch> createAccountsAsync(
+            final AccountBatch batch) {
         final var request = AsyncRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
@@ -104,7 +104,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public AccountBatch lookupAccounts(final IdBatch batch) throws Exception {
+    public AccountBatch lookupAccounts(final IdBatch batch) {
         final var request = BlockingRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -120,8 +120,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<AccountBatch> lookupAccountsAsync(final IdBatch batch)
-            throws Exception {
+    public CompletableFuture<AccountBatch> lookupAccountsAsync(final IdBatch batch) {
         final var request = AsyncRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
@@ -139,7 +138,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CreateTransferResultBatch createTransfers(final TransferBatch batch) throws Exception {
+    public CreateTransferResultBatch createTransfers(final TransferBatch batch) {
         final var request = BlockingRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -156,7 +155,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<CreateTransferResultBatch> createTransfersAsync(
-            final TransferBatch batch) throws Exception {
+            final TransferBatch batch) {
         final var request = AsyncRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
@@ -173,7 +172,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public TransferBatch lookupTransfers(final IdBatch batch) throws Exception {
+    public TransferBatch lookupTransfers(final IdBatch batch) {
         final var request = BlockingRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -189,8 +188,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<TransferBatch> lookupTransfersAsync(final IdBatch batch)
-            throws Exception {
+    public CompletableFuture<TransferBatch> lookupTransfersAsync(final IdBatch batch) {
         final var request = AsyncRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
@@ -206,7 +204,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public TransferBatch getAccountTransfers(final AccountFilter filter) throws Exception {
+    public TransferBatch getAccountTransfers(final AccountFilter filter) {
         final var request = BlockingRequest.getAccountTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -221,8 +219,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<TransferBatch> getAccountTransfersAsync(final AccountFilter filter)
-            throws Exception {
+    public CompletableFuture<TransferBatch> getAccountTransfersAsync(final AccountFilter filter) {
         final var request = AsyncRequest.getAccountTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.getFuture();
@@ -238,7 +235,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public AccountBalanceBatch getAccountBalances(final AccountFilter filter) throws Exception {
+    public AccountBalanceBatch getAccountBalances(final AccountFilter filter) {
         final var request = BlockingRequest.getAccountBalances(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -254,7 +251,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<AccountBalanceBatch> getAccountBalancesAsync(
-            final AccountFilter filter) throws Exception {
+            final AccountFilter filter) {
         final var request = AsyncRequest.getAccountBalances(this.nativeClient, filter);
         request.beginRequest();
         return request.getFuture();
@@ -269,7 +266,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public AccountBatch queryAccounts(final QueryFilter filter) throws Exception {
+    public AccountBatch queryAccounts(final QueryFilter filter) {
         final var request = BlockingRequest.queryAccounts(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -284,8 +281,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<AccountBatch> queryAccountsAsync(final QueryFilter filter)
-            throws Exception {
+    public CompletableFuture<AccountBatch> queryAccountsAsync(final QueryFilter filter) {
         final var request = AsyncRequest.queryAccounts(this.nativeClient, filter);
         request.beginRequest();
         return request.getFuture();
@@ -300,7 +296,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public TransferBatch queryTransfers(final QueryFilter filter) throws Exception {
+    public TransferBatch queryTransfers(final QueryFilter filter) {
         final var request = BlockingRequest.queryTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -315,8 +311,7 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<TransferBatch> queryTransfersAsync(final QueryFilter filter)
-            throws Exception {
+    public CompletableFuture<TransferBatch> queryTransfersAsync(final QueryFilter filter) {
         final var request = AsyncRequest.queryTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.getFuture();
