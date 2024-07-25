@@ -1414,7 +1414,7 @@ fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
 fn parse_pe(buffer: []const u8) !HeaderBodyOffsets {
     const coff = try std.coff.Coff.init(buffer, false);
 
-    if ((try coff.getStrtab()) == null) return error.InvalidPE;
+    if (!coff.is_image) return error.InvalidPE;
 
     const header_section = coff.getSectionByName(".tb_mvh");
     const body_section = coff.getSectionByName(".tb_mvb");
