@@ -40,11 +40,13 @@ internal abstract class NativeRequest
         var requestHandle = GCHandle.FromIntPtr(packet->userData);
 
         // Extract the request from the requestHandle.
+        AssertTrue(requestHandle.IsAllocated && requestHandle.Target != null, "Invalid GCHandle given to NativeRequest.Complete packet");
         var request = (NativeRequest)requestHandle.Target!;
         requestHandle.Free();
 
         // Free the packet.
-        AssertTrue((IntPtr)packet == (request.packetHandle!).Value.AddrOfPinnedObject());
+        AssertTrue(request.packetHandle != null, "NativeRequest completed without a valid packet");
+        AssertTrue((IntPtr)packet == request.packetHandle!.Value.AddrOfPinnedObject(), "Mismatching packet tied to a NativeRequest");
         request.packetHandle.Value.Free();
         request.packetHandle = null;
 

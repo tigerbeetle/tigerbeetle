@@ -10,8 +10,11 @@ namespace TigerBeetle;
 
 internal sealed class NativeClient : IDisposable
 {
+    // Once the client handle is set, all interactions with it are sychronized using `lock(this)`
+    // to prevent threads from accidentally using a deinitialized client handle. It's safe to
+    // synchronize on the NativeClient object as it's private to Client and can't be arbitrarily
+    // or externally locked by the library user.
     private volatile IntPtr client;
-    private readonly object syncRoot = new object();
 
     private unsafe delegate InitializationStatus InitFunction(
                 IntPtr* out_client,
@@ -110,7 +113,7 @@ internal sealed class NativeClient : IDisposable
     {
         unsafe
         {
-            lock (syncRoot)
+            lock (this)
             {
                 if (client != IntPtr.Zero)
                 {
@@ -126,7 +129,7 @@ internal sealed class NativeClient : IDisposable
 
     public void Dispose()
     {
-        lock (syncRoot)
+        lock (this)
         {
             if (client != IntPtr.Zero)
             {
@@ -147,7 +150,6 @@ internal sealed class NativeClient : IDisposable
         catch (Exception e)
         {
             // The caller is unmanaged code, so if an exception occurs here we should force panic.
-            Console.WriteLine(e);
             Environment.FailFast("Failed to process a packet in the OnCompletionCallback", e);
         }
     }

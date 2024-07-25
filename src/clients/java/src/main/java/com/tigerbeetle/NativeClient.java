@@ -12,35 +12,34 @@ final class NativeClient implements AutoCloseable {
      * the cleaner to dispose native memory when the `Client` instance is GCed. Also implements
      * `Runnable` to be usable as the cleaner action.
      * https://docs.oracle.com/javase%2F9%2Fdocs%2Fapi%2F%2F/java/lang/ref/Cleaner.html
+     *
+     * Methods are synchronized to ensure tb_client functions aren't called on an invalid handle.
+     * Safe to synchronize on NativeHandle object as it's private to NativeClient and can't be
+     * arbitrarily/externally locked by the library user.
      */
     private static final class NativeHandle implements Runnable {
         private long handle;
-        private final Object lock = new Object();
 
         public NativeHandle(long handle) {
             assert handle != 0;
             this.handle = handle;
         }
 
-        public void submit(final Request<?> request) {
-            synchronized (lock) {
-                if (handle == 0) {
-                    throw new IllegalStateException("Client is closed");
-                }
-
-                NativeClient.submit(handle, request);
+        public synchronized void submit(final Request<?> request) {
+            if (handle == 0) {
+                throw new IllegalStateException("Client is closed");
             }
+
+            NativeClient.submit(handle, request);
         }
 
         public synchronized void close() {
-            synchronized (lock) {
-                if (handle == 0) {
-                    return;
-                }
-
-                clientDeinit(handle);
-                handle = 0;
+            if (handle == 0) {
+                return;
             }
+
+            clientDeinit(handle);
+            handle = 0;
         }
 
         @Override
