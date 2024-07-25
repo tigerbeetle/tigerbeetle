@@ -222,7 +222,7 @@ pub fn ContextType(
             const already_shutdown = self.shutdown.swap(true, .release);
             assert(!already_shutdown);
 
-            // Wake up the run() thread for it to observe shutdowm=true, cancel inflight/pending
+            // Wake up the run() thread for it to observe shutdown=true, cancel inflight/pending
             // packets, and finish running.
             self.signal.notify();
             self.thread.join();
