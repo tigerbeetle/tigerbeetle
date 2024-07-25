@@ -1698,14 +1698,12 @@ pub fn ReplicaType(
             // If we are going to overwrite an op from the previous WAL wrap, assert that it's part
             // of a checkpoint that is durable on a commit quorum of replicas. See `op_repair_min`
             // for why op=prepare_max+1 being committed implies that.
-            if ((self.op + 1) > constants.journal_slot_count) {
-                // The first op from the former checkpoint is the first to be overwritten.
-                if ((self.op + 1) - constants.journal_slot_count ==
-                    (self.op_checkpoint() + 1) -| constants.vsr_checkpoint_interval)
-                {
-                    assert(self.commit_max >
-                        vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?);
-                }
+            const op_overwritten = (self.op + 1) -| constants.journal_slot_count;
+            const op_checkpoint_previous = self.op_checkpoint() -|
+                constants.vsr_checkpoint_interval;
+            if (op_overwritten > op_checkpoint_previous) {
+                assert(self.commit_max >
+                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?);
             }
 
             // We must advance our op and set the header as dirty before replicating and
