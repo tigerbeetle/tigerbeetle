@@ -6219,11 +6219,13 @@ pub fn ReplicaType(
 
             if (self.op < self.op_repair_max()) return;
 
-            // Request any missing or disconnected headers:
-            if (self.journal.find_latest_headers_break_between(
+            const header_break = self.journal.find_latest_headers_break_between(
                 self.op_repair_min(),
                 self.op,
-            )) |range| {
+            );
+
+            // Request any missing or disconnected headers:
+            if (header_break) |range| {
                 assert(!self.solo());
                 assert(range.op_min >= self.op_repair_min());
                 assert(range.op_max < self.op);
@@ -6251,15 +6253,40 @@ pub fn ReplicaType(
                         .op_max = range.op_max,
                     }),
                 );
-                return;
+
+                if (range.op_max > self.op_checkpoint()) {
+                    // If there's a header break after checkpoint, wait until it is repaired.
+                    // Otherwise, concurrently repair headers before checkpoint, while trying
+                    // to commit everything after the checkpoint.
+                    return;
+                }
             }
-            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
+            assert(self.valid_hash_chain_between(
+                @min(self.op_checkpoint() + 1, self.op),
+                self.op,
+            ));
 
             if (self.journal.dirty.count > 0) {
                 // Request and repair any dirty or faulty prepares.
-                self.repair_prepares();
-            } else if (self.client_replies.faulty.findFirstSet()) |slot| {
-                // After we have all prepares, repair replies.
+                const op_min = if (header_break) |range|
+                    range.op_max + 1
+                else
+                    self.op_repair_min();
+                self.repair_prepares(op_min);
+            }
+
+            if (self.commit_min < self.commit_max) {
+                // Try to the commit prepares we already have, even if we don't have all of them.
+                // This helps when a replica is recovering from a crash and has a mostly intact
+                // journal, with just some prepares missing. We do have the headers and know
+                // that they form a valid hashchain. Committing may discover more faulty prepares
+                // and drive further repairs.
+                assert(!self.solo());
+                self.commit_journal();
+            }
+
+            if (self.client_replies.faulty.findFirstSet()) |slot| {
+                // Repair replies.
                 const entry = &self.client_sessions.entries[slot];
                 assert(!self.client_sessions.entries_free.isSet(slot));
                 assert(entry.session != 0);
@@ -6278,18 +6305,10 @@ pub fn ReplicaType(
                 );
             }
 
-            if (self.commit_min < self.commit_max) {
-                // Try to the commit prepares we already have, even if we don't have all of them.
-                // This helps when a replica is recovering from a crash and has a mostly intact
-                // journal, with just some prepares missing. We do have the headers and know
-                // that they form a valid hashchain. Committing may discover more faulty prepares
-                // and drive further repairs.
-                assert(!self.solo());
-                self.commit_journal();
-            }
+            if (header_break != null or self.journal.dirty.count > 0) return;
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                if (self.journal.dirty.count == 0 and self.commit_min == self.commit_max) {
+                if (self.commit_min == self.commit_max) {
                     if (self.commit_stage != .idle) {
                         // If we still have a commit running, we started it the last time we were
                         // primary, and its still running. Wait for it to finish before repairing
@@ -6674,14 +6693,17 @@ pub fn ReplicaType(
             }
         }
 
-        fn repair_prepares(self: *Self) void {
+        fn repair_prepares(self: *Self, op_min: u64) void {
             assert(self.status == .normal or self.status == .view_change);
+            assert(op_min <= self.op_checkpoint() + 1);
+            assert(op_min <= self.op);
+            assert(self.op_repair_min() <= op_min);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
             assert(self.op - self.op_checkpoint() <= constants.journal_slot_count);
-            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
+            assert(self.valid_hash_chain_between(op_min, self.op));
 
             if (self.op < constants.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
@@ -6716,7 +6738,7 @@ pub fn ReplicaType(
             // Repair prepares in chronological order. Older prepares will be overwritten by the
             // cluster earlier, so we prioritize their repair. This also encourages concurrent
             // commit/repair.
-            var op = self.op_repair_min();
+            var op = op_min;
             while (op <= self.op) : (op += 1) {
                 const slot = self.journal.slot_with_op(op).?;
                 if (self.journal.dirty.bit(slot)) {
