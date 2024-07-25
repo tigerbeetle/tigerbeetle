@@ -71,7 +71,9 @@ pub fn main() !void {
         },
         .multiversion => |*args| {
             var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-            const stdout = stdout_buffer.writer();
+            var stdout_writer = stdout_buffer.writer();
+            const stdout = stdout_writer.any();
+
             try vsr.multiversioning.print_information(allocator, args.path, stdout);
             try stdout_buffer.flush();
         },
@@ -449,7 +451,9 @@ const Command = struct {
 
     pub fn version(allocator: mem.Allocator, verbose: bool) !void {
         var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-        const stdout = stdout_buffer.writer();
+        var stdout_writer = stdout_buffer.writer();
+        const stdout = stdout_writer.any();
+
         try std.fmt.format(stdout, "TigerBeetle version {}\n", .{constants.semver});
 
         if (verbose) {
@@ -517,7 +521,7 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
         // the parent process exiting and the new process starting. Work around this by
         // deinit'ing Replica and storage before continuing.
         // We don't need to clean up all resources here, since the process will be terminated
-        // in any case; only the ones that would block a new process from starting up.
+        // in any case; only the resources that would block a new process from starting up.
         const storage = replica.superblock.storage;
         const fd = storage.fd;
         replica.deinit(replica.static_allocator.parent_allocator);

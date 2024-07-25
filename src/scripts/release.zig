@@ -27,6 +27,7 @@ const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
 
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
+const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
@@ -59,7 +60,8 @@ const multiversion_epoch = "0.15.3";
 /// This commit references https://github.com/tigerbeetle/tigerbeetle/pull/1935.
 const multiversion_epoch_commit = "035c895bf85f5106d94f08cac49719994344880e";
 
-/// As does this tag. Have it as an explicit tag, so it's not just a random commit SHA that's
+/// This tag references https://github.com/tigerbeetle/tigerbeetle/pull/1935. Have it as an explicit
+/// tag in addition to multiversion_epoch_commit, so it's not just a random commit SHA that's
 /// important. This is later asserted to resolve to the same commit.
 const multiversion_epoch_tag = "0.15.3-multiversion-1";
 
@@ -412,24 +414,24 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                     .path = "tigerbeetle-x86_64-macos",
                 },
                 .{
-                    .cpu_type = 0x00000001, // VAX == .tb_mvb for aarch64
+                    .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64),
                     .cpu_subtype = 0x00000000,
                     .path = "multiversion-build/multiversion-aarch64-macos" ++ debug_suffix ++
                         ".body",
                 },
                 .{
-                    .cpu_type = 0x00000002, // ROMP == .tb_mvh for aarch64
+                    .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64),
                     .cpu_subtype = 0x00000000,
                     .path = "multiversion-build/multiversion-empty.header",
                 },
                 .{
-                    .cpu_type = 0x00000004, // NS32032 == .tb_mvb for x86_64
+                    .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64),
                     .cpu_subtype = 0x00000000,
                     .path = "multiversion-build/multiversion-x86_64-macos" ++ debug_suffix ++
                         ".body",
                 },
                 .{
-                    .cpu_type = 0x00000005, // NS32332 == .tb_mvh for x86_64
+                    .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64),
                     .cpu_subtype = 0x00000000,
                     .path = "multiversion-build/multiversion-empty.header",
                 },
@@ -487,23 +489,23 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 .path = "tigerbeetle-x86_64-macos",
             },
             .{
-                .cpu_type = 0x00000001, // VAX == .tb_mvb for aarch64
+                .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64),
                 .cpu_subtype = 0x00000000,
                 .path = "multiversion-build/multiversion-aarch64-macos" ++ debug_suffix ++ ".body",
             },
             .{
-                .cpu_type = 0x00000002, // ROMP == .tb_mvh for aarch64
+                .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64),
                 .cpu_subtype = 0x00000000,
                 .path = "multiversion-build/multiversion-aarch64-macos" ++ debug_suffix ++
                     ".header",
             },
             .{
-                .cpu_type = 0x00000004, // NS32032 == .tb_mvb for x86_64
+                .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64),
                 .cpu_subtype = 0x00000000,
                 .path = "multiversion-build/multiversion-x86_64-macos" ++ debug_suffix ++ ".body",
             },
             .{
-                .cpu_type = 0x00000005, // NS32332 == .tb_mvh for x86_64
+                .cpu_type = @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64),
                 .cpu_subtype = 0x00000000,
                 .path = "multiversion-build/multiversion-x86_64-macos" ++ debug_suffix ++ ".header",
             },

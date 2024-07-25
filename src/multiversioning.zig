@@ -14,6 +14,18 @@ const elf = std.elf;
 pub const checksum = @import("vsr/checksum.zig");
 pub const multiversion_binary_size_max = constants.multiversion_binary_size_max;
 
+/// In order to embed multiversion headers and bodies inside a universal binary, we repurpose some
+/// old CPU Type IDs.
+/// These are valid (in the MachO spec) but ancient (macOS has never run on anything other than
+/// x86_64 / arm64) platforms. They were chosen so that it wouldn't be a random value, but also
+/// wouldn't be something that could be realistically encountered.
+pub const section_to_macho_cpu = enum(c_int) {
+    tb_mvb_aarch64 = 0x00000001, // VAX
+    tb_mvh_aarch64 = 0x00000002, // ROMP
+    tb_mvb_x86_64 = 0x00000004, // NS32032
+    tb_mvh_x86_64 = 0x00000005, // NS32332
+};
+
 const log = std.log.scoped(.multiversioning);
 
 /// Creates a virtual file backed by memory.
@@ -523,7 +535,7 @@ pub const Multiversion = struct {
         envp: [*:null]const ?[*:0]const u8,
     };
 
-    const ExePathFormat = enum { elf, pe, macho, auto };
+    const ExePathFormat = enum { elf, pe, macho, detect };
 
     io: *IO,
 
@@ -565,12 +577,12 @@ pub const Multiversion = struct {
         allocator: std.mem.Allocator,
         io: *IO,
         exe_path: [:0]const u8,
-        exe_path_format: enum { auto, native },
+        exe_path_format: enum { detect, native },
     ) !Multiversion {
         assert(std.fs.path.isAbsolute(exe_path));
 
         const multiversion_binary_size_max_by_format = switch (exe_path_format) {
-            .auto => constants.multiversion_binary_size_max,
+            .detect => constants.multiversion_binary_size_max,
             .native => constants.multiversion_binary_platform_size_max,
         };
 
@@ -672,7 +684,7 @@ pub const Multiversion = struct {
                     .macos => .macho,
                     else => @panic("unsupported platform"),
                 },
-                .auto => .auto,
+                .detect => .detect,
             },
 
             .args_envp = args_envp,
@@ -738,7 +750,7 @@ pub const Multiversion = struct {
         if (!self.timeout_start_enabled) return;
 
         // This is tested elsewhere, but needed to not codegen.
-        if (builtin.target.os.tag != .linux) return;
+        if (builtin.target.os.tag != .linux) unreachable;
 
         self.io.timeout(
             *Multiversion,
@@ -876,7 +888,7 @@ pub const Multiversion = struct {
             .elf => try parse_elf(source_buffer),
             .pe => try parse_pe(source_buffer),
             .macho => try parse_macho(source_buffer),
-            .auto => parse_elf(source_buffer) catch parse_pe(source_buffer) catch
+            .detect => parse_elf(source_buffer) catch parse_pe(source_buffer) catch
                 parse_macho(source_buffer) catch return error.NoValidPlatformDetected,
         };
 
@@ -894,6 +906,8 @@ pub const Multiversion = struct {
         // MachO's checksum_binary_without_header works slightly differently since there are
         // actually two headers, once for x86_64 and one for aarch64. It zeros them both.
         if (offsets.header_inactive_platform) |header_inactive_platform_offset| {
+            assert(offsets.format == .macho);
+
             const buffer = source_buffer[header_inactive_platform_offset..][0..@sizeOf(
                 MultiversionHeader,
             )];
@@ -1111,8 +1125,7 @@ pub const Multiversion = struct {
                 const target_path_w = std.unicode.utf8ToUtf16LeWithNull(
                     allocator,
                     self.target_path,
-                ) catch
-                    unreachable;
+                ) catch unreachable;
                 defer allocator.free(target_path_w);
 
                 // "The Unicode version of this function, CreateProcessW, can modify the contents of
@@ -1174,6 +1187,7 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
 
         return path;
     } else if (std.mem.indexOf(u8, native_self_exe_path, multiversion_uuid) != null) {
+        assert(builtin.target.os.tag == .windows or builtin.target.os.tag == .macos);
         // Similar to above, you _could_ call your binary "tigerbeetle-multiversion-...". This can't
         // be checked with an assert unfortunately.
 
@@ -1348,35 +1362,33 @@ fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
             std.macho.fat_arch,
             buffer[offset..][0..@sizeOf(std.macho.fat_arch)],
         );
+        const fat_arch_cpu_type = @byteSwap(fat_arch.cputype);
+
         if (builtin.target.cpu.arch == .aarch64) {
-            if (@byteSwap(fat_arch.cputype) == 0x00000001) {
-                // VAX == .tb_mvb for aarch64.
+            if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64)) {
                 assert(body_offset == null and body_size == null);
                 body_offset = @byteSwap(fat_arch.offset);
                 body_size = @byteSwap(fat_arch.size);
-            } else if (@byteSwap(fat_arch.cputype) == 0x00000002) {
-                // ROMP == .tb_mvh for aarch64.
+            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64)) {
                 assert(header_offset == null);
                 header_offset = @byteSwap(fat_arch.offset);
-            } else if (@byteSwap(fat_arch.cputype) == 0x00000005) {
-                // NS32332 == .tb_mvh for _x86_64_ - the opposite of what we're matching on.
+            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64)) {
+                // .tb_mvh for _x86_64_ - the opposite of what we're matching on above.
                 assert(header_inactive_platform_offset == null);
                 header_inactive_platform_offset = @byteSwap(fat_arch.offset);
             }
         }
 
         if (builtin.target.cpu.arch == .x86_64) {
-            if (@byteSwap(fat_arch.cputype) == 0x00000004) {
-                // NS32032 == .tb_mvb for x86_64
+            if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64)) {
                 assert(body_offset == null and body_size == null);
                 body_offset = @byteSwap(fat_arch.offset);
                 body_size = @byteSwap(fat_arch.size);
-            } else if (@byteSwap(fat_arch.cputype) == 0x00000005) {
-                // NS32332 == .tb_mvh for x86_64
+            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64)) {
                 assert(header_offset == null);
                 header_offset = @byteSwap(fat_arch.offset);
-            } else if (@byteSwap(fat_arch.cputype) == 0x00000002) {
-                // ROMP == .tb_mvh for _aarch64_ - the opposite of what we're matching on.
+            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64)) {
+                // .tb_mvh for _aarch64_ - the opposite of what we're matching on.
                 assert(header_inactive_platform_offset == null);
                 header_inactive_platform_offset = @byteSwap(fat_arch.offset);
             }
@@ -1401,6 +1413,8 @@ fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
 
 fn parse_pe(buffer: []const u8) !HeaderBodyOffsets {
     const coff = try std.coff.Coff.init(buffer, false);
+
+    if ((try coff.getStrtab()) == null) return error.InvalidPE;
 
     const header_section = coff.getSectionByName(".tb_mvh");
     const body_section = coff.getSectionByName(".tb_mvb");
@@ -1559,7 +1573,7 @@ test "parse_elf" {
 pub fn print_information(
     allocator: std.mem.Allocator,
     exe_path: [:0]const u8,
-    stdout: anytype,
+    output: std.io.AnyWriter,
 ) !void {
     var io = try IO.init(32, 0);
     defer io.deinit();
@@ -1574,23 +1588,22 @@ pub fn print_information(
         allocator,
         &io,
         absolute_exe_path_z,
-        .auto,
+        .detect,
     );
     defer multiversion.deinit(allocator);
 
     multiversion.open_sync() catch |err| {
-        try std.fmt.format(stdout, "multiversioning not enabled: {}\n", .{multiversion.stage.err});
+        try output.print("multiversioning not enabled: {}\n", .{err});
         return err;
     };
 
     assert(multiversion.stage == .ready);
 
-    try std.fmt.format(stdout, "multiversioning.exe_path={s}\n", .{exe_path});
-    try std.fmt.format(stdout, "multiversioning.absolute_exe_path={s}\n", .{absolute_exe_path});
+    try output.print("multiversioning.exe_path={s}\n", .{exe_path});
+    try output.print("multiversioning.absolute_exe_path={s}\n", .{absolute_exe_path});
 
     const header = multiversion.target_header.?;
-    try std.fmt.format(
-        stdout,
+    try output.print(
         "multiversioning.releases_bundled={any}\n",
         .{multiversion.releases_bundled.const_slice()},
     );
@@ -1601,7 +1614,7 @@ pub fn print_information(
             !std.mem.eql(u8, field, "past_padding") and
             !std.mem.eql(u8, field, "reserved"))
         {
-            try std.fmt.format(stdout, "multiversioning.{s}={any}\n", .{
+            try output.print("multiversioning.header.{s}={any}\n", .{
                 field,
                 if (comptime std.mem.eql(u8, field, "current_release"))
                     Release{ .value = @field(header, field) }
@@ -1612,8 +1625,8 @@ pub fn print_information(
     }
 
     try std.fmt.format(
-        stdout,
-        "multiversioning.past.count={}\n",
+        output,
+        "multiversioning.header.past.count={}\n",
         .{header.past.count},
     );
     inline for (comptime std.meta.fieldNames(MultiversionHeader.PastReleases)) |field| {
@@ -1623,24 +1636,24 @@ pub fn print_information(
                 release_list.append_assume_capacity(Release{ .value = release });
             }
 
-            try std.fmt.format(stdout, "multiversioning.past.{s}={any}\n", .{
+            try output.print("multiversioning.header.past.{s}={any}\n", .{
                 field,
                 release_list.const_slice(),
             });
         } else if (comptime std.mem.eql(u8, field, "git_commits")) {
-            try std.fmt.format(stdout, "multiversioning.past.{s}={{ ", .{field});
+            try output.print("multiversioning.header.past.{s}={{ ", .{field});
 
             for (@field(header.past, field)[0..header.past.count]) |*git_commit| {
-                try std.fmt.format(stdout, "{s} ", .{
+                try output.print("{s} ", .{
                     std.fmt.fmtSliceHexLower(git_commit),
                 });
             }
 
-            try std.fmt.format(stdout, "}}\n", .{});
+            try output.print("}}\n", .{});
         } else if (comptime (!std.mem.eql(u8, field, "count") and
             !std.mem.eql(u8, field, "flags_padding")))
         {
-            try std.fmt.format(stdout, "multiversioning.past.{s}={any}\n", .{
+            try output.print("multiversioning.header.past.{s}={any}\n", .{
                 field,
                 @field(header.past, field)[0..header.past.count],
             });
