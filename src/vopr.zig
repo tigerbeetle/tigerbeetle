@@ -203,7 +203,8 @@ pub fn main() !void {
                 .cache_entries_account_balances = 256,
             },
         },
-        .on_client_reply = Simulator.on_cluster_reply,
+        .on_cluster_reply = Simulator.on_cluster_reply,
+        .on_client_reply = Simulator.on_client_reply,
     };
 
     const workload_options = StateMachine.Workload.Options.generate(random, .{
@@ -801,12 +802,18 @@ pub const Simulator = struct {
 
     fn on_cluster_reply(
         cluster: *Cluster,
-        reply_client: usize,
-        request: *const Message.Request,
+        reply_client: ?usize,
+        prepare: *const Message.Prepare,
         reply: *const Message.Reply,
     ) void {
+        assert((reply_client == null) == (prepare.header.client == 0));
+
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
-        simulator.reply_sequence.insert(reply_client, request, reply);
+
+        if (reply.header.op < simulator.reply_op_next) return;
+        if (simulator.reply_sequence.contains(reply)) return;
+
+        simulator.reply_sequence.insert(reply_client, prepare, reply);
 
         while (!simulator.reply_sequence.empty()) {
             const op = simulator.reply_op_next;
@@ -816,56 +823,56 @@ pub const Simulator = struct {
             if (simulator.reply_sequence.peek(op)) |commit| {
                 defer simulator.reply_sequence.next();
 
-                assert(prepare_header.client != 0);
                 simulator.reply_op_next += 1;
 
-                const commit_client = simulator.cluster.clients[commit.client_index];
                 assert(commit.reply.references == 1);
                 assert(commit.reply.header.op == op);
                 assert(commit.reply.header.command == .reply);
-                assert(commit.reply.header.client == commit_client.id);
-                assert(commit.reply.header.request == commit.request.header.request);
-                assert(commit.reply.header.operation == commit.request.header.operation);
-                assert(commit.reply.header.operation != .pulse);
-                assert(commit.request.references == 1);
-                assert(commit.request.header.checksum == prepare_header.request_checksum);
-                assert(commit.request.header.command == .request);
-                assert(commit.request.header.client == commit_client.id);
+                assert(commit.reply.header.request == commit.prepare.header.request);
+                assert(commit.reply.header.operation == commit.prepare.header.operation);
+                assert(commit.prepare.references == 1);
+                assert(commit.prepare.header.checksum == prepare_header.checksum);
+                assert(commit.prepare.header.command == .prepare);
 
                 log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
                     commit.reply.header.op,
                     commit.reply.header.operation,
-                    commit.request.header.client,
-                    commit.request.header.request,
+                    commit.prepare.header.client,
+                    commit.prepare.header.request,
                 });
 
-                if (!commit.request.header.operation.vsr_reserved()) {
-                    simulator.requests_replied += 1;
+                if (prepare_header.operation == .pulse) {
+                    simulator.workload.on_pulse(
+                        prepare_header.operation.cast(StateMachine),
+                        prepare_header.timestamp,
+                    );
+                }
+
+                if (!commit.prepare.header.operation.vsr_reserved()) {
                     simulator.workload.on_reply(
-                        commit.client_index,
+                        commit.client_index.?,
                         commit.reply.header.operation.cast(StateMachine),
                         commit.reply.header.timestamp,
-                        commit.request.body(),
+                        commit.prepare.body(),
                         commit.reply.body(),
                     );
                 }
-            } else {
-                if (prepare_header.client == 0) {
-                    if (prepare_header.operation == .pulse) {
-                        simulator.workload.on_pulse(
-                            prepare_header.operation.cast(StateMachine),
-                            prepare_header.timestamp,
-                        );
-                    }
-
-                    assert(prepare_header.operation.vsr_reserved());
-                    // We don't receive replies for requests that originated at the replicas.
-                    simulator.reply_op_next += 1;
-                } else {
-                    assert(prepare_header.operation != .pulse);
-                    break;
-                }
             }
+        }
+    }
+
+    fn on_client_reply(
+        cluster: *Cluster,
+        reply_client: usize,
+        request: *const Message.Request,
+        reply: *const Message.Reply,
+    ) void {
+        _ = reply;
+
+        const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
+
+        if (!request.header.operation.vsr_reserved()) {
+            simulator.requests_replied += 1;
         }
     }
 
