@@ -81,6 +81,7 @@ const CliArgs = union(enum) {
 
     // Experimental: the interface is subject to change.
     benchmark: struct {
+        napkin: bool = false,
         cache_accounts: ?[]const u8 = null,
         cache_transfers: ?[]const u8 = null,
         cache_transfers_pending: ?[]const u8 = null,
@@ -391,6 +392,7 @@ pub const Command = union(enum) {
         /// optimizations such as avoiding negative prefetch) while random/reversed can't.
         pub const IdOrder = enum { sequential, random, reversed };
 
+        napkin: bool,
         cache_accounts: ?[]const u8,
         cache_transfers: ?[]const u8,
         cache_transfers_pending: ?[]const u8,
@@ -773,6 +775,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
 
             return Command{
                 .benchmark = .{
+                    .napkin = benchmark.napkin,
                     .cache_accounts = benchmark.cache_accounts,
                     .cache_transfers = benchmark.cache_transfers,
                     .cache_transfers_pending = benchmark.cache_transfers_pending,
