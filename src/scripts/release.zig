@@ -477,6 +477,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             header_file.close();
         }
 
+        defer shell.project_root.deleteFile("tigerbeetle") catch {};
         try macos_universal_binary_build(shell, "tigerbeetle", &.{
             .{
                 .cpu_type = std.macho.CPU_TYPE_ARM64,
