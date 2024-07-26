@@ -93,6 +93,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             /// `client` is null when the prepare does not originate from a client.
             on_cluster_reply: ?*const fn (
                 cluster: *Self,
+                client: ?usize,
+                prepare: *const Message.Prepare,
+                reply: *const Message.Reply,
+            ) void = null,
+
+            /// Invoked when a client receives a reply.
+            /// Includes operation=register messages.
+            on_client_reply: ?*const fn (
+                cluster: *Self,
                 client: usize,
                 request: *const Message.Request,
                 reply: *const Message.Reply,
@@ -705,8 +714,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(&cluster.clients[client_index] == client);
             assert(cluster.client_eviction_reasons[client_index] == null);
 
-            if (cluster.options.on_cluster_reply) |on_cluster_reply| {
-                on_cluster_reply(cluster, client_index, request_message, reply_message);
+            if (cluster.options.on_client_reply) |on_client_reply| {
+                on_client_reply(cluster, client_index, request_message, reply_message);
             }
         }
 
@@ -752,11 +761,22 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .state_machine_opened => {
                     cluster.manifest_checker.forest_open(&replica.state_machine.forest);
                 },
-                .committed => {
+                .committed => |data| {
+                    assert(data.reply.header.client == data.prepare.header.client);
+
                     cluster.log_replica(.commit, replica.replica);
                     cluster.state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
+
+                    if (cluster.options.on_cluster_reply) |on_cluster_reply| {
+                        const client_index = if (data.prepare.header.client == 0)
+                            null
+                        else
+                            cluster.client_id_permutation.decode(data.prepare.header.client) -
+                                client_id_permutation_shift;
+                        on_cluster_reply(cluster, client_index, data.prepare, data.reply);
+                    }
                 },
                 .compaction_completed => {
                     cluster.storage_checker.replica_compact(Replica, replica) catch |err| {

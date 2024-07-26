@@ -79,7 +79,11 @@ pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
     state_machine_opened,
     /// Called immediately after a prepare is committed by the state machine.
-    committed,
+    committed: struct {
+        prepare: *const Message.Prepare,
+        /// Note that this reply may just be discarded, if the request originated from a replica.
+        reply: *const Message.Reply,
+    },
     /// Called immediately after a compaction.
     compaction_completed,
     /// Called immediately before a checkpoint.
@@ -4292,8 +4296,6 @@ pub fn ReplicaType(
             assert(self.commit_min == prepare.header.op);
             self.advance_commit_max(self.commit_min, @src());
 
-            if (self.event_callback) |hook| hook(self, .committed);
-
             reply.header.* = .{
                 .command = .reply,
                 .operation = prepare.header.operation,
@@ -4315,6 +4317,10 @@ pub fn ReplicaType(
             // See `send_reply_message_to_client` for why we compute the checksum twice.
             reply.header.context = reply.header.calculate_checksum();
             reply.header.set_checksum();
+
+            if (self.event_callback) |hook| {
+                hook(self, .{ .committed = .{ .prepare = prepare, .reply = reply } });
+            }
 
             if (self.superblock.working.vsr_state.op_compacted(prepare.header.op)) {
                 // We are recovering from a checkpoint. Prior to the crash, the client table was

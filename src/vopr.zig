@@ -203,7 +203,7 @@ pub fn main() !void {
                 .cache_entries_account_balances = 256,
             },
         },
-        .on_cluster_reply = Simulator.on_cluster_reply,
+        .on_client_reply = Simulator.on_cluster_reply,
     };
 
     const workload_options = StateMachine.Workload.Options.generate(random, .{
