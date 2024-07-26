@@ -209,6 +209,7 @@ pub const Header = extern struct {
             },
             .prepare => return .unknown,
             .block => return .unknown,
+            .reply => return .unknown,
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
 
@@ -217,7 +218,6 @@ pub const Header = extern struct {
             .pong,
             .pong_client,
             .prepare_ok,
-            .reply,
             .commit,
             .start_view_change,
             .do_view_change,
