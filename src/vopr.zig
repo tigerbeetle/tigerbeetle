@@ -118,7 +118,10 @@ pub fn main() !void {
     const standby_count =
         if (cli_args.lite) 0 else random.uintAtMost(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
-    const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
+    // -1 since otherwise it is possible that all clients will evict each other.
+    // (Due to retried register messages from the first set of evicted clients.
+    // See the "Cluster: eviction: session_too_low" replica test for a related scenario.)
+    const client_count = @max(1, random.uintAtMost(u8, constants.clients_max * 2 - 1));
 
     const batch_size_limit_min = comptime batch_size_limit_min: {
         var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
@@ -436,6 +439,8 @@ pub const Simulator = struct {
     /// Total number of requests sent, including those that have not been delivered.
     /// Does not include `register` messages.
     requests_sent: usize = 0,
+    /// Total number of replies received by non-evicted clients.
+    /// Does not include `register` messages.
     requests_replied: usize = 0,
     requests_idle: bool = false,
 
@@ -499,15 +504,21 @@ pub const Simulator = struct {
 
     pub fn pending(simulator: *const Simulator) ?[]const u8 {
         assert(simulator.core.count() > 0);
-        assert(simulator.requests_sent == simulator.options.requests_max);
+        assert(simulator.requests_sent - simulator.requests_cancelled() ==
+            simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
-        for (simulator.cluster.clients) |*client| {
-            if (client.request_inflight) |request| {
-                // Registration isn't counted by requests_sent, so an operation=register may still
-                // be in-flight. Any other requests should already be complete before done() is
-                // called.
-                assert(request.message.header.operation == .register);
-                return "pending register request";
+        for (
+            simulator.cluster.clients,
+            simulator.cluster.client_eviction_reasons,
+        ) |*client, reason| {
+            if (reason == null) {
+                if (client.request_inflight) |request| {
+                    // Registration isn't counted by requests_sent, so an operation=register may
+                    // still be in-flight. Any other requests should already be complete before
+                    // done() is called.
+                    assert(request.message.header.operation == .register);
+                    return "pending register request";
+                }
             }
         }
 
@@ -870,6 +881,7 @@ pub const Simulator = struct {
         _ = reply;
 
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
+        assert(simulator.cluster.client_eviction_reasons[reply_client] == null);
 
         if (!request.header.operation.vsr_reserved()) {
             simulator.requests_replied += 1;
@@ -889,11 +901,24 @@ pub const Simulator = struct {
         }
 
         if (simulator.requests_idle) return;
-        if (simulator.requests_sent == simulator.options.requests_max) return;
+        if (simulator.requests_sent - simulator.requests_cancelled() ==
+            simulator.options.requests_max) return;
         if (!chance(simulator.random, simulator.options.request_probability)) return;
 
-        const client_index =
-            simulator.random.uintLessThan(usize, simulator.options.cluster.client_count);
+        const client_index = index: {
+            const client_count = simulator.options.cluster.client_count;
+            const client_index_base =
+                simulator.random.uintLessThan(usize, client_count);
+            for (0..client_count) |offset| {
+                const client_index = (client_index_base + offset) % client_count;
+                if (simulator.cluster.client_eviction_reasons[client_index] == null) {
+                    break :index client_index;
+                }
+            } else {
+                unreachable;
+            }
+        };
+
         var client = &simulator.cluster.clients[client_index];
 
         // Messages aren't added to the ReplySequence until a reply arrives.
@@ -934,7 +959,8 @@ pub const Simulator = struct {
             request_metadata.operation);
 
         simulator.requests_sent += 1;
-        assert(simulator.requests_sent <= simulator.options.requests_max);
+        assert(simulator.requests_sent - simulator.requests_cancelled() <=
+            simulator.options.requests_max);
     }
 
     fn tick_crash(simulator: *Simulator) void {
@@ -1097,6 +1123,19 @@ pub const Simulator = struct {
             @min(simulator.replica_releases[replica_index] + 1, releases.len);
         simulator.replica_releases_limit =
             @max(simulator.replica_releases[replica_index], simulator.replica_releases_limit);
+    }
+
+    fn requests_cancelled(simulator: *const Simulator) u32 {
+        var count: u32 = 0;
+        for (
+            simulator.cluster.clients,
+            simulator.cluster.client_eviction_reasons,
+        ) |*client, reason| {
+            count += @intFromBool(reason != null and
+                client.request_inflight != null and
+                client.request_inflight.?.message.header.operation != .register);
+        }
+        return count;
     }
 };
 
