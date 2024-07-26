@@ -88,6 +88,10 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
         pub inline fn clear(array: *Self) void {
             array.inner.len = 0;
         }
+
+        pub inline fn pop(array: *Self) T {
+            return array.inner.pop();
+        }
     };
 }
 
