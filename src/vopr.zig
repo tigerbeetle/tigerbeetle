@@ -203,6 +203,7 @@ pub fn main() !void {
                 .cache_entries_account_balances = 256,
             },
         },
+        .on_cluster_reply = Simulator.on_cluster_reply,
     };
 
     const workload_options = StateMachine.Workload.Options.generate(random, .{
@@ -453,7 +454,7 @@ pub const Simulator = struct {
         assert(options.request_idle_off_probability > 0);
         assert(options.request_idle_off_probability <= 100);
 
-        var cluster = try Cluster.init(allocator, on_cluster_reply, options.cluster);
+        var cluster = try Cluster.init(allocator, options.cluster);
         errdefer cluster.deinit();
 
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
@@ -801,8 +802,8 @@ pub const Simulator = struct {
     fn on_cluster_reply(
         cluster: *Cluster,
         reply_client: usize,
-        request: *Message.Request,
-        reply: *Message.Reply,
+        request: *const Message.Request,
+        reply: *const Message.Reply,
     ) void {
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
         simulator.reply_sequence.insert(reply_client, request, reply);

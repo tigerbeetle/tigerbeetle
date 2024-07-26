@@ -1571,7 +1571,7 @@ const TestContext = struct {
         var prng = std.rand.DefaultPrng.init(options.seed);
         const random = prng.random();
 
-        const cluster = try Cluster.init(allocator, TestContext.on_client_reply, .{
+        const cluster = try Cluster.init(allocator, .{
             .cluster_id = 0,
             .replica_count = options.replica_count,
             .standby_count = options.standby_count,
@@ -1609,6 +1609,7 @@ const TestContext = struct {
                 .batch_size_limit = constants.message_body_size_max,
                 .lsm_forest_node_count = 4096,
             },
+            .on_cluster_reply = TestContext.on_client_reply,
         });
         errdefer cluster.deinit();
 
@@ -1696,8 +1697,8 @@ const TestContext = struct {
     fn on_client_reply(
         cluster: *Cluster,
         client: usize,
-        request: *Message.Request,
-        reply: *Message.Reply,
+        request: *const Message.Request,
+        reply: *const Message.Reply,
     ) void {
         _ = request;
         _ = reply;

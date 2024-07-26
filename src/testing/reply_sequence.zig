@@ -80,8 +80,8 @@ pub const ReplySequence = struct {
     pub fn insert(
         sequence: *ReplySequence,
         client_index: usize,
-        request_message: *Message.Request,
-        reply_message: *Message.Reply,
+        request_message: *const Message.Request,
+        reply_message: *const Message.Reply,
     ) void {
         assert(request_message.header.invalid() == null);
         assert(request_message.header.client != 0);

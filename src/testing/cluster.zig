@@ -87,16 +87,20 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             network: NetworkOptions,
             storage: Storage.Options,
             state_machine: StateMachine.Options,
+
+            /// Invoked when a replica produces a reply.
+            /// Includes operation=register messages.
+            /// `client` is null when the prepare does not originate from a client.
+            on_cluster_reply: ?*const fn (
+                cluster: *Self,
+                client: usize,
+                request: *const Message.Request,
+                reply: *const Message.Reply,
+            ) void = null,
         };
 
         allocator: mem.Allocator,
         options: Options,
-        on_cluster_reply: *const fn (
-            cluster: *Self,
-            client: usize,
-            request: *Message.Request,
-            reply: *Message.Reply,
-        ) void,
 
         network: *Network,
         storages: []Storage,
@@ -131,17 +135,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         context: ?*anyopaque = null,
 
-        pub fn init(
-            allocator: mem.Allocator,
-            /// Includes operation=register messages.
-            on_cluster_reply: *const fn (
-                cluster: *Self,
-                client: usize,
-                request: *Message.Request,
-                reply: *Message.Reply,
-            ) void,
-            options: Options,
-        ) !*Self {
+        pub fn init(allocator: mem.Allocator, options: Options) !*Self {
             assert(options.replica_count >= 1);
             assert(options.replica_count <= 6);
             assert(options.client_count > 0);
@@ -339,7 +333,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.* = Self{
                 .allocator = allocator,
                 .options = options,
-                .on_cluster_reply = on_cluster_reply,
                 .network = network,
                 .storages = storages,
                 .aofs = aofs,
@@ -712,7 +705,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(&cluster.clients[client_index] == client);
             assert(cluster.client_eviction_reasons[client_index] == null);
 
-            cluster.on_cluster_reply(cluster, client_index, request_message, reply_message);
+            if (cluster.options.on_cluster_reply) |on_cluster_reply| {
+                on_cluster_reply(cluster, client_index, request_message, reply_message);
+            }
         }
 
         fn cluster_on_eviction(cluster: *Self, client_id: u128) void {
