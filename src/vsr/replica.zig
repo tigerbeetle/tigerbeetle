@@ -1600,11 +1600,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (message.header.view < self.view) {
-                log.debug("{}: on_prepare: ignoring (older view)", .{self.replica});
-                return;
-            }
-
             self.replicate(message);
 
             if (self.status != .normal) {
@@ -5624,12 +5619,10 @@ pub fn ReplicaType(
         fn is_repair(self: *const Self, message: *const Message.Prepare) bool {
             assert(message.header.command == .prepare);
 
+            if (message.header.view < self.view) return true;
+
             if (self.status == .normal) {
-                if (message.header.view < self.view) return true;
                 if (message.header.view == self.view and message.header.op <= self.op) return true;
-            } else if (self.status == .view_change) {
-                if (message.header.view < self.view) return true;
-                // The view has already started or is newer.
             }
 
             return false;
