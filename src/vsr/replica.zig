@@ -1594,7 +1594,10 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
 
-            if (self.is_repair(message)) {
+            if (message.header.view < self.view or
+                (self.status == .normal and
+                message.header.view == self.view and message.header.op <= self.op))
+            {
                 log.debug("{}: on_prepare: ignoring (repair)", .{self.replica});
                 self.on_repair(message);
                 return;
@@ -5613,18 +5616,6 @@ pub fn ReplicaType(
                 });
                 return true;
             }
-            return false;
-        }
-
-        fn is_repair(self: *const Self, message: *const Message.Prepare) bool {
-            assert(message.header.command == .prepare);
-
-            if (message.header.view < self.view) return true;
-
-            if (self.status == .normal) {
-                if (message.header.view == self.view and message.header.op <= self.op) return true;
-            }
-
             return false;
         }
 
