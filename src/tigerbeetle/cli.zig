@@ -29,7 +29,7 @@ const StateMachine = vsr.state_machine.StateMachineType(
 );
 
 const CliArgs = union(enum) {
-    format: struct {
+    const Format = struct {
         cluster: u128,
         replica: ?u8 = null,
         // Experimental: standbys don't have a concrete practical use-case yet.
@@ -40,9 +40,9 @@ const CliArgs = union(enum) {
         positional: struct {
             path: [:0]const u8,
         },
-    },
+    };
 
-    start: struct {
+    const Start = struct {
         // Stable CLI arguments.
         addresses: []const u8,
         cache_grid: ?flags.ByteSize = null,
@@ -66,21 +66,21 @@ const CliArgs = union(enum) {
         cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
-    },
+    };
 
-    version: struct {
+    const Version = struct {
         verbose: bool = false,
-    },
+    };
 
-    repl: struct {
+    const Repl = struct {
         addresses: []const u8,
         cluster: u128,
         verbose: bool = false,
         command: []const u8 = "",
-    },
+    };
 
     // Experimental: the interface is subject to change.
-    benchmark: struct {
+    const Benchmark = struct {
         cache_accounts: ?[]const u8 = null,
         cache_transfers: ?[]const u8 = null,
         cache_transfers_pending: ?[]const u8 = null,
@@ -111,10 +111,10 @@ const CliArgs = union(enum) {
         file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
         seed: ?[]const u8 = null,
-    },
+    };
 
     // Experimental: the interface is subject to change.
-    inspect: union(enum) {
+    const Inspect = union(enum) {
         superblock: struct {
             positional: struct { path: []const u8 },
         },
@@ -197,14 +197,22 @@ const CliArgs = union(enum) {
             \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
             \\
         ;
-    },
+    };
 
     // Internal: used to validate multiversion binaries.
-    multiversion: struct {
+    const Multiversion = struct {
         positional: struct {
             path: [:0]const u8,
         },
-    },
+    };
+
+    format: Format,
+    start: Start,
+    version: Version,
+    repl: Repl,
+    benchmark: Benchmark,
+    inspect: Inspect,
+    multiversion: Multiversion,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
@@ -348,6 +356,9 @@ const start_defaults_development = StartDefaults{
 const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
 const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
+/// While CliArgs store raw arguments as passed on the command line, Command ensures that
+/// arguments are properly validated and desugared (e.g, sizes converted to counts where
+///  appropriate).
 pub const Command = union(enum) {
     pub const Format = struct {
         cluster: u128,
@@ -376,6 +387,10 @@ pub const Command = union(enum) {
         development: bool,
         experimental: bool,
         path: [:0]const u8,
+    };
+
+    pub const Version = struct {
+        verbose: bool,
     };
 
     pub const Repl = struct {
@@ -448,9 +463,7 @@ pub const Command = union(enum) {
 
     format: Format,
     start: Start,
-    version: struct {
-        verbose: bool,
-    },
+    version: Version,
     repl: Repl,
     benchmark: Benchmark,
     inspect: Inspect,
@@ -470,372 +483,377 @@ pub const Command = union(enum) {
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgIterator) !Command {
+pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgIterator) Command {
     const cli_args = flags.parse(args_iterator, CliArgs);
 
-    switch (cli_args) {
-        .version => |version| {
-            return Command{
-                .version = .{
-                    .verbose = version.verbose,
-                },
-            };
-        },
-        .format => |format| {
-            if (format.replica_count == 0) {
-                flags.fatal("--replica-count: value needs to be greater than zero", .{});
-            }
-            if (format.replica_count > constants.replicas_max) {
-                flags.fatal("--replica-count: value is too large ({}), at most {} is allowed", .{
-                    format.replica_count,
-                    constants.replicas_max,
-                });
-            }
+    return switch (cli_args) {
+        .format => |format| .{ .format = parse_args_format(format) },
+        .start => |start| .{ .start = parse_args_start(allocator, start) },
+        .version => |version| .{ .version = parse_args_version(version) },
+        .repl => |repl| .{ .repl = parse_args_repl(allocator, repl) },
+        .benchmark => |benchmark| .{ .benchmark = parse_args_benchmark(allocator, benchmark) },
+        .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
+        .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
+    };
+}
 
-            if (format.replica == null and format.standby == null) {
-                flags.fatal("--replica: argument is required", .{});
-            }
-
-            if (format.replica != null and format.standby != null) {
-                flags.fatal("--standby: conflicts with '--replica'", .{});
-            }
-
-            if (format.replica) |replica| {
-                if (replica >= format.replica_count) {
-                    flags.fatal("--replica: value is too large ({}), at most {} is allowed", .{
-                        replica,
-                        format.replica_count - 1,
-                    });
-                }
-            }
-
-            if (format.standby) |standby| {
-                if (standby < format.replica_count) {
-                    flags.fatal("--standby: value is too small ({}), at least {} is required", .{
-                        standby,
-                        format.replica_count,
-                    });
-                }
-                if (standby >= format.replica_count + constants.standbys_max) {
-                    flags.fatal("--standby: value is too large ({}), at most {} is allowed", .{
-                        standby,
-                        format.replica_count + constants.standbys_max - 1,
-                    });
-                }
-            }
-
-            const replica = (format.replica orelse format.standby).?;
-            assert(replica < constants.members_max);
-            assert(replica < format.replica_count + constants.standbys_max);
-
-            return Command{
-                .format = .{
-                    .cluster = format.cluster, // just an ID, any value is allowed
-                    .replica = replica,
-                    .replica_count = format.replica_count,
-                    .development = format.development,
-                    .path = format.positional.path,
-                },
-            };
-        },
-        .start => |start| {
-            // Allowlist of stable flags. --development will disable automatic multiversion
-            // upgrades too, but the flag itself is stable.
-            const stable_args = .{
-                "addresses",   "cache_grid",   "positional",
-                "development", "experimental",
-            };
-            inline for (std.meta.fields(@TypeOf(start))) |field| {
-                const stable_field = comptime for (stable_args) |stable_arg| {
-                    assert(std.meta.fieldIndex(@TypeOf(start), stable_arg) != null);
-                    if (std.mem.eql(u8, field.name, stable_arg)) {
-                        break true;
-                    }
-                } else false;
-                if (stable_field) continue;
-
-                const flag_name = flags.flag_name(field);
-
-                // If you've added a flag and get a comptime error here, it's likely because
-                // we require experimental flags to default to null.
-                assert(flags.default_value(field).? == null);
-
-                if (@field(start, field.name) != null and !start.experimental) {
-                    flags.fatal(
-                        "{s} is marked experimental, add `--experimental` to continue.",
-                        .{flag_name},
-                    );
-                }
-            }
-
-            const groove_config = StateMachine.Forest.groove_config;
-            const AccountsValuesCache = groove_config.accounts.ObjectsCache.Cache;
-            const TransfersValuesCache = groove_config.transfers.ObjectsCache.Cache;
-            const TransfersPendingValuesCache = groove_config.transfers_pending.ObjectsCache.Cache;
-            const AccountBalancesValuesCache = groove_config.account_balances.ObjectsCache.Cache;
-
-            const addresses = parse_addresses(allocator, start.addresses);
-            const defaults =
-                if (start.development) start_defaults_development else start_defaults_production;
-
-            const start_limit_storage: flags.ByteSize = start.limit_storage orelse
-                .{ .value = constants.storage_size_limit_max };
-            const start_memory_lsm_manifest: flags.ByteSize = start.memory_lsm_manifest orelse
-                .{ .value = constants.lsm_manifest_memory_size_default };
-
-            const storage_size_limit = start_limit_storage.bytes();
-            const storage_size_limit_min = data_file_size_min;
-            const storage_size_limit_max = constants.storage_size_limit_max;
-            if (storage_size_limit > storage_size_limit_max) {
-                flags.fatal("--limit-storage: size {}{s} exceeds maximum: {}", .{
-                    start_limit_storage.value,
-                    start_limit_storage.suffix(),
-                    vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_max),
-                });
-            }
-            if (storage_size_limit < storage_size_limit_min) {
-                flags.fatal("--limit-storage: size {}{s} is below minimum: {}", .{
-                    start_limit_storage.value,
-                    start_limit_storage.suffix(),
-                    vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_min),
-                });
-            }
-            if (storage_size_limit % constants.sector_size != 0) {
-                flags.fatal(
-                    "--limit-storage: size {}{s} must be a multiple of sector size ({})",
-                    .{
-                        start_limit_storage.value,
-                        start_limit_storage.suffix(),
-                        vsr.stdx.fmt_int_size_bin_exact(constants.sector_size),
-                    },
-                );
-            }
-
-            const pipeline_limit =
-                start.limit_pipeline_requests orelse defaults.limit_pipeline_requests;
-            const pipeline_limit_min = 0;
-            const pipeline_limit_max = constants.pipeline_request_queue_max;
-            if (pipeline_limit > pipeline_limit_max) {
-                flags.fatal("--limit-pipeline-requests: count {} exceeds maximum: {}", .{
-                    pipeline_limit,
-                    pipeline_limit_max,
-                });
-            }
-            if (pipeline_limit < pipeline_limit_min) {
-                flags.fatal("--limit-pipeline-requests: count {} is below minimum: {}", .{
-                    pipeline_limit,
-                    pipeline_limit_min,
-                });
-            }
-
-            // The minimum is chosen rather arbitrarily as 4096 since it is the sector size.
-            const request_size_limit = start.limit_request orelse defaults.limit_request;
-            const request_size_limit_min = 4096;
-            const request_size_limit_max = constants.message_size_max;
-            if (request_size_limit.bytes() > request_size_limit_max) {
-                flags.fatal("--limit-request: size {}{s} exceeds maximum: {}", .{
-                    request_size_limit.value,
-                    request_size_limit.suffix(),
-                    vsr.stdx.fmt_int_size_bin_exact(request_size_limit_max),
-                });
-            }
-            if (request_size_limit.bytes() < request_size_limit_min) {
-                flags.fatal("--limit-request: size {}{s} is below minimum: {}", .{
-                    request_size_limit.value,
-                    request_size_limit.suffix(),
-                    vsr.stdx.fmt_int_size_bin_exact(request_size_limit_min),
-                });
-            }
-
-            const lsm_manifest_memory = start_memory_lsm_manifest.bytes();
-            const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
-            const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
-            const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
-            if (lsm_manifest_memory > lsm_manifest_memory_max) {
-                flags.fatal("--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
-                    start_memory_lsm_manifest.value,
-                    start_memory_lsm_manifest.suffix(),
-                    vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_max),
-                });
-            }
-            if (lsm_manifest_memory < lsm_manifest_memory_min) {
-                flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
-                    start_memory_lsm_manifest.value,
-                    start_memory_lsm_manifest.suffix(),
-                    vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_min),
-                });
-            }
-            if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
-                flags.fatal(
-                    "--memory-lsm-manifest: size {}{s} must be a multiple of {}",
-                    .{
-                        start_memory_lsm_manifest.value,
-                        start_memory_lsm_manifest.suffix(),
-                        vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_multiplier),
-                    },
-                );
-            }
-
-            const lsm_compaction_block_memory =
-                start.memory_lsm_compaction orelse defaults.memory_lsm_compaction;
-            const lsm_compaction_block_memory_max = constants.compaction_block_memory_size_max;
-            if (lsm_compaction_block_memory.bytes() > lsm_compaction_block_memory_max) {
-                flags.fatal("--memory-lsm-compaction: size {}{s} exceeds maximum: {}", .{
-                    lsm_compaction_block_memory.value,
-                    lsm_compaction_block_memory.suffix(),
-                    vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_max),
-                });
-            }
-            if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
-                flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}", .{
-                    lsm_compaction_block_memory.value,
-                    lsm_compaction_block_memory.suffix(),
-                    vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_min),
-                });
-            }
-            if (lsm_compaction_block_memory.bytes() % constants.block_size != 0) {
-                flags.fatal(
-                    "--memory-lsm-compaction: size {}{s} must be a multiple of {}",
-                    .{
-                        lsm_compaction_block_memory.value,
-                        lsm_compaction_block_memory.suffix(),
-                        vsr.stdx.fmt_int_size_bin_exact(constants.block_size),
-                    },
-                );
-            }
-
-            const lsm_forest_compaction_block_count: u32 =
-                @intCast(@divExact(lsm_compaction_block_memory.bytes(), constants.block_size));
-            const lsm_forest_node_count: u32 =
-                @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
-
-            return Command{
-                .start = .{
-                    .addresses = addresses,
-                    .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
-                    .storage_size_limit = storage_size_limit,
-                    .pipeline_requests_limit = pipeline_limit,
-                    .request_size_limit = @intCast(request_size_limit.bytes()),
-                    .cache_accounts = parse_cache_size_to_count(
-                        tigerbeetle.Account,
-                        AccountsValuesCache,
-                        start.cache_accounts orelse defaults.cache_accounts,
-                    ),
-                    .cache_transfers = parse_cache_size_to_count(
-                        tigerbeetle.Transfer,
-                        TransfersValuesCache,
-                        start.cache_transfers orelse defaults.cache_transfers,
-                    ),
-                    .cache_transfers_pending = parse_cache_size_to_count(
-                        StateMachine.TransferPending,
-                        TransfersPendingValuesCache,
-                        start.cache_transfers_pending orelse defaults.cache_transfers_pending,
-                    ),
-                    .cache_account_balances = parse_cache_size_to_count(
-                        StateMachine.AccountBalancesGrooveValue,
-                        AccountBalancesValuesCache,
-                        start.cache_account_balances orelse defaults.cache_account_balances,
-                    ),
-                    .cache_grid_blocks = parse_cache_size_to_count(
-                        [constants.block_size]u8,
-                        Grid.Cache,
-                        start.cache_grid orelse defaults.cache_grid,
-                    ),
-                    .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
-                    .lsm_forest_node_count = lsm_forest_node_count,
-                    .development = start.development,
-                    .experimental = start.experimental,
-                    .path = start.positional.path,
-                },
-            };
-        },
-        .repl => |repl| {
-            const addresses = parse_addresses(allocator, repl.addresses);
-
-            return Command{
-                .repl = .{
-                    .addresses = addresses,
-                    .cluster = repl.cluster,
-                    .verbose = repl.verbose,
-                    .statements = repl.command,
-                },
-            };
-        },
-        .benchmark => |benchmark| {
-            const addresses = if (benchmark.addresses) |addresses|
-                parse_addresses(allocator, addresses)
-            else
-                null;
-
-            if (benchmark.addresses != null and benchmark.file != null) {
-                flags.fatal("--file: --addresses and --file are mutually exclusive", .{});
-            }
-
-            return Command{
-                .benchmark = .{
-                    .cache_accounts = benchmark.cache_accounts,
-                    .cache_transfers = benchmark.cache_transfers,
-                    .cache_transfers_pending = benchmark.cache_transfers_pending,
-                    .cache_account_balances = benchmark.cache_account_balances,
-                    .cache_grid = benchmark.cache_grid,
-                    .account_count = benchmark.account_count,
-                    .account_count_hot = benchmark.account_count_hot,
-                    .account_balances = benchmark.account_balances,
-                    .account_batch_size = benchmark.account_batch_size,
-                    .transfer_count = benchmark.transfer_count,
-                    .transfer_hot_percent = benchmark.transfer_hot_percent,
-                    .transfer_pending = benchmark.transfer_pending,
-                    .transfer_batch_size = benchmark.transfer_batch_size,
-                    .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
-                    .validate = benchmark.validate,
-                    .checksum_performance = benchmark.checksum_performance,
-                    .query_count = benchmark.query_count,
-                    .print_batch_timings = benchmark.print_batch_timings,
-                    .id_order = benchmark.id_order,
-                    .statsd = benchmark.statsd,
-                    .file = benchmark.file,
-                    .addresses = addresses,
-                    .seed = benchmark.seed,
-                },
-            };
-        },
-        .inspect => |inspect| {
-            const path = switch (inspect) {
-                inline else => |args| args.positional.path,
-            };
-
-            return Command{ .inspect = .{
-                .path = path,
-                .query = switch (inspect) {
-                    .superblock => .superblock,
-                    .wal => |args| .{ .wal = .{ .slot = args.slot } },
-                    .replies => |args| .{ .replies = .{
-                        .slot = args.slot,
-                        .superblock_copy = args.superblock_copy,
-                    } },
-                    .grid => |args| .{ .grid = .{
-                        .block = args.block,
-                        .superblock_copy = args.superblock_copy,
-                    } },
-                    .manifest => |args| .{ .manifest = .{
-                        .superblock_copy = args.superblock_copy,
-                    } },
-                    .tables => |args| .{ .tables = .{
-                        .superblock_copy = args.superblock_copy,
-                        .tree = args.tree,
-                        .level = args.level,
-                    } },
-                },
-            } };
-        },
-        .multiversion => |multiversion| {
-            return Command{
-                .multiversion = .{
-                    .path = multiversion.positional.path,
-                },
-            };
-        },
+fn parse_args_format(format: CliArgs.Format) Command.Format {
+    if (format.replica_count == 0) {
+        flags.fatal("--replica-count: value needs to be greater than zero", .{});
     }
+    if (format.replica_count > constants.replicas_max) {
+        flags.fatal("--replica-count: value is too large ({}), at most {} is allowed", .{
+            format.replica_count,
+            constants.replicas_max,
+        });
+    }
+
+    if (format.replica == null and format.standby == null) {
+        flags.fatal("--replica: argument is required", .{});
+    }
+
+    if (format.replica != null and format.standby != null) {
+        flags.fatal("--standby: conflicts with '--replica'", .{});
+    }
+
+    if (format.replica) |replica| {
+        if (replica >= format.replica_count) {
+            flags.fatal("--replica: value is too large ({}), at most {} is allowed", .{
+                replica,
+                format.replica_count - 1,
+            });
+        }
+    }
+
+    if (format.standby) |standby| {
+        if (standby < format.replica_count) {
+            flags.fatal("--standby: value is too small ({}), at least {} is required", .{
+                standby,
+                format.replica_count,
+            });
+        }
+        if (standby >= format.replica_count + constants.standbys_max) {
+            flags.fatal("--standby: value is too large ({}), at most {} is allowed", .{
+                standby,
+                format.replica_count + constants.standbys_max - 1,
+            });
+        }
+    }
+
+    const replica = (format.replica orelse format.standby).?;
+    assert(replica < constants.members_max);
+    assert(replica < format.replica_count + constants.standbys_max);
+
+    return .{
+        .cluster = format.cluster, // just an ID, any value is allowed
+        .replica = replica,
+        .replica_count = format.replica_count,
+        .development = format.development,
+        .path = format.positional.path,
+    };
+}
+
+fn parse_args_start(allocator: std.mem.Allocator, start: CliArgs.Start) Command.Start {
+    // Allowlist of stable flags. --development will disable automatic multiversion
+    // upgrades too, but the flag itself is stable.
+    const stable_args = .{
+        "addresses",   "cache_grid",   "positional",
+        "development", "experimental",
+    };
+    inline for (std.meta.fields(@TypeOf(start))) |field| {
+        const stable_field = comptime for (stable_args) |stable_arg| {
+            assert(std.meta.fieldIndex(@TypeOf(start), stable_arg) != null);
+            if (std.mem.eql(u8, field.name, stable_arg)) {
+                break true;
+            }
+        } else false;
+        if (stable_field) continue;
+
+        const flag_name = flags.flag_name(field);
+
+        // If you've added a flag and get a comptime error here, it's likely because
+        // we require experimental flags to default to null.
+        assert(flags.default_value(field).? == null);
+
+        if (@field(start, field.name) != null and !start.experimental) {
+            flags.fatal(
+                "{s} is marked experimental, add `--experimental` to continue.",
+                .{flag_name},
+            );
+        }
+    }
+
+    const groove_config = StateMachine.Forest.groove_config;
+    const AccountsValuesCache = groove_config.accounts.ObjectsCache.Cache;
+    const TransfersValuesCache = groove_config.transfers.ObjectsCache.Cache;
+    const TransfersPendingValuesCache = groove_config.transfers_pending.ObjectsCache.Cache;
+    const AccountBalancesValuesCache = groove_config.account_balances.ObjectsCache.Cache;
+
+    const addresses = parse_addresses(allocator, start.addresses);
+    const defaults =
+        if (start.development) start_defaults_development else start_defaults_production;
+
+    const start_limit_storage: flags.ByteSize = start.limit_storage orelse
+        .{ .value = constants.storage_size_limit_max };
+    const start_memory_lsm_manifest: flags.ByteSize = start.memory_lsm_manifest orelse
+        .{ .value = constants.lsm_manifest_memory_size_default };
+
+    const storage_size_limit = start_limit_storage.bytes();
+    const storage_size_limit_min = data_file_size_min;
+    const storage_size_limit_max = constants.storage_size_limit_max;
+    if (storage_size_limit > storage_size_limit_max) {
+        flags.fatal("--limit-storage: size {}{s} exceeds maximum: {}", .{
+            start_limit_storage.value,
+            start_limit_storage.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_max),
+        });
+    }
+    if (storage_size_limit < storage_size_limit_min) {
+        flags.fatal("--limit-storage: size {}{s} is below minimum: {}", .{
+            start_limit_storage.value,
+            start_limit_storage.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_min),
+        });
+    }
+    if (storage_size_limit % constants.sector_size != 0) {
+        flags.fatal(
+            "--limit-storage: size {}{s} must be a multiple of sector size ({})",
+            .{
+                start_limit_storage.value,
+                start_limit_storage.suffix(),
+                vsr.stdx.fmt_int_size_bin_exact(constants.sector_size),
+            },
+        );
+    }
+
+    const pipeline_limit =
+        start.limit_pipeline_requests orelse defaults.limit_pipeline_requests;
+    const pipeline_limit_min = 0;
+    const pipeline_limit_max = constants.pipeline_request_queue_max;
+    if (pipeline_limit > pipeline_limit_max) {
+        flags.fatal("--limit-pipeline-requests: count {} exceeds maximum: {}", .{
+            pipeline_limit,
+            pipeline_limit_max,
+        });
+    }
+    if (pipeline_limit < pipeline_limit_min) {
+        flags.fatal("--limit-pipeline-requests: count {} is below minimum: {}", .{
+            pipeline_limit,
+            pipeline_limit_min,
+        });
+    }
+
+    // The minimum is chosen rather arbitrarily as 4096 since it is the sector size.
+    const request_size_limit = start.limit_request orelse defaults.limit_request;
+    const request_size_limit_min = 4096;
+    const request_size_limit_max = constants.message_size_max;
+    if (request_size_limit.bytes() > request_size_limit_max) {
+        flags.fatal("--limit-request: size {}{s} exceeds maximum: {}", .{
+            request_size_limit.value,
+            request_size_limit.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(request_size_limit_max),
+        });
+    }
+    if (request_size_limit.bytes() < request_size_limit_min) {
+        flags.fatal("--limit-request: size {}{s} is below minimum: {}", .{
+            request_size_limit.value,
+            request_size_limit.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(request_size_limit_min),
+        });
+    }
+
+    const lsm_manifest_memory = start_memory_lsm_manifest.bytes();
+    const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
+    const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
+    const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
+    if (lsm_manifest_memory > lsm_manifest_memory_max) {
+        flags.fatal("--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
+            start_memory_lsm_manifest.value,
+            start_memory_lsm_manifest.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_max),
+        });
+    }
+    if (lsm_manifest_memory < lsm_manifest_memory_min) {
+        flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
+            start_memory_lsm_manifest.value,
+            start_memory_lsm_manifest.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_min),
+        });
+    }
+    if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
+        flags.fatal(
+            "--memory-lsm-manifest: size {}{s} must be a multiple of {}",
+            .{
+                start_memory_lsm_manifest.value,
+                start_memory_lsm_manifest.suffix(),
+                vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_multiplier),
+            },
+        );
+    }
+
+    const lsm_compaction_block_memory =
+        start.memory_lsm_compaction orelse defaults.memory_lsm_compaction;
+    const lsm_compaction_block_memory_max = constants.compaction_block_memory_size_max;
+    if (lsm_compaction_block_memory.bytes() > lsm_compaction_block_memory_max) {
+        flags.fatal("--memory-lsm-compaction: size {}{s} exceeds maximum: {}", .{
+            lsm_compaction_block_memory.value,
+            lsm_compaction_block_memory.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_max),
+        });
+    }
+    if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
+        flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}", .{
+            lsm_compaction_block_memory.value,
+            lsm_compaction_block_memory.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_min),
+        });
+    }
+    if (lsm_compaction_block_memory.bytes() % constants.block_size != 0) {
+        flags.fatal(
+            "--memory-lsm-compaction: size {}{s} must be a multiple of {}",
+            .{
+                lsm_compaction_block_memory.value,
+                lsm_compaction_block_memory.suffix(),
+                vsr.stdx.fmt_int_size_bin_exact(constants.block_size),
+            },
+        );
+    }
+
+    const lsm_forest_compaction_block_count: u32 =
+        @intCast(@divExact(lsm_compaction_block_memory.bytes(), constants.block_size));
+    const lsm_forest_node_count: u32 =
+        @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
+
+    return .{
+        .addresses = addresses,
+        .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
+        .storage_size_limit = storage_size_limit,
+        .pipeline_requests_limit = pipeline_limit,
+        .request_size_limit = @intCast(request_size_limit.bytes()),
+        .cache_accounts = parse_cache_size_to_count(
+            tigerbeetle.Account,
+            AccountsValuesCache,
+            start.cache_accounts orelse defaults.cache_accounts,
+        ),
+        .cache_transfers = parse_cache_size_to_count(
+            tigerbeetle.Transfer,
+            TransfersValuesCache,
+            start.cache_transfers orelse defaults.cache_transfers,
+        ),
+        .cache_transfers_pending = parse_cache_size_to_count(
+            StateMachine.TransferPending,
+            TransfersPendingValuesCache,
+            start.cache_transfers_pending orelse defaults.cache_transfers_pending,
+        ),
+        .cache_account_balances = parse_cache_size_to_count(
+            StateMachine.AccountBalancesGrooveValue,
+            AccountBalancesValuesCache,
+            start.cache_account_balances orelse defaults.cache_account_balances,
+        ),
+        .cache_grid_blocks = parse_cache_size_to_count(
+            [constants.block_size]u8,
+            Grid.Cache,
+            start.cache_grid orelse defaults.cache_grid,
+        ),
+        .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
+        .lsm_forest_node_count = lsm_forest_node_count,
+        .development = start.development,
+        .experimental = start.experimental,
+        .path = start.positional.path,
+    };
+}
+
+fn parse_args_version(version: CliArgs.Version) Command.Version {
+    return .{
+        .verbose = version.verbose,
+    };
+}
+
+fn parse_args_repl(allocator: std.mem.Allocator, repl: CliArgs.Repl) Command.Repl {
+    const addresses = parse_addresses(allocator, repl.addresses);
+
+    return .{
+        .addresses = addresses,
+        .cluster = repl.cluster,
+        .verbose = repl.verbose,
+        .statements = repl.command,
+    };
+}
+
+fn parse_args_benchmark(
+    allocator: std.mem.Allocator,
+    benchmark: CliArgs.Benchmark,
+) Command.Benchmark {
+    const addresses = if (benchmark.addresses) |addresses|
+        parse_addresses(allocator, addresses)
+    else
+        null;
+
+    if (benchmark.addresses != null and benchmark.file != null) {
+        flags.fatal("--file: --addresses and --file are mutually exclusive", .{});
+    }
+
+    return .{
+        .cache_accounts = benchmark.cache_accounts,
+        .cache_transfers = benchmark.cache_transfers,
+        .cache_transfers_pending = benchmark.cache_transfers_pending,
+        .cache_account_balances = benchmark.cache_account_balances,
+        .cache_grid = benchmark.cache_grid,
+        .account_count = benchmark.account_count,
+        .account_count_hot = benchmark.account_count_hot,
+        .account_balances = benchmark.account_balances,
+        .account_batch_size = benchmark.account_batch_size,
+        .transfer_count = benchmark.transfer_count,
+        .transfer_hot_percent = benchmark.transfer_hot_percent,
+        .transfer_pending = benchmark.transfer_pending,
+        .transfer_batch_size = benchmark.transfer_batch_size,
+        .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
+        .validate = benchmark.validate,
+        .checksum_performance = benchmark.checksum_performance,
+        .query_count = benchmark.query_count,
+        .print_batch_timings = benchmark.print_batch_timings,
+        .id_order = benchmark.id_order,
+        .statsd = benchmark.statsd,
+        .file = benchmark.file,
+        .addresses = addresses,
+        .seed = benchmark.seed,
+    };
+}
+
+fn parse_args_inspect(inspect: CliArgs.Inspect) Command.Inspect {
+    const path = switch (inspect) {
+        inline else => |args| args.positional.path,
+    };
+
+    return .{
+        .path = path,
+        .query = switch (inspect) {
+            .superblock => .superblock,
+            .wal => |args| .{ .wal = .{ .slot = args.slot } },
+            .replies => |args| .{ .replies = .{
+                .slot = args.slot,
+                .superblock_copy = args.superblock_copy,
+            } },
+            .grid => |args| .{ .grid = .{
+                .block = args.block,
+                .superblock_copy = args.superblock_copy,
+            } },
+            .manifest => |args| .{ .manifest = .{
+                .superblock_copy = args.superblock_copy,
+            } },
+            .tables => |args| .{ .tables = .{
+                .superblock_copy = args.superblock_copy,
+                .tree = args.tree,
+                .level = args.level,
+            } },
+        },
+    };
+}
+
+fn parse_args_multiversion(multiversion: CliArgs.Multiversion) Command.Multiversion {
+    return .{
+        .path = multiversion.positional.path,
+    };
 }
 
 /// Parse and allocate the addresses returning a slice into that array.
