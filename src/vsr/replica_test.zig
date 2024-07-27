@@ -1145,12 +1145,12 @@ test "Cluster: sync: slightly lagging replica" {
     // Corrupt all copies of a checkpointed prepare.
     a0.corrupt(.{ .wal_prepare = checkpoint_1 });
     b1.corrupt(.{ .wal_prepare = checkpoint_1 });
-    try c.request(checkpoint_1_trigger + 2, checkpoint_1_trigger + 2);
+    try c.request(checkpoint_1_prepare_max + 1, checkpoint_1_prepare_max + 1);
 
     // At this point, b2 won't be able to repair WAL and must state sync.
     b2.pass_all(.R_, .bidirectional);
-    try c.request(checkpoint_1_trigger + 3, checkpoint_1_trigger + 3);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 3);
+    try c.request(checkpoint_1_prepare_max + 2, checkpoint_1_prepare_max + 2);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_prepare_max + 2);
 }
 
 test "Cluster: sync: checkpoint from a newer view" {
@@ -1697,7 +1697,7 @@ const TestReplicas = struct {
             log.info("{}: restart replica", .{r});
             t.cluster.restart_replica(
                 r,
-                t.cluster.replicas[r].releases_bundled.const_slice(),
+                t.cluster.replicas[r].releases_bundled,
             ) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
@@ -1721,7 +1721,7 @@ const TestReplicas = struct {
 
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(r, releases_bundled.const_slice()) catch |err| {
+            t.cluster.restart_replica(r, &releases_bundled) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,

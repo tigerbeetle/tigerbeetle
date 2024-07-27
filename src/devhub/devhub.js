@@ -148,6 +148,7 @@ async function mainSeeds() {
           <td><code>${record.command}</code></td>
           <td><time>${seedDuration}</time></td>
           <td><time>${seedFreshness} ago</time></td>
+          <td>${record.count}</td>
       `;
     tableDom.appendChild(rowDom);
   }
@@ -158,11 +159,11 @@ async function mainSeeds() {
   for (const record of records) {
     if (record.branch == "https://github.com/tigerbeetle/tigerbeetle") {
       if (record.fuzzer === "canary") {
-        mainBranchCanary += 1;
+        mainBranchCanary += record.count;
       } else if (record.ok) {
-        mainBranchOk += 1;
+        mainBranchOk += record.count;
       } else {
-        mainBranchFail += 1;
+        mainBranchFail += record.count;
       }
     }
   }

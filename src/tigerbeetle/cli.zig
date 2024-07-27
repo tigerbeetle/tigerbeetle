@@ -102,6 +102,7 @@ const CliArgs = union(enum) {
         ),
         transfer_batch_delay_us: usize = 0,
         validate: bool = false,
+        checksum_performance: bool = false,
         query_count: usize = 100,
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
@@ -198,6 +199,13 @@ const CliArgs = union(enum) {
         ;
     },
 
+    // Internal: used to validate multiversion binaries.
+    multiversion: struct {
+        positional: struct {
+            path: [:0]const u8,
+        },
+    },
+
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
     pub const help = fmt.comptimePrint(
@@ -242,11 +250,11 @@ const CliArgs = union(enum) {
         \\        Set the number of replicas participating in replication.
         \\
         \\  --addresses=<addresses>
-        \\        Set the addresses of all replicas in the cluster.
+        \\        The addresses of all replicas in the cluster.
         \\        Accepts a comma-separated list of IPv4/IPv6 addresses with port numbers.
+        \\        The order is significant and must match across all replicas and clients.
         \\        Either the address or port number (but not both) may be omitted,
-        \\        in which case a default of {[default_address]s} or {[default_port]d}
-        \\        will be used.
+        \\        in which case a default of {[default_address]s} or {[default_port]d} will be used.
         \\        "addresses[i]" corresponds to replica "i".
         \\
         \\  --cache-grid=<size><KiB|MiB|GiB>
@@ -398,6 +406,7 @@ pub const Command = union(enum) {
         transfer_batch_size: usize,
         transfer_batch_delay_us: usize,
         validate: bool,
+        checksum_performance: bool,
         query_count: usize,
         print_batch_timings: bool,
         id_order: IdOrder,
@@ -433,6 +442,10 @@ pub const Command = union(enum) {
         },
     };
 
+    pub const Multiversion = struct {
+        path: [:0]const u8,
+    };
+
     format: Format,
     start: Start,
     version: struct {
@@ -441,6 +454,7 @@ pub const Command = union(enum) {
     repl: Repl,
     benchmark: Benchmark,
     inspect: Inspect,
+    multiversion: Multiversion,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
@@ -784,6 +798,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .transfer_batch_size = benchmark.transfer_batch_size,
                     .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
                     .validate = benchmark.validate,
+                    .checksum_performance = benchmark.checksum_performance,
                     .query_count = benchmark.query_count,
                     .print_batch_timings = benchmark.print_batch_timings,
                     .id_order = benchmark.id_order,
@@ -799,29 +814,34 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 inline else => |args| args.positional.path,
             };
 
+            return Command{ .inspect = .{
+                .path = path,
+                .query = switch (inspect) {
+                    .superblock => .superblock,
+                    .wal => |args| .{ .wal = .{ .slot = args.slot } },
+                    .replies => |args| .{ .replies = .{
+                        .slot = args.slot,
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .grid => |args| .{ .grid = .{
+                        .block = args.block,
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .manifest => |args| .{ .manifest = .{
+                        .superblock_copy = args.superblock_copy,
+                    } },
+                    .tables => |args| .{ .tables = .{
+                        .superblock_copy = args.superblock_copy,
+                        .tree = args.tree,
+                        .level = args.level,
+                    } },
+                },
+            } };
+        },
+        .multiversion => |multiversion| {
             return Command{
-                .inspect = .{
-                    .path = path,
-                    .query = switch (inspect) {
-                        .superblock => .superblock,
-                        .wal => |args| .{ .wal = .{ .slot = args.slot } },
-                        .replies => |args| .{ .replies = .{
-                            .slot = args.slot,
-                            .superblock_copy = args.superblock_copy,
-                        } },
-                        .grid => |args| .{ .grid = .{
-                            .block = args.block,
-                            .superblock_copy = args.superblock_copy,
-                        } },
-                        .manifest => |args| .{ .manifest = .{
-                            .superblock_copy = args.superblock_copy,
-                        } },
-                        .tables => |args| .{ .tables = .{
-                            .superblock_copy = args.superblock_copy,
-                            .tree = args.tree,
-                            .level = args.level,
-                        } },
-                    },
+                .multiversion = .{
+                    .path = multiversion.positional.path,
                 },
             };
         },

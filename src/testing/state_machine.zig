@@ -165,8 +165,9 @@ pub fn StateMachineType(
             callback(state_machine);
         }
 
-        pub fn pulse(state_machine: *const StateMachine) bool {
+        pub fn pulse_needed(state_machine: *const StateMachine, timestamp: u64) bool {
             _ = state_machine;
+            _ = timestamp;
             return false;
         }
 

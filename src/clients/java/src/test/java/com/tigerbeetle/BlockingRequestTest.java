@@ -437,7 +437,7 @@ public class BlockingRequestTest {
     }
 
     private static NativeClient getDummyClient() {
-        return NativeClient.initEcho(UInt128.asBytes(0), "3000", 1);
+        return NativeClient.initEcho(UInt128.asBytes(0), "3000");
     }
 
     private class CallbackSimulator<T extends Batch> extends Thread {

@@ -208,10 +208,30 @@ pub const Header = extern struct {
                 }
             },
             .prepare => return .unknown,
+            .block => return .unknown,
+            .reply => return .unknown,
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
+
             // All other messages identify the peer as a replica:
-            else => return .{ .replica = self.replica },
+            .ping,
+            .pong,
+            .pong_client,
+            .prepare_ok,
+            .commit,
+            .start_view_change,
+            .do_view_change,
+            .start_view,
+            .request_start_view,
+            .request_headers,
+            .request_prepare,
+            .request_reply,
+            .headers,
+            .eviction,
+            .request_blocks,
+            .request_sync_checkpoint,
+            .sync_checkpoint,
+            => return .{ .replica = self.replica },
         }
     }
 
@@ -348,7 +368,7 @@ pub const Header = extern struct {
         release: vsr.Release,
         protocol: u16 = vsr.Version,
         command: Command,
-        replica: u8 = 0,
+        replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         ping_timestamp_monotonic: u64,

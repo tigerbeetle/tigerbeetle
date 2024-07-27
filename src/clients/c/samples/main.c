@@ -69,7 +69,6 @@ int main(int argc, char **argv) {
         0,                    // Cluster ID.
         address,              // Cluster addresses.
         strlen(address),      //
-        32,                   // ConcurrencyMax, could be 1, since it's a single-threaded example.
         (uintptr_t)NULL,      // No need for a global context.
         &on_completion        // Completion callback.
     );
@@ -82,7 +81,7 @@ int main(int argc, char **argv) {
     completion_context_t ctx;
     completion_context_init(&ctx);
 
-    tb_packet_t *packet;
+    tb_packet_t packet;
 
     ////////////////////////////////////////////////////////////
     // Submitting a batch of accounts:                        //
@@ -102,31 +101,22 @@ int main(int argc, char **argv) {
     accounts[1].id = 2;
     accounts[1].code = 2;
     accounts[1].ledger = 777;
-    
-    // Acquiring a packet for this request:
-    if (tb_client_acquire_packet(client, &packet) != TB_PACKET_ACQUIRE_OK) {
-        printf("Too many concurrent packets\n");
-        exit(-1);
-    }
 
-    packet->operation = TB_OPERATION_CREATE_ACCOUNTS;  // The operation to be performed.
-    packet->data = accounts;                           // The data to be sent.
-    packet->data_size = ACCOUNTS_SIZE;                 //
-    packet->user_data = &ctx;                          // User-defined context.
-    packet->status = TB_PACKET_OK;                     // Will be set when the reply arrives.
+    packet.operation = TB_OPERATION_CREATE_ACCOUNTS;  // The operation to be performed.
+    packet.data = accounts;                           // The data to be sent.
+    packet.data_size = ACCOUNTS_SIZE;                 //
+    packet.user_data = &ctx;                          // User-defined context.
+    packet.status = TB_PACKET_OK;                     // Will be set when the reply arrives.
 
     printf("Creating accounts...\n"); 
     
-    send_request(client, packet, &ctx);
+    send_request(client, &packet, &ctx);
 
-    if (packet->status != TB_PACKET_OK) {
+    if (packet.status != TB_PACKET_OK) {
         // Checking if the request failed:
-        printf("Error calling create_accounts (ret=%d)\n", packet->status);
+        printf("Error calling create_accounts (ret=%d)\n", packet.status);
         exit(-1);
     }
-
-    // Releasing the packet, so it can be used in a next request.
-    tb_client_release_packet(client, packet);    
 
     if (ctx.size != 0) {
         // Checking for errors creating the accounts:
@@ -166,34 +156,25 @@ int main(int argc, char **argv) {
             transfers[j].amount = 1;
         }
 
-        // Acquiring a packet for this request:
-        if (tb_client_acquire_packet(client, &packet) != TB_PACKET_ACQUIRE_OK) {
-            printf("Too many concurrent packets\n");
-            exit(-1);
-        }
-
-        packet->operation = TB_OPERATION_CREATE_TRANSFERS;  // The operation to be performed.
-        packet->data = transfers;                           // The data to be sent.
-        packet->data_size = MAX_MESSAGE_SIZE;               //
-        packet->user_data = &ctx;                           // User-defined context.
-        packet->status = TB_PACKET_OK;                      // Will be set when the reply arrives.
+        packet.operation = TB_OPERATION_CREATE_TRANSFERS;  // The operation to be performed.
+        packet.data = transfers;                           // The data to be sent.
+        packet.data_size = MAX_MESSAGE_SIZE;               //
+        packet.user_data = &ctx;                           // User-defined context.
+        packet.status = TB_PACKET_OK;                      // Will be set when the reply arrives.
 
         long long now = get_time_ms();
 
-        send_request(client, packet, &ctx);
+        send_request(client, &packet, &ctx);
 
         long elapsed_ms = get_time_ms() - now;
         if (elapsed_ms > max_latency_ms) max_latency_ms = elapsed_ms;
         total_time_ms += elapsed_ms;
 
-        if (packet->status != TB_PACKET_OK) {
+        if (packet.status != TB_PACKET_OK) {
             // Checking if the request failed:
-            printf("Error calling create_transfers (ret=%d)\n", packet->status);
+            printf("Error calling create_transfers (ret=%d)\n", packet.status);
             exit(-1);
-        }
-
-        // Releasing the packet, so it can be used in a next request.
-        tb_client_release_packet(client, packet);        
+        }       
 
         if (ctx.size != 0) {
             // Checking for errors creating the accounts:
@@ -210,9 +191,9 @@ int main(int argc, char **argv) {
     printf("Transfers created successfully\n");
 	printf("============================================\n");
 
-    printf("%d transfers per second\n", (MAX_BATCHES * TRANSFERS_PER_BATCH * 1000) / total_time_ms);
-	printf("create_transfers max p100 latency per %d transfers = %dms\n", TRANSFERS_PER_BATCH, max_latency_ms);
-	printf("total %d transfers in %dms\n", MAX_BATCHES * TRANSFERS_PER_BATCH, total_time_ms);    
+    printf("%llu transfers per second\n", (MAX_BATCHES * TRANSFERS_PER_BATCH * 1000) / total_time_ms);
+	printf("create_transfers max p100 latency per %llu transfers = %ldms\n", TRANSFERS_PER_BATCH, max_latency_ms);
+	printf("total %llu transfers in %ldms\n", MAX_BATCHES * TRANSFERS_PER_BATCH, total_time_ms);    
     printf("\n");
 
     ////////////////////////////////////////////////////////////
@@ -221,29 +202,20 @@ int main(int argc, char **argv) {
 
     printf("Looking up accounts ...\n");
     tb_uint128_t ids[ACCOUNTS_LEN] = { accounts[0].id, accounts[1].id };
-    
-    // Acquiring a packet for this request:
-    if (tb_client_acquire_packet(client, &packet) != TB_PACKET_ACQUIRE_OK) {
-        printf("Too many concurrent packets\n");
-        exit(-1);
-    }
 
-    packet->operation = TB_OPERATION_LOOKUP_ACCOUNTS;
-    packet->data = ids;
-    packet->data_size = sizeof(tb_uint128_t) * ACCOUNTS_LEN;
-    packet->user_data = &ctx;
-    packet->status = TB_PACKET_OK;
+    packet.operation = TB_OPERATION_LOOKUP_ACCOUNTS;
+    packet.data = ids;
+    packet.data_size = sizeof(tb_uint128_t) * ACCOUNTS_LEN;
+    packet.user_data = &ctx;
+    packet.status = TB_PACKET_OK;
 
-    send_request(client, packet, &ctx);
+    send_request(client, &packet, &ctx);
     
-    if (packet->status != TB_PACKET_OK) {
+    if (packet.status != TB_PACKET_OK) {
         // Checking if the request failed:
-        printf("Error calling lookup_accounts (ret=%d)", packet->status);
+        printf("Error calling lookup_accounts (ret=%d)", packet.status);
         exit(-1);
     }
-
-    // Releasing the packet, so it can be used in a next request.
-    tb_client_release_packet(client, packet);    
 
     if (ctx.size == 0) {
         printf("No accounts found");
@@ -256,9 +228,9 @@ int main(int argc, char **argv) {
         printf("============================================\n");
 
         for(int i=0;i<results_len;i++) {            
-            printf("id=%d\n", (long)results[i].id);
-            printf("debits_posted=%d\n", results[i].debits_posted);
-            printf("credits_posted=%d\n", results[i].credits_posted);
+            printf("id=%ld\n", (long)results[i].id);
+            printf("debits_posted=%ld\n", (long)results[i].debits_posted);
+            printf("credits_posted=%ld\n", (long)results[i].credits_posted);
             printf("\n");
         }
     }

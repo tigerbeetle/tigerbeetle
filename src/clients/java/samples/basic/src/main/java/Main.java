@@ -6,8 +6,7 @@ import java.math.BigInteger;
 import com.tigerbeetle.*;
 
 public final class Main {
-	public static void main(String[] args)
-			throws ConcurrencyExceededException {
+	public static void main(String[] args) throws Exception {
 		String replicaAddress = System.getenv("TB_ADDRESS");
 
 		byte[] clusterID = UInt128.asBytes(0);

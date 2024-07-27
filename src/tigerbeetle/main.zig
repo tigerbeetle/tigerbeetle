@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const fmt = std.fmt;
 const mem = std.mem;
 const os = std.os;
-const log_main = std.log.scoped(.main);
+const log = std.log.scoped(.main);
 
 const vsr = @import("vsr");
 const constants = vsr.constants;
@@ -68,6 +68,14 @@ pub fn main() !void {
         .inspect => |*args| inspect.main(allocator, args) catch |err| {
             // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
             if (err != error.BrokenPipe) return err;
+        },
+        .multiversion => |*args| {
+            var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
+            var stdout_writer = stdout_buffer.writer();
+            const stdout = stdout_writer.any();
+
+            try vsr.multiversioning.print_information(allocator, args.path, stdout);
+            try stdout_buffer.flush();
         },
     }
 }
@@ -145,9 +153,11 @@ const Command = struct {
     fd: std.posix.fd_t,
     io: IO,
     storage: Storage,
+    self_exe_path: [:0]const u8,
 
     fn init(
         command: *Command,
+        allocator: mem.Allocator,
         path: [:0]const u8,
         options: struct {
             must_create: bool,
@@ -182,9 +192,13 @@ const Command = struct {
 
         command.storage = try Storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
+
+        command.self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
+        errdefer allocator.free(command.self_exe_path);
     }
 
-    fn deinit(command: *Command) void {
+    fn deinit(command: *Command, allocator: mem.Allocator) void {
+        allocator.free(command.self_exe_path);
         command.storage.deinit();
         command.io.deinit();
         std.posix.close(command.fd);
@@ -197,11 +211,11 @@ const Command = struct {
         options: SuperBlock.FormatOptions,
     ) !void {
         var command: Command = undefined;
-        try command.init(args.path, .{
+        try command.init(allocator, args.path, .{
             .must_create = true,
             .development = args.development,
         });
-        defer command.deinit();
+        defer command.deinit(allocator);
 
         var superblock = try SuperBlock.init(
             allocator,
@@ -214,7 +228,7 @@ const Command = struct {
 
         try vsr.format(Storage, allocator, options, &command.storage, &superblock);
 
-        log_main.info("{}: formatted: cluster={} replica_count={}", .{
+        log.info("{}: formatted: cluster={} replica_count={}", .{
             options.replica,
             options.cluster,
             options.replica_count,
@@ -235,11 +249,11 @@ const Command = struct {
         const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
-        try command.init(args.path, .{
+        try command.init(allocator, args.path, .{
             .must_create = false,
             .development = args.development,
         });
-        defer command.deinit();
+        defer command.deinit(allocator);
 
         var message_pool = try MessagePool.init(allocator, .{ .replica = .{
             .members_count = @intCast(args.addresses.len),
@@ -276,7 +290,7 @@ const Command = struct {
 
         const grid_cache_size_warn = 1024 * 1024 * 1024;
         if (grid_cache_size < grid_cache_size_warn) {
-            log_main.warn("Grid cache size of {}MiB is small. See --cache-grid", .{
+            log.warn("Grid cache size of {}MiB is small. See --cache-grid", .{
                 @divExact(grid_cache_size, 1024 * 1024),
             });
         }
@@ -284,12 +298,49 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
-        const releases_bundled = &[_]vsr.Release{config.process.release};
+        var multiversion: ?vsr.multiversioning.Multiversion =
+            if (constants.config.process.release.value ==
+            vsr.multiversioning.Release.minimum.value)
+        blk: {
+            log.info(
+                "multiversioning: disabled for development ({}) release.",
+                .{constants.config.process.release},
+            );
+            break :blk null;
+        } else if (args.development) blk: {
+            log.info("multiversioning: disabled due to --development.", .{});
+            break :blk null;
+        } else if (args.experimental) blk: {
+            log.info("multiversioning: disabled due to --experimental.", .{});
+            break :blk null;
+        } else if (constants.aof_recovery) blk: {
+            log.info("multiversioning: disabled due to aof_recovery.", .{});
+            break :blk null;
+        } else try vsr.multiversioning.Multiversion.init(
+            allocator,
+            &command.io,
+            command.self_exe_path,
+            .native,
+        );
 
-        log_main.info("release={}", .{config.process.release});
-        log_main.info("release_client_min={}", .{config.process.release_client_min});
-        log_main.info("releases_bundled={any}", .{releases_bundled.*});
-        log_main.info("git_commit={?s}", .{config.process.git_commit});
+        defer if (multiversion != null) multiversion.?.deinit(allocator);
+
+        // The error from .open_sync() is ignored - timeouts and checking for new binaries are still
+        // enabled even if the first version fails to load.
+        if (multiversion != null) multiversion.?.open_sync() catch {};
+
+        var releases_bundled_baseline: vsr.multiversioning.ReleaseList = .{};
+        releases_bundled_baseline.append_assume_capacity(constants.config.process.release);
+
+        const releases_bundled = if (multiversion != null)
+            &multiversion.?.releases_bundled
+        else
+            &releases_bundled_baseline;
+
+        log.info("release={}", .{config.process.release});
+        log.info("release_client_min={}", .{config.process.release_client_min});
+        log.info("releases_bundled={any}", .{releases_bundled.const_slice()});
+        log.info("git_commit={?s}", .{config.process.git_commit});
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
@@ -300,6 +351,7 @@ const Command = struct {
             .release_client_min = config.process.release_client_min,
             .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
+            .multiversion = if (multiversion) |*multiversion_| multiversion_ else null,
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
@@ -327,26 +379,32 @@ const Command = struct {
             else => |e| return e,
         };
 
+        // Enable checking for new binaries on disk after the replica has been opened. Only
+        // supported on Linux.
+        if (multiversion != null and builtin.target.os.tag == .linux) {
+            multiversion.?.timeout_enable();
+        }
+
         // Note that this does not account for the fact that any allocations will be rounded up to
         // the nearest page by `std.heap.page_allocator`.
-        log_main.info("{}: Allocated {}MiB during replica init", .{
+        log.info("{}: Allocated {}MiB during replica init", .{
             replica.replica,
             @divFloor(counting_allocator.size, 1024 * 1024),
         });
-        log_main.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
+        log.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
             replica.replica,
             @divFloor(grid_cache_size, 1024 * 1024),
             @divFloor(args.lsm_forest_node_count * constants.lsm_manifest_node_size, 1024 * 1024),
         });
 
-        log_main.info("{}: cluster={}: listening on {}", .{
+        log.info("{}: cluster={}: listening on {}", .{
             replica.replica,
             replica.cluster,
             replica.message_bus.process.accept_address,
         });
 
         if (constants.aof_recovery) {
-            log_main.warn(
+            log.warn(
                 "{}: started in AOF recovery mode. This is potentially dangerous - if it's" ++
                     " unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.",
                 .{replica.replica},
@@ -354,7 +412,7 @@ const Command = struct {
         }
 
         if (constants.verify) {
-            log_main.warn("{}: started with constants.verify - expect reduced performance. " ++
+            log.warn("{}: started with constants.verify - expect reduced performance. " ++
                 "Recompile with -Dconfig=production if unexpected.", .{replica.replica});
         }
 
@@ -378,7 +436,7 @@ const Command = struct {
                 fn thread_main() void {
                     var buf: [1]u8 = .{0};
                     _ = std.io.getStdIn().read(&buf) catch {};
-                    log_main.info("stdin closed, exiting", .{});
+                    log.info("stdin closed, exiting", .{});
                     std.process.exit(0);
                 }
             }.thread_main, .{});
@@ -392,10 +450,10 @@ const Command = struct {
     }
 
     pub fn version(allocator: mem.Allocator, verbose: bool) !void {
-        _ = allocator;
-
         var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-        const stdout = stdout_buffer.writer();
+        var stdout_writer = stdout_buffer.writer();
+        const stdout = stdout_writer.any();
+
         try std.fmt.format(stdout, "TigerBeetle version {}\n", .{constants.semver});
 
         if (verbose) {
@@ -422,6 +480,11 @@ const Command = struct {
                     @field(config.process, field_name),
                 );
             }
+
+            try stdout.writeAll("\n");
+            const self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
+            defer allocator.free(self_exe_path);
+            vsr.multiversioning.print_information(allocator, self_exe_path, stdout) catch {};
         }
         try stdout_buffer.flush();
     }
@@ -434,18 +497,61 @@ const Command = struct {
 
 fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != replica.release.value);
+    assert(release.value != vsr.Release.zero.value);
+    assert(release.value != vsr.Release.minimum.value);
+
+    const multiversion = replica.multiversion orelse {
+        @panic("replica_release_execute unsupported");
+    };
 
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
     } else {
-        log_main.err("{}: release_execute: release {} is not available; upgrade the binary", .{
+        log.err("{}: release_execute: release {} is not available;" ++
+            "upgrade (or downgrade) the binary", .{
             replica.replica,
             release,
         });
-        @panic("release_execute: binary missing required version");
+        @panic("release not available");
     }
 
-    // TODO(Multiversioning) Exec into the new release.
+    if (builtin.os.tag == .windows) {
+        // Unlike on Linux / macOS which use `execve{at,z}` for multiversion binaries,
+        // Windows has to use CreateProcess. This is a problem, because it's a race between
+        // the parent process exiting and the new process starting. Work around this by
+        // deinit'ing Replica and storage before continuing.
+        // We don't need to clean up all resources here, since the process will be terminated
+        // in any case; only the resources that would block a new process from starting up.
+        const storage = replica.superblock.storage;
+        const fd = storage.fd;
+        replica.deinit(replica.static_allocator.parent_allocator);
+        storage.deinit();
+
+        // FD is managed by Command, normally. Shut it down explicitly.
+        std.posix.close(fd);
+    }
+
+    // We have two paths here, depending on if we're upgrading or downgrading. If we're downgrading
+    // the invariant is that this code is running _before_ we've finished opening, that is,
+    // release_transition is called in open().
+    if (release.value < replica.release.value) {
+        assert(replica.release.value ==
+            replica.releases_bundled.get(replica.releases_bundled.count() - 1).value);
+
+        multiversion.exec_release(
+            release,
+        ) catch |err| {
+            std.debug.panic("failed to execute previous release: {}", .{err});
+        };
+    } else {
+        // For the upgrade case, re-run the latest binary in place. If we need something older
+        // than the latest, that'll be handled when the case above is hit when re-execing:
+        // (current version v1) -> (latest version v4) -> (desired version v2)
+        multiversion.exec_latest() catch |err| {
+            std.debug.panic("failed to execute latest release: {}", .{err});
+        };
+    }
+
     unreachable;
 }
 

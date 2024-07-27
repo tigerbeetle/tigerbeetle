@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -6,126 +7,121 @@ using static TigerBeetle.AssertionException;
 
 namespace TigerBeetle;
 
-internal struct Packet
-{
-    public readonly unsafe TBPacket* Pointer;
 
-    public unsafe Packet(TBPacket* pointer)
+internal abstract class NativeRequest
+{
+    private GCHandle? packetHandle = null;
+
+    protected unsafe void Submit(NativeClient nativeClient, TBOperation operation, void* data, int len)
     {
-        Pointer = pointer;
+        // Create a handle to the request to ensure it's not GC'd while the packet is submitted.
+        var requestHandle = GCHandle.Alloc(this, GCHandleType.Normal);
+
+        // Create a handle to the packet itself to keep it pinned in memory for the C client.
+        AssertTrue(packetHandle == null, "Submitting from an already pending NativeRequest");
+        packetHandle = GCHandle.Alloc(new TBPacket
+        {
+            next = null,
+            userData = GCHandle.ToIntPtr(requestHandle),
+            operation = (byte)operation,
+            data = (IntPtr)data,
+            dataSize = (uint)len,
+            status = PacketStatus.Ok,
+        }, GCHandleType.Pinned);
+
+        nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
     }
+
+    public static unsafe void OnComplete(TBPacket* packet, ReadOnlySpan<byte> result)
+    {
+        // Extract info from the packet before freeing it.
+        var status = packet->status;
+        var operation = packet->operation;
+        var requestHandle = GCHandle.FromIntPtr(packet->userData);
+
+        // Extract the request from the requestHandle.
+        AssertTrue(requestHandle.IsAllocated && requestHandle.Target != null, "Invalid GCHandle given to NativeRequest.Complete packet");
+        var request = (NativeRequest)requestHandle.Target!;
+        requestHandle.Free();
+
+        // Free the packet.
+        AssertTrue(request.packetHandle != null, "NativeRequest completed without a valid packet");
+        AssertTrue((IntPtr)packet == request.packetHandle!.Value.AddrOfPinnedObject(), "Mismatching packet tied to a NativeRequest");
+        request.packetHandle.Value.Free();
+        request.packetHandle = null;
+
+        request.Complete(status, operation, result);
+    }
+
+    public abstract void Complete(PacketStatus status, byte operation, ReadOnlySpan<byte> result);
 }
 
-internal interface IRequest
-{
-    public static IRequest? FromUserData(IntPtr userData)
-    {
-        var handle = GCHandle.FromIntPtr(userData);
-        return handle.IsAllocated ? handle.Target as IRequest : null;
-    }
-
-    void Complete(Packet packet, ReadOnlySpan<byte> result);
-}
-
-internal abstract class Request<TResult, TBody> : IRequest
+internal abstract class Request<TResult, TBody> : NativeRequest
     where TResult : unmanaged
     where TBody : unmanaged
 {
-    private static readonly unsafe int RESULT_SIZE = sizeof(TResult);
-    private static readonly unsafe int BODY_SIZE = sizeof(TBody);
-
-    private readonly NativeClient nativeClient;
     private readonly TBOperation operation;
-    private readonly GCHandle requestGCHandle;
 
-    public Request(NativeClient nativeClient, TBOperation operation)
+    public Request(TBOperation operation) : base()
     {
-        requestGCHandle = GCHandle.Alloc(this, GCHandleType.Normal);
-
-        this.nativeClient = nativeClient;
         this.operation = operation;
     }
 
-    public unsafe void Submit(void* pointer, int len)
+    public unsafe void Submit(NativeClient nativeClient, void* body, int bodyCount)
     {
-        AssertTrue(pointer != null);
-        AssertTrue(len > 0);
-        AssertTrue(requestGCHandle.IsAllocated, "Request GCHandle not allocated");
-
-        var packet = this.nativeClient.AcquirePacket();
-
-        var ptr = packet.Pointer;
-        ptr->next = null;
-        ptr->userData = (IntPtr)requestGCHandle;
-        ptr->operation = (byte)operation;
-        ptr->data = new nint(pointer);
-        ptr->dataSize = (uint)(len * BODY_SIZE);
-        ptr->status = PacketStatus.Ok;
-
-        this.nativeClient.Submit(packet);
+        this.Submit(nativeClient, this.operation, body, bodyCount * sizeof(TBody));
     }
 
-    public void Complete(Packet packet, ReadOnlySpan<byte> result)
+    public override void Complete(PacketStatus status, byte operation, ReadOnlySpan<byte> result)
     {
-        unsafe
+        TResult[]? array = null;
+        Exception? exception = null;
+
+        try
         {
-            TResult[]? array = null;
-            Exception? exception = null;
-
-            try
+            switch (status)
             {
-                AssertTrue(packet.Pointer != null, "Null callback packet pointer");
-
-                try
-                {
-                    AssertTrue((byte)operation == packet.Pointer->operation, "Unexpected callback operation: expected={0}, actual={1}", (byte)operation, packet.Pointer->operation);
-
-                    if (packet.Pointer->status == PacketStatus.Ok && result.Length > 0)
+                case PacketStatus.Ok:
+                    unsafe
                     {
-                        AssertTrue(result.Length % RESULT_SIZE == 0,
+                        AssertTrue(
+                            (byte)this.operation == operation,
+                            "Unexpected callback operation: expected={0}, actual={1}",
+                            (byte)this.operation,
+                            operation
+                        );
+
+                        AssertTrue(result.Length % sizeof(TResult) == 0,
                             "Invalid received data: result.Length={0}, SizeOf({1})={2}",
                             result.Length,
                             typeof(TResult).Name,
-                            RESULT_SIZE
+                            sizeof(TResult)
                         );
 
-                        array = new TResult[result.Length / RESULT_SIZE];
-
-                        var span = MemoryMarshal.Cast<byte, TResult>(result);
-                        span.CopyTo(array);
+                        array = new TResult[result.Length / sizeof(TResult)];
+                        MemoryMarshal.Cast<byte, TResult>(result).CopyTo(array);
+                        break;
                     }
-                    else
-                    {
-                        array = Array.Empty<TResult>();
-                    }
-                }
-                finally
-                {
-                    nativeClient.ReleasePacket(packet);
 
-                    if (requestGCHandle.IsAllocated) requestGCHandle.Free();
-                }
-            }
-            catch (Exception any)
-            {
-                exception = any;
-            }
+                case PacketStatus.ClientShutdown:
+                    throw new ObjectDisposedException("Client shutdown.");
 
-            if (exception != null)
-            {
-                SetException(exception);
+                default:
+                    throw new RequestException(status);
             }
-            else
-            {
-                if (packet.Pointer->status == PacketStatus.Ok)
-                {
-                    SetResult(array!);
-                }
-                else
-                {
-                    SetException(new RequestException(packet.Pointer->status));
-                }
-            }
+        }
+        catch (Exception any)
+        {
+            exception = any;
+        }
+
+        if (exception != null)
+        {
+            SetException(exception!);
+        }
+        else
+        {
+            SetResult(array!);
         }
     }
 
@@ -134,13 +130,13 @@ internal abstract class Request<TResult, TBody> : IRequest
     protected abstract void SetException(Exception exception);
 }
 
-internal sealed class AsyncRequest<TResult, TBody> : Request<TResult, TBody>, IRequest
+internal sealed class AsyncRequest<TResult, TBody> : Request<TResult, TBody>
     where TResult : unmanaged
     where TBody : unmanaged
 {
     private readonly TaskCompletionSource<TResult[]> completionSource;
 
-    public AsyncRequest(NativeClient nativeClient, TBOperation operation) : base(nativeClient, operation)
+    public AsyncRequest(TBOperation operation) : base(operation)
     {
         // Hints the TPL to execute the continuation on its own thread pool thread, instead of the unamaged's callback thread:
         this.completionSource = new TaskCompletionSource<TResult[]>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -154,7 +150,7 @@ internal sealed class AsyncRequest<TResult, TBody> : Request<TResult, TBody>, IR
 
 }
 
-internal sealed class BlockingRequest<TResult, TBody> : Request<TResult, TBody>, IRequest
+internal sealed class BlockingRequest<TResult, TBody> : Request<TResult, TBody>
     where TResult : unmanaged
     where TBody : unmanaged
 {
@@ -163,7 +159,7 @@ internal sealed class BlockingRequest<TResult, TBody> : Request<TResult, TBody>,
 
     private bool Completed => result != null || exception != null;
 
-    public BlockingRequest(NativeClient nativeClient, TBOperation operation) : base(nativeClient, operation)
+    public BlockingRequest(TBOperation operation) : base(operation)
     {
     }
 

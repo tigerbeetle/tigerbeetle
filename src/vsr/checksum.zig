@@ -40,6 +40,16 @@ const Aegis128LMac_128 = std.crypto.auth.aegis.Aegis128LMac_128;
 var seed_once = std.once(seed_init);
 var seed_state: Aegis128LMac_128 = undefined;
 
+comptime {
+    // As described above, TigerBeetle uses Aegis (and thus AES Blocks), for its checksumming.
+    // While there is a software implementation, it's much slower and we don't expect to ever be
+    // using it considering we target platforms with AES hardware acceleration.
+    //
+    // If you're trying to compile TigerBeetle for an older CPU without AES hardware acceleration,
+    // you'll need to disable the following assert.
+    assert(std.crypto.core.aes.has_hardware_support);
+}
+
 fn seed_init() void {
     const key = mem.zeroes([16]u8);
     seed_state = Aegis128LMac_128.init(&key);

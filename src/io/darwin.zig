@@ -428,6 +428,8 @@ pub const IO = struct {
         );
     }
 
+    pub const OpenatError = posix.OpenError || posix.UnexpectedError;
+
     pub const ReadError = error{
         WouldBlock,
         NotOpenForReading,
@@ -661,8 +663,12 @@ pub const IO = struct {
         const fd = try posix.socket(family, sock_type | posix.SOCK.NONBLOCK, protocol);
         errdefer self.close_socket(fd);
 
+        // darwin doesn't support SOCK_CLOEXEC.
+        _ = try posix.fcntl(fd, posix.F.SETFD, posix.FD_CLOEXEC);
+
         // darwin doesn't support posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try posix.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+
         return fd;
     }
 

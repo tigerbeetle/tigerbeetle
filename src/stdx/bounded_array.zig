@@ -68,6 +68,10 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
             array.inner.appendAssumeCapacity(item);
         }
 
+        pub inline fn append_slice_assume_capacity(array: *Self, items: []const T) void {
+            array.inner.appendSliceAssumeCapacity(items);
+        }
+
         pub inline fn writer(self: *Self) Inner.Writer {
             return self.inner.writer();
         }
@@ -83,6 +87,10 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
 
         pub inline fn clear(array: *Self) void {
             array.inner.len = 0;
+        }
+
+        pub inline fn pop(array: *Self) T {
+            return array.inner.pop();
         }
     };
 }

@@ -50,7 +50,6 @@ const NativeClient = struct {
         env: *jni.JNIEnv,
         cluster_id: u128,
         addresses_obj: jni.JString,
-        max_concurrency: u32,
     ) ?*Context {
         const addresses = JNIHelper.get_string_utf(env, addresses_obj) orelse {
             ReflectionHelper.initialization_exception_throw(
@@ -72,7 +71,6 @@ const NativeClient = struct {
             global_allocator,
             cluster_id,
             addresses,
-            max_concurrency,
             @intFromPtr(context),
             on_completion,
         ) catch |err| {
@@ -99,7 +97,7 @@ const NativeClient = struct {
         env: *jni.JNIEnv,
         context: *Context,
         request_obj: jni.JObject,
-    ) tb.tb_packet_acquire_status_t {
+    ) void {
         assert(request_obj != null);
 
         const operation = ReflectionHelper.get_request_operation(env, request_obj);
@@ -111,27 +109,22 @@ const NativeClient = struct {
             return undefined;
         };
 
-        var out_packet: ?*tb.tb_packet_t = null;
-        const acquire_status = tb.acquire_packet(context.client, &out_packet);
+        const packet = global_allocator.create(tb.tb_packet_t) catch {
+            ReflectionHelper.assertion_error_throw(env, "Request could not allocate a packet");
+            return undefined;
+        };
 
-        if (out_packet) |packet| {
-            assert(acquire_status == .ok);
+        // Holds a global reference to prevent GC before the callback.
+        const global_ref = JNIHelper.new_global_reference(env, request_obj);
 
-            // Holds a global reference to prevent GC before the callback.
-            const global_ref = JNIHelper.new_global_reference(env, request_obj);
+        packet.operation = operation;
+        packet.user_data = global_ref;
+        packet.data = send_buffer.ptr;
+        packet.data_size = @intCast(send_buffer.len);
+        packet.next = null;
+        packet.status = .ok;
 
-            packet.operation = operation;
-            packet.user_data = global_ref;
-            packet.data = send_buffer.ptr;
-            packet.data_size = @intCast(send_buffer.len);
-            packet.next = null;
-            packet.status = .ok;
-            tb.submit(context.client, packet);
-        } else {
-            assert(acquire_status != .ok);
-        }
-
-        return acquire_status;
+        tb.submit(context.client, packet);
     }
 
     /// Completion callback, always called from the native thread.
@@ -151,12 +144,15 @@ const NativeClient = struct {
         const request_obj: jni.JObject = @ptrCast(packet.user_data);
         defer env.delete_global_ref(request_obj);
 
+        // Extract the packet details before freeing it.
         const packet_operation = packet.operation;
         const packet_status = packet.status;
+        global_allocator.destroy(packet);
+
         if (result_len > 0) {
             switch (packet_status) {
                 .ok => if (result_ptr) |ptr| {
-                    // Copying the reply before releasing the packet.
+                    // Copying the reply before returning from the callback.
                     ReflectionHelper.set_reply_buffer(
                         env,
                         request_obj,
@@ -166,7 +162,6 @@ const NativeClient = struct {
                 else => {},
             }
         }
-        tb.release_packet(context.client, packet);
 
         ReflectionHelper.end_request(
             env,
@@ -196,7 +191,6 @@ comptime {
             class: jni.JClass,
             cluster_id: jni.JByteArray,
             addresses: jni.JString,
-            max_concurrency: jni.JInt,
         ) callconv(jni.JNICALL) jni.JLong {
             _ = class;
             assert(env.get_array_length(cluster_id) == 16);
@@ -209,7 +203,6 @@ comptime {
                 env,
                 @bitCast(cluster_id_elements[0..16].*),
                 addresses,
-                @bitCast(max_concurrency),
             );
             return @bitCast(@intFromPtr(context));
         }
@@ -219,7 +212,6 @@ comptime {
             class: jni.JClass,
             cluster_id: jni.JByteArray,
             addresses: jni.JString,
-            max_concurrency: jni.JInt,
         ) callconv(jni.JNICALL) jni.JLong {
             _ = class;
             assert(env.get_array_length(cluster_id) == 16);
@@ -232,7 +224,6 @@ comptime {
                 env,
                 @as(u128, @bitCast(cluster_id_elements[0..16].*)),
                 addresses,
-                @bitCast(max_concurrency),
             );
             return @bitCast(@intFromPtr(context));
         }
@@ -252,16 +243,14 @@ comptime {
             class: jni.JClass,
             context_handle: jni.JLong,
             request_obj: jni.JObject,
-        ) callconv(jni.JNICALL) jni.JInt {
+        ) callconv(jni.JNICALL) void {
             _ = class;
             assert(context_handle != 0);
-            const packet_acquire_status = NativeClient.submit(
+            NativeClient.submit(
                 env,
                 @ptrFromInt(@as(usize, @bitCast(context_handle))),
                 request_obj,
             );
-
-            return @intCast(@intFromEnum(packet_acquire_status));
         }
     };
 
