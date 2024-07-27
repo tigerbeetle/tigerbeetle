@@ -716,41 +716,11 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .storage_size_limit = storage_size_limit,
                     .pipeline_requests_limit = pipeline_limit,
                     .request_size_limit = @intCast(request_size_limit.bytes()),
-                    .cache_accounts = parse_cache_size_to_count(
-                        tigerbeetle.Account,
-                        AccountsValuesCache,
-                        start.cache_accounts orelse defaults.cache_accounts,
-                    ) catch |err| switch (err) {
-                        error.IntCastOverflow => flags.fatal("--cache-accounts: exceeds the limit", .{}),
-                    },
-                    .cache_transfers = parse_cache_size_to_count(
-                        tigerbeetle.Transfer,
-                        TransfersValuesCache,
-                        start.cache_transfers orelse defaults.cache_transfers,
-                    ) catch |err| switch (err) {
-                        error.IntCastOverflow => flags.fatal("--cache-transfers: exceeds the limit", .{}),
-                    },
-                    .cache_transfers_pending = parse_cache_size_to_count(
-                        StateMachine.TransferPending,
-                        TransfersPendingValuesCache,
-                        start.cache_transfers_pending orelse defaults.cache_transfers_pending,
-                    ) catch |err| switch (err) {
-                        error.IntCastOverflow => flags.fatal("--cache-transfers-pending: exceeds the limit", .{}),
-                    },
-                    .cache_account_balances = parse_cache_size_to_count(
-                        StateMachine.AccountBalancesGrooveValue,
-                        AccountBalancesValuesCache,
-                        start.cache_account_balances orelse defaults.cache_account_balances,
-                    ) catch |err| switch (err) {
-                        error.IntCastOverflow => flags.fatal("--cache-account-balances: exceeds the limit", .{}),
-                    },
-                    .cache_grid_blocks = parse_cache_size_to_count(
-                        [constants.block_size]u8,
-                        Grid.Cache,
-                        start.cache_grid orelse defaults.cache_grid,
-                    ) catch |err| switch (err) {
-                        error.IntCastOverflow => flags.fatal("--cache-grid: exceeds the limit", .{}),
-                    },
+                    .cache_accounts = parse_cache_size_to_count(tigerbeetle.Account, AccountsValuesCache, start.cache_accounts orelse defaults.cache_accounts, "--cache-accounts"),
+                    .cache_transfers = parse_cache_size_to_count(tigerbeetle.Transfer, TransfersValuesCache, start.cache_transfers orelse defaults.cache_transfers, "--cache-transfers"),
+                    .cache_transfers_pending = parse_cache_size_to_count(StateMachine.TransferPending, TransfersPendingValuesCache, start.cache_transfers_pending orelse defaults.cache_transfers_pending, "--cache-transfers-pending"),
+                    .cache_account_balances = parse_cache_size_to_count(StateMachine.AccountBalancesGrooveValue, AccountBalancesValuesCache, start.cache_account_balances orelse defaults.cache_account_balances, "--cache-account-balances"),
+                    .cache_grid_blocks = parse_cache_size_to_count([constants.block_size]u8, Grid.Cache, start.cache_grid orelse defaults.cache_grid, "--cache-grid"),
                     .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
                     .lsm_forest_node_count = lsm_forest_node_count,
                     .development = start.development,
@@ -873,11 +843,7 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
 
 /// Given a limit like `10GiB`, a SetAssociativeCache and T return the largest `value_count_max`
 /// that can fit in the limit.
-fn parse_cache_size_to_count(
-    comptime T: type,
-    comptime SetAssociativeCache: type,
-    size: flags.ByteSize,
-) !u32 {
+fn parse_cache_size_to_count(comptime T: type, comptime SetAssociativeCache: type, size: flags.ByteSize, cliFlag: []const u8) u32 {
     const value_count_max_multiple = SetAssociativeCache.value_count_max_multiple;
 
     const count_limit = @divFloor(size.bytes(), @sizeOf(T));
@@ -887,7 +853,7 @@ fn parse_cache_size_to_count(
     ) * value_count_max_multiple;
 
     if (count_rounded > std.math.maxInt(u32)) {
-        return error.IntCastOverflow;
+        flags.fatal("{s}: exceeds the limit", .{cliFlag});
     }
 
     const result: u32 = @intCast(count_rounded);
