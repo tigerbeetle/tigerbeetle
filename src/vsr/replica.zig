@@ -6956,6 +6956,10 @@ pub fn ReplicaType(
         fn replicate(self: *Self, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
             assert(message.header.view >= self.view);
+            // We may replicate older prepares from either a primary of the current or future view
+            // whose start view we're waiting on (to truncate our log and set our self.op
+            // accordingly).
+            maybe(message.header.op < self.op);
 
             if (message.header.op <= self.commit_max) {
                 log.debug("{}: replicate: not replicating (committed)", .{self.replica});
@@ -7491,6 +7495,7 @@ pub fn ReplicaType(
                 .prepare => |header| {
                     maybe(self.standby());
                     assert(self.replica != replica);
+                    // Do not assert message.header.replica because we forward .prepare messages.
                     if (header.replica == self.replica) assert(message.header.view <= self.view);
                     assert(header.operation != .reserved);
                 },
