@@ -81,7 +81,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     const release_triple = .{
         .major = 0,
         .minor = 15,
-        .patch = cli_args.run_number - 186,
+        .patch = cli_args.run_number - 188,
     };
 
     // The minimum client version allowed to connect. This has implications for backwards
