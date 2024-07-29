@@ -1,14 +1,15 @@
 # TigerBeetle Changelog
 
-## 2024-07-26
+## 2024-07-29
 
 ### Safety And Performance
 
-- [#2140](https://github.com/tigerbeetle/tigerbeetle/pull/2140)
+- [#2140](https://github.com/tigerbeetle/tigerbeetle/pull/2140),
+  [#2154](https://github.com/tigerbeetle/tigerbeetle/pull/2154)
 
-  Fix a bug where MessageBus sees block messages (due to state sync or repair) and peer_type says
-  they are always from replica 0 (since Header.Block.replica == 0 always). So, if they are being
-  sent by a non-R0 replica, it drops the messages with "message from unexpected peer".
+  Fix a bug where MessageBus sees block/reply messages (due to state sync or repair) and peer_type
+  says they are always from replica 0 (since Header.Block.replica == 0 always). So, if they are
+  being sent by a non-R0 replica, it drops the messages with "message from unexpected peer".
 
   This leads to a replica being stuck in state sync and unable to progress.
 
