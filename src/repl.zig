@@ -542,6 +542,12 @@ pub fn ReplType(comptime MessageBus: type) type {
             while (buffer.items.len < single_repl_input_max) {
                 const user_input = try UserInput.read(reader) orelse return null;
                 switch (user_input) {
+                    .ctrlc => {
+                        // Erase everything below the current cursor's position in case Ctrl-C was
+                        // pressed somewhere inside the buffer.
+                        try repl.printer.print("^C\x1b[J\n", .{});
+                        return &.{};
+                    },
                     .newline => {
                         try repl.printer.print("\n", .{});
                         return try buffer.toOwnedSlice();
@@ -1186,6 +1192,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                 const handle_stdin = try windows.GetStdHandle(windows.STD_INPUT_HANDLE);
                 var mode_stdin: u32 = console_mode.*.stdin;
+                mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_processed_input);
                 mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_line_input);
                 mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_echo_input);
                 mode_stdin |= @intFromEnum(WindowsConsoleMode.Input.enable_virtual_terminal_input);
@@ -1211,6 +1218,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                 var termios_new = termios_start.*;
                 termios_new.lflag.ECHO = false;
+                termios_new.lflag.ISIG = false;
                 termios_new.lflag.ICANON = false;
                 termios_new.cc[@intFromEnum(posix.V.MIN)] = 1;
                 termios_new.cc[@intFromEnum(posix.V.TIME)] = 0;
@@ -1246,6 +1254,7 @@ const WindowsConsoleMode = struct {
     stdout: u32,
 
     const Input = enum(u32) {
+        enable_processed_input = 0x0001,
         enable_line_input = 0x0002,
         enable_echo_input = 0x0004,
         enable_virtual_terminal_input = 0x0200,
@@ -1316,6 +1325,7 @@ const Terminal = struct {
 const UserInput = union(enum) {
     printable: u8,
     newline,
+    ctrlc,
     backspace,
     up,
     down,
@@ -1327,6 +1337,7 @@ const UserInput = union(enum) {
         const byte = try reader.readByte();
         switch (byte) {
             std.ascii.control_code.eot => return null,
+            std.ascii.control_code.etx => return .ctrlc,
             std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
             std.ascii.control_code.esc => {
