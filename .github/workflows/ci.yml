@@ -156,7 +156,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Needed for llvm-objcopy.
       - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
+
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
