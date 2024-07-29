@@ -128,11 +128,11 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     // Enable this once deterministic zip generation has been merged in and released.
     // const raw_run_number = stdx.cut(stdx.cut(tag, ".").?.suffix, ".").?.suffix;
 
-    // // The +185 comes from how release.zig calculates the version number.
+    // // The +186 comes from how release.zig calculates the version number.
     // const run_number = try std.fmt.allocPrint(
     //     shell.arena.allocator(),
     //     "{}",
-    //     .{try std.fmt.parseInt(u32, raw_run_number, 10) + 185},
+    //     .{try std.fmt.parseInt(u32, raw_run_number, 10) + 186},
     // );
 
     // const sha = try shell.exec_stdout("git rev-parse HEAD", .{});
