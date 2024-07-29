@@ -469,6 +469,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         starting_terminal_mode: *const anyopaque,
         client: *Client,
         printer: Printer,
+        history: std.ArrayList([]const u8),
 
         const Repl = @This();
 
@@ -534,6 +535,9 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             var buffer = std.ArrayList(u8).init(allocator);
             var buffer_index: usize = 0;
+            var history_index = repl.history.items.len;
+            // Cache the buffer the user is typing into before navigating through history.
+            var buffer_outside_history = std.ArrayList(u8).init(allocator);
 
             while (buffer.items.len < single_repl_input_max) {
                 const user_input = try UserInput.read(reader) orelse return null;
@@ -612,6 +616,63 @@ pub fn ReplType(comptime MessageBus: type) type {
                         });
                         buffer_index += 1;
                     },
+                    .up => if (history_index > 0) {
+                        const history_index_next = history_index - 1;
+                        const buffer_next = repl.history.items[history_index_next];
+
+                        const position_buffer_start = terminal.cursor_position_after_delta(
+                            -@as(isize, @intCast(buffer_index)),
+                        );
+                        const position_buffer_end = position_buffer_start.after_delta(
+                            @as(isize, @intCast(buffer_next.len)),
+                            terminal.size,
+                        );
+
+                        try repl.printer.print("\x1b[{};1H\x1b[J{s}{s}\x20\x08", .{
+                            position_buffer_start.row,
+                            prompt,
+                            buffer_next,
+                        });
+                        terminal.cursor_position = position_buffer_end;
+
+                        if (history_index == repl.history.items.len) {
+                            buffer_outside_history.clearRetainingCapacity();
+                            try buffer_outside_history.appendSlice(buffer.items);
+                        }
+                        history_index = history_index_next;
+
+                        buffer.clearRetainingCapacity();
+                        try buffer.appendSlice(buffer_next);
+                        buffer_index = buffer.items.len;
+                    },
+                    .down => if (history_index < repl.history.items.len) {
+                        const history_index_next = history_index + 1;
+                        const buffer_next = if (history_index_next == repl.history.items.len)
+                            buffer_outside_history.items
+                        else
+                            repl.history.items[history_index_next];
+
+                        const position_buffer_start = terminal.cursor_position_after_delta(
+                            -@as(isize, @intCast(buffer_index)),
+                        );
+                        const position_buffer_end = position_buffer_start.after_delta(
+                            @as(isize, @intCast(buffer_next.len)),
+                            terminal.size,
+                        );
+
+                        try repl.printer.print("\x1b[{};1H\x1b[J{s}{s}\x20\x08", .{
+                            position_buffer_start.row,
+                            prompt,
+                            buffer_next,
+                        });
+                        terminal.cursor_position = position_buffer_end;
+
+                        history_index = history_index_next;
+
+                        buffer.clearRetainingCapacity();
+                        try buffer.appendSlice(buffer_next);
+                        buffer_index = buffer.items.len;
+                    },
                     .unhandled => {},
                 }
             }
@@ -640,6 +701,19 @@ pub fn ReplType(comptime MessageBus: type) type {
                 try repl.fail("\nExiting.\n", .{});
                 return;
             };
+
+            if (input.len > 0) {
+                if (repl.history.items.len == 0 or
+                    !std.mem.eql(u8, repl.history.getLast(), input))
+                {
+                    const history_item_next = try repl.history.allocator.alloc(u8, input.len);
+                    @memcpy(history_item_next, input);
+                    repl.history.append(history_item_next) catch |err| {
+                        repl.event_loop_done = true;
+                        return err;
+                    };
+                }
+            }
 
             const statement = Parser.parse_statement(
                 arena,
@@ -723,6 +797,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     .stderr = std.io.getStdErr().writer(),
                     .stdout = stdout.writer(),
                 },
+                .history = std.ArrayList([]const u8).init(allocator),
             };
 
             if (repl.interactive) {
@@ -1242,6 +1317,8 @@ const UserInput = union(enum) {
     printable: u8,
     newline,
     backspace,
+    up,
+    down,
     left,
     right,
     unhandled,
@@ -1258,6 +1335,8 @@ const UserInput = union(enum) {
                     '[' => {
                         const third_byte = try reader.readByte();
                         switch (third_byte) {
+                            'A' => return .up,
+                            'B' => return .down,
                             'C' => return .right,
                             'D' => return .left,
                             else => return .unhandled,
