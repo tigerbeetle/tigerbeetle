@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
+const posix = std.posix;
+const windows = std.os.windows;
 
 const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
@@ -464,6 +466,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         interactive: bool,
         debug_logs: bool,
 
+        starting_terminal_mode: *const anyopaque,
         client: *Client,
         printer: Printer,
 
@@ -472,7 +475,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn fail(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (!repl.interactive) {
                 try repl.printer.print_error(format, arguments);
-                std.posix.exit(1);
+                std.process.exit(1);
             }
 
             try repl.printer.print(format, arguments);
@@ -516,21 +519,71 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
         }
 
+        const prompt = "> ";
         const single_repl_input_max = 10 * 4 * 1024;
+
+        fn read_until_newline_or_eof_alloc(
+            repl: *Repl,
+            allocator: std.mem.Allocator,
+            reader: std.io.AnyReader,
+        ) !?[]u8 {
+            try repl.prompt_mode_set();
+            defer repl.prompt_mode_unset() catch {};
+
+            var terminal = try repl.get_terminal(allocator, reader);
+
+            var buffer = std.ArrayList(u8).init(allocator);
+            var buffer_index: usize = 0;
+
+            while (buffer.items.len < single_repl_input_max) {
+                const user_input = try UserInput.read(reader) orelse return null;
+                switch (user_input) {
+                    .newline => {
+                        try repl.printer.print("\n", .{});
+                        return try buffer.toOwnedSlice();
+                    },
+                    .printable => |character| {
+                        try repl.printer.print("{c}{s}", .{
+                            character,
+                            // Some terminals may not automatically move/scroll us down to the
+                            // next row after appending a character at the last column. This can
+                            // cause us to incorrectly report the cursor's position, so we force
+                            // the terminal to do so by moving the cursor forward and backward
+                            // one space.
+                            if (terminal.cursor_position.column == terminal.size.columns)
+                                "\x20\x08"
+                            else
+                                "",
+                        });
+                        terminal.cursor_position = terminal.cursor_position_after_delta(1);
+                        try buffer.append(character);
+                        buffer_index += 1;
+                    },
+                    .backspace => if (buffer_index > 0) {
+                        try repl.printer.print("\x08\x20\x08", .{});
+                        terminal.cursor_position = terminal.cursor_position_after_delta(-1);
+                        buffer_index -= 1;
+                        _ = buffer.orderedRemove(buffer_index);
+                    },
+                    .unhandled => {},
+                }
+            }
+            return error.StreamTooLong;
+        }
+
         fn do_repl(
             repl: *Repl,
             arena: *std.heap.ArenaAllocator,
         ) !void {
-            try repl.printer.print("> ", .{});
+            try repl.printer.print(prompt, .{});
 
             const stdin = std.io.getStdIn();
             var stdin_buffered_reader = std.io.bufferedReader(stdin.reader());
-            var stdin_stream = stdin_buffered_reader.reader();
+            const stdin_stream = stdin_buffered_reader.reader().any();
 
-            const input = stdin_stream.readUntilDelimiterOrEofAlloc(
+            const input = repl.read_until_newline_or_eof_alloc(
                 arena.allocator(),
-                ';',
-                single_repl_input_max,
+                stdin_stream,
             ) catch |err| {
                 repl.event_loop_done = true;
                 return err;
@@ -610,8 +663,10 @@ pub fn ReplType(comptime MessageBus: type) type {
             verbose: bool,
         ) !void {
             const allocator = arena.allocator();
+            const stdout = std.io.getStdOut();
 
             var repl = Repl{
+                .starting_terminal_mode = undefined,
                 .client = undefined,
                 .debug_logs = verbose,
                 .request_done = true,
@@ -619,9 +674,35 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .interactive = statements.len == 0,
                 .printer = .{
                     .stderr = std.io.getStdErr().writer(),
-                    .stdout = std.io.getStdOut().writer(),
+                    .stdout = stdout.writer(),
                 },
             };
+
+            if (repl.interactive) {
+                if (!stdout.getOrEnableAnsiEscapeSupport()) {
+                    std.debug.print("ANSI escape sequences not supported.\n", .{});
+                    std.process.exit(1);
+                }
+                if (builtin.os.tag == .windows) {
+                    const handle_stdin = try windows.GetStdHandle(windows.STD_INPUT_HANDLE);
+                    var mode_stdin: u32 = 0;
+                    if (windows.kernel32.GetConsoleMode(handle_stdin, &mode_stdin) == 0) {
+                        return windows.unexpectedError(windows.kernel32.GetLastError());
+                    }
+                    const handle_stdout = try windows.GetStdHandle(windows.STD_OUTPUT_HANDLE);
+                    var mode_stdout: u32 = 0;
+                    if (windows.kernel32.GetConsoleMode(handle_stdout, &mode_stdout) == 0) {
+                        return windows.unexpectedError(windows.kernel32.GetLastError());
+                    }
+                    repl.starting_terminal_mode = @ptrCast(&WindowsConsoleMode{
+                        .stdin = mode_stdin,
+                        .stdout = mode_stdout,
+                    });
+                } else {
+                    const termios = try posix.tcgetattr(std.io.getStdIn().handle);
+                    repl.starting_terminal_mode = @ptrCast(&termios);
+                }
+            }
 
             try repl.debug("Connecting to '{any}'.\n", .{addresses});
 
@@ -678,7 +759,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             // TODO: This will be more convenient to express
                             // once https://github.com/ziglang/zig/issues/2473 is
                             // in.
-                            => std.posix.exit(1),
+                            => std.process.exit(1),
 
                             // An unexpected error for which we do
                             // want the stacktrace.
@@ -923,13 +1004,291 @@ pub fn ReplType(comptime MessageBus: type) type {
                 repl.fail("Error in callback: {any}", .{err}) catch return;
             };
         }
+
+        fn get_cursor_position(
+            repl: *Repl,
+            allocator: std.mem.Allocator,
+            reader: std.io.AnyReader,
+        ) !Terminal.CursorPosition {
+            // Obtaining the cursor's position relies on sending a request payload to stdout. The
+            // response is read from stdin, but it may have been altered by user input, so we keep
+            // retrying until successful.
+            var buffer = std.ArrayList(u8).init(allocator);
+            while (true) {
+                // The response is of the form `<ESC>[{row};{col}R`.
+                try repl.printer.print("\x1b[6n", .{});
+                buffer.clearRetainingCapacity();
+                try reader.streamUntilDelimiter(buffer.writer(), '[', null);
+
+                buffer.clearRetainingCapacity();
+                try reader.streamUntilDelimiter(buffer.writer(), ';', null);
+                const row = std.fmt.parseInt(usize, buffer.items, 10) catch continue;
+
+                buffer.clearRetainingCapacity();
+                try reader.streamUntilDelimiter(buffer.writer(), 'R', null);
+                const column = std.fmt.parseInt(usize, buffer.items, 10) catch continue;
+
+                return Terminal.CursorPosition{
+                    .row = row,
+                    .column = column,
+                };
+            }
+        }
+
+        fn get_terminal(
+            repl: *Repl,
+            allocator: std.mem.Allocator,
+            reader: std.io.AnyReader,
+        ) !Terminal {
+            // We move the cursor to a location that is unlikely to exist (2^16th row and column).
+            // Terminals usually handle this by placing the cursor at their end position, which we
+            // can use to obtain its resolution/size.
+            const cursor_start = try repl.get_cursor_position(allocator, reader);
+            try repl.printer.print("\x1b[{};{}H", .{ std.math.maxInt(u16), std.math.maxInt(u16) });
+            const cursor_end = try repl.get_cursor_position(allocator, reader);
+            try repl.printer.print("\x1b[{};{}H", .{ cursor_start.row, cursor_start.column });
+            return Terminal{
+                .cursor_position = cursor_start,
+                .size = Terminal.Size{
+                    .rows = cursor_end.row,
+                    .columns = cursor_end.column,
+                },
+            };
+        }
+
+        fn prompt_mode_set(repl: *Repl) anyerror!void {
+            if (builtin.os.tag == .windows) {
+                const console_mode: *const WindowsConsoleMode = @alignCast(@ptrCast(
+                    repl.starting_terminal_mode,
+                ));
+
+                const handle_stdin = try windows.GetStdHandle(windows.STD_INPUT_HANDLE);
+                var mode_stdin: u32 = console_mode.*.stdin;
+                mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_line_input);
+                mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_echo_input);
+                mode_stdin |= @intFromEnum(WindowsConsoleMode.Input.enable_virtual_terminal_input);
+                if (windows.kernel32.SetConsoleMode(handle_stdin, mode_stdin) == 0) {
+                    return windows.unexpectedError(windows.kernel32.GetLastError());
+                }
+
+                const handle_stdout = try windows.GetStdHandle(windows.STD_OUTPUT_HANDLE);
+                var mode_stdout: u32 = console_mode.*.stdout;
+                mode_stdout |= @intFromEnum(WindowsConsoleMode.Output.enable_processed_output);
+                mode_stdout |= @intFromEnum(WindowsConsoleMode.Output.enable_wrap_at_eol_output);
+                mode_stdout |= @intFromEnum(
+                    WindowsConsoleMode.Output.enable_virtual_terminal_processing,
+                );
+                mode_stdout &= ~@intFromEnum(WindowsConsoleMode.Output.disable_newline_auto_return);
+                if (windows.kernel32.SetConsoleMode(handle_stdout, mode_stdout) == 0) {
+                    return windows.unexpectedError(windows.kernel32.GetLastError());
+                }
+            } else {
+                const termios_start: *const posix.termios = @alignCast(@ptrCast(
+                    repl.starting_terminal_mode,
+                ));
+
+                var termios_new = termios_start.*;
+                termios_new.lflag.ECHO = false;
+                termios_new.lflag.ICANON = false;
+                termios_new.cc[@intFromEnum(posix.V.MIN)] = 1;
+                termios_new.cc[@intFromEnum(posix.V.TIME)] = 0;
+                try posix.tcsetattr(std.io.getStdIn().handle, .NOW, termios_new);
+            }
+        }
+
+        fn prompt_mode_unset(repl: *Repl) !void {
+            if (builtin.os.tag == .windows) {
+                const console_mode: *const WindowsConsoleMode = @alignCast(@ptrCast(
+                    repl.starting_terminal_mode,
+                ));
+                const handle_stdin = try windows.GetStdHandle(windows.STD_INPUT_HANDLE);
+                if (windows.kernel32.SetConsoleMode(handle_stdin, console_mode.stdin) == 0) {
+                    return windows.unexpectedError(windows.kernel32.GetLastError());
+                }
+                const handle_stdout = try windows.GetStdHandle(windows.STD_OUTPUT_HANDLE);
+                if (windows.kernel32.SetConsoleMode(handle_stdout, console_mode.stdout) == 0) {
+                    return windows.unexpectedError(windows.kernel32.GetLastError());
+                }
+            } else {
+                const termios: *const posix.termios = @alignCast(@ptrCast(
+                    repl.starting_terminal_mode,
+                ));
+                try posix.tcsetattr(std.io.getStdIn().handle, .NOW, termios.*);
+            }
+        }
     };
 }
+
+const WindowsConsoleMode = struct {
+    stdin: u32,
+    stdout: u32,
+
+    const Input = enum(u32) {
+        enable_line_input = 0x0002,
+        enable_echo_input = 0x0004,
+        enable_virtual_terminal_input = 0x0200,
+    };
+
+    const Output = enum(u32) {
+        enable_processed_output = 0x0001,
+        enable_wrap_at_eol_output = 0x0002,
+        enable_virtual_terminal_processing = 0x0004,
+        disable_newline_auto_return = 0x0008,
+    };
+};
+
+const Terminal = struct {
+    size: Size,
+    cursor_position: CursorPosition,
+
+    const Size = struct { rows: usize, columns: usize };
+
+    const CursorPosition = struct {
+        row: usize,
+        column: usize,
+
+        fn after_delta(self: CursorPosition, delta: isize, size: Size) CursorPosition {
+            if (delta == 0) return self;
+
+            // Rows and columns in terminals are one-based indexed. For simple manipulation across
+            // the grid, we map it to a zero-based index array of cells. When experiencing overflows
+            // on either end, we always saturate them such that they remain within the first or last
+            // row of the terminal (assuming a fixed size).
+            const cell_total: isize = @intCast(size.rows * size.columns);
+            const cell_index_current: isize = @intCast(
+                (self.row - 1) * size.columns + (self.column - 1),
+            );
+            assert(cell_index_current >= 0 and cell_index_current < cell_total);
+
+            const cell_index_last: isize = @intCast(cell_total - 1);
+            const column_total: isize = @intCast(size.columns);
+
+            var cell_index_after_delta: isize = cell_index_current + delta;
+            if (cell_index_after_delta > cell_index_last) {
+                const cell_index_row_n_col_1 = cell_total - column_total;
+                const cell_extra = cell_index_after_delta - cell_index_last;
+                cell_index_after_delta =
+                    cell_index_row_n_col_1 + @rem((cell_extra - 1), column_total);
+            } else if (cell_index_after_delta < 0) {
+                const cell_index_row_1_col_n = column_total - 1;
+                const cell_extra: isize = @intCast(@abs(cell_index_after_delta));
+                cell_index_after_delta =
+                    cell_index_row_1_col_n - @rem((cell_extra - 1), column_total);
+            }
+
+            const row_after_delta = @divTrunc(cell_index_after_delta, column_total) + 1;
+            const column_after_delta = @rem(cell_index_after_delta, column_total) + 1;
+
+            assert(row_after_delta >= 1 and row_after_delta <= size.rows);
+            assert(column_after_delta >= 1 and column_after_delta <= size.columns);
+
+            return .{ .row = @intCast(row_after_delta), .column = @intCast(column_after_delta) };
+        }
+    };
+
+    fn cursor_position_after_delta(self: Terminal, delta: isize) CursorPosition {
+        return self.cursor_position.after_delta(delta, self.size);
+    }
+};
+
+const UserInput = union(enum) {
+    printable: u8,
+    newline,
+    backspace,
+    unhandled,
+
+    pub fn read(reader: std.io.AnyReader) !?UserInput {
+        const byte = try reader.readByte();
+        switch (byte) {
+            std.ascii.control_code.eot => return null,
+            std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
+            std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
+            else => {
+                if (std.ascii.isPrint(byte)) {
+                    return .{ .printable = byte };
+                }
+                return .unhandled;
+            },
+        }
+    }
+};
 
 const null_printer = Printer{
     .stderr = null,
     .stdout = null,
 };
+
+test "repl.zig: Terminal cursor position change is valid" {
+    const tests = [_]struct {
+        size: Terminal.Size,
+        source: Terminal.CursorPosition,
+        delta: isize,
+        destination: Terminal.CursorPosition,
+    }{
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 1, .column = 1 },
+            .delta = -32,
+            .destination = .{ .row = 1, .column = 9 },
+        },
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 1, .column = 1 },
+            .delta = -1,
+            .destination = .{ .row = 1, .column = 10 },
+        },
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 1, .column = 2 },
+            .delta = -1,
+            .destination = .{ .row = 1, .column = 1 },
+        },
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 3, .column = 8 },
+            .delta = -26,
+            .destination = .{ .row = 1, .column = 2 },
+        },
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 2, .column = 9 },
+            .delta = 0,
+            .destination = .{ .row = 2, .column = 9 },
+        },
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 2, .column = 9 },
+            .delta = 61,
+            .destination = .{ .row = 8, .column = 10 },
+        },
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 10, .column = 9 },
+            .delta = 1,
+            .destination = .{ .row = 10, .column = 10 },
+        },
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 10, .column = 10 },
+            .delta = 1,
+            .destination = .{ .row = 10, .column = 1 },
+        },
+        .{
+            .size = .{ .rows = 10, .columns = 10 },
+            .source = .{ .row = 10, .column = 10 },
+            .delta = 21,
+            .destination = .{ .row = 10, .column = 1 },
+        },
+    };
+
+    for (tests) |t| {
+        const terminal = Terminal{
+            .size = t.size,
+            .cursor_position = t.source,
+        };
+        try std.testing.expectEqual(terminal.cursor_position_after_delta(t.delta), t.destination);
+    }
+}
 
 test "repl.zig: Parser single transfer successfully" {
     const tests = [_]struct {
