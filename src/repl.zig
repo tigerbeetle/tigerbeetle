@@ -543,27 +543,74 @@ pub fn ReplType(comptime MessageBus: type) type {
                         return try buffer.toOwnedSlice();
                     },
                     .printable => |character| {
-                        try repl.printer.print("{c}{s}", .{
-                            character,
-                            // Some terminals may not automatically move/scroll us down to the
-                            // next row after appending a character at the last column. This can
-                            // cause us to incorrectly report the cursor's position, so we force
-                            // the terminal to do so by moving the cursor forward and backward
-                            // one space.
-                            if (terminal.cursor_position.column == terminal.size.columns)
-                                "\x20\x08"
-                            else
-                                "",
-                        });
-                        terminal.cursor_position = terminal.cursor_position_after_delta(1);
-                        try buffer.append(character);
+                        const is_append = buffer_index == buffer.items.len;
+                        if (is_append) {
+                            try repl.printer.print("{c}{s}", .{
+                                character,
+                                // Some terminals may not automatically move/scroll us down to the
+                                // next row after appending a character at the last column. This can
+                                // cause us to incorrectly report the cursor's position, so we force
+                                // the terminal to do so by moving the cursor forward and backward
+                                // one space.
+                                if (terminal.cursor_position.column == terminal.size.columns)
+                                    "\x20\x08"
+                                else
+                                    "",
+                            });
+                            terminal.cursor_position = terminal.cursor_position_after_delta(1);
+                        } else {
+                            // If we're inserting mid-buffer, we need to redraw everything that
+                            // comes after as well.
+                            const buffer_redraw_len: isize = @intCast(
+                                buffer.items.len - buffer_index,
+                            );
+                            const position_buffer_end = terminal.cursor_position_after_delta(
+                                buffer_redraw_len,
+                            );
+                            const position_after_new_character = position_buffer_end.after_delta(
+                                -(buffer_redraw_len - 1),
+                                terminal.size,
+                            );
+
+                            try repl.printer.print("{c}{s}\x1b[{};{}H", .{
+                                character,
+                                buffer.items[buffer_index..],
+                                position_after_new_character.row,
+                                position_after_new_character.column,
+                            });
+                            terminal.cursor_position = position_after_new_character;
+                        }
+
+                        try buffer.insert(buffer_index, character);
                         buffer_index += 1;
                     },
                     .backspace => if (buffer_index > 0) {
-                        try repl.printer.print("\x08\x20\x08", .{});
                         terminal.cursor_position = terminal.cursor_position_after_delta(-1);
+                        try repl.printer.print("\x08{s}\x20\x1b[{};{}H", .{
+                            // If we're deleting mid-buffer, we need to redraw everything that
+                            // comes after as well.
+                            if (buffer_index < buffer.items.len)
+                                buffer.items[buffer_index..]
+                            else
+                                "",
+                            terminal.cursor_position.row,
+                            terminal.cursor_position.column,
+                        });
                         buffer_index -= 1;
                         _ = buffer.orderedRemove(buffer_index);
+                    },
+                    .left => if (buffer_index > 0) {
+                        try repl.printer.print("\x08", .{});
+                        terminal.cursor_position = terminal.cursor_position_after_delta(-1);
+                        buffer_index -= 1;
+                    },
+                    .right => if (buffer_index < buffer.items.len) {
+                        terminal.cursor_position = terminal.cursor_position_after_delta(1);
+                        try repl.printer.print("\x1b[{};{}H", .{
+                            terminal.cursor_position.row,
+                            terminal.cursor_position.column,
+                        });
+                        buffer_index += 1;
                     },
                     .unhandled => {},
                 }
@@ -1195,6 +1242,8 @@ const UserInput = union(enum) {
     printable: u8,
     newline,
     backspace,
+    left,
+    right,
     unhandled,
 
     pub fn read(reader: std.io.AnyReader) !?UserInput {
@@ -1203,6 +1252,20 @@ const UserInput = union(enum) {
             std.ascii.control_code.eot => return null,
             std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
+            std.ascii.control_code.esc => {
+                const second_byte = try reader.readByte();
+                switch (second_byte) {
+                    '[' => {
+                        const third_byte = try reader.readByte();
+                        switch (third_byte) {
+                            'C' => return .right,
+                            'D' => return .left,
+                            else => return .unhandled,
+                        }
+                    },
+                    else => return .unhandled,
+                }
+            },
             else => {
                 if (std.ascii.isPrint(byte)) {
                     return .{ .printable = byte };
