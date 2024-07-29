@@ -7624,9 +7624,11 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                 },
             }
-            if (replica != self.replica) {
-                // Critical: Do not advertise a view/log_view before it is durable.
-                // See view_durable()/log_view_durable().
+            // Critical:
+            // Do not advertise a view/log_view before it is durable. We only need perform these
+            // checks if we authored the message, not if we're simply forwarding a message along.
+            // See view_durable()/log_view_durable().
+            if (replica != self.replica and message.header.replica == self.replica) {
                 if (message.header.view > self.view_durable() and
                     message.header.command != .request_start_view and
                     !(message.header.command == .ping and
