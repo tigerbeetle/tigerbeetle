@@ -234,7 +234,7 @@ pub fn main() !void {
         \\    tb_packet_t* packet
         \\);
         \\
-        \\void tb_client_submit_sync(
+        \\tb_sync_submit_result_t tb_client_submit_sync(
         \\    tb_client_t client,
         \\    tb_packet_t* packet
         \\);
