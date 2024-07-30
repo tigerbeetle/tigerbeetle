@@ -565,6 +565,7 @@ pub const Multiversion = struct {
     target_fd: posix.fd_t,
     target_path: [:0]const u8,
     target_body_offset: ?u32 = null,
+    target_body_size: ?u32 = null,
     target_header: ?MultiversionHeader = null,
     /// This list is referenced by `Replica.releases_bundled`.
     releases_bundled: ReleaseList = .{},
@@ -912,12 +913,12 @@ pub const Multiversion = struct {
                 parse_macho(source_buffer) catch return error.NoValidPlatformDetected,
         };
 
-        if (offsets.header + @sizeOf(MultiversionHeader) > source_buffer.len) {
+        if (offsets.header_offset + @sizeOf(MultiversionHeader) > source_buffer.len) {
             return error.FileTooSmall;
         }
 
         // `init_from_bytes` validates the header checksum internally.
-        const source_buffer_header = source_buffer[offsets.header..][0..@sizeOf(
+        const source_buffer_header = source_buffer[offsets.header_offset..][0..@sizeOf(
             MultiversionHeader,
         )];
         const header = try MultiversionHeader.init_from_bytes(source_buffer_header);
@@ -925,10 +926,10 @@ pub const Multiversion = struct {
 
         // MachO's checksum_binary_without_header works slightly differently since there are
         // actually two headers, once for x86_64 and one for aarch64. It zeros them both.
-        if (offsets.header_inactive_platform) |header_inactive_platform_offset| {
+        if (offsets.header_offset_inactive_platform) |header_offset_inactive_platform| {
             assert(offsets.format == .macho);
 
-            const buffer = source_buffer[header_inactive_platform_offset..][0..@sizeOf(
+            const buffer = source_buffer[header_offset_inactive_platform..][0..@sizeOf(
                 MultiversionHeader,
             )];
             const source_buffer_header_inactive_platform = buffer; // Line length limits.
@@ -958,8 +959,8 @@ pub const Multiversion = struct {
             std.mem.asBytes(&header),
         );
 
-        if (offsets.header_inactive_platform) |header_inactive_platform_offset| {
-            const buffer = source_buffer[header_inactive_platform_offset..][0..@sizeOf(
+        if (offsets.header_offset_inactive_platform) |header_offset_inactive_platform| {
+            const buffer = source_buffer[header_offset_inactive_platform..][0..@sizeOf(
                 MultiversionHeader,
             )];
             const source_buffer_header_inactive_platform = buffer; // Line length limits.
@@ -1034,7 +1035,8 @@ pub const Multiversion = struct {
         try target_file.pwriteAll(source_buffer, 0);
 
         self.target_header = header;
-        self.target_body_offset = offsets.body;
+        self.target_body_offset = offsets.body_offset;
+        self.target_body_size = offsets.body_size;
 
         self.stage = .ready;
 
@@ -1226,9 +1228,10 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
 }
 
 const HeaderBodyOffsets = struct {
-    header: u32,
-    header_inactive_platform: ?u32 = null,
-    body: u32,
+    header_offset: u32,
+    header_offset_inactive_platform: ?u32 = null,
+    body_offset: u32,
+    body_size: u32,
     format: enum { elf, pe, macho },
 };
 
@@ -1356,8 +1359,9 @@ fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBodyOffs
     }
 
     return .{
-        .header = header_offset.?,
-        .body = body_offset.?,
+        .header_offset = header_offset.?,
+        .body_offset = body_offset.?,
+        .body_size = body_size.?,
         .format = .elf,
     };
 }
@@ -1372,7 +1376,7 @@ fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
     if (@byteSwap(fat_header.nfat_arch) != 6) return error.InvalidMachoArches;
 
     var header_offset: ?u32 = null;
-    var header_inactive_platform_offset: ?u32 = null;
+    var header_offset_inactive_platform: ?u32 = null;
     var body_offset: ?u32 = null;
     var body_size: ?u32 = null;
     for (0..6) |i| {
@@ -1394,8 +1398,8 @@ fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
                 header_offset = @byteSwap(fat_arch.offset);
             } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64)) {
                 // .tb_mvh for _x86_64_ - the opposite of what we're matching on above.
-                assert(header_inactive_platform_offset == null);
-                header_inactive_platform_offset = @byteSwap(fat_arch.offset);
+                assert(header_offset_inactive_platform == null);
+                header_offset_inactive_platform = @byteSwap(fat_arch.offset);
             }
         }
 
@@ -1409,8 +1413,8 @@ fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
                 header_offset = @byteSwap(fat_arch.offset);
             } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64)) {
                 // .tb_mvh for _aarch64_ - the opposite of what we're matching on.
-                assert(header_inactive_platform_offset == null);
-                header_inactive_platform_offset = @byteSwap(fat_arch.offset);
+                assert(header_offset_inactive_platform == null);
+                header_offset_inactive_platform = @byteSwap(fat_arch.offset);
             }
         }
     }
@@ -1424,9 +1428,10 @@ fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
     }
 
     return .{
-        .header = header_offset.?,
-        .header_inactive_platform = header_inactive_platform_offset.?,
-        .body = body_offset.?,
+        .header_offset = header_offset.?,
+        .header_offset_inactive_platform = header_offset_inactive_platform.?,
+        .body_offset = body_offset.?,
+        .body_size = body_size.?,
         .format = .macho,
     };
 }
@@ -1451,8 +1456,9 @@ fn parse_pe(buffer: []const u8) !HeaderBodyOffsets {
     }
 
     return .{
-        .header = header_offset,
-        .body = body_offset,
+        .header_offset = header_offset,
+        .body_offset = body_offset,
+        .body_size = body_size,
         .format = .pe,
     };
 }
@@ -1585,8 +1591,8 @@ test "parse_elf" {
         section_mvb.sh_size = 8192;
         const parsed = try parse_elf(&buffer);
 
-        assert(parsed.body == 16384);
-        assert(parsed.header == 24576);
+        assert(parsed.body_offset == 16384);
+        assert(parsed.header_offset == 24576);
     }
 }
 
@@ -1626,8 +1632,9 @@ pub fn print_information(
 
     // `source_buffer` contains the same data as `target_file` - this code doesn't update anything
     // after the initial open_sync().
+    const target_body_size = multiversion.target_body_size.?; // Line length limits.
     try header.past.verify_checksums(
-        multiversion.source_buffer[multiversion.target_body_offset.?..],
+        multiversion.source_buffer[multiversion.target_body_offset.?..][0..target_body_size],
     );
 
     try output.print(
