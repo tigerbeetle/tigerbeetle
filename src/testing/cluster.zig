@@ -781,10 +781,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     };
                 },
                 .sync_stage_changed => switch (replica.syncing) {
-                    .requesting_checkpoint => cluster.log_replica(
-                        .sync_commenced,
-                        replica.replica,
-                    ),
                     .idle => cluster.log_replica(.sync_completed, replica.replica),
                     else => {},
                 },

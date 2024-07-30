@@ -298,9 +298,6 @@ pub fn ReplicaType(
         opened: bool,
 
         syncing: SyncStage = .idle,
-        /// The latest discovered checkpoint that would be safe to sync to.
-        /// Kept up-to-date during every status, while syncing or healthy.
-        sync_target_max: ?SyncTarget = null,
         /// Invariants:
         /// - If syncing≠idle then sync_tables=null.
         sync_tables: ?ForestTableIterator = null,
@@ -503,7 +500,7 @@ pub fn ReplicaType(
         /// (status=normal or (status=view-change and primary))
         repair_timeout: Timeout,
 
-        /// The number of ticks before triggering state sync.
+        /// The number of ticks before checking whether state sync should be requested.
         /// This allows the replica to attempt WAL/grid repair before falling back, even if it
         /// is lagging behind the primary, to try to avoid unnecessary state sync.
         ///
@@ -517,10 +514,6 @@ pub fn ReplicaType(
 
         /// (always running)
         grid_scrub_timeout: Timeout,
-
-        /// The number of ticks before sending a sync message (message types depend on syncing).
-        /// (syncing≠idle)
-        sync_message_timeout: Timeout,
 
         /// The number of ticks on an idle cluster before injecting a `pulse` operation.
         /// (status=normal and primary and !constants.aof_recovery)
@@ -767,27 +760,22 @@ pub fn ReplicaType(
                     self.transition_to_normal_from_recovering_status();
                 }
             } else {
-                if (self.log_view < self.superblock.working.vsr_state.sync_view) {
-                    // During state sync, the replica installed CheckpointState from a future view.
-                    self.transition_to_recovering_head();
-                } else {
-                    // Even if op_head_certain() returns false, a DVC always has a certain head op.
-                    if ((self.log_view < self.view and self.op_checkpoint() <= self.op) or
-                        (self.log_view == self.view and self.op_head_certain()))
-                    {
-                        if (self.log_view == self.view) {
-                            if (self.primary_index(self.view) == self.replica) {
-                                self.transition_to_view_change_status(self.view + 1);
-                            } else {
-                                self.transition_to_normal_from_recovering_status();
-                            }
+                // Even if op_head_certain() returns false, a DVC always has a certain head op.
+                if ((self.log_view < self.view and self.op_checkpoint() <= self.op) or
+                    (self.log_view == self.view and self.op_head_certain()))
+                {
+                    if (self.log_view == self.view) {
+                        if (self.primary_index(self.view) == self.replica) {
+                            self.transition_to_view_change_status(self.view + 1);
                         } else {
-                            assert(self.view > self.log_view);
-                            self.transition_to_view_change_status(self.view);
+                            self.transition_to_normal_from_recovering_status();
                         }
                     } else {
-                        self.transition_to_recovering_head();
+                        assert(self.view > self.log_view);
+                        self.transition_to_view_change_status(self.view);
                     }
+                } else {
+                    self.transition_to_recovering_head();
                 }
             }
 
@@ -1219,11 +1207,6 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50, // (`after` will be adjusted at runtime to tune the scrubber pace.)
                 },
-                .sync_message_timeout = Timeout{
-                    .name = "sync_message_timeout",
-                    .id = replica_index,
-                    .after = 50,
-                },
                 .pulse_timeout = Timeout{
                     .name = "pulse_timeout",
                     .id = replica_index,
@@ -1328,7 +1311,6 @@ pub fn ReplicaType(
                 .{ &self.repair_sync_timeout, on_repair_sync_timeout },
                 .{ &self.grid_repair_message_timeout, on_grid_repair_message_timeout },
                 .{ &self.upgrade_timeout, on_upgrade_timeout },
-                .{ &self.sync_message_timeout, on_sync_message_timeout },
                 .{ &self.pulse_timeout, on_pulse_timeout },
                 .{ &self.grid_scrub_timeout, on_grid_scrub_timeout },
             };
@@ -1392,7 +1374,6 @@ pub fn ReplicaType(
             }
 
             self.jump_view(message.header);
-            self.jump_sync_target(message.header);
 
             assert(message.header.replica < self.node_count);
             switch (message.into_any()) {
@@ -1414,11 +1395,16 @@ pub fn ReplicaType(
                 .headers => |m| self.on_headers(m),
                 .request_blocks => |m| self.on_request_blocks(m),
                 .block => |m| self.on_block(m),
-                .request_sync_checkpoint => |m| self.on_request_sync_checkpoint(m),
-                .sync_checkpoint => |m| self.on_sync_checkpoint(m),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
+                        self.replica,
+                        @tagName(message.header.command),
+                    });
+                    return;
+                },
+                .request_sync_checkpoint, .sync_checkpoint => {
+                    log.warn("{}: on_message: ignoring old protocol ({s})", .{
                         self.replica,
                         @tagName(message.header.command),
                     });
@@ -1602,6 +1588,11 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
+
+            if (self.syncing == .updating_superblock) {
+                log.debug("{}: on_prepare: ignoring (sync)", .{self.replica});
+                return;
+            }
 
             if (message.header.view < self.view or
                 (self.status == .normal and
@@ -2170,13 +2161,14 @@ pub fn ReplicaType(
             }
         }
 
-        /// When other replicas receive the start_view message, they replace their log with the one
-        /// in the message, set their op number to that of the latest entry in the log, set their
-        /// view number to the view number in the message, change their status to normal, and update
-        /// the information in their client table. If there are non-committed operations in the log,
-        /// they send a ⟨prepare_ok v, n, i⟩ message to the primary; here n is the op-number. Then
-        /// they execute all operations known to be committed that they haven’t executed previously,
-        /// advance their commit number, and update the information in their client table.
+        // When other replicas receive the start_view message, they replace their log and
+        // checkpoint with the ones in the message, set their op number to that of the latest entry
+        // in the log, set their view number to the view number in the message, change their status
+        // to normal, and update the information in their client table. If there are non-committed
+        // operations in the log, they send a ⟨prepare_ok v, n, i⟩ message to the primary; here n
+        // is the op-number. Then they execute all operations known to be committed that they
+        // haven’t executed previously, advance their commit number, and update the information in
+        // their client table.
         fn on_start_view(self: *Self, message: *const Message.StartView) void {
             assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message.base_const())) return;
@@ -2220,53 +2212,130 @@ pub fn ReplicaType(
             }
             assert(self.view == message.header.view);
 
+            const view_checkpoint = std.mem.bytesAsValue(
+                vsr.CheckpointState,
+                message.body()[message.body().len -
+                    @sizeOf(vsr.CheckpointState) ..][0..@sizeOf(vsr.CheckpointState)],
+            );
+            if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
+                assert(message.header.commit >= trigger);
+            }
+            assert(
+                message.header.op <= vsr.Checkpoint.prepare_max_for_checkpoint(
+                    vsr.Checkpoint.checkpoint_after(view_checkpoint.header.op),
+                ).?,
+            );
+
             const view_headers = message_body_as_view_headers(message.base_const());
             assert(view_headers.command == .start_view);
             assert(view_headers.slice[0].op == message.header.op);
+            assert(view_headers.slice[0].op >= view_headers.slice[view_headers.slice.len - 1].op);
 
-            for (view_headers.slice) |*header| {
-                assert(header.commit <= message.header.commit);
+            if (message.header.commit > self.op_prepare_max() and (
+            //  Cluster is far ahead, replica's WAL no longer intersects primary's WAL.
+                message.header.commit > self.op_prepare_max() + constants.vsr_checkpoint_interval or
+                // Cluster is a bit ahead. The replica might still be able to repair WAL, but that
+                // is not certain.
+                (self.syncing == .idle and self.repair_stuck()) or
+                // Completing previously starting state sync.
+                self.syncing == .awaiting_checkpoint))
+            {
+                // State sync: at this point, the we know we want to replace our checkpoint
+                // with the one from SV.
 
-                if (header.op <= self.op_prepare_max()) {
-                    if (self.log_view < self.view or
-                        (self.log_view == self.view and header.op >= self.op))
-                    {
-                        self.set_op_and_commit_max(header.op, message.header.commit, @src());
-                        assert(self.op == header.op);
-                        assert(self.commit_max >= message.header.commit);
-                        break;
+                assert(message.header.commit > self.op_checkpoint_next_trigger());
+                assert(view_checkpoint.header.op > self.op_checkpoint());
+
+                if (self.syncing == .idle) {
+                    // If we are already checkpointing, let that finish first --- perhaps we won't
+                    // need state sync after all.
+                    if (self.commit_stage == .checkpoint_superblock) return;
+                    if (self.commit_stage == .checkpoint_data) return;
+                    // Otherwise, cancel in progress commit and prepare to sync
+                    self.sync_start_from_committing();
+                    assert(self.syncing != .idle);
+                }
+                switch (self.syncing) {
+                    .idle => unreachable,
+                    .canceling_commit,
+                    .canceling_grid,
+                    .updating_superblock,
+                    => {
+                        log.debug(
+                            \\{}: on_start_view sync {s} view={} op_checkpoint={} op_checkpoint_new={}
+                        , .{
+                            self.replica,
+                            @tagName(self.syncing),
+                            self.log_view,
+                            self.op_checkpoint(),
+                            view_checkpoint.header.op,
+                        });
+                        return;
+                    },
+                    .awaiting_checkpoint => {},
+                }
+
+                log.debug(
+                    \\{}: on_start_view sync started view={} op_checkpoint={} op_checkpoint_new={}
+                , .{
+                    self.replica,
+                    self.log_view,
+                    self.op_checkpoint(),
+                    view_checkpoint.header.op,
+                });
+
+                self.sync_dispatch(.{ .updating_superblock = .{
+                    .checkpoint_state = view_checkpoint.*,
+                } });
+
+                // The new checkpoint would we written to the superblock asynchronously.
+                // From this point on, we are in a delicate state where we must be using this
+                // in-memory checkpoint to check validity of log messages.
+                assert(self.syncing == .updating_superblock);
+                assert(!self.state_machine_opened);
+            }
+
+            {
+                // Replace our log with the suffix from SV. Transition to sync above guarantees
+                // that there's at least one message that fits the effective checkpoint, but some
+                // messages might be beyond its prepare_max.
+                maybe(view_headers.slice[0].op > self.op_prepare_max_sync());
+
+                // Find the first message that fits, make it our new head.
+                for (view_headers.slice) |*header| {
+                    assert(header.commit <= message.header.commit);
+
+                    if (header.op <= self.op_prepare_max_sync()) {
+                        if (self.log_view < self.view or
+                            (self.log_view == self.view and header.op >= self.op))
+                        {
+                            self.set_op_and_commit_max(header.op, message.header.commit, @src());
+                            assert(self.op == header.op);
+                            assert(self.commit_max >= message.header.commit);
+                            break;
+                        }
+                    }
+                } else unreachable;
+
+                for (view_headers.slice) |*header| {
+                    if (header.op <= self.op_prepare_max_sync()) {
+                        self.replace_header(header);
                     }
                 }
-            } else {
-                // This replica is too far behind, i.e. the new `self.op` is too far ahead of
-                // the last checkpoint. If we wrap now, we overwrite un-checkpointed transfers
-                // in the WAL, precluding recovery.
-                if (self.syncing == .idle) {
-                    log.warn("{}: on_start_view: start sync; lagging behind cluster " ++
-                        "(op_prepare_max={} quorum_head={})", .{
-                        self.replica,
-                        self.op_prepare_max(),
-                        view_headers.slice[0].op,
-                    });
-                    self.sync_start_from_committing();
-                }
-                return;
             }
 
-            for (view_headers.slice) |*header| {
-                if (header.op <= self.op_prepare_max()) {
-                    self.replace_header(header);
-                }
+            if (self.syncing == .updating_superblock) {
+                maybe(self.commit_min >
+                    self.syncing.updating_superblock.checkpoint_state.header.op);
+                self.commit_min = self.syncing.updating_superblock.checkpoint_state.header.op;
             }
 
-            if (self.status != .normal) {
-                self.view_headers.replace(.start_view, view_headers.slice);
-                assert(self.view_headers.array.get(0).view <= self.view);
-                assert(self.view_headers.array.get(0).op == message.header.op);
-                maybe(self.view_headers.array.get(0).op > self.op_prepare_max());
-                assert(self.view_headers.array.get(self.view_headers.array.count() - 1).op <=
-                    self.op_prepare_max());
-            }
+            self.view_headers.replace(.start_view, view_headers.slice);
+            assert(self.view_headers.array.get(0).view <= self.view);
+            assert(self.view_headers.array.get(0).op == message.header.op);
+            maybe(self.view_headers.array.get(0).op > self.op_prepare_max_sync());
+            assert(self.view_headers.array.get(self.view_headers.array.count() - 1).op <=
+                self.op_prepare_max_sync());
 
             switch (self.status) {
                 .view_change => {
@@ -2276,9 +2345,16 @@ pub fn ReplicaType(
                 },
                 .recovering_head => {
                     self.transition_to_normal_from_recovering_head_status(message.header.view);
+                    if (self.syncing == .updating_superblock) {
+                        self.view_durable_update();
+                    }
                     self.commit_journal();
                 },
-                .normal => {},
+                .normal => {
+                    if (self.syncing == .updating_superblock) {
+                        self.view_durable_update();
+                    }
+                },
                 .recovering => unreachable,
             }
 
@@ -2286,8 +2362,9 @@ pub fn ReplicaType(
             assert(message.header.view == self.log_view);
             assert(message.header.view == self.view);
             assert(self.backup());
+            if (self.syncing == .updating_superblock) assert(self.view_durable_updating());
 
-            self.repair();
+            if (self.syncing == .idle) self.repair();
         }
 
         fn on_request_start_view(
@@ -2780,47 +2857,6 @@ pub fn ReplicaType(
             self.sync_reclaim_tables();
         }
 
-        fn on_request_sync_checkpoint(
-            self: *Self,
-            message: *Message.RequestSyncCheckpoint,
-        ) void {
-            assert(message.header.command == .request_sync_checkpoint);
-            if (self.ignore_request_sync_checkpoint_message(message)) return;
-
-            assert(message.header.checkpoint_op ==
-                self.superblock.staging.vsr_state.checkpoint.header.op);
-            assert(message.header.checkpoint_id == self.superblock.staging.checkpoint_id());
-
-            self.send_sync_checkpoint(.{ .replica = message.header.replica });
-        }
-
-        fn on_sync_checkpoint(self: *Self, message: *const Message.SyncCheckpoint) void {
-            assert(message.header.replica < self.replica_count);
-            assert(message.header.command == .sync_checkpoint);
-            if (self.ignore_sync_checkpoint_message(message)) return;
-
-            const stage: *const SyncStage.RequestingCheckpoint =
-                &self.syncing.requesting_checkpoint;
-            assert(stage.target.checkpoint_id == message.header.checkpoint_id);
-            assert(stage.target.checkpoint_id == message.header.checksum_body);
-
-            log.debug("{}: on_sync_checkpoint: checkpoint_op={} checkpoint_id={x:0>32}", .{
-                self.replica,
-                stage.target.checkpoint_op,
-                stage.target.checkpoint_id,
-            });
-
-            assert(message.body().len == @sizeOf(vsr.CheckpointState));
-            const checkpoint_state = std.mem.bytesAsValue(
-                vsr.CheckpointState,
-                message.body()[0..@sizeOf(vsr.CheckpointState)],
-            );
-            assert(checkpoint_state.header.valid_checksum());
-            assert(checkpoint_state.header.command == .prepare);
-            assert(checkpoint_state.header.invalid() == null);
-            self.sync_requesting_checkpoint_callback(checkpoint_state);
-        }
-
         fn on_ping_timeout(self: *Self) void {
             self.ping_timeout.reset();
 
@@ -3075,57 +3111,28 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.backup());
             assert(self.repair_sync_timeout.ticking);
-
             self.repair_sync_timeout.reset();
 
-            if (self.syncing != .idle) return;
-            // May as well wait for an in-progress checkpoint to complete —
-            // we would need to wait for it before sync starts anyhow, and the newer
-            // checkpoint might sidestep the need for sync anyhow.
-            if (self.commit_stage == .checkpoint_superblock) return;
-            if (self.commit_stage == .checkpoint_data) return;
-
-            // TODO Test connectivity to cluster to rule out a network partition.
-
-            // Even if we want to transition to sync, there is no point if we don't have
-            // a target yet (or if our latest target would not advance our state).
-            if (self.sync_target_max == null) return;
-            if (self.sync_target_max.?.checkpoint_op <= self.op_checkpoint()) return;
-
-            {
-                const commit_next = self.commit_min + 1;
-                const commit_next_slot = self.journal.slot_with_op(commit_next);
-
-                // "stuck" is not actually certain, merely likely (see below).
-                const stuck_header = !self.valid_hash_chain(@src());
-
-                const stuck_prepare =
-                    (commit_next_slot == null or self.journal.dirty.bit(commit_next_slot.?));
-
-                const stuck_grid = !self.grid.read_global_queue.empty();
-
-                if (!stuck_header and !stuck_prepare and !stuck_grid) return;
+            if (self.syncing == .awaiting_checkpoint or self.repair_stuck()) {
+                log.warn("{}: on_repair_sync_timeout: request sync; lagging behind cluster " ++
+                    "(op_head={} commit_min={} commit_max={} commit_stage={s})", .{
+                    self.replica,
+                    self.op,
+                    self.commit_min,
+                    self.commit_max,
+                    @tagName(self.commit_stage),
+                });
+                self.send_header_to_replica(
+                    self.primary_index(self.view),
+                    @bitCast(Header.RequestStartView{
+                        .command = .request_start_view,
+                        .cluster = self.cluster,
+                        .replica = self.replica,
+                        .view = self.view,
+                        .nonce = self.nonce,
+                    }),
+                );
             }
-
-            // At this point:
-            // - we know that the cluster committed atop of a future a checkpoint, and
-            // - we have not made any progress committing for some interval.
-            // It is possible that we could in fact repair and progress anyway, but this is not
-            // guaranteed: the rest of the cluster no longer repairs the relevant prepares.
-            // We might be stuck waiting for a prepare or block which will never arrive.
-
-            log.warn("{}: on_repair_sync_timeout: start sync; lagging behind cluster " ++
-                "(op_head={} commit_min={} commit_max={} commit_stage={s})", .{
-                self.replica,
-                self.op,
-                self.commit_min,
-                self.commit_max,
-                @tagName(self.commit_stage),
-            });
-
-            // It is possible that we trigger state sync even though we could have repaired.
-            // For example, if a block we are trying to repair keeps getting dropped by the network.
-            self.sync_start_from_committing();
         }
 
         fn on_grid_repair_message_timeout(self: *Self) void {
@@ -3178,25 +3185,6 @@ pub fn ReplicaType(
                 const scrub_next = self.grid_scrubber.read_next();
                 if (!scrub_next) break;
             } else unreachable;
-        }
-
-        fn on_sync_message_timeout(self: *Self) void {
-            assert(!self.solo());
-            assert(self.syncing != .idle);
-            assert(self.sync_message_timeout.ticking);
-
-            self.sync_message_timeout.reset();
-
-            switch (self.syncing) {
-                .idle => unreachable,
-                .canceling_commit,
-                .canceling_grid,
-                .requesting_target,
-                .updating_superblock,
-                => return,
-
-                .requesting_checkpoint => self.send_request_sync_checkpoint(),
-            }
         }
 
         fn on_pulse_timeout(self: *Self) void {
@@ -4629,7 +4617,8 @@ pub fn ReplicaType(
             defer self.message_bus.unref(message);
 
             message.header.* = .{
-                .size = @sizeOf(Header) * (1 + self.view_headers.array.count_as(u32)),
+                .size = @sizeOf(Header) * (1 + self.view_headers.array.count_as(u32)) +
+                    @sizeOf(vsr.CheckpointState),
                 .command = .start_view,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -4640,11 +4629,20 @@ pub fn ReplicaType(
                 .nonce = nonce,
             };
 
+            const body_headers_size = self.view_headers.array.count_as(usize) * @sizeOf(vsr.Header);
+            const body_headers = message.body()[0..body_headers_size];
+            const body_checkpoint = message.body()[body_headers_size..];
             stdx.copy_disjoint(
                 .exact,
                 Header.Prepare,
-                std.mem.bytesAsSlice(Header.Prepare, message.body()),
+                std.mem.bytesAsSlice(Header.Prepare, body_headers),
                 self.view_headers.array.const_slice(),
+            );
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                body_checkpoint,
+                std.mem.asBytes(&self.superblock.working.vsr_state.checkpoint),
             );
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -5842,6 +5840,17 @@ pub fn ReplicaType(
             return vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
+        /// Like prepare_max, but takes into account yet the in-memory checkpoint during sync.
+        fn op_prepare_max_sync(self: *const Self) u64 {
+            if (self.syncing != .updating_superblock) return self.op_prepare_max();
+
+            return vsr.Checkpoint.prepare_max_for_checkpoint(
+                vsr.Checkpoint.checkpoint_after(
+                    self.syncing.updating_superblock.checkpoint_state.header.op,
+                ),
+            ).?;
+        }
+
         /// Returns checkpoint id associated with the op.
         ///
         /// Specifically, returns the checkpoint id corresponding to the checkpoint with:
@@ -5896,8 +5905,8 @@ pub fn ReplicaType(
         /// for ensuring that replica.op is valid.
         fn op_repair_min(self: *const Self) u64 {
             if (self.status == .recovering) assert(self.solo());
-            assert(self.op >= self.op_checkpoint());
-            assert(self.op <= self.op_prepare_max());
+            assert(self.syncing == .updating_superblock or self.op >= self.op_checkpoint());
+            assert(self.op <= self.op_prepare_max_sync());
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             const repair_min = repair_min: {
@@ -5926,7 +5935,8 @@ pub fn ReplicaType(
             assert(repair_min <= self.op);
             assert(repair_min <= self.commit_min + 1);
             assert(repair_min <= self.op_checkpoint() + 1);
-            assert(self.op - repair_min < constants.journal_slot_count);
+            assert(self.syncing == .updating_superblock or
+                self.op - repair_min < constants.journal_slot_count);
             assert(self.checkpoint_id_for_op(repair_min) != null);
             return repair_min;
         }
@@ -5937,10 +5947,10 @@ pub fn ReplicaType(
         fn op_repair_max(self: *const Self) u64 {
             assert(self.status != .recovering_head);
             assert(self.op >= self.op_checkpoint());
-            assert(self.op <= self.op_prepare_max());
+            assert(self.op <= self.op_prepare_max_sync());
             assert(self.op <= self.commit_max + constants.pipeline_prepare_queue_max);
 
-            return @min(self.commit_max, self.op_prepare_max());
+            return @min(self.commit_max, self.op_prepare_max_sync());
         }
 
         /// Panics if immediate neighbors in the same view would have a broken hash chain.
@@ -6195,6 +6205,8 @@ pub fn ReplicaType(
             }
 
             self.repair_timeout.reset();
+            if (self.syncing == .updating_superblock) return;
+            if (!self.state_machine_opened) return;
 
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
@@ -6399,6 +6411,7 @@ pub fn ReplicaType(
             assert(header.valid_checksum());
             assert(header.invalid() == null);
             assert(header.command == .prepare);
+            if (self.syncing == .updating_superblock) return false;
 
             if (header.view > self.view) {
                 log.debug("{}: repair_header: op={} checksum={} view={} (newer view)", .{
@@ -6944,6 +6957,36 @@ pub fn ReplicaType(
             }
         }
 
+        // Determines if the repair can not make further progress. Used to decide to abandon WAL
+        // repair and decide to state sync. This is a semi heuristic:
+        // - if WAL repair is impossible, this function must eventually returns true.
+        // - but sometimes it may return true even if WAL repair could, in principle, succeed
+        //   later.
+        fn repair_stuck(self: *const Self) bool {
+            if (self.commit_min == self.commit_max) return false;
+
+            // May as well wait for an in-progress checkpoint to complete —
+            // we would need to wait for it before sync starts anyhow, and the newer
+            // checkpoint might sidestep the need for sync anyhow.
+            if (self.commit_stage == .checkpoint_superblock) return false;
+            if (self.commit_stage == .checkpoint_data) return false;
+
+            if (self.status == .recovering_head) return false;
+
+            const commit_next = self.commit_min + 1;
+            const commit_next_slot = self.journal.slot_with_op(commit_next);
+
+            // "stuck" is not actually certain, merely likely.
+            const stuck_header = !self.valid_hash_chain(@src());
+
+            const stuck_prepare =
+                (commit_next_slot == null or self.journal.dirty.bit(commit_next_slot.?));
+
+            const stuck_grid = !self.grid.read_global_queue.empty();
+
+            return stuck_header or stuck_prepare or stuck_grid;
+        }
+
         /// Replaces the header if the header is different and at least op_repair_min.
         /// The caller must ensure that the header is trustworthy (part of the current view's log).
         fn replace_header(self: *Self, header: *const Header.Prepare) void {
@@ -6956,11 +6999,11 @@ pub fn ReplicaType(
             assert(header.command == .prepare);
             assert(header.view <= self.view);
             assert(header.op <= self.op); // Never advance the op.
-            assert(header.op <= self.op_prepare_max());
+            assert(header.op <= self.op_prepare_max_sync());
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
-                assert(self.journal.has(header));
+                assert(self.syncing == .updating_superblock or self.journal.has(header));
             }
 
             if (header.op == self.op_checkpoint() + 1) {
@@ -7781,7 +7824,8 @@ pub fn ReplicaType(
             return self.superblock.updating(.view_change);
         }
 
-        /// Persist the current view and log_view to the superblock.
+        /// Persist the current view and log_view to the superblock and/or updates checkpoint
+        /// during state sync.
         /// `view_durable` and `log_view_durable` will update asynchronously, when their respective
         /// updates are durable.
         fn view_durable_update(self: *Self) void {
@@ -7790,7 +7834,11 @@ pub fn ReplicaType(
             assert(self.view >= self.log_view);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
-            assert(self.log_view > self.log_view_durable() or self.view > self.view_durable());
+            assert(
+                self.log_view > self.log_view_durable() or
+                    self.view > self.view_durable() or
+                    self.syncing == .updating_superblock,
+            );
             // The primary must only persist the SV headers after repairs are done.
             // Otherwise headers could be nacked, truncated, then restored after a crash.
             assert(self.log_view < self.view or self.replica != self.primary_index(self.view) or
@@ -7817,6 +7865,38 @@ pub fn ReplicaType(
                     .view = self.view,
                     .log_view = self.log_view,
                     .headers = &self.view_headers,
+                    .checkpoint = switch (self.syncing) {
+                        .updating_superblock => |*stage| &stage.checkpoint_state,
+                        else => &self.superblock.staging.vsr_state.checkpoint,
+                    },
+                    .sync_op_max = switch (self.syncing) {
+                        .updating_superblock => |*stage| vsr.Checkpoint.trigger_for_checkpoint(
+                            stage.checkpoint_state.header.op,
+                        ).?,
+                        else => self.superblock.staging.vsr_state.sync_op_max,
+                    },
+                    .sync_op_min = switch (self.syncing) {
+                        .updating_superblock => |_| sync_op_min: {
+                            const syncing_already =
+                                self.superblock.staging.vsr_state.sync_op_max > 0;
+                            const sync_min_old = self.superblock.staging.vsr_state.sync_op_min;
+
+                            const sync_min_new = if (vsr.Checkpoint.trigger_for_checkpoint(
+                                self.op_checkpoint(),
+                            )) |trigger|
+                                // +1 because sync_op_min is inclusive, but (when !syncing_already)
+                                // `vsr_state.commit_min` itself does not need to be synced.
+                                trigger + 1
+                            else
+                                0;
+
+                            break :sync_op_min if (syncing_already)
+                                @min(sync_min_old, sync_min_new)
+                            else
+                                sync_min_new;
+                        },
+                        else => self.superblock.staging.vsr_state.sync_op_min,
+                    },
                 },
             );
             assert(self.view_durable_updating());
@@ -7844,6 +7924,15 @@ pub fn ReplicaType(
             assert(self.log_view_durable() <= self.view_durable());
             assert(self.log_view_durable() <= self.log_view);
 
+            switch (self.syncing) {
+                .updating_superblock => |stage| {
+                    if (stage.checkpoint_state.header.op == self.op_checkpoint()) {
+                        self.sync_superblock_update_finish();
+                    }
+                },
+                else => {},
+            }
+
             // recovering_head here is triggered by state sync.
             if (self.status == .recovering_head) return;
 
@@ -7855,7 +7944,10 @@ pub fn ReplicaType(
                 (self.replica != self.primary_index(self.view) or self.status == .normal);
             assert(!(update_dvc and update_sv));
 
-            if (update_dvc or update_sv) self.view_durable_update();
+            const update_checkpoint = self.syncing == .updating_superblock and
+                self.syncing.updating_superblock.checkpoint_state.header.op > self.op_checkpoint();
+
+            if (update_dvc or update_sv or update_checkpoint) self.view_durable_update();
 
             // Reset SVC timeout in case the view-durable update took a long time.
             if (self.view_change_status_timeout.ticking) self.view_change_status_timeout.reset();
@@ -7891,7 +7983,7 @@ pub fn ReplicaType(
             assert(self.status == .view_change or self.status == .normal or
                 self.status == .recovering_head);
 
-            assert(op <= self.op_prepare_max());
+            assert(op <= self.op_prepare_max_sync());
             maybe(op >= self.commit_max);
             maybe(op >= commit_max);
 
@@ -8180,25 +8272,13 @@ pub fn ReplicaType(
 
         fn transition_to_recovering_head(self: *Self) void {
             assert(!self.solo());
+            assert(self.status == .recovering);
             assert(self.commit_stage == .idle);
+            assert(self.syncing == .idle);
+            assert(self.pipeline == .cache);
             assert(self.journal.header_with_op(self.op) != null);
-
-            if (self.log_view < self.superblock.working.vsr_state.sync_view) {
-                // Transitioning to recovering head after state sync --- checkpoint is from a
-                // "future" view, so the replica needs to truncate its log.
-                assert(self.commit_min == self.op_checkpoint());
-            } else {
-                if (self.status == .recovering) {
-                    assert(self.pipeline == .cache);
-                    if (self.log_view < self.view) {
-                        assert(self.op < self.commit_min);
-                    }
-                } else {
-                    // During state sync, we may use recovering_head to avoid violating invariants
-                    // when the checkpoint jumps ahead.
-                    assert(self.syncing != .idle);
-                    assert(self.op < self.commit_min);
-                }
+            if (self.log_view < self.view) {
+                assert(self.op < self.commit_min);
             }
 
             self.status = .recovering_head;
@@ -8378,7 +8458,7 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op(self.op) != null);
             assert(!self.primary_abdicating);
             assert(self.view_headers.command == .start_view);
-            assert(self.log_view >= self.superblock.working.vsr_state.checkpoint.header.view);
+            assert(self.log_view >= self.superblock.working.vsr_state.sync_view);
 
             self.status = .normal;
 
@@ -8672,15 +8752,6 @@ pub fn ReplicaType(
 
             self.sync_tables = null;
 
-            // We learned that we are lagging behind the cluster, so we know we shouldn't actually
-            // be the primary. But we can't join a new view until the view's headers are within our
-            // `op_prepare_max`. We need to bump our `op_checkpoint` first – but that is
-            // async. So even if we are arriving at `sync_start_from_committing` via
-            // `on_start_view`, `on_start_view` leaves us as the "primary" for now.
-            if (self.status == .normal and self.primary()) {
-                self.transition_to_view_change_status(self.view + 1);
-            }
-
             // Abort grid operations.
             // Wait for non-grid operations to finish.
             switch (self.commit_stage) {
@@ -8704,51 +8775,6 @@ pub fn ReplicaType(
             }
         }
 
-        /// Transition from "syncing" to "syncing" — a new target was discovered.
-        fn sync_start_from_sync(self: *Self) void {
-            assert(!self.solo());
-            assert(self.status != .recovering);
-            assert(self.syncing != .idle);
-            assert(self.sync_tables == null);
-
-            log.debug("{}: sync_start_from_sync " ++
-                "(checkpoint_op={} checkpoint_id={x:0>32})", .{
-                self.replica,
-                self.op_checkpoint(),
-                self.superblock.staging.checkpoint_id(),
-            });
-
-            switch (self.syncing) {
-                .idle => unreachable,
-
-                // Uninterruptible states:
-                .canceling_commit, // No sync target selected yet.
-                .canceling_grid, // No sync target selected yet.
-                .updating_superblock, // Hopefully won't need to resync.
-                => return,
-
-                .requesting_target => {
-                    assert(self.commit_stage == .idle);
-                    assert(self.grid_repair_tables.executing() == 0);
-                    assert(self.sync_target_max != null);
-                    self.sync_dispatch(.requesting_target);
-                },
-
-                // We had a sync target already, but we discovered a newer one.
-                // Re-sync to the new target.
-                .requesting_checkpoint => |*stage| {
-                    assert(self.commit_stage == .idle);
-                    assert(self.grid_repair_tables.executing() == 0);
-                    assert(self.sync_target_max.?.checkpoint_op >= stage.target.checkpoint_op);
-                    if (self.sync_target_max.?.checkpoint_op == stage.target.checkpoint_op) return;
-
-                    self.sync_dispatch(.{ .requesting_checkpoint = .{
-                        .target = self.sync_target_max.?,
-                    } });
-                },
-            }
-        }
-
         /// sync_dispatch() is called between every sync-state transition.
         fn sync_dispatch(self: *Self, state_new: SyncStage) void {
             assert(!self.solo());
@@ -8758,53 +8784,11 @@ pub fn ReplicaType(
             const state_old = self.syncing;
             self.syncing = state_new;
 
-            // We were already syncing, but discovered a newer target:
-            if (self.syncing.target()) |target| {
-                assert(self.commit_stage == .idle);
-
-                if (target.checkpoint_op < self.sync_target_max.?.checkpoint_op) {
-                    log.debug("{}: sync_dispatch: change target op={}..{} id={x:0>32}..{x:0>32}", .{
-                        self.replica,
-                        target.checkpoint_op,
-                        self.sync_target_max.?.checkpoint_op,
-                        target.checkpoint_id,
-                        self.sync_target_max.?.checkpoint_id,
-                    });
-                    self.syncing =
-                        .{ .requesting_checkpoint = .{ .target = self.sync_target_max.? } };
-                }
-            }
-
-            // We have been waiting for a target:
-            if (self.syncing == .requesting_target) {
-                assert(self.commit_stage == .idle);
-
-                if (self.sync_target_max) |target| {
-                    if (target.checkpoint_op > self.op_checkpoint() or
-                        (target.checkpoint_op == self.op_checkpoint() and
-                        target.checkpoint_id != self.superblock.working.checkpoint_id()))
-                    {
-                        self.syncing = .{ .requesting_checkpoint = .{ .target = target } };
-                    }
-                }
-            }
-
-            if (self.syncing.target()) |target| {
-                log.debug("{}: sync_dispatch: {s}..{s}: " ++
-                    "(target_op={} target_id={x:0>32})", .{
-                    self.replica,
-                    @tagName(state_old),
-                    @tagName(self.syncing),
-                    target.checkpoint_op,
-                    target.checkpoint_id,
-                });
-            } else {
-                log.debug("{}: sync_dispatch: {s}..{s}", .{
-                    self.replica,
-                    @tagName(state_old),
-                    @tagName(self.syncing),
-                });
-            }
+            log.debug("{}: sync_dispatch: {s}..{s}", .{
+                self.replica,
+                @tagName(state_old),
+                @tagName(self.syncing),
+            });
 
             if (self.event_callback) |hook| hook(self, .sync_stage_changed);
 
@@ -8818,9 +8802,8 @@ pub fn ReplicaType(
                     assert(self.grid_repair_tables.executing() == 0);
                     assert(self.grid.read_global_queue.empty());
                 },
-                .requesting_target => {}, // Waiting for a usable sync target.
-                .requesting_checkpoint => self.sync_message_timeout.start(),
-                .updating_superblock => self.sync_superblock_update(),
+                .awaiting_checkpoint => {}, // Waiting for a usable sync target.
+                .updating_superblock => self.sync_superblock_update_start(),
             }
         }
 
@@ -8882,7 +8865,7 @@ pub fn ReplicaType(
             var grid_repair_writes = self.grid_repair_writes.iterate();
             while (grid_repair_writes.next()) |write| self.grid_repair_writes.release(write);
 
-            self.sync_dispatch(.requesting_target);
+            self.sync_dispatch(.awaiting_checkpoint);
         }
 
         fn sync_requesting_checkpoint_callback(
@@ -8936,10 +8919,9 @@ pub fn ReplicaType(
             } });
         }
 
-        fn sync_superblock_update(self: *Self) void {
+        fn sync_superblock_update_start(self: *Self) void {
             assert(!self.solo());
             assert(self.syncing == .updating_superblock);
-            assert(self.sync_message_timeout.ticking);
             assert(self.sync_tables == null);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
@@ -8948,8 +8930,6 @@ pub fn ReplicaType(
             assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             maybe(self.state_machine_opened);
 
-            const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
-
             self.state_machine_opened = false;
             self.state_machine.reset();
 
@@ -8957,51 +8937,9 @@ pub fn ReplicaType(
             self.grid.free_set_checkpoint.reset();
             self.client_sessions_checkpoint.reset();
             self.client_sessions.reset();
-
-            // Bump commit_max before the superblock update so that a view_durable_update()
-            // during the sync_start update uses the correct (new) commit_max.
-            self.advance_commit_max(stage.target.checkpoint_op, @src());
-
-            const sync_op_max =
-                vsr.Checkpoint.trigger_for_checkpoint(stage.target.checkpoint_op).?;
-            const sync_op_min = sync_op_min: {
-                const syncing_already = self.superblock.staging.vsr_state.sync_op_max > 0;
-                const sync_min_old = self.superblock.staging.vsr_state.sync_op_min;
-
-                const sync_min_new = if (vsr.Checkpoint.trigger_for_checkpoint(
-                    self.op_checkpoint(),
-                )) |trigger|
-                    // +1 because sync_op_min is inclusive, but (when !syncing_already)
-                    // `vsr_state.commit_min` itself does not need to be synced.
-                    trigger + 1
-                else
-                    0;
-
-                break :sync_op_min if (syncing_already)
-                    @min(sync_min_old, sync_min_new)
-                else
-                    sync_min_new;
-            };
-            const sync_view = stage.target.view;
-
-            log.info("{}: sync: ops={}..{}", .{ self.replica, sync_op_min, sync_op_max });
-
-            self.sync_message_timeout.stop();
-            self.superblock.sync(
-                sync_superblock_update_callback,
-                &self.superblock_context,
-                .{
-                    .checkpoint = stage.checkpoint_state,
-                    .commit_max = self.commit_max,
-                    .sync_op_max = sync_op_max,
-                    .sync_op_min = sync_op_min,
-                    .sync_view = sync_view,
-                },
-            );
         }
 
-        fn sync_superblock_update_callback(superblock_context: *SuperBlock.Context) void {
-            const self: *Self = @fieldParentPtr("superblock_context", superblock_context);
+        fn sync_superblock_update_finish(self: *Self) void {
             assert(self.sync_tables == null);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
@@ -9015,15 +8953,15 @@ pub fn ReplicaType(
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
-            assert(self.superblock.working.checkpoint_id() == stage.target.checkpoint_id);
+            assert(self.superblock.working.vsr_state.checkpoint.header.checksum ==
+                stage.checkpoint_state.header.checksum);
             assert(stdx.equal_bytes(
                 vsr.CheckpointState,
                 &self.superblock.working.vsr_state.checkpoint,
                 &stage.checkpoint_state,
             ));
 
-            const commit_min_previous = self.commit_min;
-            self.commit_min = self.superblock.working.vsr_state.checkpoint.header.op;
+            assert(self.commit_min == self.superblock.working.vsr_state.checkpoint.header.op);
 
             if (self.release.value <
                 self.superblock.working.vsr_state.checkpoint.release.value)
@@ -9047,7 +8985,6 @@ pub fn ReplicaType(
                 //   have executed at least one (but not all) of the upgrades in that last bar.
                 // As we replay the bar immediately after this checkpoint, we will set
                 // `upgrade_release` "again", so we reset it now to keep the assertions simple.
-                assert(commit_min_previous > self.op_checkpoint() + 1);
                 assert(self.superblock.working.vsr_state.checkpoint.header.operation != .upgrade);
 
                 self.upgrade_release = null;
@@ -9057,12 +8994,17 @@ pub fn ReplicaType(
 
             // The head op must be in the Journal and there should not be a break between the
             // checkpoint header and the Journal.
-            if (self.op < self.op_checkpoint() or self.log_view < stage.target.view) {
-                self.transition_to_recovering_head();
-            }
+            assert(self.op >= self.op_checkpoint());
+
+            log.info("{}: sync: ops={}..{}", .{
+                self.replica,
+                self.superblock.working.vsr_state.sync_op_min,
+                self.superblock.working.vsr_state.sync_op_max,
+            });
 
             self.grid.open(grid_open_callback);
             self.sync_dispatch(.idle);
+            assert(self.op <= self.op_prepare_max());
         }
 
         /// We have just:
@@ -9275,7 +9217,7 @@ pub fn ReplicaType(
         /// Whether it is safe to commit or send prepare_ok messages.
         /// Returns true if the hash chain is valid and up to date for the current view.
         /// This is a stronger guarantee than `valid_hash_chain_between()` below.
-        fn valid_hash_chain(self: *Self, source: SourceLocation) bool {
+        fn valid_hash_chain(self: *const Self, source: SourceLocation) bool {
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op);
 
@@ -9478,83 +9420,6 @@ pub fn ReplicaType(
                     self.transition_to_view_change_status(header.view);
                 },
                 else => unreachable,
-            }
-        }
-
-        fn jump_sync_target(self: *Self, header: *const Header) void {
-            if (header.into_const(.commit)) |h| assert(h.commit >= h.checkpoint_op);
-
-            if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
-            if (header.replica == self.replica) return; // Ignore messages from self (misdirected).
-
-            const candidate: SyncTarget = switch (header.into_any()) {
-                inline .commit, .ping => |h| .{
-                    .checkpoint_id = h.checkpoint_id,
-                    .checkpoint_op = h.checkpoint_op,
-                    .view = h.view,
-                },
-                else => return,
-            };
-
-            if (candidate.checkpoint_op == self.op_checkpoint() and
-                candidate.checkpoint_id != self.superblock.working.checkpoint_id())
-            {
-                log.err("{}: on_{s}: jump_sync_target: checkpoint diverged " ++
-                    "(op={} id_from_superblock={x:0>32} id_from_commit={x:0>32})", .{
-                    self.replica,
-                    @tagName(header.command),
-                    candidate.checkpoint_op,
-                    self.superblock.working.checkpoint_id(),
-                    candidate.checkpoint_id,
-                });
-
-                // Either this replica, the header's replica, or both, have diverged.
-                @panic("checkpoint diverged");
-            }
-
-            // Don't sync backwards, or to our current checkpoint.
-            if (candidate.checkpoint_op <= self.op_checkpoint()) return;
-
-            // Don't sync to the immediately-next checkpoint unless it has been committed atop.
-            // - If the checkpoint has been committed atop, that guarantees that at least a
-            //   commit-quorum of replicas has reached that exact checkpoint.
-            // - If the next checkpoint has *not* been committed atop yet, then we can (and should)
-            //   sync via WAL replay instead to maximize durability.
-            //
-            // To understand why this is critical, consider the case (R=3) where:
-            // 1. R₀ is primary.
-            // 2. R₀ prepares and acks all ops.
-            // 3. R₁ prepares and acks odd ops.
-            // 4. R₂ prepares and acks even ops.
-            // 5. R₀ is able to commit an entire checkpoint, but not beyond that.
-            // If R₁/R₂ state-sync to R₀'s latest checkpoint, then a single block corruption on R₀
-            // could lead to permanent unavailability.
-            if (candidate.checkpoint_op == self.op_checkpoint_next()) {
-                if (header.into_const(.commit)) |h| {
-                    if (h.commit <= self.op_prepare_max()) return;
-                } else {
-                    return;
-                }
-            }
-
-            if (self.sync_target_max != null and
-                self.sync_target_max.?.checkpoint_op >= candidate.checkpoint_op)
-            {
-                return;
-            }
-
-            log.debug("{}: on_{s}: jump_sync_target: op={} id={x:0>32} (syncing={s})", .{
-                self.replica,
-                @tagName(header.command),
-                candidate.checkpoint_op,
-                candidate.checkpoint_id,
-                @tagName(self.syncing),
-            });
-
-            self.sync_target_max = candidate;
-
-            if (self.syncing != .idle) {
-                self.sync_start_from_sync();
             }
         }
 
@@ -10372,9 +10237,14 @@ fn message_body_as_headers_unchecked(message: *const Message) []const Header.Pre
         message.header.command == .start_view or
         message.header.command == .headers);
 
+    const headers_end_offset = switch (message.header.command) {
+        .start_view => message.header.size - @sizeOf(vsr.CheckpointState),
+        else => message.header.size,
+    };
+
     return std.mem.bytesAsSlice(
         Header.Prepare,
-        message.buffer[@sizeOf(Header)..message.header.size],
+        message.buffer[@sizeOf(Header)..headers_end_offset],
     );
 }
 
