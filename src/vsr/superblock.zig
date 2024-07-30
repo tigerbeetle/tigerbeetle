@@ -897,6 +897,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             log_view: u32,
             view: u32,
             headers: *const vsr.Headers.ViewChangeArray,
+            checkpoint: *const vsr.CheckpointState,
+            sync_op_min: u64,
+            sync_op_max: u64,
         };
 
         /// The replica calls view_change() to persist its view/log_view — it cannot
@@ -913,14 +916,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.vsr_state.commit_max <= update.commit_max);
             assert(superblock.staging.vsr_state.view <= update.view);
             assert(superblock.staging.vsr_state.log_view <= update.log_view);
+            assert(superblock.staging.vsr_state.checkpoint.header.op <=
+                update.checkpoint.header.op);
             assert(superblock.staging.vsr_state.log_view < update.log_view or
-                superblock.staging.vsr_state.view < update.view);
+                superblock.staging.vsr_state.view < update.view or
+                superblock.staging.vsr_state.checkpoint.header.op < update.checkpoint.header.op);
             assert((update.headers.command == .start_view and update.log_view == update.view) or
                 (update.headers.command == .do_view_change and update.log_view < update.view));
-            // Usually the op-head is ahead of the commit_min. But this may not be the case, due to
-            // state sync that ran after the view_durable_update was queued, but before it executed.
-            maybe(superblock.staging.vsr_state.checkpoint.header.op >
-                update.headers.array.get(0).op);
+            assert(
+                superblock.staging.vsr_state.checkpoint.header.op <= update.headers.array.get(0).op,
+            );
 
             update.headers.verify();
             assert(update.view >= update.log_view);
@@ -929,6 +934,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.commit_max = update.commit_max;
             vsr_state.log_view = update.log_view;
             vsr_state.view = update.view;
+            vsr_state.checkpoint = update.checkpoint.*;
+            vsr_state.sync_op_min = update.sync_op_min;
+            vsr_state.sync_op_max = update.sync_op_max;
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
             context.* = .{
@@ -937,55 +945,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .caller = .view_change,
                 .vsr_state = vsr_state,
                 .vsr_headers = update.headers.*,
-            };
-            superblock.log_context(context);
-            superblock.acquire(context);
-        }
-
-        const UpdateSync = struct {
-            checkpoint: SuperBlockHeader.CheckpointState,
-            commit_max: u64,
-            sync_op_min: u64,
-            sync_op_max: u64,
-            sync_view: u32,
-        };
-
-        pub fn sync(
-            superblock: *SuperBlock,
-            callback: *const fn (context: *Context) void,
-            context: *Context,
-            update: UpdateSync,
-        ) void {
-            assert(superblock.opened);
-            assert(update.checkpoint.header.valid_checksum());
-            assert(update.checkpoint.header.command == .prepare);
-            assert(update.checkpoint.header.op >=
-                superblock.staging.vsr_state.checkpoint.header.op);
-            assert(update.checkpoint.header.op <= update.commit_max);
-            assert(
-                (update.checkpoint.header.op ==
-                    superblock.staging.vsr_state.checkpoint.header.op) ==
-                    (update.checkpoint.header.checksum ==
-                    superblock.staging.vsr_state.checkpoint.header.checksum),
-            );
-            assert(update.sync_op_min <= update.sync_op_max);
-            assert(update.sync_op_max > update.checkpoint.header.op);
-            assert(update.sync_view >= update.checkpoint.header.view);
-
-            var vsr_state = superblock.staging.vsr_state;
-            vsr_state.checkpoint = update.checkpoint;
-            vsr_state.commit_max = update.commit_max;
-            vsr_state.sync_op_min = update.sync_op_min;
-            vsr_state.sync_op_max = update.sync_op_max;
-            vsr_state.sync_view = update.sync_view;
-
-            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
-
-            context.* = .{
-                .superblock = superblock,
-                .callback = callback,
-                .caller = .sync,
-                .vsr_state = vsr_state,
             };
             superblock.log_context(context);
             superblock.acquire(context);
