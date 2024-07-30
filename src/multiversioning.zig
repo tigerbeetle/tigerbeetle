@@ -559,7 +559,7 @@ pub const Multiversion = struct {
     exe_path_format: ExePathFormat,
     args_envp: ArgsEnvp,
 
-    source_buffer: []u8,
+    source_buffer: []align(8) u8,
     source_fd: ?posix.fd_t = null,
 
     target_fd: posix.fd_t,
@@ -607,7 +607,11 @@ pub const Multiversion = struct {
         // * source_buffer is where the in-progress data lives,
         // * target_fd is where the advertised data lives.
         // This does impact memory usage.
-        const source_buffer = try allocator.alloc(u8, multiversion_binary_size_max_by_format);
+        const source_buffer = try allocator.alignedAlloc(
+            u8,
+            8,
+            multiversion_binary_size_max_by_format,
+        );
         errdefer allocator.free(source_buffer);
 
         const nonce = std.crypto.random.int(u128);
@@ -898,7 +902,7 @@ pub const Multiversion = struct {
         assert(self.stage == .ready);
     }
 
-    fn target_update(self: *Multiversion, source_buffer: []u8) !void {
+    fn target_update(self: *Multiversion, source_buffer: []align(8) u8) !void {
         assert(self.stage == .target_update);
         const offsets = switch (self.exe_path_format) {
             .elf => try parse_elf(source_buffer),
@@ -1234,9 +1238,9 @@ const HeaderBodyOffsets = struct {
 ///
 /// Anything that would normally assert should return an error instead - especially implicit things
 /// like bounds checking on slices.
-fn parse_elf(buffer: []const u8) !HeaderBodyOffsets {
+fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBodyOffsets {
     if (@sizeOf(elf.Elf64_Ehdr) > buffer.len) return error.InvalidELF;
-    const elf_header = try elf.Header.parse(@alignCast(buffer[0..@sizeOf(elf.Elf64_Ehdr)]));
+    const elf_header = try elf.Header.parse(buffer[0..@sizeOf(elf.Elf64_Ehdr)]);
 
     // TigerBeetle only supports little endian on 64 bit platforms.
     if (elf_header.endian != .little) return error.WrongEndian;
