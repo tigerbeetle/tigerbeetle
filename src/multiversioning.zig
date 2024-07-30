@@ -13,6 +13,13 @@ const elf = std.elf;
 // Re-export to make release code easier.
 pub const checksum = @import("vsr/checksum.zig");
 pub const multiversion_binary_size_max = constants.multiversion_binary_size_max;
+pub const multiversion_binary_platform_size_max = constants.multiversion_binary_platform_size_max;
+
+// Useful for test code, or constructing releases in release.zig.
+pub const ListU32 = stdx.BoundedArray(u32, constants.vsr_releases_max);
+pub const ListU128 = stdx.BoundedArray(u128, constants.vsr_releases_max);
+pub const ListGitCommit = stdx.BoundedArray([20]u8, constants.vsr_releases_max);
+pub const ListFlag = stdx.BoundedArray(MultiversionHeader.Flags, constants.vsr_releases_max);
 
 /// In order to embed multiversion headers and bodies inside a universal binary, we repurpose some
 /// old CPU Type IDs.
@@ -169,7 +176,7 @@ test "ReleaseTriple.parse" {
 }
 
 pub const MultiversionHeader = extern struct {
-    const Flags = packed struct {
+    pub const Flags = packed struct {
         /// Normally release upgrades are allowed to skip to the latest. If a corresponding release
         /// is set to true here, it must be visited on the way to the newest release.
         visit: bool,
@@ -365,11 +372,14 @@ pub const MultiversionHeader = extern struct {
     past: PastReleases = .{},
     past_padding: [16]u8 = std.mem.zeroes([16]u8),
 
+    current_git_commit: [20]u8,
+    current_release_client_min: u32,
+
     /// Reserved space for future use. This is special: unlike the rest of the *_padding fields,
     /// which are required to be zeroed, this is not. This allows adding whole new fields in a
     /// backwards compatible way, while preventing the temptation of changing the meaning of
     /// existing fields without bumping the schema version entirely.
-    reserved: [4768]u8 = std.mem.zeroes([4768]u8),
+    reserved: [4744]u8 = std.mem.zeroes([4744]u8),
 
     /// Parses an instance from a slice of bytes and validates its checksum. Returns a copy.
     pub fn init_from_bytes(bytes: *const [@sizeOf(MultiversionHeader)]u8) !MultiversionHeader {
@@ -379,7 +389,7 @@ pub const MultiversionHeader = extern struct {
         return self;
     }
 
-    fn verify(self: *const MultiversionHeader) !void {
+    pub fn verify(self: *const MultiversionHeader) !void {
         const checksum_calculated = self.calculate_header_checksum();
 
         if (checksum_calculated != self.checksum_header) return error.ChecksumMismatch;
@@ -389,6 +399,15 @@ pub const MultiversionHeader = extern struct {
         if (!stdx.zeroed(&self.current_flags_padding)) return error.InvalidCurrentFlags;
         if (!self.current_flags.visit) return error.InvalidCurrentFlags;
         if (self.current_release == 0) return error.InvalidCurrentRelease;
+
+        // current_git_commit and current_release_client_min were added after 0.15.4.
+        if (self.current_release > (try Release.parse("0.15.4")).value) {
+            if (stdx.zeroed(&self.current_git_commit)) return error.InvalidCurrentRelease;
+            if (self.current_release_client_min == 0) return error.InvalidCurrentRelease;
+        } else {
+            if (!stdx.zeroed(&self.current_git_commit)) return error.InvalidCurrentRelease;
+            if (self.current_release_client_min != 0) return error.InvalidCurrentRelease;
+        }
 
         stdx.maybe(stdx.zeroed(&self.reserved));
 
@@ -460,10 +479,6 @@ pub const MultiversionHeader = extern struct {
 };
 
 test "MultiversionHeader.advertisable" {
-    const ListU32 = stdx.BoundedArray(u32, constants.vsr_releases_max);
-    const ListU128 = stdx.BoundedArray(u128, constants.vsr_releases_max);
-    const ListGitCommit = stdx.BoundedArray([20]u8, constants.vsr_releases_max);
-
     const tests = [_]struct {
         releases: []const u32,
         flags: []const MultiversionHeader.Flags,
@@ -523,6 +538,8 @@ test "MultiversionHeader.advertisable" {
             .current_checksum = 0,
             .current_flags = .{ .visit = true, .debug = false },
             .checksum_binary_without_header = 1,
+            .current_git_commit = std.mem.zeroes([20]u8),
+            .current_release_client_min = 0,
         };
         header.checksum_header = header.calculate_header_checksum();
 
@@ -600,7 +617,10 @@ pub const Multiversion = struct {
 
         const multiversion_binary_size_max_by_format = switch (exe_path_format) {
             .detect => constants.multiversion_binary_size_max,
-            .native => constants.multiversion_binary_platform_size_max,
+            .native => constants.multiversion_binary_platform_size_max(.{
+                .macos = builtin.target.os.tag == .macos,
+                .debug = builtin.mode != .ReleaseSafe,
+            }),
         };
 
         // To keep the invariant that whatever has been advertised can be executed, while allowing
@@ -1284,7 +1304,7 @@ const HeaderBodyOffsets = struct {
 ///
 /// Anything that would normally assert should return an error instead - especially implicit things
 /// like bounds checking on slices.
-fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBodyOffsets {
+pub fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBodyOffsets {
     if (@sizeOf(elf.Elf64_Ehdr) > buffer.len) return error.InvalidELF;
     const elf_header = try elf.Header.parse(buffer[0..@sizeOf(elf.Elf64_Ehdr)]);
 
@@ -1409,7 +1429,7 @@ fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBodyOffs
     };
 }
 
-fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
+pub fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
     if (@sizeOf(std.macho.fat_header) > buffer.len) return error.InvalidMacho;
     const fat_header = std.mem.bytesAsValue(
         std.macho.fat_header,
@@ -1479,7 +1499,7 @@ fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
     };
 }
 
-fn parse_pe(buffer: []const u8) !HeaderBodyOffsets {
+pub fn parse_pe(buffer: []const u8) !HeaderBodyOffsets {
     const coff = try std.coff.Coff.init(buffer, false);
 
     if (!coff.is_image) return error.InvalidPE;
@@ -1686,7 +1706,12 @@ pub fn print_information(
     );
 
     inline for (comptime std.meta.fieldNames(MultiversionHeader)) |field| {
-        if (!std.mem.eql(u8, field, "past") and
+        if (std.mem.eql(u8, field, "current_git_commit")) {
+            try output.print("multiversioning.header.{s}={s}\n", .{
+                field,
+                std.fmt.fmtSliceHexLower(&header.current_git_commit),
+            });
+        } else if (!std.mem.eql(u8, field, "past") and
             !std.mem.eql(u8, field, "current_flags_padding") and
             !std.mem.eql(u8, field, "past_padding") and
             !std.mem.eql(u8, field, "reserved"))
