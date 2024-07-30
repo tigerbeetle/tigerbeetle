@@ -307,6 +307,22 @@ pub const MultiversionHeader = extern struct {
                 return error.InvalidPastReleases;
             }
         }
+
+        /// Used by the build process to verify that the inner checksums are correct. Skipped during
+        /// runtime, as the outer checksum includes them all. This same method can't be implemented
+        /// for current_release, as that would require `objcopy` at runtime to split the pieces out.
+        pub fn verify_checksums(self: *const PastReleases, body: []const u8) !void {
+            for (
+                self.checksums[0..self.count],
+                self.offsets[0..self.count],
+                self.sizes[0..self.count],
+            ) |checksum_expected, offset, size| {
+                const checksum_calculated = checksum.checksum(body[offset..][0..size]);
+                if (checksum_calculated != checksum_expected) {
+                    return error.PastReleaseChecksumMismatch;
+                }
+            }
+        }
     };
 
     /// Covers MultiversionHeader[@sizeOf(u128)..].
@@ -1603,6 +1619,13 @@ pub fn print_information(
     try output.print("multiversioning.absolute_exe_path={s}\n", .{absolute_exe_path});
 
     const header = multiversion.target_header.?;
+
+    // `source_buffer` contains the same data as `target_file` - this code doesn't update anything
+    // after the initial open_sync().
+    try header.past.verify_checksums(
+        multiversion.source_buffer[multiversion.target_body_offset.?..],
+    );
+
     try output.print(
         "multiversioning.releases_bundled={any}\n",
         .{multiversion.releases_bundled.const_slice()},
