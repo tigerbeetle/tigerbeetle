@@ -890,7 +890,7 @@ fn parse_cache_size_to_count(
     comptime T: type,
     comptime SetAssociativeCache: type,
     size: flags.ByteSize,
-    cliFlag: []const u8,
+    cli_flag: []const u8,
 ) u32 {
     const value_count_max_multiple = SetAssociativeCache.value_count_max_multiple;
 
@@ -901,7 +901,7 @@ fn parse_cache_size_to_count(
     ) * value_count_max_multiple;
 
     if (count_rounded > std.math.maxInt(u32)) {
-        flags.fatal("{s}: exceeds the limit", .{cliFlag});
+        flags.fatal("{s}: exceeds the limit", .{cli_flag});
     }
 
     const result: u32 = @intCast(count_rounded);
