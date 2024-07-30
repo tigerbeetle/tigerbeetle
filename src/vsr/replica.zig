@@ -795,6 +795,14 @@ pub fn ReplicaType(
             maybe(self.status == .recovering_head);
             if (self.status == .recovering) assert(self.solo());
 
+            if (self.superblock.working.vsr_state.sync_op_max != 0) {
+                log.info("{}: sync: ops={}..{}", .{
+                    self.replica,
+                    self.superblock.working.vsr_state.sync_op_min,
+                    self.superblock.working.vsr_state.sync_op_max,
+                });
+            }
+
             // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
             // can repair grid blocks if necessary:
             self.grid.open(grid_open_callback);
@@ -4091,6 +4099,10 @@ pub fn ReplicaType(
                 }
                 break :storage_size storage_size;
             };
+
+            if (self.superblock.working.vsr_state.sync_op_max != 0 and vsr_state_sync.op_max == 0) {
+                log.info("{}: sync: done", .{self.replica});
+            }
 
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
@@ -8967,6 +8979,8 @@ pub fn ReplicaType(
                     sync_min_new;
             };
             const sync_view = stage.target.view;
+
+            log.info("{}: sync: ops={}..{}", .{ self.replica, sync_op_min, sync_op_max });
 
             self.sync_message_timeout.stop();
             self.superblock.sync(
