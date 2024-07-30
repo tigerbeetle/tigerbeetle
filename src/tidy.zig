@@ -84,10 +84,9 @@ fn tidy_long_line(file: SourceFile) !void {
     }
 }
 
-/// `tigerbeetle/cli.zig`'s `parse_args` holds the function line count record as of July 26, 2024
-/// with 366 lines. As we trim our functions, make sure to update this constant; tidy will
-/// error if you do not.
-const function_line_count_max = 366;
+/// `scripts/client_readmes.zig`'s `readme_root` holds the function line count record.
+/// As we trim our functions, make sure to update this constant; tidy will error if you do not.
+const function_line_count_max = 364;
 
 fn tidy_long_functions(
     file: SourceFile,

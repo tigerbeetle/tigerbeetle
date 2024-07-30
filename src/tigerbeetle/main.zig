@@ -51,7 +51,7 @@ pub fn main() !void {
     var arg_iterator = try std.process.argsWithAllocator(allocator);
     defer arg_iterator.deinit();
 
-    var command = try cli.parse_args(allocator, &arg_iterator);
+    var command = cli.parse_args(allocator, &arg_iterator);
     defer command.deinit(allocator);
 
     switch (command) {
