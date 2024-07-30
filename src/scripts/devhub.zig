@@ -35,7 +35,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     try shell.project_root.deleteFile("tigerbeetle");
 
     try shell.zig(
-        \\build scripts -- release --build --run-number=189 --sha={sha}
+        \\build scripts -- release --build --run-number=192 --sha={sha}
         \\    --language=zig
     , .{ .sha = cli_args.sha });
     try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
