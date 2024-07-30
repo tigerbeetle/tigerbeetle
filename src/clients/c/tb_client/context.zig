@@ -104,7 +104,7 @@ pub fn ContextType(
         allocator: std.mem.Allocator,
         client_id: u128,
 
-        addresses: []const std.net.Address,
+        addresses: stdx.BoundedArray(std.net.Address, constants.replicas_max),
         io: IO,
         message_pool: MessagePool,
         client: Client,
@@ -134,15 +134,22 @@ pub fn ContextType(
             assert(context.client_id != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
-            context.addresses = vsr.parse_addresses(
-                context.allocator,
+            context.addresses = .{};
+            const addresses_parsed = vsr.parse_addresses(
                 addresses,
-                constants.replicas_max,
+                context.addresses.unused_capacity_slice(),
             ) catch |err| return switch (err) {
                 error.AddressLimitExceeded => error.AddressLimitExceeded,
-                else => error.AddressInvalid,
+                error.AddressHasMoreThanOneColon,
+                error.AddressHasTrailingComma,
+                error.AddressInvalid,
+                error.PortInvalid,
+                error.PortOverflow,
+                => error.AddressInvalid,
             };
-            errdefer context.allocator.free(context.addresses);
+            assert(addresses_parsed.len > 0);
+            assert(addresses_parsed.len <= constants.replicas_max);
+            context.addresses.resize(addresses_parsed.len) catch unreachable;
 
             log.debug("{}: init: initializing IO", .{context.client_id});
             context.io = IO.init(32, 0) catch |err| {
@@ -172,10 +179,10 @@ pub fn ContextType(
                 .{
                     .id = context.client_id,
                     .cluster = cluster_id,
-                    .replica_count = @intCast(context.addresses.len),
+                    .replica_count = context.addresses.count_as(u8),
                     .message_pool = &context.message_pool,
                     .message_bus_options = .{
-                        .configuration = context.addresses,
+                        .configuration = context.addresses.const_slice(),
                         .io = &context.io,
                     },
                 },
@@ -234,7 +241,6 @@ pub fn ContextType(
             self.message_pool.deinit(self.allocator);
             self.io.deinit();
 
-            self.allocator.free(self.addresses);
             self.allocator.destroy(self);
         }
 
