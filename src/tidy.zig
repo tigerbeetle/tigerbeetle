@@ -84,9 +84,8 @@ fn tidy_long_line(file: SourceFile) !void {
     }
 }
 
-/// `scripts/client_readmes.zig`'s `readme_root` holds the function line count record.
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 364;
+const function_line_count_max = 361; // build_tigerbeetle
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -94,6 +93,12 @@ fn tidy_long_functions(
     function_line_count_longest: usize,
 } {
     const allocator = std.testing.allocator;
+
+    if (std.mem.endsWith(u8, file.path, "client_readmes.zig")) {
+        // This file is essentially a template to generate a markdown file, so it
+        // intentionally has giant functions.
+        return .{ .function_line_count_longest = 0 };
+    }
 
     const Function = struct {
         fn_decl_line: usize,
