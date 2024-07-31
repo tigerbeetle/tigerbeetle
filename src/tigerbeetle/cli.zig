@@ -734,26 +734,31 @@ fn parse_args_start(allocator: std.mem.Allocator, start: CliArgs.Start) Command.
             tigerbeetle.Account,
             AccountsValuesCache,
             start.cache_accounts orelse defaults.cache_accounts,
+            "--cache-accounts",
         ),
         .cache_transfers = parse_cache_size_to_count(
             tigerbeetle.Transfer,
             TransfersValuesCache,
             start.cache_transfers orelse defaults.cache_transfers,
+            "--cache-transfers",
         ),
         .cache_transfers_pending = parse_cache_size_to_count(
             StateMachine.TransferPending,
             TransfersPendingValuesCache,
             start.cache_transfers_pending orelse defaults.cache_transfers_pending,
+            "--cache-transfers-pending",
         ),
         .cache_account_balances = parse_cache_size_to_count(
             StateMachine.AccountBalancesGrooveValue,
             AccountBalancesValuesCache,
             start.cache_account_balances orelse defaults.cache_account_balances,
+            "--cache-account-balances",
         ),
         .cache_grid_blocks = parse_cache_size_to_count(
             [constants.block_size]u8,
             Grid.Cache,
             start.cache_grid orelse defaults.cache_grid,
+            "--cache-grid",
         ),
         .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
         .lsm_forest_node_count = lsm_forest_node_count,
@@ -885,6 +890,7 @@ fn parse_cache_size_to_count(
     comptime T: type,
     comptime SetAssociativeCache: type,
     size: flags.ByteSize,
+    cli_flag: []const u8,
 ) u32 {
     const value_count_max_multiple = SetAssociativeCache.value_count_max_multiple;
 
@@ -894,7 +900,11 @@ fn parse_cache_size_to_count(
         value_count_max_multiple,
     ) * value_count_max_multiple;
 
-    const result: u32 = @intCast(count_rounded); // TODO: better error message on overflow
+    if (count_rounded > std.math.maxInt(u32)) {
+        flags.fatal("{s}: exceeds the limit", .{cli_flag});
+    }
+
+    const result: u32 = @intCast(count_rounded);
     assert(@as(u64, result) * @sizeOf(T) <= size.bytes());
 
     return result;
