@@ -92,6 +92,7 @@ pub const ReplicaEvent = union(enum) {
     /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
     checkpoint_completed,
     sync_stage_changed,
+    client_evicted: u128,
 };
 
 const Nonce = u128;
@@ -4545,6 +4546,10 @@ pub fn ReplicaType(
                     constants.clients_max,
                     evictee,
                 });
+
+                if (self.event_callback) |hook| {
+                    hook(self, .{ .client_evicted = evictee });
+                }
             }
 
             log.debug("{}: client_table_entry_create: write (client={} session={} request={})", .{
@@ -5129,7 +5134,19 @@ pub fn ReplicaType(
                 } else if (entry.session > message.header.session) {
                     // The client must not reuse the ephemeral client ID when registering a new
                     // session.
-                    log.err("{}: on_request: ignoring older session (client bug)", .{self.replica});
+                    //
+                    // Alternatively, this could be caused by the following scenario:
+                    // 1. Client `A` sends an `operation=register` to a fresh cluster. (`A₁`)
+                    // 2. Cluster prepares + commits `A₁`, and sends the reply to `A`.
+                    // 4. `A` receives the reply to `A₁`, and issues a second request (`A₂`).
+                    // 5. `clients_max` other clients register, evicting `A`'s session.
+                    // 6. An old retry (or replay) of `A₁` arrives at the cluster.
+                    // 7. `A₁` is committed (for a second time, as a different op, evicting one of
+                    //    the other clients).
+                    // 8. `A` sends a second request (`A₂`), but `A` has the session number from the
+                    //    first time `A₁` was committed.
+                    log.mark.err("{}: on_request: ignoring older session", .{self.replica});
+                    self.send_eviction_message_to_client(message.header.client, .session_too_low);
                     return true;
                 } else if (entry.session < message.header.session) {
                     // This cannot be because of a partition since we check the client's view

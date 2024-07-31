@@ -13,7 +13,7 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const IOPS = @import("../iops.zig").IOPS;
 const FIFO = @import("../fifo.zig").FIFO;
 
-const log = std.log.scoped(.client);
+const log = stdx.log.scoped(.client);
 
 pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {
@@ -109,44 +109,61 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             reply: *Message.Reply,
         ) void = null,
 
+        evicted: bool = false,
+        on_eviction_callback: ?*const fn (
+            client: *Self,
+            eviction: *const Message.Eviction,
+        ) void = null,
+
         pub fn init(
             allocator: mem.Allocator,
-            id: u128,
-            cluster: u128,
-            replica_count: u8,
-            message_pool: *MessagePool,
-            message_bus_options: MessageBus.Options,
+            options: struct {
+                id: u128,
+                cluster: u128,
+                replica_count: u8,
+                message_pool: *MessagePool,
+                message_bus_options: MessageBus.Options,
+                /// When eviction_callback is null, the client will panic on eviction.
+                ///
+                /// When eviction_callback is non-null, it must `deinit()` the Client.
+                /// After eviction, the client must not send or process any additional messages.
+                eviction_callback: ?*const fn (
+                    client: *Self,
+                    eviction: *const Message.Eviction,
+                ) void = null,
+            },
         ) !Self {
-            assert(id > 0);
-            assert(replica_count > 0);
+            assert(options.id > 0);
+            assert(options.replica_count > 0);
 
             var message_bus = try MessageBus.init(
                 allocator,
-                cluster,
-                .{ .client = id },
-                message_pool,
+                options.cluster,
+                .{ .client = options.id },
+                options.message_pool,
                 Self.on_message,
-                message_bus_options,
+                options.message_bus_options,
             );
             errdefer message_bus.deinit(allocator);
 
             var self = Self{
                 .allocator = allocator,
                 .message_bus = message_bus,
-                .id = id,
-                .cluster = cluster,
-                .replica_count = replica_count,
+                .id = options.id,
+                .cluster = options.cluster,
+                .replica_count = options.replica_count,
                 .request_timeout = .{
                     .name = "request_timeout",
-                    .id = id,
+                    .id = options.id,
                     .after = constants.rtt_ticks * constants.rtt_multiple,
                 },
                 .ping_timeout = .{
                     .name = "ping_timeout",
-                    .id = id,
+                    .id = options.id,
                     .after = 30000 / constants.tick_ms,
                 },
-                .prng = std.rand.DefaultPrng.init(@as(u64, @truncate(id))),
+                .prng = std.rand.DefaultPrng.init(@as(u64, @truncate(options.id))),
+                .on_eviction_callback = options.eviction_callback,
             };
 
             self.ping_timeout.start();
@@ -161,6 +178,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub fn on_message(message_bus: *MessageBus, message: *Message) void {
             const self: *Self = @fieldParentPtr("message_bus", message_bus);
+            assert(!self.evicted);
+
             log.debug("{}: on_message: {}", .{ self.id, message.header });
             if (message.header.invalid()) |reason| {
                 log.debug("{}: on_message: invalid ({s})", .{ self.id, reason });
@@ -189,6 +208,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         pub fn tick(self: *Self) void {
+            assert(!self.evicted);
+
             self.ticks += 1;
 
             self.message_bus.tick();
@@ -202,6 +223,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         /// Registers a session with the cluster for the client, if this has not yet been done.
         pub fn register(self: *Self, callback: Request.RegisterCallback, user_data: u128) void {
+            assert(!self.evicted);
             assert(self.request_inflight == null);
             assert(self.request_number == 0);
 
@@ -254,6 +276,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
             };
+            assert(!self.evicted);
             assert(self.request_inflight == null);
             assert(self.request_number > 0);
             assert(events.len <= constants.message_body_size_max);
@@ -342,6 +365,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         fn on_eviction(self: *Self, eviction: *const Message.Eviction) void {
+            assert(!self.evicted);
             assert(eviction.header.command == .eviction);
             assert(eviction.header.cluster == self.cluster);
 
@@ -369,7 +393,14 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 @tagName(eviction.header.reason),
                 eviction.header.release,
             });
-            @panic("session evicted");
+
+            if (self.on_eviction_callback) |callback| {
+                self.evicted = true;
+                self.on_eviction_callback = null;
+                callback(self, eviction);
+            } else {
+                @panic("session evicted");
+            }
         }
 
         fn on_pong_client(self: *Self, pong: *const Message.PongClient) void {

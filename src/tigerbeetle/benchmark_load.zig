@@ -76,13 +76,15 @@ pub fn main(
 
     var client = try Client.init(
         allocator,
-        client_id,
-        cluster_id,
-        @intCast(addresses.len),
-        &message_pool,
         .{
-            .configuration = addresses,
-            .io = &io,
+            .id = client_id,
+            .cluster = cluster_id,
+            .replica_count = @intCast(addresses.len),
+            .message_pool = &message_pool,
+            .message_bus_options = .{
+                .configuration = addresses,
+                .io = &io,
+            },
         },
     );
 

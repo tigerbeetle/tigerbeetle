@@ -57,20 +57,22 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
         pub fn init(
             allocator: mem.Allocator,
-            id: u128,
-            cluster: u128,
-            replica_count: u8,
-            message_pool: *MessagePool,
-            message_bus_options: MessageBus.Options,
+            options: struct {
+                id: u128,
+                cluster: u128,
+                replica_count: u8,
+                message_pool: *MessagePool,
+                message_bus_options: MessageBus.Options,
+            },
         ) !Self {
             _ = allocator;
-            _ = replica_count;
-            _ = message_bus_options;
+            _ = options.replica_count;
+            _ = options.message_bus_options;
 
             return Self{
-                .id = id,
-                .cluster = cluster,
-                .message_pool = message_pool,
+                .id = options.id,
+                .cluster = options.cluster,
+                .message_pool = options.message_pool,
             };
         }
 

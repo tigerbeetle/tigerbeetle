@@ -312,13 +312,15 @@ pub const AOFReplayClient = struct {
 
         client.* = try Client.init(
             allocator,
-            std.crypto.random.int(u128),
-            0,
-            @intCast(addresses.len),
-            message_pool,
             .{
-                .configuration = addresses,
-                .io = io,
+                .id = std.crypto.random.int(u128),
+                .cluster = 0,
+                .replica_count = @intCast(addresses.len),
+                .message_pool = message_pool,
+                .message_bus_options = .{
+                    .configuration = addresses,
+                    .io = io,
+                },
             },
         );
         errdefer client.deinit(allocator);

@@ -1261,6 +1261,7 @@ pub const Header = extern struct {
             invalid_request_operation = 4,
             invalid_request_body = 5,
             invalid_request_body_size = 6,
+            session_too_low = 7,
 
             comptime {
                 for (std.enums.values(Reason), 0..) |reason, index| {
