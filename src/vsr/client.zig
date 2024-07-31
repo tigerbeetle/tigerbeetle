@@ -123,6 +123,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 replica_count: u8,
                 message_pool: *MessagePool,
                 message_bus_options: MessageBus.Options,
+                /// When eviction_callback is null, the client will panic on eviction.
+                ///
+                /// When eviction_callback is non-null, it must `deinit()` the Client.
+                /// After eviction, the client must not send or process any additional messages.
                 eviction_callback: ?*const fn (
                     client: *Self,
                     eviction: *const Message.Eviction,

@@ -1495,8 +1495,11 @@ test "Cluster: eviction: session_too_low" {
     t.replica(.R_).replay_recorded();
     t.run();
 
+    const mark = marks.check("on_request: ignoring older session");
+
     // C0 now has a session again, but the client only knows the old (evicted) session number.
     try c0.request(2, 1);
+    try mark.expect_hit();
     try expectEqual(c0.eviction_reason(), .session_too_low);
 }
 

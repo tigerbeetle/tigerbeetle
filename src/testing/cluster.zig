@@ -222,6 +222,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var replica_pools = try allocator.alloc(MessagePool, node_count);
             errdefer allocator.free(replica_pools);
 
+            // There may be more clients than `clients_max` (to test session eviction).
             const pipeline_requests_limit =
                 @min(options.client_count, constants.clients_max) -|
                 constants.pipeline_prepare_queue_max;

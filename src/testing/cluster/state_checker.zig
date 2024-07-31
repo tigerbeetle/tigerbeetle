@@ -198,8 +198,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     // `checksum_body` will not match; the leader's StateMachine updated the
                     // timestamps in the prepare body's accounts/transfers.
                 } else {
-                    // The cluster is running with one or more raw MessageBus "clients", so there
-                    // may be requests not found in `Cluster.clients`.
+                    // Either:
+                    // - The cluster is running with one or more raw MessageBus "clients", so there
+                    //   may be requests not found in `Cluster.clients`.
+                    // - The test includes one or more client evictions.
                 }
             }
 

@@ -5134,7 +5134,7 @@ pub fn ReplicaType(
                     //    the other clients).
                     // 8. `A` sends a second request (`A₂`), but `A` has the session number from the
                     //    first time `A₁` was committed.
-                    log.err("{}: on_request: ignoring older session (client bug)", .{self.replica});
+                    log.mark.err("{}: on_request: ignoring older session", .{self.replica});
                     self.send_eviction_message_to_client(message.header.client, .session_too_low);
                     return true;
                 } else if (entry.session < message.header.session) {
