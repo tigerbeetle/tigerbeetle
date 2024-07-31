@@ -54,7 +54,7 @@ const CliArgs = union(enum) {
         // Everything below here is considered experimental, and requires `--experimental` to be
         // set. Experimental flags disable automatic upgrades with multiversion binaries; each
         // replica has to be manually restarted.
-        // Experimental flags must default to null.
+        // Experimental flags must default to null, except for bools which must be false.
         experimental: bool = false,
 
         limit_storage: ?flags.ByteSize = null,
@@ -66,6 +66,13 @@ const CliArgs = union(enum) {
         cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
+
+        /// AOF (Append Only File) logs all transactions synchronously to disk before replying
+        /// to the client. The logic behind this code has been kept as simple as possible -
+        /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
+        /// log consisting of logged requests. Much like a redis AOF with fsync=on.
+        /// Enabling this will have performance implications.
+        aof: bool = false,
     };
 
     const Version = struct {
@@ -386,6 +393,7 @@ pub const Command = union(enum) {
         lsm_forest_node_count: u32,
         development: bool,
         experimental: bool,
+        aof: bool,
         path: [:0]const u8,
     };
 
@@ -573,9 +581,10 @@ fn parse_args_start(allocator: std.mem.Allocator, start: CliArgs.Start) Command.
 
         // If you've added a flag and get a comptime error here, it's likely because
         // we require experimental flags to default to null.
-        assert(flags.default_value(field).? == null);
+        const required_default = if (field.type == bool) false else null;
+        assert(flags.default_value(field).? == required_default);
 
-        if (@field(start, field.name) != null and !start.experimental) {
+        if (@field(start, field.name) != required_default and !start.experimental) {
             flags.fatal(
                 "{s} is marked experimental, add `--experimental` to continue.",
                 .{flag_name},
@@ -764,6 +773,7 @@ fn parse_args_start(allocator: std.mem.Allocator, start: CliArgs.Start) Command.
         .lsm_forest_node_count = lsm_forest_node_count,
         .development = start.development,
         .experimental = start.experimental,
+        .aof = start.aof,
         .path = start.positional.path,
     };
 }

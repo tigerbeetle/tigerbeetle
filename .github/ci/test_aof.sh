@@ -6,12 +6,7 @@ if [ ! -d "zig" ]; then
     ./scripts/install_zig.sh
 fi
 
-# TODO: remove -Drelease once we no longer use a lot of stack in Groove.zig
-./zig/zig build -Drelease -Dconfig-aof-record=true
-mv zig-out/bin/tigerbeetle tigerbeetle-aof
-
-./zig/zig build -Drelease -Dconfig-aof-record=true -Dconfig-aof-recovery=true
-mv zig-out/bin/tigerbeetle tigerbeetle-aof-recovery
+./zig/zig build install
 
 rm -f aof.log
 
@@ -35,14 +30,14 @@ trap onerror EXIT
 rm -f aof-test.tigerbeetle
 rm -f aof-test.tigerbeetle.aof
 
-./tigerbeetle-aof format --cluster=0 --replica=0 --replica-count=1 aof-test.tigerbeetle > aof.log 2>&1
-./tigerbeetle-aof start --cache-grid=256MiB --addresses=3001 aof-test.tigerbeetle >> aof.log 2>&1 &
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 aof-test.tigerbeetle > aof.log 2>&1
+./tigerbeetle start --cache-grid=256MiB --addresses=3001 --aof --experimental aof-test.tigerbeetle >> aof.log 2>&1 &
 
 # Wait for replicas to start, listen and connect:
 sleep 1
 
-echo "Running 'zig build benchmark' to populate AOF..."
-./zig/zig build -Drelease -Dconfig=production run -- benchmark --addresses=3001 --transfer-count=400000 >> aof.log 2>&1
+echo "Running benchmark to populate AOF..."
+./tigerbeetle benchmark --addresses=3001 --transfer-count=4000 --transfer-batch-size=20 >> aof.log 2>&1
 
 echo ""
 echo "Running 'zig build aof -- debug aof-test.tigerbeetle.aof' to check AOF..."
@@ -57,13 +52,13 @@ sleep 1
 rm -rf 1 2
 
 mkdir 1 && cd 1
-../tigerbeetle-aof-recovery format --cluster=0 --replica=0 --replica-count=2 aof-test.tigerbeetle >> aof.log 2>&1
-../tigerbeetle-aof-recovery start --cache-grid=256MiB --addresses=3001,3002 aof-test.tigerbeetle >> aof.log 2>&1 &
+../tigerbeetle format --cluster=0 --replica=0 --replica-count=2 aof-test.tigerbeetle >> aof.log 2>&1
+../tigerbeetle start --cache-grid=256MiB --addresses=3001,3002 --aof --experimental aof-test.tigerbeetle >> aof.log 2>&1 &
 cd ..
 
 mkdir 2 && cd 2
-../tigerbeetle-aof-recovery format --cluster=0 --replica=1 --replica-count=2 aof-test.tigerbeetle >> aof.log 2>&1
-../tigerbeetle-aof-recovery start --cache-grid=256MiB --addresses=3001,3002 aof-test.tigerbeetle >> aof.log 2>&1 &
+../tigerbeetle format --cluster=0 --replica=1 --replica-count=2 aof-test.tigerbeetle >> aof.log 2>&1
+../tigerbeetle start --cache-grid=256MiB --addresses=3001,3002 --aof --experimental aof-test.tigerbeetle >> aof.log 2>&1 &
 cd ..
 
 # mkdir 3 && cd 3
@@ -73,7 +68,7 @@ cd ..
 
 sleep 1
 
-./zig/zig build aof -- recover 127.0.0.1:3001,127.0.0.1:3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
+./zig/zig build aof -- import 127.0.0.1:3001,127.0.0.1:3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
 
 # Give replicas time to settle.
 sleep 10

@@ -71,11 +71,6 @@ pub fn build(b: *std.Build) !void {
     const build_options = .{
         .target = b.option([]const u8, "target", "The CPU architecture and OS to build for"),
         .config = b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
-        .config_aof_record = b.option(
-            bool,
-            "config-aof-record",
-            "Enable AOF Recording.",
-        ) orelse false,
         .config_log_level = b.option(std.log.Level, "config-log-level", "Log level.") orelse .info,
         .config_release = b.option([]const u8, "config-release", "Release triple."),
         .config_release_client_min = b.option(
@@ -128,7 +123,6 @@ pub fn build(b: *std.Build) !void {
     vsr_options.addOption(config.ConfigBase, "config_base", build_options.config);
     vsr_options.addOption(std.log.Level, "config_log_level", build_options.config_log_level);
     vsr_options.addOption(config.TracerBackend, "tracer_backend", build_options.tracer_backend);
-    vsr_options.addOption(bool, "config_aof_record", build_options.config_aof_record);
     vsr_options.addOption(config.HashLogMode, "hash_log_mode", build_options.hash_log_mode);
 
     const vsr_module: *std.Build.Module = vsr: {
