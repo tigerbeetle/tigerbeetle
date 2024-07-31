@@ -1602,19 +1602,19 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
 
-            if (self.is_repair(message)) {
+            if (message.header.view < self.view or
+                (self.status == .normal and
+                message.header.view == self.view and message.header.op <= self.op))
+            {
                 log.debug("{}: on_prepare: ignoring (repair)", .{self.replica});
                 self.on_repair(message);
                 return;
             }
 
+            self.replicate(message);
+
             if (self.status != .normal) {
                 log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
-                return;
-            }
-
-            if (message.header.view < self.view) {
-                log.debug("{}: on_prepare: ignoring (older view)", .{self.replica});
                 return;
             }
 
@@ -1730,7 +1730,6 @@ pub fn ReplicaType(
             self.op = message.header.op;
             self.journal.set_header_as_dirty(message.header);
 
-            self.replicate(message);
             self.append(message);
         }
 
@@ -5632,20 +5631,6 @@ pub fn ReplicaType(
             return false;
         }
 
-        fn is_repair(self: *const Self, message: *const Message.Prepare) bool {
-            assert(message.header.command == .prepare);
-
-            if (self.status == .normal) {
-                if (message.header.view < self.view) return true;
-                if (message.header.view == self.view and message.header.op <= self.op) return true;
-            } else if (self.status == .view_change) {
-                if (message.header.view < self.view) return true;
-                // The view has already started or is newer.
-            }
-
-            return false;
-        }
-
         /// Returns the index into the configuration of the primary for a given view.
         pub fn primary_index(self: *const Self, view: u32) u8 {
             return @intCast(@mod(view, self.replica_count));
@@ -6981,10 +6966,12 @@ pub fn ReplicaType(
         /// Replication to standbys works similarly, jumping off the replica just before primary.
         /// TODO Use recent heartbeat data for next replica to leapfrog if faulty (optimization).
         fn replicate(self: *Self, message: *Message.Prepare) void {
-            assert(self.status == .normal);
             assert(message.header.command == .prepare);
-            assert(message.header.view == self.view);
-            assert(message.header.op == self.op);
+            assert(message.header.view >= self.view);
+            // We may replicate older prepares from either a primary of the current or future view
+            // whose start view we're waiting on (to truncate our log and set our self.op
+            // accordingly).
+            maybe(message.header.op < self.op);
 
             if (message.header.op <= self.commit_max) {
                 log.debug("{}: replicate: not replicating (committed)", .{self.replica});
@@ -7496,7 +7483,11 @@ pub fn ReplicaType(
             }
 
             assert(message.header.cluster == self.cluster);
-            assert(message.header.release.value <= self.release.value);
+
+            // Compare the release in this message to ours only if we authored the message.
+            if (message.header.replica == self.replica) {
+                assert(message.header.release.value <= self.release.value);
+            }
 
             if (message.header.command == .block) {
                 assert(message.header.protocol <= vsr.Version);
@@ -7517,12 +7508,7 @@ pub fn ReplicaType(
                     maybe(self.standby());
                     assert(self.replica != replica);
                     // Do not assert message.header.replica because we forward .prepare messages.
-                    switch (self.status) {
-                        .normal => assert(message.header.view <= self.view),
-                        .view_change => assert(message.header.view < self.view),
-                        // These are replies to a request_prepare:
-                        else => assert(message.header.view <= self.view),
-                    }
+                    if (header.replica == self.replica) assert(message.header.view <= self.view);
                     assert(header.operation != .reserved);
                 },
                 .prepare_ok => |header| {
@@ -7650,10 +7636,11 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                 },
             }
-
-            if (replica != self.replica) {
-                // Critical: Do not advertise a view/log_view before it is durable.
-                // See view_durable()/log_view_durable().
+            // Critical:
+            // Do not advertise a view/log_view before it is durable. We only need perform these
+            // checks if we authored the message, not if we're simply forwarding a message along.
+            // See view_durable()/log_view_durable().
+            if (replica != self.replica and message.header.replica == self.replica) {
                 if (message.header.view > self.view_durable() and
                     message.header.command != .request_start_view and
                     !(message.header.command == .ping and
