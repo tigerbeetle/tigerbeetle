@@ -299,10 +299,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.parent == 0);
             assert(message.header.session == 0);
             assert(message.header.request == 0);
-
-            if (!constants.aof_recovery) {
-                assert(!message.header.operation.vsr_reserved());
-            }
+            assert(!message.header.operation.vsr_reserved());
 
             // TODO: Re-investigate this state for AOF as it currently traps.
             // assert(message.header.timestamp == 0 or constants.aof_recovery);

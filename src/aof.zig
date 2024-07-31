@@ -684,8 +684,8 @@ const usage =
     \\
     \\Commands:
     \\
-    \\  recover  Recover a recorded AOF file at <path> to a TigerBeetle cluster running
-    \\           at <addresses>. Said cluster must be running with aof_recovery = true
+    \\  import   Recover a recorded AOF file at <path> to a TigerBeetle cluster running
+    \\           at <addresses>. Said cluster must have support for `import_*` operations
     \\           and have the same cluster ID as the source. The AOF must have a consistent
     \\           hash chain, which can be ensured using the `merge` subcommand.
     \\

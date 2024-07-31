@@ -510,7 +510,7 @@ pub const Header = extern struct {
             assert(self.command == .request);
             if (self.release.value == 0) return "release == 0";
             if (self.parent_padding != 0) return "parent_padding != 0";
-            if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
+            if (self.timestamp != 0) return "timestamp != 0";
             switch (self.operation) {
                 .reserved => return "operation == .reserved",
                 .root => return "operation == .root",

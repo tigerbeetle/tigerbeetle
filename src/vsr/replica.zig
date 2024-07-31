@@ -522,7 +522,7 @@ pub fn ReplicaType(
         sync_message_timeout: Timeout,
 
         /// The number of ticks on an idle cluster before injecting a `pulse` operation.
-        /// (status=normal and primary and !constants.aof_recovery)
+        /// (status=normal and primary)
         pulse_timeout: Timeout,
 
         /// The number of ticks before checking whether we are ready to begin an upgrade.
@@ -1347,7 +1347,7 @@ pub fn ReplicaType(
         fn on_message_from_bus(message_bus: *MessageBus, message: *Message) void {
             const self: *Self = @alignCast(@fieldParentPtr("message_bus", message_bus));
             if (message.header.into(.request)) |header| {
-                assert(header.client != 0 or constants.aof_recovery);
+                assert(header.client != 0);
             }
             self.on_message(message);
         }
@@ -3200,7 +3200,6 @@ pub fn ReplicaType(
         }
 
         fn on_pulse_timeout(self: *Self) void {
-            assert(!constants.aof_recovery);
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.pulse_timeout.ticking);
@@ -4228,8 +4227,7 @@ pub fn ReplicaType(
                 self.state_machine.commit_timestamp,
                 prepare.header.timestamp,
             });
-            assert(self.state_machine.commit_timestamp < prepare.header.timestamp or
-                constants.aof_recovery);
+            assert(self.state_machine.commit_timestamp < prepare.header.timestamp);
 
             // Synchronously record this request in our AOF. This can be used for disaster recovery
             // in the case of catastrophic storage failure. Internally, write() will only return
@@ -4271,8 +4269,7 @@ pub fn ReplicaType(
                 ),
             };
 
-            assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or
-                constants.aof_recovery);
+            assert(self.state_machine.commit_timestamp <= prepare.header.timestamp);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
 
             if (self.status == .normal and self.primary()) {
@@ -6039,19 +6036,7 @@ pub fn ReplicaType(
                 .checkpoint_id = checkpoint_id,
                 .op = self.op + 1,
                 .commit = self.commit_max,
-                .timestamp = timestamp: {
-                    // When running in AOF recovery mode, we allow clients to set a timestamp
-                    // explicitly, but they can still pass in 0.
-                    if (constants.aof_recovery) {
-                        if (request_header.timestamp == 0) {
-                            break :timestamp prepare_timestamp;
-                        } else {
-                            break :timestamp request_header.timestamp;
-                        }
-                    } else {
-                        break :timestamp prepare_timestamp;
-                    }
-                },
+                .timestamp = prepare_timestamp,
                 .request = request_header.request,
                 .operation = request_header.operation,
             };
@@ -6076,10 +6061,8 @@ pub fn ReplicaType(
                 self.primary_abdicate_timeout.start();
             }
 
-            if (!constants.aof_recovery) {
-                assert(self.pulse_timeout.ticking);
-                self.pulse_timeout.reset();
-            }
+            assert(self.pulse_timeout.ticking);
+            self.pulse_timeout.reset();
 
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
@@ -8273,7 +8256,7 @@ pub fn ReplicaType(
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
                 self.grid_scrub_timeout.start();
-                if (!constants.aof_recovery) self.pulse_timeout.start();
+                self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
@@ -8412,7 +8395,7 @@ pub fn ReplicaType(
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
                 self.grid_scrub_timeout.start();
-                if (!constants.aof_recovery) self.pulse_timeout.start();
+                self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
@@ -9759,8 +9742,6 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(!self.pipeline.queue.full());
 
-            // Pulses are replayed during `aof recovery`.
-            if (constants.aof_recovery) return false;
             // There's a pulse already in progress.
             if (self.pipeline.queue.contains_operation(.pulse)) return false;
             // Solo replicas only change views immediately when they start up,
@@ -9774,7 +9755,6 @@ pub fn ReplicaType(
         }
 
         fn send_request_pulse_to_self(self: *Self) void {
-            assert(!constants.aof_recovery);
             assert(self.status == .normal);
             assert(self.primary());
             assert(!self.pipeline.queue.full());

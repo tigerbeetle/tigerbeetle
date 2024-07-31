@@ -605,7 +605,6 @@ pub fn StateMachineType(
         }
 
         pub fn pulse_needed(self: *const StateMachine, timestamp: u64) bool {
-            assert(!global_constants.aof_recovery);
             assert(self.expire_pending_transfers.pulse_next_timestamp >=
                 TimestampRange.timestamp_min);
 
@@ -1326,7 +1325,7 @@ pub fn StateMachineType(
             _ = client;
             assert(op != 0);
             assert(self.input_valid(operation, input));
-            assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
+            assert(timestamp > self.commit_timestamp);
             assert(input.len <= self.batch_size_limit);
 
             maybe(self.scan_lookup_result_count != null);
@@ -1690,7 +1689,7 @@ pub fn StateMachineType(
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
-            assert(a.timestamp > self.commit_timestamp or global_constants.aof_recovery);
+            assert(a.timestamp > self.commit_timestamp);
 
             if (a.reserved != 0) return .reserved_field;
             if (a.flags.padding != 0) return .reserved_flag;
@@ -1733,7 +1732,7 @@ pub fn StateMachineType(
         }
 
         fn create_transfer(self: *StateMachine, t: *const Transfer) CreateTransferResult {
-            assert(t.timestamp > self.commit_timestamp or global_constants.aof_recovery);
+            assert(t.timestamp > self.commit_timestamp);
 
             if (t.flags.padding != 0) return .reserved_flag;
 

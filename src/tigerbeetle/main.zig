@@ -313,9 +313,6 @@ const Command = struct {
         } else if (args.experimental) blk: {
             log.info("multiversioning: disabled due to --experimental.", .{});
             break :blk null;
-        } else if (constants.aof_recovery) blk: {
-            log.info("multiversioning: disabled due to aof_recovery.", .{});
-            break :blk null;
         } else try vsr.multiversioning.Multiversion.init(
             allocator,
             &command.io,
@@ -402,14 +399,6 @@ const Command = struct {
             replica.cluster,
             replica.message_bus.process.accept_address,
         });
-
-        if (constants.aof_recovery) {
-            log.warn(
-                "{}: started in AOF recovery mode. This is potentially dangerous - if it's" ++
-                    " unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.",
-                .{replica.replica},
-            );
-        }
 
         if (constants.verify) {
             log.warn("{}: started with constants.verify - expect reduced performance. " ++

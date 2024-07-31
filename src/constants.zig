@@ -774,10 +774,6 @@ pub const verify = config.process.verify;
 /// Enabling this will have performance implications.
 pub const aof_record = config.process.aof_record;
 
-/// Place us in a special recovery state, where we accept timestamps passed in to us. Used to
-/// replay our AOF.
-pub const aof_recovery = config.process.aof_recovery;
-
 /// The maximum number of bytes to use for compaction blocks.
 pub const compaction_block_memory_size_max = std.math.maxInt(u32) * block_size;
 
