@@ -248,7 +248,7 @@ necessary:
   Additionally, the entire batch can be submitted as a [linked chain](#flagslinked), ensuring that
   if any event fails, none of them are committed, preserving the last timestamp unchanged.
   This approach gives the application a chance to correct failed imported events, re-submitting
-  the batch again whith the same user-defined timestamps.
+  the batch again with the same user-defined timestamps.
 
 ### `timestamp`
 
