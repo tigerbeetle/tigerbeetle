@@ -92,7 +92,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         tracer_slot: ?tracer.SpanStart = null,
 
-        active_scope: ?TableMemory.ValueContext = null,
+        active_scope: ?struct {
+            value_context: TableMemory.ValueContext,
+            key_range: ?KeyRange,
+        } = null,
 
         /// The range of keys in this tree at snapshot_latest.
         key_range: ?KeyRange = null,
@@ -189,15 +192,20 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// or discarded. Only one scope can be active at a time.
         pub fn scope_open(tree: *Tree) void {
             assert(tree.active_scope == null);
-            tree.active_scope = tree.table_mutable.value_context;
+            tree.active_scope = .{
+                .value_context = tree.table_mutable.value_context,
+                .key_range = tree.key_range,
+            };
         }
 
         pub fn scope_close(tree: *Tree, mode: ScopeCloseMode) void {
             assert(tree.active_scope != null);
-            assert(tree.active_scope.?.count <= tree.table_mutable.value_context.count);
+            assert(tree.active_scope.?.value_context.count <=
+                tree.table_mutable.value_context.count);
 
             if (mode == .discard) {
-                tree.table_mutable.value_context = tree.active_scope.?;
+                tree.table_mutable.value_context = tree.active_scope.?.value_context;
+                tree.key_range = tree.active_scope.?.key_range;
             }
 
             tree.active_scope = null;
