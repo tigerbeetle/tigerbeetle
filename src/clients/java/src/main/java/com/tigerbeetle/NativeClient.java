@@ -3,7 +3,6 @@ package com.tigerbeetle;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 import java.lang.ref.Cleaner;
-import java.util.concurrent.atomic.AtomicLong;
 
 final class NativeClient implements AutoCloseable {
     private final static Cleaner cleaner;
@@ -13,63 +12,34 @@ final class NativeClient implements AutoCloseable {
      * the cleaner to dispose native memory when the `Client` instance is GCed. Also implements
      * `Runnable` to be usable as the cleaner action.
      * https://docs.oracle.com/javase%2F9%2Fdocs%2Fapi%2F%2F/java/lang/ref/Cleaner.html
+     *
+     * Methods are synchronized to ensure tb_client functions aren't called on an invalid handle.
+     * Safe to synchronize on NativeHandle object as it's private to NativeClient and can't be
+     * arbitrarily/externally locked by the library user.
      */
     private static final class NativeHandle implements Runnable {
-        // Keeping the contextHandle and a reference counter guarded by
-        // atomics in order to prevent the client from using a disposed
-        // context during `close()`.
-        private final AtomicLong atomicHandle;
-        private final AtomicLong atomicHandleReferences;
+        private long handle;
 
         public NativeHandle(long handle) {
-            this.atomicHandle = new AtomicLong(handle);
-            this.atomicHandleReferences = new AtomicLong(0);
+            assert handle != 0;
+            this.handle = handle;
         }
 
-        public void submit(final Request<?> request) throws ConcurrencyExceededException {
-            try {
-                atomicHandleReferences.incrementAndGet();
-                final var handle = atomicHandle.getAcquire();
-
-                if (handle == 0L)
-                    throw new IllegalStateException("Client is closed");
-
-                final var packet_acquire_status = NativeClient.submit(handle, request);
-                if (packet_acquire_status == PacketAcquireStatus.ConcurrencyMaxExceeded.value) {
-                    throw new ConcurrencyExceededException();
-                } else if (packet_acquire_status == PacketAcquireStatus.Shutdown.value) {
-                    throw new IllegalStateException("Client is closing");
-                } else {
-                    assertTrue(packet_acquire_status == PacketAcquireStatus.Ok.value,
-                            "PacketAcquireStatus=%d is not implemented", packet_acquire_status);
-                }
-            } finally {
-                atomicHandleReferences.decrementAndGet();
+        public synchronized void submit(final Request<?> request) {
+            if (handle == 0) {
+                throw new IllegalStateException("Client is closed");
             }
+
+            NativeClient.submit(handle, request);
         }
 
-        public void close() {
-            if (atomicHandle.getAcquire() != 0L) {
-                synchronized (this) {
-                    final var handle = atomicHandle.getAcquire();
-                    if (handle != 0L) {
-                        // Signalize that this client is closed by setting the handler to 0,
-                        // and spin wait until all references that might be using the old handle
-                        // could be released.
-                        atomicHandle.setRelease(0L);
-                        while (atomicHandleReferences.getAcquire() > 0L) {
-                            // Thread::onSpinWait method to give JVM a hint that the following code
-                            // is in a spin loop. This has no side-effect and only provides a hint
-                            // to optimize spin loops in a processor specific manner.
-                            Thread.onSpinWait();
-                        }
-
-                        // This function waits until all submitted requests are completed, and no
-                        // more packets can be acquired after that.
-                        clientDeinit(handle);
-                    }
-                }
+        public synchronized void close() {
+            if (handle == 0) {
+                return;
             }
+
+            clientDeinit(handle);
+            handle = 0;
         }
 
         @Override
@@ -86,25 +56,21 @@ final class NativeClient implements AutoCloseable {
     private final NativeHandle handle;
     private final Cleaner.Cleanable cleanable;
 
-    public static NativeClient init(final byte[] clusterID, final String addresses,
-            final int concurrencyMax) {
-        assertArgs(clusterID, addresses, concurrencyMax);
-        final long contextHandle = clientInit(clusterID, addresses, concurrencyMax);
+    public static NativeClient init(final byte[] clusterID, final String addresses) {
+        assertArgs(clusterID, addresses);
+        final long contextHandle = clientInit(clusterID, addresses);
         return new NativeClient(contextHandle);
     }
 
-    public static NativeClient initEcho(final byte[] clusterID, final String addresses,
-            final int concurrencyMax) {
-        assertArgs(clusterID, addresses, concurrencyMax);
-        final long contextHandle = clientInitEcho(clusterID, addresses, concurrencyMax);
+    public static NativeClient initEcho(final byte[] clusterID, final String addresses) {
+        assertArgs(clusterID, addresses);
+        final long contextHandle = clientInitEcho(clusterID, addresses);
         return new NativeClient(contextHandle);
     }
 
-    private static void assertArgs(final byte[] clusterID, final String addresses,
-            final int concurrencyMax) {
+    private static void assertArgs(final byte[] clusterID, final String addresses) {
         assertTrue(clusterID.length == 16, "ClusterID must be a UInt128");
         assertTrue(addresses != null, "Replica addresses cannot be null");
-        assertTrue(concurrencyMax > 0, "Invalid concurrencyMax");
     }
 
     private NativeClient(final long contextHandle) {
@@ -117,7 +83,7 @@ final class NativeClient implements AutoCloseable {
         }
     }
 
-    public void submit(final Request<?> request) throws ConcurrencyExceededException {
+    public void submit(final Request<?> request) {
         this.handle.submit(request);
     }
 
@@ -133,12 +99,11 @@ final class NativeClient implements AutoCloseable {
         cleanable.clean();
     }
 
-    private static native int submit(long contextHandle, Request<?> request);
+    private static native void submit(long contextHandle, Request<?> request);
 
-    private static native long clientInit(byte[] clusterID, String addresses, int concurrencyMax);
+    private static native long clientInit(byte[] clusterID, String addresses);
 
-    private static native long clientInitEcho(byte[] clusterID, String addresses,
-            int concurrencyMax);
+    private static native long clientInitEcho(byte[] clusterID, String addresses);
 
     private static native void clientDeinit(long contextHandle);
 }

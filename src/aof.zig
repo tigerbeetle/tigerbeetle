@@ -292,8 +292,9 @@ pub const AOFReplayClient = struct {
     message_pool: *MessagePool,
     inflight_message: ?*Message.Request = null,
 
-    pub fn init(allocator: std.mem.Allocator, raw_addresses: []const u8) !Self {
-        const addresses = try vsr.parse_addresses(allocator, raw_addresses, constants.replicas_max);
+    pub fn init(allocator: std.mem.Allocator, addresses: []std.net.Address) !Self {
+        assert(addresses.len > 0);
+        assert(addresses.len <= constants.replicas_max);
 
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
@@ -312,13 +313,15 @@ pub const AOFReplayClient = struct {
 
         client.* = try Client.init(
             allocator,
-            std.crypto.random.int(u128),
-            0,
-            @intCast(addresses.len),
-            message_pool,
             .{
-                .configuration = addresses,
-                .io = io,
+                .id = std.crypto.random.int(u128),
+                .cluster = 0,
+                .replica_count = @intCast(addresses.len),
+                .message_pool = message_pool,
+                .message_bus_options = .{
+                    .configuration = addresses,
+                    .io = io,
+                },
             },
         );
         errdefer client.deinit(allocator);
@@ -750,7 +753,9 @@ pub fn main() !void {
         var it = try AOF.iterator(paths[0]);
         defer it.close();
 
-        var replay = try AOFReplayClient.init(allocator, addresses.?);
+        var addresses_buffer: [constants.replicas_max]std.net.Address = undefined;
+        const addresses_parsed = try vsr.parse_addresses(addresses.?, &addresses_buffer);
+        var replay = try AOFReplayClient.init(allocator, addresses_parsed);
         defer replay.deinit(allocator);
 
         try replay.replay(&it);

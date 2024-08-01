@@ -110,11 +110,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         replica_times: []Time,
         replica_health: []ReplicaHealth,
         replica_upgrades: []?vsr.Release,
+        replica_pipeline_requests_limit: u32,
         replica_count: u8,
         standby_count: u8,
 
         clients: []Client,
         client_pools: []MessagePool,
+        /// Updated when the *client* is informed of the eviction.
+        /// (Which may be some time after the client is actually evicted by the cluster.)
+        client_eviction_reasons: []?vsr.Header.Eviction.Reason,
         client_id_permutation: IdPermutation,
 
         state_checker: StateChecker,
@@ -218,8 +222,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var replica_pools = try allocator.alloc(MessagePool, node_count);
             errdefer allocator.free(replica_pools);
 
+            // There may be more clients than `clients_max` (to test session eviction).
             const pipeline_requests_limit =
-                options.client_count -| constants.pipeline_prepare_queue_max;
+                @min(options.client_count, constants.clients_max) -|
+                constants.pipeline_prepare_queue_max;
 
             for (replica_pools, 0..) |*pool, i| {
                 errdefer for (replica_pools[0..i]) |*p| p.deinit(allocator);
@@ -259,6 +265,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
             errdefer for (client_pools) |*pool| pool.deinit(allocator);
 
+            const client_eviction_reasons =
+                try allocator.alloc(?vsr.Header.Eviction.Reason, options.client_count);
+            errdefer allocator.free(client_eviction_reasons);
+            @memset(client_eviction_reasons, null);
+
             const client_id_permutation = IdPermutation.generate(random);
             var clients = try allocator.alloc(Client, options.client_count);
             errdefer allocator.free(clients);
@@ -267,11 +278,14 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (clients[0..i]) |*c| c.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
-                    client_id_permutation.encode(i + client_id_permutation_shift),
-                    options.cluster_id,
-                    options.replica_count,
-                    &client_pools[i],
-                    .{ .network = network },
+                    .{
+                        .id = client_id_permutation.encode(i + client_id_permutation_shift),
+                        .cluster = options.cluster_id,
+                        .replica_count = options.replica_count,
+                        .message_pool = &client_pools[i],
+                        .message_bus_options = .{ .network = network },
+                        .eviction_callback = client_on_eviction,
+                    },
                 );
                 client.release = options.releases[0].release;
             }
@@ -334,10 +348,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .replica_times = replica_times,
                 .replica_health = replica_health,
                 .replica_upgrades = replica_upgrades,
+                .replica_pipeline_requests_limit = pipeline_requests_limit,
                 .replica_count = options.replica_count,
                 .standby_count = options.standby_count,
                 .clients = clients,
                 .client_pools = client_pools,
+                .client_eviction_reasons = client_eviction_reasons,
                 .client_id_permutation = client_id_permutation,
                 .state_checker = state_checker,
                 .storage_checker = storage_checker,
@@ -394,6 +410,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.grid_checker.deinit(); // (Storage references this.)
 
             cluster.allocator.free(cluster.clients);
+            cluster.allocator.free(cluster.client_eviction_reasons);
             cluster.allocator.free(cluster.client_pools);
             cluster.allocator.free(cluster.replicas);
             cluster.allocator.free(cluster.replica_upgrades);
@@ -412,7 +429,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn tick(cluster: *Self) void {
             cluster.network.tick();
 
-            for (cluster.clients) |*client| client.tick();
+            for (cluster.clients, cluster.client_eviction_reasons) |*client, eviction_reason| {
+                if (eviction_reason == null) client.tick();
+            }
+
             for (cluster.storages) |*storage| storage.tick();
 
             // Upgrades immediately follow storage.tick(), since upgrades occur at checkpoint
@@ -509,9 +529,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 }
             } else unreachable;
 
-            const pipeline_requests_limit =
-                cluster.options.client_count -| constants.pipeline_prepare_queue_max;
-
             cluster.releases_bundled[replica_index] = options.releases_bundled.*;
 
             var replica = &cluster.replicas[replica_index];
@@ -519,7 +536,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.allocator,
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
-                    .pipeline_requests_limit = pipeline_requests_limit,
+                    .pipeline_requests_limit = cluster.replica_pipeline_requests_limit,
                     .storage = &cluster.storages[replica_index],
                     .aof = &cluster.aofs[replica_index],
                     // TODO Test restarting with a higher storage limit.
@@ -638,6 +655,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             request_message: *Message,
             request_body_size: usize,
         ) void {
+            assert(cluster.client_eviction_reasons[client_index] == null);
+
             const client = &cluster.clients[client_index];
             const message = request_message.build(.request);
 
@@ -687,11 +706,43 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(reply_message.header.command == .reply);
             assert(reply_message.header.operation == request_message.header.operation);
 
-            const client_index = for (cluster.clients, 0..) |*c, i| {
-                if (client == c) break i;
-            } else unreachable;
+            const client_index =
+                cluster.client_id_permutation.decode(client.id) - client_id_permutation_shift;
+            assert(&cluster.clients[client_index] == client);
+            assert(cluster.client_eviction_reasons[client_index] == null);
 
             cluster.on_cluster_reply(cluster, client_index, request_message, reply_message);
+        }
+
+        fn cluster_on_eviction(cluster: *Self, client_id: u128) void {
+            _ = client_id;
+            // Disable checking of `Client.request_inflight`, to guard against the following panic:
+            // 1. Client `A` sends an `operation=register` to a fresh cluster. (`A₁`)
+            // 2. Cluster prepares + commits `A₁`, and sends the reply to `A`.
+            // 4. `A` receives the reply to `A₁`, and issues a second request (`A₂`).
+            // 5. `clients_max` other clients register, evicting `A`'s session.
+            // 6. An old retry (or replay) of `A₁` arrives at the cluster.
+            // 7. `A₁` is committed (for a second time, as a different op).
+            //    If `StateChecker` were to check `Client.request_inflight`, it would see that `A₁`
+            //    is not actually in-flight, despite being committed for the "first time" by a
+            //    replica.
+            cluster.state_checker.clients_exhaustive = false;
+        }
+
+        fn client_on_eviction(client: *Client, eviction: *const Message.Eviction) void {
+            const cluster: *Self = @ptrCast(@alignCast(client.on_reply_context.?));
+            assert(eviction.header.invalid() == null);
+            assert(eviction.header.cluster == cluster.options.cluster_id);
+            assert(eviction.header.client == client.id);
+            assert(eviction.header.command == .eviction);
+
+            const client_index =
+                cluster.client_id_permutation.decode(client.id) - client_id_permutation_shift;
+            assert(&cluster.clients[client_index] == client);
+            assert(cluster.client_eviction_reasons[client_index] == null);
+
+            cluster.client_eviction_reasons[client_index] = eviction.header.reason;
+            cluster.network.process_disable(.{ .client = client.id });
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
@@ -736,6 +787,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .idle => cluster.log_replica(.sync_completed, replica.replica),
                     else => {},
                 },
+                .client_evicted => |client_id| cluster.cluster_on_eviction(client_id),
             }
         }
 

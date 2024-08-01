@@ -793,26 +793,22 @@ test "exponential_backoff_with_jitter" {
 /// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
 pub fn parse_addresses(
-    allocator: std.mem.Allocator,
     raw: []const u8,
-    address_limit: usize,
+    out_buffer: []std.net.Address,
 ) ![]std.net.Address {
     const address_count = std.mem.count(u8, raw, ",") + 1;
-    if (address_count > address_limit) return error.AddressLimitExceeded;
-
-    const addresses = try allocator.alloc(std.net.Address, address_count);
-    errdefer allocator.free(addresses);
+    if (address_count > out_buffer.len) return error.AddressLimitExceeded;
 
     var index: usize = 0;
     var comma_iterator = std.mem.split(u8, raw, ",");
     while (comma_iterator.next()) |raw_address| : (index += 1) {
-        assert(index < address_limit);
+        assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        addresses[index] = try parse_address_and_port(raw_address);
+        out_buffer[index] = try parse_address_and_port(raw_address);
     }
     assert(index == address_count);
 
-    return addresses;
+    return out_buffer[0..address_count];
 }
 
 pub fn parse_address_and_port(string: []const u8) !std.net.Address {
@@ -958,9 +954,9 @@ test parse_addresses {
         .{ .raw = "1.2.3.4:5,2.3.4.5:65536", .err = error.PortOverflow },
     };
 
+    var buffer: [3]std.net.Address = undefined;
     for (vectors_positive) |vector| {
-        const addresses_actual = try parse_addresses(std.testing.allocator, vector.raw, 3);
-        defer std.testing.allocator.free(addresses_actual);
+        const addresses_actual = try parse_addresses(vector.raw, &buffer);
 
         try std.testing.expectEqual(addresses_actual.len, vector.addresses.len);
         for (vector.addresses, 0..) |address_expect, i| {
@@ -975,7 +971,7 @@ test parse_addresses {
     for (vectors_negative) |vector| {
         try std.testing.expectEqual(
             vector.err,
-            parse_addresses(std.testing.allocator, vector.raw, 2),
+            parse_addresses(vector.raw, buffer[0..2]),
         );
     }
 }
@@ -991,14 +987,16 @@ test "parse_addresses: fuzz" {
     const random = prng.random();
 
     var input_max: [len_max]u8 = .{0} ** len_max;
+    var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
         const len = random.uintAtMost(usize, len_max);
         const input = input_max[0..len];
         for (input) |*c| {
             c.* = alphabet[random.uintAtMost(usize, alphabet.len)];
         }
-        if (parse_addresses(std.testing.allocator, input, 3)) |addresses| {
-            std.testing.allocator.free(addresses);
+        if (parse_addresses(input, &buffer)) |addresses| {
+            assert(addresses.len > 0);
+            assert(addresses.len <= 3);
         } else |_| {}
     }
 }
@@ -1452,20 +1450,22 @@ const ViewChangeHeadersArray = struct {
     }
 };
 
-/// For a replica with journal_slot_count=9, lsm_batch_multiple=2, pipeline_prepare_queue_max=1, and
-/// checkpoint_interval = journal_slot_count - (lsm_batch_multiple + pipeline_prepare_queue_max) = 6
+/// For a replica with journal_slot_count=10, lsm_batch_multiple=2, pipeline_prepare_queue_max=2,
+/// and checkpoint_interval=4, which can be computed as follows:
+/// journal_slot_count - (lsm_batch_multiple + 2 * pipeline_prepare_queue_max) = 4
 ///
-///   checkpoint() call           0   1   2   3
-///   op_checkpoint               0   5  11  17
-///   op_checkpoint_next          5  11  17  23
-///   op_checkpoint_next_trigger  7  13  19  25
+///   checkpoint() call           0   1   2   3   4
+///   op_checkpoint               0   3   7  11  15
+///   op_checkpoint_next          3   7  11  15  19
+///   op_checkpoint_next_trigger  5   9  13  17  21
 ///
 ///     commit log (ops)           │ write-ahead log (slots)
-///     0   4   8   2   6   0   4  │  0  -  -  -  4  -  -  -  8
-///   0 ─────✓·%                   │[ 0  1  2  3  4  ✓] 6  %  R
-///   1 ───────────✓·%             │  9 10  ✓]12  %  5[ 6  7  8
-///   2 ─────────────────✓·%       │ 18  % 11[12 13 14 15 16  ✓]
-///   3 ───────────────────────✓·% │[18 19 20 21 22  ✓]24  % 17
+///     0   4   8   2   6   0   4  │  0  -  -  -  4  -  -  -  -  9
+///   0 ───✓·%                     │[ 0  1  2  ✓] 4  %  R  R  R  R
+///   1 ───────✓·%                 │  0  1  2  3[ 4  5  6  ✓] 8  %
+///   2 ───────────✓·%             │  10 ✓] 12 %  4  5  6  7[ 8  %
+///   3 ───────────────✓·%         │  10 11[12 13 14 ✓] 16 %  8  9
+///   4 ───────────────────✓·%     │  20 %  12 13 14 15[16 17 18 19]
 ///
 /// Legend:
 ///

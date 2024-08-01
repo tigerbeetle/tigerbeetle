@@ -60,7 +60,10 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
         });
     }
 
-    const addresses = args.addresses orelse &.{tigerbeetle_process.?.address};
+    const addresses = if (args.addresses) |*addresses|
+        addresses.const_slice()
+    else
+        &.{tigerbeetle_process.?.address};
     try benchmark_load.main(allocator, addresses, args);
 
     if (tigerbeetle_process) |*p| {

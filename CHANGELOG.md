@@ -1,5 +1,123 @@
 # TigerBeetle Changelog
 
+## 2024-07-29
+
+### Safety And Performance
+
+- [#2140](https://github.com/tigerbeetle/tigerbeetle/pull/2140),
+  [#2154](https://github.com/tigerbeetle/tigerbeetle/pull/2154)
+
+  Fix a bug where MessageBus sees block/reply messages (due to state sync or repair) and peer_type
+  says they are always from replica 0 (since Header.Block.replica == 0 always). So, if they are
+  being sent by a non-R0 replica, it drops the messages with "message from unexpected peer".
+
+  This leads to a replica being stuck in state sync and unable to progress.
+
+- [#2137](https://github.com/tigerbeetle/tigerbeetle/pull/2137)
+
+  It was possible for a prepare to exist in a mixture of WALs and checkpoints, which could
+  compromise physical durability under storage fault conditions, since the data is present across a
+  commit-quorum of replicas in different forms.
+
+  Rather, ensure a prepare in the WAL is only overwritten if it belongs to a commit-quorum of
+  checkpoints.
+
+- [#2127](https://github.com/tigerbeetle/tigerbeetle/pull/2127),
+  [#2096](https://github.com/tigerbeetle/tigerbeetle/pull/2096)
+
+  A few CI changes: run tests in CI for x86_64 macOS, add in client tests on macOS and run the
+  benchmark with `--validate` in CI.
+
+- [#2117](https://github.com/tigerbeetle/tigerbeetle/pull/2117)
+
+  TigerBeetle reserves the most significant bit of the timestamp as the tombstone flag, so indicate
+  and assert that timestamp_max is a `maxInt(u63)`.
+
+- [#2123](https://github.com/tigerbeetle/tigerbeetle/pull/2123),
+  [#2125](https://github.com/tigerbeetle/tigerbeetle/pull/2125)
+
+  Internally, TigerBeetle uses AEGIS-128L for checksumming - hardware AES is a prerequisite for
+  performance. Due to a build system bug, releases being built with a specified (`-Dtarget=`) target
+  would only be built with baseline CPU features, and thus use the software AES implementation.
+
+  Enforce at comptime that hardware acceleration is available, fix the build system bug, log
+  checksum performance on our [devhub](https://tigerbeetle.github.io/tigerbeetle/) and build client
+  libraries with hardware acceleration too.
+
+- [#2139](https://github.com/tigerbeetle/tigerbeetle/pull/2139)
+
+  TigerBeetle would wait until all repairable headers are fixed before trying to commits prepares,
+  but if all the headers after the checkpoint are present then we can start committing even if
+  some headers from before the checkpoint are missing.
+
+- [#2141](https://github.com/tigerbeetle/tigerbeetle/pull/2141)
+
+  Clarify that the order of replicas in `--addresses` is important. Currently, the order of replicas
+  as specified has a direct impact on how messages are routed between them. Having a differing order
+  leads to significantly degraded performance.
+
+- [#2120](https://github.com/tigerbeetle/tigerbeetle/pull/2120)
+
+  The state machine depended on `prepare_timestamp` to evaluate `pulse()`, but in an idle cluster,
+  `prepare_timestamp` would only be set if pulse returned true! Thanks @ikolomiets for reporting.
+
+- [#2028](https://github.com/tigerbeetle/tigerbeetle/pull/2028)
+
+  Add a fuzzer for scans.
+
+- [#2109](https://github.com/tigerbeetle/tigerbeetle/pull/2109)
+
+  Fuzz `storage.zig`, by using a mocked IO layer.
+
+### Features
+
+- [#2070](https://github.com/tigerbeetle/tigerbeetle/pull/2070)
+
+  Certain workloads (for example, sending in tiny batches) can cause high amounts of space
+  amplification in TigerBeetle, leading to data file sizes that are much larger than optimal.
+
+  This introduces a stopgap fix, greedily coalescing tables in level 0 of the LSM, which improves
+  space amplification dramatically.
+
+- [#2003](https://github.com/tigerbeetle/tigerbeetle/pull/2003)
+
+  Add a data file inspector tool to the TigerBeetle CLI, handy for development and debugging alike.
+  You can run it with `tigerbeetle inspect --help`.
+
+- [#2136](https://github.com/tigerbeetle/tigerbeetle/pull/2136),
+  [#2013](https://github.com/tigerbeetle/tigerbeetle/pull/2013),
+  [#2126](https://github.com/tigerbeetle/tigerbeetle/pull/2126)
+
+  TigerBeetle clusters can now be [upgraded](https://docs.tigerbeetle.com/operating/upgrading)!
+
+- [#2095](https://github.com/tigerbeetle/tigerbeetle/pull/2095)
+
+  Add a custom formatter for displaying units in error messages. Thanks @tensorush!
+
+### Internals
+
+- [#1380](https://github.com/tigerbeetle/tigerbeetle/pull/1380)
+
+  Allows for language clients to manage their own `Packet` memory, removing the need for tb_client
+  to do so and thus removing the concepts of acquire/release_packet and concurrency_max.
+
+- [#2148](https://github.com/tigerbeetle/tigerbeetle/pull/2148)
+
+  Add function length limits to our internal tidy tests.
+
+- [#2116](https://github.com/tigerbeetle/tigerbeetle/pull/2116),
+  [#2114](https://github.com/tigerbeetle/tigerbeetle/pull/2114),
+  [#2111](https://github.com/tigerbeetle/tigerbeetle/pull/2111),
+  [#2132](https://github.com/tigerbeetle/tigerbeetle/pull/2132),
+  [#2131](https://github.com/tigerbeetle/tigerbeetle/pull/2131),
+  [#2124](https://github.com/tigerbeetle/tigerbeetle/pull/2124)
+
+  Lots of small [CFO](https://tigerbeetle.github.io/tigerbeetle/) improvements.
+
+### TigerTracks 🎧
+
+- [Here I Go Again](https://www.youtube.com/watch?v=WyF8RHM1OCg)
+
 ## 2024-07-15 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance

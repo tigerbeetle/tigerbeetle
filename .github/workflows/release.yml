@@ -45,9 +45,9 @@ jobs:
           node-version: '18.x'
           registry-url: 'https://registry.npmjs.org'
 
-      # TODO(multiversioning): llvm-lipo is only needed for _extracting_ fat Mac binaries for
-      # building releases. We already implement generating fat Mac binaries ourselves.
+      # Needed for llvm-objcopy.
       - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
+
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build scripts -- release --build --publish --run-number=${{ github.run_number }} --sha=${{ github.sha }}
         env:

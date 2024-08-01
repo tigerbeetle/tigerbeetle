@@ -140,10 +140,6 @@ const type_mappings = .{
     .{ tb_client.tb_packet_status_t, TypeMapping{
         .name = "PacketStatus",
     } },
-    .{ tb_client.tb_packet_acquire_status_t, TypeMapping{
-        .name = "PacketAcquireStatus",
-        .visibility = .internal,
-    } },
 };
 
 const auto_generated_code_notice =

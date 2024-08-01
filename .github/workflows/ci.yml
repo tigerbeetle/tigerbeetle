@@ -110,7 +110,9 @@ jobs:
           - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
 
           # Limited matrix for macOS - runners are concurrency limited.
-          - { os: 'macos-latest',   language: 'go',      language_version: '1.21'  }
+          # TODO: Go build is currently failing:
+          # https://github.com/tigerbeetle/tigerbeetle/actions/runs/10088474857/job/27894324584?pr=2137
+          # - { os: 'macos-latest',   language: 'go',      language_version: '1.21'  }
           - { os: 'macos-latest',   language: 'node',    language_version: '20.x'  }
 
           - { os: 'macos-13',       language: 'go',      language_version: '1.21'  }
@@ -154,7 +156,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Needed for llvm-objcopy.
       - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
+
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:

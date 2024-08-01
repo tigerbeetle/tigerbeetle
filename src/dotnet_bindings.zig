@@ -122,10 +122,6 @@ const type_mappings = .{
         .name = "PacketStatus",
         .visibility = .public,
     } },
-    .{ tb_client.tb_packet_acquire_status_t, TypeMapping{
-        .name = "PacketAcquireStatus",
-        .visibility = .internal,
-    } },
     .{ tb_client.tb_operation_t, TypeMapping{
         .name = "TBOperation",
         .visibility = .internal,
@@ -481,7 +477,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        UInt128Extensions.UnsafeU128 cluster_id,
         \\        byte* address_ptr,
         \\        uint address_len,
-        \\        uint num_packets,
         \\        IntPtr on_completion_ctx,
         \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
         \\    );
@@ -492,21 +487,8 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        UInt128Extensions.UnsafeU128 cluster_id,
         \\        byte* address_ptr,
         \\        uint address_len,
-        \\        uint num_packets,
         \\        IntPtr on_completion_ctx,
         \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
-        \\    );
-        \\
-        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\    public static unsafe extern PacketAcquireStatus tb_client_acquire_packet(
-        \\        IntPtr client,
-        \\        TBPacket** out_packet
-        \\    );
-        \\
-        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\    public static unsafe extern void tb_client_release_packet(
-        \\        IntPtr client,
-        \\        TBPacket* packet
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

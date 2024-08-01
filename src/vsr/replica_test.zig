@@ -47,7 +47,6 @@ const releases = .{
     },
 };
 
-// TODO Test client eviction once it no longer triggers a client panic.
 // TODO Detect when cluster has stabilized and stop run() early, rather than just running for a
 //      fixed number of ticks.
 
@@ -1145,12 +1144,12 @@ test "Cluster: sync: slightly lagging replica" {
     // Corrupt all copies of a checkpointed prepare.
     a0.corrupt(.{ .wal_prepare = checkpoint_1 });
     b1.corrupt(.{ .wal_prepare = checkpoint_1 });
-    try c.request(checkpoint_1_trigger + 2, checkpoint_1_trigger + 2);
+    try c.request(checkpoint_1_prepare_max + 1, checkpoint_1_prepare_max + 1);
 
     // At this point, b2 won't be able to repair WAL and must state sync.
     b2.pass_all(.R_, .bidirectional);
-    try c.request(checkpoint_1_trigger + 3, checkpoint_1_trigger + 3);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 3);
+    try c.request(checkpoint_1_prepare_max + 2, checkpoint_1_prepare_max + 2);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_prepare_max + 2);
 }
 
 test "Cluster: sync: checkpoint from a newer view" {
@@ -1453,6 +1452,57 @@ test "Cluster: client: empty command=request operation=register body" {
     try expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
 }
 
+test "Cluster: eviction: no_session" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(0, 1);
+    var c = t.clients(1, constants.clients_max);
+
+    // Register a single client.
+    try c0.request(1, 1);
+    // Register clients_max other clients.
+    // This evicts the "extra" client, though the eviction message has not been sent yet.
+    try c.request(constants.clients_max, constants.clients_max);
+
+    // Try to send one last request -- which fails, since this client has been evicted.
+    try c0.request(2, 1);
+    try expectEqual(c0.eviction_reason(), .no_session);
+    try expectEqual(c.eviction_reason(), null);
+}
+
+test "Cluster: eviction: session_too_low" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(0, 1);
+    var c = t.clients(1, constants.clients_max);
+
+    t.replica(.R_).record(.C0, .incoming, .request);
+    try c0.request(1, 1);
+
+    // Evict C0. (C0 doesn't know this yet, though).
+    try c.request(constants.clients_max, constants.clients_max);
+    try expectEqual(c0.eviction_reason(), null);
+
+    // Replay C0's register message.
+    t.replica(.R_).replay_recorded();
+    t.run();
+
+    const mark = marks.check("on_request: ignoring older session");
+
+    // C0 now has a session again, but the client only knows the old (evicted) session number.
+    try c0.request(2, 1);
+    try mark.expect_hit();
+    try expectEqual(c0.eviction_reason(), .session_too_low);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
@@ -1476,13 +1526,14 @@ const ProcessSelector = enum {
     B4,
     B5,
     C_, // all clients
+    C0,
 };
 
 const TestContext = struct {
     cluster: *Cluster,
     log_level: std.log.Level,
-    client_requests: [constants.clients_max]usize = [_]usize{0} ** constants.clients_max,
-    client_replies: [constants.clients_max]usize = [_]usize{0} ** constants.clients_max,
+    client_requests: []usize,
+    client_replies: []usize,
 
     pub fn init(options: struct {
         replica_count: u8,
@@ -1537,12 +1588,22 @@ const TestContext = struct {
 
         for (cluster.storages) |*storage| storage.faulty = true;
 
+        const client_requests = try allocator.alloc(usize, options.client_count);
+        errdefer allocator.free(client_requests);
+        @memset(client_requests, 0);
+
+        const client_replies = try allocator.alloc(usize, options.client_count);
+        errdefer allocator.free(client_replies);
+        @memset(client_replies, 0);
+
         const context = try allocator.create(TestContext);
         errdefer allocator.destroy(context);
 
         context.* = .{
             .cluster = cluster,
             .log_level = log_level_original,
+            .client_requests = client_requests,
+            .client_replies = client_replies,
         };
         cluster.context = context;
 
@@ -1551,6 +1612,8 @@ const TestContext = struct {
 
     pub fn deinit(t: *TestContext) void {
         std.testing.log_level = t.log_level;
+        allocator.free(t.client_replies);
+        allocator.free(t.client_requests);
         t.cluster.deinit();
         allocator.destroy(t);
     }
@@ -1650,6 +1713,7 @@ const TestContext = struct {
                 .append_assume_capacity(.{ .replica = @intCast((view + 4) % replica_count) }),
             .B5 => array
                 .append_assume_capacity(.{ .replica = @intCast((view + 5) % replica_count) }),
+            .C0 => array.append_assume_capacity(.{ .client = t.cluster.clients[0].id }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
                     for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
@@ -2124,6 +2188,20 @@ const TestClients = struct {
         var replies_total: usize = 0;
         for (t.clients.const_slice()) |c| replies_total += t.context.client_replies[c];
         return replies_total;
+    }
+
+    pub fn eviction_reason(t: *const TestClients) ?vsr.Header.Eviction.Reason {
+        var evicted_all: ?vsr.Header.Eviction.Reason = null;
+        for (t.clients.const_slice(), 0..) |r, i| {
+            const client_eviction_reason = t.cluster.client_eviction_reasons[r];
+            if (i == 0) {
+                assert(evicted_all == null);
+            } else {
+                assert(evicted_all == client_eviction_reason);
+            }
+            evicted_all = client_eviction_reason;
+        }
+        return evicted_all;
     }
 };
 

@@ -269,3 +269,23 @@ test "benchmark/inspect smoke" {
         try std.testing.expect(status_ok_inspect);
     }
 }
+
+test "help/version smoke" {
+    const shell = try Shell.create(std.testing.allocator);
+    defer shell.destroy();
+
+    const tigerbeetle = try tigerbeetle_exe(shell);
+
+    // The substring is chosen to be mostly stable, but from (near) the end of the output, to catch
+    // a missed buffer flush.
+    inline for (.{
+        .{ .command = "{tigerbeetle} --help", .substring = "tigerbeetle repl" },
+        .{ .command = "{tigerbeetle} inspect --help", .substring = "tables --tree" },
+        .{ .command = "{tigerbeetle} version", .substring = "TigerBeetle version" },
+        .{ .command = "{tigerbeetle} version --verbose", .substring = "process.aof_recovery=" },
+    }) |check| {
+        const output = try shell.exec_stdout(check.command, .{ .tigerbeetle = tigerbeetle });
+        try std.testing.expect(output.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, output, check.substring) != null);
+    }
+}

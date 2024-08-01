@@ -32,27 +32,6 @@ const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for
 /// to query all non-deleted tables.
 pub const snapshot_latest: u64 = math.maxInt(u64) - 1;
 
-// StateMachine:
-//
-// /// state machine will pass this on to all object stores
-// /// Read I/O only
-// pub fn read(batch, callback) void
-//
-// /// write the ops in batch to the memtable/objcache, previously called commit()
-// pub fn write(batch) void
-//
-// /// Flush in memory state to disk, perform merges, etc
-// /// Only function that triggers Write I/O in LSMs, as well as some Read
-// /// Make as incremental as possible, don't block the main thread, avoid high latency/spikes
-// pub fn flush(callback) void
-//
-// /// Write manifest info for all object stores into buffer
-// pub fn encode_superblock(buffer) void
-//
-// /// Restore all in-memory state from the superblock data
-// pub fn decode_superblock(buffer) void
-//
-
 /// The maximum number of tables for a single tree.
 pub const table_count_max = table_count_max_for_tree(
     constants.lsm_growth_factor,

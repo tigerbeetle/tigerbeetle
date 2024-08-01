@@ -680,7 +680,7 @@ test "flags" {
         gpa: std.mem.Allocator,
         tmp_dir: std.testing.TmpDir,
         output_buf: std.ArrayList(u8),
-        flags_exe_buf: *[std.fs.MAX_PATH_BYTES]u8,
+        flags_exe_buf: *[std.fs.max_path_bytes]u8,
         flags_exe: []const u8,
 
         fn init(gpa: std.mem.Allocator) !T {
@@ -702,7 +702,7 @@ test "flags" {
             const output_buf = std.ArrayList(u8).init(gpa);
             errdefer output_buf.deinit();
 
-            const flags_exe_buf = try gpa.create([std.fs.MAX_PATH_BYTES]u8);
+            const flags_exe_buf = try gpa.create([std.fs.max_path_bytes]u8);
             errdefer gpa.destroy(flags_exe_buf);
 
             { // Compile this file as an executable!

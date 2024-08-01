@@ -11,9 +11,8 @@ public enum InitializationStatus {
     OutOfMemory((int) 2),
     AddressInvalid((int) 3),
     AddressLimitExceeded((int) 4),
-    ConcurrencyMaxInvalid((int) 5),
-    SystemResources((int) 6),
-    NetworkSubsystem((int) 7);
+    SystemResources((int) 5),
+    NetworkSubsystem((int) 6);
 
     public final int value;
 

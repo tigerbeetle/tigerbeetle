@@ -32,6 +32,7 @@ import (
 	"runtime"
 	"strings"
 	"unsafe"
+	"sync"
 
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
@@ -54,19 +55,18 @@ type Client interface {
 }
 
 type request struct {
-	packet *C.tb_packet_t
 	result unsafe.Pointer
 	ready  chan struct{}
 }
 
 type c_client struct {
 	tb_client C.tb_client_t
+	mutex sync.Mutex
 }
 
 func NewClient(
 	clusterID types.Uint128,
 	addresses []string,
-	concurrencyMax uint,
 ) (Client, error) {
 	// Allocate a cstring of the addresses joined with ",".
 	addresses_raw := strings.Join(addresses[:], ",")
@@ -81,7 +81,6 @@ func NewClient(
 		C.tb_uint128_t(clusterID),
 		c_addresses,
 		C.uint32_t(len(addresses_raw)),
-		C.uint32_t(concurrencyMax),
 		C.uintptr_t(0), // on_completion_ctx
 		(*[0]byte)(C.onGoPacketCompletion),
 	)
@@ -96,8 +95,6 @@ func NewClient(
 			return nil, errors.ErrInvalidAddress{}
 		case C.TB_STATUS_ADDRESS_LIMIT_EXCEEDED:
 			return nil, errors.ErrAddressLimitExceeded{}
-		case C.TB_STATUS_CONCURRENCY_MAX_INVALID:
-			return nil, errors.ErrInvalidConcurrencyMax{}
 		case C.TB_STATUS_SYSTEM_RESOURCES:
 			return nil, errors.ErrSystemResources{}
 		case C.TB_STATUS_NETWORK_SUBSYSTEM:
@@ -115,6 +112,9 @@ func NewClient(
 }
 
 func (c *c_client) Close() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	if c.tb_client != nil {
 		C.tb_client_deinit(c.tb_client)
 		c.tb_client = nil
@@ -177,57 +177,49 @@ func (c *c_client) doRequest(
 		return 0, errors.ErrEmptyBatch{}
 	}
 
-	if c.tb_client == nil {
-		return 0, errors.ErrClientClosed{}
-	}
-
-	req := request{
-		packet: nil,
-		ready:  make(chan struct{}),
-	}
-
-	switch acquire_status := C.tb_client_acquire_packet(c.tb_client, &req.packet); acquire_status {
-	case C.TB_PACKET_ACQUIRE_CONCURRENCY_MAX_EXCEEDED:
-		return 0, errors.ErrConcurrencyExceeded{}
-	case C.TB_PACKET_ACQUIRE_SHUTDOWN:
-		return 0, errors.ErrClientClosed{}
-	default:
-		if req.packet == nil {
-			panic("tb_client_acquire_packet(): returned null packet")
-		}
-	}
-
-	// Release the packet for other goroutines to use.
-	defer C.tb_client_release_packet(c.tb_client, req.packet)
-
-	pinner := new(runtime.Pinner)
+	var req request
+	req.result = result
+	req.ready = make(chan struct{}, 1) // buffered chan prevents completion handler blocking for Go.
+	
+	// NOTE: packet must be its own allocation and cannot live in request as then CGO is unable to
+	// correctly track it (panic: runtime error: cgo argument has Go pointer to unpinned Go pointer)
+	packet := new(C.tb_packet_t)
+	packet.user_data = unsafe.Pointer(&req)
+	packet.operation = C.uint8_t(op)
+	packet.status = C.TB_PACKET_OK
+	packet.data_size = C.uint32_t(count * int(getEventSize(op)))
+	packet.data = data
+	
+	// NOTE: Pin all go-allocated refs that will be accessed by onGoPacketCompletion after submit(). 
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	pinner.Pin(&req)
 	pinner.Pin(data)
 	pinner.Pin(result)
-
-	req.packet.user_data = unsafe.Pointer(&req)
-	req.packet.operation = C.uint8_t(op)
-	req.packet.status = C.TB_PACKET_OK
-	req.packet.data_size = C.uint32_t(count * int(getEventSize(op)))
-	req.packet.data = data
-
-	// Set where to write the result bytes.
-	req.result = result
-
-	// Submit the request.
-	C.tb_client_submit(c.tb_client, req.packet)
+	pinner.Pin(packet)
+	
+	// Lock the mutex when accessing the `c.tb_client` handle. 
+	c.mutex.Lock()
+	if c.tb_client != nil {
+		C.tb_client_submit(c.tb_client, packet)
+		c.mutex.Unlock()
+	} else {
+		c.mutex.Unlock()
+		return 0, errors.ErrClientClosed{}
+	}
 
 	// Wait for the request to complete.
 	<-req.ready
-	pinner.Unpin()
-	status := C.TB_PACKET_STATUS(req.packet.status)
-	wrote := int(req.packet.data_size)
+	status := C.TB_PACKET_STATUS(packet.status)
+	wrote := int(packet.data_size)
 
 	// Handle packet error
 	if status != C.TB_PACKET_OK {
 		switch status {
 		case C.TB_PACKET_TOO_MUCH_DATA:
 			return 0, errors.ErrMaximumBatchSizeExceeded{}
+		case C.TB_PACKET_CLIENT_SHUTDOWN:
+			return 0, errors.ErrClientClosed{}
 		case C.TB_PACKET_INVALID_OPERATION:
 			// we control what C.TB_OPERATION is given
 			// but allow an invalid opcode to be passed to emulate a client nop
@@ -253,11 +245,8 @@ func onGoPacketCompletion(
 ) {
 	// Get the request from the packet user data.
 	req := (*request)(unsafe.Pointer(packet.user_data))
-	if req.packet != packet {
-		panic("invalid packet: request packet mismatch")
-	}
 
-	var wrote C.uint32_t
+	var wrote C.uint32_t = 0
 	if result_len > 0 && result_ptr != nil {
 		op := C.TB_OPERATION(packet.operation)
 
@@ -287,7 +276,7 @@ func onGoPacketCompletion(
 	}
 
 	// Signal to the goroutine which owns this request that it's ready.
-	req.packet.data_size = wrote
+	packet.data_size = wrote
 	req.ready <- struct{}{}
 }
 

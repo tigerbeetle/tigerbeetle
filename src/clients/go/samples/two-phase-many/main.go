@@ -57,7 +57,7 @@ func main() {
 		port = "3000"
 	}
 
-	client, err := NewClient(ToUint128(0), []string{port}, 256)
+	client, err := NewClient(ToUint128(0), []string{port})
 	if err != nil {
 		log.Fatalf("Error creating client: %s", err)
 	}

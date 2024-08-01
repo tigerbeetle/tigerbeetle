@@ -1007,11 +1007,9 @@ public enum InitializationStatus : uint
 
     AddressLimitExceeded = 4,
 
-    ConcurrencyMaxInvalid = 5,
+    SystemResources = 5,
 
-    SystemResources = 6,
-
-    NetworkSubsystem = 7,
+    NetworkSubsystem = 6,
 
 }
 
@@ -1021,19 +1019,11 @@ public enum PacketStatus : byte
 
     TooMuchData = 1,
 
-    InvalidOperation = 2,
+    ClientShutdown = 2,
 
-    InvalidDataSize = 3,
+    InvalidOperation = 3,
 
-}
-
-internal enum PacketAcquireStatus : uint
-{
-    Ok = 0,
-
-    ConcurrencyMaxExceeded = 1,
-
-    Shutdown = 2,
+    InvalidDataSize = 4,
 
 }
 
@@ -1126,7 +1116,6 @@ internal static class TBClient
         UInt128Extensions.UnsafeU128 cluster_id,
         byte* address_ptr,
         uint address_len,
-        uint num_packets,
         IntPtr on_completion_ctx,
         delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
     );
@@ -1137,21 +1126,8 @@ internal static class TBClient
         UInt128Extensions.UnsafeU128 cluster_id,
         byte* address_ptr,
         uint address_len,
-        uint num_packets,
         IntPtr on_completion_ctx,
         delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
-    );
-
-    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern PacketAcquireStatus tb_client_acquire_packet(
-        IntPtr client,
-        TBPacket** out_packet
-    );
-
-    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern void tb_client_release_packet(
-        IntPtr client,
-        TBPacket* packet
     );
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

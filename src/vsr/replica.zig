@@ -92,6 +92,7 @@ pub const ReplicaEvent = union(enum) {
     /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
     checkpoint_completed,
     sync_stage_changed,
+    client_evicted: u128,
 };
 
 const Nonce = u128;
@@ -794,6 +795,14 @@ pub fn ReplicaType(
             maybe(self.status == .view_change);
             maybe(self.status == .recovering_head);
             if (self.status == .recovering) assert(self.solo());
+
+            if (self.superblock.working.vsr_state.sync_op_max != 0) {
+                log.info("{}: sync: ops={}..{}", .{
+                    self.replica,
+                    self.superblock.working.vsr_state.sync_op_min,
+                    self.superblock.working.vsr_state.sync_op_max,
+                });
+            }
 
             // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
             // can repair grid blocks if necessary:
@@ -1594,19 +1603,19 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
 
-            if (self.is_repair(message)) {
+            if (message.header.view < self.view or
+                (self.status == .normal and
+                message.header.view == self.view and message.header.op <= self.op))
+            {
                 log.debug("{}: on_prepare: ignoring (repair)", .{self.replica});
                 self.on_repair(message);
                 return;
             }
 
+            self.replicate(message);
+
             if (self.status != .normal) {
                 log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
-                return;
-            }
-
-            if (message.header.view < self.view) {
-                log.debug("{}: on_prepare: ignoring (older view)", .{self.replica});
                 return;
             }
 
@@ -1695,6 +1704,17 @@ pub fn ReplicaType(
                 self.panic_if_hash_chain_would_break_in_the_same_view(previous, message.header);
             }
 
+            // If we are going to overwrite an op from the previous WAL wrap, assert that it's part
+            // of a checkpoint that is durable on a commit quorum of replicas. See `op_repair_min`
+            // for why op=prepare_max+1 being committed implies that.
+            const op_overwritten = (self.op + 1) -| constants.journal_slot_count;
+            const op_checkpoint_previous = self.op_checkpoint() -|
+                constants.vsr_checkpoint_interval;
+            if (op_overwritten > op_checkpoint_previous) {
+                assert(self.commit_max >
+                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?);
+            }
+
             // We must advance our op and set the header as dirty before replicating and
             // journalling. The primary needs this before its journal is outrun by any
             // prepare_ok quorum:
@@ -1711,7 +1731,6 @@ pub fn ReplicaType(
             self.op = message.header.op;
             self.journal.set_header_as_dirty(message.header);
 
-            self.replicate(message);
             self.append(message);
         }
 
@@ -4081,6 +4100,10 @@ pub fn ReplicaType(
                 break :storage_size storage_size;
             };
 
+            if (self.superblock.working.vsr_state.sync_op_max != 0 and vsr_state_sync.op_max == 0) {
+                log.info("{}: sync: done", .{self.replica});
+            }
+
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
@@ -4523,6 +4546,10 @@ pub fn ReplicaType(
                     constants.clients_max,
                     evictee,
                 });
+
+                if (self.event_callback) |hook| {
+                    hook(self, .{ .client_evicted = evictee });
+                }
             }
 
             log.debug("{}: client_table_entry_create: write (client={} session={} request={})", .{
@@ -5107,7 +5134,19 @@ pub fn ReplicaType(
                 } else if (entry.session > message.header.session) {
                     // The client must not reuse the ephemeral client ID when registering a new
                     // session.
-                    log.err("{}: on_request: ignoring older session (client bug)", .{self.replica});
+                    //
+                    // Alternatively, this could be caused by the following scenario:
+                    // 1. Client `A` sends an `operation=register` to a fresh cluster. (`A₁`)
+                    // 2. Cluster prepares + commits `A₁`, and sends the reply to `A`.
+                    // 4. `A` receives the reply to `A₁`, and issues a second request (`A₂`).
+                    // 5. `clients_max` other clients register, evicting `A`'s session.
+                    // 6. An old retry (or replay) of `A₁` arrives at the cluster.
+                    // 7. `A₁` is committed (for a second time, as a different op, evicting one of
+                    //    the other clients).
+                    // 8. `A` sends a second request (`A₂`), but `A` has the session number from the
+                    //    first time `A₁` was committed.
+                    log.mark.err("{}: on_request: ignoring older session", .{self.replica});
+                    self.send_eviction_message_to_client(message.header.client, .session_too_low);
                     return true;
                 } else if (entry.session < message.header.session) {
                     // This cannot be because of a partition since we check the client's view
@@ -5609,20 +5648,6 @@ pub fn ReplicaType(
             return false;
         }
 
-        fn is_repair(self: *const Self, message: *const Message.Prepare) bool {
-            assert(message.header.command == .prepare);
-
-            if (self.status == .normal) {
-                if (message.header.view < self.view) return true;
-                if (message.header.view == self.view and message.header.op <= self.op) return true;
-            } else if (self.status == .view_change) {
-                if (message.header.view < self.view) return true;
-                // The view has already started or is newer.
-            }
-
-            return false;
-        }
-
         /// Returns the index into the configuration of the primary for a given view.
         pub fn primary_index(self: *const Self, view: u32) u8 {
             return @intCast(@mod(view, self.replica_count));
@@ -5862,8 +5887,9 @@ pub fn ReplicaType(
         /// Availability condition: each committed op must be present either in a quorum of WALs or
         /// in a quorum of checkpoints.
         ///
-        /// If op=trigger+1 is committed, the corresponding checkpoint is durably present on
-        /// a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
+        /// If op=prepare_max+1 is committed, a quorum of replicas have moved to the next
+        /// prepare_max, which in turn signals that the corresponding checkpoint is durably present
+        /// on a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
         /// both conditions.
         ///
         /// When called from status=recovering_head or status=recovering, the caller is responsible
@@ -5879,13 +5905,15 @@ pub fn ReplicaType(
                     break :repair_min 0;
                 }
 
-                const op_checkpoint_trigger =
-                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+                const prepare_max_for_current_checkpoint =
+                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
                 // After state sync, commit_max might lag behind checkpoint_op.
-                maybe(self.commit_max < op_checkpoint_trigger);
-                if (self.commit_max > op_checkpoint_trigger) {
+                maybe(self.commit_max < prepare_max_for_current_checkpoint);
+                if (self.commit_max > prepare_max_for_current_checkpoint) {
                     if (self.op == self.op_checkpoint()) {
                         // Don't allow "op_repair_min > op_head".
+                        // See https://github.com/tigerbeetle/tigerbeetle/pull/1589 for why
+                        // this is required.
                         break :repair_min self.op_checkpoint();
                     }
                     break :repair_min self.op_checkpoint() + 1;
@@ -6219,11 +6247,13 @@ pub fn ReplicaType(
 
             if (self.op < self.op_repair_max()) return;
 
-            // Request any missing or disconnected headers:
-            if (self.journal.find_latest_headers_break_between(
+            const header_break = self.journal.find_latest_headers_break_between(
                 self.op_repair_min(),
                 self.op,
-            )) |range| {
+            );
+
+            // Request any missing or disconnected headers:
+            if (header_break) |range| {
                 assert(!self.solo());
                 assert(range.op_min >= self.op_repair_min());
                 assert(range.op_max < self.op);
@@ -6251,15 +6281,40 @@ pub fn ReplicaType(
                         .op_max = range.op_max,
                     }),
                 );
-                return;
+
+                if (range.op_max > self.op_checkpoint()) {
+                    // If there's a header break after checkpoint, wait until it is repaired.
+                    // Otherwise, concurrently repair headers before checkpoint, while trying
+                    // to commit everything after the checkpoint.
+                    return;
+                }
             }
-            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
+            assert(self.valid_hash_chain_between(
+                @min(self.op_checkpoint() + 1, self.op),
+                self.op,
+            ));
 
             if (self.journal.dirty.count > 0) {
                 // Request and repair any dirty or faulty prepares.
-                self.repair_prepares();
-            } else if (self.client_replies.faulty.findFirstSet()) |slot| {
-                // After we have all prepares, repair replies.
+                const op_min = if (header_break) |range|
+                    range.op_max + 1
+                else
+                    self.op_repair_min();
+                self.repair_prepares(op_min);
+            }
+
+            if (self.commit_min < self.commit_max) {
+                // Try to the commit prepares we already have, even if we don't have all of them.
+                // This helps when a replica is recovering from a crash and has a mostly intact
+                // journal, with just some prepares missing. We do have the headers and know
+                // that they form a valid hashchain. Committing may discover more faulty prepares
+                // and drive further repairs.
+                assert(!self.solo());
+                self.commit_journal();
+            }
+
+            if (self.client_replies.faulty.findFirstSet()) |slot| {
+                // Repair replies.
                 const entry = &self.client_sessions.entries[slot];
                 assert(!self.client_sessions.entries_free.isSet(slot));
                 assert(entry.session != 0);
@@ -6278,18 +6333,10 @@ pub fn ReplicaType(
                 );
             }
 
-            if (self.commit_min < self.commit_max) {
-                // Try to the commit prepares we already have, even if we don't have all of them.
-                // This helps when a replica is recovering from a crash and has a mostly intact
-                // journal, with just some prepares missing. We do have the headers and know
-                // that they form a valid hashchain. Committing may discover more faulty prepares
-                // and drive further repairs.
-                assert(!self.solo());
-                self.commit_journal();
-            }
+            if (header_break != null or self.journal.dirty.count > 0) return;
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                if (self.journal.dirty.count == 0 and self.commit_min == self.commit_max) {
+                if (self.commit_min == self.commit_max) {
                     if (self.commit_stage != .idle) {
                         // If we still have a commit running, we started it the last time we were
                         // primary, and its still running. Wait for it to finish before repairing
@@ -6674,14 +6721,17 @@ pub fn ReplicaType(
             }
         }
 
-        fn repair_prepares(self: *Self) void {
+        fn repair_prepares(self: *Self, op_min: u64) void {
             assert(self.status == .normal or self.status == .view_change);
+            assert(op_min <= self.op_checkpoint() + 1);
+            assert(op_min <= self.op);
+            assert(self.op_repair_min() <= op_min);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
             assert(self.op - self.op_checkpoint() <= constants.journal_slot_count);
-            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
+            assert(self.valid_hash_chain_between(op_min, self.op));
 
             if (self.op < constants.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
@@ -6716,7 +6766,7 @@ pub fn ReplicaType(
             // Repair prepares in chronological order. Older prepares will be overwritten by the
             // cluster earlier, so we prioritize their repair. This also encourages concurrent
             // commit/repair.
-            var op = self.op_repair_min();
+            var op = op_min;
             while (op <= self.op) : (op += 1) {
                 const slot = self.journal.slot_with_op(op).?;
                 if (self.journal.dirty.bit(slot)) {
@@ -6933,10 +6983,12 @@ pub fn ReplicaType(
         /// Replication to standbys works similarly, jumping off the replica just before primary.
         /// TODO Use recent heartbeat data for next replica to leapfrog if faulty (optimization).
         fn replicate(self: *Self, message: *Message.Prepare) void {
-            assert(self.status == .normal);
             assert(message.header.command == .prepare);
-            assert(message.header.view == self.view);
-            assert(message.header.op == self.op);
+            assert(message.header.view >= self.view);
+            // We may replicate older prepares from either a primary of the current or future view
+            // whose start view we're waiting on (to truncate our log and set our self.op
+            // accordingly).
+            maybe(message.header.op < self.op);
 
             if (message.header.op <= self.commit_max) {
                 log.debug("{}: replicate: not replicating (committed)", .{self.replica});
@@ -7448,7 +7500,11 @@ pub fn ReplicaType(
             }
 
             assert(message.header.cluster == self.cluster);
-            assert(message.header.release.value <= self.release.value);
+
+            // Compare the release in this message to ours only if we authored the message.
+            if (message.header.replica == self.replica) {
+                assert(message.header.release.value <= self.release.value);
+            }
 
             if (message.header.command == .block) {
                 assert(message.header.protocol <= vsr.Version);
@@ -7469,12 +7525,7 @@ pub fn ReplicaType(
                     maybe(self.standby());
                     assert(self.replica != replica);
                     // Do not assert message.header.replica because we forward .prepare messages.
-                    switch (self.status) {
-                        .normal => assert(message.header.view <= self.view),
-                        .view_change => assert(message.header.view < self.view),
-                        // These are replies to a request_prepare:
-                        else => assert(message.header.view <= self.view),
-                    }
+                    if (header.replica == self.replica) assert(message.header.view <= self.view);
                     assert(header.operation != .reserved);
                 },
                 .prepare_ok => |header| {
@@ -7602,10 +7653,11 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                 },
             }
-
-            if (replica != self.replica) {
-                // Critical: Do not advertise a view/log_view before it is durable.
-                // See view_durable()/log_view_durable().
+            // Critical:
+            // Do not advertise a view/log_view before it is durable. We only need perform these
+            // checks if we authored the message, not if we're simply forwarding a message along.
+            // See view_durable()/log_view_durable().
+            if (replica != self.replica and message.header.replica == self.replica) {
                 if (message.header.view > self.view_durable() and
                     message.header.command != .request_start_view and
                     !(message.header.command == .ping and
@@ -8932,6 +8984,8 @@ pub fn ReplicaType(
             };
             const sync_view = stage.target.view;
 
+            log.info("{}: sync: ops={}..{}", .{ self.replica, sync_op_min, sync_op_max });
+
             self.sync_message_timeout.stop();
             self.superblock.sync(
                 sync_superblock_update_callback,
@@ -9477,7 +9531,7 @@ pub fn ReplicaType(
             // could lead to permanent unavailability.
             if (candidate.checkpoint_op == self.op_checkpoint_next()) {
                 if (header.into_const(.commit)) |h| {
-                    if (h.commit <= self.op_checkpoint_next_trigger()) return;
+                    if (h.commit <= self.op_prepare_max()) return;
                 } else {
                     return;
                 }

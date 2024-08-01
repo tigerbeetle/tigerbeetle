@@ -25,6 +25,8 @@ test "tidy" {
     var dead_detector = DeadDetector.init(allocator);
     defer dead_detector.deinit();
 
+    var function_line_count_longest: usize = 0;
+
     // NB: all checks are intentionally implemented in a streaming fashion, such that we only need
     // to read the files once.
     while (try walker.next()) |entry| {
@@ -33,19 +35,32 @@ test "tidy" {
             defer file.close();
 
             const bytes_read = try file.readAll(buffer);
-            if (bytes_read == buffer.len) return error.FileTooLong;
+            if (bytes_read == buffer.len - 1) return error.FileTooLong;
+            buffer[bytes_read] = 0;
 
-            const source_file = SourceFile{ .path = entry.path, .text = buffer[0..bytes_read] };
+            const source_file = SourceFile{ .path = entry.path, .text = buffer[0..bytes_read :0] };
             try tidy_banned(source_file);
             try tidy_long_line(source_file);
+
+            function_line_count_longest = @max(
+                function_line_count_longest,
+                (try tidy_long_functions(source_file)).function_line_count_longest,
+            );
+
             try dead_detector.visit(source_file);
         }
     }
 
     try dead_detector.finish();
+
+    if (function_line_count_longest < function_line_count_max) {
+        std.debug.print("error: `function_line_count_max` must be updated to {d}\n", .{
+            function_line_count_longest,
+        });
+    }
 }
 
-const SourceFile = struct { path: []const u8, text: []const u8 };
+const SourceFile = struct { path: []const u8, text: [:0]const u8 };
 
 fn tidy_banned(file: SourceFile) !void {
     if (banned(file.text)) |ban| {
@@ -67,6 +82,123 @@ fn tidy_long_line(file: SourceFile) !void {
         );
         return error.LineTooLong;
     }
+}
+
+/// As we trim our functions, make sure to update this constant; tidy will error if you do not.
+const function_line_count_max = 361; // build_tigerbeetle
+
+fn tidy_long_functions(
+    file: SourceFile,
+) !struct {
+    function_line_count_longest: usize,
+} {
+    const allocator = std.testing.allocator;
+
+    if (std.mem.endsWith(u8, file.path, "client_readmes.zig")) {
+        // This file is essentially a template to generate a markdown file, so it
+        // intentionally has giant functions.
+        return .{ .function_line_count_longest = 0 };
+    }
+
+    const Function = struct {
+        fn_decl_line: usize,
+        first_token_location: std.zig.Ast.Location,
+        last_token_location: std.zig.Ast.Location,
+        /// Functions that are not "innermost," meaning that they have other functions
+        /// inside of them (such as functions that return `type`s) are not checked as
+        /// it is normal for them to be very lengthy.
+        is_innermost: bool,
+
+        fn is_parent_of(a: @This(), b: @This()) bool {
+            return a.first_token_location.line_start < b.first_token_location.line_start and
+                a.last_token_location.line_end > b.last_token_location.line_end;
+        }
+
+        fn get_and_check_line_count(
+            function: @This(),
+            file_of_function: SourceFile,
+        ) usize {
+            const function_line_count =
+                function.last_token_location.line -
+                function.first_token_location.line;
+
+            if (function_line_count > function_line_count_max) {
+                std.debug.print(
+                    "{s}:{d} error: above function line count max with {d} lines\n",
+                    .{
+                        file_of_function.path,
+                        function.fn_decl_line + 1,
+                        function_line_count,
+                    },
+                );
+            }
+
+            return function_line_count;
+        }
+    };
+
+    var function_stack = stdx.BoundedArray(Function, 32).from_slice(&.{}) catch unreachable;
+
+    var tree = try std.zig.Ast.parse(allocator, file.text, .zig);
+    defer tree.deinit(allocator);
+
+    const tags = tree.nodes.items(.tag);
+    const datas = tree.nodes.items(.data);
+
+    var function_line_count_longest: usize = 0;
+
+    for (tags, datas, 0..) |tag, data, function_decl_node| {
+        if (tag != .fn_decl) continue;
+
+        const function_body_node = data.rhs;
+
+        const function_decl_first_token = tree.firstToken(@intCast(function_decl_node));
+        const function_body_first_token = tree.firstToken(@intCast(function_body_node));
+        const function_body_last_token = tree.lastToken(@intCast(function_body_node));
+
+        const innermost_function = .{
+            .fn_decl_line = tree.tokenLocation(0, function_decl_first_token).line,
+            .first_token_location = tree.tokenLocation(0, function_body_first_token),
+            .last_token_location = tree.tokenLocation(0, function_body_last_token),
+            .is_innermost = true,
+        };
+
+        while (function_stack.count() > 0) {
+            const last_function = function_stack.get(function_stack.count() - 1);
+
+            if (!last_function.is_parent_of(innermost_function)) {
+                if (last_function.is_innermost) {
+                    const line_count = last_function.get_and_check_line_count(file);
+                    function_line_count_longest = @max(function_line_count_longest, line_count);
+                }
+                _ = function_stack.pop();
+            } else {
+                break;
+            }
+        }
+
+        if (function_stack.count() > 0) {
+            const last_function = &function_stack.slice()[function_stack.count() - 1];
+
+            assert(last_function.is_parent_of(innermost_function));
+            last_function.is_innermost = false;
+        }
+
+        function_stack.append_assume_capacity(innermost_function);
+    }
+
+    if (function_stack.count() > 0) {
+        const last_function = function_stack.get(function_stack.count() - 1);
+
+        if (last_function.is_innermost) {
+            const line_count = last_function.get_and_check_line_count(file);
+            function_line_count_longest = @max(function_line_count_longest, line_count);
+        }
+    }
+
+    return .{
+        .function_line_count_longest = function_line_count_longest,
+    };
 }
 
 // Zig's lazy compilation model makes it too easy to forget to include a file into the build --- if
@@ -93,7 +225,7 @@ const DeadDetector = struct {
     fn visit(detector: *DeadDetector, file: SourceFile) !void {
         (try detector.file_state(file.path)).definition_count += 1;
 
-        var text = file.text;
+        var text: []const u8 = file.text;
         for (0..1024) |_| {
             const cut = stdx.cut(text, "@import(\"") orelse break;
             text = cut.suffix;
