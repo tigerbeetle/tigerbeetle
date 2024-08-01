@@ -23,9 +23,29 @@ public enum CreateAccountResult {
     LinkedEventChainOpen((int) 2),
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_expected">imported_event_expected</a>
+     */
+    ImportedEventExpected((int) 22),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_not_expected">imported_event_not_expected</a>
+     */
+    ImportedEventNotExpected((int) 23),
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero">timestamp_must_be_zero</a>
      */
     TimestampMustBeZero((int) 3),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_be_zero">imported_event_timestamp_must_not_be_zero</a>
+     */
+    ImportedEventTimestampMustNotBeZero((int) 24),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance">imported_event_timestamp_must_not_advance</a>
+     */
+    ImportedEventTimestampMustNotAdvance((int) 25),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field">reserved_field</a>
@@ -115,7 +135,12 @@ public enum CreateAccountResult {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#exists">exists</a>
      */
-    Exists((int) 21);
+    Exists((int) 21),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_regress">imported_event_timestamp_must_not_regress</a>
+     */
+    ImportedEventTimestampMustNotRegress((int) 26);
 
     public final int value;
 

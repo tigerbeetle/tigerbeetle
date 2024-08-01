@@ -285,7 +285,47 @@ public enum CreateTransferResult {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits">exceeds_debits</a>
      */
-    ExceedsDebits((int) 55);
+    ExceedsDebits((int) 55),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_expected">imported_event_expected</a>
+     */
+    ImportedEventExpected((int) 56),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_not_expected">imported_event_not_expected</a>
+     */
+    ImportedEventNotExpected((int) 57),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_be_zero">imported_event_timestamp_must_not_be_zero</a>
+     */
+    ImportedEventTimestampMustNotBeZero((int) 58),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance">imported_event_timestamp_must_not_advance</a>
+     */
+    ImportedEventTimestampMustNotAdvance((int) 59),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_debit_account_must_not_advance">imported_event_debit_account_must_not_advance</a>
+     */
+    ImportedEventDebitAccountMustNotAdvance((int) 60),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_credit_account_must_not_advance">imported_event_credit_account_must_not_advance</a>
+     */
+    ImportedEventCreditAccountMustNotAdvance((int) 61),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress">imported_event_timestamp_must_not_regress</a>
+     */
+    ImportedEventTimestampMustNotRegress((int) 62),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero">imported_event_timeout_must_be_zero</a>
+     */
+    ImportedEventTimeoutMustBeZero((int) 63);
 
     public final int value;
 
