@@ -1103,6 +1103,7 @@ test "repl.zig: Parser single account successfully" {
                 .ledger = 0,
                 .code = 0,
                 .flags = .{},
+                .timestamp = 0,
             },
         },
         .{
@@ -1124,6 +1125,7 @@ test "repl.zig: Parser single account successfully" {
                 .ledger = 12,
                 .code = 9999,
                 .flags = .{ .linked = true, .debits_must_not_exceed_credits = true },
+                .timestamp = 0,
             },
         },
         .{
@@ -1148,6 +1150,7 @@ test "repl.zig: Parser single account successfully" {
                     .linked = true,
                     .debits_must_not_exceed_credits = true,
                 },
+                .timestamp = 0,
             },
         },
     };
@@ -1310,6 +1313,7 @@ test "repl.zig: Parser multiple accounts successfully" {
                     .ledger = 0,
                     .code = 0,
                     .flags = .{},
+                    .timestamp = 0,
                 },
                 tb.Account{
                     .id = 2,
@@ -1324,6 +1328,7 @@ test "repl.zig: Parser multiple accounts successfully" {
                     .ledger = 0,
                     .code = 0,
                     .flags = .{},
+                    .timestamp = 0,
                 },
             },
         },
