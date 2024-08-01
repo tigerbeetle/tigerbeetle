@@ -442,6 +442,18 @@ fn readme_root(ctx: *Context) !void {
         ctx.code_section("linked-events");
     }
 
+    {
+        ctx.header(2, "Imported Events");
+        ctx.paragraph(
+            \\When the `imported` flag is specified for an account when creating accounts or
+            \\a transfer when creating transfers, it allows importing historical events with
+            \\a user-defined timestamp.
+            \\
+            \\The entire batch of events must be set with the flag `imported`.
+        );
+        ctx.code_section("imported-events");
+    }
+
     ctx.ensure_final_newline();
 }
 
