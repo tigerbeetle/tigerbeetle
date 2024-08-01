@@ -927,6 +927,7 @@ pub fn GrooveType(
                 groove.ids.key_range_update(object.id);
             }
             groove.objects.put(object);
+            groove.objects.key_range_update(object.timestamp);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
