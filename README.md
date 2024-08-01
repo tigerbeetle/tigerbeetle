@@ -120,8 +120,9 @@ and account `2` has `credits_posted` as `10`. The `10` amount is fully
 accounted for!
 
 For further reading:
-* [Run a single-node cluster](https://docs.tigerbeetle.com/getting-started/single-binary)
-* [Run a three-node cluster](https://docs.tigerbeetle.com/getting-started/single-binary-three)
+* [Run a single-node cluster](https://docs.tigerbeetle.com/quick-start)
+* [Run a three-node cluster](https://docs.tigerbeetle.com/quick-start/#optional-run-a-multi-node-cluster)
+* [Run on docker](https://docs.tigerbeetle.com/operating/docker)
 
 ## Next Steps
 
@@ -151,7 +152,7 @@ Here are a few key pages you might be interested in:
 - Deployment
   - [Hardware](https://docs.tigerbeetle.com/deploy/hardware/)
 - Usage
-  - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
+  - [Integration](https://docs.tigerbeetle.com/coding/system-architecture)
 - Reference
   - [Account](https://docs.tigerbeetle.com/reference/account)
   - [Transfer](https://docs.tigerbeetle.com/reference/transfer)
