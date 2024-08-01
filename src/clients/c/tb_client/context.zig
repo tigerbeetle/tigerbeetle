@@ -46,6 +46,17 @@ pub fn ContextType(
     return struct {
         const Context = @This();
 
+        const allowed_operations = [_]Client.StateMachine.Operation{
+            .create_accounts,
+            .create_transfers,
+            .lookup_accounts,
+            .lookup_transfers,
+            .get_account_transfers,
+            .get_account_balances,
+            .query_accounts,
+            .query_transfers,
+        };
+
         const StateMachine = Client.StateMachine;
         const UserData = extern struct {
             self: *Context,
@@ -57,16 +68,6 @@ pub fn ContextType(
         }
 
         fn operation_from_int(op: u8) ?Client.StateMachine.Operation {
-            const allowed_operations = [_]Client.StateMachine.Operation{
-                .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-                .get_account_transfers,
-                .get_account_balances,
-                .query_accounts,
-                .query_transfers,
-            };
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
                     return operation;
@@ -76,16 +77,6 @@ pub fn ContextType(
         }
 
         fn operation_event_size(op: u8) ?usize {
-            const allowed_operations = [_]Client.StateMachine.Operation{
-                .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-                .get_account_transfers,
-                .get_account_balances,
-                .query_accounts,
-                .query_transfers,
-            };
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
                     return @sizeOf(Client.StateMachine.Event(operation));
