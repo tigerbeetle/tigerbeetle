@@ -83,7 +83,6 @@ const type_mappings = .{
             "credits_pending",
             "debits_posted",
             "credits_posted",
-            "timestamp",
         },
         .docs_link = "reference/account#",
     } },
@@ -102,7 +101,7 @@ const type_mappings = .{
     .{ tb.Transfer, TypeMapping{
         .name = "TransferBatch",
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{"timestamp"},
+        .readonly_fields = &.{},
         .docs_link = "reference/transfer#",
     } },
     .{ tb.CreateAccountResult, TypeMapping{
