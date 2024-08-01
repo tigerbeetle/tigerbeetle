@@ -2891,7 +2891,7 @@ const TestAction = union(enum) {
     },
 
     get_account_transfers: TestGetAccountTransfers,
-    get_account_transfers_result: TestGetAccountTransfersResult,
+    get_account_transfers_result: u128,
 
     query_accounts: TestQueryAccounts,
     query_accounts_result: u128,
@@ -3027,54 +3027,6 @@ const TestGetAccountBalances = TestAccountFilter;
 const TestGetAccountTransfers = TestAccountFilter;
 const TestQueryAccounts = TestQueryFilter;
 const TestQueryTransfers = TestQueryFilter;
-
-const TestGetAccountTransfersResult = struct {
-    id: u128,
-    debit_account_id: u128,
-    credit_account_id: u128,
-    amount: u128 = 0,
-    pending_id: u128 = 0,
-    user_data_128: u128 = 0,
-    user_data_64: u64 = 0,
-    user_data_32: u32 = 0,
-    timeout: u32 = 0,
-    ledger: u32,
-    code: u16,
-    flags_linked: ?enum { LNK } = null,
-    flags_pending: ?enum { PEN } = null,
-    flags_post_pending_transfer: ?enum { POS } = null,
-    flags_void_pending_transfer: ?enum { VOI } = null,
-    flags_balancing_debit: ?enum { BDR } = null,
-    flags_balancing_credit: ?enum { BCR } = null,
-    flags_padding: u9 = 0,
-    timestamp: u64 = 0,
-
-    fn result(t: TestGetAccountTransfersResult, timestamp: ?u64) Transfer {
-        return .{
-            .id = t.id,
-            .debit_account_id = t.debit_account_id,
-            .credit_account_id = t.credit_account_id,
-            .amount = t.amount,
-            .pending_id = t.pending_id,
-            .user_data_128 = t.user_data_128,
-            .user_data_64 = t.user_data_64,
-            .user_data_32 = t.user_data_32,
-            .timeout = t.timeout,
-            .ledger = t.ledger,
-            .code = t.code,
-            .flags = .{
-                .linked = t.flags_linked != null,
-                .pending = t.flags_pending != null,
-                .post_pending_transfer = t.flags_post_pending_transfer != null,
-                .void_pending_transfer = t.flags_void_pending_transfer != null,
-                .balancing_debit = t.flags_balancing_debit != null,
-                .balancing_credit = t.flags_balancing_credit != null,
-                .padding = t.flags_padding,
-            },
-            .timestamp = timestamp orelse t.timestamp,
-        };
-    }
-};
 
 fn check(test_table: []const u8) !void {
     const parse_table = @import("testing/table.zig").parse;
@@ -3268,11 +3220,9 @@ fn check(test_table: []const u8) !void {
                 };
                 try request.appendSlice(std.mem.asBytes(&event));
             },
-            .get_account_transfers_result => |r| {
+            .get_account_transfers_result => |id| {
                 assert(operation.? == .get_account_transfers);
-
-                const transfer = r.result(transfers.get(r.id).?.timestamp);
-                try reply.appendSlice(std.mem.asBytes(&transfer));
+                try reply.appendSlice(std.mem.asBytes(&transfers.get(id).?));
             },
             .query_accounts => |f| {
                 assert(operation == null or operation.? == .query_accounts);
@@ -4176,47 +4126,47 @@ test "get_account_transfers: single-phase" {
         \\ commit create_transfers
         \\
         \\ get_account_transfers A1 _ _ 10 DR CR  _ // Debits + credits, chronological.
-        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T2
+        \\ get_account_transfers_result T3
+        \\ get_account_transfers_result T4
         \\ commit get_account_transfers
         \\
         \\ get_account_transfers A1  _  _  2 DR CR  _ // Debits + credits, limit=2.
-        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T2
         \\ commit get_account_transfers
         \\
         \\ get_account_transfers A1 T3  _ 10 DR CR  _ // Debits + credits, timestamp_min>0.
-        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T3
+        \\ get_account_transfers_result T4
         \\ commit get_account_transfers
         \\
         \\ get_account_transfers A1  _ T2 10 DR CR  _ // Debits + credits, timestamp_max>0.
-        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T2
         \\ commit get_account_transfers
         \\
         \\ get_account_transfers A1 T2 T3 10 DR CR  _ // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
-        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T2
+        \\ get_account_transfers_result T3
         \\ commit get_account_transfers
         \\
         \\ get_account_transfers A1  _  _ 10 DR CR REV // Debits + credits, reverse-chronological.
-        \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T4
+        \\ get_account_transfers_result T3
+        \\ get_account_transfers_result T2
+        \\ get_account_transfers_result T1
         \\ commit get_account_transfers
         \\
         \\ get_account_transfers A1  _  _ 10 DR  _  _ // Debits only.
-        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T3
         \\ commit get_account_transfers
         \\
         \\ get_account_transfers A1  _  _ 10  _ CR  _ // Credits only.
-        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
-        \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T2
+        \\ get_account_transfers_result T4
         \\ commit get_account_transfers
     );
 }
@@ -4232,8 +4182,8 @@ test "get_account_transfers: two-phase" {
         \\ commit create_transfers
         \\
         \\ get_account_transfers A1 _ _ 10 DR CR  _
-        \\ get_account_transfers_result T1 A1 A2    2   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _
-        \\ get_account_transfers_result T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T2
         \\ commit get_account_transfers
     );
 }
@@ -4261,8 +4211,8 @@ test "get_account_transfers: invalid filter" {
         \\ commit get_account_transfers                // Empty result.
         \\
         \\ get_account_transfers A1 _   _ 10 DR CR _   // Success.
-        \\ get_account_transfers_result T1 A1 A2    2   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _
-        \\ get_account_transfers_result T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T2
         \\ commit get_account_transfers
     );
 }
