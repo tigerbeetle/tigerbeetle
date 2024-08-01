@@ -329,17 +329,28 @@ public enum CreateTransferResult {
 
     public final int value;
 
+    static final CreateTransferResult[] enumByValue;
+    static {
+    final var values = values();
+      enumByValue = new CreateTransferResult[values.length];
+       for (final var item : values) {
+          enumByValue[item.value] = item;
+      }
+    }
+
     CreateTransferResult(int value) {
         this.value = value;
     }
 
     public static CreateTransferResult fromValue(int value) {
-        var values = CreateTransferResult.values();
-        if (value < 0 || value >= values.length)
+        if (value < 0 || value >= enumByValue.length)
             throw new IllegalArgumentException(
                     String.format("Invalid CreateTransferResult value=%d", value));
 
-        return values[value];
+        final var item = enumByValue[value];
+        AssertionError.assertTrue(item.value == value,
+          "Unexpected CreateTransferResult: found=%d expected=%d", item.value, value);
+        return item;
     }
 }
 

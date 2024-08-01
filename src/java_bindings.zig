@@ -268,17 +268,28 @@ fn emit_enum(
         \\
         \\    public final {[int_type]s} value;
         \\
+        \\    static final {[name]s}[] enumByValue;
+        \\    static {{
+        \\    final var values = values();
+        \\      enumByValue = new {[name]s}[values.length];
+        \\       for (final var item : values) {{
+        \\          enumByValue[item.value] = item;
+        \\      }}
+        \\    }}
+        \\
         \\    {[name]s}({[int_type]s} value) {{
         \\        this.value = value;
         \\    }}
         \\
         \\    public static {[name]s} fromValue({[int_type]s} value) {{
-        \\        var values = {[name]s}.values();
-        \\        if (value < 0 || value >= values.length)
+        \\        if (value < 0 || value >= enumByValue.length)
         \\            throw new IllegalArgumentException(
         \\                    String.format("Invalid {[name]s} value=%d", value));
         \\
-        \\        return values[value];
+        \\        final var item = enumByValue[value];
+        \\        AssertionError.assertTrue(item.value == value,
+        \\          "Unexpected {[name]s}: found=%d expected=%d", item.value, value);
+        \\        return item;
         \\    }}
         \\}}
         \\
