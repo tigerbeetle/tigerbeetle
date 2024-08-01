@@ -462,6 +462,9 @@ fn find_long_line(file_text: []const u8) !?usize {
                     // Table tests from state_machine.zig. They are intentionally wide.
                     continue;
                 }
+
+                // vsr.zig's Checkpoint ops diagram.
+                if (std.mem.startsWith(u8, string_value, "OPS: ")) continue;
             }
 
             return line_index;
