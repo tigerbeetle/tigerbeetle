@@ -14,8 +14,10 @@ public class CreateTransferResultTest {
 
     @Test
     public void testOrdinal() {
-        var value = CreateTransferResult.AmountMustNotBeZero.value;
-        Assert.assertEquals(CreateTransferResult.AmountMustNotBeZero.ordinal(), value);
+        for (final var expected : CreateTransferResult.values()) {
+            final var actual = CreateTransferResult.fromValue(expected.value);
+            Assert.assertEquals(expected, actual);
+        }
     }
 
     @Test(expected = IllegalArgumentException.class)

@@ -144,17 +144,28 @@ public enum CreateAccountResult {
 
     public final int value;
 
+    static final CreateAccountResult[] enumByValue;
+    static {
+    final var values = values();
+      enumByValue = new CreateAccountResult[values.length];
+       for (final var item : values) {
+          enumByValue[item.value] = item;
+      }
+    }
+
     CreateAccountResult(int value) {
         this.value = value;
     }
 
     public static CreateAccountResult fromValue(int value) {
-        var values = CreateAccountResult.values();
-        if (value < 0 || value >= values.length)
+        if (value < 0 || value >= enumByValue.length)
             throw new IllegalArgumentException(
                     String.format("Invalid CreateAccountResult value=%d", value));
 
-        return values[value];
+        final var item = enumByValue[value];
+        AssertionError.assertTrue(item.value == value,
+          "Unexpected CreateAccountResult: found=%d expected=%d", item.value, value);
+        return item;
     }
 }
 
