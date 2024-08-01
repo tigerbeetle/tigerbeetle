@@ -31,10 +31,36 @@ The transfer was not created. The [`Transfer.flags.linked`](../transfer.md#flags
 on the last event in the batch, which is not legal. (`flags.linked` indicates that the chain
 continues to the next operation).
 
+### `imported_event_expected`
+
+The transfer was not created. The [`Transfer.flags.imported`](../transfer.md#flagsimported) was
+expected to be set, as it's not allowed to mix transfers with different `imported` flag in the
+same batch. The first transfer determines the entire operation.
+
+### `imported_event_not_expected`
+
+The transfer was not created. The [`Transfer.flags.imported`](../transfer.md#flagsimported) was
+expected to _not_ be set, as it's not allowed to mix transfers with different `imported` flag
+in the same batch. The first transfer determines the entire operation.
+
 ### `timestamp_must_be_zero`
 
-The transfer was not created. The [`Transfer.timestamp`](../account.md#timestamp) is nonzero, but
+The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is nonzero, but
 must be zero. The cluster is responsible for setting this field.
+
+### `imported_event_timestamp_must_not_be_zero`
+
+This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is zero, but must
+be a user-defined timestamp.
+
+### `imported_event_timestamp_must_not_advance`
+
+This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp) is
+greater than the current [cluster time](../../coding/time.md), but it must be a past timestamp.
 
 ### `reserved_flag`
 
@@ -171,6 +197,22 @@ refer to an existing `Account`.
 
 The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
 refer to an existing `Account`.
+
+### `imported_event_debit_account_must_not_advance`
+
+This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+
+The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
+refer to an `Account` which [`timestamp`](../account.md#timestamp) is less than or equal to the
+[`Transfer.timestamp`](../transfer.md#timestamp).
+
+### `imported_event_credit_account_must_not_advance`
+
+This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+
+The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
+refer to an `Account` which [`timestamp`](../account.md#timestamp) is less than or equal to the
+[`Transfer.timestamp`](../transfer.md#timestamp).
 
 ### `accounts_must_have_the_same_ledger`
 
@@ -326,10 +368,31 @@ If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debi
 transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
 (if non-zero) `amount` of the transfer in the request.
 
-Otherwise, the existing transfer is identical to the transfer in the request.
+Otherwise, with the possible exception of the `timestamp` field, the existing transfer is identical
+to the transfer in the request.
 
 To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
 many applications should handle `exists` exactly as [`ok`](#ok).
+
+### `imported_event_timestamp_must_not_regress`
+
+This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp)
+regressed, but it must be greater than the last timestamp assigned to any `Transfer` in the cluster.
+
+### `imported_event_timeout_must_be_zero`
+
+This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The [`Transfer.timeout`](../transfer.md#timeout) is nonzero, but
+must be zero.
+
+It's possible to import [pending](../transfer.md#flagspending) transfers with a user-defined
+timestamp, but since it's not driven by the real-time clock, it cannot define a timeout for
+automatic expiration.
+In those cases, the [two-phase post or rollback](../../coding/two-phase-transfers.md) must be
+done manually.
 
 ### `overflows_debits_pending`
 
