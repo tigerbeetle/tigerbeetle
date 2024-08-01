@@ -29,6 +29,11 @@ export enum AccountFlags {
   * See [history](https://docs.tigerbeetle.com/reference/account#flagshistory)
   */
   history = (1 << 3),
+
+  /**
+  * See [imported](https://docs.tigerbeetle.com/reference/account#flagsimported)
+  */
+  imported = (1 << 4),
 }
 
 
@@ -67,6 +72,11 @@ export enum TransferFlags {
   * See [balancing_credit](https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_credit)
   */
   balancing_credit = (1 << 5),
+
+  /**
+  * See [imported](https://docs.tigerbeetle.com/reference/transfer#flagsimported)
+  */
+  imported = (1 << 6),
 }
 
 
@@ -271,9 +281,29 @@ export enum CreateAccountError {
   linked_event_chain_open = 2,
 
   /**
+  * See [imported_event_expected](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_expected)
+  */
+  imported_event_expected = 22,
+
+  /**
+  * See [imported_event_not_expected](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_not_expected)
+  */
+  imported_event_not_expected = 23,
+
+  /**
   * See [timestamp_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero)
   */
   timestamp_must_be_zero = 3,
+
+  /**
+  * See [imported_event_timestamp_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_be_zero)
+  */
+  imported_event_timestamp_must_not_be_zero = 24,
+
+  /**
+  * See [imported_event_timestamp_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance)
+  */
+  imported_event_timestamp_must_not_advance = 25,
 
   /**
   * See [reserved_field](https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field)
@@ -364,6 +394,11 @@ export enum CreateAccountError {
   * See [exists](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
   */
   exists = 21,
+
+  /**
+  * See [imported_event_timestamp_must_not_regress](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_regress)
+  */
+  imported_event_timestamp_must_not_regress = 26,
 }
 
 
@@ -651,6 +686,46 @@ export enum CreateTransferError {
   * See [exceeds_debits](https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits)
   */
   exceeds_debits = 55,
+
+  /**
+  * See [imported_event_expected](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_expected)
+  */
+  imported_event_expected = 56,
+
+  /**
+  * See [imported_event_not_expected](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_not_expected)
+  */
+  imported_event_not_expected = 57,
+
+  /**
+  * See [imported_event_timestamp_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_be_zero)
+  */
+  imported_event_timestamp_must_not_be_zero = 58,
+
+  /**
+  * See [imported_event_timestamp_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance)
+  */
+  imported_event_timestamp_must_not_advance = 59,
+
+  /**
+  * See [imported_event_debit_account_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_debit_account_must_not_advance)
+  */
+  imported_event_debit_account_must_not_advance = 60,
+
+  /**
+  * See [imported_event_credit_account_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_credit_account_must_not_advance)
+  */
+  imported_event_credit_account_must_not_advance = 61,
+
+  /**
+  * See [imported_event_timestamp_must_not_regress](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress)
+  */
+  imported_event_timestamp_must_not_regress = 62,
+
+  /**
+  * See [imported_event_timeout_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero)
+  */
+  imported_event_timeout_must_be_zero = 63,
 }
 
 export type CreateAccountsError = {
