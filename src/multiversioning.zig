@@ -1220,7 +1220,7 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
         const path = arg_iterator.next().?;
         assert(std.fs.path.isAbsolute(path));
 
-        return path;
+        return try allocator.dupeZ(u8, path);
     } else {
         // Not running from a memfd or temp path. `native_self_exe_path` is the real path.
         return try allocator.dupeZ(u8, native_self_exe_path);
