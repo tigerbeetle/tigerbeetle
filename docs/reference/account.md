@@ -215,6 +215,41 @@ When set, the account will retain the history of balances at each transfer.
 Note that the [`get_account_balances`](./requests/get_account_balances.md) operation only works for
 accounts with this flag set.
 
+#### `flags.imported`
+
+When set, allows importing historical `Account`s with their original [`timestamp`](#timestamp).
+
+TigerBeetle will not use the [real-time clock](../coding/time.md) to assign the timestamp, allowing
+the user to define it, expressing _when_ the account was effectively created by an external
+event.
+
+To maintain system invariants regarding auditability and traceability, some constraints are
+necessary:
+
+- It is not allowed to mix events with the `imported` flag set and _not_ set in the same batch.
+  The application must submit batches of imported events separately.
+
+- User-defined timestamps must be **unique** and expressed as nanoseconds since the UNIX epoch.
+  No two accounts can share the same timestamp.
+
+- User-defined timestamps must be a past date, never ahead of the cluster real-time clock at the
+  time the request arrives.
+
+- Timestamps must be monotonically increasing.
+
+  Even user-defined timestamps that are required to be past dates need to be at least one
+  nanosecond ahead of the timestamp of the last account committed by the cluster.
+
+  Since the timestamp cannot regress, importing past events can be naturally restrictive without
+  coordination, as the last timestamp can be updated using the real-time clock during regular
+  cluster activity. Instead, it's recommended to import events only on a fresh cluster or
+  during a scheduled maintenance window.
+
+  Additionally, the entire batch can be submitted as a [linked chain](#flagslinked), ensuring that
+  if any event fails, none of them are committed, preserving the last timestamp unchanged.
+  This approach gives the application a chance to correct failed imported events, re-submitting
+  the batch again whith the same user-defined timestamps.
+
 ### `timestamp`
 
 This is the time the account was created, as nanoseconds since UNIX epoch.
@@ -226,7 +261,9 @@ You can read more about [Time in TigerBeetle](../coding/time.md).
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be set to `0` by the user when the `Account` is created
+- Must be `0` when the `Account` is created
+- Must be greater than `0` and less than `2^63` when the `Account` is created with
+  [`flags.imported`](#flagsimported) set
 
 ## Internals
 
