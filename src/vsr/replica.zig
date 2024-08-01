@@ -2212,11 +2212,7 @@ pub fn ReplicaType(
             }
             assert(self.view == message.header.view);
 
-            const view_checkpoint = std.mem.bytesAsValue(
-                vsr.CheckpointState,
-                message.body()[message.body().len -
-                    @sizeOf(vsr.CheckpointState) ..][0..@sizeOf(vsr.CheckpointState)],
-            );
+            const view_checkpoint = start_view_message_checkpoint(message);
             if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
                 assert(message.header.commit >= trigger);
             }
@@ -2226,10 +2222,9 @@ pub fn ReplicaType(
                 ).?,
             );
 
-            const view_headers = message_body_as_view_headers(message.base_const());
-            assert(view_headers.command == .start_view);
-            assert(view_headers.slice[0].op == message.header.op);
-            assert(view_headers.slice[0].op >= view_headers.slice[view_headers.slice.len - 1].op);
+            const view_headers = start_view_message_headers(message);
+            assert(view_headers[0].op == message.header.op);
+            assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
 
             if (message.header.commit > self.op_prepare_max() and (
             //  Cluster is far ahead, replica's WAL no longer intersects primary's WAL.
@@ -2299,10 +2294,10 @@ pub fn ReplicaType(
                 // Replace our log with the suffix from SV. Transition to sync above guarantees
                 // that there's at least one message that fits the effective checkpoint, but some
                 // messages might be beyond its prepare_max.
-                maybe(view_headers.slice[0].op > self.op_prepare_max_sync());
+                maybe(view_headers[0].op > self.op_prepare_max_sync());
 
                 // Find the first message that fits, make it our new head.
-                for (view_headers.slice) |*header| {
+                for (view_headers) |*header| {
                     assert(header.commit <= message.header.commit);
 
                     if (header.op <= self.op_prepare_max_sync()) {
@@ -2317,7 +2312,7 @@ pub fn ReplicaType(
                     }
                 } else unreachable;
 
-                for (view_headers.slice) |*header| {
+                for (view_headers) |*header| {
                     if (header.op <= self.op_prepare_max_sync()) {
                         self.replace_header(header);
                     }
@@ -2330,7 +2325,7 @@ pub fn ReplicaType(
                 self.commit_min = self.syncing.updating_superblock.checkpoint_state.header.op;
             }
 
-            self.view_headers.replace(.start_view, view_headers.slice);
+            self.view_headers.replace(.start_view, view_headers);
             assert(self.view_headers.array.get(0).view <= self.view);
             assert(self.view_headers.array.get(0).op == message.header.op);
             maybe(self.view_headers.array.get(0).op > self.op_prepare_max_sync());
@@ -4601,6 +4596,7 @@ pub fn ReplicaType(
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_start_view_message(self: *Self, nonce: u128) *Message.StartView {
             assert(self.status == .normal);
+            assert(self.syncing != .updating_superblock);
             assert(self.replica == self.primary_index(self.view));
             assert(self.commit_min == self.commit_max);
             assert(self.commit_min <= self.op);
@@ -4617,8 +4613,8 @@ pub fn ReplicaType(
             defer self.message_bus.unref(message);
 
             message.header.* = .{
-                .size = @sizeOf(Header) * (1 + self.view_headers.array.count_as(u32)) +
-                    @sizeOf(vsr.CheckpointState),
+                .size = @sizeOf(Header) + @sizeOf(vsr.CheckpointState) +
+                    @sizeOf(Header) * self.view_headers.array.count_as(u32),
                 .command = .start_view,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -4629,20 +4625,18 @@ pub fn ReplicaType(
                 .nonce = nonce,
             };
 
-            const body_headers_size = self.view_headers.array.count_as(usize) * @sizeOf(vsr.Header);
-            const body_headers = message.body()[0..body_headers_size];
-            const body_checkpoint = message.body()[body_headers_size..];
-            stdx.copy_disjoint(
-                .exact,
-                Header.Prepare,
-                std.mem.bytesAsSlice(Header.Prepare, body_headers),
-                self.view_headers.array.const_slice(),
-            );
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                body_checkpoint,
+                message.body()[0..@sizeOf(vsr.CheckpointState)],
                 std.mem.asBytes(&self.superblock.working.vsr_state.checkpoint),
+            );
+            comptime assert(@sizeOf(vsr.CheckpointState) % @sizeOf(Header) == 0);
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                message.body()[@sizeOf(vsr.CheckpointState)..],
+                std.mem.sliceAsBytes(self.view_headers.array.const_slice()),
             );
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -10192,13 +10186,11 @@ const DVCQuorum = struct {
 
 fn message_body_as_view_headers(message: *const Message) vsr.Headers.ViewChangeSlice {
     assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
-    assert(message.header.command == .do_view_change or
-        message.header.command == .start_view);
+    assert(message.header.command == .do_view_change);
 
     return vsr.Headers.ViewChangeSlice.init(
         switch (message.header.command) {
             .do_view_change => .do_view_change,
-            .start_view => .start_view,
             else => unreachable,
         },
         message_body_as_headers_unchecked(message),
@@ -10209,8 +10201,7 @@ fn message_body_as_view_headers(message: *const Message) vsr.Headers.ViewChangeS
 /// The headers may contain gaps and/or breaks.
 fn message_body_as_prepare_headers(message: *const Message) []const Header.Prepare {
     assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
-    assert(message.header.command == .start_view or
-        message.header.command == .headers);
+    assert(message.header.command == .headers);
 
     const headers = message_body_as_headers_unchecked(message);
     var child: ?*const Header.Prepare = null;
@@ -10234,18 +10225,40 @@ fn message_body_as_prepare_headers(message: *const Message) []const Header.Prepa
 fn message_body_as_headers_unchecked(message: *const Message) []const Header.Prepare {
     assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
     assert(message.header.command == .do_view_change or
-        message.header.command == .start_view or
         message.header.command == .headers);
-
-    const headers_end_offset = switch (message.header.command) {
-        .start_view => message.header.size - @sizeOf(vsr.CheckpointState),
-        else => message.header.size,
-    };
 
     return std.mem.bytesAsSlice(
         Header.Prepare,
-        message.buffer[@sizeOf(Header)..headers_end_offset],
+        message.body(),
     );
+}
+
+fn start_view_message_checkpoint(message: *const Message.StartView) *const vsr.CheckpointState {
+    assert(message.header.command == .start_view);
+    const checkpoint = std.mem.bytesAsValue(
+        vsr.CheckpointState,
+        message.body()[0..@sizeOf(vsr.CheckpointState)],
+    );
+    assert(checkpoint.header.valid_checksum());
+    assert(stdx.zeroed(&checkpoint.reserved));
+    return checkpoint;
+}
+
+fn start_view_message_headers(message: *const Message.StartView) []const Header.Prepare {
+    assert(message.header.command == .start_view);
+    // Body must contain at least one header.
+    assert(message.header.size > @sizeOf(Header) + @sizeOf(vsr.CheckpointState));
+
+    const headers = std.mem.bytesAsSlice(
+        Header.Prepare,
+        message.body()[@sizeOf(vsr.CheckpointState)..],
+    );
+    // To run verification.
+    _ = vsr.Headers.ViewChangeSlice.init(.start_view, headers);
+    if (constants.verify) {
+        for (headers) |header| assert(header.valid_checksum());
+    }
+    return headers;
 }
 
 /// The PipelineQueue belongs to a normal-status primary. It consists of two queues:
