@@ -627,3 +627,45 @@ transfers.setId(4);
 
 transferErrors = client.createTransfers(transfers);
 ```
+
+## Imported Events
+
+When the `imported` flag is specified for an account when creating accounts or
+a transfer when creating transfers, it allows importing historical events with
+a user-defined timestamp.
+
+The entire batch of events must be set with the flag `imported`.
+
+```java
+accounts = new AccountBatch(2);
+accounts.add();
+accounts.setId(1001);
+accounts.setLedger(1);
+accounts.setCode(718);
+accounts.setFlags(AccountFlags.IMPORTED);
+accounts.setTimestamp(historicalTimestamp + 1); // User-defined timestamp.
+
+accounts.add();
+accounts.setId(2001);
+accounts.setLedger(1);
+accounts.setCode(718);
+accounts.setFlags(AccountFlags.IMPORTED);
+accounts.setTimestamp(historicalTimestamp + 2); // User-defined timestamp.
+
+accountErrors = client.createAccounts(accounts);
+// error handling omitted
+
+transfers = new TransferBatch(1);
+transfers.add();
+transfers.setId(100);
+transfers.setDebitAccountId(1001);
+transfers.setCreditAccountId(2001);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
+transfers.setFlags(TransferFlags.IMPORTED);
+transfers.setTimestamp(historicalTimestamp + 3); // User-defined timestamp.
+
+transferErrors = client.createTransfers(transfers);
+// error handling omitted
+```

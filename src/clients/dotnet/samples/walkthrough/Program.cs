@@ -240,4 +240,46 @@ using (var client = new Client(clusterID, addresses))
     createTransfersError = client.CreateTransfers(batch.ToArray());
     // error handling omitted
     // endsection:linked-events
+
+    // External source of time
+    ulong historicalTimestamp = 0UL;
+
+    // section:imported-events
+    accounts = new[] {
+        new Account
+        {
+            Id = 1001,
+            Ledger = 1,
+            Code = 718,
+            Flags = AccountFlags.Imported,
+            Timestamp = historicalTimestamp + 1, // User-defined timestamp
+        },
+        new Account
+        {
+            Id = 2001,
+            Ledger = 1,
+            Code = 718,
+            Flags = AccountFlags.Imported,
+            Timestamp = historicalTimestamp + 2, // User-defined timestamp
+        },
+    };
+
+    createAccountsError = client.CreateAccounts(accounts);
+    // error handling omitted
+
+    transfer = new Transfer
+    {
+        Id = 100,
+        DebitAccountId = 1001,
+        CreditAccountId = 2001,
+        Amount = 10,
+        Ledger = 1,
+        Code = 1,
+        Flags = TransferFlags.Imported,
+        Timestamp = historicalTimestamp + 3, // User-defined timestamp
+    };
+
+    createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
+    // error handling omitted
+    // endsection:imported-events
 }

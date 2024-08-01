@@ -531,3 +531,50 @@ batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ });
 createTransfersError = client.CreateTransfers(batch.ToArray());
 // error handling omitted
 ```
+
+## Imported Events
+
+When the `imported` flag is specified for an account when creating accounts or
+a transfer when creating transfers, it allows importing historical events with
+a user-defined timestamp.
+
+The entire batch of events must be set with the flag `imported`.
+
+```cs
+accounts = new[] {
+    new Account
+    {
+        Id = 1001,
+        Ledger = 1,
+        Code = 718,
+        Flags = AccountFlags.Imported,
+        Timestamp = historicalTimestamp + 1, // User-defined timestamp
+    },
+    new Account
+    {
+        Id = 2001,
+        Ledger = 1,
+        Code = 718,
+        Flags = AccountFlags.Imported,
+        Timestamp = historicalTimestamp + 2, // User-defined timestamp
+    },
+};
+
+createAccountsError = client.CreateAccounts(accounts);
+// error handling omitted
+
+transfer = new Transfer
+{
+    Id = 100,
+    DebitAccountId = 1001,
+    CreditAccountId = 2001,
+    Amount = 10,
+    Ledger = 1,
+    Code = 1,
+    Flags = TransferFlags.Imported,
+    Timestamp = historicalTimestamp + 3, // User-defined timestamp
+};
+
+createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
+// error handling omitted
+```

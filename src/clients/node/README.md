@@ -728,3 +728,66 @@ const errors = await client.createTransfers(batch);
  * ]
  */
 ```
+
+## Imported Events
+
+When the `imported` flag is specified for an account when creating accounts or
+a transfer when creating transfers, it allows importing historical events with
+a user-defined timestamp.
+
+The entire batch of events must be set with the flag `imported`.
+
+```javascript
+accounts = [{
+  id: 1001n,
+  debits_pending: 0n,
+  debits_posted: 0n,
+  credits_pending: 0n,
+  credits_posted: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  reserved: 0,
+  ledger: 1,
+  code: 718,
+  flags: AccountFlags.imported,
+  timestamp: historicalTimestamp + 1n, // User-defined timestamp.
+},
+{
+  id: 2001n,
+  debits_pending: 0n,
+  debits_posted: 0n,
+  credits_pending: 0n,
+  credits_posted: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  reserved: 0,
+  ledger: 1,
+  code: 718,
+  flags: AccountFlags.imported,
+  timestamp: historicalTimestamp + 2n, // User-defined timestamp.
+}];
+
+accountErrors = await client.createAccounts([account]);
+// error handling omitted
+
+transfers = [{
+  id: 100n,
+  debit_account_id: 1001n,
+  credit_account_id: 2001n,
+  amount: 10n,
+  pending_id: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  timeout: 0,
+  ledger: 1,
+  code: 720,
+  flags: TransferFlags.imported,
+  timestamp: historicalTimestamp + 3n, // User-defined timestamp.
+}];
+
+transferErrors = await client.createTransfers(transfers);
+// error handling omitted
+```

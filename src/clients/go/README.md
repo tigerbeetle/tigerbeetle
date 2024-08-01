@@ -595,3 +595,74 @@ batch = append(batch, Transfer{ID: ToUint128(4) /* ... rest of transfer ... */})
 
 transfersRes, err = client.CreateTransfers(batch)
 ```
+
+## Imported Events
+
+When the `imported` flag is specified for an account when creating accounts or
+a transfer when creating transfers, it allows importing historical events with
+a user-defined timestamp.
+
+The entire batch of events must be set with the flag `imported`.
+
+```go
+accounts = []Account{
+	{
+		ID:             ToUint128(1001),
+		DebitsPending:  ToUint128(0),
+		DebitsPosted:   ToUint128(0),
+		CreditsPending: ToUint128(0),
+		CreditsPosted:  ToUint128(0),
+		UserData128:    ToUint128(0),
+		UserData64:     0,
+		UserData32:     0,
+		Reserved:       0,
+		Ledger:         1,
+		Code:           718,
+		Flags:          AccountFlags{Imported: true}.ToUint16(),
+		Timestamp:      historicalTimestamp + 1, // User-defined timestamp.
+	},
+	{
+		ID:             ToUint128(1002),
+		DebitsPending:  ToUint128(0),
+		DebitsPosted:   ToUint128(0),
+		CreditsPending: ToUint128(0),
+		CreditsPosted:  ToUint128(0),
+		UserData128:    ToUint128(0),
+		UserData64:     0,
+		UserData32:     0,
+		Reserved:       0,
+		Ledger:         1,
+		Code:           718,
+		Flags:          AccountFlags{Imported: true}.ToUint16(),
+		Timestamp:      historicalTimestamp + 2, // User-defined timestamp.
+	},
+}
+
+accountsRes, err = client.CreateAccounts(accounts)
+if err != nil {
+	log.Printf("Error importing account batch: %s", err)
+	return
+}
+
+transfers = []Transfer{{
+	ID:              ToUint128(100),
+	DebitAccountID:  ToUint128(1001),
+	CreditAccountID: ToUint128(2001),
+	Amount:          ToUint128(10),
+	PendingID:       ToUint128(0),
+	UserData128:     ToUint128(0),
+	UserData64:      0,
+	UserData32:      0,
+	Timeout:         0,
+	Ledger:          1,
+	Code:            1,
+	Flags:           TransferFlags{Imported: true}.ToUint16(),
+	Timestamp:       historicalTimestamp + 3, // User-defined timestamp.
+}}
+
+transfersRes, err = client.CreateTransfers(transfers)
+if err != nil {
+	log.Printf("Error importing transfer batch: %s", err)
+	return
+}
+```
