@@ -33,6 +33,11 @@ public enum AccountFlags : ushort
     /// </summary>
     History = 1 << 3,
 
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account#flagsimported
+    /// </summary>
+    Imported = 1 << 4,
+
 }
 
 [Flags]
@@ -69,6 +74,11 @@ public enum TransferFlags : ushort
     /// https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_credit
     /// </summary>
     BalancingCredit = 1 << 5,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsimported
+    /// </summary>
+    Imported = 1 << 6,
 
 }
 
@@ -200,7 +210,7 @@ public struct Account
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/account#timestamp
     /// </summary>
-    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
 }
 
@@ -298,7 +308,7 @@ public struct Transfer
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/transfer#timestamp
     /// </summary>
-    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
 }
 
@@ -320,9 +330,29 @@ public enum CreateAccountResult : uint
     LinkedEventChainOpen = 2,
 
     /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_expected
+    /// </summary>
+    ImportedEventExpected = 22,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_not_expected
+    /// </summary>
+    ImportedEventNotExpected = 23,
+
+    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero
     /// </summary>
     TimestampMustBeZero = 3,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_be_zero
+    /// </summary>
+    ImportedEventTimestampMustNotBeZero = 24,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance
+    /// </summary>
+    ImportedEventTimestampMustNotAdvance = 25,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field
@@ -413,6 +443,11 @@ public enum CreateAccountResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists
     /// </summary>
     Exists = 21,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_regress
+    /// </summary>
+    ImportedEventTimestampMustNotRegress = 26,
 
 }
 
@@ -697,6 +732,46 @@ public enum CreateTransferResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits
     /// </summary>
     ExceedsDebits = 55,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_expected
+    /// </summary>
+    ImportedEventExpected = 56,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_not_expected
+    /// </summary>
+    ImportedEventNotExpected = 57,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_be_zero
+    /// </summary>
+    ImportedEventTimestampMustNotBeZero = 58,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance
+    /// </summary>
+    ImportedEventTimestampMustNotAdvance = 59,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_debit_account_must_not_advance
+    /// </summary>
+    ImportedEventDebitAccountMustNotAdvance = 60,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_credit_account_must_not_advance
+    /// </summary>
+    ImportedEventCreditAccountMustNotAdvance = 61,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress
+    /// </summary>
+    ImportedEventTimestampMustNotRegress = 62,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero
+    /// </summary>
+    ImportedEventTimeoutMustBeZero = 63,
 
 }
 
