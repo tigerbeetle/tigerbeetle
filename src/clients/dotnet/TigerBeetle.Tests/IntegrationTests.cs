@@ -1708,6 +1708,115 @@ public class IntegrationTests
         }
     }
 
+    [TestMethod]
+    [DoNotParallelize]
+    public void ImportedFlag()
+    {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = GetTimestampLast();
+        Thread.Sleep(10);
+
+        var accounts = GenerateAccounts();
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            accounts[i].Flags = AccountFlags.Imported;
+            accounts[i].Timestamp = timestamp + (ulong)(i + 1);
+        }
+
+        var results = client.CreateAccounts(accounts);
+        Assert.IsTrue(results.Length == 0);
+
+        var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            Assert.AreEqual(accounts[i].Timestamp, timestamp + (ulong)(i + 1));
+        }
+
+        var transfer = new Transfer
+        {
+            Id = ID.Create(),
+            DebitAccountId = accounts[0].Id,
+            CreditAccountId = accounts[1].Id,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.Imported,
+            Amount = 10,
+            Timestamp = timestamp + (ulong)(accounts.Length + 1),
+        };
+
+        var createTransferResult = client.CreateTransfer(transfer);
+        Assert.AreEqual(CreateTransferResult.Ok, createTransferResult);
+
+        var lookupTransfer = client.LookupTransfer(transfer.Id);
+        Assert.IsNotNull(lookupTransfer);
+        AssertTransfer(transfer, lookupTransfer.Value);
+        Assert.AreEqual(transfer.Timestamp, lookupTransfer.Value.Timestamp);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task ImportedFlagAsync()
+    {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = GetTimestampLast();
+        Thread.Sleep(10);
+
+        var accounts = GenerateAccounts();
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            accounts[i].Flags = AccountFlags.Imported;
+            accounts[i].Timestamp = timestamp + (ulong)(i + 1);
+        }
+
+        var results = await client.CreateAccountsAsync(accounts);
+        Assert.IsTrue(results.Length == 0);
+
+        var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            Assert.AreEqual(accounts[i].Timestamp, timestamp + (ulong)(i + 1));
+        }
+
+        var transfer = new Transfer
+        {
+            Id = ID.Create(),
+            DebitAccountId = accounts[0].Id,
+            CreditAccountId = accounts[1].Id,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.Imported,
+            Amount = 10,
+            Timestamp = timestamp + (ulong)(accounts.Length + 1),
+        };
+
+        var createTransferResult = await client.CreateTransferAsync(transfer);
+        Assert.AreEqual(CreateTransferResult.Ok, createTransferResult);
+
+        var lookupTransfer = await client.LookupTransferAsync(transfer.Id);
+        Assert.IsNotNull(lookupTransfer);
+        AssertTransfer(transfer, lookupTransfer.Value);
+        Assert.AreEqual(transfer.Timestamp, lookupTransfer.Value.Timestamp);
+    }
+
+    private static ulong GetTimestampLast()
+    {
+        // Inserts a dummy transfer just to retrieve the lastest timestamp
+        // recorded by the cluster.
+        // Must be used only in "DoNotParallelize" tests.
+        var dummy_account = GenerateAccounts()[0];
+        var okResult = client.CreateAccount(dummy_account);
+        Assert.IsTrue(okResult == CreateAccountResult.Ok);
+
+        var lookup = client.LookupAccount(dummy_account.Id);
+        Assert.IsNotNull(lookup);
+
+        return lookup.Value.Timestamp;
+    }
+
     /// <summary>
     /// This test asserts that a single Client can be shared by multiple concurrent tasks
     /// </summary>
