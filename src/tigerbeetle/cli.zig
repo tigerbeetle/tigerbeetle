@@ -17,6 +17,7 @@ const fmt = std.fmt;
 const net = std.net;
 
 const vsr = @import("vsr");
+const stdx = vsr.stdx;
 const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
@@ -360,6 +361,8 @@ const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constan
 /// arguments are properly validated and desugared (e.g, sizes converted to counts where
 ///  appropriate).
 pub const Command = union(enum) {
+    const Addresses = stdx.BoundedArray(std.net.Address, constants.members_max);
+
     pub const Format = struct {
         cluster: u128,
         replica: u8,
@@ -369,7 +372,7 @@ pub const Command = union(enum) {
     };
 
     pub const Start = struct {
-        addresses: []const net.Address,
+        addresses: Addresses,
         // true when the value of `--addresses` is exactly `0`. Used to enable "magic zero" mode for
         // testing. We check the raw string rather then the parsed address to prevent triggering
         // this logic by accident.
@@ -394,7 +397,7 @@ pub const Command = union(enum) {
     };
 
     pub const Repl = struct {
-        addresses: []const net.Address,
+        addresses: Addresses,
         cluster: u128,
         verbose: bool,
         statements: []const u8,
@@ -427,7 +430,7 @@ pub const Command = union(enum) {
         id_order: IdOrder,
         statsd: bool,
         file: ?[]const u8,
-        addresses: ?[]const net.Address,
+        addresses: ?Addresses,
         seed: ?[]const u8,
     };
 
@@ -468,30 +471,19 @@ pub const Command = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
-
-    pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
-        switch (command.*) {
-            inline .start, .repl => |*cmd| allocator.free(cmd.addresses),
-            .benchmark => |*cmd| {
-                if (cmd.addresses) |addresses| allocator.free(addresses);
-            },
-            else => {},
-        }
-        command.* = undefined;
-    }
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgIterator) Command {
+pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
     const cli_args = flags.parse(args_iterator, CliArgs);
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },
-        .start => |start| .{ .start = parse_args_start(allocator, start) },
+        .start => |start| .{ .start = parse_args_start(start) },
         .version => |version| .{ .version = parse_args_version(version) },
-        .repl => |repl| .{ .repl = parse_args_repl(allocator, repl) },
-        .benchmark => |benchmark| .{ .benchmark = parse_args_benchmark(allocator, benchmark) },
+        .repl => |repl| .{ .repl = parse_args_repl(repl) },
+        .benchmark => |benchmark| .{ .benchmark = parse_args_benchmark(benchmark) },
         .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
         .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
     };
@@ -553,7 +545,7 @@ fn parse_args_format(format: CliArgs.Format) Command.Format {
     };
 }
 
-fn parse_args_start(allocator: std.mem.Allocator, start: CliArgs.Start) Command.Start {
+fn parse_args_start(start: CliArgs.Start) Command.Start {
     // Allowlist of stable flags. --development will disable automatic multiversion
     // upgrades too, but the flag itself is stable.
     const stable_args = .{
@@ -589,7 +581,7 @@ fn parse_args_start(allocator: std.mem.Allocator, start: CliArgs.Start) Command.
     const TransfersPendingValuesCache = groove_config.transfers_pending.ObjectsCache.Cache;
     const AccountBalancesValuesCache = groove_config.account_balances.ObjectsCache.Cache;
 
-    const addresses = parse_addresses(allocator, start.addresses);
+    const addresses = parse_addresses(start.addresses);
     const defaults =
         if (start.development) start_defaults_development else start_defaults_production;
 
@@ -774,8 +766,8 @@ fn parse_args_version(version: CliArgs.Version) Command.Version {
     };
 }
 
-fn parse_args_repl(allocator: std.mem.Allocator, repl: CliArgs.Repl) Command.Repl {
-    const addresses = parse_addresses(allocator, repl.addresses);
+fn parse_args_repl(repl: CliArgs.Repl) Command.Repl {
+    const addresses = parse_addresses(repl.addresses);
 
     return .{
         .addresses = addresses,
@@ -785,12 +777,9 @@ fn parse_args_repl(allocator: std.mem.Allocator, repl: CliArgs.Repl) Command.Rep
     };
 }
 
-fn parse_args_benchmark(
-    allocator: std.mem.Allocator,
-    benchmark: CliArgs.Benchmark,
-) Command.Benchmark {
+fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
-        parse_addresses(allocator, addresses)
+        parse_addresses(addresses)
     else
         null;
 
@@ -862,11 +851,12 @@ fn parse_args_multiversion(multiversion: CliArgs.Multiversion) Command.Multivers
 }
 
 /// Parse and allocate the addresses returning a slice into that array.
-fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []net.Address {
-    return vsr.parse_addresses(
-        allocator,
+fn parse_addresses(raw_addresses: []const u8) Command.Addresses {
+    var result: Command.Addresses = .{};
+
+    const addresses_parsed = vsr.parse_addresses(
         raw_addresses,
-        constants.members_max,
+        result.unused_capacity_slice(),
     ) catch |err| switch (err) {
         error.AddressHasTrailingComma => flags.fatal("--addresses: invalid trailing comma", .{}),
         error.AddressLimitExceeded => {
@@ -880,8 +870,11 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
         error.PortOverflow => flags.fatal("--addresses: port exceeds 65535", .{}),
         error.PortInvalid => flags.fatal("--addresses: invalid port", .{}),
         error.AddressInvalid => flags.fatal("--addresses: invalid IPv4 or IPv6 address", .{}),
-        error.OutOfMemory => flags.fatal("out of memory", .{}),
     };
+    assert(addresses_parsed.len > 0);
+    assert(addresses_parsed.len <= constants.members_max);
+    result.resize(addresses_parsed.len) catch unreachable;
+    return result;
 }
 
 /// Given a limit like `10GiB`, a SetAssociativeCache and T return the largest `value_count_max`

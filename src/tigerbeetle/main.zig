@@ -51,8 +51,7 @@ pub fn main() !void {
     var arg_iterator = try std.process.argsWithAllocator(allocator);
     defer arg_iterator.deinit();
 
-    var command = cli.parse_args(allocator, &arg_iterator);
-    defer command.deinit(allocator);
+    var command = cli.parse_args(&arg_iterator);
 
     switch (command) {
         .format => |*args| try Command.format(allocator, args, .{
@@ -256,7 +255,7 @@ const Command = struct {
         defer command.deinit(allocator);
 
         var message_pool = try MessagePool.init(allocator, .{ .replica = .{
-            .members_count = @intCast(args.addresses.len),
+            .members_count = args.addresses.count_as(u8),
             .pipeline_requests_limit = args.pipeline_requests_limit,
         } });
         defer message_pool.deinit(allocator);
@@ -346,7 +345,7 @@ const Command = struct {
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
-            .node_count = @intCast(args.addresses.len),
+            .node_count = args.addresses.count_as(u8),
             .release = config.process.release,
             .release_client_min = config.process.release_client_min,
             .releases_bundled = releases_bundled,
@@ -369,7 +368,7 @@ const Command = struct {
                 .cache_entries_account_balances = args.cache_account_balances,
             },
             .message_bus_options = .{
-                .configuration = args.addresses,
+                .configuration = args.addresses.const_slice(),
                 .io = &command.io,
                 .clients_limit = clients_limit,
             },
@@ -491,7 +490,13 @@ const Command = struct {
 
     pub fn repl(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Repl) !void {
         const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
-        try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
+        try Repl.run(
+            arena,
+            args.addresses.const_slice(),
+            args.cluster,
+            args.statements,
+            args.verbose,
+        );
     }
 };
 

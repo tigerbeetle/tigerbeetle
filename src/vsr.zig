@@ -793,26 +793,22 @@ test "exponential_backoff_with_jitter" {
 /// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
 pub fn parse_addresses(
-    allocator: std.mem.Allocator,
     raw: []const u8,
-    address_limit: usize,
+    out_buffer: []std.net.Address,
 ) ![]std.net.Address {
     const address_count = std.mem.count(u8, raw, ",") + 1;
-    if (address_count > address_limit) return error.AddressLimitExceeded;
-
-    const addresses = try allocator.alloc(std.net.Address, address_count);
-    errdefer allocator.free(addresses);
+    if (address_count > out_buffer.len) return error.AddressLimitExceeded;
 
     var index: usize = 0;
     var comma_iterator = std.mem.split(u8, raw, ",");
     while (comma_iterator.next()) |raw_address| : (index += 1) {
-        assert(index < address_limit);
+        assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        addresses[index] = try parse_address_and_port(raw_address);
+        out_buffer[index] = try parse_address_and_port(raw_address);
     }
     assert(index == address_count);
 
-    return addresses;
+    return out_buffer[0..address_count];
 }
 
 pub fn parse_address_and_port(string: []const u8) !std.net.Address {
@@ -958,9 +954,9 @@ test parse_addresses {
         .{ .raw = "1.2.3.4:5,2.3.4.5:65536", .err = error.PortOverflow },
     };
 
+    var buffer: [3]std.net.Address = undefined;
     for (vectors_positive) |vector| {
-        const addresses_actual = try parse_addresses(std.testing.allocator, vector.raw, 3);
-        defer std.testing.allocator.free(addresses_actual);
+        const addresses_actual = try parse_addresses(vector.raw, &buffer);
 
         try std.testing.expectEqual(addresses_actual.len, vector.addresses.len);
         for (vector.addresses, 0..) |address_expect, i| {
@@ -975,7 +971,7 @@ test parse_addresses {
     for (vectors_negative) |vector| {
         try std.testing.expectEqual(
             vector.err,
-            parse_addresses(std.testing.allocator, vector.raw, 2),
+            parse_addresses(vector.raw, buffer[0..2]),
         );
     }
 }
@@ -991,14 +987,16 @@ test "parse_addresses: fuzz" {
     const random = prng.random();
 
     var input_max: [len_max]u8 = .{0} ** len_max;
+    var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
         const len = random.uintAtMost(usize, len_max);
         const input = input_max[0..len];
         for (input) |*c| {
             c.* = alphabet[random.uintAtMost(usize, alphabet.len)];
         }
-        if (parse_addresses(std.testing.allocator, input, 3)) |addresses| {
-            std.testing.allocator.free(addresses);
+        if (parse_addresses(input, &buffer)) |addresses| {
+            assert(addresses.len > 0);
+            assert(addresses.len <= 3);
         } else |_| {}
     }
 }
