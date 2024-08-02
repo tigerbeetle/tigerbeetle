@@ -1903,6 +1903,7 @@ pub fn ReplicaType(
 
         fn on_repair(self: *Self, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
+            assert(self.syncing != .updating_superblock);
 
             if (self.status != .normal and self.status != .view_change) {
                 log.debug("{}: on_repair: ignoring ({})", .{ self.replica, self.status });
@@ -2227,16 +2228,19 @@ pub fn ReplicaType(
             assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
 
             if (message.header.commit > self.op_prepare_max() and (
-            //  Cluster is far ahead, replica's WAL no longer intersects primary's WAL.
+            //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
+            //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
+            //  prepares in this replica's WAL are no longer needed.
                 message.header.commit > self.op_prepare_max() + constants.vsr_checkpoint_interval or
-                // Cluster is a bit ahead. The replica might still be able to repair WAL, but that
-                // is not certain.
+                // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
+                // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
+                // there's evidence that the repair can't be completed.
                 (self.syncing == .idle and self.repair_stuck()) or
                 // Completing previously starting state sync.
                 self.syncing == .awaiting_checkpoint))
             {
-                // State sync: at this point, the we know we want to replace our checkpoint
-                // with the one from SV.
+                // State sync: at this point, we know we want to replace our checkpoint
+                // with the one from this SV.
 
                 assert(message.header.commit > self.op_checkpoint_next_trigger());
                 assert(view_checkpoint.header.op > self.op_checkpoint());
@@ -2246,7 +2250,7 @@ pub fn ReplicaType(
                     // need state sync after all.
                     if (self.commit_stage == .checkpoint_superblock) return;
                     if (self.commit_stage == .checkpoint_data) return;
-                    // Otherwise, cancel in progress commit and prepare to sync
+                    // Otherwise, cancel in progress commit and prepare to sync.
                     self.sync_start_from_committing();
                     assert(self.syncing != .idle);
                 }
@@ -2257,7 +2261,7 @@ pub fn ReplicaType(
                     .updating_superblock,
                     => {
                         log.debug(
-                            \\{}: on_start_view sync {s} view={} op_checkpoint={} op_checkpoint_new={}
+                            \\{}: on_start_view: sync {s} view={} op_checkpoint={} op_checkpoint_new={}
                         , .{
                             self.replica,
                             @tagName(self.syncing),
@@ -2271,7 +2275,7 @@ pub fn ReplicaType(
                 }
 
                 log.debug(
-                    \\{}: on_start_view sync started view={} op_checkpoint={} op_checkpoint_new={}
+                    \\{}: on_start_view sync: started view={} op_checkpoint={} op_checkpoint_new={}
                 , .{
                     self.replica,
                     self.log_view,
@@ -2283,7 +2287,7 @@ pub fn ReplicaType(
                     .checkpoint_state = view_checkpoint.*,
                 } });
 
-                // The new checkpoint would we written to the superblock asynchronously.
+                // The new checkpoint will be written to the superblock asynchronously.
                 // From this point on, we are in a delicate state where we must be using this
                 // in-memory checkpoint to check validity of log messages.
                 assert(self.syncing == .updating_superblock);
@@ -7879,7 +7883,8 @@ pub fn ReplicaType(
                                 self.op_checkpoint(),
                             )) |trigger|
                                 // +1 because sync_op_min is inclusive, but (when !syncing_already)
-                                // `vsr_state.commit_min` itself does not need to be synced.
+                                // `vsr_state.checkpoint.commit_min` itself does not need to be
+                                // synced.
                                 trigger + 1
                             else
                                 0;
@@ -7926,9 +7931,6 @@ pub fn ReplicaType(
                 },
                 else => {},
             }
-
-            // recovering_head here is triggered by state sync.
-            if (self.status == .recovering_head) return;
 
             // The view/log_view incremented while the previous view-change update was being saved.
             const update = self.log_view_durable() < self.log_view or
@@ -8916,13 +8918,17 @@ pub fn ReplicaType(
         fn sync_superblock_update_start(self: *Self) void {
             assert(!self.solo());
             assert(self.syncing == .updating_superblock);
+            assert(self.superblock.working.vsr_state.checkpoint.header.op <
+                self.syncing.updating_superblock.checkpoint_state.header.checksum);
             assert(self.sync_tables == null);
+            assert(self.commit_stage == .idle);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_writes.executing() == 0);
             assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             maybe(self.state_machine_opened);
+            maybe(self.view_durable_updating());
 
             self.state_machine_opened = false;
             self.state_machine.reset();
@@ -8935,6 +8941,7 @@ pub fn ReplicaType(
 
         fn sync_superblock_update_finish(self: *Self) void {
             assert(self.sync_tables == null);
+            assert(self.commit_stage == .idle);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(self.grid_repair_tables.executing() == 0);
@@ -8948,6 +8955,8 @@ pub fn ReplicaType(
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
             assert(self.superblock.working.vsr_state.checkpoint.header.checksum ==
+                stage.checkpoint_state.header.checksum);
+            assert(self.superblock.staging.vsr_state.checkpoint.header.checksum ==
                 stage.checkpoint_state.header.checksum);
             assert(stdx.equal_bytes(
                 vsr.CheckpointState,

@@ -647,6 +647,7 @@ test "Cluster: repair: ack committed prepare" {
     try expectEqual(b2.status(), .normal);
 
     // Change views. B1/B2 participate. Don't allow B2 to repair op=3.
+    try expectEqual(p.role(), .primary);
     t.replica(.R_).pass(.R_, .bidirectional, .start_view_change);
     t.replica(.R_).pass(.R_, .bidirectional, .do_view_change);
     p.drop(.__, .bidirectional, .prepare);
@@ -655,6 +656,7 @@ test "Cluster: repair: ack committed prepare" {
     t.run();
     try expectEqual(b1.commit(), 2);
     try expectEqual(b2.commit(), 2);
+    try expectEqual(p.role(), .backup);
 
     try expectEqual(p.status(), .normal);
     try expectEqual(b1.status(), .normal);
@@ -1067,7 +1069,9 @@ test "Cluster: sync: view-change with lagging replica" {
     // Let the cluster run for some time without B2 state syncing.
     b2.drop(.R_, .bidirectional, .start_view);
     t.run();
+    try expectEqual(b2.status(), .view_change);
     try expectEqual(b2.op_checkpoint(), 0);
+    try c.request(checkpoint_2_trigger + 1, checkpoint_2_trigger); // Cluster is blocked.
 
     // Let B2 state sync. This unblocks the cluster.
     b2.pass(.R_, .bidirectional, .start_view);
@@ -1075,7 +1079,7 @@ test "Cluster: sync: view-change with lagging replica" {
     try expectEqual(b1.role(), .primary);
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).sync_status(), .idle);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+    try expect(b2.commit() >= checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 
     // Note: we need to commit more --- state sync status is cleared only at checkpoint.
@@ -1167,6 +1171,7 @@ test "Cluster: sync: checkpoint from a newer view" {
 
         try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
 
+        // Wipe B1 in-memory state and check that it ends up in a consistent state after restart.
         b1.stop();
         try b1.open();
         t.run();
