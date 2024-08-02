@@ -69,7 +69,8 @@ pub const CountingAllocator = @import("counting_allocator.zig");
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
-pub const Version: u16 = 0;
+pub const VersionCurrent: u16 = 0;
+pub const VersionNext: u16 = 1;
 
 pub const multiversioning = @import("multiversioning.zig");
 pub const ReleaseList = multiversioning.ReleaseList;

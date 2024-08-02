@@ -76,6 +76,7 @@ pub const Options = union(vsr.ProcessType) {
                 // Connection.send_queue:
                 sum += connections_max * constants.connection_send_queue_max_replica;
                 sum += 1; // Handle bursts (e.g. Connection.parse_message)
+                sum += 1; // Extra burst from sending two SV variants.
                 // Handle Replica.commit_op's reply:
                 // (This is separate from the burst +1 because they may occur concurrently).
                 sum += 1;

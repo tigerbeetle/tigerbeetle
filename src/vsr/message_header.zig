@@ -172,9 +172,10 @@ pub const Header = extern struct {
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
 
         if (self.command == .block) {
-            if (self.protocol > vsr.Version) return "block: protocol > Version";
+            if (self.protocol > vsr.VersionNext) return "block: protocol > Version";
         } else {
-            if (self.protocol != vsr.Version) return "protocol != Version";
+            if (self.protocol != vsr.VersionCurrent and
+                self.protocol != vsr.VersionNext) return "protocol != Version";
         }
 
         switch (self.into_any()) {
@@ -290,7 +291,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0,
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8 = 0,
         reserved_frame: [12]u8,
@@ -318,7 +319,7 @@ pub const Header = extern struct {
         // view, to avoid disrupting clock synchronization while the view is being updated.
         view: u32,
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -366,7 +367,7 @@ pub const Header = extern struct {
         // view, to avoid disrupting clock synchronization while the view is being updated.
         view: u32 = 0,
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -401,7 +402,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8 = 0, // Always 0.
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -435,7 +436,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -466,7 +467,7 @@ pub const Header = extern struct {
         view: u32 = 0,
         /// The client's release version.
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8 = 0, // Always 0.
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -583,7 +584,7 @@ pub const Header = extern struct {
         view: u32,
         /// The corresponding Request's release version.
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8 = 0,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -750,7 +751,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -837,7 +838,7 @@ pub const Header = extern struct {
         /// - to emphasize that the reply's format must be compatible with the client's version –
         ///   which is potentially behind the cluster's version when the prepare commits.
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -899,7 +900,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -946,7 +947,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -976,7 +977,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1022,7 +1023,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1059,7 +1060,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1091,7 +1092,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1127,7 +1128,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1162,7 +1163,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1199,7 +1200,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1228,7 +1229,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1284,7 +1285,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1319,7 +1320,7 @@ pub const Header = extern struct {
         view: u32 = 0, // Always 0.
         /// The release that generated this block.
         release: vsr.Release,
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8 = 0, // Always 0.
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1361,7 +1362,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
@@ -1394,7 +1395,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
+        protocol: u16 = vsr.VersionCurrent,
         command: Command,
         replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,

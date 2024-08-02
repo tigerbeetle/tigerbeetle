@@ -1394,6 +1394,7 @@ pub fn ReplicaType(
                 .request_reply => |m| self.on_request_reply(m),
                 .headers => |m| self.on_headers(m),
                 .request_blocks => |m| self.on_request_blocks(m),
+                .request_sync_checkpoint => |m| self.on_request_sync_checkpoint(m),
                 .block => |m| self.on_block(m),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
@@ -1403,7 +1404,7 @@ pub fn ReplicaType(
                     });
                     return;
                 },
-                .request_sync_checkpoint, .sync_checkpoint => {
+                .sync_checkpoint => {
                     log.warn("{}: on_message: ignoring old protocol ({s})", .{
                         self.replica,
                         @tagName(message.header.command),
@@ -2212,22 +2213,26 @@ pub fn ReplicaType(
                 }
             }
             assert(self.view == message.header.view);
+            assert(message.header.protocol == vsr.VersionCurrent or
+                message.header.protocol == vsr.VersionNext);
 
             const view_checkpoint = start_view_message_checkpoint(message);
-            if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
-                assert(message.header.commit >= trigger);
+            if (view_checkpoint) |checkpoint| {
+                if (vsr.Checkpoint.trigger_for_checkpoint(checkpoint.header.op)) |trigger| {
+                    assert(message.header.commit >= trigger);
+                }
+                assert(
+                    message.header.op <= vsr.Checkpoint.prepare_max_for_checkpoint(
+                        vsr.Checkpoint.checkpoint_after(checkpoint.header.op),
+                    ).?,
+                );
             }
-            assert(
-                message.header.op <= vsr.Checkpoint.prepare_max_for_checkpoint(
-                    vsr.Checkpoint.checkpoint_after(view_checkpoint.header.op),
-                ).?,
-            );
 
             const view_headers = start_view_message_headers(message);
             assert(view_headers[0].op == message.header.op);
             assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
 
-            if (message.header.commit > self.op_prepare_max() and (
+            if (view_checkpoint != null and message.header.commit > self.op_prepare_max() and (
             //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
             //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
             //  prepares in this replica's WAL are no longer needed.
@@ -2243,7 +2248,7 @@ pub fn ReplicaType(
                 // with the one from this SV.
 
                 assert(message.header.commit > self.op_checkpoint_next_trigger());
-                assert(view_checkpoint.header.op > self.op_checkpoint());
+                assert(view_checkpoint.?.header.op > self.op_checkpoint());
 
                 if (self.syncing == .idle) {
                     // If we are already checkpointing, let that finish first --- perhaps we won't
@@ -2267,7 +2272,7 @@ pub fn ReplicaType(
                             @tagName(self.syncing),
                             self.log_view,
                             self.op_checkpoint(),
-                            view_checkpoint.header.op,
+                            view_checkpoint.?.header.op,
                         });
                         return;
                     },
@@ -2280,11 +2285,11 @@ pub fn ReplicaType(
                     self.replica,
                     self.log_view,
                     self.op_checkpoint(),
-                    view_checkpoint.header.op,
+                    view_checkpoint.?.header.op,
                 });
 
                 self.sync_dispatch(.{ .updating_superblock = .{
-                    .checkpoint_state = view_checkpoint.*,
+                    .checkpoint_state = view_checkpoint.?.*,
                 } });
 
                 // The new checkpoint will be written to the superblock asynchronously.
@@ -2314,7 +2319,10 @@ pub fn ReplicaType(
                             break;
                         }
                     }
-                } else unreachable;
+                } else {
+                    assert(view_checkpoint == null);
+                    return;
+                }
 
                 for (view_headers) |*header| {
                     if (header.op <= self.op_prepare_max_sync()) {
@@ -2379,16 +2387,22 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
             assert(self.primary());
 
-            const start_view = self.create_start_view_message(message.header.nonce);
-            defer self.message_bus.unref(start_view);
+            const start_view_messages = self.create_start_view_message(message.header.nonce);
+            defer self.message_bus.unref(start_view_messages.current);
+            defer self.message_bus.unref(start_view_messages.next);
 
-            assert(start_view.references == 1);
-            assert(start_view.header.command == .start_view);
-            assert(start_view.header.view == self.view);
-            assert(start_view.header.op == self.op);
-            assert(start_view.header.commit == self.commit_max);
+            for ([_]*Message.StartView{
+                start_view_messages.current,
+                start_view_messages.next,
+            }) |start_view| {
+                assert(start_view.references == 1);
+                assert(start_view.header.command == .start_view);
+                assert(start_view.header.view == self.view);
+                assert(start_view.header.op == self.op);
+                assert(start_view.header.commit == self.commit_max);
 
-            self.send_message_to_replica(message.header.replica, start_view);
+                self.send_message_to_replica(message.header.replica, start_view);
+            }
         }
 
         /// If the requested prepare has been guaranteed by this replica:
@@ -2773,8 +2787,8 @@ pub fn ReplicaType(
             assert(message.header.command == .block);
             assert(message.header.size <= constants.block_size);
             assert(message.header.address > 0);
-            assert(message.header.protocol <= vsr.Version);
-            maybe(message.header.protocol < vsr.Version);
+            assert(message.header.protocol <= vsr.VersionNext);
+            maybe(message.header.protocol < vsr.VersionCurrent);
 
             if (self.grid.callback == .cancel) {
                 assert(self.grid.read_global_queue.count == 0);
@@ -2854,6 +2868,20 @@ pub fn ReplicaType(
             });
 
             self.sync_reclaim_tables();
+        }
+
+        fn on_request_sync_checkpoint(
+            self: *Self,
+            message: *Message.RequestSyncCheckpoint,
+        ) void {
+            assert(message.header.command == .request_sync_checkpoint);
+            if (self.ignore_request_sync_checkpoint_message(message)) return;
+
+            assert(message.header.checkpoint_op ==
+                self.superblock.staging.vsr_state.checkpoint.header.op);
+            assert(message.header.checkpoint_id == self.superblock.staging.checkpoint_id());
+
+            self.send_sync_checkpoint(.{ .replica = message.header.replica });
         }
 
         fn on_ping_timeout(self: *Self) void {
@@ -4598,7 +4626,10 @@ pub fn ReplicaType(
 
         /// Construct a SV message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_start_view_message(self: *Self, nonce: u128) *Message.StartView {
+        fn create_start_view_message(self: *Self, nonce: u128) struct {
+            current: *Message.StartView,
+            next: *Message.StartView,
+        } {
             assert(self.status == .normal);
             assert(self.syncing != .updating_superblock);
             assert(self.replica == self.primary_index(self.view));
@@ -4623,6 +4654,9 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
+                // There are two versions of an SV: one with checkpoint and one without.
+                // Currently, we send both, but the version with checkpoint is canonical.
+                .protocol = vsr.VersionNext,
                 .checkpoint_op = self.op_checkpoint(),
                 .op = self.op,
                 .commit = self.commit_min, // (Same as commit_max.)
@@ -4645,7 +4679,26 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
-            return message.ref();
+            const message_copy = self.message_bus.get_message(.start_view);
+            defer self.message_bus.unref(message_copy);
+
+            message_copy.header.* = message.header.*;
+            message_copy.header.size -= @sizeOf(vsr.CheckpointState);
+            message_copy.header.protocol = vsr.VersionCurrent;
+            assert(message_copy.header.protocol + 1 == message.header.protocol);
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                message_copy.body(),
+                message.body()[@sizeOf(vsr.CheckpointState)..],
+            );
+            message_copy.header.set_checksum_body(message_copy.body());
+            message_copy.header.set_checksum();
+
+            return .{
+                .current = message_copy.ref(),
+                .next = message.ref(),
+            };
         }
 
         fn primary_update_view_headers(self: *Self) void {
@@ -7548,9 +7601,10 @@ pub fn ReplicaType(
             }
 
             if (message.header.command == .block) {
-                assert(message.header.protocol <= vsr.Version);
+                assert(message.header.protocol <= vsr.VersionNext);
             } else {
-                assert(message.header.protocol == vsr.Version);
+                assert(message.header.protocol == vsr.VersionCurrent or
+                    message.header.protocol == vsr.VersionNext);
             }
 
             // TODO According to message.header.command, assert on the destination replica.
@@ -7957,9 +8011,11 @@ pub fn ReplicaType(
                     // to guarantee freshness of the message.
                     const nonce = 0;
                     const start_view = self.create_start_view_message(nonce);
-                    defer self.message_bus.unref(start_view);
+                    defer self.message_bus.unref(start_view.current);
+                    defer self.message_bus.unref(start_view.next);
 
-                    self.send_message_to_other_replicas(start_view);
+                    self.send_message_to_other_replicas(start_view.current);
+                    self.send_message_to_other_replicas(start_view.next);
                 } else {
                     self.send_prepare_oks_after_view_change();
                 }
@@ -10242,26 +10298,53 @@ fn message_body_as_headers_unchecked(message: *const Message) []const Header.Pre
     );
 }
 
-fn start_view_message_checkpoint(message: *const Message.StartView) *const vsr.CheckpointState {
+fn start_view_message_checkpoint(message: *const Message.StartView) ?*const vsr.CheckpointState {
     assert(message.header.command == .start_view);
-    const checkpoint = std.mem.bytesAsValue(
-        vsr.CheckpointState,
-        message.body()[0..@sizeOf(vsr.CheckpointState)],
-    );
-    assert(checkpoint.header.valid_checksum());
-    assert(stdx.zeroed(&checkpoint.reserved));
-    return checkpoint;
+
+    switch (message.header.protocol) {
+        vsr.VersionCurrent => return null,
+        vsr.VersionNext => {
+            assert(
+                message.body().len > @sizeOf(vsr.CheckpointState),
+            );
+            const checkpoint = std.mem.bytesAsValue(
+                vsr.CheckpointState,
+                message.body()[0..@sizeOf(vsr.CheckpointState)],
+            );
+            assert(checkpoint.header.valid_checksum());
+            assert(stdx.zeroed(&checkpoint.reserved));
+            return checkpoint;
+        },
+        else => unreachable,
+    }
 }
 
 fn start_view_message_headers(message: *const Message.StartView) []const Header.Prepare {
     assert(message.header.command == .start_view);
-    // Body must contain at least one header.
-    assert(message.header.size > @sizeOf(Header) + @sizeOf(vsr.CheckpointState));
+    assert(message.header.protocol == vsr.VersionCurrent or
+        message.header.protocol == vsr.VersionNext);
 
-    const headers = std.mem.bytesAsSlice(
+    // Body must contain at least one header.
+    switch (message.header.protocol) {
+        vsr.VersionCurrent => assert(message.header.size > @sizeOf(Header)),
+        vsr.VersionNext => assert(
+            message.header.size > @sizeOf(Header) + @sizeOf(vsr.CheckpointState),
+        ),
+        else => unreachable,
+    }
+
+    const headers_offset: usize = switch (message.header.protocol) {
+        vsr.VersionCurrent => 0,
+        vsr.VersionNext => @sizeOf(vsr.CheckpointState),
+        else => unreachable,
+    };
+
+    assert(headers_offset % @alignOf(vsr.Header) == 0);
+    const headers: []const vsr.Header.Prepare = @alignCast(std.mem.bytesAsSlice(
         Header.Prepare,
-        message.body()[@sizeOf(vsr.CheckpointState)..],
-    );
+        message.body()[headers_offset..],
+    ));
+    assert(headers.len > 0);
     // To run verification.
     _ = vsr.Headers.ViewChangeSlice.init(.start_view, headers);
     if (constants.verify) {
