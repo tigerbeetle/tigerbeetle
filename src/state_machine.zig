@@ -1791,7 +1791,8 @@ pub fn StateMachineType(
             const amount = amount: {
                 var amount = t.amount;
                 if (t.flags.balancing_debit or t.flags.balancing_credit) {
-                    if (amount == 0) amount = std.math.maxInt(u64);
+                    comptime assert(@TypeOf(amount) == u128);
+                    if (amount == 0) amount = std.math.maxInt(u128);
                 } else {
                     assert(amount != 0);
                 }
@@ -2645,7 +2646,6 @@ fn ExpirePendingTransfersType(
 const testing = std.testing;
 const expect = testing.expect;
 const expectEqual = testing.expectEqual;
-const expectEqualSlices = testing.expectEqualSlices;
 
 fn sum_overflows_test(comptime Int: type) !void {
     try expectEqual(false, sum_overflows(Int, math.maxInt(Int), 0));
@@ -3862,6 +3862,33 @@ test "create_transfers: balancing_debit | balancing_credit (amount=0)" {
         \\ lookup_transfer T1 amount 9
         \\ lookup_transfer T2 amount 8
         \\ lookup_transfer T3 amount 8
+        \\ commit lookup_transfers
+    );
+}
+
+test "create_transfers: balancing_debit | balancing_credit (amount=0, balance≈maxInt)" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ ok
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ setup A1 0  0 0 -1
+        \\ setup A4 0 -1 0  0
+        \\
+        \\ transfer   T1 A1 A2    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ ok
+        \\ transfer   T2 A3 A4    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 0 -1  0 -1
+        \\ lookup_account A2 0  0  0 -1
+        \\ lookup_account A3 0 -1  0  0
+        \\ lookup_account A4 0 -1  0 -1
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 amount -1
+        \\ lookup_transfer T2 amount -1
         \\ commit lookup_transfers
     );
 }
