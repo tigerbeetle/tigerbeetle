@@ -348,22 +348,12 @@ pub fn main() !void {
     while (tick < cli_args.ticks_max_convergence) : (tick += 1) {
         simulator.tick();
         tick_total += 1;
-        if (simulator.done()) {
+        if (simulator.pending() == null) {
             break;
         }
     }
 
-    if (simulator.done()) {
-        const commits = simulator.cluster.state_checker.commits.items;
-        const last_checksum = commits[commits.len - 1].header.checksum;
-        for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
-            if (simulator.core.isSet(replica_index)) {
-                try aof.validate(last_checksum);
-            } else {
-                try aof.validate(null);
-            }
-        }
-    } else {
+    if (simulator.pending()) |reason| {
         if (simulator.core_missing_primary()) {
             stdx.unimplemented("repair requires reachable primary");
         } else if (simulator.core_missing_quorum()) {
@@ -376,7 +366,17 @@ pub fn main() !void {
             output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
             output.err("you can reproduce this failure with seed={}", .{seed});
-            fatal(.liveness, "no state convergence", .{});
+            fatal(.liveness, "no state convergence: {s}", .{reason});
+        }
+    } else {
+        const commits = simulator.cluster.state_checker.commits.items;
+        const last_checksum = commits[commits.len - 1].header.checksum;
+        for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
+            if (simulator.core.isSet(replica_index)) {
+                try aof.validate(last_checksum);
+            } else {
+                try aof.validate(null);
+            }
         }
     }
 
@@ -495,7 +495,7 @@ pub const Simulator = struct {
         simulator.cluster.deinit();
     }
 
-    pub fn done(simulator: *const Simulator) bool {
+    pub fn pending(simulator: *const Simulator) ?[]const u8 {
         assert(simulator.core.count() > 0);
         assert(simulator.requests_sent == simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
@@ -505,7 +505,7 @@ pub const Simulator = struct {
                 // be in-flight. Any other requests should already be complete before done() is
                 // called.
                 assert(request.message.header.operation == .register);
-                return false;
+                return "pending register request";
             }
         }
 
@@ -516,14 +516,14 @@ pub const Simulator = struct {
                 // (If down, the replica is waiting to be upgraded.)
                 maybe(simulator.cluster.replica_health[replica.replica] == .down);
 
-                if (replica.release.value != release_max.value) return false;
+                if (replica.release.value != release_max.value) return "pending upgrade";
             }
         }
 
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica)) {
                 if (!simulator.cluster.state_checker.replica_convergence(replica.replica)) {
-                    return false;
+                    return "pending replica convergence";
                 }
             }
         }
@@ -536,12 +536,12 @@ pub const Simulator = struct {
             if (simulator.core.isSet(replica.replica)) {
                 for (replica.op_checkpoint() + 1..commit_max + 1) |op| {
                     const header = simulator.cluster.state_checker.header_with_op(op);
-                    if (!replica.journal.has_clean(&header)) return false;
+                    if (!replica.journal.has_clean(&header)) return "pending journal";
                 }
                 // It's okay for a replica to miss some prepares older than the current checkpoint.
                 maybe(replica.journal.faulty.count > 0);
 
-                if (!replica.sync_content_done()) return false;
+                if (!replica.sync_content_done()) return "pending sync content";
             }
         }
 
@@ -559,7 +559,7 @@ pub const Simulator = struct {
         }
         assert(checkpoint_id != null);
 
-        return true;
+        return null;
     }
 
     pub fn tick(simulator: *Simulator) void {
