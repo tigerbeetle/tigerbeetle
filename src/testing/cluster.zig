@@ -533,6 +533,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.releases_bundled[replica_index] = options.releases_bundled.*;
 
             var replica = &cluster.replicas[replica_index];
+            const release_latest = cluster.options.releases[cluster.options.releases.len - 1];
+            replica.protocol = if (options.release.value == release_latest.release.value)
+                vsr.VersionNext
+            else
+                vsr.VersionCurrent;
             try replica.open(
                 cluster.allocator,
                 .{

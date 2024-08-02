@@ -1364,6 +1364,14 @@ pub fn ReplicaType(
                 return;
             }
 
+            if (message.header.protocol > self.protocol) {
+                log.err("{}: on_message: incompatible version (command={})", .{
+                    self.replica,
+                    message.header.command,
+                });
+                return;
+            }
+
             // No client or replica should ever send a .reserved message.
             assert(message.header.command != .reserved);
 
@@ -6403,7 +6411,7 @@ pub fn ReplicaType(
                     @bitCast(Header.RequestReply{
                         .command = .request_reply,
                         .cluster = self.cluster,
-                .protocol = self.protocol,
+                        .protocol = self.protocol,
                         .replica = self.replica,
                         .reply_client = entry.header.client,
                         .reply_op = entry.header.op,
@@ -7277,7 +7285,7 @@ pub fn ReplicaType(
                         .cluster = self.cluster,
                         .replica = self.replica,
                         .epoch = header.epoch,
-                .protocol = self.protocol,
+                        .protocol = self.protocol,
                         .view = self.view,
                         .op = header.op,
                         .commit = header.commit,
@@ -9482,7 +9490,7 @@ pub fn ReplicaType(
                             .command = .request_start_view,
                             .cluster = self.cluster,
                             .replica = self.replica,
-                .protocol = self.protocol,
+                            .protocol = self.protocol,
                             .view = header.view,
                             .nonce = self.nonce,
                         }),
