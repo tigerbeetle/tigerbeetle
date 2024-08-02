@@ -147,6 +147,7 @@ pub fn main() !void {
         .storage_size_limit = storage_size_limit,
         .seed = random.int(u64),
         .releases = &releases,
+        .client_release = releases[0].release,
         .network = .{
             .node_count = node_count,
             .client_count = client_count,

@@ -82,6 +82,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             /// - Only releases[0] is "bundled" in each replica. (Use `restart_replica()` to add
             ///   more).
             releases: []const Release,
+            client_release: vsr.Release,
 
             network: NetworkOptions,
             storage: Storage.Options,
@@ -287,7 +288,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         .eviction_callback = client_on_eviction,
                     },
                 );
-                client.release = options.releases[0].release;
+                client.release = options.client_release;
             }
             errdefer for (clients) |*client| client.deinit(allocator);
 
