@@ -19,7 +19,7 @@ pub const Stage = union(enum) {
     canceling_grid,
 
     /// We received an SV, decided to sync, but were committing at that point. So instead we
-    /// requested cancelletion of the commit process and entered `awaiting_checkpoint` to get
+    /// requested cancellation of the commit process and entered `awaiting_checkpoint` to get
     /// a new SV in the future, while commit stage is idle.
     ///
     /// TODO: Right now this works by literally requesting a new SV from the primary, but it would

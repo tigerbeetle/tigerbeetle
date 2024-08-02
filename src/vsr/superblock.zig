@@ -902,10 +902,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
             sync_op_max: u64,
         };
 
-        /// The replica calls view_change() to persist its view/log_view — it cannot
-        /// advertise either value until it is certain they will never backtrack.
+        /// The replica calls view_change():
         ///
-        /// The update must advance view/log_view (monotonically increasing).
+        /// - to persist its view/log_view — it cannot advertise either value until it is certain
+        ///   they will never backtrack.
+        /// - to update checkpoint during sync
+        ///
+        /// The update must advance view/log_view (monotonically increasing) or checkpoint.
+        // TODO: the current naming confusing and needs changing: during sync, this function doesn't
+        //       necessary advance the view.
         pub fn view_change(
             superblock: *SuperBlock,
             callback: *const fn (context: *Context) void,

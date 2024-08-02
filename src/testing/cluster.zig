@@ -825,7 +825,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 commit = ' ',
                 checkpoint_commenced = '[',
                 checkpoint_completed = ']',
-                sync_commenced = '<',
                 sync_completed = '>',
             },
             replica_index: u8,
