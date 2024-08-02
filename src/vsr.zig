@@ -1531,6 +1531,105 @@ pub const Checkpoint = struct {
     }
 };
 
+test "Checkpoint ops diagram" {
+    const Snap = @import("./testing/snaptest.zig").Snap;
+    const snap = Snap.snap;
+
+    var string = std.ArrayList(u8).init(std.testing.allocator);
+    defer string.deinit();
+
+    var string2 = std.ArrayList(u8).init(std.testing.allocator);
+    defer string2.deinit();
+
+    try string.writer().print(
+        \\journal_slot_count={[journal_slot_count]}
+        \\lsm_batch_multiple={[lsm_batch_multiple]}
+        \\pipeline_prepare_queue_max={[pipeline_prepare_queue_max]}
+        \\vsr_checkpoint_interval={[vsr_checkpoint_interval]}
+        \\
+        \\
+    , .{
+        .journal_slot_count = constants.journal_slot_count,
+        .lsm_batch_multiple = constants.lsm_batch_multiple,
+        .pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max,
+        .vsr_checkpoint_interval = constants.vsr_checkpoint_interval,
+    });
+
+    var checkpoint_prev: u64 = 0;
+    var checkpoint_next: u64 = 0;
+    var checkpoint_count: u32 = 0;
+    for (0..constants.journal_slot_count * 10) |op| {
+        const last_beat = op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1;
+        const last_slot = (op % constants.journal_slot_count) + 1 == constants.journal_slot_count;
+
+        const op_type: enum {
+            normal,
+            checkpoint,
+            checkpoint_trigger,
+            checkpoint_prepare_max,
+        } = op_type: {
+            if (op == checkpoint_next) break :op_type .checkpoint;
+            if (checkpoint_prev != 0) {
+                if (op == Checkpoint.trigger_for_checkpoint(checkpoint_prev).?) {
+                    break :op_type .checkpoint_trigger;
+                }
+
+                if (op == Checkpoint.prepare_max_for_checkpoint(checkpoint_prev).?) {
+                    break :op_type .checkpoint_prepare_max;
+                }
+            }
+            break :op_type .normal;
+        };
+
+        // Marker for tidy.zig to ignore the long lines.
+        if (op % constants.journal_slot_count == 0) try string.appendSlice("OPS: ");
+
+        try string.writer().print("{s}{:_>3}{s}", .{
+            switch (op_type) {
+                .normal => " ",
+                .checkpoint => if (checkpoint_count % 2 == 0) "[" else "{",
+                .checkpoint_trigger => "<",
+                .checkpoint_prepare_max => " ",
+            },
+            op,
+            switch (op_type) {
+                .normal => if (last_slot) "" else " ",
+                .checkpoint => if (last_slot) "" else " ",
+                .checkpoint_trigger => ">",
+                .checkpoint_prepare_max => if (checkpoint_count % 2 == 0) "]" else "}",
+            },
+        });
+
+        if (last_slot) try string.append('\n');
+        if (!last_slot and last_beat) try string.append(' ');
+
+        if (op_type == .checkpoint) {
+            checkpoint_prev = checkpoint_next;
+            checkpoint_next = Checkpoint.checkpoint_after(checkpoint_prev);
+        }
+        checkpoint_count += @intFromBool(op == checkpoint_prev);
+    }
+
+    try snap(@src(),
+        \\journal_slot_count=32
+        \\lsm_batch_multiple=4
+        \\pipeline_prepare_queue_max=4
+        \\vsr_checkpoint_interval=20
+        \\
+        \\OPS: [__0  __1  __2  __3   __4  __5  __6  __7   __8  __9  _10  _11   _12  _13  _14  _15   _16  _17  _18 {_19   _20  _21  _22 <_23>  _24  _25  _26  _27]  _28  _29  _30  _31
+        \\OPS:  _32  _33  _34  _35   _36  _37  _38 [_39   _40  _41  _42 <_43>  _44  _45  _46  _47}  _48  _49  _50  _51   _52  _53  _54  _55   _56  _57  _58 {_59   _60  _61  _62 <_63>
+        \\OPS:  _64  _65  _66  _67]  _68  _69  _70  _71   _72  _73  _74  _75   _76  _77  _78 [_79   _80  _81  _82 <_83>  _84  _85  _86  _87}  _88  _89  _90  _91   _92  _93  _94  _95
+        \\OPS:  _96  _97  _98 {_99   100  101  102 <103>  104  105  106  107]  108  109  110  111   112  113  114  115   116  117  118 [119   120  121  122 <123>  124  125  126  127}
+        \\OPS:  128  129  130  131   132  133  134  135   136  137  138 {139   140  141  142 <143>  144  145  146  147]  148  149  150  151   152  153  154  155   156  157  158 [159
+        \\OPS:  160  161  162 <163>  164  165  166  167}  168  169  170  171   172  173  174  175   176  177  178 {179   180  181  182 <183>  184  185  186  187]  188  189  190  191
+        \\OPS:  192  193  194  195   196  197  198 [199   200  201  202 <203>  204  205  206  207}  208  209  210  211   212  213  214  215   216  217  218 {219   220  221  222 <223>
+        \\OPS:  224  225  226  227]  228  229  230  231   232  233  234  235   236  237  238 [239   240  241  242 <243>  244  245  246  247}  248  249  250  251   252  253  254  255
+        \\OPS:  256  257  258 {259   260  261  262 <263>  264  265  266  267]  268  269  270  271   272  273  274  275   276  277  278 [279   280  281  282 <283>  284  285  286  287}
+        \\OPS:  288  289  290  291   292  293  294  295   296  297  298 {299   300  301  302 <303>  304  305  306  307]  308  309  310  311   312  313  314  315   316  317  318 [319
+        \\
+    ).diff(string.items);
+}
+
 pub const Snapshot = struct {
     /// A table with TableInfo.snapshot_min=S was written during some commit with op<S.
     /// A block with snapshot_min=S is definitely readable at op=S.
