@@ -1198,6 +1198,7 @@ pub const Headers = struct {
             .operation = .reserved,
             .op = op,
             .cluster = 0,
+            .protocol = 0,
             .view = 0,
             .request_checksum = 0,
             .checkpoint_id = 0,

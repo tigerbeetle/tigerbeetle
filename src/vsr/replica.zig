@@ -211,6 +211,9 @@ pub fn ReplicaType(
         /// More than half of replica_count.
         quorum_majority: u8,
 
+        // To be able to override replica's protocol in the VOPR, store it as a field.
+        protocol: u16 = vsr.VersionCurrent,
+
         /// The version of code that is running right now.
         ///
         /// Invariants:
@@ -1445,6 +1448,8 @@ pub fn ReplicaType(
                 .command = .pong,
                 .cluster = self.cluster,
                 .replica = self.replica,
+                .protocol = self.protocol,
+
                 .view = self.view_durable(), // Don't drop pongs while the view is being updated.
                 .release = self.release,
                 // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
@@ -1507,6 +1512,8 @@ pub fn ReplicaType(
                 .command = .pong_client,
                 .cluster = self.cluster,
                 .replica = self.replica,
+                .protocol = self.protocol,
+
                 .view = self.view,
                 .release = self.release,
             }));
@@ -2510,6 +2517,7 @@ pub fn ReplicaType(
                 .command = .headers,
                 .cluster = self.cluster,
                 .replica = self.replica,
+                .protocol = self.protocol,
                 .view = self.view,
             };
 
@@ -2895,6 +2903,7 @@ pub fn ReplicaType(
                 .size = @sizeOf(Header) + @sizeOf(vsr.Release) * constants.vsr_releases_max,
                 .cluster = self.cluster,
                 .replica = self.replica,
+                .protocol = self.protocol,
                 // Don't drop pings while the view is being updated.
                 .view = @max(self.view_durable(), self.superblock.working.vsr_state.sync_view),
                 .release = self.release,
@@ -3122,6 +3131,7 @@ pub fn ReplicaType(
                     .command = .request_start_view,
                     .cluster = self.cluster,
                     .replica = self.replica,
+                    .protocol = self.protocol,
                     .view = self.view,
                     .nonce = self.nonce,
                 }),
@@ -3155,6 +3165,7 @@ pub fn ReplicaType(
                         .command = .request_start_view,
                         .cluster = self.cluster,
                         .replica = self.replica,
+                        .protocol = self.protocol,
                         .view = self.view,
                         .nonce = self.nonce,
                     }),
@@ -4317,6 +4328,7 @@ pub fn ReplicaType(
                 .request = prepare.header.request,
                 .cluster = prepare.header.cluster,
                 .replica = prepare.header.replica,
+                .protocol = self.protocol,
                 .view = prepare.header.view,
                 .release = prepare.header.release,
                 .op = prepare.header.op,
@@ -6092,6 +6104,7 @@ pub fn ReplicaType(
             message.header.* = Header.Prepare{
                 .cluster = self.cluster,
                 .size = request_header.size,
+                .protocol = self.protocol,
                 .view = self.view,
                 .release = request_header.release,
                 .command = .prepare,
@@ -6302,6 +6315,7 @@ pub fn ReplicaType(
                         .command = .request_start_view,
                         .cluster = self.cluster,
                         .replica = self.replica,
+                        .protocol = self.protocol,
                         .view = self.view,
                         .nonce = self.nonce,
                     }),
@@ -6339,6 +6353,7 @@ pub fn ReplicaType(
                     @bitCast(Header.RequestHeaders{
                         .command = .request_headers,
                         .cluster = self.cluster,
+                        .protocol = self.protocol,
                         .replica = self.replica,
                         .op_min = range.op_min,
                         .op_max = range.op_max,
@@ -6388,6 +6403,7 @@ pub fn ReplicaType(
                     @bitCast(Header.RequestReply{
                         .command = .request_reply,
                         .cluster = self.cluster,
+                .protocol = self.protocol,
                         .replica = self.replica,
                         .reply_client = entry.header.client,
                         .reply_op = entry.header.op,
@@ -6952,6 +6968,7 @@ pub fn ReplicaType(
             const request_prepare = Header.RequestPrepare{
                 .command = .request_prepare,
                 .cluster = self.cluster,
+                .protocol = self.protocol,
                 .replica = self.replica,
                 .prepare_op = op,
                 .prepare_checksum = checksum,
@@ -7260,6 +7277,7 @@ pub fn ReplicaType(
                         .cluster = self.cluster,
                         .replica = self.replica,
                         .epoch = header.epoch,
+                .protocol = self.protocol,
                         .view = self.view,
                         .op = header.op,
                         .commit = header.commit,
@@ -7299,6 +7317,7 @@ pub fn ReplicaType(
                 .command = .start_view_change,
                 .cluster = self.cluster,
                 .replica = self.replica,
+                .protocol = self.protocol,
                 .view = self.view,
             };
 
@@ -7385,6 +7404,7 @@ pub fn ReplicaType(
                 .command = .do_view_change,
                 .cluster = self.cluster,
                 .replica = self.replica,
+                .protocol = self.protocol,
                 .view = self.view,
                 // The latest normal view (as specified in the 2012 paper) is different to the view
                 // number contained in the prepare headers we include in the body. The former shows
@@ -7456,6 +7476,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .release = self.release,
                 .replica = self.replica,
+                .protocol = self.protocol,
                 .view = self.view,
                 .client = client,
                 .reason = reason,
@@ -9461,6 +9482,7 @@ pub fn ReplicaType(
                             .command = .request_start_view,
                             .cluster = self.cluster,
                             .replica = self.replica,
+                .protocol = self.protocol,
                             .view = header.view,
                             .nonce = self.nonce,
                         }),
@@ -9582,6 +9604,7 @@ pub fn ReplicaType(
             message.header.* = .{
                 .command = .request_blocks,
                 .cluster = self.cluster,
+                .protocol = self.protocol,
                 .replica = self.replica,
                 .size = @sizeOf(Header) + requests_count * @sizeOf(vsr.BlockRequest),
             };
@@ -9623,6 +9646,7 @@ pub fn ReplicaType(
             reply.header.* = .{
                 .command = .sync_checkpoint,
                 .cluster = self.cluster,
+                .protocol = self.protocol,
                 .replica = self.replica,
                 .size = @sizeOf(Header) + @sizeOf(vsr.CheckpointState),
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
@@ -9673,6 +9697,7 @@ pub fn ReplicaType(
                 .command = .commit,
                 .cluster = self.cluster,
                 .replica = self.replica,
+                .protocol = self.protocol,
                 .view = self.view,
                 .commit = self.commit_max,
                 .commit_checksum = latest_committed_entry,
@@ -9738,6 +9763,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .release = self.release,
                 .size = @intCast(@sizeOf(Header) + body.len),
+                .protocol = self.protocol,
                 .view = self.view,
                 .operation = operation,
                 .request = 0,
