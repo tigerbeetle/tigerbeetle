@@ -11,20 +11,21 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const Direction = @import("../direction.zig").Direction;
 
-/// A TableDataIterator iterates a table's data blocks in ascending or descending key order.
-pub fn TableDataIteratorType(comptime Storage: type) type {
+//TODO: rename to 'scan_table_value_iterator.zig'.
+/// A TableValueIterator iterates a table's value blocks in ascending or descending key order.
+pub fn TableValueIteratorType(comptime Storage: type) type {
     return struct {
-        const TableDataIterator = @This();
+        const TableValueIterator = @This();
 
         const Grid = GridType(Storage);
 
-        pub const Callback = *const fn (it: *TableDataIterator, data_block: ?BlockPtrConst) void;
+        pub const Callback = *const fn (it: *TableValueIterator, value_block: ?BlockPtrConst) void;
 
         pub const Context = struct {
             grid: *Grid,
-            /// Table data block addresses.
+            /// Table value block addresses.
             addresses: []const u64,
-            /// Table data block checksums.
+            /// Table value block checksums.
             checksums: []const schema.Checksum,
             direction: Direction,
         };
@@ -40,38 +41,10 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
         read: Grid.Read,
         next_tick: Grid.NextTick,
 
-        pub fn init() TableDataIterator {
-            var it: TableDataIterator = undefined;
-            it.reset();
-            return it;
-        }
-
-        pub fn deinit(it: *TableDataIterator) void {
-            it.* = undefined;
-        }
-
-        pub fn reset(it: *TableDataIterator) void {
-            it.* = .{
-                .context = .{
-                    .grid = undefined,
-                    // The zero-init here is important.
-                    // In other places we assume that we can call `next` on a fresh
-                    // TableDataIterator and get `null` rather than UB.
-                    .addresses = &.{},
-                    .checksums = &.{},
-                    .direction = .ascending,
-                },
-                .callback = .none,
-                .read = undefined,
-                .next_tick = undefined,
-            };
-        }
-
-        pub fn start(
-            it: *TableDataIterator,
+        pub fn init(
+            it: *TableValueIterator,
             context: Context,
         ) void {
-            assert(it.callback == .none);
             assert(context.addresses.len == context.checksums.len);
 
             it.* = .{
@@ -82,14 +55,14 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
             };
         }
 
-        pub fn empty(it: *const TableDataIterator) bool {
+        pub fn empty(it: *const TableValueIterator) bool {
             assert(it.context.addresses.len == it.context.checksums.len);
             return it.context.addresses.len == 0;
         }
 
         /// Calls `callback` with either the next data block or null.
         /// The block is only valid for the duration of the callback.
-        pub fn next(it: *TableDataIterator, callback: Callback) void {
+        pub fn next(it: *TableValueIterator, callback: Callback) void {
             assert(it.callback == .none);
             assert(it.context.addresses.len == it.context.checksums.len);
 
@@ -110,13 +83,16 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                     .{ .cache_read = true, .cache_write = true },
                 );
             } else {
+                assert(it.context.addresses.len == 0);
+                assert(it.context.checksums.len == 0);
+
                 it.callback = .{ .next_tick = callback };
                 it.context.grid.on_next_tick(on_next_tick, &it.next_tick);
             }
         }
 
         fn on_read(read: *Grid.Read, block: BlockPtrConst) void {
-            const it: *TableDataIterator = @fieldParentPtr("read", read);
+            const it: *TableValueIterator = @fieldParentPtr("read", read);
             assert(it.callback == .read);
             assert(it.context.addresses.len == it.context.checksums.len);
 
@@ -152,7 +128,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {
-            const it: *TableDataIterator = @alignCast(@fieldParentPtr("next_tick", next_tick));
+            const it: *TableValueIterator = @alignCast(@fieldParentPtr("next_tick", next_tick));
             assert(it.callback == .next_tick);
             assert(it.empty());
 

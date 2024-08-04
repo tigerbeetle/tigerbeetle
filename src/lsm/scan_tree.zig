@@ -25,8 +25,8 @@ const TreeTableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 const ScanState = @import("scan_state.zig").ScanState;
-const LevelTableValueBlockIteratorType =
-    @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
+const TableIndexIteratorType =
+    @import("level_data_iterator.zig").TableIndexIteratorType;
 
 /// Scans a range of keys over a Tree, in ascending or descending order.
 /// At a high level, this is an ordered iterator over the values in a tree, at a particular
@@ -526,7 +526,7 @@ pub fn ScanTreeType(
 fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
     return struct {
         const ScanTreeLevel = @This();
-        const LevelTableValueBlockIterator = LevelTableValueBlockIteratorType(
+        const TableIndexIterator = TableIndexIteratorType(
             ScanTree.Table,
             Storage,
         );
@@ -541,7 +541,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
         scan: *ScanTree,
         level_index: u8,
-        iterator: LevelTableValueBlockIterator,
+        iterator: TableIndexIterator,
         buffer: ScanBuffer.LevelBuffer,
 
         /// State over the manifest.
@@ -568,7 +568,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             return .{
                 .level_index = level_index,
                 .scan = scan,
-                .iterator = LevelTableValueBlockIterator.init(),
+                .iterator = undefined,
                 .buffer = buffer,
                 .manifest = .iterating_tables,
                 .values = .fetching,
@@ -585,55 +585,58 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         ) void {
             assert(self.manifest == .iterating_tables);
             assert(self.values == .fetching);
-            assert(self.iterator.callback == .none);
 
             const scan: *ScanTree = self.scan;
             assert(scan.state == .buffering);
 
-            const table_info: ?*const TableInfo = blk: {
-                const manifest: *Manifest = &scan.tree.manifest;
-                if (manifest.next_table(.{
-                    .level = self.level_index,
-                    .snapshot = scan.snapshot,
-                    .key_min = scan.key_min,
-                    .key_max = scan.key_max,
-                    .key_exclusive = switch (key_exclusive) {
-                        .begin => null,
-                        .key_next => |key| key,
-                    },
-                    .direction = scan.direction,
-                })) |table_next_info| {
-                    const key_exclusive_next = switch (scan.direction) {
-                        .ascending => table_next_info.key_max,
-                        .descending => table_next_info.key_min,
-                    };
-
-                    if (scan.key_max < key_exclusive_next) {
-                        assert(scan.direction == .ascending);
-                        self.manifest = .finished;
-                    } else if (key_exclusive_next < scan.key_min) {
-                        assert(scan.direction == .descending);
-                        self.manifest = .finished;
-                    } else {
-                        self.manifest = .{ .iterating_blocks = key_exclusive_next };
-                    }
-
-                    break :blk table_next_info;
-                } else {
-                    self.manifest = .finished;
-                    break :blk null;
-                }
-            };
-
-            assert(self.iterator.callback == .none);
-            self.iterator.start(.{
-                .grid = scan.tree.grid,
+            const manifest: *Manifest = &scan.tree.manifest;
+            if (manifest.next_table(.{
                 .level = self.level_index,
                 .snapshot = scan.snapshot,
-                .index_block = self.buffer.index_block,
-                .tables = .{ .scan = table_info },
+                .key_min = scan.key_min,
+                .key_max = scan.key_max,
+                .key_exclusive = switch (key_exclusive) {
+                    .begin => null,
+                    .key_next => |key| key,
+                },
                 .direction = scan.direction,
-            });
+            })) |table_next_info| {
+                const key_exclusive_next = switch (scan.direction) {
+                    .ascending => table_next_info.key_max,
+                    .descending => table_next_info.key_min,
+                };
+
+                if (scan.key_max < key_exclusive_next) {
+                    assert(scan.direction == .ascending);
+                    self.manifest = .finished;
+                } else if (key_exclusive_next < scan.key_min) {
+                    assert(scan.direction == .descending);
+                    self.manifest = .finished;
+                } else {
+                    self.manifest = .{ .iterating_blocks = key_exclusive_next };
+                }
+
+                self.iterator.init(.{
+                    .grid = scan.tree.grid,
+                    .level = self.level_index,
+                    .snapshot = scan.snapshot,
+                    .index_block = .{
+                        .buffer = self.buffer.index_block,
+                        .address = table_next_info.address,
+                        .checksum = table_next_info.checksum,
+                    },
+                    .direction = scan.direction,
+                });
+            } else {
+                self.manifest = .finished;
+                self.iterator.init(.{
+                    .grid = scan.tree.grid,
+                    .level = self.level_index,
+                    .snapshot = scan.snapshot,
+                    .index_block = null,
+                    .direction = scan.direction,
+                });
+            }
         }
 
         /// Fetches data from storage for the current `table_info`.
@@ -642,11 +645,11 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 self.manifest == .finished);
             assert(self.values == .fetching);
             assert(self.scan.state == .buffering);
-            assert(self.iterator.callback == .none);
+            assert(self.iterator.callback == null);
 
             self.iterator.next(.{
                 .on_index = index_block_callback,
-                .on_data = data_block_callback,
+                .on_value = value_block_callback,
             });
         }
 
@@ -765,8 +768,9 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         fn index_block_callback(
-            iterator: *LevelTableValueBlockIterator,
-        ) LevelTableValueBlockIterator.DataBlocksToLoad {
+            iterator: *TableIndexIterator,
+            index_block: BlockPtrConst,
+        ) TableIndexIterator.ValueBlocksToLoad {
             const self: *ScanTreeLevel = @fieldParentPtr("iterator", iterator);
             const scan: *const ScanTree = self.scan;
 
@@ -776,7 +780,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(scan.state == .buffering);
             assert(scan.state.buffering.pending_count > 0);
 
-            const keys = Table.index_data_keys_used(iterator.context.index_block, .key_max);
+            const keys = Table.index_data_keys_used(index_block, .key_max);
             const indexes = binary_search.binary_search_keys_range_upsert_indexes(
                 Key,
                 keys,
@@ -792,7 +796,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             // the key depending on the `key_min`.
             const end = end: {
                 const keys_min = Table.index_data_keys_used(
-                    iterator.context.index_block,
+                    index_block,
                     .key_min,
                 );
                 break :end indexes.end + @intFromBool(
@@ -811,9 +815,9 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             };
         }
 
-        fn data_block_callback(
-            iterator: *LevelTableValueBlockIterator,
-            data_block: ?BlockPtrConst,
+        fn value_block_callback(
+            iterator: *TableIndexIterator,
+            value_block: ?BlockPtrConst,
         ) void {
             const self: *ScanTreeLevel = @fieldParentPtr("iterator", iterator);
             const scan: *ScanTree = self.scan;
@@ -824,8 +828,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(scan.state == .buffering);
             assert(scan.state.buffering.pending_count > 0);
 
-            if (data_block) |data| {
-                const values = Table.data_block_values_used(data);
+            if (value_block) |ptr| {
+                const values = Table.data_block_values_used(ptr);
                 const range = binary_search.binary_search_values_range(
                     Key,
                     Value,
