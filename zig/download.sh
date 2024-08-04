@@ -26,11 +26,21 @@ else
 fi
 
 # Determine the operating system:
-if [ "$(uname)" = "Linux" ]; then
-    ZIG_OS="linux"
-else
-    ZIG_OS="macos"
-fi
+case "$(uname)" in
+    Linux)
+        ZIG_OS="linux"
+        ;;
+    Darwin)
+        ZIG_OS="macos"
+        ;;
+    CYGWIN*)
+        ZIG_OS="windows"
+        ;;
+    *)
+        echo "Unknown OS"
+        exit 1
+        ;;
+esac
 
 ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
 
@@ -56,8 +66,22 @@ if [ -z "$ZIG_URL" ]; then
 fi
 
 # Work out the filename from the URL, as well as the directory without the ".tar.xz" file extension:
-ZIG_TARBALL=$(basename "$ZIG_URL")
-ZIG_DIRECTORY=$(basename "$ZIG_TARBALL" .tar.xz)
+ZIG_ARCHIVE=$(basename "$ZIG_URL")
+
+case "$ZIG_ARCHIVE" in
+    *".tar.xz")
+        ZIG_ARCHIVE_EXT=".tar.xz"
+        ;;
+    *".zip")
+        ZIG_ARCHIVE_EXT=".zip"
+        ;;
+    *)
+        echo "Unknown archive extension"
+        exit 1
+        ;;
+esac
+
+ZIG_DIRECTORY=$(basename "$ZIG_ARCHIVE" "$ZIG_ARCHIVE_EXT")
 
 # Download, making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
 echo "Downloading $ZIG_URL..."
@@ -70,14 +94,26 @@ if command -v wget; then
     ipv4=""
     fi
     # shellcheck disable=SC2086 # We control ipv4 and it'll always either be empty or -4
-    wget $ipv4 --quiet --output-document="$ZIG_TARBALL" "$ZIG_URL"
+    wget $ipv4 --quiet --output-document="$ZIG_ARCHIVE" "$ZIG_URL"
 else
-    curl --silent --output "$ZIG_TARBALL" "$ZIG_URL"
+    curl --silent --output "$ZIG_ARCHIVE" "$ZIG_URL"
 fi
 
-# Extract and then remove the downloaded tarball:
-tar -xf "$ZIG_TARBALL"
-rm "$ZIG_TARBALL"
+# Extract and then remove the downloaded archive:
+echo "Extracting $ZIG_ARCHIVE..."
+case "$ZIG_ARCHIVE_EXT" in
+    ".tar.xz")
+        tar -xf "$ZIG_ARCHIVE"
+        ;;
+    ".zip")
+        unzip -q "$ZIG_ARCHIVE"
+        ;;
+    *)
+        echo "Unexpected error"
+        exit 1
+        ;;
+esac
+rm "$ZIG_ARCHIVE"
 
 # Replace these existing directories and files so that we can install or upgrade:
 rm -rf zig/doc
