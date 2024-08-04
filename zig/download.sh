@@ -45,7 +45,7 @@ esac
 ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
 
 # Determine the build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
-if command -v wget; then
+if command -v wget > /dev/null; then
     # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
     # Only A records (for ipv4) are used in DNS:
     ipv4="-4"
@@ -85,7 +85,7 @@ ZIG_DIRECTORY=$(basename "$ZIG_ARCHIVE" "$ZIG_ARCHIVE_EXT")
 
 # Download, making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
 echo "Downloading $ZIG_URL..."
-if command -v wget; then
+if command -v wget > /dev/null; then
     # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
     # Only A records (for ipv4) are used in DNS:
     ipv4="-4"
