@@ -652,6 +652,13 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         connection.peer,
                         @tagName(message.header.command),
                     });
+                    var messages_queued = connection.send_queue.iterator();
+                    while (messages_queued.next()) |message_queued| {
+                        log.info("message queue on peer {}: {s} message", .{
+                            connection.peer,
+                            @tagName(message_queued.header.command),
+                        });
+                    }
                     return;
                 }
                 connection.send_queue.push_assume_capacity(message.ref());
