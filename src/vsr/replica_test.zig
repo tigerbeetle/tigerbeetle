@@ -34,16 +34,16 @@ const log_level = std.log.Level.err;
 
 const releases = .{
     .{
-        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
-        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
     },
     .{
-        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 2 }),
-        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 20 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
     },
     .{
-        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 3 }),
-        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 30 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
     },
 };
 
@@ -1278,18 +1278,18 @@ test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
         try c.request(data.request, data.request);
 
         t.replica(.R_).stop();
-        try t.replica(.R_).open_upgrade(&[_]u8{ 1, 2 });
+        try t.replica(.R_).open_upgrade(&[_]u8{ 10, 20 });
 
         // Prevent the upgrade from committing so that we can verify that the replica is still
         // running version 1.
         t.replica(.R_).drop(.__, .bidirectional, .prepare_ok);
         t.run();
         try expectEqual(t.replica(.R_).op_checkpoint(), 0);
-        try expectEqual(t.replica(.R_).release(), 1);
+        try expectEqual(t.replica(.R_).release(), 10);
 
         t.replica(.R_).pass(.__, .bidirectional, .prepare_ok);
         t.run();
-        try expectEqual(t.replica(.R_).release(), 2);
+        try expectEqual(t.replica(.R_).release(), 20);
         try expectEqual(t.replica(.R_).op_checkpoint(), data.checkpoint);
         try expectEqual(t.replica(.R_).commit(), trigger_for_checkpoint(data.checkpoint).?);
         try expectEqual(t.replica(.R_).op_head(), trigger_for_checkpoint(data.checkpoint).?);
@@ -1305,11 +1305,11 @@ test "Cluster: upgrade: R=1" {
     defer t.deinit();
 
     t.replica(.R_).stop();
-    try t.replica(.R0).open_upgrade(&[_]u8{ 1, 2 });
+    try t.replica(.R0).open_upgrade(&[_]u8{ 10, 20 });
     t.run();
 
     try expectEqual(t.replica(.R0).health(), .up);
-    try expectEqual(t.replica(.R0).release(), 2);
+    try expectEqual(t.replica(.R0).release(), 20);
     try expectEqual(t.replica(.R0).op_checkpoint(), checkpoint_1);
     try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
 }
@@ -1321,8 +1321,8 @@ test "Cluster: upgrade: state-sync to new release" {
     var c = t.clients(0, t.cluster.clients.len);
 
     t.replica(.R_).stop();
-    try t.replica(.R0).open_upgrade(&[_]u8{ 1, 2 });
-    try t.replica(.R1).open_upgrade(&[_]u8{ 1, 2 });
+    try t.replica(.R0).open_upgrade(&[_]u8{ 10, 20 });
+    try t.replica(.R1).open_upgrade(&[_]u8{ 10, 20 });
     t.run();
     try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
     try c.request(constants.vsr_checkpoint_interval, constants.vsr_checkpoint_interval);
@@ -1331,19 +1331,19 @@ test "Cluster: upgrade: state-sync to new release" {
     // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
     try t.replica(.R2).open();
     try expectEqual(t.replica(.R2).health(), .up);
-    try expectEqual(t.replica(.R2).release(), 1);
+    try expectEqual(t.replica(.R2).release(), 10);
     try expectEqual(t.replica(.R2).commit(), 0);
     t.run();
 
     // ...But R2 doesn't have v2 available, so it shuts down.
     try expectEqual(t.replica(.R2).health(), .down);
-    try expectEqual(t.replica(.R2).release(), 1);
+    try expectEqual(t.replica(.R2).release(), 10);
     try expectEqual(t.replica(.R2).commit(), checkpoint_2);
 
     // Start R2 up with v2 available, and it recovers.
-    try t.replica(.R2).open_upgrade(&[_]u8{ 1, 2 });
+    try t.replica(.R2).open_upgrade(&[_]u8{ 10, 20 });
     try expectEqual(t.replica(.R2).health(), .up);
-    try expectEqual(t.replica(.R2).release(), 2);
+    try expectEqual(t.replica(.R2).release(), 20);
     try expectEqual(t.replica(.R2).commit(), checkpoint_2);
 
     t.run();
@@ -1431,7 +1431,7 @@ test "Cluster: client: empty command=request operation=register body" {
         .request = 0,
         .command = .request,
         .operation = .register,
-        .release = .{ .value = 1 },
+        .release = releases[0].release,
     };
     request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
     request_header.set_checksum();
@@ -1472,6 +1472,30 @@ test "Cluster: eviction: no_session" {
     try c0.request(2, 1);
     try expectEqual(c0.eviction_reason(), .no_session);
     try expectEqual(c.eviction_reason(), null);
+}
+
+test "Cluster: eviction: release_too_low" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_release = .{ .value = releases[0].release.value - 1 },
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(0, 1);
+    try c0.request(1, 0);
+    try expectEqual(c0.eviction_reason(), .release_too_low);
+}
+
+test "Cluster: eviction: release_too_high" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_release = .{ .value = releases[0].release.value + 1 },
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(0, 1);
+    try c0.request(1, 0);
+    try expectEqual(c0.eviction_reason(), .release_too_high);
 }
 
 test "Cluster: eviction: session_too_low" {
@@ -1539,6 +1563,7 @@ const TestContext = struct {
         replica_count: u8,
         standby_count: u8 = 0,
         client_count: u8 = constants.clients_max,
+        client_release: vsr.Release = releases[0].release,
         seed: u64 = 123,
     }) !*TestContext {
         const log_level_original = std.testing.log_level;
@@ -1546,7 +1571,7 @@ const TestContext = struct {
         var prng = std.rand.DefaultPrng.init(options.seed);
         const random = prng.random();
 
-        const cluster = try Cluster.init(allocator, TestContext.on_client_reply, .{
+        const cluster = try Cluster.init(allocator, .{
             .cluster_id = 0,
             .replica_count = options.replica_count,
             .standby_count = options.standby_count,
@@ -1554,6 +1579,7 @@ const TestContext = struct {
             .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
             .seed = random.int(u64),
             .releases = &releases,
+            .client_release = options.client_release,
             .network = .{
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
@@ -1583,6 +1609,7 @@ const TestContext = struct {
                 .batch_size_limit = constants.message_body_size_max,
                 .lsm_forest_node_count = 4096,
             },
+            .on_client_reply = TestContext.on_client_reply,
         });
         errdefer cluster.deinit();
 
@@ -1670,8 +1697,8 @@ const TestContext = struct {
     fn on_client_reply(
         cluster: *Cluster,
         client: usize,
-        request: *Message.Request,
-        reply: *Message.Reply,
+        request: *const Message.Request,
+        reply: *const Message.Reply,
     ) void {
         _ = request;
         _ = reply;

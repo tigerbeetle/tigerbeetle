@@ -82,20 +82,34 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             /// - Only releases[0] is "bundled" in each replica. (Use `restart_replica()` to add
             ///   more).
             releases: []const Release,
+            client_release: vsr.Release,
 
             network: NetworkOptions,
             storage: Storage.Options,
             state_machine: StateMachine.Options,
+
+            /// Invoked when a replica produces a reply.
+            /// Includes operation=register messages.
+            /// `client` is null when the prepare does not originate from a client.
+            on_cluster_reply: ?*const fn (
+                cluster: *Self,
+                client: ?usize,
+                prepare: *const Message.Prepare,
+                reply: *const Message.Reply,
+            ) void = null,
+
+            /// Invoked when a client receives a reply.
+            /// Includes operation=register messages.
+            on_client_reply: ?*const fn (
+                cluster: *Self,
+                client: usize,
+                request: *const Message.Request,
+                reply: *const Message.Reply,
+            ) void = null,
         };
 
         allocator: mem.Allocator,
         options: Options,
-        on_cluster_reply: *const fn (
-            cluster: *Self,
-            client: usize,
-            request: *Message.Request,
-            reply: *Message.Reply,
-        ) void,
 
         network: *Network,
         storages: []Storage,
@@ -130,17 +144,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         context: ?*anyopaque = null,
 
-        pub fn init(
-            allocator: mem.Allocator,
-            /// Includes operation=register messages.
-            on_cluster_reply: *const fn (
-                cluster: *Self,
-                client: usize,
-                request: *Message.Request,
-                reply: *Message.Reply,
-            ) void,
-            options: Options,
-        ) !*Self {
+        pub fn init(allocator: mem.Allocator, options: Options) !*Self {
             assert(options.replica_count >= 1);
             assert(options.replica_count <= 6);
             assert(options.client_count > 0);
@@ -287,7 +291,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         .eviction_callback = client_on_eviction,
                     },
                 );
-                client.release = options.releases[0].release;
+                client.release = options.client_release;
             }
             errdefer for (clients) |*client| client.deinit(allocator);
 
@@ -338,7 +342,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.* = Self{
                 .allocator = allocator,
                 .options = options,
-                .on_cluster_reply = on_cluster_reply,
                 .network = network,
                 .storages = storages,
                 .aofs = aofs,
@@ -711,7 +714,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(&cluster.clients[client_index] == client);
             assert(cluster.client_eviction_reasons[client_index] == null);
 
-            cluster.on_cluster_reply(cluster, client_index, request_message, reply_message);
+            if (cluster.options.on_client_reply) |on_client_reply| {
+                on_client_reply(cluster, client_index, request_message, reply_message);
+            }
         }
 
         fn cluster_on_eviction(cluster: *Self, client_id: u128) void {
@@ -756,11 +761,22 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .state_machine_opened => {
                     cluster.manifest_checker.forest_open(&replica.state_machine.forest);
                 },
-                .committed => {
+                .committed => |data| {
+                    assert(data.reply.header.client == data.prepare.header.client);
+
                     cluster.log_replica(.commit, replica.replica);
                     cluster.state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
+
+                    if (cluster.options.on_cluster_reply) |on_cluster_reply| {
+                        const client_index = if (data.prepare.header.client == 0)
+                            null
+                        else
+                            cluster.client_id_permutation.decode(data.prepare.header.client) -
+                                client_id_permutation_shift;
+                        on_cluster_reply(cluster, client_index, data.prepare, data.reply);
+                    }
                 },
                 .compaction_completed => {
                     cluster.storage_checker.replica_compact(Replica, replica) catch |err| {
