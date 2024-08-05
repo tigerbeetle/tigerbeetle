@@ -2010,6 +2010,7 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).insert(command);
+        if (command == .start_view) t.pass(peer, direction, .start_view_deprecated);
     }
 
     pub fn drop(
@@ -2020,6 +2021,7 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).remove(command);
+        if (command == .start_view) t.drop(peer, direction, .start_view_deprecated);
     }
 
     pub fn filter(
