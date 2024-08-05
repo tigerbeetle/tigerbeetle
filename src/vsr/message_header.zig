@@ -89,6 +89,7 @@ pub const Header = extern struct {
             .start_view_change => StartViewChange,
             .do_view_change => DoViewChange,
             .start_view => StartView,
+            .start_view2 => StartView2,
             .request_start_view => RequestStartView,
             .request_headers => RequestHeaders,
             .request_prepare => RequestPrepare,
@@ -212,6 +213,8 @@ pub const Header = extern struct {
             .reply => return .unknown,
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
+
+            .start_view2 => return .unknown, // At the current version, SV2 is completely ignored.
 
             // All other messages identify the peer as a replica:
             .ping,
@@ -1042,6 +1045,32 @@ pub const Header = extern struct {
             if (self.op < self.commit) return "op < commit_min";
             if (self.commit < self.checkpoint_op) return "commit_min < checkpoint_op";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const StartView2 = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
+        checksum: u128,
+        checksum_padding: u128,
+        checksum_body: u128,
+        checksum_body_padding: u128,
+        nonce_reserved: u128,
+        cluster: u128,
+        size: u32,
+        epoch: u32,
+        view: u32,
+        release: vsr.Release = vsr.Release.zero,
+        protocol: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        reserved: [128]u8 = .{0} ** 128,
+
+        fn invalid_header(self: *const @This()) ?[]const u8 {
+            assert(self.command == .start_view2);
             return null;
         }
     };
