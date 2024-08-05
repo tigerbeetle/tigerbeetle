@@ -160,6 +160,7 @@ pub fn ReplicaType(
             table: Grid.RepairTable,
         };
 
+        timer: std.time.Timer,
         /// We use this allocator during open/init and then disable it.
         /// An accidental dynamic allocation after open/init will cause an assertion failure.
         static_allocator: StaticAllocator,
@@ -1105,8 +1106,10 @@ pub fn ReplicaType(
                 &self.client_sessions_checkpoint,
             );
             errdefer self.grid_scrubber.deinit(allocator);
+            const timer = try std.time.Timer.start();
 
             self.* = Self{
+                .timer = timer,
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
                 .replica_count = replica_count,
@@ -2785,7 +2788,7 @@ pub fn ReplicaType(
             const self = write.replica;
             defer self.grid_repair_writes.release(write);
 
-            log.debug("{}: on_block: repair done address={}", .{
+            log.info("{}: on_block: repair done address={}", .{
                 self.replica,
                 grid_write.address,
             });
@@ -9200,10 +9203,13 @@ pub fn ReplicaType(
             if (self.grid_repair_tables.executing() == 0) {
                 assert(self.sync_tables.?.next(&self.state_machine.forest) == null);
 
-                log.debug("{}: sync_enqueue_tables: all tables synced (commit={}..{})", .{
+                const sync_content_duration_ns = self.timer.read();
+
+                log.info("{}: sync_enqueue_tables: all tables synced (commit={}..{}) in {}s", .{
                     self.replica,
                     sync_op_min,
                     sync_op_max,
+                    @divTrunc(sync_content_duration_ns, std.time.ns_per_s),
                 });
 
                 self.sync_tables = null;
