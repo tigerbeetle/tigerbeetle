@@ -24,9 +24,9 @@ cd /build
 # Validate dictionary is formatted correctly
 curl -L -o /tmp/jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
 chmod +x /tmp/jq
-cat scripts/.cspell.json | /tmp/jq empty
+cat docs/.cspell.json | /tmp/jq empty
 
 # Spellcheck
 files="$(git ls-files -s | grep -v ^16 | cut -f2- | grep \.md)"
-npx cspell --config ./scripts/.cspell.json $files
+npx cspell --config ./docs/.cspell.json $files
 '

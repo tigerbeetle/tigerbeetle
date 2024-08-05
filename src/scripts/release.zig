@@ -550,7 +550,7 @@ fn build_tigerbeetle_epoch(shell: *Shell) !void {
     const multiversion_epoch_tag_commit = try shell.exec_stdout("git rev-parse HEAD", .{});
     assert(std.mem.eql(u8, multiversion_epoch_commit, multiversion_epoch_tag_commit));
 
-    try shell.exec("scripts/install_zig.sh", .{});
+    try shell.exec("zig/download.sh", .{});
     try shell.exec("zig/zig build scripts -- release --run-number={run_number} --sha={commit} " ++
         "--language=zig --build", .{
         .commit = multiversion_epoch_commit,

@@ -35,8 +35,8 @@ To build TigerBeetle from source, clone the repo, install Zig and run `zig build
 
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
-./scripts/install_zig.sh # or .bat if you're on Windows.
-zig/zig build
+./zig/download.sh # .bat if you're on Windows.
+./zig/zig build
 ./tigerbeetle version
 ```
 

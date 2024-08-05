@@ -10,7 +10,7 @@ production deployments, TigerBeetle also works on Windows and MacOS.
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle.git
 cd tigerbeetle
-./scripts/install_zig.sh # There's a .bat version for Windows.
+./zig/download.sh # .bat if you're on Windows.
 ./zig/zig build -Drelease
 ./tigerbeetle --version
 ```

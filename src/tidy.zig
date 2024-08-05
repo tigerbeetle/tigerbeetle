@@ -377,7 +377,7 @@ test "tidy extensions" {
         .{"favicon.png"},                            .{"LICENSE"},
         .{"module-info.test"},                       .{"index.html"},
         .{"logo.svg"},                               .{"logo-white.svg"},
-        .{"logo-with-text-white.svg"},               .{"scripts/install_zig.sh"},
+        .{"logo-with-text-white.svg"},               .{"zig/download.sh"},
         .{"src/scripts/cfo_supervisor.sh"},          .{"src/docs_website/scripts/build.sh"},
         .{".github/ci/docs_check.sh"},               .{".github/ci/test_aof.sh"},
         .{"tools/systemd/tigerbeetle-pre-start.sh"}, .{"tools/vscode/format_debug_server.sh"},

@@ -38,7 +38,7 @@ jobs:
         with:
           node-version: 'latest'
 
-      - run: ./scripts/install_zig.sh
+      - run: ./zig/download.sh
 
       - run: ./zig/zig build scripts -- ci --validate-release
         env:

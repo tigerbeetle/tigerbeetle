@@ -21,8 +21,8 @@ Want to build from source locally?
 
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
-./scripts/install_zig.sh # or .bat if you're on Windows.
-zig/zig build
+./zig/download.sh # or .bat if you're on Windows.
+./zig/zig build
 ./tigerbeetle version
 ```
 
