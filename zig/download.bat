@@ -74,6 +74,28 @@ if not exist %ZIG_TARBALL% (
   exit 1
 )
 
+if exist zig\doc (
+  rd /s /q zig\doc
+  if exist zig\doc (
+    echo The zig\doc directory could not be deleted.
+    exit 1
+  )
+)
+
+if exist zig\lib (
+  rd /s /q zig\lib
+  if exist zig\lib (
+    echo The zig\lib directory could not be deleted.
+    exit 1
+  )
+)
+
+move /Y %ZIG_DIRECTORY%\LICENSE zig\LICENSE>nul
+move /Y %ZIG_DIRECTORY%\README.md zig\README.md>nul
+move /Y %ZIG_DIRECTORY%\doc zig>nul
+move /Y %ZIG_DIRECTORY%\lib zig>nul
+move /Y %ZIG_DIRECTORY%\zig.exe zig\zig.exe>nul
+
 if exist %ZIG_DIRECTORY%\doc (
   rd /s /q %ZIG_DIRECTORY%\doc
   if exist %ZIG_DIRECTORY%\doc (
@@ -89,12 +111,6 @@ if exist %ZIG_DIRECTORY%\lib (
     exit 1
   )
 )
-
-ren %ZIG_DIRECTORY%\LICENSE zig\LICENSE
-ren %ZIG_DIRECTORY%\README.md zig\README.md
-ren %ZIG_DIRECTORY%\doc zig\doc
-ren %ZIG_DIRECTORY%\lib zig\lib
-ren %ZIG_DIRECTORY%\zig.exe zig\zig.exe
 
 rd /s /q %ZIG_DIRECTORY%
 if exist %ZIG_DIRECTORY% (
