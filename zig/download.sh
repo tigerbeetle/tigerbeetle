@@ -82,11 +82,11 @@ rm "$ZIG_TARBALL"
 # Replace these existing directories and files so that we can install or upgrade:
 rm -rf zig/doc
 rm -rf zig/lib
-mv "$ZIG_DIRECTORY/LICENSE" zig
-mv "$ZIG_DIRECTORY/README.md" zig
-mv "$ZIG_DIRECTORY/doc" zig
-mv "$ZIG_DIRECTORY/lib" zig
-mv "$ZIG_DIRECTORY/zig" zig
+mv "$ZIG_DIRECTORY/LICENSE" zig/
+mv "$ZIG_DIRECTORY/README.md" zig/
+mv "$ZIG_DIRECTORY/doc" zig/
+mv "$ZIG_DIRECTORY/lib" zig/
+mv "$ZIG_DIRECTORY/zig" zig/
 
 # We expect to have now moved all directories and files out of the extracted directory.
 # Do not force remove so that we can get an error if the above list of files ever changes:

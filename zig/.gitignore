@@ -1,6 +1,3 @@
-LICENSE
-README.md
-doc
-lib
-zig
-zig.exe
+*
+!download.bat
+!download.sh
