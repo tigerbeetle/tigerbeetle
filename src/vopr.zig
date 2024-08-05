@@ -118,7 +118,10 @@ pub fn main() !void {
     const standby_count =
         if (cli_args.lite) 0 else random.uintAtMost(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
-    const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
+    // -1 since otherwise it is possible that all clients will evict each other.
+    // (Due to retried register messages from the first set of evicted clients.
+    // See the "Cluster: eviction: session_too_low" replica test for a related scenario.)
+    const client_count = @max(1, random.uintAtMost(u8, constants.clients_max * 2 - 1));
 
     const batch_size_limit_min = comptime batch_size_limit_min: {
         var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
@@ -203,6 +206,8 @@ pub fn main() !void {
                 .cache_entries_account_balances = 256,
             },
         },
+        .on_cluster_reply = Simulator.on_cluster_reply,
+        .on_client_reply = Simulator.on_client_reply,
     };
 
     const workload_options = StateMachine.Workload.Options.generate(random, .{
@@ -434,6 +439,8 @@ pub const Simulator = struct {
     /// Total number of requests sent, including those that have not been delivered.
     /// Does not include `register` messages.
     requests_sent: usize = 0,
+    /// Total number of replies received by non-evicted clients.
+    /// Does not include `register` messages.
     requests_replied: usize = 0,
     requests_idle: bool = false,
 
@@ -453,7 +460,7 @@ pub const Simulator = struct {
         assert(options.request_idle_off_probability > 0);
         assert(options.request_idle_off_probability <= 100);
 
-        var cluster = try Cluster.init(allocator, on_cluster_reply, options.cluster);
+        var cluster = try Cluster.init(allocator, options.cluster);
         errdefer cluster.deinit();
 
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
@@ -497,15 +504,21 @@ pub const Simulator = struct {
 
     pub fn pending(simulator: *const Simulator) ?[]const u8 {
         assert(simulator.core.count() > 0);
-        assert(simulator.requests_sent == simulator.options.requests_max);
+        assert(simulator.requests_sent - simulator.requests_cancelled() ==
+            simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
-        for (simulator.cluster.clients) |*client| {
-            if (client.request_inflight) |request| {
-                // Registration isn't counted by requests_sent, so an operation=register may still
-                // be in-flight. Any other requests should already be complete before done() is
-                // called.
-                assert(request.message.header.operation == .register);
-                return "pending register request";
+        for (
+            simulator.cluster.clients,
+            simulator.cluster.client_eviction_reasons,
+        ) |*client, reason| {
+            if (reason == null) {
+                if (client.request_inflight) |request| {
+                    // Registration isn't counted by requests_sent, so an operation=register may
+                    // still be in-flight. Any other requests should already be complete before
+                    // done() is called.
+                    assert(request.message.header.operation == .register);
+                    return "pending register request";
+                }
             }
         }
 
@@ -800,12 +813,18 @@ pub const Simulator = struct {
 
     fn on_cluster_reply(
         cluster: *Cluster,
-        reply_client: usize,
-        request: *Message.Request,
-        reply: *Message.Reply,
+        reply_client: ?usize,
+        prepare: *const Message.Prepare,
+        reply: *const Message.Reply,
     ) void {
+        assert((reply_client == null) == (prepare.header.client == 0));
+
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
-        simulator.reply_sequence.insert(reply_client, request, reply);
+
+        if (reply.header.op < simulator.reply_op_next) return;
+        if (simulator.reply_sequence.contains(reply)) return;
+
+        simulator.reply_sequence.insert(reply_client, prepare, reply);
 
         while (!simulator.reply_sequence.empty()) {
             const op = simulator.reply_op_next;
@@ -815,56 +834,57 @@ pub const Simulator = struct {
             if (simulator.reply_sequence.peek(op)) |commit| {
                 defer simulator.reply_sequence.next();
 
-                assert(prepare_header.client != 0);
                 simulator.reply_op_next += 1;
 
-                const commit_client = simulator.cluster.clients[commit.client_index];
                 assert(commit.reply.references == 1);
                 assert(commit.reply.header.op == op);
                 assert(commit.reply.header.command == .reply);
-                assert(commit.reply.header.client == commit_client.id);
-                assert(commit.reply.header.request == commit.request.header.request);
-                assert(commit.reply.header.operation == commit.request.header.operation);
-                assert(commit.reply.header.operation != .pulse);
-                assert(commit.request.references == 1);
-                assert(commit.request.header.checksum == prepare_header.request_checksum);
-                assert(commit.request.header.command == .request);
-                assert(commit.request.header.client == commit_client.id);
+                assert(commit.reply.header.request == commit.prepare.header.request);
+                assert(commit.reply.header.operation == commit.prepare.header.operation);
+                assert(commit.prepare.references == 1);
+                assert(commit.prepare.header.checksum == prepare_header.checksum);
+                assert(commit.prepare.header.command == .prepare);
 
                 log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
                     commit.reply.header.op,
                     commit.reply.header.operation,
-                    commit.request.header.client,
-                    commit.request.header.request,
+                    commit.prepare.header.client,
+                    commit.prepare.header.request,
                 });
 
-                if (!commit.request.header.operation.vsr_reserved()) {
-                    simulator.requests_replied += 1;
+                if (prepare_header.operation == .pulse) {
+                    simulator.workload.on_pulse(
+                        prepare_header.operation.cast(StateMachine),
+                        prepare_header.timestamp,
+                    );
+                }
+
+                if (!commit.prepare.header.operation.vsr_reserved()) {
                     simulator.workload.on_reply(
-                        commit.client_index,
+                        commit.client_index.?,
                         commit.reply.header.operation.cast(StateMachine),
                         commit.reply.header.timestamp,
-                        commit.request.body(),
+                        commit.prepare.body(),
                         commit.reply.body(),
                     );
                 }
-            } else {
-                if (prepare_header.client == 0) {
-                    if (prepare_header.operation == .pulse) {
-                        simulator.workload.on_pulse(
-                            prepare_header.operation.cast(StateMachine),
-                            prepare_header.timestamp,
-                        );
-                    }
-
-                    assert(prepare_header.operation.vsr_reserved());
-                    // We don't receive replies for requests that originated at the replicas.
-                    simulator.reply_op_next += 1;
-                } else {
-                    assert(prepare_header.operation != .pulse);
-                    break;
-                }
             }
+        }
+    }
+
+    fn on_client_reply(
+        cluster: *Cluster,
+        reply_client: usize,
+        request: *const Message.Request,
+        reply: *const Message.Reply,
+    ) void {
+        _ = reply;
+
+        const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
+        assert(simulator.cluster.client_eviction_reasons[reply_client] == null);
+
+        if (!request.header.operation.vsr_reserved()) {
+            simulator.requests_replied += 1;
         }
     }
 
@@ -881,11 +901,24 @@ pub const Simulator = struct {
         }
 
         if (simulator.requests_idle) return;
-        if (simulator.requests_sent == simulator.options.requests_max) return;
+        if (simulator.requests_sent - simulator.requests_cancelled() ==
+            simulator.options.requests_max) return;
         if (!chance(simulator.random, simulator.options.request_probability)) return;
 
-        const client_index =
-            simulator.random.uintLessThan(usize, simulator.options.cluster.client_count);
+        const client_index = index: {
+            const client_count = simulator.options.cluster.client_count;
+            const client_index_base =
+                simulator.random.uintLessThan(usize, client_count);
+            for (0..client_count) |offset| {
+                const client_index = (client_index_base + offset) % client_count;
+                if (simulator.cluster.client_eviction_reasons[client_index] == null) {
+                    break :index client_index;
+                }
+            } else {
+                unreachable;
+            }
+        };
+
         var client = &simulator.cluster.clients[client_index];
 
         // Messages aren't added to the ReplySequence until a reply arrives.
@@ -926,7 +959,8 @@ pub const Simulator = struct {
             request_metadata.operation);
 
         simulator.requests_sent += 1;
-        assert(simulator.requests_sent <= simulator.options.requests_max);
+        assert(simulator.requests_sent - simulator.requests_cancelled() <=
+            simulator.options.requests_max);
     }
 
     fn tick_crash(simulator: *Simulator) void {
@@ -1089,6 +1123,19 @@ pub const Simulator = struct {
             @min(simulator.replica_releases[replica_index] + 1, releases.len);
         simulator.replica_releases_limit =
             @max(simulator.replica_releases[replica_index], simulator.replica_releases_limit);
+    }
+
+    fn requests_cancelled(simulator: *const Simulator) u32 {
+        var count: u32 = 0;
+        for (
+            simulator.cluster.clients,
+            simulator.cluster.client_eviction_reasons,
+        ) |*client, reason| {
+            count += @intFromBool(reason != null and
+                client.request_inflight != null and
+                client.request_inflight.?.message.header.operation != .register);
+        }
+        return count;
     }
 };
 
