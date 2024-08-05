@@ -1688,3 +1688,108 @@ pub const Snapshot = struct {
         return op + 1;
     }
 };
+
+pub const RequestBatch = extern struct {
+    const count_max = 256 - 1;
+
+    count: u16 align(@alignOf(Header)) = 0,
+    sizes: [count_max]u16 = [_]u16{0} ** count_max,
+
+    comptime {
+        assert(@sizeOf(RequestBatch) == @sizeOf([256]u16));
+        assert(@sizeOf(RequestBatch) % @sizeOf(Header) == 0);
+        assert(@alignOf(RequestBatch) == @alignOf(Header));
+    }
+
+    const Message = @import("message_pool.zig").MessagePool.Message;
+
+    pub fn WriterType(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            message: *Message.Request,
+
+            pub fn init(message: *Message.Request) Self {
+                const batch: *RequestBatch = @alignCast(@ptrCast(message.body().ptr));
+                batch.* = .{};
+
+                message.header.size = @sizeOf(Header) + @sizeOf(RequestBatch);
+                return .{ .message = message };
+            }
+
+            pub fn write(self: Self, values: []const T) void {
+                const body = self.message.body();
+                assert(body.len >= @sizeOf(RequestBatch));
+                assert(body.len <= constants.message_body_size_max);
+
+                const batch: *RequestBatch = @alignCast(@ptrCast(self.message.body().ptr));
+                assert(batch.count < count_max);
+                assert(batch.sizes[batch.count] == 0);
+
+                const value_count: u16 = @intCast(values.len);
+                assert(value_count > 0);
+
+                const value_bytes = std.mem.sliceAsBytes(values);
+                assert(body.len + value_bytes.len <= constants.message_body_size_max);
+
+                self.message.header.size += value_bytes.len;
+                stdx.copy_disjoint(
+                    .exact,
+                    u8, 
+                    (body.ptr + body.len)[0..value_bytes.len],
+                    value_bytes,
+                );
+
+                batch.sizes[batch.count] = value_count;
+                batch.count += 1;
+            }
+        };
+    }
+
+    pub fn ReaderType(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            sizes: []const u16,
+            values: []const T,
+
+            pub fn init(message: *const Message.Request) Self {
+                assert(message.body().len <= constants.message_body_size_max);
+                assert(message.body() >= @sizeOf(RequestBatch));
+
+                const batch: *const RequestBatch = @alignCast(@ptrCast(message.body().ptr));
+                assert(batch.count > 0);
+                assert(batch.count <= count_max);
+                
+                var value_count: u32 = 0;
+                for (batch.sizes[0..batch.count]) |size| {
+                    assert(size > 0);
+                    value_count += size;
+                }
+
+                assert(message.body().len == @sizeOf(RequestBatch) + (@sizeOf(T) * value_count));
+                return .{
+                    .sizes = batch.sizes[0..batch.count],
+                    .values = @alignCast(std.mem.bytesAsSlice(
+                        message.body()[@sizeOf(RequestBatch)..],
+                    )),
+                };
+            }
+
+            pub fn next(self: *Self) ?[]const T {
+                if (self.sizes.len == 0) {
+                    assert(self.values.len == 0);
+                    return null;
+                }
+
+                const size = self.sizes[0];
+                self.sizes = self.sizes[1..];
+
+                const values = self.values[0..size];
+                self.values = self.values[size..];
+
+                return values;
+            }
+        };
+    }
+};
