@@ -172,7 +172,7 @@ pub fn ContextType(
             log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
                 context.client_id,
                 cluster_id,
-                context.addresses,
+                context.addresses.const_slice(),
             });
             context.client = try Client.init(
                 allocator,
