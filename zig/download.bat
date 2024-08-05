@@ -96,22 +96,6 @@ move /Y %ZIG_DIRECTORY%\doc zig>nul
 move /Y %ZIG_DIRECTORY%\lib zig>nul
 move /Y %ZIG_DIRECTORY%\zig.exe zig\zig.exe>nul
 
-if exist %ZIG_DIRECTORY%\doc (
-  rd /s /q %ZIG_DIRECTORY%\doc
-  if exist %ZIG_DIRECTORY%\doc (
-    echo The %ZIG_DIRECTORY%\doc directory could not be deleted.
-    exit 1
-  )
-)
-
-if exist %ZIG_DIRECTORY%\lib (
-  rd /s /q %ZIG_DIRECTORY%\lib
-  if exist %ZIG_DIRECTORY%\lib (
-    echo The %ZIG_DIRECTORY%\lib directory could not be deleted.
-    exit 1
-  )
-)
-
 rd /s /q %ZIG_DIRECTORY%
 if exist %ZIG_DIRECTORY% (
   echo The %ZIG_DIRECTORY% directory could not be deleted.
