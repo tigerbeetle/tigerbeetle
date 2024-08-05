@@ -11,7 +11,6 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const Direction = @import("../direction.zig").Direction;
 
-//TODO: rename to 'scan_table_value_iterator.zig'.
 /// A TableValueIterator iterates a table's value blocks in ascending or descending key order.
 pub fn TableValueIteratorType(comptime Storage: type) type {
     return struct {

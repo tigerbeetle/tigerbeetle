@@ -26,7 +26,7 @@ const ManifestType = @import("manifest.zig").ManifestType;
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 const ScanState = @import("scan_state.zig").ScanState;
 const TableValueIteratorType =
-    @import("table_data_iterator.zig").TableValueIteratorType;
+    @import("table_value_iterator.zig").TableValueIteratorType;
 
 /// Scans a range of keys over a Tree, in ascending or descending order.
 /// At a high level, this is an ordered iterator over the values in a tree, at a particular
