@@ -23,6 +23,7 @@ const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const kcov = @import("./scripts/kcov.zig");
 const changelog = @import("./scripts/changelog.zig");
+const upgrader = @import("./scripts/upgrader.zig");
 
 const CliArgs = union(enum) {
     cfo: cfo.CliArgs,
@@ -31,6 +32,7 @@ const CliArgs = union(enum) {
     devhub: devhub.CliArgs,
     kcov: kcov.CliArgs,
     changelog: void,
+    upgrader: upgrader.CliArgs,
 
     pub const help =
         \\Usage:
@@ -91,5 +93,6 @@ pub fn main() !void {
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
         .kcov => |args_kcov| try kcov.main(shell, gpa, args_kcov),
         .changelog => try changelog.main(shell, gpa),
+        .upgrader => |args_upgrader| try upgrader.main(shell, gpa, args_upgrader),
     }
 }
