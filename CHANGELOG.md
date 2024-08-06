@@ -1,5 +1,48 @@
 # TigerBeetle Changelog
 
+## 2024-08-05
+
+### Safety And Performance
+
+- [#2162](https://github.com/tigerbeetle/tigerbeetle/pull/2162)
+
+  Past release checksums are further validated when printing multi-version information.
+
+- [#2143](https://github.com/tigerbeetle/tigerbeetle/pull/2143)
+
+  Write Ahead Log (WAL) appending was decoupled from WAL replication, tightening asserts.
+
+- [#2153](https://github.com/tigerbeetle/tigerbeetle/pull/2153),
+  [#2170](https://github.com/tigerbeetle/tigerbeetle/pull/2170)
+
+  VSR eviction edge cases receive more hardening.
+
+- [#2175](https://github.com/tigerbeetle/tigerbeetle/pull/2175)
+
+  Fix account overflows when doing a balance transfer for remaining funds (`amount=0`).
+
+- [#2168](https://github.com/tigerbeetle/tigerbeetle/pull/2168),
+  [#2164](https://github.com/tigerbeetle/tigerbeetle/pull/2164),
+  [#2152](https://github.com/tigerbeetle/tigerbeetle/pull/2152),
+  [#2122](https://github.com/tigerbeetle/tigerbeetle/pull/2122)
+
+  Command line argument parsing no longer dynamically allocates and handles error handling paths
+  more explicitly.
+
+### Internals
+
+- [#2169](https://github.com/tigerbeetle/tigerbeetle/pull/2169)
+
+  Golang's tests for the CI were re-enabled for ARM64 macOS.
+
+- [#2159](https://github.com/tigerbeetle/tigerbeetle/pull/2159)
+
+  This is a CHANGELOG entry about fixing a previous CHANGELOG entry.
+
+### TigerTracks 🎧
+
+- [Ramble On](https://www.youtube.com/watch?v=EYeG3QrvkEE)
+
 ## 2024-07-29
 
 ### Safety And Performance
