@@ -38,7 +38,8 @@ jobs:
         with:
           node-version: 'latest'
 
-      - run: ./zig/download.sh
+      # TODO: Leave only `./zig/download.sh` after the next release is out.
+      - run: ./zig/download.sh | ./scripts/install_zig.sh
 
       - run: ./zig/zig build scripts -- ci --validate-release
         env:
