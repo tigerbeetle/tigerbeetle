@@ -1,4 +1,2 @@
+* text=auto eol=lf
 *.bat text=auto eol=crlf
-*.md text=auto eol=lf
-*.sh text=auto eol=lf
-build.zig text=auto eol=lf
