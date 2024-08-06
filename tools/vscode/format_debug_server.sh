@@ -2,9 +2,9 @@
 set -eEuo pipefail
 FILE=0_0.tigerbeetle.debug
 
-# Install Zig if it does not already exist:
-if [ ! -d "zig" ]; then
-    scripts/install_zig.sh
+# Download Zig if it does not yet exist:
+if [ ! -f "zig/zig" ]; then
+    zig/download.sh
 fi
 
 if [ -f "$FILE" ]; then

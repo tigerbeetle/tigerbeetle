@@ -7,8 +7,6 @@ simulator
 /tigerbeetle.exe
 *_*.tigerbeetle.*
 *_*.tigerbeetle
-zig/
-zig-cache/
 .zig-cache/
 zig-out/
 kcov-output/

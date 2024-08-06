@@ -25,11 +25,11 @@ Go to the repo root.
 If you don't already have the TigerBeetle version of `zig` run:
 
 ```console
-./scripts/install_zig.[sh|bat]
+./zig/download.[sh|bat]
 ```
 
-Use the `.sh` script if you're on macOS or Linux. Use the `.bat`
-script on Windows.
+Use the `.sh` script if you're on macOS or Linux.
+Use the `.bat` script if you're on Windows.
 
 To build and run the client docs generator:
 

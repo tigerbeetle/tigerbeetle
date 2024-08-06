@@ -5,7 +5,7 @@
 //!     git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
 //!     while True:
 //!         git fetch origin && git reset --hard origin/main
-//!         ./scripts/install_zig.sh
+//!         ./zig/download.sh
 //!         ./zig/zig build scripts -- cfo
 //!
 //! By modifying this script, we can make those machines do interesting things.

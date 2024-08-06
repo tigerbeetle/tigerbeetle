@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -eEuo pipefail
 
-# Install Zig if it does not already exist:
-if [ ! -d "zig" ]; then
-    ./scripts/install_zig.sh
+# Download Zig if it does not yet exist:
+if [ ! -f "zig/zig" ]; then
+    ./zig/download.sh
 fi
 
 # TODO: remove -Drelease once we no longer use a lot of stack in Groove.zig

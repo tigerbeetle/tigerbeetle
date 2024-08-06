@@ -10,9 +10,9 @@ fi
 
 # Validate the release version explicitly:
 if echo "$ZIG_RELEASE" | grep -q '^builds$'; then
-    echo "Installing Zig latest build..."
+    echo "Downloading Zig latest build..."
 elif echo "$ZIG_RELEASE" | grep -q '^[0-9]\+.[0-9]\+.[0-9]\+$'; then
-    echo "Installing Zig $ZIG_RELEASE release build..."
+    echo "Downloading Zig $ZIG_RELEASE release build..."
 else
     echo "Release version invalid"
     exit 1
@@ -76,17 +76,22 @@ else
 fi
 
 # Extract and then remove the downloaded tarball:
-echo "Extracting $ZIG_TARBALL..."
 tar -xf "$ZIG_TARBALL"
 rm "$ZIG_TARBALL"
 
-# Replace any existing Zig installation so that we can install or upgrade:
-echo "Installing $ZIG_DIRECTORY to 'zig' in current working directory..."
-rm -rf zig
-mv "$ZIG_DIRECTORY" zig
+# Replace these existing directories and files so that we can install or upgrade:
+rm -rf zig/doc
+rm -rf zig/lib
+mv "$ZIG_DIRECTORY/LICENSE" zig/
+mv "$ZIG_DIRECTORY/README.md" zig/
+mv "$ZIG_DIRECTORY/doc" zig/
+mv "$ZIG_DIRECTORY/lib" zig/
+mv "$ZIG_DIRECTORY/zig" zig/
+
+# We expect to have now moved all directories and files out of the extracted directory.
+# Do not force remove so that we can get an error if the above list of files ever changes:
+rmdir "$ZIG_DIRECTORY"
 
 # It's up to the user to add this to their path if they want to:
 ZIG_BIN="$(pwd)/zig/zig"
-
-ZIG_VERSION=$($ZIG_BIN version)
-echo "Congratulations, you have successfully installed Zig $ZIG_VERSION to $ZIG_BIN. Enjoy!"
+echo "Downloading completed ($ZIG_BIN)! Enjoy!"
