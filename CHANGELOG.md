@@ -1,6 +1,6 @@
 # TigerBeetle Changelog
 
-## 2024-08-05
+## 2024-08-05 (No release: Queued up to improve multiversion upgrade flow)
 
 ### Safety And Performance
 
