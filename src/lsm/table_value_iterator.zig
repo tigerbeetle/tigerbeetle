@@ -18,7 +18,7 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
 
         const Grid = GridType(Storage);
 
-        pub const Callback = *const fn (it: *TableValueIterator, value_block: ?BlockPtrConst) void;
+        pub const Callback = *const fn (it: *TableValueIterator, value_block: BlockPtrConst) void;
 
         pub const Context = struct {
             grid: *Grid,
@@ -38,7 +38,6 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
         },
 
         read: Grid.Read,
-        next_tick: Grid.NextTick,
 
         pub fn init(
             it: *TableValueIterator,
@@ -50,7 +49,6 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
                 .context = context,
                 .callback = .none,
                 .read = undefined,
-                .next_tick = undefined,
             };
         }
 
@@ -59,38 +57,31 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
             return it.context.addresses.len == 0;
         }
 
-        /// Calls `callback` with either the next data block or null.
+        /// Calls `callback` with the next value block.
+        /// Not expected to be called in an empty iterator.
         /// The block is only valid for the duration of the callback.
-        pub fn next(it: *TableValueIterator, callback: Callback) void {
+        pub fn next_value_block(it: *TableValueIterator, callback: Callback) void {
             assert(it.callback == .none);
-            assert(it.context.addresses.len == it.context.checksums.len);
+            assert(!it.empty());
 
-            if (it.context.addresses.len > 0) {
-                const index: usize = switch (it.context.direction) {
-                    .ascending => 0,
-                    .descending => it.context.addresses.len - 1,
-                };
+            const index: usize = switch (it.context.direction) {
+                .ascending => 0,
+                .descending => it.context.addresses.len - 1,
+            };
 
-                assert(it.context.checksums[index].padding == 0);
+            assert(it.context.checksums[index].padding == 0);
 
-                it.callback = .{ .read = callback };
-                it.context.grid.read_block(
-                    .{ .from_local_or_global_storage = on_read },
-                    &it.read,
-                    it.context.addresses[index],
-                    it.context.checksums[index].value,
-                    .{ .cache_read = true, .cache_write = true },
-                );
-            } else {
-                assert(it.context.addresses.len == 0);
-                assert(it.context.checksums.len == 0);
-
-                it.callback = .{ .next_tick = callback };
-                it.context.grid.on_next_tick(on_next_tick, &it.next_tick);
-            }
+            it.callback = .{ .read = callback };
+            it.context.grid.read_block(
+                .{ .from_local_or_global_storage = read_block_callback },
+                &it.read,
+                it.context.addresses[index],
+                it.context.checksums[index].value,
+                .{ .cache_read = true, .cache_write = true },
+            );
         }
 
-        fn on_read(read: *Grid.Read, block: BlockPtrConst) void {
+        fn read_block_callback(read: *Grid.Read, block: BlockPtrConst) void {
             const it: *TableValueIterator = @fieldParentPtr("read", read);
             assert(it.callback == .read);
             assert(it.context.addresses.len == it.context.checksums.len);
@@ -100,22 +91,18 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
 
             switch (it.context.direction) {
                 .ascending => {
-                    if (constants.verify) {
-                        const header = schema.header_from_block(block);
-                        assert(header.address == it.context.addresses[0]);
-                        assert(header.checksum == it.context.checksums[0].value);
-                    }
+                    const header = schema.header_from_block(block);
+                    assert(header.address == it.context.addresses[0]);
+                    assert(header.checksum == it.context.checksums[0].value);
 
                     it.context.addresses = it.context.addresses[1..];
                     it.context.checksums = it.context.checksums[1..];
                 },
                 .descending => {
                     const index_last = it.context.checksums.len - 1;
-                    if (constants.verify) {
-                        const header = schema.header_from_block(block);
-                        assert(header.address == it.context.addresses[index_last]);
-                        assert(header.checksum == it.context.checksums[index_last].value);
-                    }
+                    const header = schema.header_from_block(block);
+                    assert(header.address == it.context.addresses[index_last]);
+                    assert(header.checksum == it.context.checksums[index_last].value);
 
                     it.context.addresses = it.context.addresses[0..index_last];
                     it.context.checksums = it.context.checksums[0..index_last];
@@ -124,16 +111,6 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
 
             assert(it.context.addresses.len == it.context.checksums.len);
             callback(it, block);
-        }
-
-        fn on_next_tick(next_tick: *Grid.NextTick) void {
-            const it: *TableValueIterator = @alignCast(@fieldParentPtr("next_tick", next_tick));
-            assert(it.callback == .next_tick);
-            assert(it.empty());
-
-            const callback = it.callback.next_tick;
-            it.callback = .none;
-            callback(it, null);
         }
     };
 }

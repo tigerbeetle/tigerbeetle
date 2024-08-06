@@ -256,10 +256,10 @@ pub fn ScanTreeType(
                 switch (level.values) {
                     .fetching => {
                         assert(level.state == .iterating_manifest or
-                            level.state == .iterating_values or
-                            level.state == .finished);
+                            level.state == .loading_index or
+                            level.state == .iterating_values);
 
-                        if (level.state == .iterating_manifest) level.table_next(.begin);
+                        if (level.state == .iterating_manifest) level.move_next();
                         self.state.buffering.pending_count += 1;
                         level.fetch();
                     },
@@ -611,67 +611,6 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             };
         }
 
-        /// Moves the iterator to the next `table_info` that might contain the key range.
-        /// No IO is performed until `fetch()` is called.
-        pub fn table_next(
-            self: *ScanTreeLevel,
-            key_exclusive: union(enum) {
-                begin,
-                next: Key,
-            },
-        ) void {
-            assert(self.state == .iterating_manifest);
-            assert(self.values == .fetching);
-
-            const scan: *ScanTree = self.scan;
-            assert(scan.state == .buffering);
-
-            const manifest: *Manifest = &scan.tree.manifest;
-            if (manifest.next_table(.{
-                .level = self.level_index,
-                .snapshot = scan.snapshot,
-                .key_min = scan.key_min,
-                .key_max = scan.key_max,
-                .key_exclusive = switch (key_exclusive) {
-                    .begin => null,
-                    .next => |key| key,
-                },
-                .direction = scan.direction,
-            })) |table_info| {
-                const manifest_table_next: State.ManifestTableNext = table_next: {
-                    // The last key depending on the direction:
-                    const key_last = switch (scan.direction) {
-                        .ascending => table_info.key_max,
-                        .descending => table_info.key_min,
-                    };
-
-                    // If the last key is out of the key range,
-                    // there are no more tables to scan next.
-                    if (scan.key_max < key_last) {
-                        assert(scan.direction == .ascending);
-                        break :table_next .out_of_range;
-                    } else if (key_last < scan.key_min) {
-                        assert(scan.direction == .descending);
-                        break :table_next .out_of_range;
-                    }
-
-                    break :table_next .{ .key_exclusive = key_last };
-                };
-
-                self.state = .{
-                    .loading_index = .{
-                        .manifest_table_next = manifest_table_next,
-                        .address = table_info.address,
-                        .checksum = table_info.checksum,
-                    },
-                };
-                self.values = .fetching;
-            } else {
-                self.state = .{ .finished = .{} };
-                self.values = .finished;
-            }
-        }
-
         pub fn fetch(self: *ScanTreeLevel) void {
             assert(self.scan.state == .buffering);
 
@@ -680,8 +619,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 .loading_index => |*loading_index| {
                     assert(self.values == .fetching);
                     // Reading the index blocks:
-                    const grid: *Grid = self.scan.tree.grid;
-                    grid.read_block(
+                    self.scan.tree.grid.read_block(
                         .{ .from_local_or_global_storage = index_block_callback },
                         &loading_index.read,
                         loading_index.address,
@@ -691,12 +629,12 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 },
                 .iterating_values => |*iterating_values| {
                     assert(self.values == .fetching);
-                    iterating_values.iterator.next(value_block_callback);
+                    assert(!iterating_values.iterator.empty());
+                    iterating_values.iterator.next_value_block(value_block_callback);
                 },
                 .finished => |*finished| {
                     assert(self.values == .finished);
-                    const grid: *Grid = self.scan.tree.grid;
-                    grid.on_next_tick(
+                    self.scan.tree.grid.on_next_tick(
                         finished_callback,
                         &finished.next_tick,
                     );
@@ -743,13 +681,17 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(@intFromPtr(values.ptr) <=
                 @intFromPtr(self.buffer.data_block) + self.buffer.data_block.len);
 
-            // The buffer is re-sliced during pop,
-            // updating the backing field at the end.
-            defer if (values.len == 0) {
-                self.values = .fetching;
-            } else {
-                self.values.buffered = values;
-            };
+            defer {
+                if (values.len == 0) {
+                    // Moving to the next `value_block` or `table_info`.
+                    // This will cause the next `peek()` to return `Drained`.
+                    self.move_next();
+                } else {
+                    // The buffer is re-sliced during pop,
+                    // updating the backing field at the end.
+                    self.values.buffered = values;
+                }
+            }
 
             switch (self.scan.direction) {
                 .ascending => {
@@ -781,7 +723,9 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                     );
 
                     if (slice.len == 0) {
-                        self.values = .fetching;
+                        // Moving to the next `value_block` or `table_info`.
+                        // This will cause the next `peek()` to return `Drained`.
+                        self.move_next();
                     } else {
                         // The next exclusive key must be ahead of (or equals) the probe key,
                         // so the level iterator state can be preserved without reading the
@@ -797,9 +741,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                             });
                         }
 
-                        self.values = .{
-                            .buffered = slice,
-                        };
+                        self.values = .{ .buffered = slice };
                     }
                 },
                 .finished => {
@@ -821,6 +763,96 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             }
         }
 
+        /// Move to the next `value_block` or `table_info` according to the current state.
+        fn move_next(self: *ScanTreeLevel) void {
+            assert(self.values == .fetching or
+                self.values == .buffered);
+
+            switch (self.state) {
+                .iterating_manifest => self.move_manifest_table_next(null),
+                .loading_index => unreachable,
+                .iterating_values => |*iterating_values| {
+                    if (iterating_values.iterator.empty()) {
+                        switch (iterating_values.manifest_table_next) {
+                            .key_exclusive => |key_exclusive| {
+                                assert(switch (self.scan.direction) {
+                                    .ascending => self.scan.key_min <= key_exclusive,
+                                    .descending => self.scan.key_max >= key_exclusive,
+                                });
+                                // Load the next `table_info`.
+                                self.state = .iterating_manifest;
+                                self.values = .fetching;
+                                self.move_manifest_table_next(key_exclusive);
+                            },
+                            .out_of_range => {
+                                // The next `table_info` is out of the key range, so it's finished.
+                                self.state = .{ .finished = .{} };
+                                self.values = .finished;
+                            },
+                        }
+                    } else {
+                        // Keep iterating to the next `value_block`.
+                        self.values = .fetching;
+                    }
+                },
+                .finished => unreachable,
+            }
+        }
+
+        /// Moves the iterator to the next `table_info` that might contain the key range.
+        fn move_manifest_table_next(
+            self: *ScanTreeLevel,
+            key_exclusive: ?Key,
+        ) void {
+            assert(self.state == .iterating_manifest);
+            assert(self.values == .fetching);
+
+            assert(self.scan.state == .seeking or
+                self.scan.state == .buffering);
+
+            const manifest: *Manifest = &self.scan.tree.manifest;
+            if (manifest.next_table(.{
+                .level = self.level_index,
+                .snapshot = self.scan.snapshot,
+                .key_min = self.scan.key_min,
+                .key_max = self.scan.key_max,
+                .key_exclusive = key_exclusive,
+                .direction = self.scan.direction,
+            })) |table_info| {
+                const manifest_table_next: State.ManifestTableNext = table_next: {
+                    // The last key depending on the direction:
+                    const key_last = switch (self.scan.direction) {
+                        .ascending => table_info.key_max,
+                        .descending => table_info.key_min,
+                    };
+
+                    // If the last key is out of the key range,
+                    // there are no more tables to scan next.
+                    if (self.scan.key_max < key_last) {
+                        assert(self.scan.direction == .ascending);
+                        break :table_next .out_of_range;
+                    } else if (key_last < self.scan.key_min) {
+                        assert(self.scan.direction == .descending);
+                        break :table_next .out_of_range;
+                    }
+
+                    break :table_next .{ .key_exclusive = key_last };
+                };
+
+                self.state = .{
+                    .loading_index = .{
+                        .manifest_table_next = manifest_table_next,
+                        .address = table_info.address,
+                        .checksum = table_info.checksum,
+                    },
+                };
+                self.values = .fetching;
+            } else {
+                self.state = .{ .finished = .{} };
+                self.values = .finished;
+            }
+        }
+
         fn index_block_callback(
             read: *Grid.Read,
             index_block: BlockPtrConst,
@@ -829,39 +861,42 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             const loading_index: *LoadingIndex = @fieldParentPtr("read", read);
             const state: *State = @fieldParentPtr("loading_index", loading_index);
             const self: *ScanTreeLevel = @fieldParentPtr("state", state);
-            const scan: *const ScanTree = self.scan;
 
             assert(self.state == .loading_index);
             assert(self.values == .fetching);
-            assert(scan.state == .buffering);
-            assert(scan.state.buffering.pending_count > 0);
+            assert(self.scan.state == .buffering);
+            assert(self.scan.state.buffering.pending_count > 0);
 
             // `index_block` is only valid for this callback, so copy it's contents.
             stdx.copy_disjoint(.exact, u8, self.buffer.index_block, index_block);
 
             const Range = struct { start: u32, end: u32 };
             const range_found: ?Range = range: {
-                const keys = Table.index_data_keys_used(self.buffer.index_block, .key_max);
+                const keys_max = Table.index_data_keys_used(self.buffer.index_block, .key_max);
+                const keys_min = Table.index_data_keys_used(self.buffer.index_block, .key_min);
+                // The `index_block` *might* contain the key range,
+                // otherwise, it shouldn't have been returned by the manifest.
+                assert(keys_min.len > 0 and keys_max.len > 0);
+                assert(keys_min.len == keys_max.len);
+                assert(keys_min[0] <= self.scan.key_max and
+                    self.scan.key_min <= keys_max[keys_max.len - 1]);
+
                 const indexes = binary_search.binary_search_keys_range_upsert_indexes(
                     Key,
-                    keys,
-                    scan.key_min,
-                    scan.key_max,
+                    keys_max,
+                    self.scan.key_min,
+                    self.scan.key_max,
                 );
 
                 // The key range was not found.
-                if (indexes.start == keys.len) break :range null;
+                if (indexes.start == keys_max.len) break :range null;
 
                 // Because we search `key_max` in the index block, if the search does not find an
                 // exact match it returns the index of the next greatest key, which may contain
                 // the key depending on the `key_min`.
                 const end = end: {
-                    const keys_min = Table.index_data_keys_used(
-                        index_block,
-                        .key_min,
-                    );
                     break :end indexes.end + @intFromBool(
-                        indexes.end < keys.len and keys_min[indexes.end] <= scan.key_max,
+                        indexes.end < keys_max.len and keys_min[indexes.end] <= self.scan.key_max,
                     );
                 };
 
@@ -886,99 +921,75 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 },
             };
 
-            const context: TableValueIterator.Context = if (range_found) |range| .{
-                .grid = scan.tree.grid,
-                .addresses = data_addresses[range.start..range.end],
-                .checksums = data_checksums[range.start..range.end],
-                .direction = scan.direction,
-            } else .{
-                .grid = scan.tree.grid,
-                .addresses = &.{},
-                .checksums = &.{},
-                .direction = scan.direction,
-            };
-
-            self.state.iterating_values.iterator.init(context);
-            self.state.iterating_values.iterator.next(value_block_callback);
+            if (range_found) |range| {
+                self.state.iterating_values.iterator.init(.{
+                    .grid = self.scan.tree.grid,
+                    .addresses = data_addresses[range.start..range.end],
+                    .checksums = data_checksums[range.start..range.end],
+                    .direction = self.scan.direction,
+                });
+                self.state.iterating_values.iterator.next_value_block(value_block_callback);
+            } else {
+                // The current `table_info` does not contain the key range,
+                // fetching the next `table_info`.
+                self.move_next();
+                self.fetch();
+            }
         }
 
         fn value_block_callback(
             iterator: *TableValueIterator,
-            value_block_maybe: ?BlockPtrConst,
+            value_block: BlockPtrConst,
         ) void {
             const IteratingValues = std.meta.FieldType(State, .iterating_values);
             const iterating_values: *IteratingValues = @fieldParentPtr("iterator", iterator);
             const state: *State = @fieldParentPtr("iterating_values", iterating_values);
             const self: *ScanTreeLevel = @fieldParentPtr("state", state);
-            const scan: *ScanTree = self.scan;
 
             assert(self.state == .iterating_values);
             assert(self.values == .fetching);
-            assert(scan.state == .buffering);
-            assert(scan.state.buffering.pending_count > 0);
+            assert(self.scan.state == .buffering);
+            assert(self.scan.state.buffering.pending_count > 0);
 
-            if (value_block_maybe) |value_block| {
-                const values = Table.data_block_values_used(value_block);
-                const range = binary_search.binary_search_values_range(
-                    Key,
+            const values = Table.data_block_values_used(value_block);
+            const range = binary_search.binary_search_values_range(
+                Key,
+                Value,
+                key_from_value,
+                values,
+                self.scan.key_min,
+                self.scan.key_max,
+            );
+
+            if (range.count > 0) {
+                // The buffer is a whole grid block, but only the matching values should
+                // be copied to save memory bandwidth. The buffer `data block` does not
+                // follow the block layout (e.g. header + values).
+                const buffer: []Value = std.mem.bytesAsSlice(Value, self.buffer.data_block);
+                stdx.copy_disjoint(
+                    .exact,
                     Value,
-                    key_from_value,
-                    values,
-                    scan.key_min,
-                    scan.key_max,
+                    buffer[0..range.count],
+                    values[range.start..][0..range.count],
                 );
-
-                if (range.count > 0) {
-                    // The buffer is a whole grid block, but only the matching values should
-                    // be copied to save memory bandwidth. The buffer `data block` does not
-                    // follow the block layout (e.g. header + values).
-                    const buffer: []Value = std.mem.bytesAsSlice(Value, self.buffer.data_block);
-                    stdx.copy_disjoint(
-                        .exact,
-                        Value,
-                        buffer[0..range.count],
-                        values[range.start..][0..range.count],
-                    );
-                    // Found values that match the range query.
-                    self.values = .{ .buffered = buffer[0..range.count] };
-                } else {
-                    // The `data_block` *might* contain the scan range,
-                    // otherwise, it shouldn't have been returned by the iterator.
-                    const key_min = key_from_value(&values[0]);
-                    const key_max = key_from_value(&values[values.len - 1]);
-                    assert(key_min < scan.key_min and
-                        scan.key_max < key_max);
-
-                    // No matches were found.
-                    // Keep loading `value_block`s from the same table.
-                    self.values = .fetching;
-                }
+                // Found values that match the range query.
+                self.values = .{ .buffered = buffer[0..range.count] };
             } else {
-                // There are no more value blocks in this table:
-                switch (self.state.iterating_values.manifest_table_next) {
-                    .key_exclusive => |key_exclusive| {
-                        assert(switch (self.scan.direction) {
-                            .ascending => self.scan.key_min <= key_exclusive,
-                            .descending => self.scan.key_max >= key_exclusive,
-                        });
-                        // Loading the next table_info.
-                        self.state = .iterating_manifest;
-                        self.values = .fetching;
-                        self.table_next(.{
-                            .next = key_exclusive,
-                        });
-                    },
-                    .out_of_range => {
-                        // The next `table_info` is out of the key range, so it's finished.
-                        self.state = .{ .finished = .{} };
-                        self.values = .finished;
-                    },
-                }
+                // The `data_block` *might* contain the key range,
+                // otherwise, it shouldn't have been returned by the iterator.
+                const key_min = key_from_value(&values[0]);
+                const key_max = key_from_value(&values[values.len - 1]);
+                assert(key_min < self.scan.key_min and
+                    self.scan.key_max < key_max);
+
+                // Keep fetching if there are more value blocks on this table,
+                // or move to the next table otherwise.
+                self.move_next();
             }
 
             switch (self.values) {
                 .fetching => self.fetch(),
-                .buffered, .finished => scan.levels_read_complete(),
+                .buffered, .finished => self.scan.levels_read_complete(),
             }
         }
 
@@ -987,14 +998,13 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             const finished: *Finished = @fieldParentPtr("next_tick", next_tick);
             const state: *State = @alignCast(@fieldParentPtr("finished", finished));
             const self: *ScanTreeLevel = @fieldParentPtr("state", state);
-            const scan: *ScanTree = self.scan;
 
             assert(self.state == .finished);
             assert(self.values == .finished);
-            assert(scan.state == .buffering);
-            assert(scan.state.buffering.pending_count > 0);
+            assert(self.scan.state == .buffering);
+            assert(self.scan.state.buffering.pending_count > 0);
 
-            scan.levels_read_complete();
+            self.scan.levels_read_complete();
         }
     };
 }
