@@ -1054,7 +1054,13 @@ pub const Multiversion = struct {
     }
 
     pub fn exec_latest(self: *Multiversion) !noreturn {
-        assert(self.stage == .ready);
+        // target_fd is only modified in target_update() which happens synchronously.
+        assert(self.stage != .target_update);
+
+        // Ensure that target_update() has been called at least once, and thus target_fd is
+        // populated by checking that target_header has been set.
+        assert(self.target_header != null);
+
         log.info("re-executing {s}...\n", .{self.exe_path});
         try self.exec_target_fd();
     }
