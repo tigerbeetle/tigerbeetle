@@ -219,6 +219,11 @@ pub const Command = enum(u8) {
     request_sync_checkpoint = 21,
     sync_checkpoint = 22,
 
+    // A reserved command for the new state sync protocol. At the moment, replica ignores this
+    // command (as opposed to panicking on an unknown command), to allow the next release to send
+    // both versions of StartView.
+    start_view2 = 23,
+
     comptime {
         for (std.enums.values(Command), 0..) |result, index| {
             assert(@intFromEnum(result) == index);
