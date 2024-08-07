@@ -4638,7 +4638,7 @@ pub fn ReplicaType(
         /// Construct a SV message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_start_view_message(self: *Self, nonce: u128) struct {
-            current: *Message.StartView,
+            current: *Message.StartViewDeprecated,
             next: *Message.StartView,
         } {
             assert(self.status == .normal);
@@ -4689,6 +4689,7 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
+            comptime assert(Message.StartView == Message.StartViewDeprecated);
             const message_copy = self.message_bus.get_message(.start_view);
             defer self.message_bus.unref(message_copy);
 

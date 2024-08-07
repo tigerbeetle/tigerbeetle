@@ -203,6 +203,8 @@ pub const Command = enum(u8) {
 
     start_view_change = 10,
     do_view_change = 11,
+    // Historical version of SV, without checkpoint. Currently  both `start_view_deprecated` and
+    // `start_view` are handled. Next release will ignore `start_view_deprecated`.
     start_view_deprecated = 12,
 
     request_start_view = 13,
@@ -219,9 +221,6 @@ pub const Command = enum(u8) {
     request_sync_checkpoint = 21,
     sync_checkpoint = 22,
 
-    // A reserved command for the new state sync protocol. At the moment, replica ignores this
-    // command (as opposed to panicking on an unknown command), to allow the next release to send
-    // both versions of StartView.
     start_view = 23,
 
     comptime {
