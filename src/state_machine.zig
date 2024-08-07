@@ -1352,6 +1352,7 @@ pub fn StateMachineType(
         pub fn commit(
             self: *StateMachine,
             client: u128,
+            client_release: vsr.Release,
             op: u64,
             timestamp: u64,
             operation: Operation,
@@ -1359,6 +1360,7 @@ pub fn StateMachineType(
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             _ = client;
+            _ = client_release;
             assert(op != 0);
             assert(self.input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
@@ -2884,6 +2886,7 @@ const TestContext = struct {
 
         return context.state_machine.commit(
             0,
+            vsr.Release.minimum,
             1,
             timestamp,
             operation,

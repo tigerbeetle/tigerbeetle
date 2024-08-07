@@ -4261,6 +4261,7 @@ pub fn ReplicaType(
                 .upgrade => self.commit_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
                 else => self.state_machine.commit(
                     prepare.header.client,
+                    prepare.header.release,
                     prepare.header.op,
                     prepare.header.timestamp,
                     prepare.header.operation.cast(StateMachine),
