@@ -189,6 +189,9 @@ The transfer was not created. [`Transfer.timeout`](../transfer.md#timeout) is no
 
 ### `amount_must_not_be_zero`
 
+**Deprecated**: This error code is only returned to clients prior to release `0.16.0`.
+Since `0.16.0`, zero-amount transfers are permitted.
+
 The transfer was not created. [`Transfer.amount`](../transfer.md#amount) is zero, but must be
 nonzero.
 

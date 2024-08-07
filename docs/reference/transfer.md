@@ -155,11 +155,6 @@ Constraints:
 - When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero, it will
   automatically be set to the maximum amount that does not violate the corresponding account limits.
   (Equivalent to setting `amount = 2^128 - 1`).
-- When all of the following flags are not set, `amount` must be nonzero:
-  - `flags.post_pending_transfer`
-  - `flags.void_pending_transfer`
-  - `flags.balancing_debit`
-  - `flags.balancing_credit`
 
 #### Examples
 
