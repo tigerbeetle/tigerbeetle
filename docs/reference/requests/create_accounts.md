@@ -32,8 +32,8 @@ to the next operation).
 ### `imported_event_expected`
 
 The account was not created. The [`Account.flags.imported`](../account.md#flagsimported) was
-expected to be set, as it's not allowed to mix accounts with different `imported` flag in the
-same batch. The first account determines the entire operation.
+set on the first account of the batch, but not all accounts in the batch.
+Batches cannot mix imported accounts with non-imported accounts.
 
 ### `imported_event_not_expected`
 
@@ -43,8 +43,13 @@ in the same batch. The first account determines the entire operation.
 
 ### `timestamp_must_be_zero`
 
+This result only applies when [Account.flags.imported](../account.md#flagsimported) is _not_ set.
+
 The account was not created. The [`Account.timestamp`](../account.md#timestamp) is nonzero, but
 must be zero. The cluster is responsible for setting this field.
+
+The [`Account.timestamp`](../account.md#timestamp) can only be assigned when creating accounts
+with [Account.flags.imported](../account.md#flagsimported) set.
 
 ### `imported_event_timestamp_must_not_be_zero`
 

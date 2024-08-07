@@ -239,6 +239,8 @@ This is the interval in seconds after a [`pending`](#flagspending) transfer's
 
 Non-pending transfers cannot have a timeout.
 
+Imported transfers cannot have a timeout.
+
 TigerBeetle makes a best-effort approach to remove pending balances of expired transfers
 automatically:
 
@@ -404,7 +406,7 @@ pending transfer will never exceed/overflow either account's limits.
 
 When set, allows importing historical `Transfer`s with their original [`timestamp`](#timestamp).
 
-TigerBeetle will not use the [real-time clock](../coding/time.md) to assign the timestamp, allowing
+TigerBeetle will not use the [cluster clock](../coding/time.md) to assign the timestamp, allowing
 the user to define it, expressing _when_ the transfer was effectively created by an external
 event.
 
@@ -417,23 +419,32 @@ necessary:
 - User-defined timestamps must be **unique** and expressed as nanoseconds since the UNIX epoch.
   No two transfers can share the same timestamp.
 
-- User-defined timestamps must be a past date, never ahead of the cluster real-time clock at the
-  time the request arrives.
+- User-defined timestamps must be a past date, never ahead of the cluster clock at the time the
+  request arrives.
 
-- Timestamps must be monotonically increasing.
+- Timestamps must be strictly increasing.
 
   Even user-defined timestamps that are required to be past dates need to be at least one
   nanosecond ahead of the timestamp of the last transfer committed by the cluster.
 
   Since the timestamp cannot regress, importing past events can be naturally restrictive without
-  coordination, as the last timestamp can be updated using the real-time clock during regular
+  coordination, as the last timestamp can be updated using the cluster clock during regular
   cluster activity. Instead, it's recommended to import events only on a fresh cluster or
   during a scheduled maintenance window.
 
-  Additionally, the entire batch can be submitted as a [linked chain](#flagslinked), ensuring that
-  if any event fails, none of them are committed, preserving the last timestamp unchanged.
-  This approach gives the application a chance to correct failed imported events, re-submitting
+  It's recommended to submit the entire batch as a [linked chain](#flagslinked), ensuring that
+  if any transfer fails, none of them are committed, preserving the last timestamp unchanged.
+  This approach gives the application a chance to correct failed imported transfers, re-submitting
   the batch again with the same user-defined timestamps.
+
+- Imported transfers cannot have a [`timeout`](#timeout).
+
+  It's possible to import [pending](#flagspending) transfers with a user-defined timestamp,
+  but since it's not driven by the cluster clock, it cannot define a
+  [`timeout`](#timeout) for automatic expiration.
+  In those cases, the [two-phase post or rollback](../coding/two-phase-transfers.md) must be
+  done manually.
+
 
 ### `timestamp`
 
@@ -446,7 +457,7 @@ You can read more about [Time in TigerBeetle](../coding/time.md).
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be `0` when the `Transfer` is created
+- Must be `0` when the `Transfer` is created with [`flags.imported`](#flagsimported) _not_ set
 - Must be greater than `0` and less than `2^63` when the `Transfer` is created with
   [`flags.imported`](#flagsimported) set
 

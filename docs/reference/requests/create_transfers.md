@@ -34,8 +34,8 @@ continues to the next operation).
 ### `imported_event_expected`
 
 The transfer was not created. The [`Transfer.flags.imported`](../transfer.md#flagsimported) was
-expected to be set, as it's not allowed to mix transfers with different `imported` flag in the
-same batch. The first transfer determines the entire operation.
+set on the first transfer of the batch, but not all transfers in the batch.
+Batches cannot mix imported transfers with non-imported transfers.
 
 ### `imported_event_not_expected`
 
@@ -45,8 +45,13 @@ in the same batch. The first transfer determines the entire operation.
 
 ### `timestamp_must_be_zero`
 
+This result only applies when [Account.flags.imported](../account.md#flagsimported) is _not_ set.
+
 The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is nonzero, but
 must be zero. The cluster is responsible for setting this field.
+
+The [`Transfer.timestamp`](../transfer.md#timestamp) can only be assigned when creating transfers
+with [Transfer.flags.imported](../transfer.md#flagsimported) set.
 
 ### `imported_event_timestamp_must_not_be_zero`
 
@@ -87,26 +92,37 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+- [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✓ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✓ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
 
 ### `debit_account_id_must_not_be_zero`
 
@@ -389,7 +405,7 @@ The transfer was not created. The [`Transfer.timeout`](../transfer.md#timeout) i
 must be zero.
 
 It's possible to import [pending](../transfer.md#flagspending) transfers with a user-defined
-timestamp, but since it's not driven by the real-time clock, it cannot define a timeout for
+timestamp, but since it's not driven by the cluster clock, it cannot define a timeout for
 automatic expiration.
 In those cases, the [two-phase post or rollback](../../coding/two-phase-transfers.md) must be
 done manually.
