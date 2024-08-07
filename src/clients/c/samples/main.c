@@ -49,10 +49,10 @@ long long get_time_ms(void);
 
 // Completion function, called by tb_client no notify that a request as completed.
 void on_completion(
-    uintptr_t context, 
-    tb_client_t client, 
-    tb_packet_t *packet, 
-    const uint8_t *data, 
+    uintptr_t context,
+    tb_client_t client,
+    tb_packet_t *packet,
+    const uint8_t *data,
     uint32_t size
 );
 
@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
     printf("TigerBeetle C Sample\n");
     printf("Connecting...\n");
     tb_client_t client;
-    
+
     const char *address = getenv("TB_ADDRESS");
     if (address == NULL) address = "3000";
 
@@ -90,10 +90,10 @@ int main(int argc, char **argv) {
     #define ACCOUNTS_LEN 2
     #define ACCOUNTS_SIZE sizeof(tb_account_t) * ACCOUNTS_LEN
     tb_account_t accounts[ACCOUNTS_LEN];
-    
+
     // Zeroing the memory, so we don't have to initialize every field.
     memset(&accounts, 0, ACCOUNTS_SIZE);
-    
+
     accounts[0].id = 1;
     accounts[0].code = 2;
     accounts[0].ledger = 777;
@@ -108,8 +108,8 @@ int main(int argc, char **argv) {
     packet.user_data = &ctx;                          // User-defined context.
     packet.status = TB_PACKET_OK;                     // Will be set when the reply arrives.
 
-    printf("Creating accounts...\n"); 
-    
+    printf("Creating accounts...\n");
+
     send_request(client, &packet, &ctx);
 
     if (packet.status != TB_PACKET_OK) {
@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
     }
 
     printf("Accounts created successfully\n");
-    
+
     ////////////////////////////////////////////////////////////
     // Submitting multiple batches of transfers:              //
     ////////////////////////////////////////////////////////////
@@ -143,10 +143,10 @@ int main(int argc, char **argv) {
     long total_time_ms = 0;
     for (int i=0; i< MAX_BATCHES;i++) {
         tb_transfer_t transfers[TRANSFERS_PER_BATCH];
-        
+
         // Zeroing the memory, so we don't have to initialize every field.
         memset(transfers, 0, TRANSFERS_SIZE);
-        
+
         for (int j=0; j<TRANSFERS_PER_BATCH; j++) {
             transfers[j].id = j + 1 + (i * TRANSFERS_PER_BATCH);
             transfers[j].debit_account_id = accounts[0].id;
@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
             // Checking if the request failed:
             printf("Error calling create_transfers (ret=%d)\n", packet.status);
             exit(-1);
-        }       
+        }
 
         if (ctx.size != 0) {
             // Checking for errors creating the accounts:
@@ -189,11 +189,11 @@ int main(int argc, char **argv) {
     }
 
     printf("Transfers created successfully\n");
-	printf("============================================\n");
+    printf("============================================\n");
 
     printf("%llu transfers per second\n", (MAX_BATCHES * TRANSFERS_PER_BATCH * 1000) / total_time_ms);
-	printf("create_transfers max p100 latency per %llu transfers = %ldms\n", TRANSFERS_PER_BATCH, max_latency_ms);
-	printf("total %llu transfers in %ldms\n", MAX_BATCHES * TRANSFERS_PER_BATCH, total_time_ms);    
+    printf("create_transfers max p100 latency per %llu transfers = %ldms\n", TRANSFERS_PER_BATCH, max_latency_ms);
+    printf("total %llu transfers in %ldms\n", MAX_BATCHES * TRANSFERS_PER_BATCH, total_time_ms);
     printf("\n");
 
     ////////////////////////////////////////////////////////////
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
     packet.status = TB_PACKET_OK;
 
     send_request(client, &packet, &ctx);
-    
+
     if (packet.status != TB_PACKET_OK) {
         // Checking if the request failed:
         printf("Error calling lookup_accounts (ret=%d)", packet.status);
@@ -227,7 +227,7 @@ int main(int argc, char **argv) {
         printf("%d Account(s) found\n", results_len);
         printf("============================================\n");
 
-        for(int i=0;i<results_len;i++) {            
+        for(int i=0;i<results_len;i++) {
             printf("id=%ld\n", (long)results[i].id);
             printf("debits_posted=%ld\n", (long)results[i].debits_posted);
             printf("credits_posted=%ld\n", (long)results[i].credits_posted);
@@ -243,12 +243,12 @@ int main(int argc, char **argv) {
 #if IS_POSIX
 
 void on_completion(
-    uintptr_t context, 
-    tb_client_t client, 
-    tb_packet_t *packet, 
-    const uint8_t *data, 
+    uintptr_t context,
+    tb_client_t client,
+    tb_packet_t *packet,
+    const uint8_t *data,
     uint32_t size
-) {    
+) {
     // The user_data gives context to a request:
     completion_context_t* ctx = (completion_context_t*)packet->user_data;
 
@@ -258,7 +258,7 @@ void on_completion(
     memcpy (ctx->reply, data, size);
     ctx->size = size;
     ctx->completed = true;
-    
+
     pthread_cond_signal(&ctx->cv);
     pthread_mutex_unlock(&ctx->lock);
 }
@@ -285,7 +285,7 @@ void send_request(
             exit(-1);
         }
     }
-    
+
     if (pthread_mutex_unlock(&ctx->lock) != 0) {
         printf("Failed to unlock mutex\n");
         exit(-1);
@@ -321,22 +321,22 @@ long long get_time_ms(void) {
 #elif _WIN32
 
 void on_completion(
-    uintptr_t context, 
-    tb_client_t client, 
-    tb_packet_t *packet, 
-    const uint8_t *data, 
+    uintptr_t context,
+    tb_client_t client,
+    tb_packet_t *packet,
+    const uint8_t *data,
     uint32_t size
-) {    
+) {
     // The user_data gives context to a request:
     completion_context_t* ctx = (completion_context_t*)packet->user_data;
 
     // Signaling the main thread we received the reply:
     EnterCriticalSection(&ctx->lock);
-    
+
     memcpy (ctx->reply, data, size);
     ctx->size = size;
     ctx->completed = true;
-    
+
     WakeConditionVariable(&ctx->cv);
     LeaveCriticalSection(&ctx->lock);
 }
@@ -357,7 +357,7 @@ void send_request(
     while (!ctx->completed) {
         SleepConditionVariableCS (&ctx->cv, &ctx->lock, INFINITE);
     }
-    
+
     LeaveCriticalSection(&ctx->lock);
 }
 

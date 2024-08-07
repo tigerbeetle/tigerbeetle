@@ -12,15 +12,14 @@ const Shell = @import("./shell.zig");
 test "tidy" {
     const allocator = std.testing.allocator;
 
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    const paths = try list_file_paths(shell);
+
     const buffer_size = 1024 * 1024;
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
-
-    var src_dir = try fs.cwd().openDir("./src", .{ .iterate = true });
-    defer src_dir.close();
-
-    var walker = try src_dir.walk(allocator);
-    defer walker.deinit();
 
     var dead_detector = DeadDetector.init(allocator);
     defer dead_detector.deinit();
@@ -29,18 +28,37 @@ test "tidy" {
 
     // NB: all checks are intentionally implemented in a streaming fashion, such that we only need
     // to read the files once.
-    while (try walker.next()) |entry| {
-        if (entry.kind == .file and mem.endsWith(u8, entry.path, ".zig")) {
-            const file = try entry.dir.openFile(entry.basename, .{});
-            defer file.close();
+    for (paths) |path| {
+        const bytes_read = (try std.fs.cwd().readFile(path, buffer)).len;
+        if (bytes_read == buffer.len - 1) return error.FileTooLong;
+        buffer[bytes_read] = 0;
 
-            const bytes_read = try file.readAll(buffer);
-            if (bytes_read == buffer.len - 1) return error.FileTooLong;
-            buffer[bytes_read] = 0;
+        const source_file = SourceFile{ .path = path, .text = buffer[0..bytes_read :0] };
 
-            const source_file = SourceFile{ .path = entry.path, .text = buffer[0..bytes_read :0] };
-            try tidy_banned(source_file);
-            try tidy_long_line(source_file);
+        if (tidy_control_characters(source_file)) |control_character| {
+            std.debug.print(
+                "{s} error: contains control character: code={} symbol='{c}'\n",
+                .{ source_file.path, control_character, control_character },
+            );
+            return error.BannedControlCharacter;
+        }
+
+        if (mem.endsWith(u8, source_file.path, ".zig")) {
+            if (tidy_banned(source_file.text)) |ban_reason| {
+                std.debug.print(
+                    "{s}: error: banned, {s}\n",
+                    .{ source_file.path, ban_reason },
+                );
+                return error.Banned;
+            }
+
+            if (try tidy_long_line(source_file)) |line_index| {
+                std.debug.print(
+                    "{s}:{d} error: line exceeds 100 columns\n",
+                    .{ source_file.path, line_index + 1 },
+                );
+                return error.LineTooLong;
+            }
 
             function_line_count_longest = @max(
                 function_line_count_longest,
@@ -62,30 +80,104 @@ test "tidy" {
 
 const SourceFile = struct { path: []const u8, text: [:0]const u8 };
 
-fn tidy_banned(file: SourceFile) !void {
-    if (banned(file.text)) |ban| {
-        std.debug.print(
-            "{s}: banned: {s}\n",
-            .{ file.path, ban },
-        );
-        return error.Banned;
+fn tidy_banned(source: []const u8) ?[]const u8 {
+    // Note: must avoid banning ourselves!
+    if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
+        return "use stdx." ++ "BoundedArray instead of std version";
     }
+
+    if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
+        return "use stdx." ++ "has_unique_representation instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "mem." ++ "copy(") != null) {
+        return "use stdx." ++ "copy_disjoint instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "mem." ++ "copyForwards(") != null) {
+        return "use stdx." ++ "copy_left instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "mem." ++ "copyBackwards(") != null) {
+        return "use stdx." ++ "copy_right instead of std version";
+    }
+
+    // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on
+    // larger pull requests, it is often helpful to leave fixme comments as a reminder to oneself.
+    // This tidy rule ensures that the reminder is acted upon before code gets into main. That is:
+    // - use fixme for issues to be fixed in the same pull request,
+    // - use todo as general-purpose long-term remainders without enforcement.
+    if (std.mem.indexOf(u8, source, "FIX" ++ "ME") != null) {
+        return "FIX" ++ "ME comments must be addressed before getting to main";
+    }
+
+    return null;
 }
 
-fn tidy_long_line(file: SourceFile) !void {
-    if (std.mem.endsWith(u8, file.path, "low_level_hash_vectors.zig")) return;
-    const long_line = try find_long_line(file.text);
-    if (long_line) |line_index| {
-        std.debug.print(
-            "{s}:{d} error: line exceeds 100 columns\n",
-            .{ file.path, line_index + 1 },
-        );
-        return error.LineTooLong;
+fn tidy_long_line(file: SourceFile) !?u32 {
+    if (std.mem.endsWith(u8, file.path, "low_level_hash_vectors.zig")) return null;
+    var line_iterator = mem.split(u8, file.text, "\n");
+    var line_index: u32 = 0;
+    while (line_iterator.next()) |line| : (line_index += 1) {
+        const line_length = try std.unicode.utf8CountCodepoints(line);
+        if (line_length > 100) {
+            if (has_link(line)) continue;
+
+            // Journal recovery table
+            if (std.mem.indexOf(u8, line, "Case.init(") != null) continue;
+
+            // For multiline strings, we care that the _result_ fits 100 characters,
+            // but we don't mind indentation in the source.
+            if (parse_multiline_string(line)) |string_value| {
+                const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
+                if (string_value_length <= 100) continue;
+
+                if (std.mem.startsWith(u8, string_value, " account A") or
+                    std.mem.startsWith(u8, string_value, " transfer T") or
+                    std.mem.startsWith(u8, string_value, " transfer   "))
+                {
+                    // Table tests from state_machine.zig. They are intentionally wide.
+                    continue;
+                }
+
+                // vsr.zig's Checkpoint ops diagram.
+                if (std.mem.startsWith(u8, string_value, "OPS: ")) continue;
+            }
+
+            return line_index;
+        }
     }
+    return null;
+}
+
+fn tidy_control_characters(file: SourceFile) ?u8 {
+    const binary_file_extensions: []const []const u8 = &.{ ".ico", ".png" };
+    for (binary_file_extensions) |extension| {
+        if (std.mem.endsWith(u8, file.path, extension)) return null;
+    }
+
+    if (mem.indexOfScalar(u8, file.text, '\r') != null) {
+        if (std.mem.endsWith(u8, file.path, ".bat")) return null;
+        return '\r';
+    }
+
+    // Learning the best from UNIX, Visual Studio, like make, insists on tabs.
+    if (std.mem.endsWith(u8, file.path, ".sln")) return null;
+    // Go code uses tabs.
+    if (std.mem.endsWith(u8, file.path, ".go") or
+        (std.mem.endsWith(u8, file.path, ".md") and mem.indexOf(u8, file.text, "```go") != null))
+    {
+        return null;
+    }
+
+    if (mem.indexOfScalar(u8, file.text, '\t') != null) {
+        return '\t';
+    }
+    return null;
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 361; // build_tigerbeetle
+const function_line_count_max = 450; // build in build.zig
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -281,6 +373,7 @@ const DeadDetector = struct {
             "go_bindings.zig",
             "node_bindings.zig",
             "java_bindings.zig",
+            "build.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -370,27 +463,26 @@ test "tidy extensions" {
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
-        .{".editorconfig"},                          .{".gitattributes"},
-        .{".gitignore"},                             .{".nojekyll"},
-        .{"CNAME"},                                  .{"Dockerfile"},
-        .{"exclude-pmd.properties"},                 .{"favicon.ico"},
-        .{"favicon.png"},                            .{"LICENSE"},
-        .{"module-info.test"},                       .{"index.html"},
-        .{"logo.svg"},                               .{"logo-white.svg"},
-        .{"logo-with-text-white.svg"},               .{"zig/download.sh"},
-        .{"src/scripts/cfo_supervisor.sh"},          .{"src/docs_website/scripts/build.sh"},
-        .{".github/ci/docs_check.sh"},               .{".github/ci/test_aof.sh"},
-        .{"tools/systemd/tigerbeetle-pre-start.sh"}, .{"tools/vscode/format_debug_server.sh"},
+        .{".editorconfig"},                       .{".gitignore"},
+        .{".nojekyll"},                           .{"CNAME"},
+        .{"Dockerfile"},                          .{"exclude-pmd.properties"},
+        .{"favicon.ico"},                         .{"favicon.png"},
+        .{"LICENSE"},                             .{"module-info.test"},
+        .{"index.html"},                          .{"logo.svg"},
+        .{"logo-white.svg"},                      .{"logo-with-text-white.svg"},
+        .{"zig/download.sh"},                     .{"src/scripts/cfo_supervisor.sh"},
+        .{"src/docs_website/scripts/build.sh"},   .{".github/ci/docs_check.sh"},
+        .{".github/ci/test_aof.sh"},              .{"tools/systemd/tigerbeetle-pre-start.sh"},
+        .{"tools/vscode/format_debug_server.sh"},
     });
 
     const allocator = std.testing.allocator;
     const shell = try Shell.create(allocator);
     defer shell.destroy();
 
-    const files = try shell.exec_stdout("git ls-files", .{});
-    var lines = std.mem.split(u8, files, "\n");
+    const paths = try list_file_paths(shell);
     var bad_extension = false;
-    while (lines.next()) |path| {
+    for (paths) |path| {
         if (path.len == 0) continue;
         const extension = std.fs.path.extension(path);
         if (!allowed_extensions.has(extension)) {
@@ -404,75 +496,6 @@ test "tidy extensions" {
     if (bad_extension) return error.BadExtension;
 }
 
-fn banned(source: []const u8) ?[]const u8 {
-    // Note: must avoid banning ourselves!
-    if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
-        return "use stdx." ++ "BoundedArray instead of std version";
-    }
-
-    if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
-        return "use stdx." ++ "has_unique_representation instead of std version";
-    }
-
-    if (std.mem.indexOf(u8, source, "mem." ++ "copy(") != null) {
-        return "use stdx." ++ "copy_disjoint instead of std version";
-    }
-
-    if (std.mem.indexOf(u8, source, "mem." ++ "copyForwards(") != null) {
-        return "use stdx." ++ "copy_left instead of std version";
-    }
-
-    if (std.mem.indexOf(u8, source, "mem." ++ "copyBackwards(") != null) {
-        return "use stdx." ++ "copy_right instead of std version";
-    }
-
-    // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on
-    // larger pull requests, it is often helpful to leave fixme comments as a reminder to oneself.
-    // This tidy rule ensures that the reminder is acted upon before code gets into main. That is:
-    // - use fixme for issues to be fixed in the same pull request,
-    // - use todo as general-purpose long-term remainders without enforcement.
-    if (std.mem.indexOf(u8, source, "FIX" ++ "ME") != null) {
-        return "FIX" ++ "ME comments must be addressed before getting to main";
-    }
-
-    return null;
-}
-
-fn find_long_line(file_text: []const u8) !?usize {
-    var line_iterator = mem.split(u8, file_text, "\n");
-    var line_index: usize = 0;
-    while (line_iterator.next()) |line| : (line_index += 1) {
-        const line_length = try std.unicode.utf8CountCodepoints(line);
-        if (line_length > 100) {
-            if (has_link(line)) continue;
-
-            // Journal recovery table
-            if (std.mem.indexOf(u8, line, "Case.init(") != null) continue;
-
-            // For multiline strings, we care that the _result_ fits 100 characters,
-            // but we don't mind indentation in the source.
-            if (parse_multiline_string(line)) |string_value| {
-                const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
-                if (string_value_length <= 100) continue;
-
-                if (std.mem.startsWith(u8, string_value, " account A") or
-                    std.mem.startsWith(u8, string_value, " transfer T") or
-                    std.mem.startsWith(u8, string_value, " transfer   "))
-                {
-                    // Table tests from state_machine.zig. They are intentionally wide.
-                    continue;
-                }
-
-                // vsr.zig's Checkpoint ops diagram.
-                if (std.mem.startsWith(u8, string_value, "OPS: ")) continue;
-            }
-
-            return line_index;
-        }
-    }
-    return null;
-}
-
 /// Heuristically checks if a `line` contains an URL.
 fn has_link(line: []const u8) bool {
     return std.mem.indexOf(u8, line, "https://") != null;
@@ -483,4 +506,19 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
     const cut = stdx.cut(line, "\\\\") orelse return null;
     for (cut.prefix) |c| if (c != ' ') return null;
     return cut.suffix;
+}
+
+/// Lists all files in the repository.
+fn list_file_paths(shell: *Shell) ![]const []const u8 {
+    var result = std.ArrayList([]const u8).init(shell.arena.allocator());
+
+    const files = try shell.exec_stdout("git ls-files -z", .{});
+    assert(files[files.len - 1] == 0);
+    var lines = std.mem.splitScalar(u8, files[0 .. files.len - 1], 0);
+    while (lines.next()) |line| {
+        assert(line.len > 0);
+        try result.append(line);
+    }
+
+    return result.items;
 }

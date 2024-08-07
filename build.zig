@@ -638,7 +638,10 @@ fn dotnet_client(
     const bindings_step = b.addRunArtifact(bindings);
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = platform[2] }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{
+            .arch_os_abi = platform[0],
+            .cpu_features = platform[2],
+        }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(cross_target);
 
         const lib = b.addSharedLibrary(.{
@@ -720,7 +723,10 @@ fn node_client(
     run_dll_tool.cwd = b.path("./src/clients/node");
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = platform[2] }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{
+            .arch_os_abi = platform[0],
+            .cpu_features = platform[2],
+        }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(cross_target);
 
         const lib = b.addSharedLibrary(.{
@@ -864,7 +870,9 @@ fn set_cpu_features(
     // CPU model detection from: https://github.com/ziglang/zig/blob/0.13.0/lib/std/zig/system.zig#L320
     target_requested.result.cpu.model = switch (target_supported.cpu_model) {
         .native => @panic("pre-defined supported target assumed runtime-detected cpu model"),
-        .baseline, .determined_by_cpu_arch => std.Target.Cpu.baseline(target_supported.cpu_arch.?).model,
+        .baseline,
+        .determined_by_cpu_arch,
+        => std.Target.Cpu.baseline(target_supported.cpu_arch.?).model,
         .explicit => |model| model,
     };
     target_requested.result.cpu.features.addFeatureSet(target_supported.cpu_features_add);
@@ -875,7 +883,9 @@ fn set_cpu_features(
 fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     comptime std.debug.assert(builtin.os.tag == .windows);
     const set_dll_directory = struct {
-        pub extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.C) std.os.windows.BOOL;
+        pub extern "kernel32" fn SetDllDirectoryA(
+            path: [*:0]const u8,
+        ) callconv(.C) std.os.windows.BOOL;
     }.SetDllDirectoryA;
 
     const java_bin_path = std.fs.path.joinZ(
@@ -949,10 +959,20 @@ const CopyFile = struct {
         const cwd = std.fs.cwd();
 
         if (install.enforce_already_installed) {
-            const src = try std.fs.cwd().readFileAlloc(step.owner.allocator, full_src_path, std.math.maxInt(usize));
+            const src = try std.fs.cwd().readFileAlloc(
+                step.owner.allocator,
+                full_src_path,
+                std.math.maxInt(usize),
+            );
             defer step.owner.allocator.free(src);
-            const dest = try std.fs.cwd().readFileAlloc(step.owner.allocator, install.dest_path, std.math.maxInt(usize));
+
+            const dest = try std.fs.cwd().readFileAlloc(
+                step.owner.allocator,
+                install.dest_path,
+                std.math.maxInt(usize),
+            );
             defer step.owner.allocator.free(dest);
+
             if (!std.mem.eql(u8, src, dest)) return step.fail(
                 "file '{s}' differs from source '{s}'",
                 .{ install.dest_path, full_src_path },
@@ -961,7 +981,13 @@ const CopyFile = struct {
             return;
         }
 
-        const prev = std.fs.Dir.updateFile(cwd, full_src_path, cwd, install.dest_path, .{}) catch |err| {
+        const prev = std.fs.Dir.updateFile(
+            cwd,
+            full_src_path,
+            cwd,
+            install.dest_path,
+            .{},
+        ) catch |err| {
             return step.fail("unable to update file from '{s}' to '{s}': {s}", .{
                 full_src_path, install.dest_path, @errorName(err),
             });
