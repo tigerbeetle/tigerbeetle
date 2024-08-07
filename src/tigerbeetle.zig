@@ -233,9 +233,6 @@ pub const CreateTransferResult = enum(u32) {
     debit_account_not_found = 21,
     credit_account_not_found = 22,
 
-    //imported_event_debit_account_must_not_advance = 60,
-    //imported_event_credit_account_must_not_advance = 61,
-
     accounts_must_have_the_same_ledger = 23,
     transfer_must_have_the_same_ledger_as_accounts = 24,
 
@@ -268,7 +265,9 @@ pub const CreateTransferResult = enum(u32) {
     exists_with_different_code = 45,
     exists = 46,
 
-    //imported_event_timestamp_must_not_regress = 62,
+    //imported_event_timestamp_must_not_regress = 60,
+    //imported_event_debit_account_must_not_advance = 61,
+    //imported_event_credit_account_must_not_advance = 62,
     //imported_event_timeout_must_be_zero = 63,
 
     overflows_debits_pending = 47,
@@ -294,9 +293,9 @@ pub const CreateTransferResult = enum(u32) {
     imported_event_not_expected = 57,
     imported_event_timestamp_must_not_be_zero = 58,
     imported_event_timestamp_must_not_advance = 59,
-    imported_event_debit_account_must_not_advance = 60,
-    imported_event_credit_account_must_not_advance = 61,
-    imported_event_timestamp_must_not_regress = 62,
+    imported_event_timestamp_must_not_regress = 60,
+    imported_event_debit_account_must_not_advance = 61,
+    imported_event_credit_account_must_not_advance = 62,
     imported_event_timeout_must_be_zero = 63,
 
     comptime {
