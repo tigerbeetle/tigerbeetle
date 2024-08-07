@@ -423,7 +423,7 @@ const Benchmark = struct {
         const ms_time = @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms);
 
         if (b.print_batch_timings) {
-            log.info("batch {}: {} tx in {} ms\n", .{
+            log.info("batch {}: {} tx in {} ms", .{
                 b.batch_index,
                 b.batch_transfers.items.len,
                 ms_time,
