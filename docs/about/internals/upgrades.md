@@ -15,8 +15,8 @@ coordination.
 
 Multiple versions in a single binary are required for two reasons:
 * It allows a replica to crash after the binary has been upgraded, and still come back online.
-	* It also allows for deployments, like Docker, where the binary is immutable and the process
-	  has to be terminated to learn about new versions from itself.
+  * It also allows for deployments, like Docker, where the binary is immutable and the process
+    has to be terminated to learn about new versions from itself.
 * It allows for migrations over a range to happen easily without having to manually jump from
   version to version.
 

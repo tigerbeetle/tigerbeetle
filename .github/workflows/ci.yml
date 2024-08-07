@@ -67,6 +67,7 @@ jobs:
   test_windows:
     runs-on: windows-latest
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2147483647
@@ -120,6 +121,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
 
       - if: matrix.language == 'dotnet'

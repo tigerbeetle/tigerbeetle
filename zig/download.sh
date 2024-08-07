@@ -41,7 +41,7 @@ if command -v wget; then
     ipv4="-4"
     # But Alpine doesn't support this argument
     if [ -f /etc/alpine-release ]; then
-	ipv4=""
+    ipv4=""
     fi
     # shellcheck disable=SC2086 # We control ipv4 and it'll always either be empty or -4
     ZIG_URL=$(wget $ipv4 --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
@@ -67,7 +67,7 @@ if command -v wget; then
     ipv4="-4"
     # But Alpine doesn't support this argument
     if [ -f /etc/alpine-release ]; then
-	ipv4=""
+    ipv4=""
     fi
     # shellcheck disable=SC2086 # We control ipv4 and it'll always either be empty or -4
     wget $ipv4 --quiet --output-document="$ZIG_TARBALL" "$ZIG_URL"

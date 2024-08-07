@@ -101,11 +101,11 @@ go mod edit -require github.com/tigerbeetle/tigerbeetle-go@v0.15.4
 Edit your `pom.xml`:
 
 ```
-	<dependency>
-		<groupId>com.tigerbeetle</groupId>
-		<artifactId>tigerbeetle-java</artifactId>
-		<version>0.15.4</version>
-	</dependency>
+    <dependency>
+        <groupId>com.tigerbeetle</groupId>
+        <artifactId>tigerbeetle-java</artifactId>
+        <version>0.15.4</version>
+    </dependency>
 ```
 
 ### Node.js
