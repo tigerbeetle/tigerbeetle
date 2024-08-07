@@ -336,9 +336,9 @@ const (
 	TransferImportedEventNotExpected                   CreateTransferResult = 57
 	TransferImportedEventTimestampMustNotBeZero        CreateTransferResult = 58
 	TransferImportedEventTimestampMustNotAdvance       CreateTransferResult = 59
-	TransferImportedEventDebitAccountMustNotAdvance    CreateTransferResult = 60
-	TransferImportedEventCreditAccountMustNotAdvance   CreateTransferResult = 61
-	TransferImportedEventTimestampMustNotRegress       CreateTransferResult = 62
+	TransferImportedEventTimestampMustNotRegress       CreateTransferResult = 60
+	TransferImportedEventDebitAccountMustNotAdvance    CreateTransferResult = 61
+	TransferImportedEventCreditAccountMustNotAdvance   CreateTransferResult = 62
 	TransferImportedEventTimeoutMustBeZero             CreateTransferResult = 63
 )
 
@@ -464,12 +464,12 @@ func (i CreateTransferResult) String() string {
 		return "TransferImportedEventTimestampMustNotBeZero"
 	case TransferImportedEventTimestampMustNotAdvance:
 		return "TransferImportedEventTimestampMustNotAdvance"
+	case TransferImportedEventTimestampMustNotRegress:
+		return "TransferImportedEventTimestampMustNotRegress"
 	case TransferImportedEventDebitAccountMustNotAdvance:
 		return "TransferImportedEventDebitAccountMustNotAdvance"
 	case TransferImportedEventCreditAccountMustNotAdvance:
 		return "TransferImportedEventCreditAccountMustNotAdvance"
-	case TransferImportedEventTimestampMustNotRegress:
-		return "TransferImportedEventTimestampMustNotRegress"
 	case TransferImportedEventTimeoutMustBeZero:
 		return "TransferImportedEventTimeoutMustBeZero"
 	}

@@ -1737,7 +1737,7 @@ pub fn StateMachineType(
 
             if (a.flags.imported) {
                 // Allows past timestamp, but validates whether it regressed from the last
-                // inserted event.
+                // inserted account.
                 // This validation must be called _after_ the idempotency checks so the user
                 // can still handle `exists` results when importing.
                 if (self.forest.grooves.accounts.objects.key_range) |*key_range| {
@@ -1832,10 +1832,10 @@ pub fn StateMachineType(
                         return .imported_event_timestamp_must_not_regress;
                     }
                 }
-                if (t.timestamp < dr_account.timestamp) {
+                if (t.timestamp <= dr_account.timestamp) {
                     return .imported_event_debit_account_must_not_advance;
                 }
-                if (t.timestamp < cr_account.timestamp) {
+                if (t.timestamp <= cr_account.timestamp) {
                     return .imported_event_credit_account_must_not_advance;
                 }
                 if (t.timeout != 0) {
@@ -1843,8 +1843,8 @@ pub fn StateMachineType(
                     return .imported_event_timeout_must_be_zero;
                 }
             }
-            assert(t.timestamp >= dr_account.timestamp);
-            assert(t.timestamp >= cr_account.timestamp);
+            assert(t.timestamp > dr_account.timestamp);
+            assert(t.timestamp > cr_account.timestamp);
 
             const amount = amount: {
                 var amount = t.amount;
@@ -2063,7 +2063,7 @@ pub fn StateMachineType(
 
             if (t.flags.imported) {
                 // Allows past timestamp, but validates whether it regressed from the last
-                // inserted event.
+                // inserted transfer.
                 // This validation must be called _after_ the idempotency checks so the user
                 // can still handle `exists` results when importing.
                 if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
@@ -4031,15 +4031,17 @@ test "imported events: timestamp" {
         \\
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  0 imported_event_timestamp_must_not_be_zero
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ 99 imported_event_timestamp_must_not_advance
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 ok // The same timestamp as an account.
-        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  2 imported_event_timestamp_must_not_regress
-        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 ok
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  2 imported_event_debit_account_must_not_advance  // The same timestamp as an account.
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_credit_account_must_not_advance // The same timestamp as an account.
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 ok
+        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_timestamp_must_not_regress
+        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  5 ok
         \\ commit create_transfers
         \\
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ 99 imported_event_timestamp_must_not_advance
-        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 exists
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 exists
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  5 exists
+        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  6 exists
         \\ commit create_transfers
     );
 }
@@ -4052,27 +4054,27 @@ test "imported events: validations" {
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  2 ok
         \\ commit create_accounts
         \\
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  1 imported_event_credit_account_must_not_advance
-        \\ transfer   T1 A2 A1    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  1 imported_event_debit_account_must_not_advance
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  2 ok
-        \\ transfer   T2 A1 A2    4   _  _  _  _    1 L1 C2   _     PEN _   _   _   _  IMP _  3 imported_event_timeout_must_be_zero
-        \\ transfer   T2 A1 A2    4   _  _  _  _    0 L1 C2   _     PEN _   _   _   _  IMP _  3 ok
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  1 imported_event_debit_account_must_not_advance
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  2 imported_event_credit_account_must_not_advance
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  3 ok
+        \\ transfer   T2 A1 A2    4   _  _  _  _    1 L1 C2   _     PEN _   _   _   _  IMP _  4 imported_event_timeout_must_be_zero
+        \\ transfer   T2 A1 A2    4   _  _  _  _    0 L1 C2   _     PEN _   _   _   _  IMP _  4 ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 4  3  0  0
         \\ lookup_account A2 0  0  4  3
         \\ commit lookup_accounts
         \\
-        \\ transfer   T3 A1 A2    4  T2 _  _   _    _ L1 C2   _     _   POS _   _   _  IMP _  4 ok
+        \\ transfer   T3 A1 A2    4  T2 _  _   _    _ L1 C2   _     _   POS _   _   _  IMP _  5 ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0  7  0  0
         \\ lookup_account A2 0  0  0  7
         \\ commit lookup_accounts
         \\
-        \\ lookup_transfer T1 timestamp 2
-        \\ lookup_transfer T2 timestamp 3
-        \\ lookup_transfer T3 timestamp 4
+        \\ lookup_transfer T1 timestamp 3
+        \\ lookup_transfer T2 timestamp 4
+        \\ lookup_transfer T3 timestamp 5
         \\ commit lookup_transfers
     );
 }
@@ -4091,14 +4093,14 @@ test "imported events: linked chain" {
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  3 ok
         \\ commit create_accounts
         \\
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  2 linked_event_failed
-        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  3 linked_event_failed
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  4 linked_event_failed
+        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  5 linked_event_failed
         \\ transfer   T3 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  0 imported_event_timestamp_must_not_be_zero
         \\ commit create_transfers
         \\
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  2 ok
-        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  3 ok
-        \\ transfer   T3 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  4 ok
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  4 ok
+        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  5 ok
+        \\ transfer   T3 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  6 ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0  9  0  0
@@ -4106,9 +4108,9 @@ test "imported events: linked chain" {
         \\ lookup_account A3 0  0  0  0
         \\ commit lookup_accounts
         \\
-        \\ lookup_transfer T1 timestamp 2
-        \\ lookup_transfer T2 timestamp 3
-        \\ lookup_transfer T3 timestamp 4
+        \\ lookup_transfer T1 timestamp 4
+        \\ lookup_transfer T2 timestamp 5
+        \\ lookup_transfer T3 timestamp 6
         \\ commit lookup_transfers
     );
 }
