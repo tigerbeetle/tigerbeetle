@@ -5,18 +5,32 @@ After=network-online.target
 Wants=network-online.target systemd-networkd-wait-online.service
 
 [Service]
-DynamicUser=true
-DevicePolicy=closed
-ProtectHome=true
-StateDirectory=tigerbeetle
-StateDirectoryMode=700
-
 Environment=TIGERBEETLE_CACHE_GRID_SIZE=1GiB
 Environment=TIGERBEETLE_ADDRESSES=3001
 Environment=TIGERBEETLE_REPLICA_COUNT=1
 Environment=TIGERBEETLE_REPLICA_INDEX=0
 Environment=TIGERBEETLE_CLUSTER_ID=0
 Environment=TIGERBEETLE_DATA_FILE=%S/tigerbeetle/0_0.tigerbeetle
+
+DevicePolicy=closed
+DynamicUser=true
+LockPersonality=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=noaccess
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+StateDirectory=tigerbeetle
+StateDirectoryMode=700
 
 Type=exec
 ExecStartPre=/usr/local/bin/tigerbeetle-pre-start.sh
