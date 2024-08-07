@@ -4590,6 +4590,7 @@ pub fn ReplicaType(
                 assert(entry.header.request + 1 == reply.header.request);
                 assert(entry.header.op < reply.header.op);
                 assert(entry.header.commit < reply.header.commit);
+                assert(entry.header.release.value == reply.header.release.value);
 
                 // TODO Use this reply's prepare to cross-check against the entry's prepare, if we
                 // still have access to the prepare in the journal (it may have been snapshotted).
@@ -5158,6 +5159,20 @@ pub fn ReplicaType(
                     // This cannot be because of a partition since we check the client's view
                     // number.
                     log.err("{}: on_request: ignoring newer session (client bug)", .{self.replica});
+                    return true;
+                }
+
+                if (entry.header.release.value != message.header.release.value) {
+                    // Clients must not change releases mid-session.
+                    log.warn(
+                        "{}: on_request: ignoring request from unexpected release" ++
+                            " expected={} found={} (client bug)",
+                        .{ self.replica, entry.header.release, message.header.release },
+                    );
+                    self.send_eviction_message_to_client(
+                        message.header.client,
+                        .session_release_mismatch,
+                    );
                     return true;
                 }
 
