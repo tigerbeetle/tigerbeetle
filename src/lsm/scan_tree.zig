@@ -758,7 +758,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 self.values == .buffered);
 
             switch (self.state) {
-                .iterating_manifest => self.move_manifest_table_next(null),
+                .iterating_manifest => self.move_next_manifest_table(null),
                 .loading_index => unreachable,
                 .iterating_values => |*iterating_values| {
                     if (iterating_values.iterator.empty()) {
@@ -771,7 +771,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                             // Load the next `table_info`.
                             self.state = .iterating_manifest;
                             self.values = .fetching;
-                            self.move_manifest_table_next(key_exclusive_next);
+                            self.move_next_manifest_table(key_exclusive_next);
                         } else {
                             // The next `table_info` is out of the key range, so it's finished.
                             self.state = .{ .finished = .{} };
@@ -787,7 +787,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         /// Moves the iterator to the next `table_info` that might contain the key range.
-        fn move_manifest_table_next(
+        fn move_next_manifest_table(
             self: *ScanTreeLevel,
             key_exclusive: ?Key,
         ) void {
