@@ -12,15 +12,14 @@ const Shell = @import("./shell.zig");
 test "tidy" {
     const allocator = std.testing.allocator;
 
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    const paths = try list_file_paths(shell);
+
     const buffer_size = 1024 * 1024;
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
-
-    var src_dir = try fs.cwd().openDir("./", .{ .iterate = true });
-    defer src_dir.close();
-
-    var walker = try src_dir.walk(allocator);
-    defer walker.deinit();
 
     var dead_detector = DeadDetector.init(allocator);
     defer dead_detector.deinit();
@@ -29,20 +28,26 @@ test "tidy" {
 
     // NB: all checks are intentionally implemented in a streaming fashion, such that we only need
     // to read the files once.
-    while (try walker.next()) |entry| {
-        if (entry.kind == .file and mem.endsWith(u8, entry.path, ".zig")) {
-            const file = try entry.dir.openFile(entry.basename, .{});
-            defer file.close();
+    for (paths) |path| {
+        const bytes_read = (try std.fs.cwd().readFile(path, buffer)).len;
+        if (bytes_read == buffer.len - 1) return error.FileTooLong;
+        buffer[bytes_read] = 0;
 
-            const bytes_read = try file.readAll(buffer);
-            if (bytes_read == buffer.len - 1) return error.FileTooLong;
-            buffer[bytes_read] = 0;
+        const source_file = SourceFile{ .path = path, .text = buffer[0..bytes_read :0] };
 
-            const source_file = SourceFile{ .path = entry.path, .text = buffer[0..bytes_read :0] };
-            if (tidy_banned(file.text)) |ban_reason| {
+        if (tidy_control_characters(source_file)) |control_character| {
+            std.debug.print(
+                "{s} error: contains control character: code={} symbol='{c}'\n",
+                .{ source_file.path, control_character, control_character },
+            );
+            return error.BannedControlCharacter;
+        }
+
+        if (mem.endsWith(u8, source_file.path, ".zig")) {
+            if (tidy_banned(source_file.text)) |ban_reason| {
                 std.debug.print(
                     "{s}: error: banned, {s}\n",
-                    .{ file.path, ban_reason },
+                    .{ source_file.path, ban_reason },
                 );
                 return error.Banned;
             }
@@ -50,7 +55,7 @@ test "tidy" {
             if (try tidy_long_line(source_file)) |line_index| {
                 std.debug.print(
                     "{s}:{d} error: line exceeds 100 columns\n",
-                    .{ file.path, line_index + 1 },
+                    .{ source_file.path, line_index + 1 },
                 );
                 return error.LineTooLong;
             }
@@ -145,8 +150,34 @@ fn tidy_long_line(file: SourceFile) !?u32 {
     return null;
 }
 
+fn tidy_control_characters(file: SourceFile) ?u8 {
+    const binary_file_extensions: []const []const u8 = &.{ ".ico", ".png" };
+    for (binary_file_extensions) |extension| {
+        if (std.mem.endsWith(u8, file.path, extension)) return null;
+    }
+
+    if (mem.indexOfScalar(u8, file.text, '\r') != null) {
+        if (std.mem.endsWith(u8, file.path, ".bat")) return null;
+        return '\r';
+    }
+
+    // Learning the best from UNIX, Visual Studio, like make, insists on tabs.
+    if (std.mem.endsWith(u8, file.path, ".sln")) return null;
+    // Go code uses tabs.
+    if (std.mem.endsWith(u8, file.path, ".go") or
+        (std.mem.endsWith(u8, file.path, ".md") and mem.indexOf(u8, file.text, "```go") != null))
+    {
+        return null;
+    }
+
+    if (mem.indexOfScalar(u8, file.text, '\t') != null) {
+        return '\t';
+    }
+    return null;
+}
+
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 361; // build_tigerbeetle
+const function_line_count_max = 450; // build in build.zig
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -342,6 +373,7 @@ const DeadDetector = struct {
             "go_bindings.zig",
             "node_bindings.zig",
             "java_bindings.zig",
+            "build.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -431,17 +463,17 @@ test "tidy extensions" {
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
-        .{".editorconfig"},                          .{".gitattributes"},
-        .{".gitignore"},                             .{".nojekyll"},
-        .{"CNAME"},                                  .{"Dockerfile"},
-        .{"exclude-pmd.properties"},                 .{"favicon.ico"},
-        .{"favicon.png"},                            .{"LICENSE"},
-        .{"module-info.test"},                       .{"index.html"},
-        .{"logo.svg"},                               .{"logo-white.svg"},
-        .{"logo-with-text-white.svg"},               .{"zig/download.sh"},
-        .{"src/scripts/cfo_supervisor.sh"},          .{"src/docs_website/scripts/build.sh"},
-        .{".github/ci/docs_check.sh"},               .{".github/ci/test_aof.sh"},
-        .{"tools/systemd/tigerbeetle-pre-start.sh"}, .{"tools/vscode/format_debug_server.sh"},
+        .{".editorconfig"},                       .{".gitignore"},
+        .{".nojekyll"},                           .{"CNAME"},
+        .{"Dockerfile"},                          .{"exclude-pmd.properties"},
+        .{"favicon.ico"},                         .{"favicon.png"},
+        .{"LICENSE"},                             .{"module-info.test"},
+        .{"index.html"},                          .{"logo.svg"},
+        .{"logo-white.svg"},                      .{"logo-with-text-white.svg"},
+        .{"zig/download.sh"},                     .{"src/scripts/cfo_supervisor.sh"},
+        .{"src/docs_website/scripts/build.sh"},   .{".github/ci/docs_check.sh"},
+        .{".github/ci/test_aof.sh"},              .{"tools/systemd/tigerbeetle-pre-start.sh"},
+        .{"tools/vscode/format_debug_server.sh"},
     });
 
     const allocator = std.testing.allocator;
@@ -474,4 +506,19 @@ fn parse_multiline_string(line: []const u8) ?[]const u8 {
     const cut = stdx.cut(line, "\\\\") orelse return null;
     for (cut.prefix) |c| if (c != ' ') return null;
     return cut.suffix;
+}
+
+/// Lists all files in the repository.
+fn list_file_paths(shell: *Shell) ![]const []const u8 {
+    var result = std.ArrayList([]const u8).init(shell.arena.allocator());
+
+    const files = try shell.exec_stdout("git ls-files -z", .{});
+    assert(files[files.len - 1] == 0);
+    var lines = std.mem.splitScalar(u8, files[0 .. files.len - 1], 0);
+    while (lines.next()) |line| {
+        assert(line.len > 0);
+        try result.append(line);
+    }
+
+    return result.items;
 }
