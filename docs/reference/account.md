@@ -219,7 +219,7 @@ accounts with this flag set.
 
 When set, allows importing historical `Account`s with their original [`timestamp`](#timestamp).
 
-TigerBeetle will not use the [real-time clock](../coding/time.md) to assign the timestamp, allowing
+TigerBeetle will not use the [cluster clock](../coding/time.md) to assign the timestamp, allowing
 the user to define it, expressing _when_ the account was effectively created by an external
 event.
 
@@ -232,22 +232,22 @@ necessary:
 - User-defined timestamps must be **unique** and expressed as nanoseconds since the UNIX epoch.
   No two accounts can share the same timestamp.
 
-- User-defined timestamps must be a past date, never ahead of the cluster real-time clock at the
-  time the request arrives.
+- User-defined timestamps must be a past date, never ahead of the cluster clock at the time the
+  request arrives.
 
-- Timestamps must be monotonically increasing.
+- Timestamps must be strictly increasing.
 
   Even user-defined timestamps that are required to be past dates need to be at least one
   nanosecond ahead of the timestamp of the last account committed by the cluster.
 
   Since the timestamp cannot regress, importing past events can be naturally restrictive without
-  coordination, as the last timestamp can be updated using the real-time clock during regular
+  coordination, as the last timestamp can be updated using the cluster clock during regular
   cluster activity. Instead, it's recommended to import events only on a fresh cluster or
   during a scheduled maintenance window.
 
-  Additionally, the entire batch can be submitted as a [linked chain](#flagslinked), ensuring that
-  if any event fails, none of them are committed, preserving the last timestamp unchanged.
-  This approach gives the application a chance to correct failed imported events, re-submitting
+  It's recommended to submit the entire batch as a [linked chain](#flagslinked), ensuring that
+  if any account fails, none of them are committed, preserving the last timestamp unchanged.
+  This approach gives the application a chance to correct failed imported accounts, re-submitting
   the batch again with the same user-defined timestamps.
 
 ### `timestamp`
@@ -261,7 +261,7 @@ You can read more about [Time in TigerBeetle](../coding/time.md).
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be `0` when the `Account` is created
+- Must be `0` when the `Account` is created with [`flags.imported`](#flagsimported) _not_ set
 - Must be greater than `0` and less than `2^63` when the `Account` is created with
   [`flags.imported`](#flagsimported) set
 
