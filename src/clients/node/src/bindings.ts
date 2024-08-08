@@ -713,14 +713,14 @@ export enum CreateTransferError {
   imported_event_timestamp_must_not_regress = 60,
 
   /**
-  * See [imported_event_debit_account_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_debit_account_must_not_advance)
+  * See [imported_event_timestamp_must_postdate_debit_account](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account)
   */
-  imported_event_debit_account_must_not_advance = 61,
+  imported_event_timestamp_must_postdate_debit_account = 61,
 
   /**
-  * See [imported_event_credit_account_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_credit_account_must_not_advance)
+  * See [imported_event_timestamp_must_postdate_credit_account](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account)
   */
-  imported_event_credit_account_must_not_advance = 62,
+  imported_event_timestamp_must_postdate_credit_account = 62,
 
   /**
   * See [imported_event_timeout_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero)

@@ -759,14 +759,14 @@ public enum CreateTransferResult : uint
     ImportedEventTimestampMustNotRegress = 60,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_debit_account_must_not_advance
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account
     /// </summary>
-    ImportedEventDebitAccountMustNotAdvance = 61,
+    ImportedEventTimestampMustPostdateDebitAccount = 61,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_credit_account_must_not_advance
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account
     /// </summary>
-    ImportedEventCreditAccountMustNotAdvance = 62,
+    ImportedEventTimestampMustPostdateCreditAccount = 62,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero
