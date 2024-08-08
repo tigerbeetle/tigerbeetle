@@ -292,7 +292,7 @@ one at a time like so:
 ```go
 for i := 0; i < len(transfers); i++ {
 	transfersRes, err = client.CreateTransfers([]Transfer{transfers[i]})
-	// error handling omitted
+	// Error handling omitted.
 }
 ```
 
@@ -310,7 +310,7 @@ for i := 0; i < len(transfers); i += BATCH_SIZE {
 		batch = len(transfers) - i
 	}
 	transfersRes, err = client.CreateTransfers(transfers[i : i+batch])
-	// error handling omitted
+	// Error handling omitted.
 }
 ```
 
@@ -344,7 +344,7 @@ transfer0 := Transfer{ /* ... account values ... */ }
 transfer1 := Transfer{ /* ... account values ... */ }
 transfer0.Flags = TransferFlags{Linked: true}.ToUint16()
 transfersRes, err = client.CreateTransfers([]Transfer{transfer0, transfer1})
-// error handling omitted
+// Error handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -371,7 +371,7 @@ transfer := Transfer{
 	Timestamp: 0,
 }
 transfersRes, err = client.CreateTransfers([]Transfer{transfer})
-// error handling omitted
+// Error handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -390,7 +390,7 @@ transfer = Transfer{
 	Timestamp: 0,
 }
 transfersRes, err = client.CreateTransfers([]Transfer{transfer})
-// error handling omitted
+// Error handling omitted.
 ```
 
 ## Transfer Lookup
@@ -604,65 +604,46 @@ a user-defined timestamp.
 
 The entire batch of events must be set with the flag `imported`.
 
+It's recommended to submit the whole batch as a `linked` chain of events, ensuring that
+if any event fails, none of them are committed, preserving the last timestamp unchanged.
+This approach gives the application a chance to correct failed imported events, re-submitting
+the batch again with the same user-defined timestamps.
+
 ```go
-accounts = []Account{
-	{
-		ID:             ToUint128(1001),
-		DebitsPending:  ToUint128(0),
-		DebitsPosted:   ToUint128(0),
-		CreditsPending: ToUint128(0),
-		CreditsPosted:  ToUint128(0),
-		UserData128:    ToUint128(0),
-		UserData64:     0,
-		UserData32:     0,
-		Reserved:       0,
-		Ledger:         1,
-		Code:           718,
-		Flags:          AccountFlags{Imported: true}.ToUint16(),
-		Timestamp:      historicalTimestamp + 1, // User-defined timestamp.
-	},
-	{
-		ID:             ToUint128(1002),
-		DebitsPending:  ToUint128(0),
-		DebitsPosted:   ToUint128(0),
-		CreditsPending: ToUint128(0),
-		CreditsPosted:  ToUint128(0),
-		UserData128:    ToUint128(0),
-		UserData64:     0,
-		UserData32:     0,
-		Reserved:       0,
-		Ledger:         1,
-		Code:           718,
-		Flags:          AccountFlags{Imported: true}.ToUint16(),
-		Timestamp:      historicalTimestamp + 2, // User-defined timestamp.
-	},
-}
+// First, load and import all accounts with their timestamps from the historical source.
+accountsBatch := []Account{}
+for index, account := range historicalAccounts {
+	// Set a unique and strictly increasing timestamp.
+	account.Timestamp = historicalTimestamp + uint64(index)
+	account.Flags = AccountFlags{
+		// Set the account as `imported`.
+		Imported: true,
+		// To ensure atomicity, the entire batch (except the last event in the chain)
+		// must be `linked`.
+		Linked: index < len(historicalAccounts)-1,
+	}.ToUint16()
 
-accountsRes, err = client.CreateAccounts(accounts)
-if err != nil {
-	log.Printf("Error importing account batch: %s", err)
-	return
+	accountsBatch = append(accountsBatch, account)
 }
+accountsRes, err = client.CreateAccounts(accountsBatch)
 
-transfers = []Transfer{{
-	ID:              ToUint128(100),
-	DebitAccountID:  ToUint128(1001),
-	CreditAccountID: ToUint128(2001),
-	Amount:          ToUint128(10),
-	PendingID:       ToUint128(0),
-	UserData128:     ToUint128(0),
-	UserData64:      0,
-	UserData32:      0,
-	Timeout:         0,
-	Ledger:          1,
-	Code:            1,
-	Flags:           TransferFlags{Imported: true}.ToUint16(),
-	Timestamp:       historicalTimestamp + 3, // User-defined timestamp.
-}}
+// Then, load and import all transfers with their timestamps from the historical source.
+transfersBatch := []Transfer{}
+for index, transfer := range historicalTransfers {
+	// Set a unique and strictly increasing timestamp.
+	transfer.Timestamp = historicalTimestamp + uint64(index)
+	transfer.Flags = TransferFlags{
+		// Set the transfer as `imported`.
+		Imported: true,
+		// To ensure atomicity, the entire batch (except the last event in the chain)
+		// must be `linked`.
+		Linked: index < len(historicalAccounts)-1,
+	}.ToUint16()
 
-transfersRes, err = client.CreateTransfers(transfers)
-if err != nil {
-	log.Printf("Error importing transfer batch: %s", err)
-	return
+	transfersBatch = append(transfersBatch, transfer)
 }
+transfersRes, err = client.CreateTransfers(transfersBatch)
+// Error handling omitted..
+// Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+// with the same historical timestamps without regressing the cluster timestamp.
 ```
