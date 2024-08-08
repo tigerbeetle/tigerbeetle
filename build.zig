@@ -240,24 +240,17 @@ pub fn build(b: *std.Build) !void {
     }
 
     const tb_client_header = blk: {
-        const tb_client_header = b.addExecutable(.{
+        const tb_client_header_generator = b.addExecutable(.{
             .name = "tb_client_header",
             .root_source_file = b.path("src/clients/c/tb_client_header.zig"),
             .target = target,
         });
-        tb_client_header.root_module.addImport("vsr", vsr_module);
-        tb_client_header.root_module.addOptions("vsr_options", vsr_options);
-
-        const run = b.addRunArtifact(tb_client_header);
-        const out_file = run.captureStdOut();
-
-        const install = CopyFile.create(
-            b,
-            out_file,
-            "./src/clients/c/tb_client.h",
-            .{ .enforce_already_installed = build_options.ci },
-        );
-        break :blk install.getDest();
+        tb_client_header_generator.root_module.addImport("vsr", vsr_module);
+        tb_client_header_generator.root_module.addOptions("vsr_options", vsr_options);
+        break :blk Generated.file(b, .{
+            .generator = tb_client_header_generator,
+            .path = "./src/clients/c/tb_client.h",
+        });
     };
 
     { // zig build aof
@@ -283,7 +276,7 @@ pub fn build(b: *std.Build) !void {
         unit_tests.root_module.addOptions("vsr_options", vsr_options);
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
-        unit_tests.addIncludePath(tb_client_header.dirname());
+        unit_tests.addIncludePath(tb_client_header.path.dirname());
 
         build_steps.test_unit_build.dependOn(&b.addInstallArtifact(unit_tests, .{}).step);
 
@@ -447,10 +440,10 @@ pub fn build(b: *std.Build) !void {
     }
 
     { // zig build client:$lang
-        go_client(b, build_steps.clients_go, mode, vsr_options, tb_client_header, build_options.ci);
+        go_client(b, build_steps.clients_go, mode, vsr_module, vsr_options, tb_client_header.path);
         java_client(b, build_steps.clients_java, mode, vsr_module, vsr_options);
-        dotnet_client(b, build_steps.clients_dotnet, mode, vsr_options);
-        node_client(b, build_steps.clients_node, mode, vsr_options);
+        dotnet_client(b, build_steps.clients_dotnet, mode, vsr_module, vsr_options);
+        node_client(b, build_steps.clients_node, mode, vsr_module, vsr_options);
         c_client(b, build_steps.clients_c, mode, vsr_options, tb_client_header);
     }
 
@@ -514,26 +507,28 @@ fn go_client(
     b: *std.Build,
     build_step: *std.Build.Step,
     mode: Mode,
+    vsr_module: *std.Build.Module,
     vsr_options: *std.Build.Step.Options,
     tb_client_header: std.Build.LazyPath,
-    ci: bool,
 ) void {
     // Updates the generated header file:
-    const install_header = CopyFile.create(
-        b,
-        tb_client_header,
-        "./src/clients/go/pkg/native/tb_client.h",
-        .{ .enforce_already_installed = ci },
-    );
+    const tb_client_header_copy = Generated.file_copy(b, .{
+        .from = tb_client_header,
+        .path = "./src/clients/go/pkg/native/tb_client.h",
+    });
 
-    const bindings = b.addExecutable(.{
+    const go_bindings_generator = b.addExecutable(.{
         .name = "go_bindings",
-        .root_source_file = b.path("src/go_bindings.zig"),
+        .root_source_file = b.path("src/clients/go/go_bindings.zig"),
         .target = b.graph.host,
     });
-    bindings.root_module.addOptions("vsr_options", vsr_options);
-    bindings.step.dependOn(&install_header.step);
-    const bindings_step = b.addRunArtifact(bindings);
+    go_bindings_generator.root_module.addImport("vsr", vsr_module);
+    go_bindings_generator.root_module.addOptions("vsr_options", vsr_options);
+    go_bindings_generator.step.dependOn(&tb_client_header_copy.step);
+    const bindings = Generated.file(b, .{
+        .generator = go_bindings_generator,
+        .path = "./src/clients/go/pkg/types/bindings.go",
+    });
 
     inline for (platforms) |platform| {
         // We don't need the linux-gnu builds.
@@ -564,7 +559,7 @@ fn go_client(
         lib.root_module.stack_protector = false;
         lib.root_module.addOptions("vsr_options", vsr_options);
 
-        lib.step.dependOn(&bindings_step.step);
+        lib.step.dependOn(&bindings.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
         const lib_install = b.addInstallArtifact(lib, .{});
@@ -580,13 +575,17 @@ fn java_client(
     vsr_module: *std.Build.Module,
     vsr_options: *std.Build.Step.Options,
 ) void {
-    const bindings = b.addExecutable(.{
+    const java_bindings_generator = b.addExecutable(.{
         .name = "java_bindings",
-        .root_source_file = b.path("src/java_bindings.zig"),
+        .root_source_file = b.path("src/clients/java/java_bindings.zig"),
         .target = b.graph.host,
     });
-    bindings.root_module.addOptions("vsr_options", vsr_options);
-    const bindings_step = b.addRunArtifact(bindings);
+    java_bindings_generator.root_module.addImport("vsr", vsr_module);
+    java_bindings_generator.root_module.addOptions("vsr_options", vsr_options);
+    const bindings = Generated.directory(b, .{
+        .generator = java_bindings_generator,
+        .path = "./src/clients/java/src/main/java/com/tigerbeetle/",
+    });
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{
@@ -611,7 +610,7 @@ fn java_client(
         lib.root_module.addImport("vsr", vsr_module);
         lib.root_module.addOptions("vsr_options", vsr_options);
 
-        lib.step.dependOn(&bindings_step.step);
+        lib.step.dependOn(&bindings.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
         const lib_install = b.addInstallArtifact(lib, .{});
@@ -627,15 +626,20 @@ fn dotnet_client(
     b: *std.Build,
     build_step: *std.Build.Step,
     mode: Mode,
+    vsr_module: *std.Build.Module,
     vsr_options: *std.Build.Step.Options,
 ) void {
-    const bindings = b.addExecutable(.{
+    const dotnet_bindings_generator = b.addExecutable(.{
         .name = "dotnet_bindings",
-        .root_source_file = b.path("src/dotnet_bindings.zig"),
+        .root_source_file = b.path("src/clients/dotnet/dotnet_bindings.zig"),
         .target = b.graph.host,
     });
-    bindings.root_module.addOptions("vsr_options", vsr_options);
-    const bindings_step = b.addRunArtifact(bindings);
+    dotnet_bindings_generator.root_module.addImport("vsr", vsr_module);
+    dotnet_bindings_generator.root_module.addOptions("vsr_options", vsr_options);
+    const bindings = Generated.file(b, .{
+        .generator = dotnet_bindings_generator,
+        .path = "./src/clients/dotnet/TigerBeetle/Bindings.cs",
+    });
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{
@@ -659,7 +663,7 @@ fn dotnet_client(
 
         lib.root_module.addOptions("vsr_options", vsr_options);
 
-        lib.step.dependOn(&bindings_step.step);
+        lib.step.dependOn(&bindings.step);
 
         build_step.dependOn(&CopyFile.create(
             b,
@@ -677,15 +681,20 @@ fn node_client(
     b: *std.Build,
     build_step: *std.Build.Step,
     mode: Mode,
+    vsr_module: *std.Build.Module,
     vsr_options: *std.Build.Step.Options,
 ) void {
-    const bindings = b.addExecutable(.{
+    const node_bindings_generator = b.addExecutable(.{
         .name = "node_bindings",
-        .root_source_file = b.path("src/node_bindings.zig"),
+        .root_source_file = b.path("src/clients/node/node_bindings.zig"),
         .target = b.graph.host,
     });
-    bindings.root_module.addOptions("vsr_options", vsr_options);
-    const bindings_step = b.addRunArtifact(bindings);
+    node_bindings_generator.root_module.addImport("vsr", vsr_module);
+    node_bindings_generator.root_module.addOptions("vsr_options", vsr_options);
+    const bindings = Generated.file(b, .{
+        .generator = node_bindings_generator,
+        .path = "./src/clients/node/src/bindings.ts",
+    });
 
     // Run `npm install` to get access to node headers.
     var npm_install = b.addSystemCommand(&.{ "npm", "install" });
@@ -752,7 +761,7 @@ fn node_client(
 
         lib.root_module.addOptions("vsr_options", vsr_options);
 
-        lib.step.dependOn(&bindings_step.step);
+        lib.step.dependOn(&bindings.step);
 
         build_step.dependOn(&CopyFile.create(
             b,
@@ -770,16 +779,9 @@ fn c_client(
     build_step: *std.Build.Step,
     mode: Mode,
     vsr_options: *std.Build.Step.Options,
-    tb_client_header: std.Build.LazyPath,
+    tb_client_header: *Generated,
 ) void {
-    // Updates the generated header file:
-    const install_header = CopyFile.create(
-        b,
-        tb_client_header,
-        "./src/clients/c/lib/include/tb_client.h",
-        .{},
-    );
-    build_step.dependOn(&install_header.step);
+    build_step.dependOn(&tb_client_header.step);
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{
@@ -993,5 +995,223 @@ const CopyFile = struct {
             });
         };
         step.result_cached = prev == .fresh;
+    }
+};
+
+/// Code generation for files which must also be committed to the repository.
+///
+/// Runs the generator program to produce a file or a directory and copies the result to the
+/// destination directory within the source tree.
+///
+/// On CI (when CI env var is set), the files are not updated, and merely checked for freshness.
+const Generated = struct {
+    step: std.Build.Step,
+    path: std.Build.LazyPath,
+
+    destination: []const u8,
+    generated_file: std.Build.GeneratedFile,
+    source: std.Build.LazyPath,
+    mode: enum { file, directory },
+
+    /// The `generator` program prints the file to stdout.
+    pub fn file(b: *std.Build, options: struct {
+        generator: *std.Build.Step.Compile,
+        path: []const u8,
+    }) *Generated {
+        return create(b, options.path, .{
+            .file = options.generator,
+        });
+    }
+
+    pub fn file_copy(b: *std.Build, options: struct {
+        from: std.Build.LazyPath,
+        path: []const u8,
+    }) *Generated {
+        return create(b, options.path, .{
+            .copy = options.from,
+        });
+    }
+
+    /// The `generator` program creates several files in the output directory, which is passed in
+    /// as an argument.
+    ///
+    /// NB: there's no check that there aren't extra file at the destination. In other words, this
+    /// API can be used for mixing generated and hand-written files in a single directory.
+    pub fn directory(b: *std.Build, options: struct {
+        generator: *std.Build.Step.Compile,
+        path: []const u8,
+    }) *Generated {
+        return create(b, options.path, .{
+            .directory = options.generator,
+        });
+    }
+
+    fn create(b: *std.Build, destination: []const u8, generator: union(enum) {
+        file: *std.Build.Step.Compile,
+        directory: *std.Build.Step.Compile,
+        copy: std.Build.LazyPath,
+    }) *Generated {
+        assert(std.mem.startsWith(u8, destination, "./src"));
+        const result = b.allocator.create(Generated) catch @panic("OOM");
+        result.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = b.fmt("generate {s}", .{std.fs.path.basename(destination)}),
+                .owner = b,
+                .makeFn = make,
+            }),
+            .path = .{ .generated = .{ .file = &result.generated_file } },
+
+            .destination = destination,
+            .generated_file = .{ .step = &result.step },
+            .source = switch (generator) {
+                .file => |compile| b.addRunArtifact(compile).captureStdOut(),
+                .directory => |compile| b.addRunArtifact(compile).addOutputDirectoryArg("out"),
+                .copy => |lazy_path| lazy_path,
+            },
+            .mode = switch (generator) {
+                .file, .copy => .file,
+                .directory => .directory,
+            },
+        };
+        result.source.addStepDependencies(&result.step);
+
+        return result;
+    }
+
+    fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
+        _ = prog_node;
+        const b = step.owner;
+        const generated: *Generated = @fieldParentPtr("step", step);
+        const ci = try std.process.hasEnvVar(b.allocator, "CI");
+        const source_path = generated.source.getPath2(b, step);
+
+        if (ci) {
+            const fresh = switch (generated.mode) {
+                .file => file_fresh(b, source_path, generated.destination),
+                .directory => directory_fresh(b, source_path, generated.destination),
+            } catch |err| {
+                return step.fail("unable to check '{s}': {s}", .{
+                    generated.destination, @errorName(err),
+                });
+            };
+
+            if (!fresh) {
+                return step.fail("file '{s}' is outdated", .{
+                    generated.destination,
+                });
+            }
+            step.result_cached = true;
+        } else {
+            const prev = switch (generated.mode) {
+                .file => file_update(b, source_path, generated.destination),
+                .directory => directory_update(b, source_path, generated.destination),
+            } catch |err| {
+                return step.fail("unable to update '{s}': {s}", .{
+                    generated.destination, @errorName(err),
+                });
+            };
+            step.result_cached = prev == .fresh;
+        }
+
+        generated.generated_file.path = generated.destination;
+    }
+
+    fn file_fresh(
+        b: *std.Build,
+        source_path: []const u8,
+        target_path: []const u8,
+    ) !bool {
+        const want = try b.build_root.handle.readFileAlloc(
+            b.allocator,
+            source_path,
+            std.math.maxInt(usize),
+        );
+        defer b.allocator.free(want);
+
+        const got = b.build_root.handle.readFileAlloc(
+            b.allocator,
+            target_path,
+            std.math.maxInt(usize),
+        ) catch return false;
+        defer b.allocator.free(got);
+
+        return std.mem.eql(u8, want, got);
+    }
+
+    fn file_update(
+        b: *std.Build,
+        source_path: []const u8,
+        target_path: []const u8,
+    ) !std.fs.Dir.PrevStatus {
+        return std.fs.Dir.updateFile(
+            b.build_root.handle,
+            source_path,
+            b.build_root.handle,
+            target_path,
+            .{},
+        );
+    }
+
+    fn directory_fresh(
+        b: *std.Build,
+        source_path: []const u8,
+        target_path: []const u8,
+    ) !bool {
+        var source_dir = try b.build_root.handle.openDir(source_path, .{ .iterate = true });
+        defer source_dir.close();
+
+        var target_dir = b.build_root.handle.openDir(target_path, .{}) catch return false;
+        defer target_dir.close();
+
+        var source_iter = source_dir.iterate();
+        while (try source_iter.next()) |entry| {
+            assert(entry.kind == .file);
+            const want = try source_dir.readFileAlloc(
+                b.allocator,
+                entry.name,
+                std.math.maxInt(usize),
+            );
+            defer b.allocator.free(want);
+
+            const got = target_dir.readFileAlloc(
+                b.allocator,
+                entry.name,
+                std.math.maxInt(usize),
+            ) catch return false;
+            defer b.allocator.free(got);
+
+            if (!std.mem.eql(u8, want, got)) return false;
+        }
+
+        return true;
+    }
+
+    fn directory_update(
+        b: *std.Build,
+        source_path: []const u8,
+        target_path: []const u8,
+    ) !std.fs.Dir.PrevStatus {
+        var result: std.fs.Dir.PrevStatus = .fresh;
+        var source_dir = try b.build_root.handle.openDir(source_path, .{ .iterate = true });
+        defer source_dir.close();
+
+        var target_dir = try b.build_root.handle.makeOpenPath(target_path, .{});
+        defer target_dir.close();
+
+        var source_iter = source_dir.iterate();
+        while (try source_iter.next()) |entry| {
+            assert(entry.kind == .file);
+            const status = try std.fs.Dir.updateFile(
+                source_dir,
+                entry.name,
+                target_dir,
+                entry.name,
+                .{},
+            );
+            if (status == .stale) result = .stale;
+        }
+
+        return result;
     }
 };

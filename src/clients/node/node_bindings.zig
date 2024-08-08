@@ -1,12 +1,9 @@
 const std = @import("std");
-const assert = std.debug.assert;
+const vsr = @import("vsr");
 
-// TODO: Move this back to src/clients/node when there's a better solution for main_pkg_path=src/
-const vsr = @import("vsr.zig");
+const assert = std.debug.assert;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
-
-const output_file = "src/clients/node/src/bindings.ts";
 
 const TypeMapping = struct {
     name: []const u8,
@@ -265,23 +262,5 @@ pub fn main() !void {
 
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
-    try std.fs.cwd().writeFile(.{ .sub_path = output_file, .data = buffer.items });
-}
-
-const testing = std.testing;
-
-test "bindings node" {
-    var buffer = std.ArrayList(u8).init(testing.allocator);
-    defer buffer.deinit();
-
-    try generate_bindings(&buffer);
-
-    const current = try std.fs.cwd().readFileAlloc(
-        testing.allocator,
-        output_file,
-        std.math.maxInt(usize),
-    );
-    defer testing.allocator.free(current);
-
-    try testing.expectEqualStrings(current, buffer.items);
+    try std.io.getStdOut().writeAll(buffer.items);
 }
