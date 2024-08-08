@@ -1833,10 +1833,10 @@ pub fn StateMachineType(
                     }
                 }
                 if (t.timestamp <= dr_account.timestamp) {
-                    return .imported_event_debit_account_must_not_advance;
+                    return .imported_event_timestamp_must_postdate_debit_account;
                 }
                 if (t.timestamp <= cr_account.timestamp) {
-                    return .imported_event_credit_account_must_not_advance;
+                    return .imported_event_timestamp_must_postdate_credit_account;
                 }
                 if (t.timeout != 0) {
                     assert(t.flags.pending);
@@ -4031,8 +4031,8 @@ test "imported events: timestamp" {
         \\
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  0 imported_event_timestamp_must_not_be_zero
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ 99 imported_event_timestamp_must_not_advance
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  2 imported_event_debit_account_must_not_advance  // The same timestamp as an account.
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_credit_account_must_not_advance // The same timestamp as an account.
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  2 imported_event_timestamp_must_postdate_debit_account  // The same timestamp as an account.
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_timestamp_must_postdate_credit_account // The same timestamp as an account.
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 ok
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_timestamp_must_not_regress
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  5 ok
@@ -4054,8 +4054,8 @@ test "imported events: validations" {
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  2 ok
         \\ commit create_accounts
         \\
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  1 imported_event_debit_account_must_not_advance
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  2 imported_event_credit_account_must_not_advance
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  1 imported_event_timestamp_must_postdate_debit_account
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  2 imported_event_timestamp_must_postdate_credit_account
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  3 ok
         \\ transfer   T2 A1 A2    4   _  _  _  _    1 L1 C2   _     PEN _   _   _   _  IMP _  4 imported_event_timeout_must_be_zero
         \\ transfer   T2 A1 A2    4   _  _  _  _    0 L1 C2   _     PEN _   _   _   _  IMP _  4 ok

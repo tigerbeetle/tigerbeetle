@@ -266,8 +266,8 @@ pub const CreateTransferResult = enum(u32) {
     exists = 46,
 
     //imported_event_timestamp_must_not_regress = 60,
-    //imported_event_debit_account_must_not_advance = 61,
-    //imported_event_credit_account_must_not_advance = 62,
+    //imported_event_timestamp_must_postdate_debit_account = 61,
+    //imported_event_timestamp_must_postdate_credit_account = 62,
     //imported_event_timeout_must_be_zero = 63,
 
     overflows_debits_pending = 47,
@@ -294,8 +294,8 @@ pub const CreateTransferResult = enum(u32) {
     imported_event_timestamp_must_not_be_zero = 58,
     imported_event_timestamp_must_not_advance = 59,
     imported_event_timestamp_must_not_regress = 60,
-    imported_event_debit_account_must_not_advance = 61,
-    imported_event_credit_account_must_not_advance = 62,
+    imported_event_timestamp_must_postdate_debit_account = 61,
+    imported_event_timestamp_must_postdate_credit_account = 62,
     imported_event_timeout_must_be_zero = 63,
 
     comptime {

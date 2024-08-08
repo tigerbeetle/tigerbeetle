@@ -313,14 +313,14 @@ public enum CreateTransferResult {
     ImportedEventTimestampMustNotRegress((int) 60),
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_debit_account_must_not_advance">imported_event_debit_account_must_not_advance</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account">imported_event_timestamp_must_postdate_debit_account</a>
      */
-    ImportedEventDebitAccountMustNotAdvance((int) 61),
+    ImportedEventTimestampMustPostdateDebitAccount((int) 61),
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_credit_account_must_not_advance">imported_event_credit_account_must_not_advance</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account">imported_event_timestamp_must_postdate_credit_account</a>
      */
-    ImportedEventCreditAccountMustNotAdvance((int) 62),
+    ImportedEventTimestampMustPostdateCreditAccount((int) 62),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero">imported_event_timeout_must_be_zero</a>
