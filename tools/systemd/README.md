@@ -26,7 +26,7 @@ Here's how to do that:
 
 ### Pre-start script
 
-This service executes the `tigerbeetle-pre-start` script before starting TigerBeetle.
+This service executes the `tigerbeetle-pre-start.sh` script before starting TigerBeetle.
 This script is responsible for ensuring that a replica data file exists.
 It will create a data file if it doesn't exist.
 
@@ -39,7 +39,7 @@ If this is not the case, adjust the `ExecStartPre` line in `tigerbeetle.service`
 ### TigerBeetle executable
 
 The `tigerbeetle` executable is assumed to be installed in `/usr/local/bin`.
-If this is not the case, adjust both `tigerbeetle.service` and `tigerbeetle-pre-start` to use the correct location.
+If this is not the case, adjust both `tigerbeetle.service` and `tigerbeetle-pre-start.sh` to use the correct location.
 
 ### Environment variables
 
@@ -64,3 +64,9 @@ Due to systemd's dynamic user capabilities, the replica data file path will not 
 Some hardening configurations are enabled for added security when running the service.
 It is **not recommended** to change these, since they have additional implications on all other configurations and values defined in this service file.
 If you wish to change those, you are expected to understand those implications and make any other adjustments accordingly.
+
+### Development mode
+
+The service was created assuming it'll be used in a production scenario.
+
+In case you want to use this service for development as well, you may need to adjust the `ExecStart` line to include the `--development` flag if your development environment doesn't support Direct IO, or if you require smaller cache sizes and/or batch sizes due to memory constraints.
