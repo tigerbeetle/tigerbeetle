@@ -648,7 +648,8 @@ for(int index = 0; index < historicalAccounts.length; index += 1) {
     accounts.add();
 
     // Set a unique and strictly increasing timestamp.
-    accounts.setTimestamp(historicalTimestamp + index);
+    historicalTimestamp += 1;
+    accounts.setTimestamp(historicalTimestamp);
     // Set the account as `imported`.
     // To ensure atomicity, the entire batch (except the last event in the chain)
     // must be `linked`.
@@ -671,7 +672,8 @@ for(int index = 0; index < historicalTransfers.length; index += 1) {
     transfers.add();
 
     // Set a unique and strictly increasing timestamp.
-    transfers.setTimestamp(historicalTimestamp + index);
+    historicalTimestamp += 1;
+    transfers.setTimestamp(historicalTimestamp);
     // Set the account as `imported`.
     // To ensure atomicity, the entire batch (except the last event in the chain)
     // must be `linked`.

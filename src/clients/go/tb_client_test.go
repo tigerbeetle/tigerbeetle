@@ -47,7 +47,9 @@ func WithClient(t testing.TB, withClient func(Client)) {
 	clusterArg := fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID)
 
 	fileName := fmt.Sprintf("./%d_%d_%d.tigerbeetle", TIGERBEETLE_CLUSTER_ID, TIGERBEETLE_REPLICA_ID, rand.Int())
-	_ = os.Remove(fileName)
+	t.Cleanup(func() {
+		_ = os.Remove(fileName)
+	})
 
 	tbInit := exec.Command(tigerbeetlePath, "format", clusterArg, replicaArg, replicaCountArg, fileName)
 	var tbErr bytes.Buffer
@@ -57,10 +59,6 @@ func WithClient(t testing.TB, withClient func(Client)) {
 		fmt.Println(fmt.Sprint(err) + ": " + tbErr.String())
 		t.Fatal(err)
 	}
-
-	t.Cleanup(func() {
-		_ = os.Remove(fileName)
-	})
 
 	tbStart := exec.Command(tigerbeetlePath, "start", addressArg, cacheSizeArg, fileName)
 	if err := tbStart.Start(); err != nil {

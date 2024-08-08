@@ -308,7 +308,9 @@ func main() {
 	accountsBatch := []Account{}
 	for index, account := range historicalAccounts {
 		// Set a unique and strictly increasing timestamp.
-		account.Timestamp = historicalTimestamp + uint64(index)
+		historicalTimestamp += 1
+		account.Timestamp = historicalTimestamp
+
 		account.Flags = AccountFlags{
 			// Set the account as `imported`.
 			Imported: true,
@@ -325,7 +327,9 @@ func main() {
 	transfersBatch := []Transfer{}
 	for index, transfer := range historicalTransfers {
 		// Set a unique and strictly increasing timestamp.
-		transfer.Timestamp = historicalTimestamp + uint64(index)
+		historicalTimestamp += 1
+		transfer.Timestamp = historicalTimestamp
+
 		transfer.Flags = TransferFlags{
 			// Set the transfer as `imported`.
 			Imported: true,

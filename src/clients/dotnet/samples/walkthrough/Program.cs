@@ -252,7 +252,8 @@ using (var client = new Client(clusterID, addresses))
         var account = historicalAccounts[index];
 
         // Set a unique and strictly increasing timestamp.
-        account.Timestamp = historicalTimestamp + (ulong)index;
+        historicalTimestamp += 1;
+        account.Timestamp = historicalTimestamp;
         // Set the account as `imported`.
         account.Flags = AccountFlags.Imported;
         // To ensure atomicity, the entire batch (except the last event in the chain)
@@ -275,7 +276,8 @@ using (var client = new Client(clusterID, addresses))
         var transfer = historicalTransfers[index];
 
         // Set a unique and strictly increasing timestamp.
-        transfer.Timestamp = historicalTimestamp + (ulong)index;
+        historicalTimestamp += 1;
+        transfer.Timestamp = historicalTimestamp;
         // Set the account as `imported`.
         transfer.Flags = TransferFlags.Imported;
         // To ensure atomicity, the entire batch (except the last event in the chain)
