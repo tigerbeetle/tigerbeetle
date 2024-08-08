@@ -288,8 +288,8 @@ public final class Main {
 
             // External source of time
             long historicalTimestamp = 0L;
-            Object[] historicalAccounts = new Object[0];
-            Object[] historicalTransfers = new Object[0];
+            Object[] historicalAccounts = new Object[1];
+            Object[] historicalTransfers = new Object[1];
 
             // section:imported-events
             // First, load and import all accounts with their timestamps from the historical source.
