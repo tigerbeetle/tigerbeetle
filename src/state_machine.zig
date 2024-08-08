@@ -3905,17 +3905,17 @@ test "create_transfers: balancing_debit | balancing_credit (amount=0)" {
 
 test "create_transfers: balancing_debit | balancing_credit (amount=0, balance≈maxInt)" {
     try check(
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ ok
-        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ ok
-        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ ok
-        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ ok
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ ok
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ ok
         \\ commit create_accounts
         \\
         \\ setup A1 0  0 0 -1
         \\ setup A4 0 -1 0  0
         \\
-        \\ transfer   T1 A1 A2    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ ok
-        \\ transfer   T2 A3 A4    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ ok
+        \\ transfer   T1 A1 A2    0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ _ ok
+        \\ transfer   T2 A3 A4    0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 -1  0 -1
