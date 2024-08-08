@@ -353,9 +353,16 @@ pub const AOFReplayClient = struct {
         var target: AOFEntry = undefined;
 
         while (try aof.next(&target)) |entry| {
-            // Skip replaying reserved messages.
+            // Skip replaying reserved messages, and messages not marked for playback in the state
+            // machine.
             const header = entry.header();
             if (header.operation.vsr_reserved()) continue;
+            const state_machine_operation = header.operation.cast(StateMachine);
+            const state_machine_operation_import = switch (state_machine_operation) {
+                .create_accounts => .import_accounts,
+                .create_transfers => .import_transfers,
+                else => continue,
+            }
 
             const message = self.client.get_message().build(.request);
             errdefer self.client.release_message(message.base());
@@ -365,11 +372,14 @@ pub const AOFReplayClient = struct {
 
             entry.to_message(message.base().build(.prepare));
 
+            assert(state_machine_operation == .create_accounts or
+                state_machine_operation == .create_transfers);
+
             message.header.* = .{
                 .client = self.client.id,
                 .cluster = self.client.cluster,
                 .command = .request,
-                .operation = header.operation,
+                .operation = state_machine_operation_import,
                 .size = header.size,
                 .timestamp = header.timestamp,
                 .view = 0,
@@ -678,7 +688,7 @@ const usage =
     \\
     \\  aof [-h | --help]
     \\
-    \\  aof recover <addresses> <path>
+    \\  aof import <addresses> <path>
     \\
     \\  aof debug <path>
     \\
@@ -687,8 +697,8 @@ const usage =
     \\
     \\Commands:
     \\
-    \\  recover  Recover a recorded AOF file at <path> to a TigerBeetle cluster running
-    \\           at <addresses>. Said cluster must be running with aof_recovery = true
+    \\  import   Recover a recorded AOF file at <path> to a TigerBeetle cluster running
+    \\           at <addresses>. Said cluster must have support for `import_*` operations
     \\           and have the same cluster ID as the source. The AOF must have a consistent
     \\           hash chain, which can be ensured using the `merge` subcommand.
     \\
@@ -733,11 +743,11 @@ pub fn main() !void {
 
         if (count == 1) {
             action = arg;
-        } else if (count == 2 and std.mem.eql(u8, action.?, "recover")) {
+        } else if (count == 2 and std.mem.eql(u8, action.?, "import")) {
             addresses = arg;
         } else if (count == 2 and std.mem.eql(u8, action.?, "debug")) {
             paths[0] = arg;
-        } else if (count == 3 and std.mem.eql(u8, action.?, "recover")) {
+        } else if (count == 3 and std.mem.eql(u8, action.?, "import")) {
             paths[0] = arg;
         } else if (count >= 2 and std.mem.eql(u8, action.?, "merge")) {
             paths[count - 2] = arg;
@@ -749,7 +759,7 @@ pub fn main() !void {
     const target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
 
-    if (action != null and std.mem.eql(u8, action.?, "recover") and count == 4) {
+    if (action != null and std.mem.eql(u8, action.?, "import") and count == 4) {
         var it = try AOF.iterator(paths[0]);
         defer it.close();
 
