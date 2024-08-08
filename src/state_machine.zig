@@ -4021,12 +4021,14 @@ test "imported events: timestamp" {
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  2 ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  1 imported_event_timestamp_must_not_regress
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  3 ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  9 ok
         \\ commit create_accounts
         \\
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ 99 imported_event_timestamp_must_not_advance
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  1 exists
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  3 exists
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  4 exists
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  9 exists
         \\ commit create_accounts
         \\
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  0 imported_event_timestamp_must_not_be_zero

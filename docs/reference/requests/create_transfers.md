@@ -214,22 +214,6 @@ refer to an existing `Account`.
 The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
 refer to an existing `Account`.
 
-### `imported_event_timestamp_must_postdate_debit_account`
-
-This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
-
-The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
-refer to an `Account` which [`timestamp`](../account.md#timestamp) is less than the
-[`Transfer.timestamp`](../transfer.md#timestamp).
-
-### `imported_event_timestamp_must_postdate_credit_account`
-
-This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
-
-The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
-refer to an `Account` which [`timestamp`](../account.md#timestamp) is less than the
-[`Transfer.timestamp`](../transfer.md#timestamp).
-
 ### `accounts_must_have_the_same_ledger`
 
 The transfer was not created. The accounts referred to by
@@ -396,6 +380,22 @@ This result only applies when [Transfer.flags.imported](../transfer.md#flagsimpo
 
 The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp)
 regressed, but it must be greater than the last timestamp assigned to any `Transfer` in the cluster.
+
+### `imported_event_timestamp_must_postdate_debit_account`
+
+This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+
+The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
+refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than the
+[`Transfer.timestamp`](../transfer.md#timestamp).
+
+### `imported_event_timestamp_must_postdate_credit_account`
+
+This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+
+The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
+refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than the
+[`Transfer.timestamp`](../transfer.md#timestamp).
 
 ### `imported_event_timeout_must_be_zero`
 
