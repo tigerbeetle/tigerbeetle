@@ -552,7 +552,7 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
         // For the upgrade case, re-run the latest binary in place. If we need something older
         // than the latest, that'll be handled when the case above is hit when re-execing:
         // (current version v1) -> (latest version v4) -> (desired version v2)
-        multiversion.exec_latest() catch |err| {
+        multiversion.exec_current(release) catch |err| {
             std.debug.panic("failed to execute latest release: {}", .{err});
         };
     }
