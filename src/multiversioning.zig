@@ -356,7 +356,7 @@ pub const MultiversionHeader = extern struct {
     vsr_releases_max: u32 = constants.vsr_releases_max,
 
     /// The current release is executed differently to past releases embedded in the body, so store
-    /// it separately. See exec_latest vs exec_release.
+    /// it separately. See exec_current vs exec_release.
     current_release: u32,
 
     current_flags: Flags,
@@ -1053,7 +1053,7 @@ pub const Multiversion = struct {
         self.timeout_start();
     }
 
-    pub fn exec_latest(self: *Multiversion) !noreturn {
+    pub fn exec_current(self: *Multiversion, release_target: Release) !noreturn {
         // target_fd is only modified in target_update() which happens synchronously.
         assert(self.stage != .target_update);
 
@@ -1061,7 +1061,39 @@ pub const Multiversion = struct {
         // populated by checking that target_header has been set.
         assert(self.target_header != null);
 
-        log.info("re-executing {s}...\n", .{self.exe_path});
+        // The release_taget is only used as a sanity check, and doesn't control the exec path here.
+        // There are two possible cases:
+        // * release_target == target_header.current_release:
+        //   The latest release will be executed, and it won't do any more re-execs from there
+        //   onwards (that we know about). Happens when jumping to the latest release.
+        // * release_target in target_header.past.releases:
+        //   The latest release will be executed, but after starting up it will use exec_release()
+        //   to execute a past version. Happens when stopping at an intermediate release with
+        //   visit == true.
+        const release_target_current = release_target.value == self.target_header.?.current_release;
+        const release_target_past = std.mem.indexOfScalar(
+            u32,
+            self.target_header.?.past.releases[0..self.target_header.?.past.count],
+            release_target.value,
+        ) != null;
+
+        assert(!(release_target_current and release_target_past));
+        assert(release_target_current or release_target_past);
+
+        // The trailing newline is intentional - it provides visual separation in the logs when
+        // exec'ing new versions.
+        if (release_target_current) {
+            log.info("executing current release {} via {s}...\n", .{
+                release_target,
+                self.exe_path,
+            });
+        } else if (release_target_past) {
+            log.info("executing current release {} (target: {}) via {s}...\n", .{
+                self.target_header.?.current_release,
+                release_target,
+                self.exe_path,
+            });
+        }
         try self.exec_target_fd();
     }
 
@@ -1119,7 +1151,12 @@ pub const Multiversion = struct {
         };
         assert(written_checksum == binary_checksum);
 
-        log.info("executing release {}...\n", .{release_target});
+        // The trailing newline is intentional - it provides visual separation in the logs when
+        // exec'ing new versions.
+        log.info("executing internal release {} via {s}...\n", .{
+            release_target,
+            self.exe_path,
+        });
         try self.exec_target_fd();
     }
 

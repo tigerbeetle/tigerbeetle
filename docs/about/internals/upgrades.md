@@ -85,7 +85,7 @@ version is what will checkpoint to the new version, at which point the exec happ
 
 ## Executing
 The final step is executing into the new version of TigerBeetle. On Linux, this is handled by
-`execveat` which allows executing from a `memfd`. If executing the latest release, `exec_latest`
+`execveat` which allows executing from a `memfd`. If executing the latest release, `exec_current`
 re-execs the `memfd` as-is. If executing an older release, `exec_release` copies it out of the
 pack, verifies its checksum, and then executes it.
 
