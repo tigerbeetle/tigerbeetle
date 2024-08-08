@@ -3033,6 +3033,9 @@ fn check(test_table: []const u8) !void {
                 account_new.debits_posted = b.debits_posted;
                 account_new.credits_pending = b.credits_pending;
                 account_new.credits_posted = b.credits_posted;
+                assert(!account_new.debits_exceed_credits(0));
+                assert(!account_new.credits_exceed_debits(0));
+
                 if (!stdx.equal_bytes(Account, &account_new, account)) {
                     context.state_machine.forest.grooves.accounts.update(.{
                         .old = account,
