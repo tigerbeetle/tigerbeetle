@@ -327,7 +327,7 @@ for (int i = 0; i < transferIds.length; i++) {
     batch.setAmount(amounts[i]);
 
     CreateTransferResultBatch errors = client.createTransfers(batch);
-    // error handling omitted
+    // Error handling omitted.
 }
 ```
 
@@ -351,7 +351,7 @@ for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
     }
 
     CreateTransferResultBatch errors = client.createTransfers(batch);
-    // error handling omitted
+    // Error handling omitted.
 }
 ```
 
@@ -636,36 +636,57 @@ a user-defined timestamp.
 
 The entire batch of events must be set with the flag `imported`.
 
+It's recommended to submit the whole batch as a `linked` chain of events, ensuring that
+if any event fails, none of them are committed, preserving the last timestamp unchanged.
+This approach gives the application a chance to correct failed imported events, re-submitting
+the batch again with the same user-defined timestamps.
+
 ```java
-accounts = new AccountBatch(2);
-accounts.add();
-accounts.setId(1001);
-accounts.setLedger(1);
-accounts.setCode(718);
-accounts.setFlags(AccountFlags.IMPORTED);
-accounts.setTimestamp(historicalTimestamp + 1); // User-defined timestamp.
+// First, load and import all accounts with their timestamps from the historical source.
+accounts = new AccountBatch(historicalAccounts.length);
+for(int index = 0; index < historicalAccounts.length; index += 1) {
+    accounts.add();
 
-accounts.add();
-accounts.setId(2001);
-accounts.setLedger(1);
-accounts.setCode(718);
-accounts.setFlags(AccountFlags.IMPORTED);
-accounts.setTimestamp(historicalTimestamp + 2); // User-defined timestamp.
+    // Set a unique and strictly increasing timestamp.
+    accounts.setTimestamp(historicalTimestamp + index);
+    // Set the account as `imported`.
+    // To ensure atomicity, the entire batch (except the last event in the chain)
+    // must be `linked`.
+    if (index < historicalAccounts.length - 1) {
+        accounts.setFlags(AccountFlags.IMPORTED | AccountFlags.LINKED);
+    } else {
+        accounts.setFlags(AccountFlags.IMPORTED);
+    }
 
+    // Populate the rest of the account:
+    // accounts.setId(historicalAccounts[index].Id);
+    // accounts.setCode(historicalAccounts[index].Code);
+}
 accountErrors = client.createAccounts(accounts);
-// error handling omitted
+// Error handling omitted.
 
-transfers = new TransferBatch(1);
-transfers.add();
-transfers.setId(100);
-transfers.setDebitAccountId(1001);
-transfers.setCreditAccountId(2001);
-transfers.setAmount(10);
-transfers.setLedger(1);
-transfers.setCode(1);
-transfers.setFlags(TransferFlags.IMPORTED);
-transfers.setTimestamp(historicalTimestamp + 3); // User-defined timestamp.
+// Then, load and import all transfers with their timestamps from the historical source.
+transfers = new TransferBatch(historicalTransfers.length);
+for(int index = 0; index < historicalTransfers.length; index += 1) {
+    transfers.add();
 
+    // Set a unique and strictly increasing timestamp.
+    transfers.setTimestamp(historicalTimestamp + index);
+    // Set the account as `imported`.
+    // To ensure atomicity, the entire batch (except the last event in the chain)
+    // must be `linked`.
+    if (index < historicalTransfers.length - 1) {
+        transfers.setFlags(TransferFlags.IMPORTED | TransferFlags.LINKED);
+    } else {
+        transfers.setFlags(TransferFlags.IMPORTED);
+    }
+
+    // Populate the rest of the transfer:
+    // transfers.setId(historicalTransfers[index].Id);
+    // transfers.setCode(historicalTransfers[index].Code);
+}
 transferErrors = client.createTransfers(transfers);
-// error handling omitted
+// Error handling omitted.
+// Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+// with the same historical timestamps without regressing the cluster timestamp.
 ```

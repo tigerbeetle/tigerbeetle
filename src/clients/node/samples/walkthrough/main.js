@@ -198,7 +198,7 @@ async function main() {
   // section:no-batch
   for (let i = 0; i < transfers.len; i++) {
     const transferErrors = await client.createTransfers(transfers[i]);
-    // error handling omitted
+    // Error handling omitted.
   }
   // endsection:no-batch
 
@@ -208,7 +208,7 @@ async function main() {
     const transferErrors = await client.createTransfers(
       transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)),
     );
-    // error handling omitted
+    // Error handling omitted.
   }
   // endsection:batch
 
@@ -449,60 +449,49 @@ async function main() {
 
         // External source of time.
         let historicalTimestamp = 0n
+        const historicalAccounts = [];
+        const historicalTransfers = [];
 
         // section:imported-events
-        accounts = [{
-          id: 1001n,
-          debits_pending: 0n,
-          debits_posted: 0n,
-          credits_pending: 0n,
-          credits_posted: 0n,
-          user_data_128: 0n,
-          user_data_64: 0n,
-          user_data_32: 0,
-          reserved: 0,
-          ledger: 1,
-          code: 718,
-          flags: AccountFlags.imported,
-          timestamp: historicalTimestamp + 1n, // User-defined timestamp.
-        },
-        {
-          id: 2001n,
-          debits_pending: 0n,
-          debits_posted: 0n,
-          credits_pending: 0n,
-          credits_posted: 0n,
-          user_data_128: 0n,
-          user_data_64: 0n,
-          user_data_32: 0,
-          reserved: 0,
-          ledger: 1,
-          code: 718,
-          flags: AccountFlags.imported,
-          timestamp: historicalTimestamp + 2n, // User-defined timestamp.
-        }];
+        // First, load and import all accounts with their timestamps from the historical source.
+        const accountsBatch = [];
+        for (let index = 0; i < historicalAccounts.length ; i++) {
+          let account = historicalAccounts[i];
+          // Set a unique and strictly increasing timestamp.
+          account.timestamp = historicalTimestamp + index;
+          // Set the account as `imported`.
+          account.flags = AccountFlags.imported;
+          // To ensure atomicity, the entire batch (except the last event in the chain)
+          // must be `linked`.
+          if (index < historicalAccounts.length - 1) {
+            account.flags = AccountFlags.linked;
+          }
 
-        accountErrors = await client.createAccounts([account]);
-        // error handling omitted
+          accountsBatch.push(account);
+        }
+        accountErrors = await client.createAccounts(accountsBatch);
 
-        transfers = [{
-          id: 100n,
-          debit_account_id: 1001n,
-          credit_account_id: 2001n,
-          amount: 10n,
-          pending_id: 0n,
-          user_data_128: 0n,
-          user_data_64: 0n,
-          user_data_32: 0,
-          timeout: 0,
-          ledger: 1,
-          code: 720,
-          flags: TransferFlags.imported,
-          timestamp: historicalTimestamp + 3n, // User-defined timestamp.
-        }];
+        // Error handling omitted.
+        // Then, load and import all transfers with their timestamps from the historical source.
+        const transfersBatch = [];
+        for (let index = 0; i < historicalTransfers.length ; i++) {
+          let transfer = historicalTransfers[i];
+          // Set a unique and strictly increasing timestamp.
+          transfer.timestamp = historicalTimestamp + index;
+          // Set the account as `imported`.
+          transfer.flags = TransferFlags.imported;
+          // To ensure atomicity, the entire batch (except the last event in the chain)
+          // must be `linked`.
+          if (index < historicalTransfers.length - 1) {
+            transfer.flags = TransferFlags.linked;
+          }
 
-        transferErrors = await client.createTransfers(transfers);
-        // error handling omitted
+          transfersBatch.push(transfer);
+        }
+        transferErrors = await client.createAccounts(transfersBatch);
+        // Error handling omitted.
+        // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+        // with the same historical timestamps without regressing the cluster timestamp.
         // endsection:imported-events
 
     } catch (exception) {

@@ -450,6 +450,11 @@ fn readme_root(ctx: *Context) !void {
             \\a user-defined timestamp.
             \\
             \\The entire batch of events must be set with the flag `imported`.
+            \\
+            \\It's recommended to submit the whole batch as a `linked` chain of events, ensuring that
+            \\if any event fails, none of them are committed, preserving the last timestamp unchanged.
+            \\This approach gives the application a chance to correct failed imported events, re-submitting
+            \\the batch again with the same user-defined timestamps.
         );
         ctx.code_section("imported-events");
     }
