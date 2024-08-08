@@ -369,7 +369,17 @@ A transfer with the same `id` already exists.
 If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
 [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
 transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
-(if non-zero) `amount` of the transfer in the request.
+`amount` of the transfer in the request.
+
+<details>
+<summary>Client release < 0.16.0</summary>
+
+If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
+transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
+`amount` of the transfer in the request.
+
+</details>
 
 Otherwise, with the possible exception of the `timestamp` field, the existing transfer is identical
 to the transfer in the request.
@@ -459,27 +469,37 @@ replica, not the `0` value sent by the client.
 
 The transfer was not created.
 
+The [debit account](../transfer.md#debit_account_id) has
+[`flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) set, but
+`debit_account.debits_pending + debit_account.debits_posted + transfer.amount` would exceed
+`debit_account.credits_posted`.
+
+<details>
+<summary>Client release < 0.16.0</summary>
+
 If [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) is set, then
 `debit_account.debits_pending + debit_account.debits_posted + 1` would exceed
 `debit_account.credits_posted`.
 
-Otherwise, the [debit account](../transfer.md#debit_account_id) has
-[`flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) set, but
-`debit_account.debits_pending + debit_account.debits_posted + transfer.amount` would exceed
-`debit_account.credits_posted`.
+</details>
 
 ### `exceeds_debits`
 
 The transfer was not created.
 
+The [credit account](../transfer.md#credit_account_id) has
+[`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) set, but
+`credit_account.credits_pending + credit_account.credits_posted + transfer.amount` would exceed
+`credit_account.debits_posted`.
+
+<details>
+<summary>Client release < 0.16.0</summary>
+
 If [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) is set, then
 `credit_account.credits_pending + credit_account.credits_posted + 1` would exceed
 `credit_account.debits_posted`.
 
-Otherwise, the [credit account](../transfer.md#credit_account_id) has
-[`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) set, but
-`credit_account.credits_pending + credit_account.credits_posted + transfer.amount` would exceed
-`credit_account.debits_posted`.
+</details>
 
 ## Client libraries
 
