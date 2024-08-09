@@ -1,6 +1,5 @@
 src/clients/c/lib
 dist/
-/main
 /tigerbeetle
 /tigerbeetle.exe
 *_*.tigerbeetle.*
@@ -8,11 +7,5 @@ dist/
 .zig-cache/
 zig-out/
 
-tools/tracy
-# It is occasionally useful to dump LLVM IR to an `.ll` file to investigate perf problems.
-.ll
 # By convention, logs from simulator use .vopr extension.
 *.vopr
-
-# We have a recommended vscode config under tools/vscode, which you can symlink to .vscode.
-/.vscode
