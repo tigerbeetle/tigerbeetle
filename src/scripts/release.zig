@@ -27,6 +27,7 @@ const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
 
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
+const multiversion_binary_platform_size_max = multiversioning.multiversion_binary_platform_size_max;
 const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 
 const Language = enum { dotnet, go, java, node, zig, docker };
@@ -45,26 +46,6 @@ const VersionInfo = struct {
     sha: []const u8,
 };
 
-/// 0.15.4 will be the first version with the ability to read the multiversion metadata embedded in
-/// TigerBeetle. This presents a bootstrapping problem:
-///
-/// * Operator replaces 0.15.3 with 0.15.4,
-/// * 0.15.4 starts up, re-execs into 0.15.3,
-/// * 0.15.3 knows nothing about 0.15.4 or how to check it's available, so we just hang.
-///
-/// Work around this by creating a custom re-release of 0.15.3, hardcoding that if 0.15.3 is present
-/// in a pack, 0.15.4 must be too.
-///
-const multiversion_epoch = "0.15.3";
-
-/// This commit references https://github.com/tigerbeetle/tigerbeetle/pull/1935.
-const multiversion_epoch_commit = "035c895bf85f5106d94f08cac49719994344880e";
-
-/// This tag references https://github.com/tigerbeetle/tigerbeetle/pull/1935. Have it as an explicit
-/// tag in addition to multiversion_epoch_commit, so it's not just a random commit SHA that's
-/// important. This is later asserted to resolve to the same commit.
-const multiversion_epoch_tag = "0.15.3-multiversion-1";
-
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     assert(builtin.target.os.tag == .linux);
     assert(builtin.target.cpu.arch == .x86_64);
@@ -78,11 +59,18 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     // Run number is a monotonically incremented integer. Map it to a three-component version
     // number.
     // If you change this, make sure to change the validation code in release_validate.zig!
-    const release_triple = .{
+    const release_triple = multiversioning.ReleaseTriple{
         .major = 0,
         .minor = 15,
-        .patch = cli_args.run_number - 188,
+        .patch = @intCast(cli_args.run_number - 188),
     };
+
+    // Ensure we're building a version newer than the first multiversion release. That was
+    // bootstrapped with code to do a custom build of the release before that (see git history)
+    // whereas now past binaries are downloaded and the multiversion parts extracted.
+    const first_multiversion_release = "0.15.4";
+    assert((multiversioning.Release.from(release_triple)).value >
+        (try multiversioning.Release.parse(first_multiversion_release)).value);
 
     // The minimum client version allowed to connect. This has implications for backwards
     // compatibility and the upgrade path for replicas and clients. If there's no overlap
@@ -96,13 +84,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     };
 
     const version_info = VersionInfo{
-        .release_triple = try std.fmt.allocPrint(
-            shell.arena.allocator(),
-            "{[major]}.{[minor]}.{[patch]}",
-            release_triple,
-        ),
-        .release_triple_client_min = try std.fmt.allocPrint(
-            shell.arena.allocator(),
+        .release_triple = try shell.fmt("{[major]}.{[minor]}.{[patch]}", release_triple),
+        .release_triple_client_min = try shell.fmt(
             "{[major]}.{[minor]}.{[patch]}",
             release_triple_client_min,
         ),
@@ -171,10 +154,6 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     var section = try shell.open_section("build tigerbeetle");
     defer section.close();
 
-    // TODO(multiversioning): This code only supports building the 0.15.4 release.
-    assert((try multiversioning.Release.parse(info.release_triple)).value ==
-        (try multiversioning.Release.parse("0.15.4")).value);
-
     const llvm_objcopy = for (@as([2][]const u8, .{
         "llvm-objcopy-16",
         "llvm-objcopy",
@@ -196,19 +175,6 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
 
     // We shell out to `zip` for creating archives, so we need an absolute path here.
     const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
-
-    // TODO(multiversioning): Remove once multiversion releases have been bootstrapped.
-    const is_multiversion_epoch = std.mem.eql(
-        u8,
-        try shell.exec_stdout("gh release view --json tagName --template {template}", .{
-            .template = "{{.tagName}}", // Static, but shell.zig is not happy with '{'.
-        }),
-        multiversion_epoch,
-    );
-    if (!is_multiversion_epoch) @panic("non-epoch builds unsupported");
-
-    defer shell.project_root.deleteTree("tigerbeetle-epoch") catch {};
-    try build_tigerbeetle_epoch(shell);
 
     const targets = .{
         "x86_64-linux",
@@ -282,6 +248,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 target,
                 debug,
                 body_path,
+                llvm_objcopy,
             );
 
             // Use objcopy to add in our new body, as well as its header - even though the
@@ -314,6 +281,10 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 },
                 .past = past_versions,
                 .checksum_binary_without_header = checksum_binary_without_header,
+                .current_release_client_min = (try multiversioning.Release.parse(
+                    info.release_triple_client_min,
+                )).value,
+                .current_git_commit = try git_sha_to_binary(info.sha),
             };
             header.checksum_header = header.calculate_header_checksum();
 
@@ -342,9 +313,20 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 });
             }
 
-            // Finally, check the binary produced using both the old and new versions.
-            // TODO(multiversioning): Do the check with the old binary downloaded, if it wasn't
-            // the epoch.
+            // Check the binary produced using both the old and new versions.
+            for (past_versions.releases[0..past_versions.count]) |release| {
+                // 0.15.3 didn't have the multiversion subcommand since it was the epoch.
+                if (release == (try multiversioning.Release.parse("0.15.3")).value) continue;
+
+                // It's expected that the first iteration of the outer loop is debug, x86_64-linux.
+                try shell.exec_options(
+                    .{ .echo = false },
+                    "multiversion-build/past/" ++
+                        "tigerbeetle-x86_64-linux-debug-{release} multiversion {exe_name}",
+                    .{ .release = release, .exe_name = exe_name },
+                );
+            }
+
             try shell.exec("multiversion-build/tigerbeetle multiversion {exe_name}", .{
                 .exe_name = exe_name,
             });
@@ -390,6 +372,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             "aarch64-macos",
             debug,
             "multiversion-build/multiversion-aarch64-macos" ++ debug_suffix ++ ".body",
+            llvm_objcopy,
         );
 
         const past_versions_x86_64 = try build_multiversion_body(
@@ -397,7 +380,9 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             "x86_64-macos",
             debug,
             "multiversion-build/multiversion-x86_64-macos" ++ debug_suffix ++ ".body",
+            llvm_objcopy,
         );
+        assert(past_versions_aarch64.count == past_versions_x86_64.count);
 
         try macos_universal_binary_build(
             shell,
@@ -470,6 +455,10 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 },
                 .past = past_versions,
                 .checksum_binary_without_header = checksum_binary_without_header,
+                .current_release_client_min = (try multiversioning.Release.parse(
+                    info.release_triple_client_min,
+                )).value,
+                .current_git_commit = try git_sha_to_binary(info.sha),
             };
             header.checksum_header = header.calculate_header_checksum();
 
@@ -513,9 +502,19 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         });
 
         // Finally, check the binary produced using both the old and new versions.
-        // TODO(multiversioning): Do the check with the old binary downloaded, if it wasn't
-        // the epoch.
         try shell.exec("multiversion-build/tigerbeetle multiversion tigerbeetle", .{});
+
+        for (past_versions_aarch64.releases[0..past_versions_aarch64.count]) |release| {
+            // 0.15.3 didn't have the multiversion subcommand since it was the epoch.
+            if (release == (try multiversioning.Release.parse("0.15.3")).value) continue;
+
+            try shell.exec_options(
+                .{ .echo = false },
+                "multiversion-build/past/" ++
+                    "tigerbeetle-x86_64-linux-{release} multiversion tigerbeetle",
+                .{ .release = release },
+            );
+        }
 
         try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
         try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
@@ -530,106 +529,277 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     }
 }
 
-/// Buildception! Rather than rely on a hardcoded binary, build the custom 0.15.3 release here.
-/// The caller must clean up the `tigerbeetle-epoch/` directory after use.
-fn build_tigerbeetle_epoch(shell: *Shell) !void {
-    var section = try shell.open_section("build tigerbeetle epoch");
-    defer section.close();
-
-    try shell.exec(
-        "git clone https://github.com/tigerbeetle/tigerbeetle.git tigerbeetle-epoch",
-        .{},
-    );
-
-    try shell.pushd("./tigerbeetle-epoch");
-    defer shell.popd();
-
-    try shell.exec("git checkout {tag}", .{
-        .tag = multiversion_epoch_tag,
-    });
-    const multiversion_epoch_tag_commit = try shell.exec_stdout("git rev-parse HEAD", .{});
-    assert(std.mem.eql(u8, multiversion_epoch_commit, multiversion_epoch_tag_commit));
-
-    try shell.exec("zig/download.sh", .{});
-    try shell.exec("zig/zig build scripts -- release --run-number={run_number} --sha={commit} " ++
-        "--language=zig --build", .{
-        .commit = multiversion_epoch_commit,
-
-        // 188 corresponds to 0.15.3, in 0.15.3's release code.
-        .run_number = 188,
-    });
-}
-
 /// Builds a multiversion body for the `target` specified, returns the PastReleases metadata and
 /// writes the output to `body_path`.
 fn build_multiversion_body(
     shell: *Shell,
     comptime target: []const u8,
-    debug: bool,
+    comptime debug: bool,
     body_path: []const u8,
+    llvm_objcopy: []const u8,
 ) !multiversioning.MultiversionHeader.PastReleases {
+    // Needed to compile, because of the .mode lower down.
+    if (builtin.target.os.tag != .linux) @panic("unsupported platform");
+
     var section = try shell.open_section("build multiversion body");
     defer section.close();
+
+    // No cleanup - multiversion-build/ is cleared as a whole later, and this makes it easy to both
+    // use the binaries extracted for verification, and for debugging.
+    var past_build_dir = try shell.project_root.makeOpenPath(
+        "multiversion-build/past",
+        .{},
+    );
+    defer past_build_dir.close();
+
+    const body_file = try shell.cwd.createFile(body_path, .{ .exclusive = true });
+    defer body_file.close();
+
+    try shell.pushd("./multiversion-build/past");
+    defer shell.popd();
 
     const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
     const macos = comptime std.mem.indexOf(u8, target, "macos") != null;
     const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
+    const debug_suffix = if (debug) "-debug" else "";
 
-    // TODO(multiversioning): Normally this would download and extract the last published release
-    // of TigerBeetle. For the 0.15.4 release, it uses the custom build provided in
-    // `tigerbeetle-epoch/` by build_tigerbeetle_epoch().
-    try shell.exec("unzip -d tigerbeetle-epoch/dist/extracted " ++
-        "tigerbeetle-epoch/dist/tigerbeetle/tigerbeetle-{target}{debug}.zip", .{
-        .target = if (macos) "universal-macos" else target,
-        .debug = if (debug) "-debug" else "",
-    });
-    defer shell.project_root.deleteTree("tigerbeetle-epoch/dist/extracted") catch {};
+    // macOS has a universal binary, unlike other targets that have a binary per platform.
+    const tigerbeetle_name_binary = "tigerbeetle-" ++ target ++ debug_suffix;
+    const tigerbeetle_name_zip = if (macos)
+        "tigerbeetle-universal-macos" ++ debug_suffix
+    else
+        tigerbeetle_name_binary;
 
-    const past_binary = try shell.project_root
-        .openFile("./tigerbeetle-epoch/dist/extracted/" ++ exe_name, .{ .mode = .read_only });
+    // macOS gets called twice, once for aarch64 and once for x86_64, but both of these map to
+    // tigerbeetle-universal-macos{-debug}.zip. There's no need to download and extract again.
+    if (!(macos and shell.file_exists(tigerbeetle_name_zip))) {
+        try shell.exec("gh release download -p {tigerbeetle_name_zip}.zip", .{
+            .tigerbeetle_name_zip = tigerbeetle_name_zip,
+        });
+        try shell.exec("unzip {tigerbeetle_name_zip}.zip", .{
+            .tigerbeetle_name_zip = tigerbeetle_name_zip,
+        });
+        try shell.cwd.rename(exe_name, tigerbeetle_name_zip);
+    }
+
+    const past_binary = try shell.cwd
+        .openFile(tigerbeetle_name_zip, .{ .mode = .read_only });
     defer past_binary.close();
 
-    const past_binary_contents = try past_binary.readToEndAlloc(
+    const past_binary_contents = try past_binary.readToEndAllocOptions(
         shell.arena.allocator(),
         multiversion_binary_size_max,
+        null,
+        8,
+        null,
     );
 
-    const checksum: u128 = multiversioning.checksum.checksum(past_binary_contents);
+    const parsed_offsets = try if (windows)
+        multiversioning.parse_pe(past_binary_contents)
+    else if (macos)
+        multiversioning.parse_macho(past_binary_contents)
+    else
+        multiversioning.parse_elf(past_binary_contents);
 
-    const body_file = try shell.project_root.createFile(body_path, .{ .exclusive = true });
-    defer body_file.close();
+    // release.zig only supports x86_64 so if targeting aarch64 macos the alternative header is
+    // always used.
+    assert(builtin.target.cpu.arch == .x86_64); // Asserted in main() too.
+    const header_bytes = if (macos and std.mem.eql(u8, target, "aarch64-macos"))
+        past_binary_contents[parsed_offsets.header_offset_inactive_platform.?..][0..@sizeOf(
+            multiversioning.MultiversionHeader,
+        )]
+    else
+        past_binary_contents[parsed_offsets.header_offset..][0..@sizeOf(
+            multiversioning.MultiversionHeader,
+        )];
 
-    try body_file.writeAll(past_binary_contents);
+    var header = try multiversioning.MultiversionHeader.init_from_bytes(header_bytes);
+    if (header.current_release == (try multiversioning.Release.parse("0.15.4")).value) {
+        // current_git_commit and current_release_client_min were added after 0.15.4. These are the
+        // values for that release.
+        header.current_git_commit = try git_sha_to_binary(
+            "14abaeabd09bd7c78a95b6b990748f3612b3e4cc",
+        );
+        header.current_release_client_min = (try multiversioning.Release.parse("0.15.3")).value;
+    }
 
-    const git_commit: [20]u8 = blk: {
-        var commit_bytes: [20]u8 = std.mem.zeroes([20]u8);
-        for (0..@divExact(multiversion_epoch_commit.len, 2)) |i| {
-            const byte = try std.fmt.parseInt(u8, multiversion_epoch_commit[i * 2 ..][0..2], 16);
-            commit_bytes[i] = byte;
+    var releases = multiversioning.ListU32{};
+    var checksums = multiversioning.ListU128{};
+    var offsets = multiversioning.ListU32{};
+    var sizes = multiversioning.ListU32{};
+    var flags_ = multiversioning.ListFlag{};
+    var git_commits = multiversioning.ListGitCommit{};
+    var release_client_mins = multiversioning.ListU32{};
+
+    // Extract the old current release - this is the release that was the current release, and not
+    // embedded in the past pack.
+    const old_current_release = header.current_release;
+    const old_current_release_output_name = try shell.fmt(
+        "{s}-{}",
+        .{ tigerbeetle_name_binary, old_current_release },
+    );
+
+    if (macos) {
+        const cpu_type = if (std.mem.eql(u8, target, "aarch64-macos"))
+            std.macho.CPU_TYPE_ARM64
+        else
+            std.macho.CPU_TYPE_X86_64;
+
+        const cpu_subtype = if (cpu_type == std.macho.CPU_TYPE_ARM64)
+            std.macho.CPU_SUBTYPE_ARM_ALL
+        else
+            std.macho.CPU_SUBTYPE_X86_64_ALL;
+
+        try macos_universal_binary_extract(
+            shell,
+            tigerbeetle_name_zip,
+            .{ .cpu_type = cpu_type, .cpu_subtype = cpu_subtype },
+            old_current_release_output_name,
+        );
+    } else {
+        try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined" ++
+            " --remove-section .tb_mvb --remove-section .tb_mvh " ++
+            "{tigerbeetle_name_zip} {old_current_release_output_name}", .{
+            .llvm_objcopy = llvm_objcopy,
+            .tigerbeetle_name_zip = tigerbeetle_name_zip,
+            .old_current_release_output_name = old_current_release_output_name,
+        });
+    }
+
+    // It's important to verify the previous current_release checksum - it can't be verified at
+    // runtime by multiversioning.zig, since it relies on objcopy to extract.
+    assert(header.current_checksum == try checksum_file(
+        shell,
+        old_current_release_output_name,
+        multiversion_binary_size_max,
+    ));
+
+    const old_current_release_size: u32 = @intCast((try (try shell.cwd.openFile(
+        old_current_release_output_name,
+        .{ .mode = .read_only },
+    )).stat()).size);
+
+    // You can have as many releases as you want, as long as it's 6 or less.
+    // This is made up of:
+    // * up to 4 releases from the old past pack (extracted from the release downloaded),
+    // * 1 old current release (extracted from the release downloaded),
+    // * 1 current release (that was just built).
+    // This will be improved soon:
+    // https://github.com/tigerbeetle/tigerbeetle/pull/2165#discussion_r1698114401
+    //
+    // No size limits are explicitly checked here; they're validated later by using the
+    // `multiversion` subcommand to test the final built binary against all past binaries that are
+    // included.
+    const past_count = @min(4, header.past.count);
+
+    const past_starting_index = header.past.count - past_count;
+
+    for (
+        header.past.releases[past_starting_index..][0..past_count],
+        header.past.offsets[past_starting_index..][0..past_count],
+        header.past.sizes[past_starting_index..][0..past_count],
+        header.past.checksums[past_starting_index..][0..past_count],
+        header.past.flags[past_starting_index..][0..past_count],
+        header.past.git_commits[past_starting_index..][0..past_count],
+        header.past.release_client_mins[past_starting_index..][0..past_count],
+    ) |
+        past_release,
+        past_offset,
+        past_size,
+        past_checksum,
+        past_flag,
+        past_commit,
+        past_release_client_min,
+    | {
+        const past_name = try shell.fmt("{s}-{}", .{ tigerbeetle_name_binary, past_release });
+        const past_release_file = try shell.cwd
+            .createFile(past_name, .{
+            .exclusive = true,
+            .mode = 0o777,
+        });
+        errdefer past_release_file.close();
+
+        try past_release_file.writeAll(
+            past_binary_contents[parsed_offsets.body_offset..][past_offset..][0..past_size],
+        );
+        past_release_file.close();
+
+        // This is double-checked later when validating at runtime with the binary.
+        assert(past_checksum == try checksum_file(
+            shell,
+            past_name,
+            multiversion_binary_size_max,
+        ));
+
+        const offset = blk: {
+            var offset: u32 = 0;
+            for (sizes.const_slice()) |size| {
+                offset += size;
+            }
+            break :blk offset;
+        };
+
+        releases.append_assume_capacity(past_release);
+        checksums.append_assume_capacity(past_checksum);
+        offsets.append_assume_capacity(offset);
+        sizes.append_assume_capacity(past_size);
+        flags_.append_assume_capacity(past_flag);
+        git_commits.append_assume_capacity(past_commit);
+        release_client_mins.append_assume_capacity(past_release_client_min);
+    }
+
+    const old_current_release_offset = blk: {
+        var offset: u32 = 0;
+        for (sizes.const_slice()) |s| {
+            offset += s;
         }
-
-        var multiversion_epoch_commit_roundtrip: [40]u8 = undefined;
-        assert(std.mem.eql(u8, try std.fmt.bufPrint(
-            &multiversion_epoch_commit_roundtrip,
-            "{s}",
-            .{std.fmt.fmtSliceHexLower(&commit_bytes)},
-        ), multiversion_epoch_commit));
-
-        break :blk commit_bytes;
+        break :blk offset;
     };
 
-    return multiversioning.MultiversionHeader.PastReleases.init(1, .{
-        .releases = &.{
-            (try multiversioning.Release.parse(multiversion_epoch)).value,
-        },
-        .checksums = &.{checksum},
-        .offsets = &.{0},
-        .sizes = &.{@as(u32, @intCast(past_binary_contents.len))},
-        .flags = &.{.{ .visit = false, .debug = debug }},
-        .git_commits = &.{git_commit},
-        .release_client_mins = &.{
-            (try multiversioning.Release.parse(multiversion_epoch)).value,
-        },
+    const old_current_release_flags = blk: {
+        var old_current_release_flags = header.current_flags;
+
+        // For now, no releases are marked as visit. These need to get explicitly reset here, since
+        // current_flags.visit is by definition always true.
+        old_current_release_flags.visit = false;
+
+        break :blk old_current_release_flags;
+    };
+
+    // All of these are in ascending order, so the old current release goes last:
+
+    releases.append_assume_capacity(old_current_release);
+    checksums.append_assume_capacity(header.current_checksum);
+    offsets.append_assume_capacity(old_current_release_offset);
+    sizes.append_assume_capacity(old_current_release_size);
+    flags_.append_assume_capacity(old_current_release_flags);
+    git_commits.append_assume_capacity(header.current_git_commit);
+    release_client_mins.append_assume_capacity(header.current_release_client_min);
+
+    for (
+        releases.const_slice(),
+        offsets.const_slice(),
+        sizes.const_slice(),
+    ) |release, offset, size| {
+        const past_name = try shell.fmt("{s}-{}", .{ tigerbeetle_name_binary, release });
+
+        const past_release_file = try shell.cwd
+            .openFile(past_name, .{ .mode = .read_only });
+        defer past_release_file.close();
+
+        const contents = try past_release_file.readToEndAlloc(shell.arena.allocator(), size);
+        try body_file.pwriteAll(contents, offset);
+    }
+
+    // past_count + 1 to include the old current release.
+    return multiversioning.MultiversionHeader.PastReleases.init(past_count + 1, .{
+        .releases = releases.const_slice(),
+        .checksums = checksums.const_slice(),
+        .offsets = offsets.const_slice(),
+        .sizes = sizes.const_slice(),
+        .flags = flags_.const_slice(),
+        .git_commits = git_commits.const_slice(),
+        .release_client_mins = release_client_mins.const_slice(),
     });
 }
 
@@ -664,7 +834,7 @@ fn macos_universal_binary_build(
 
     var current_offset: u32 = alignment;
     for (binaries, binary_headers) |binary, *binary_header| {
-        const binary_file = try shell.project_root.openFile(binary.path, .{ .mode = .read_only });
+        const binary_file = try shell.cwd.openFile(binary.path, .{ .mode = .read_only });
         defer binary_file.close();
 
         const binary_size: u32 = @intCast((try binary_file.stat()).size);
@@ -727,7 +897,7 @@ fn macos_universal_binary_extract(
     var section = try shell.open_section("macos universal binary extract");
     defer section.close();
 
-    const input_file = try shell.project_root.openFile(input_path, .{ .mode = .read_only });
+    const input_file = try shell.cwd.openFile(input_path, .{ .mode = .read_only });
     defer input_file.close();
     const binary_contents = try input_file.readToEndAlloc(
         shell.arena.allocator(),
@@ -754,8 +924,8 @@ fn macos_universal_binary_extract(
             const offset = @byteSwap(fat_arch.offset);
             const size = @byteSwap(fat_arch.size);
 
-            const output_file = try shell.project_root.openFile(output_path, .{
-                .mode = .read_only,
+            const output_file = try shell.cwd.createFile(output_path, .{
+                .exclusive = true,
             });
             defer output_file.close();
             try output_file.writeAll(binary_contents[offset..][0..size]);
@@ -768,7 +938,7 @@ fn macos_universal_binary_extract(
 }
 
 fn checksum_file(shell: *Shell, path: []const u8, size_max: u32) !u128 {
-    const file = try shell.project_root.openFile(path, .{
+    const file = try shell.cwd.openFile(path, .{
         .mode = .read_only,
     });
     defer file.close();
@@ -778,6 +948,25 @@ fn checksum_file(shell: *Shell, path: []const u8, size_max: u32) !u128 {
         size_max,
     );
     return multiversioning.checksum.checksum(contents);
+}
+
+fn git_sha_to_binary(commit: []const u8) ![20]u8 {
+    assert(commit.len == 40);
+
+    var commit_bytes: [20]u8 = std.mem.zeroes([20]u8);
+    for (0..@divExact(commit.len, 2)) |i| {
+        const byte = try std.fmt.parseInt(u8, commit[i * 2 ..][0..2], 16);
+        commit_bytes[i] = byte;
+    }
+
+    var commit_roundtrip: [40]u8 = undefined;
+    assert(std.mem.eql(u8, try std.fmt.bufPrint(
+        &commit_roundtrip,
+        "{s}",
+        .{std.fmt.fmtSliceHexLower(&commit_bytes)},
+    ), commit));
+
+    return commit_bytes;
 }
 
 fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {

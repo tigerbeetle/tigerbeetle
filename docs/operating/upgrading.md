@@ -121,7 +121,3 @@ to upgrade, with two options:
   duration of the upgrade and unavailability will be extended.
 * Upgrade the replicas to the latest release that supports the client version in use, then upgrade
   the clients to that version. Repeat this until you're on the latest release.
-
-## Upgrading Windows / macOS
-Upgrading development data files on Windows / macOS is not yet supported. This will be added in the
-next release.
