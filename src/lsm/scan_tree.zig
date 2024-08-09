@@ -761,7 +761,9 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 .iterating_manifest => self.move_next_manifest_table(null),
                 .loading_index => unreachable,
                 .iterating_values => |*iterating_values| {
-                    if (iterating_values.iterator.empty()) {
+                    if (iterating_values.iterator.context == null or
+                        iterating_values.iterator.empty())
+                    {
                         // If the next key is out of the range,
                         // there are no more `table_info`s to scan next.
                         const key_exclusive_next = iterating_values.key_exclusive_next;
@@ -891,7 +893,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             self.state = .{
                 .iterating_values = .{
                     .key_exclusive_next = self.state.loading_index.key_exclusive_next,
-                    .iterator = undefined,
+                    .iterator = .{},
                 },
             };
 

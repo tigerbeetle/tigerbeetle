@@ -29,9 +29,9 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
             direction: Direction,
         };
 
-        context: Context,
-        callback: ?Callback,
-        read: Grid.Read,
+        context: ?Context = null,
+        callback: ?Callback = null,
+        read: Grid.Read = undefined,
 
         pub fn init(
             it: *TableValueIterator,
@@ -46,8 +46,8 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
         }
 
         pub fn empty(it: *const TableValueIterator) bool {
-            assert(it.context.addresses.len == it.context.checksums.len);
-            return it.context.addresses.len == 0;
+            assert(it.context.?.addresses.len == it.context.?.checksums.len);
+            return it.context.?.addresses.len == 0;
         }
 
         /// Calls `callback` with the next value block.
@@ -57,19 +57,19 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
             assert(it.callback == null);
             assert(!it.empty());
 
-            const index: usize = switch (it.context.direction) {
+            const index: usize = switch (it.context.?.direction) {
                 .ascending => 0,
-                .descending => it.context.addresses.len - 1,
+                .descending => it.context.?.addresses.len - 1,
             };
 
-            assert(it.context.checksums[index].padding == 0);
+            assert(it.context.?.checksums[index].padding == 0);
 
             it.callback = callback;
-            it.context.grid.read_block(
+            it.context.?.grid.read_block(
                 .{ .from_local_or_global_storage = read_block_callback },
                 &it.read,
-                it.context.addresses[index],
-                it.context.checksums[index].value,
+                it.context.?.addresses[index],
+                it.context.?.checksums[index].value,
                 .{ .cache_read = true, .cache_write = true },
             );
         }
@@ -77,32 +77,32 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
         fn read_block_callback(read: *Grid.Read, block: BlockPtrConst) void {
             const it: *TableValueIterator = @fieldParentPtr("read", read);
             assert(it.callback != null);
-            assert(it.context.addresses.len == it.context.checksums.len);
+            assert(it.context.?.addresses.len == it.context.?.checksums.len);
 
             const callback = it.callback.?;
             it.callback = null;
 
-            switch (it.context.direction) {
+            switch (it.context.?.direction) {
                 .ascending => {
                     const header = schema.header_from_block(block);
-                    assert(header.address == it.context.addresses[0]);
-                    assert(header.checksum == it.context.checksums[0].value);
+                    assert(header.address == it.context.?.addresses[0]);
+                    assert(header.checksum == it.context.?.checksums[0].value);
 
-                    it.context.addresses = it.context.addresses[1..];
-                    it.context.checksums = it.context.checksums[1..];
+                    it.context.?.addresses = it.context.?.addresses[1..];
+                    it.context.?.checksums = it.context.?.checksums[1..];
                 },
                 .descending => {
-                    const index_last = it.context.checksums.len - 1;
+                    const index_last = it.context.?.checksums.len - 1;
                     const header = schema.header_from_block(block);
-                    assert(header.address == it.context.addresses[index_last]);
-                    assert(header.checksum == it.context.checksums[index_last].value);
+                    assert(header.address == it.context.?.addresses[index_last]);
+                    assert(header.checksum == it.context.?.checksums[index_last].value);
 
-                    it.context.addresses = it.context.addresses[0..index_last];
-                    it.context.checksums = it.context.checksums[0..index_last];
+                    it.context.?.addresses = it.context.?.addresses[0..index_last];
+                    it.context.?.checksums = it.context.?.checksums[0..index_last];
                 },
             }
 
-            assert(it.context.addresses.len == it.context.checksums.len);
+            assert(it.context.?.addresses.len == it.context.?.checksums.len);
             callback(it, block);
         }
     };
