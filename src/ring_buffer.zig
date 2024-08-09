@@ -223,6 +223,35 @@ pub fn RingBuffer(
             return result;
         }
 
+        /// Pops @min(self.count, buffer.len) elements into a slice.
+        pub fn pop_slice(self: *Self, out_buffer: []T) []T {
+            const output_length = @min(self.count, out_buffer.len);
+            if (output_length == 0) return &.{};
+
+            const pre_wrap_start = self.index;
+            const pre_wrap_count = @min(self.count, self.buffer.len - pre_wrap_start);
+            const post_wrap_count = self.count - pre_wrap_count;
+
+            stdx.copy_disjoint(
+                .inexact,
+                T,
+                out_buffer[0..pre_wrap_count],
+                self.buffer[pre_wrap_start..][0..pre_wrap_count],
+            );
+            stdx.copy_disjoint(
+                .inexact,
+                T,
+                out_buffer[pre_wrap_count..],
+                self.buffer[0..post_wrap_count],
+            );
+
+            self.index += output_length;
+            self.index %= self.buffer.len;
+            self.count -= output_length;
+
+            return out_buffer[0..output_length];
+        }
+
         pub const Iterator = struct {
             ring: *const Self,
             count: usize = 0,
@@ -484,4 +513,27 @@ test "RingBuffer: push_head" {
 
 test "RingBuffer: count_max=0" {
     std.testing.refAllDecls(RingBuffer(u32, .{ .array = 0 }));
+}
+
+test "RingBuffer: pop_slice" {
+    var buffer: [16]u32 = undefined;
+    var ring = RingBuffer(u32, .{ .array = 16 }).init();
+
+    for (0..128) |index| {
+        var rng = std.rand.DefaultPrng.init(index);
+        var len = rng.random().intRangeLessThan(usize, 0, 16);
+
+        for (0..len) |_| {
+            try ring.push(rng.random().int(u32));
+        }
+
+        const slice = ring.pop_slice(&buffer);
+
+        rng = std.rand.DefaultPrng.init(index);
+        len = rng.random().intRangeLessThan(usize, 0, 16);
+
+        for (slice[0..len], 0..len) |actual, _| {
+            try testing.expectEqual(rng.random().int(u32), actual);
+        }
+    }
 }

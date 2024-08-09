@@ -12,6 +12,8 @@ const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
+    pub const tag = .darwin;
+
     kq: fd_t,
     time: Time = .{},
     io_inflight: usize = 0,
@@ -198,13 +200,13 @@ pub const IO = struct {
 
     const Operation = union(enum) {
         accept: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
         },
         close: struct {
             fd: fd_t,
         },
         connect: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             address: std.net.Address,
             initiated: bool,
         },
@@ -215,12 +217,12 @@ pub const IO = struct {
             offset: u64,
         },
         recv: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             buf: [*]u8,
             len: u32,
         },
         send: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             buf: [*]const u8,
             len: u32,
         },
@@ -297,10 +299,10 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: AcceptError!posix.socket_t,
+            result: AcceptError!socket_t,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
     ) void {
         self.submit(
             context,
@@ -311,7 +313,7 @@ pub const IO = struct {
                 .socket = socket,
             },
             struct {
-                fn do_operation(op: anytype) AcceptError!posix.socket_t {
+                fn do_operation(op: anytype) AcceptError!socket_t {
                     const fd = try posix.accept(
                         op.socket,
                         null,
@@ -395,7 +397,7 @@ pub const IO = struct {
             result: ConnectError!void,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         address: std.net.Address,
     ) void {
         self.submit(
@@ -510,7 +512,7 @@ pub const IO = struct {
             result: RecvError!usize,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         buffer: []u8,
     ) void {
         self.submit(
@@ -543,7 +545,7 @@ pub const IO = struct {
             result: SendError!usize,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         buffer: []const u8,
     ) void {
         self.submit(
@@ -654,10 +656,23 @@ pub const IO = struct {
         );
     }
 
+    pub const socket_t = posix.socket_t;
+    pub const socklen_t = u32;
     pub const INVALID_SOCKET = -1;
 
+    pub fn setsockopt(
+        io: *IO,
+        fd: socket_t,
+        level: i32,
+        optname: u32,
+        opt: []const u8,
+    ) posix.SetSockOptError!void {
+        _ = io;
+        return posix.setsockopt(fd, level, optname, opt);
+    }
+
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !posix.socket_t {
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
         const fd = try posix.socket(family, sock_type | posix.SOCK.NONBLOCK, protocol);
         errdefer self.close_socket(fd);
 
@@ -671,9 +686,34 @@ pub const IO = struct {
     }
 
     /// Closes a socket opened by the IO instance.
-    pub fn close_socket(self: *IO, socket: posix.socket_t) void {
+    pub fn close_socket(self: *IO, socket: socket_t) void {
         _ = self;
         posix.close(socket);
+    }
+
+    pub fn getsockname(
+        io: *IO,
+        sock: socket_t,
+        addr: *posix.sockaddr,
+        addrlen: *socklen_t,
+    ) posix.GetSockNameError!void {
+        _ = io;
+        return posix.getsockname(sock, addr, addrlen);
+    }
+
+    pub fn bind(
+        io: *IO,
+        sock: socket_t,
+        addr: *const posix.sockaddr,
+        len: socklen_t,
+    ) posix.BindError!void {
+        _ = io;
+        return posix.bind(sock, addr, len);
+    }
+
+    pub fn listen(io: *IO, sock: socket_t, backlog: u31) posix.ListenError!void {
+        _ = io;
+        return posix.listen(sock, backlog);
     }
 
     /// Opens a directory with read only access.
