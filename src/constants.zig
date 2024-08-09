@@ -421,7 +421,7 @@ pub const connection_delay_min_ms = config.process.connection_delay_min_ms;
 pub const connection_delay_max_ms = config.process.connection_delay_max_ms;
 
 /// The maximum number of outgoing messages that may be queued on a replica connection.
-pub const connection_send_queue_max_replica = @max(@min(clients_max, 4), 2);
+pub const connection_send_queue_max_replica = @max(@min(clients_max, 16), 2);
 
 /// The maximum number of outgoing messages that may be queued on a client connection.
 /// The client has one in-flight request, and occasionally a ping.
