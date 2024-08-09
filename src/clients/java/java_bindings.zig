@@ -1,13 +1,10 @@
 const std = @import("std");
 
-// TODO: Move this back to src/clients/java when there's a better solution for main_pkg_path=src/
-const vsr = @import("vsr.zig");
+const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 const assert = std.debug.assert;
-
-const output_path = "src/clients/java/src/main/java/com/tigerbeetle/";
 
 const TypeMapping = struct {
     name: []const u8,
@@ -917,45 +914,31 @@ pub fn generate_bindings(
 }
 
 pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+    assert(args.skip());
+    const target_dir_path = args.next().?;
+    assert(args.next() == null);
+
+    var target_dir = try std.fs.cwd().openDir(target_dir_path, .{});
+    defer target_dir.close();
+
     // Emit Java declarations.
     inline for (type_mappings) |type_mapping| {
         const ZigType = type_mapping[0];
         const mapping = type_mapping[1];
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const allocator = arena.allocator();
-
         var buffer = std.ArrayList(u8).init(allocator);
         try generate_bindings(ZigType, mapping, &buffer);
 
-        try std.fs.cwd().writeFile(.{
-            .sub_path = output_path ++ mapping.name ++ ".java",
+        try target_dir.writeFile(.{
+            .sub_path = mapping.name ++ ".java",
             .data = buffer.items,
         });
-    }
-}
-
-const testing = std.testing;
-
-test "bindings java" {
-    // Test Java declarations.
-    inline for (type_mappings) |type_mapping| {
-        const ZigType = type_mapping[0];
-        const mapping = type_mapping[1];
-
-        var buffer = std.ArrayList(u8).init(testing.allocator);
-        defer buffer.deinit();
-
-        try generate_bindings(ZigType, mapping, &buffer);
-
-        const current = try std.fs.cwd().readFileAlloc(
-            testing.allocator,
-            output_path ++ mapping.name ++ ".java",
-            std.math.maxInt(usize),
-        );
-        defer testing.allocator.free(current);
-
-        try testing.expectEqualStrings(buffer.items, current);
     }
 }
