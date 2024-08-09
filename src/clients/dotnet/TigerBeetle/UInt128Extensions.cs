@@ -33,7 +33,18 @@ public static class UInt128Extensions
     {
         unsafe
         {
-            return new Guid(new ReadOnlySpan<byte>(&value, SIZE));
+            var bytes = new Span<byte>(&value, SIZE);
+
+            // The GUID type internal byte layout in dotnet is
+            // 4 byte int (typically little endian but can be big endian depending on cpu)
+            // 2 byte short (typically little endian but can be big endian depending on cpu)
+            // 2 byte short (typically little endian but can be big endian depending on cpu)
+            // 8 bytes stored as-is
+            // We must use the bigEndian:true parameter to ensure the bytes are stored internally 
+            // exactly as we have provided them, because 1. the inverse `ToUint128` constructs the
+            // UInt128 by reading the bytes as-is 2. everything outside of dotnet e.g. TigerBeetle
+            // Entity Framework handles the bytes as-is.
+            return new Guid(bytes, bigEndian: true);
         }
     }
 
@@ -42,10 +53,13 @@ public static class UInt128Extensions
         unsafe
         {
             UInt128 ret = UInt128.Zero;
+            Span<byte> bytes = new Span<byte>(&ret, SIZE);
 
             // Passing a fixed 16-byte span, there's no possibility
             // of returning false.
-            _ = value.TryWriteBytes(new Span<byte>(&ret, SIZE));
+            // `bigEndian: true` signals to write the bytes as they're stored
+            // without reinterpreting them based on CPU endianness
+            _ = value.TryWriteBytes(bytes, bigEndian: true, out _);
 
             return ret;
         }

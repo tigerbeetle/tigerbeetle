@@ -67,7 +67,6 @@ public class UInt128Tests
         _ = array.ToUInt128();
     }
 
-
     [TestMethod]
     public void BigIntegerConversion()
     {
@@ -86,8 +85,6 @@ public class UInt128Tests
         checkConversion(new BigInteger(uint.MaxValue));
         checkConversion(new BigInteger(ulong.MaxValue));
     }
-
-
 
     [TestMethod]
     [ExpectedException(typeof(OverflowException))]
@@ -109,12 +106,38 @@ public class UInt128Tests
     [TestMethod]
     public void LittleEndian()
     {
-        var expected = new byte[16] { 86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        var expected = new byte[16] {86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
         Assert.IsTrue(expected.SequenceEqual(expected.ToUInt128().ToArray()));
         Assert.IsTrue(expected.SequenceEqual(BigInteger.Parse("123456", NumberStyles.HexNumber).ToUInt128().ToArray()));
-        Assert.IsTrue(expected.SequenceEqual(new Guid(expected).ToUInt128().ToArray()));
+        // `bigEndian: true` signals to the Guid constructor to store the bytes as-is 
+        Assert.IsTrue(expected.SequenceEqual(new Guid(expected, bigEndian: true).ToUInt128().ToArray()));
         Assert.IsTrue(expected.SequenceEqual(new UInt128(0, 0x123456).ToArray()));
+    }
+
+    [TestMethod]
+    public unsafe void EndToEndTigerBeetleSimulationViaGuid()
+    {
+        // "00000001-0001-4000-AA00-000000000000" 
+        var idSourcedExternally = Guid.Parse("00000001-0001-4000-AA00-000000000000"); // e.g. guid from other database
+        var bytesStoredInTB = new byte[]
+            {0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x40, 0x00, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+        // Parse TB result (TB client reads by overlaying dotnet types on raw bytes)
+        UInt128 parsed = UInt128.Zero;
+        bytesStoredInTB.CopyTo(new Span<byte>(&parsed, 16));
+
+        // Round-trip via GUID
+        var roundTripped = parsed.ToGuid().ToUInt128();
+
+        // Send bytes to TB (TB client send raw bytes of dotnet types over the wire) 
+        var roundTrippedBytes = new Span<byte>(&roundTripped, 16);
+
+        var externalIdUInt128 = idSourcedExternally.ToUInt128();
+        var externalIdBytes = new Span<byte>(&externalIdUInt128, 16);
+
+        Assert.IsTrue(roundTrippedBytes.SequenceEqual(bytesStoredInTB));
+        Assert.IsTrue(externalIdBytes.SequenceEqual(bytesStoredInTB));
     }
 
     [TestMethod]
