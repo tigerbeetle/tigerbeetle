@@ -372,6 +372,9 @@ const Environment = struct {
                 .command = .do_view_change,
                 .array = vsr_headers,
             },
+            .checkpoint = &vsr_state.checkpoint,
+            .sync_op_min = vsr_state.sync_op_min,
+            .sync_op_max = vsr_state.sync_op_max,
         });
     }
 

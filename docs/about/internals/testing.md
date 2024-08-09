@@ -17,7 +17,6 @@ Documentation for (roughly) code in the `src/testing` directory.
     - ` `: commit
     - `[`: checkpoint start
     - `]`: checkpoint done
-    - `<`: sync start (or change target)
     - `>`: sync done
 3. Role (according to the replica itself):
     - `/`: primary
@@ -66,7 +65,6 @@ Documentation for (roughly) code in the `src/testing` directory.
  2 ] \   .         3V  95/_99/_99C  68:_99Jo  0/_0J!  68:_99Wo <__0:__0> v1:2   167Ga  0G!   0G?
  1   \  .          3V  71/_99/_99C  68:_99Jo  0/_1J!  67:_98Wo <__0:__0> v1:2   183Ga  0G!   0G?
  1 [ \  .          3V  71/_99/_99C  68:_99Jo  0/_1J!  67:_98Wo <__0:__0> v1:2   183Ga  0G!   0G?
- 4 < ~     v       3V  23/_23/_46C  19:_50Jo  0/_0J!  19:_50Wo <__0:__0> v1:2    66Ga  0G!   0G?
  5   |      .      3V  71/_99/_99C  68:_99Jo  0/_0J!  68:_99Wo <__0:__0> v1:2   183Ga  0G!   0G?
  5 [ |      .      3V  71/_99/_99C  68:_99Jo  0/_0J!  68:_99Wo <__0:__0> v1:2   183Ga  0G!   0G?
 ```

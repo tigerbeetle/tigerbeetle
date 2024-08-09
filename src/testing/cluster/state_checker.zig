@@ -97,7 +97,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         /// Returns whether the replica's state changed since the last check_state().
         pub fn check_state(state_checker: *Self, replica_index: u8) !void {
             const replica = &state_checker.replicas[replica_index];
-            if (replica.syncing.target()) |sync_target| {
+            if (replica.syncing == .updating_superblock) {
                 // Allow a syncing replica to fast-forward its commit.
                 //
                 // But "fast-forwarding" may actually move commit_min slightly backwards:
@@ -106,7 +106,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 //    the cluster anymore.
                 // 3. When we sync, `commit_min` "backtracks", to `X - lsm_batch_multiple`.
                 const commit_min_source = state_checker.commit_mins[replica_index];
-                const commit_min_target = sync_target.checkpoint_op;
+                const commit_min_target =
+                    replica.syncing.updating_superblock.checkpoint_state.header.op;
                 assert(commit_min_source <= commit_min_target + constants.lsm_batch_multiple);
                 state_checker.commit_mins[replica_index] = commit_min_target;
                 return;

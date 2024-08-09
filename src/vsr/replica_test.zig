@@ -647,6 +647,7 @@ test "Cluster: repair: ack committed prepare" {
     try expectEqual(b2.status(), .normal);
 
     // Change views. B1/B2 participate. Don't allow B2 to repair op=3.
+    try expectEqual(p.role(), .primary);
     t.replica(.R_).pass(.R_, .bidirectional, .start_view_change);
     t.replica(.R_).pass(.R_, .bidirectional, .do_view_change);
     p.drop(.__, .bidirectional, .prepare);
@@ -655,6 +656,7 @@ test "Cluster: repair: ack committed prepare" {
     t.run();
     try expectEqual(b1.commit(), 2);
     try expectEqual(b2.commit(), 2);
+    try expectEqual(p.role(), .backup);
 
     try expectEqual(p.status(), .normal);
     try expectEqual(b1.status(), .normal);
@@ -929,13 +931,13 @@ test "Cluster: view-change: nack older view" {
 
 test "Cluster: sync: partition, lag, sync (transition from idle)" {
     for ([_]u64{
-        // Normal case: the cluster has committed atop the checkpoint trigger.
+        // Normal case: the cluster has prepared beyond the checkpoint.
         // The lagging replica can learn the latest checkpoint from a commit message.
-        checkpoint_2_trigger + 1,
-        // Idle case: the idle cluster has not committed atop the checkpoint trigger.
+        checkpoint_2_prepare_max + 1,
+        // Idle case: the idle cluster has not prepared beyond the checkpoint.
         // The lagging replica is far enough behind the cluster that it can sync to the latest
         // checkpoint anyway, since it cannot possibly recover via WAL repair.
-        checkpoint_2_trigger,
+        checkpoint_2_prepare_max,
     }) |cluster_commit_max| {
         log.info("test cluster_commit_max={}", .{cluster_commit_max});
 
@@ -963,39 +965,6 @@ test "Cluster: sync: partition, lag, sync (transition from idle)" {
         t.run(); // (Wait for grid sync to finish.)
         try TestReplicas.expect_sync_done(t.replica(.R_));
     }
-}
-
-test "Cluster: sync: sync, bump target, sync" {
-    const t = try TestContext.init(.{ .replica_count = 3 });
-    defer t.deinit();
-
-    var c = t.clients(0, t.cluster.clients.len);
-
-    t.replica(.R2).drop_all(.R_, .bidirectional);
-    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
-
-    // Allow R2 to complete SyncStage.requesting_target, but get stuck
-    // during SyncStage.requesting_checkpoint.
-    t.replica(.R2).pass_all(.R_, .bidirectional);
-    t.replica(.R2).drop(.R_, .outgoing, .request_sync_checkpoint);
-    t.run();
-    try expectEqual(t.replica(.R2).sync_status(), .requesting_checkpoint);
-    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_2);
-
-    // R2 discovers the newer sync target and restarts sync.
-    try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
-    try expectEqual(t.replica(.R2).sync_status(), .requesting_checkpoint);
-    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_3);
-
-    t.replica(.R2).pass(.R_, .bidirectional, .request_sync_checkpoint);
-    t.run();
-
-    try expectEqual(t.replica(.R_).status(), .normal);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
-    try expectEqual(t.replica(.R_).sync_status(), .idle);
-
-    t.run(); // (Wait for grid sync to finish.)
-    try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
 test "Cluster: repair: R=2 (primary checkpoints, but backup lags behind)" {
@@ -1073,55 +1042,49 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
-// TODO: Replicas in recovering_head cannot (currently) participate in view-change, even when
-// they arrived at recovering_head via state sync, not corruption+crash. As a result, it is possible
-// for a 2/3 cluster to get stuck without any corruptions or crashes.
-// See: https://github.com/tigerbeetle/tigerbeetle/pull/933#discussion_r1245440623,
-// https://github.com/tigerbeetle/tigerbeetle/issues/1376, and `Simulator.core_missing_quorum()`.
-test "Cluster: sync: view-change with lagging replica in recovering_head" {
+test "Cluster: sync: view-change with lagging replica" {
+    // Check that a cluster can view change even if view-change quorum contains syncing replicas.
+    // This used to be a special case for an older sync protocol, but now this mostly holds by
+    // construction.
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    // B2 will need at least one commit to ensure it ends up in recovering_head.
-    try c.request(1, 1);
+    try c.request(1, 1); // Make sure that the logic doesn't depend on the root prepare.
     try expectEqual(t.replica(.R_).commit(), 1);
 
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
-    b2.drop_all(.R_, .bidirectional);
+    b2.drop_all(.R_, .bidirectional); // Isolate B2.
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
 
     // Allow B2 to join, but partition A0 to force a view change.
-    // B2 is lagging far enough behind that it must state sync – it will transition to
-    // recovering_head. Despite this, the cluster of B1/B2 should recover to normal status.
+    // B2 is lagging far enough behind that it must state sync.
+    // Despite this, the cluster of B1/B2 should recover to normal status.
     b2.pass_all(.R_, .bidirectional);
     a0.drop_all(.R_, .bidirectional);
 
-    // When B2 rejoins, it will race between:
-    // - Discovering that it is lagging, and requesting a sync_checkpoint (which transitions B2 to
-    //   recovering_head).
-    // - Participating in a view-change with B1 (while we are still in status=normal in the original
-    //   view).
-    // For this test, we want the former to occur before the latter (since the latter would always
-    // work).
-    b2.drop(.R_, .bidirectional, .start_view_change);
+    // Let the cluster run for some time without B2 state syncing.
+    b2.drop(.R_, .bidirectional, .start_view);
     t.run();
-    b2.pass(.R_, .bidirectional, .start_view_change);
-    t.run();
+    try expectEqual(b2.status(), .view_change);
+    try expectEqual(b2.op_checkpoint(), 0);
+    try c.request(checkpoint_2_trigger + 1, checkpoint_2_trigger); // Cluster is blocked.
 
-    // try expectEqual(b1.role(), .primary);
-    try expectEqual(b1.status(), .normal);
-    try expectEqual(b2.status(), .recovering_head);
-    // try expectEqual(t.replica(.R_).status(), .normal);
+    // Let B2 state sync. This unblocks the cluster.
+    b2.pass(.R_, .bidirectional, .start_view);
+    t.run();
+    try expectEqual(b1.role(), .primary);
+    try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).sync_status(), .idle);
-    try expectEqual(b2.commit(), checkpoint_2);
-    // try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+    try expect(b2.commit() >= checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 
-    // try TestReplicas.expect_sync_done(t.replica(.R_));
+    // Note: we need to commit more --- state sync status is cleared only at checkpoint.
+    try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
+    try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
 test "Cluster: sync: slightly lagging replica" {
@@ -1206,18 +1169,12 @@ test "Cluster: sync: checkpoint from a newer view" {
         b1.drop(.R_, .incoming, .ping);
         b1.drop(.R_, .incoming, .pong);
 
-        const b1_view_before = b1.view();
         try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
-        try expectEqual(b1_view_before, b1.view());
-        try expectEqual(b1.op_checkpoint(), checkpoint_1);
-        try expectEqual(b1.status(), .recovering_head);
 
+        // Wipe B1 in-memory state and check that it ends up in a consistent state after restart.
         b1.stop();
         try b1.open();
         t.run();
-        try expectEqual(b1_view_before, b1.view());
-        try expectEqual(b1.op_checkpoint(), checkpoint_1);
-        try expectEqual(b1.status(), .recovering_head);
     }
 
     t.replica(.R_).pass_all(.R_, .bidirectional);
@@ -2053,6 +2010,7 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).insert(command);
+        if (command == .start_view) t.pass(peer, direction, .start_view_deprecated);
     }
 
     pub fn drop(
@@ -2063,6 +2021,7 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).remove(command);
+        if (command == .start_view) t.drop(peer, direction, .start_view_deprecated);
     }
 
     pub fn filter(
@@ -2129,7 +2088,7 @@ const TestReplicas = struct {
 
         for (t.replicas.const_slice()) |replica_index| {
             const replica: *const Cluster.Replica = &t.cluster.replicas[replica_index];
-            assert(replica.sync_content_done());
+            if (!replica.sync_content_done()) return error.SyncContentPending;
 
             // If the replica has finished syncing, but not yet checkpointed, then it might not have
             // updated its sync_op_max.
