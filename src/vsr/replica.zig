@@ -3651,7 +3651,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.syncing != .idle) return;
+            if (self.syncing != .idle or !self.sync_content_done()) return;
 
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.commit_stage != .idle) {
