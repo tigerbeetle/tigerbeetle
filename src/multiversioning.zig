@@ -809,7 +809,6 @@ pub const Multiversion = struct {
     fn binary_statx_callback(self: *Multiversion, _: *IO.Completion, result: anyerror!void) void {
         _ = result catch |e| {
             self.timeout_statx_previous = .err;
-            self.timeout_start();
 
             return self.handle_error(e);
         };
