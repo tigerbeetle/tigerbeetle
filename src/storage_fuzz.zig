@@ -64,7 +64,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
         var storage_data_read: [storage_size]u8 align(sector_size) = undefined;
         @memset(&storage_data_read, 0);
 
-        var io = IO.init(&.{
+        var io = IO.init(fuzz.allocator, &.{
             .{
                 .buffer = &storage_data_stored,
                 .fault_map = &fault_map.masks,
@@ -74,7 +74,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
             .larger_than_logical_sector_read_fault_probability = 10,
         });
 
-        var storage = try Storage.init(&io, 0);
+        var storage = try Storage.init(&io, IO.Descriptor.from_tagged_index(.{ .file = 0 }));
 
         var write_completion: Storage.Write = undefined;
 
@@ -131,20 +131,29 @@ pub fn main(args: fuzz.FuzzArgs) !void {
                 const read_buffer =
                     storage_data_read[zone.start() + sector_offset ..][0..read_length];
 
-                var read_completion: Storage.Read = undefined;
+                const Read = struct {
+                    completion: Storage.Read = undefined,
+                    submitted: bool = false,
+                };
+                var read = Read{};
+
                 storage.read_sectors(
                     struct {
-                        fn callback(completion: *Storage.Read) void {
-                            _ = completion;
+                        fn callback(read_completion: *Storage.Read) void {
+                            const read_data: *Read = @fieldParentPtr("completion", read_completion);
+                            read_data.submitted = false;
                         }
                     }.callback,
-                    &read_completion,
+                    &read.completion,
                     read_buffer,
                     zone,
                     sector_offset,
                 );
+                read.submitted = true;
 
-                storage.tick();
+                while (read.submitted) {
+                    storage.tick();
+                }
             }
         }
 

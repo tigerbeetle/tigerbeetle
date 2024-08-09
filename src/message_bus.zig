@@ -5,8 +5,6 @@ const mem = std.mem;
 const os = std.os;
 const posix = std.posix;
 
-const is_linux = builtin.target.os.tag == .linux;
-
 const constants = @import("constants.zig");
 const log = std.log.scoped(.message_bus);
 
@@ -15,14 +13,18 @@ const Header = vsr.Header;
 
 const stdx = @import("stdx.zig");
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
-const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
-pub const MessageBusReplica = MessageBusType(.replica);
-pub const MessageBusClient = MessageBusType(.client);
+pub const MessageBusReplica = MessageBusType(.replica, vsr.io.IO);
+pub const MessageBusClient = MessageBusType(.client, vsr.io.IO);
 
-fn MessageBusType(comptime process_type: vsr.ProcessType) type {
+pub fn MessageBusType(
+    comptime process_type: vsr.ProcessType,
+    comptime IO: type,
+) type {
+    const is_linux = IO.tag == .linux;
+
     const SendQueue = RingBuffer(*Message, .{
         .array = switch (process_type) {
             .replica => constants.connection_send_queue_max_replica,
@@ -54,7 +56,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             .replica => struct {
                 replica: u8,
                 /// The file descriptor for the process on which to accept connections.
-                accept_fd: posix.socket_t,
+                accept_fd: IO.socket_t,
                 /// Address the accept_fd is bound to, as reported by `getsockname`.
                 ///
                 /// This allows passing port 0 as an address for the OS to pick an open port for us
@@ -188,7 +190,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         }
 
         fn init_tcp(io: *IO, address: std.net.Address) !struct {
-            fd: posix.socket_t,
+            fd: IO.socket_t,
             address: std.net.Address,
         } {
             const fd = try io.open_socket(
@@ -199,71 +201,83 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             errdefer io.close_socket(fd);
 
             const set = struct {
-                fn set(_fd: posix.socket_t, level: i32, option: u32, value: c_int) !void {
-                    try posix.setsockopt(_fd, level, option, &mem.toBytes(value));
+                fn set(_io: *IO, _fd: IO.socket_t, level: i32, option: u32, value: c_int) !void {
+                    try _io.setsockopt(_fd, level, option, &mem.toBytes(value));
                 }
             }.set;
 
             if (constants.tcp_rcvbuf > 0) rcvbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
-                    if (set(fd, posix.SOL.SOCKET, posix.SO.RCVBUFFORCE, constants.tcp_rcvbuf)) |_| {
+                    if (set(
+                        io,
+                        fd,
+                        posix.SOL.SOCKET,
+                        posix.SO.RCVBUFFORCE,
+                        constants.tcp_rcvbuf,
+                    )) |_| {
                         break :rcvbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, posix.SOL.SOCKET, posix.SO.RCVBUF, constants.tcp_rcvbuf);
+                try set(io, fd, posix.SOL.SOCKET, posix.SO.RCVBUF, constants.tcp_rcvbuf);
             }
 
             if (tcp_sndbuf > 0) sndbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
-                    if (set(fd, posix.SOL.SOCKET, posix.SO.SNDBUFFORCE, tcp_sndbuf)) |_| {
+                    if (set(io, fd, posix.SOL.SOCKET, posix.SO.SNDBUFFORCE, tcp_sndbuf)) |_| {
                         break :sndbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, posix.SOL.SOCKET, posix.SO.SNDBUF, tcp_sndbuf);
+                try set(io, fd, posix.SOL.SOCKET, posix.SO.SNDBUF, tcp_sndbuf);
             }
 
             if (constants.tcp_keepalive) {
-                try set(fd, posix.SOL.SOCKET, posix.SO.KEEPALIVE, 1);
+                try set(io, fd, posix.SOL.SOCKET, posix.SO.KEEPALIVE, 1);
                 if (is_linux) {
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPIDLE, constants.tcp_keepidle);
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPINTVL, constants.tcp_keepintvl);
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPCNT, constants.tcp_keepcnt);
+                    try set(io, fd, posix.IPPROTO.TCP, posix.TCP.KEEPIDLE, constants.tcp_keepidle);
+                    try set(
+                        io,
+                        fd,
+                        posix.IPPROTO.TCP,
+                        posix.TCP.KEEPINTVL,
+                        constants.tcp_keepintvl,
+                    );
+                    try set(io, fd, posix.IPPROTO.TCP, posix.TCP.KEEPCNT, constants.tcp_keepcnt);
                 }
             }
 
             if (constants.tcp_user_timeout_ms > 0) {
                 if (is_linux) {
                     const timeout_ms = constants.tcp_user_timeout_ms;
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.USER_TIMEOUT, timeout_ms);
+                    try set(io, fd, posix.IPPROTO.TCP, posix.TCP.USER_TIMEOUT, timeout_ms);
                 }
             }
 
             // Set tcp no-delay
             if (constants.tcp_nodelay) {
                 if (is_linux) {
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.NODELAY, 1);
+                    try set(io, fd, posix.IPPROTO.TCP, posix.TCP.NODELAY, 1);
                 }
             }
 
-            try set(fd, posix.SOL.SOCKET, posix.SO.REUSEADDR, 1);
-            try posix.bind(fd, &address.any, address.getOsSockLen());
+            try set(io, fd, posix.SOL.SOCKET, posix.SO.REUSEADDR, 1);
+            try io.bind(fd, &address.any, address.getOsSockLen());
 
             // Resolve port 0 to an actual port picked by the OS.
             var address_resolved: std.net.Address = .{ .any = undefined };
             var addrlen: posix.socklen_t = @sizeOf(std.net.Address);
-            try posix.getsockname(fd, &address_resolved.any, &addrlen);
+            try io.getsockname(fd, &address_resolved.any, &addrlen);
             assert(address_resolved.getOsSockLen() == addrlen);
             assert(address_resolved.any.family == address.any.family);
 
-            try posix.listen(fd, constants.tcp_backlog);
+            try io.listen(fd, constants.tcp_backlog);
 
             return .{ .fd = fd, .address = address_resolved };
         }
@@ -371,7 +385,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         fn on_accept(
             bus: *Self,
             completion: *IO.Completion,
-            result: IO.AcceptError!posix.socket_t,
+            result: IO.AcceptError!IO.socket_t,
         ) void {
             _ = completion;
 
@@ -461,7 +475,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// IO.INVALID_SOCKET instead of undefined here for safety to ensure an error if the
             /// invalid value is ever used, instead of potentially performing an action on an
             /// active fd.
-            fd: posix.socket_t = IO.INVALID_SOCKET,
+            fd: IO.socket_t = IO.INVALID_SOCKET,
 
             /// This completion is used for all recv operations.
             /// It is also used for the initial connect when establishing a replica connection.
@@ -607,7 +621,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             /// Given a newly accepted fd, start receiving messages on it.
             /// Callbacks will be continuously re-registered until terminate() is called.
-            pub fn on_accept(connection: *Connection, bus: *Self, fd: posix.socket_t) void {
+            pub fn on_accept(connection: *Connection, bus: *Self, fd: IO.socket_t) void {
                 assert(connection.peer == .none);
                 assert(connection.state == .accepting);
                 assert(connection.fd == IO.INVALID_SOCKET);
@@ -681,6 +695,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.fd != IO.INVALID_SOCKET);
                 switch (how) {
                     .shutdown => {
+                        if (IO.tag == .mock) return;
+
                         // The shutdown syscall will cause currently in progress send/recv
                         // operations to be gracefully closed while keeping the fd open.
                         //
