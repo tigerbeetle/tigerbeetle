@@ -35,6 +35,7 @@ pub fn CacheMapType(
         const CacheMap = @This();
 
         const map_load_percentage_max = 50;
+        const has_timestamp = @hasField(Value, "timestamp") and @hasField(Value, "id");
 
         pub const Cache = SetAssociativeCacheType(
             Key,
@@ -59,6 +60,11 @@ pub fn CacheMapType(
             map_load_percentage_max,
         );
 
+        pub const MapByTimestamp = if (has_timestamp) std.AutoHashMapUnmanaged(
+            u64,
+            *Value,
+        ) else void;
+
         pub const Options = struct {
             cache_value_count_max: u32,
             map_value_count_max: u32,
@@ -73,6 +79,7 @@ pub fn CacheMapType(
         // When cache is null, the stash mirrors the mutable table.
         cache: ?Cache,
         stash: Map,
+        map_by_timestamp: MapByTimestamp,
 
         // Scopes allow you to perform operations on the CacheMap before either persisting or
         // discarding them.
@@ -97,6 +104,16 @@ pub fn CacheMapType(
             try stash.ensureTotalCapacity(allocator, options.map_value_count_max);
             errdefer stash.deinit(allocator);
 
+            var map_by_timestamp: MapByTimestamp =
+                if (has_timestamp) .{} else {};
+            if (has_timestamp) {
+                try map_by_timestamp.ensureTotalCapacity(
+                    allocator,
+                    options.map_value_count_max + options.cache_value_count_max,
+                );
+            }
+            errdefer if (has_timestamp) map_by_timestamp.deinit(allocator);
+
             var scope_rollback_log = try std.ArrayListUnmanaged(Value).initCapacity(
                 allocator,
                 options.scope_value_count_max,
@@ -106,6 +123,7 @@ pub fn CacheMapType(
             return CacheMap{
                 .cache = cache,
                 .stash = stash,
+                .map_by_timestamp = map_by_timestamp,
                 .scope_rollback_log = scope_rollback_log,
                 .options = options,
             };
@@ -115,9 +133,16 @@ pub fn CacheMapType(
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
             assert(self.stash.count() <= self.options.map_value_count_max);
+            if (has_timestamp) {
+                assert(self.map_by_timestamp.count() <=
+                    self.options.map_value_count_max + self.options.cache_value_count_max);
+            }
 
             self.scope_rollback_log.deinit(allocator);
             self.stash.deinit(allocator);
+            if (has_timestamp) {
+                self.map_by_timestamp.deinit(allocator);
+            }
             if (self.cache) |*cache| cache.deinit(allocator);
         }
 
@@ -125,13 +150,21 @@ pub fn CacheMapType(
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
             assert(self.stash.count() <= self.options.map_value_count_max);
+            if (has_timestamp) {
+                assert(self.map_by_timestamp.count() <=
+                    self.options.map_value_count_max + self.options.cache_value_count_max);
+            }
 
             if (self.cache) |*cache| cache.reset();
             self.stash.clearRetainingCapacity();
+            if (has_timestamp) {
+                self.map_by_timestamp.clearRetainingCapacity();
+            }
 
             self.* = .{
                 .cache = self.cache,
                 .stash = self.stash,
+                .map_by_timestamp = self.map_by_timestamp,
                 .scope_rollback_log = self.scope_rollback_log,
                 .options = self.options,
             };
@@ -141,9 +174,19 @@ pub fn CacheMapType(
             return self.get(key) != null;
         }
 
+        pub fn has_by_timestamp(self: *const CacheMap, timestamp: u64) bool {
+            comptime assert(has_timestamp);
+            return self.get_by_timestamp(timestamp) != null;
+        }
+
         pub fn get(self: *const CacheMap, key: Key) ?*Value {
             return (if (self.cache) |*cache| cache.get(key) else null) orelse
                 self.stash.getKeyPtr(tombstone_from_key(key));
+        }
+
+        pub fn get_by_timestamp(self: *const CacheMap, timestamp: u64) ?*Value {
+            comptime assert(has_timestamp);
+            return self.map_by_timestamp.get(timestamp);
         }
 
         pub fn upsert(self: *CacheMap, value: *const Value) void {
@@ -170,6 +213,9 @@ pub fn CacheMapType(
             if (self.cache) |*cache| {
                 const key = key_from_value(value);
                 const result = cache.upsert(value);
+                if (has_timestamp) {
+                    self.map_by_timestamp.putAssumeCapacity(value.timestamp, result.value);
+                }
 
                 if (result.evicted) |*evicted| {
                     switch (result.updated) {
@@ -211,7 +257,12 @@ pub fn CacheMapType(
             // critical, since we use HashMaps with no Value, `putAssumeCapacity`
             // _will not_ clobber the existing value.
             const gop = self.stash.getOrPutAssumeCapacity(value.*);
-            defer gop.key_ptr.* = value.*;
+            defer {
+                gop.key_ptr.* = value.*;
+                if (has_timestamp) {
+                    self.map_by_timestamp.putAssumeCapacity(value.timestamp, gop.key_ptr);
+                }
+            }
 
             return if (gop.found_existing)
                 gop.key_ptr.*
@@ -224,10 +275,17 @@ pub fn CacheMapType(
             // Make sure we aren't being called in regular code without another once over.
             assert(constants.verify);
 
-            const cache_removed: ?Value = if (self.cache) |*cache|
-                cache.remove(key)
-            else
-                null;
+            const cache_removed: ?Value = if (self.cache) |*cache| blk: {
+                const value = cache.remove(key);
+                if (has_timestamp) {
+                    if (value != null) {
+                        const removed = self.map_by_timestamp.remove(value.?.timestamp);
+                        assert(removed);
+                    }
+                }
+
+                break :blk value;
+            } else null;
 
             // We don't allow stale values, so we need to remove from the stash as well,
             // since both can have different versions with the same key.
@@ -236,17 +294,22 @@ pub fn CacheMapType(
             if (self.scope_is_active) {
                 // TODO: Actually, does the fuzz catch this...
                 self.scope_rollback_log.appendAssumeCapacity(
-                    cache_removed orelse
-                        stash_removed orelse return,
+                    cache_removed orelse stash_removed orelse return,
                 );
             }
         }
 
         fn stash_remove(self: *CacheMap, key: Key) ?Value {
-            return if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
-                kv.key
-            else
-                null;
+            if (self.stash.fetchRemove(tombstone_from_key(key))) |kv| {
+                if (has_timestamp) {
+                    const removed = self.map_by_timestamp.remove(kv.key.timestamp);
+                    maybe(removed);
+                }
+
+                return kv.key;
+            } else {
+                return null;
+            }
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
@@ -284,8 +347,13 @@ pub fn CacheMapType(
                     // in _both_ the cache and stash on insert.
                     if (self.cache) |*cache| {
                         // If we have cache enabled, it must be there.
-                        const cache_removed = cache.remove(key) != null;
-                        assert(cache_removed);
+                        const value = cache.remove(key);
+                        assert(value != null);
+
+                        if (has_timestamp) {
+                            const timestamp_removed = self.map_by_timestamp.remove(value.?.timestamp);
+                            assert(timestamp_removed);
+                        }
                     }
 
                     // It should be in the stash _iif_ we don't have cache enabled.
@@ -305,6 +373,13 @@ pub fn CacheMapType(
             assert(self.scope_rollback_log.items.len == 0);
             maybe(self.stash.count() <= self.options.map_value_count_max);
 
+            if (has_timestamp) {
+                var it = self.stash.keyIterator();
+                while (it.next()) |value| {
+                    const removed = self.map_by_timestamp.remove(value.timestamp);
+                    assert(removed);
+                }
+            }
             self.stash.clearRetainingCapacity();
         }
     };

@@ -691,6 +691,10 @@ pub fn StateMachineType(
         fn prefetch_create_accounts(self: *StateMachine, accounts: []const Account) void {
             for (accounts) |*a| {
                 self.forest.grooves.accounts.prefetch_enqueue(a.id);
+
+                if (a.flags.imported) {
+                    self.forest.grooves.transfers.prefetch_by_timestamp_enqueue(a.timestamp);
+                }
             }
 
             self.forest.grooves.accounts.prefetch(
@@ -705,6 +709,23 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
+            const accounts: []const Account = std.mem.bytesAsSlice(Account, self.prefetch_input.?);
+            if (accounts.len > 0 and accounts[0].flags.imported) {
+                self.forest.grooves.transfers.prefetch(
+                    prefetch_create_accounts_transfers_callback,
+                    self.prefetch_context.get(.transfers),
+                );
+            } else {
+                self.prefetch_finish();
+            }
+        }
+
+        fn prefetch_create_accounts_transfers_callback(
+            completion: *TransfersGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
+            self.prefetch_context = .null;
+
             self.prefetch_finish();
         }
 
@@ -714,6 +735,10 @@ pub fn StateMachineType(
 
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     self.forest.grooves.transfers.prefetch_enqueue(t.pending_id);
+                }
+
+                if (t.flags.imported) {
+                    self.forest.grooves.accounts.prefetch_by_timestamp_enqueue(t.timestamp);
                 }
             }
 
@@ -1745,6 +1770,9 @@ pub fn StateMachineType(
                         return .imported_event_timestamp_must_not_regress;
                     }
                 }
+                if (self.forest.grooves.transfers.get_by_timestamp(a.timestamp) != null) {
+                    return .imported_event_timestamp_must_not_regress;
+                }
             }
 
             self.forest.grooves.accounts.insert(a);
@@ -1832,6 +1860,10 @@ pub fn StateMachineType(
                         return .imported_event_timestamp_must_not_regress;
                     }
                 }
+                if (self.forest.grooves.accounts.get_by_timestamp(t.timestamp) != null) {
+                    return .imported_event_timestamp_must_not_regress;
+                }
+
                 if (t.timestamp <= dr_account.timestamp) {
                     return .imported_event_timestamp_must_postdate_debit_account;
                 }
@@ -2070,6 +2102,9 @@ pub fn StateMachineType(
                     if (t.timestamp <= key_range.key_max) {
                         return .imported_event_timestamp_must_not_regress;
                     }
+                }
+                if (self.forest.grooves.accounts.get_by_timestamp(t.timestamp) != null) {
+                    return .imported_event_timestamp_must_not_regress;
                 }
             }
 

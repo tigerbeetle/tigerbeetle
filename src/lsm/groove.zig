@@ -441,7 +441,7 @@ pub fn GrooveType(
         ids: IdTree,
         indexes: IndexTrees,
 
-        /// Object IDs enqueued to be prefetched.
+        /// Object IDs or timestamps enqueued to be prefetched.
         /// Prefetching ensures that point lookups against the latest snapshot are synchronous.
         /// This shields state machine implementations from the challenges of concurrency and I/O,
         /// and enables simple state machine function signatures that commit writes atomically.
@@ -628,6 +628,10 @@ pub fn GrooveType(
             return groove.objects_cache.get(key);
         }
 
+        pub fn get_by_timestamp(groove: *const Groove, timestamp: u64) ?*const Object {
+            return groove.objects_cache.get_by_timestamp(timestamp);
+        }
+
         /// Must be called directly before the state machine begins queuing ids for prefetch.
         /// When `snapshot` is null, prefetch from the current snapshot.
         pub fn prefetch_setup(groove: *Groove, snapshot: ?u64) void {
@@ -661,6 +665,14 @@ pub fn GrooveType(
 
                 groove.prefetch_from_memory_by_timestamp(key);
             }
+        }
+
+        pub fn prefetch_by_timestamp_enqueue(groove: *Groove, timestamp: u64) void {
+            if (groove.objects_cache.has_by_timestamp(timestamp)) {
+                return;
+            }
+
+            groove.prefetch_from_memory_by_timestamp(timestamp);
         }
 
         /// This function attempts to prefetch a value for the given id from the IdTree's

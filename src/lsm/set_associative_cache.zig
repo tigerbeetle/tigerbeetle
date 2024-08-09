@@ -300,6 +300,7 @@ pub fn SetAssociativeCacheType(
         pub fn upsert(self: *Self, value: *const Value) struct {
             index: usize,
             updated: UpdateOrInsert,
+            value: *Value,
             evicted: ?Value,
         } {
             const key = key_from_value(value);
@@ -312,6 +313,7 @@ pub fn SetAssociativeCacheType(
                 return .{
                     .index = set.offset + way,
                     .updated = .update,
+                    .value = &set.values[way],
                     .evicted = evicted,
                 };
             }
@@ -356,6 +358,7 @@ pub fn SetAssociativeCacheType(
             return .{
                 .index = set.offset + way,
                 .updated = .insert,
+                .value = &set.values[way],
                 .evicted = evicted,
             };
         }
