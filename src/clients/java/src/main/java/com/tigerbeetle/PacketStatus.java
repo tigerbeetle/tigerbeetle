@@ -14,17 +14,28 @@ public enum PacketStatus {
 
     public final byte value;
 
+    static final PacketStatus[] enumByValue;
+    static {
+    final var values = values();
+      enumByValue = new PacketStatus[values.length];
+       for (final var item : values) {
+          enumByValue[item.value] = item;
+      }
+    }
+
     PacketStatus(byte value) {
         this.value = value;
     }
 
     public static PacketStatus fromValue(byte value) {
-        var values = PacketStatus.values();
-        if (value < 0 || value >= values.length)
+        if (value < 0 || value >= enumByValue.length)
             throw new IllegalArgumentException(
                     String.format("Invalid PacketStatus value=%d", value));
 
-        return values[value];
+        final var item = enumByValue[value];
+        AssertionError.assertTrue(item.value == value,
+          "Unexpected PacketStatus: found=%d expected=%d", item.value, value);
+        return item;
     }
 }
 

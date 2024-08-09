@@ -16,17 +16,28 @@ public enum InitializationStatus {
 
     public final int value;
 
+    static final InitializationStatus[] enumByValue;
+    static {
+    final var values = values();
+      enumByValue = new InitializationStatus[values.length];
+       for (final var item : values) {
+          enumByValue[item.value] = item;
+      }
+    }
+
     InitializationStatus(int value) {
         this.value = value;
     }
 
     public static InitializationStatus fromValue(int value) {
-        var values = InitializationStatus.values();
-        if (value < 0 || value >= values.length)
+        if (value < 0 || value >= enumByValue.length)
             throw new IllegalArgumentException(
                     String.format("Invalid InitializationStatus value=%d", value));
 
-        return values[value];
+        final var item = enumByValue[value];
+        AssertionError.assertTrue(item.value == value,
+          "Unexpected InitializationStatus: found=%d expected=%d", item.value, value);
+        return item;
     }
 }
 

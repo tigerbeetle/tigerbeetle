@@ -38,6 +38,11 @@ public interface TransferFlags {
      */
     int BALANCING_CREDIT = (int) (1 << 5);
 
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsimported">imported</a>
+     */
+    int IMPORTED = (int) (1 << 6);
+
     static boolean hasLinked(final int flags) {
         return (flags & LINKED) == LINKED;
     }
@@ -60,6 +65,10 @@ public interface TransferFlags {
 
     static boolean hasBalancingCredit(final int flags) {
         return (flags & BALANCING_CREDIT) == BALANCING_CREDIT;
+    }
+
+    static boolean hasImported(final int flags) {
+        return (flags & IMPORTED) == IMPORTED;
     }
 
 }

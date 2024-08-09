@@ -127,7 +127,7 @@ func main() {
 	// section:no-batch
 	for i := 0; i < len(transfers); i++ {
 		transfersRes, err = client.CreateTransfers([]Transfer{transfers[i]})
-		// error handling omitted
+		// Error handling omitted.
 	}
 	// endsection:no-batch
 
@@ -139,7 +139,7 @@ func main() {
 			batch = len(transfers) - i
 		}
 		transfersRes, err = client.CreateTransfers(transfers[i : i+batch])
-		// error handling omitted
+		// Error handling omitted.
 	}
 	// endsection:batch
 
@@ -148,7 +148,7 @@ func main() {
 	transfer1 := Transfer{ /* ... account values ... */ }
 	transfer0.Flags = TransferFlags{Linked: true}.ToUint16()
 	transfersRes, err = client.CreateTransfers([]Transfer{transfer0, transfer1})
-	// error handling omitted
+	// Error handling omitted.
 	// endsection:transfer-flags-link
 
 	// section:transfer-flags-post
@@ -159,7 +159,7 @@ func main() {
 		Timestamp: 0,
 	}
 	transfersRes, err = client.CreateTransfers([]Transfer{transfer})
-	// error handling omitted
+	// Error handling omitted.
 	// endsection:transfer-flags-post
 
 	// section:transfer-flags-void
@@ -170,7 +170,7 @@ func main() {
 		Timestamp: 0,
 	}
 	transfersRes, err = client.CreateTransfers([]Transfer{transfer})
-	// error handling omitted
+	// Error handling omitted.
 	// endsection:transfer-flags-void
 
 	// section:lookup-transfers
@@ -297,6 +297,54 @@ func main() {
 
 	transfersRes, err = client.CreateTransfers(batch)
 	// endsection:linked-events
+
+	// External source of time.
+	var historicalTimestamp uint64 = 0
+	historicalAccounts := []Account{}
+	historicalTransfers := []Transfer{}
+
+	// section:imported-events
+	// First, load and import all accounts with their timestamps from the historical source.
+	accountsBatch := []Account{}
+	for index, account := range historicalAccounts {
+		// Set a unique and strictly increasing timestamp.
+		historicalTimestamp += 1
+		account.Timestamp = historicalTimestamp
+
+		account.Flags = AccountFlags{
+			// Set the account as `imported`.
+			Imported: true,
+			// To ensure atomicity, the entire batch (except the last event in the chain)
+			// must be `linked`.
+			Linked: index < len(historicalAccounts)-1,
+		}.ToUint16()
+
+		accountsBatch = append(accountsBatch, account)
+	}
+	accountsRes, err = client.CreateAccounts(accountsBatch)
+
+	// Then, load and import all transfers with their timestamps from the historical source.
+	transfersBatch := []Transfer{}
+	for index, transfer := range historicalTransfers {
+		// Set a unique and strictly increasing timestamp.
+		historicalTimestamp += 1
+		transfer.Timestamp = historicalTimestamp
+
+		transfer.Flags = TransferFlags{
+			// Set the transfer as `imported`.
+			Imported: true,
+			// To ensure atomicity, the entire batch (except the last event in the chain)
+			// must be `linked`.
+			Linked: index < len(historicalAccounts)-1,
+		}.ToUint16()
+
+		transfersBatch = append(transfersBatch, transfer)
+	}
+	transfersRes, err = client.CreateTransfers(transfersBatch)
+	// Error handling omitted..
+	// Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+	// with the same historical timestamps without regressing the cluster timestamp.
+	// endsection:imported-events
 
 	// section:imports
 }

@@ -258,9 +258,9 @@ public class AsyncRequestTest {
         var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putInt(0);
-        dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.ordinal());
+        dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(1);
-        dummyReplyBuffer.putInt(CreateAccountResult.Exists.ordinal());
+        dummyReplyBuffer.putInt(CreateAccountResult.Exists.value);
 
         var callback = new CallbackSimulator<CreateAccountResultBatch>(
                 AsyncRequest.createAccounts(client, batch),
@@ -294,9 +294,9 @@ public class AsyncRequestTest {
         var dummyReplyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putInt(0);
-        dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.ordinal());
+        dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(1);
-        dummyReplyBuffer.putInt(CreateTransferResult.Exists.ordinal());
+        dummyReplyBuffer.putInt(CreateTransferResult.Exists.value);
 
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
                 AsyncRequest.createTransfers(client, batch),

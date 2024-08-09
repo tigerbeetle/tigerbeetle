@@ -13,8 +13,10 @@ public class CreateAccountResultTest {
 
     @Test
     public void testOrdinal() {
-        final var value = CreateAccountResult.Exists.value;
-        Assert.assertEquals(CreateAccountResult.Exists.ordinal(), value);
+        for (final var expected : CreateAccountResult.values()) {
+            final var actual = CreateAccountResult.fromValue(expected.value);
+            Assert.assertEquals(expected, actual);
+        }
     }
 
     @Test(expected = IllegalArgumentException.class)
