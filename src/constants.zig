@@ -326,7 +326,10 @@ comptime {
     assert(view_change_headers_max > 0);
     assert(view_change_headers_max >= pipeline_prepare_queue_max + 3);
     assert(view_change_headers_max <= journal_slot_count);
-    assert(view_change_headers_max <= @divFloor(message_body_size_max, @sizeOf(vsr.Header)));
+    assert(view_change_headers_max <= @divFloor(
+        message_body_size_max - @sizeOf(vsr.CheckpointState),
+        @sizeOf(vsr.Header),
+    ));
     assert(view_change_headers_max > view_change_headers_suffix_max);
 }
 
