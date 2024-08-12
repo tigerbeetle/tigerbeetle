@@ -83,6 +83,20 @@ pub const Terminal = struct {
             std.ascii.control_code.eot => return null,
             std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
+            std.ascii.control_code.esc => {
+                const second_byte = try stdin.readByte();
+                switch (second_byte) {
+                    '[' => {
+                        const third_byte = try stdin.readByte();
+                        switch (third_byte) {
+                            'C' => return .right,
+                            'D' => return .left,
+                            else => return .unhandled,
+                        }
+                    },
+                    else => return .unhandled,
+                }
+            },
             else => |byte| {
                 if (std.ascii.isPrint(byte)) {
                     return .{ .printable = byte };
@@ -246,6 +260,8 @@ const UserInput = union(enum) {
     printable: u8,
     newline,
     backspace,
+    left,
+    right,
     unhandled,
 };
 
