@@ -518,6 +518,12 @@ pub fn ReplType(comptime MessageBus: type) type {
             while (buffer.items.len < single_repl_input_max) {
                 const user_input = try repl.terminal.read_user_input() orelse return null;
                 switch (user_input) {
+                    .ctrlc => {
+                        // Erase everything below the current cursor's position in case Ctrl-C was
+                        // pressed somewhere inside the buffer.
+                        try repl.terminal.print("^C\x1b[J\n", .{});
+                        return &.{};
+                    },
                     .newline => {
                         try repl.terminal.print("\n", .{});
                         return try buffer.toOwnedSlice();

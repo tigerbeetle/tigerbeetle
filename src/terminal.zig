@@ -81,6 +81,7 @@ pub const Terminal = struct {
 
         switch (try stdin.readByte()) {
             std.ascii.control_code.eot => return null,
+            std.ascii.control_code.etx => return .ctrlc,
             std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
             std.ascii.control_code.esc => {
@@ -115,6 +116,7 @@ pub const Terminal = struct {
             const console_mode: *const WindowsConsoleMode = @alignCast(@ptrCast(self.mode_start));
 
             var mode_stdin: u32 = console_mode.*.stdin;
+            mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_processed_input);
             mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_line_input);
             mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_echo_input);
             mode_stdin |= @intFromEnum(WindowsConsoleMode.Input.enable_virtual_terminal_input);
@@ -137,6 +139,7 @@ pub const Terminal = struct {
 
             var termios_new = termios_start.*;
             termios_new.lflag.ECHO = false;
+            termios_new.lflag.ISIG = false;
             termios_new.lflag.ICANON = false;
             termios_new.cc[@intFromEnum(posix.V.MIN)] = 1;
             termios_new.cc[@intFromEnum(posix.V.TIME)] = 0;
@@ -260,6 +263,7 @@ const Screen = struct {
 
 const UserInput = union(enum) {
     printable: u8,
+    ctrlc,
     newline,
     backspace,
     left,
@@ -274,6 +278,7 @@ const WindowsConsoleMode = struct {
     stdout: u32,
 
     const Input = enum(u32) {
+        enable_processed_input = 0x0001,
         enable_line_input = 0x0002,
         enable_echo_input = 0x0004,
         enable_virtual_terminal_input = 0x0200,
