@@ -255,11 +255,11 @@ pub fn ScanTreeType(
 
                 switch (level.values) {
                     .fetching => {
-                        assert(level.state == .iterating_manifest or
+                        assert(level.state == .loading_manifest or
                             level.state == .loading_index or
                             level.state == .iterating);
 
-                        if (level.state == .iterating_manifest) level.move_next();
+                        if (level.state == .loading_manifest) level.move_next();
                         self.state.buffering.pending_count += 1;
                         level.fetch();
                     },
@@ -565,7 +565,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         buffer: ScanBuffer.LevelBuffer,
 
         state: union(enum) {
-            iterating_manifest,
+            loading_manifest,
             loading_index: struct {
                 key_exclusive_next: Key,
                 address: u64,
@@ -601,7 +601,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 .level_index = level_index,
                 .scan = scan,
                 .buffer = buffer,
-                .state = .iterating_manifest,
+                .state = .loading_manifest,
                 .values = .fetching,
             };
         }
@@ -610,7 +610,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.scan.state == .buffering);
 
             switch (self.state) {
-                .iterating_manifest => unreachable,
+                .loading_manifest => unreachable,
                 .loading_index => |*loading_index| {
                     assert(self.values == .fetching);
                     // Reading the index blocks:
@@ -624,6 +624,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 },
                 .iterating => |*iterating| {
                     assert(self.values == .fetching);
+                    assert(iterating.values == .iterator);
                     assert(!iterating.values.iterator.empty());
                     iterating.values.iterator.next_value_block(value_block_callback);
                 },
@@ -639,7 +640,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
         pub fn peek(self: *const ScanTreeLevel) error{ Drained, Empty }!Key {
             // `peek` can be called in any state during `seeking`.
-            assert(self.state == .iterating_manifest or
+            assert(self.state == .loading_manifest or
                 self.state == .loading_index or
                 self.state == .iterating or
                 self.state == .finished);
@@ -666,7 +667,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         pub fn pop(self: *ScanTreeLevel) Value {
-            maybe(self.state == .iterating_manifest or
+            maybe(self.state == .loading_manifest or
                 self.state == .iterating or
                 self.state == .finished);
             assert(self.values == .buffered);
@@ -702,7 +703,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         pub fn probe(self: *ScanTreeLevel, probe_key: Key) void {
-            maybe(self.state == .iterating_manifest or
+            maybe(self.state == .loading_manifest or
                 self.state == .iterating or
                 self.state == .finished);
 
@@ -751,7 +752,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 // iterator instead of calling `move_next()`.
                 // However, it's most likely the index block is still in the grid cache, so this
                 // may not represent any real improvement.
-                self.state = .iterating_manifest;
+                self.state = .loading_manifest;
             }
         }
 
@@ -761,7 +762,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 self.values == .buffered);
 
             switch (self.state) {
-                .iterating_manifest => self.move_next_manifest_table(null),
+                .loading_manifest => self.move_next_manifest_table(null),
                 .loading_index => unreachable,
                 .iterating => |*iterating| {
                     if (iterating.values == .none or
@@ -774,7 +775,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                             key_exclusive_next <= self.scan.key_max)
                         {
                             // Load the next `table_info`.
-                            self.state = .iterating_manifest;
+                            self.state = .loading_manifest;
                             self.values = .fetching;
                             self.move_next_manifest_table(key_exclusive_next);
                         } else {
@@ -796,7 +797,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             self: *ScanTreeLevel,
             key_exclusive: ?Key,
         ) void {
-            assert(self.state == .iterating_manifest);
+            assert(self.state == .loading_manifest);
             assert(self.values == .fetching);
 
             assert(self.scan.state == .seeking or
