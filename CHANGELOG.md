@@ -1,5 +1,84 @@
 # TigerBeetle Changelog
 
+## 2024-08-12
+
+Highlight of this release is fully rolled-out support for multiversion binaries. This means that,
+from now on, the upgrade procedure is going to be as simple as dropping the new version of
+`tigerbeetle` binary onto the servers. TigerBeetle will take care of restarting the cluster at the
+new version when it is appropriate. See <https://docs.tigerbeetle.com/operating/upgrading> for
+reference documentation.
+
+Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involved.
+
+- When upgrading from `0.15.3`, you'll need to stop and restart `tigerbeetle` binary manually.
+- When upgrading from `0.15.4`, the binary will stop automatically by hitting an `assert`. You
+  should restart it after that.
+
+### Safety And Performance
+
+- [#2174](https://github.com/tigerbeetle/tigerbeetle/pull/2174)
+  [#2190](https://github.com/tigerbeetle/tigerbeetle/pull/2190),
+
+  Test client eviction in the VOPR.
+
+- [#2187](https://github.com/tigerbeetle/tigerbeetle/pull/2187)
+
+  Add integration tests for upgrades.
+
+- [#2188](https://github.com/tigerbeetle/tigerbeetle/pull/2188)
+
+  Add more hardening parameters to the suggested systemd unit definition.
+
+### Features
+
+- [#2180](https://github.com/tigerbeetle/tigerbeetle/pull/2180),
+  [#2185](https://github.com/tigerbeetle/tigerbeetle/pull/2185),
+  [#2189](https://github.com/tigerbeetle/tigerbeetle/pull/2189),
+  [#2196](https://github.com/tigerbeetle/tigerbeetle/pull/2196)
+
+  Make the root directory smaller by getting rid of `scripts` and `.gitattributes` entries.
+  Root directory is the first thing you see when opening the repository, this space shouldn't be
+  wasted!
+
+- [#2199](https://github.com/tigerbeetle/tigerbeetle/pull/2199),
+  [#2165](https://github.com/tigerbeetle/tigerbeetle/pull/2165),
+  [#2198](https://github.com/tigerbeetle/tigerbeetle/pull/2198),
+  [#2184](https://github.com/tigerbeetle/tigerbeetle/pull/2184).
+
+  Complete the integration of multiversion binaries with the release infrastructure. From now on,
+  the upgrade procedure is as simple as replacing the binary on disk with a new version. TigerBeetle
+  will take care of safely and seamlessly restarting the cluster when appropriate itself.
+
+- [#2181](https://github.com/tigerbeetle/tigerbeetle/pull/2181)
+
+  Prepare to rollout the new state sync protocol. Stay tuned
+  for the next release!
+
+### Internals
+
+- [#2179](https://github.com/tigerbeetle/tigerbeetle/pull/2179),
+  [#2200](https://github.com/tigerbeetle/tigerbeetle/pull/2200)
+
+  Simplify iteration over an LSM tree during scans.
+
+- [#2182](https://github.com/tigerbeetle/tigerbeetle/pull/2182)
+
+  Fix addresses logging in the client regressed by
+  [#2164](https://github.com/tigerbeetle/tigerbeetle/pull/2164).
+
+- [#2193](https://github.com/tigerbeetle/tigerbeetle/pull/2193)
+
+  Modernize scripts to generate client bindings to follow modern idioms for `build.zig`.
+
+- [#2195](https://github.com/tigerbeetle/tigerbeetle/pull/2195)
+
+  Fix typo in the currency exchange example.
+
+
+### TigerTracks 🎧
+
+- [High Hopes](https://open.spotify.com/track/236mI0lz8JdQjlmijARSwY?si=38f80fc31cfc4876)
+
 ## 2024-08-05 (No release: Queued up to improve multiversion upgrade flow)
 
 ### Safety And Performance

@@ -759,9 +759,8 @@ fn build_multiversion_body(
     const old_current_release_flags = blk: {
         var old_current_release_flags = header.current_flags;
 
-        // For now, no releases are marked as visit. These need to get explicitly reset here, since
-        // current_flags.visit is by definition always true.
-        old_current_release_flags.visit = false;
+        // Visit https://github.com/tigerbeetle/tigerbeetle/pull/2181.
+        old_current_release_flags.visit = true;
 
         break :blk old_current_release_flags;
     };
