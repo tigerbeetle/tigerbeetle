@@ -22,7 +22,7 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 fn ObjectTreeHelpers(comptime Object: type) type {
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
+    assert(std.meta.FieldType(Object, .timestamp) == u64);
 
     return struct {
         inline fn key_from_value(value: *const Object) u64 {
@@ -58,6 +58,7 @@ const IdTreeValue = extern struct {
     }
 
     inline fn key_from_value(value: *const IdTreeValue) u128 {
+        assert(value.padding == 0);
         return value.id;
     }
 
@@ -65,6 +66,7 @@ const IdTreeValue = extern struct {
     const tombstone_bit = 1 << (64 - 1);
 
     inline fn tombstone(value: *const IdTreeValue) bool {
+        assert(value.padding == 0);
         return (value.timestamp & tombstone_bit) != 0;
     }
 
@@ -167,8 +169,8 @@ pub fn GrooveType(
 
     comptime var index_fields: []const std.builtin.Type.StructField = &.{};
 
-    const primary_field = if (has_id) "id" else "timestamp";
-    const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
+    const primary_field: std.meta.FieldEnum(Object) = if (has_id) .id else .timestamp;
+    const PrimaryKey = std.meta.FieldType(Object, primary_field);
 
     // Generate index LSM trees from the struct fields.
     for (std.meta.fields(Object)) |field| {
@@ -368,46 +370,7 @@ pub fn GrooveType(
         }
     }.HelperType;
 
-    const ObjectsCacheHelpers = struct {
-        const tombstone_bit = 1 << (64 - 1);
-
-        inline fn key_from_value(value: *const Object) PrimaryKey {
-            if (has_id) {
-                return value.id;
-            } else {
-                return value.timestamp & ~@as(u64, tombstone_bit);
-            }
-        }
-
-        inline fn hash(key: PrimaryKey) u64 {
-            return stdx.hash_inline(key);
-        }
-
-        inline fn tombstone_from_key(a: PrimaryKey) Object {
-            var obj: Object = undefined;
-            if (has_id) {
-                obj.id = a;
-                obj.timestamp = 0;
-            } else {
-                obj.timestamp = a;
-            }
-            obj.timestamp |= tombstone_bit;
-            return obj;
-        }
-
-        inline fn tombstone(a: *const Object) bool {
-            return (a.timestamp & tombstone_bit) != 0;
-        }
-    };
-
-    const _ObjectsCache = CacheMapType(
-        PrimaryKey,
-        Object,
-        ObjectsCacheHelpers.key_from_value,
-        ObjectsCacheHelpers.hash,
-        ObjectsCacheHelpers.tombstone_from_key,
-        ObjectsCacheHelpers.tombstone,
-    );
+    const _ObjectsCache = CacheMapType(Object);
 
     return struct {
         const Groove = @This();
@@ -423,7 +386,7 @@ pub fn GrooveType(
 
         const Callback = *const fn (*Groove) void;
 
-        const trees_total = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
+        const trees_total: usize = 1 + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
         const TreesBitSet = std.StaticBitSet(trees_total);
 
         const PrefetchKeys = std.AutoHashMapUnmanaged(
@@ -918,7 +881,7 @@ pub fn GrooveType(
             assert(object.timestamp >= TimestampRange.timestamp_min);
             assert(object.timestamp <= TimestampRange.timestamp_max);
             if (constants.verify) {
-                assert(!groove.objects_cache.has(@field(object, primary_field)));
+                assert(!groove.objects_cache.has(@field(object, @tagName(primary_field))));
             }
 
             groove.objects_cache.upsert(object);
@@ -953,7 +916,10 @@ pub fn GrooveType(
             const new = values.new;
 
             if (constants.verify) {
-                const old_from_cache = groove.objects_cache.get(@field(old, primary_field)).?;
+                const old_from_cache = groove.objects_cache.get(@field(
+                    old,
+                    @tagName(primary_field),
+                )).?;
 
                 // While all that's actually required is that the _contents_ of the old_from_cache
                 // and old objects are identical, in current usage they're always the same piece of
