@@ -114,6 +114,9 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         return error.NotSupported;
     }
 
+    log.info("start {}", .{stdx.DateTimeUTC.now()});
+    defer log.info("end {}", .{stdx.DateTimeUTC.now()});
+
     assert(try shell.exec_status_ok("git --version", .{}));
 
     // Read-write token for <https://github.com/tigerbeetle/devhubdb>.

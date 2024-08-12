@@ -796,3 +796,56 @@ test fmt_int_size_bin_exact {
         fmt_int_size_bin_exact(std.math.maxInt(u64) - 1023),
     });
 }
+
+// DateTime in UTC, intended primarily for logging.
+//
+// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
+// timezones or leap seconds is necessary.
+pub const DateTimeUTC = struct {
+    year: u16,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+
+    pub fn now() DateTimeUTC {
+        const timestamp_seconds = std.time.timestamp();
+        assert(timestamp_seconds > 0);
+        return DateTimeUTC.from_timestamp(@intCast(timestamp_seconds));
+    }
+
+    pub fn from_timestamp(timestamp: u64) DateTimeUTC {
+        const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = timestamp };
+        const year_day = epoch_seconds.getEpochDay().calculateYearDay();
+        const month_day = year_day.calculateMonthDay();
+        const time = epoch_seconds.getDaySeconds();
+
+        return DateTimeUTC{
+            .year = year_day.year,
+            .month = month_day.month.numeric(),
+            .day = month_day.day_index + 1,
+            .hour = time.getHoursIntoDay(),
+            .minute = time.getMinutesIntoHour(),
+            .second = time.getSecondsIntoMinute(),
+        };
+    }
+
+    pub fn format(
+        datetime: DateTimeUTC,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2} UTC", .{
+            datetime.year,
+            datetime.month,
+            datetime.day,
+            datetime.hour,
+            datetime.minute,
+            datetime.second,
+        });
+    }
+};
