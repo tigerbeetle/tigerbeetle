@@ -15,31 +15,12 @@ const MessagePool = vsr.message_pool.MessagePool;
 
 const tb = vsr.tigerbeetle;
 
-// Printer is separate from logging since messages from the REPL
-// aren't logs but actual messages for the user. The fields are made
-// optional so that printing on failure can be disabled in tests that
-// test for failure.
-pub const Printer = struct {
-    stdout: ?std.fs.File.Writer,
-    stderr: ?std.fs.File.Writer,
-
-    fn print(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
-        if (printer.stdout) |stdout| {
-            try stdout.print(format, arguments);
-        }
-    }
-
-    fn print_error(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
-        if (printer.stderr) |stderr| {
-            try stderr.print(format, arguments);
-        }
-    }
-};
+const Terminal = @import("terminal.zig").Terminal;
 
 pub const Parser = struct {
     input: []const u8,
     offset: usize = 0,
-    printer: Printer,
+    terminal: *const Terminal,
 
     pub const Error = error{
         BadKeyValuePair,
@@ -99,17 +80,17 @@ pub const Parser = struct {
             } else unreachable;
         };
 
-        try parser.printer.print_error("Fail near line {}, column {}:\n\n{s}\n", .{
+        try parser.terminal.print_error("Fail near line {}, column {}:\n\n{s}\n", .{
             target.position_line,
             target.position_column,
             target.line,
         });
         var column = target.position_column;
         while (column > 0) {
-            try parser.printer.print_error(" ", .{});
+            try parser.terminal.print_error(" ", .{});
             column -= 1;
         }
-        try parser.printer.print_error("^ Near here.\n\n", .{});
+        try parser.terminal.print_error("^ Near here.\n\n", .{});
     }
 
     fn eat_whitespace(parser: *Parser) void {
@@ -164,7 +145,7 @@ pub const Parser = struct {
                 var copy = Parser{
                     .input = parser.input,
                     .offset = parser.offset,
-                    .printer = parser.printer,
+                    .terminal = parser.terminal,
                 };
                 copy.eat_whitespace();
                 if (copy.offset < parser.input.len and parser.input[copy.offset] == '|') {
@@ -337,7 +318,7 @@ pub const Parser = struct {
 
             if (id_result.len == 0) {
                 try parser.print_current_position();
-                try parser.printer.print_error(
+                try parser.terminal.print_error(
                     "Expected key starting key-value pair. e.g. `id=1`\n",
                     .{},
                 );
@@ -347,7 +328,7 @@ pub const Parser = struct {
             // Grab =.
             parser.parse_syntax_char('=') catch {
                 try parser.print_current_position();
-                try parser.printer.print_error(
+                try parser.terminal.print_error(
                     "Expected equal sign after key '{s}' in key-value" ++
                         " pair. e.g. `id=1`.\n",
                     .{id_result},
@@ -360,7 +341,7 @@ pub const Parser = struct {
 
             if (value_result.len == 0) {
                 try parser.print_current_position();
-                try parser.printer.print_error(
+                try parser.terminal.print_error(
                     "Expected value after equal sign in key-value pair. e.g. `id=1`.\n",
                     .{},
                 );
@@ -370,7 +351,7 @@ pub const Parser = struct {
             // Match key to a field in the struct.
             match_arg(&object, id_result, value_result) catch {
                 try parser.print_current_position();
-                try parser.printer.print_error(
+                try parser.terminal.print_error(
                     "'{s}'='{s}' is not a valid pair for {s}.\n",
                     .{ id_result, value_result, @tagName(object) },
                 );
@@ -405,9 +386,9 @@ pub const Parser = struct {
     pub fn parse_statement(
         arena: *std.heap.ArenaAllocator,
         input: []const u8,
-        printer: Printer,
+        terminal: *const Terminal,
     ) (error{OutOfMemory} || std.fs.File.WriteError || Error)!Statement {
-        var parser = Parser{ .input = input, .printer = printer };
+        var parser = Parser{ .input = input, .terminal = terminal };
         parser.eat_whitespace();
         const after_whitespace = parser.offset;
         const operation_identifier = parser.parse_identifier();
@@ -426,7 +407,7 @@ pub const Parser = struct {
             // token.
             parser.offset = after_whitespace;
             try parser.print_current_position();
-            try parser.printer.print_error(
+            try parser.terminal.print_error(
                 "Operation must be " ++
                     comptime operations: {
                     var names: []const u8 = "";
@@ -465,22 +446,22 @@ pub fn ReplType(comptime MessageBus: type) type {
         debug_logs: bool,
 
         client: *Client,
-        printer: Printer,
+        terminal: *Terminal,
 
         const Repl = @This();
 
         fn fail(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (!repl.interactive) {
-                try repl.printer.print_error(format, arguments);
+                try repl.terminal.print_error(format, arguments);
                 std.posix.exit(1);
             }
 
-            try repl.printer.print(format, arguments);
+            try repl.terminal.print(format, arguments);
         }
 
         fn debug(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (repl.debug_logs) {
-                try repl.printer.print("[Debug] " ++ format, arguments);
+                try repl.terminal.print("[Debug] " ++ format, arguments);
             }
         }
 
@@ -521,7 +502,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl: *Repl,
             arena: *std.heap.ArenaAllocator,
         ) !void {
-            try repl.printer.print("> ", .{});
+            try repl.terminal.print("> ", .{});
 
             const stdin = std.io.getStdIn();
             var stdin_buffered_reader = std.io.bufferedReader(stdin.reader());
@@ -544,7 +525,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             const statement = Parser.parse_statement(
                 arena,
                 input,
-                repl.printer,
+                repl.terminal,
             ) catch |err| {
                 switch (err) {
                     // These are parsing errors, so the REPL should
@@ -586,7 +567,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_help(repl: *Repl) !void {
-            try repl.printer.print("TigerBeetle CLI Client {}\n" ++
+            try repl.terminal.print("TigerBeetle CLI Client {}\n" ++
                 \\  Hit enter after a semicolon to run a command.
                 \\
                 \\Examples:
@@ -617,11 +598,11 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .request_done = true,
                 .event_loop_done = false,
                 .interactive = statements.len == 0,
-                .printer = .{
-                    .stderr = std.io.getStdErr().writer(),
-                    .stdout = std.io.getStdOut().writer(),
-                },
+                .terminal = undefined,
             };
+
+            var terminal = Terminal.init();
+            repl.terminal = &terminal;
 
             try repl.debug("Connecting to '{any}'.\n", .{addresses});
 
@@ -662,7 +643,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     const statement = Parser.parse_statement(
                         &execution_arena,
                         statement_string,
-                        repl.printer,
+                        repl.terminal,
                     ) catch |err| {
                         switch (err) {
                             // These are parsing errors and since this
@@ -775,7 +756,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 @TypeOf(object.*) == tb.Transfer or
                 @TypeOf(object.*) == tb.AccountBalance);
 
-            try repl.printer.print("{{\n", .{});
+            try repl.terminal.print("{{\n", .{});
             inline for (@typeInfo(@TypeOf(object.*)).Struct.fields, 0..) |object_field, i| {
                 if (comptime std.mem.eql(u8, object_field.name, "reserved")) {
                     continue;
@@ -783,36 +764,36 @@ pub fn ReplType(comptime MessageBus: type) type {
                 }
 
                 if (i > 0) {
-                    try repl.printer.print(",\n", .{});
+                    try repl.terminal.print(",\n", .{});
                 }
 
                 if (comptime std.mem.eql(u8, object_field.name, "flags")) {
-                    try repl.printer.print("  \"" ++ object_field.name ++ "\": [", .{});
+                    try repl.terminal.print("  \"" ++ object_field.name ++ "\": [", .{});
                     var needs_comma = false;
 
                     inline for (@typeInfo(object_field.type).Struct.fields) |flag_field| {
                         if (comptime !std.mem.eql(u8, flag_field.name, "padding")) {
                             if (@field(@field(object, "flags"), flag_field.name)) {
                                 if (needs_comma) {
-                                    try repl.printer.print(",", .{});
+                                    try repl.terminal.print(",", .{});
                                     needs_comma = false;
                                 }
 
-                                try repl.printer.print("\"{s}\"", .{flag_field.name});
+                                try repl.terminal.print("\"{s}\"", .{flag_field.name});
                                 needs_comma = true;
                             }
                         }
                     }
 
-                    try repl.printer.print("]", .{});
+                    try repl.terminal.print("]", .{});
                 } else {
-                    try repl.printer.print(
+                    try repl.terminal.print(
                         "  \"{s}\": \"{}\"",
                         .{ object_field.name, @field(object, object_field.name) },
                     );
                 }
             }
-            try repl.printer.print("\n}}\n", .{});
+            try repl.terminal.print("\n}}\n", .{});
         }
 
         fn client_request_callback_error(
@@ -841,7 +822,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (create_account_results.len > 0) {
                         for (create_account_results) |*reason| {
-                            try repl.printer.print(
+                            try repl.terminal.print(
                                 "Failed to create account ({}): {any}.\n",
                                 .{ reason.index, reason.result },
                             );
@@ -870,7 +851,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (create_transfer_results.len > 0) {
                         for (create_transfer_results) |*reason| {
-                            try repl.printer.print(
+                            try repl.terminal.print(
                                 "Failed to create transfer ({}): {any}.\n",
                                 .{ reason.index, reason.result },
                             );
@@ -926,7 +907,7 @@ pub fn ReplType(comptime MessageBus: type) type {
     };
 }
 
-const null_printer = Printer{
+const null_terminal = Terminal{
     .stderr = null,
     .stdout = null,
 };
@@ -1018,7 +999,7 @@ test "repl.zig: Parser single transfer successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1075,7 +1056,7 @@ test "repl.zig: Parser multiple transfers successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1159,7 +1140,7 @@ test "repl.zig: Parser single account successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -1217,7 +1198,7 @@ test "repl.zig: Parser account filter successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, t.operation);
@@ -1281,7 +1262,7 @@ test "repl.zig: Parser query filter successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, t.operation);
@@ -1336,7 +1317,7 @@ test "repl.zig: Parser multiple accounts successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -1463,7 +1444,7 @@ test "repl.zig: Parser odd but correct formatting" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1529,7 +1510,7 @@ test "repl.zig: Handle parsing errors" {
         const result = Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            null_terminal,
         );
         try std.testing.expectError(t.err, result);
     }
