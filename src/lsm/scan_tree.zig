@@ -624,6 +624,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 },
                 .iterating => |*iterating| {
                     assert(self.values == .fetching);
+                    assert(iterating.values == .iterator);
                     assert(!iterating.values.iterator.empty());
                     iterating.values.iterator.next_value_block(value_block_callback);
                 },
