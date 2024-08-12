@@ -75,6 +75,7 @@ test "tidy" {
         std.debug.print("error: `function_line_count_max` must be updated to {d}\n", .{
             function_line_count_longest,
         });
+        return error.LineCountOudated;
     }
 }
 
@@ -177,7 +178,7 @@ fn tidy_control_characters(file: SourceFile) ?u8 {
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 450; // build in build.zig
+const function_line_count_max = 441; // build in build.zig
 
 fn tidy_long_functions(
     file: SourceFile,
