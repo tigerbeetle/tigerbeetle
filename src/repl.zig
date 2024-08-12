@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const vsr = @import("vsr.zig");
@@ -453,7 +452,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn fail(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (!repl.interactive) {
                 try repl.terminal.print_error(format, arguments);
-                std.posix.exit(1);
+                std.process.exit(1);
             }
 
             try repl.terminal.print(format, arguments);
@@ -497,22 +496,67 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
         }
 
+        const prompt = "> ";
         const single_repl_input_max = 10 * 4 * 1024;
+
+        fn read_until_newline_or_eof_alloc(
+            repl: *Repl,
+            allocator: std.mem.Allocator,
+        ) !?[]u8 {
+            try repl.terminal.prompt_mode_set();
+            defer repl.terminal.prompt_mode_unset() catch {};
+
+            var terminal_screen = try repl.terminal.get_screen(allocator);
+
+            var buffer = std.ArrayList(u8).init(allocator);
+            var buffer_index: usize = 0;
+
+            while (buffer.items.len < single_repl_input_max) {
+                const user_input = try repl.terminal.read_user_input() orelse return null;
+                switch (user_input) {
+                    .newline => {
+                        try repl.terminal.print("\n", .{});
+                        return try buffer.toOwnedSlice();
+                    },
+                    .printable => |character| {
+                        terminal_screen.update_cursor_position(1);
+                        try repl.terminal.print("{c}", .{character});
+                        // Some terminals may not automatically move/scroll us down to the next
+                        // row after appending a character at the last column. This can cause us
+                        // to incorrectly report the cursor's position, so we force the terminal
+                        // to do so by moving the cursor forward and backward one space.
+                        if (terminal_screen.cursor_column == terminal_screen.columns) {
+                            try repl.terminal.print("\x20\x1b[{};{}H", .{
+                                terminal_screen.cursor_row,
+                                terminal_screen.cursor_column,
+                            });
+                        }
+                        try buffer.append(character);
+                        buffer_index += 1;
+                    },
+                    .backspace => if (buffer_index > 0) {
+                        terminal_screen.update_cursor_position(-1);
+                        try repl.terminal.print("\x1b[{};{}H\x20\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        buffer_index -= 1;
+                        _ = buffer.orderedRemove(buffer_index);
+                    },
+                    .unhandled => {},
+                }
+            }
+            return error.StreamTooLong;
+        }
+
         fn do_repl(
             repl: *Repl,
             arena: *std.heap.ArenaAllocator,
         ) !void {
-            try repl.terminal.print("> ", .{});
-
-            const stdin = std.io.getStdIn();
-            var stdin_buffered_reader = std.io.bufferedReader(stdin.reader());
-            var stdin_stream = stdin_buffered_reader.reader();
-
-            const input = stdin_stream.readUntilDelimiterOrEofAlloc(
-                arena.allocator(),
-                ';',
-                single_repl_input_max,
-            ) catch |err| {
+            try repl.terminal.print(prompt, .{});
+            const input = repl.read_until_newline_or_eof_alloc(arena.allocator()) catch |err| {
                 repl.event_loop_done = true;
                 return err;
             } orelse {
@@ -601,7 +645,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .terminal = undefined,
             };
 
-            var terminal = Terminal.init();
+            var terminal = try Terminal.init(allocator, repl.interactive);
             repl.terminal = &terminal;
 
             try repl.debug("Connecting to '{any}'.\n", .{addresses});
@@ -659,7 +703,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             // TODO: This will be more convenient to express
                             // once https://github.com/ziglang/zig/issues/2473 is
                             // in.
-                            => std.posix.exit(1),
+                            => std.process.exit(1),
 
                             // An unexpected error for which we do
                             // want the stacktrace.
@@ -908,6 +952,8 @@ pub fn ReplType(comptime MessageBus: type) type {
 }
 
 const null_terminal = Terminal{
+    .mode_start = null,
+    .stdin = undefined,
     .stderr = null,
     .stdout = null,
 };
@@ -999,7 +1045,7 @@ test "repl.zig: Parser single transfer successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_terminal,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1056,7 +1102,7 @@ test "repl.zig: Parser multiple transfers successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_terminal,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1140,7 +1186,7 @@ test "repl.zig: Parser single account successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_terminal,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -1198,7 +1244,7 @@ test "repl.zig: Parser account filter successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_terminal,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, t.operation);
@@ -1262,7 +1308,7 @@ test "repl.zig: Parser query filter successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_terminal,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, t.operation);
@@ -1317,7 +1363,7 @@ test "repl.zig: Parser multiple accounts successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_terminal,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -1444,7 +1490,7 @@ test "repl.zig: Parser odd but correct formatting" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_terminal,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1510,7 +1556,7 @@ test "repl.zig: Handle parsing errors" {
         const result = Parser.parse_statement(
             &arena,
             t.in,
-            null_terminal,
+            &null_terminal,
         );
         try std.testing.expectError(t.err, result);
     }
