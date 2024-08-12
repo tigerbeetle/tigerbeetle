@@ -89,6 +89,8 @@ pub const Terminal = struct {
                     '[' => {
                         const third_byte = try stdin.readByte();
                         switch (third_byte) {
+                            'A' => return .up,
+                            'B' => return .down,
                             'C' => return .right,
                             'D' => return .left,
                             else => return .unhandled,
@@ -262,6 +264,8 @@ const UserInput = union(enum) {
     backspace,
     left,
     right,
+    up,
+    down,
     unhandled,
 };
 
