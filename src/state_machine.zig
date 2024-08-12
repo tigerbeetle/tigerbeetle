@@ -3219,7 +3219,31 @@ fn check(test_table: []const u8) !void {
                 if (t.result == .ok) {
                     const timestamp = context.state_machine.prepare_timestamp + 1 +
                         @divExact(request.items.len, @sizeOf(Transfer));
-                    try transfers.put(t.id, t.event(if (t.timestamp == 0) timestamp else null));
+                    var transfer = t.event(if (t.timestamp == 0) timestamp else null);
+
+                    if (transfer.pending_id != 0) {
+                        // Fill in default values.
+                        const t_pending = transfers.get(transfer.pending_id).?;
+                        inline for (.{
+                            "debit_account_id",
+                            "credit_account_id",
+                            "ledger",
+                            "code",
+                            "user_data_128",
+                            "user_data_64",
+                            "user_data_32",
+                        }) |field| {
+                            if (@field(transfer, field) == 0) {
+                                @field(transfer, field) = @field(t_pending, field);
+                            }
+                        }
+
+                        if (transfer.flags.void_pending_transfer) {
+                            if (transfer.amount == 0) transfer.amount = t_pending.amount;
+                        }
+                    }
+
+                    try transfers.put(t.id, transfer);
                 } else {
                     const result = CreateTransfersResult{
                         .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
