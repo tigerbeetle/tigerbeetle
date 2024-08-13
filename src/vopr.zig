@@ -1061,28 +1061,9 @@ pub const Simulator = struct {
             }
         }
 
-        var header_prepare_view_mismatch: bool = false;
+        var wal_fixed: bool = true;
         if (!fault) {
-            // The journal writes redundant headers of faulty ops as zeroes to ensure
-            // that they remain faulty after a crash/recover. Since that fault cannot
-            // be disabled by `storage.faulty`, we must manually repair it here to
-            // ensure a cluster cannot become stuck in status=recovering_head.
-            // See recover_slots() for more detail.
-            const headers_offset = vsr.Zone.wal_headers.offset(0);
-            const headers_size = vsr.Zone.wal_headers.size().?;
-            const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
-            for (
-                mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
-                replica_storage.wal_prepares(),
-            ) |*wal_header, *wal_prepare| {
-                if (wal_header.checksum == 0) {
-                    wal_header.* = wal_prepare.header;
-                } else {
-                    if (wal_header.view != wal_prepare.header.view) {
-                        header_prepare_view_mismatch = true;
-                    }
-                }
-            }
+            wal_fixed = simulator.cluster.fix_wal(replica_index);
         }
 
         const replica_releases_count = simulator.replica_releases[replica_index];
@@ -1104,13 +1085,9 @@ pub const Simulator = struct {
         ) catch unreachable;
 
         if (replica.status == .recovering_head) {
-            // Even with faults disabled, a replica that was syncing before it crashed
-            // (or just recently finished syncing before it crashed) may wind up in
-            // status=recovering_head.
-            assert(fault or
-                replica.op < replica.op_checkpoint() or
-                replica.log_view < replica.superblock.working.vsr_state.sync_view or
-                header_prepare_view_mismatch);
+            // Even with faults disabled may wind up in status=recovering_head when it's impossible
+            // to repair the wal.
+            assert(fault or !wal_fixed);
         }
 
         replica_storage.faulty = true;

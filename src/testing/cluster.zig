@@ -513,6 +513,32 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(messages_in_pool == message_bus.pool.messages_max);
         }
 
+        /// The journal writes redundant headers of faulty ops as zeroes to ensure
+        /// that they remain faulty after a crash/recover. Since that fault cannot
+        /// be disabled by `storage.faulty`, we must manually repair it here to
+        /// ensure a cluster cannot become stuck in status=recovering_head.
+        /// See recover_slots() for more detail.
+        pub fn fix_wal(cluster: *Self, replica_index: u8) bool {
+            var header_prepare_view_mismatch = false;
+            const headers_offset = vsr.Zone.wal_headers.offset(0);
+            const headers_size = vsr.Zone.wal_headers.size().?;
+            const headers_bytes = cluster.storages[replica_index]
+                .memory[headers_offset..][0..headers_size];
+            for (
+                mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
+                cluster.storages[replica_index].wal_prepares(),
+            ) |*wal_header, *wal_prepare| {
+                if (wal_header.checksum == 0) {
+                    wal_header.* = wal_prepare.header;
+                } else {
+                    if (wal_header.view != wal_prepare.header.view) {
+                        header_prepare_view_mismatch = true;
+                    }
+                }
+            }
+            return !header_prepare_view_mismatch;
+        }
+
         fn replica_enable(cluster: *Self, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .down);
 
@@ -618,6 +644,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 // to too many replicas in status=recovering_head.
                 const faulty = cluster.storages[replica_index].faulty;
                 cluster.storages[replica_index].faulty = false;
+                const wal_fixed = cluster.fix_wal(replica_index);
                 defer cluster.storages[replica_index].faulty = faulty;
 
                 cluster.replica_open(replica_index, .{
@@ -628,6 +655,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     log.err("{}: release_execute failed: error={}", .{ replica_index, err });
                     @panic("release_execute failed");
                 };
+                if (cluster.replicas[replica_index].status == .recovering_head) assert(!wal_fixed);
                 cluster.replica_enable(replica_index);
             } else {
                 // The cluster has upgraded to `release`, but this replica does not have that
