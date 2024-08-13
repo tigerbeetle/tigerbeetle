@@ -879,9 +879,10 @@ pub fn ReplicaType(
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 maybe(self.client_replies.writing.count() > 0);
                 for (0..constants.clients_max) |entry_slot| {
-                    if (self.client_sessions.entries_free.isSet(entry_slot)) {
-                        assert(!self.client_replies.faulty.isSet(entry_slot));
-                    } else {
+                    const slot_faulty = self.client_replies.faulty.isSet(entry_slot);
+                    const slot_free = self.client_sessions.entries_free.isSet(entry_slot);
+                    assert(!slot_faulty);
+                    if (!slot_free) {
                         const entry = &self.client_sessions.entries[entry_slot];
                         if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
                             entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
@@ -8970,7 +8971,6 @@ pub fn ReplicaType(
             self.grid.free_set_checkpoint.reset();
             self.client_sessions_checkpoint.reset();
             self.client_sessions.reset();
-
             // Faulty bits will be set in sync_content().
             while (self.client_replies.faulty.findFirstSet()) |slot| {
                 self.client_replies.faulty.unset(slot);
