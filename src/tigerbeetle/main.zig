@@ -297,30 +297,35 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
-        var multiversion: ?vsr.multiversioning.Multiversion =
+        var multiversion: ?vsr.multiversioning.Multiversion = blk: {
             if (constants.config.process.release.value ==
-            vsr.multiversioning.Release.minimum.value)
-        blk: {
-            log.info(
-                "multiversioning: disabled for development ({}) release.",
-                .{constants.config.process.release},
+                vsr.multiversioning.Release.minimum.value)
+            {
+                log.info("multiversioning: disabled for development ({}) release.", .{
+                    constants.config.process.release,
+                });
+                break :blk null;
+            }
+            if (args.development) {
+                log.info("multiversioning: disabled due to --development.", .{});
+                break :blk null;
+            }
+            if (args.experimental) {
+                log.info("multiversioning: disabled due to --experimental.", .{});
+                break :blk null;
+            }
+            if (constants.aof_recovery) {
+                log.info("multiversioning: disabled due to aof_recovery.", .{});
+                break :blk null;
+            }
+
+            break :blk try vsr.multiversioning.Multiversion.init(
+                allocator,
+                &command.io,
+                command.self_exe_path,
+                .native,
             );
-            break :blk null;
-        } else if (args.development) blk: {
-            log.info("multiversioning: disabled due to --development.", .{});
-            break :blk null;
-        } else if (args.experimental) blk: {
-            log.info("multiversioning: disabled due to --experimental.", .{});
-            break :blk null;
-        } else if (constants.aof_recovery) blk: {
-            log.info("multiversioning: disabled due to aof_recovery.", .{});
-            break :blk null;
-        } else try vsr.multiversioning.Multiversion.init(
-            allocator,
-            &command.io,
-            command.self_exe_path,
-            .native,
-        );
+        };
 
         defer if (multiversion != null) multiversion.?.deinit(allocator);
 
