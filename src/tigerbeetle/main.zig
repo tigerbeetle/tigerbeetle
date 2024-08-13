@@ -383,11 +383,7 @@ const Command = struct {
             else => |e| return e,
         };
 
-        // Enable checking for new binaries on disk after the replica has been opened. Only
-        // supported on Linux.
-        if (multiversion != null and builtin.target.os.tag == .linux) {
-            multiversion.?.timeout_enable();
-        }
+        if (multiversion != null) multiversion.?.timeout_start(replica.replica);
 
         // Note that this does not account for the fact that any allocations will be rounded up to
         // the nearest page by `std.heap.page_allocator`.
@@ -449,6 +445,7 @@ const Command = struct {
 
         while (true) {
             replica.tick();
+            if (multiversion != null) multiversion.?.tick();
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
     }
