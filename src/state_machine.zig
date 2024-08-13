@@ -705,6 +705,30 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
+            const accounts = mem.bytesAsSlice(Account, self.prefetch_input.?);
+            if (accounts.len > 0 and
+                accounts[0].flags.imported)
+            {
+                // Looking for transfers with the same timestamp.
+                for (accounts) |*a| {
+                    self.forest.grooves.transfers.prefetch_exists_enqueue(a.timestamp);
+                }
+
+                self.forest.grooves.transfers.prefetch(
+                    prefetch_create_accounts_transfers_callback,
+                    self.prefetch_context.get(.transfers),
+                );
+            } else {
+                self.prefetch_finish();
+            }
+        }
+
+        fn prefetch_create_accounts_transfers_callback(
+            completion: *TransfersGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
+            self.prefetch_context = .null;
+
             self.prefetch_finish();
         }
 
@@ -743,6 +767,11 @@ pub fn StateMachineType(
                 } else {
                     self.forest.grooves.accounts.prefetch_enqueue(t.debit_account_id);
                     self.forest.grooves.accounts.prefetch_enqueue(t.credit_account_id);
+                }
+
+                if (t.flags.imported) {
+                    // Looking for accounts with the same timestamp.
+                    self.forest.grooves.accounts.prefetch_exists_enqueue(t.timestamp);
                 }
             }
 
@@ -1745,6 +1774,9 @@ pub fn StateMachineType(
                         return .imported_event_timestamp_must_not_regress;
                     }
                 }
+                if (self.forest.grooves.transfers.exists(a.timestamp)) {
+                    return .imported_event_timestamp_must_not_regress;
+                }
             }
 
             self.forest.grooves.accounts.insert(a);
@@ -1832,6 +1864,10 @@ pub fn StateMachineType(
                         return .imported_event_timestamp_must_not_regress;
                     }
                 }
+                if (self.forest.grooves.accounts.exists(t.timestamp)) {
+                    return .imported_event_timestamp_must_not_regress;
+                }
+
                 if (t.timestamp <= dr_account.timestamp) {
                     return .imported_event_timestamp_must_postdate_debit_account;
                 }
@@ -2070,6 +2106,9 @@ pub fn StateMachineType(
                     if (t.timestamp <= key_range.key_max) {
                         return .imported_event_timestamp_must_not_regress;
                     }
+                }
+                if (self.forest.grooves.accounts.exists(t.timestamp)) {
+                    return .imported_event_timestamp_must_not_regress;
                 }
             }
 
@@ -4036,22 +4075,30 @@ test "imported events: timestamp" {
         \\
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  0 imported_event_timestamp_must_not_be_zero
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ 99 imported_event_timestamp_must_not_advance
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  2 imported_event_timestamp_must_postdate_debit_account  // The same timestamp as an account.
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_timestamp_must_postdate_credit_account // The same timestamp as an account.
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  2 imported_event_timestamp_must_not_regress // The same timestamp as the dr account.
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_timestamp_must_not_regress // The same timestamp as the cr account.
+        \\ transfer   T1 A3 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 imported_event_timestamp_must_postdate_debit_account
+        \\ transfer   T1 A1 A3    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 imported_event_timestamp_must_postdate_credit_account
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 ok
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_timestamp_must_not_regress
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  5 ok
         \\ commit create_transfers
         \\
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ 99 imported_event_timestamp_must_not_advance
-        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 exists
+        \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  4 exists // T2 `exists` regardless different timestamps.
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  5 exists
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  6 exists
         \\ commit create_transfers
+        \\
+        \\ transfer   T3 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ 10 ok
+        \\ commit create_transfers
+        \\
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ 10 imported_event_timestamp_must_not_regress // The same timestamp as a transfer.
+        \\ commit create_accounts
     );
 }
 
-test "imported events: validations" {
+test "imported events: pending transfers" {
     try check(
         \\ tick 10 nanoseconds
         \\
@@ -4059,8 +4106,6 @@ test "imported events: validations" {
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  2 ok
         \\ commit create_accounts
         \\
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  1 imported_event_timestamp_must_postdate_debit_account
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  2 imported_event_timestamp_must_postdate_credit_account
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  3 ok
         \\ transfer   T2 A1 A2    4   _  _  _  _    1 L1 C2   _     PEN _   _   _   _  IMP _  4 imported_event_timeout_must_be_zero
         \\ transfer   T2 A1 A2    4   _  _  _  _    0 L1 C2   _     PEN _   _   _   _  IMP _  4 ok

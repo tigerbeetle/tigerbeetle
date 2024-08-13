@@ -379,7 +379,7 @@ many applications should handle `exists` exactly as [`ok`](#ok).
 This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
 
 The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp)
-regressed, but it must be greater than the last timestamp assigned to any `Transfer` in the cluster.
+regressed, but it must be greater than the last timestamp assigned to any `Transfer` in the cluster and cannot be equal to the timestamp of any existing [`Account`](../account.md).
 
 ### `imported_event_timestamp_must_postdate_debit_account`
 

@@ -417,7 +417,7 @@ necessary:
   The application must submit batches of imported events separately.
 
 - User-defined timestamps must be **unique** and expressed as nanoseconds since the UNIX epoch.
-  No two transfers can share the same timestamp.
+  No two objects can have the same timestamp, even different objects like an `Account` and a `Transfer` cannot share the same timestamp.
 
 - User-defined timestamps must be a past date, never ahead of the cluster clock at the time the
   request arrives.
@@ -449,15 +449,15 @@ necessary:
 ### `timestamp`
 
 This is the time the transfer was created, as nanoseconds since UNIX epoch.
-
-It is set by TigerBeetle to the moment the transfer arrives at the cluster.
-
 You can read more about [Time in TigerBeetle](../coding/time.md).
 
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
 - Must be `0` when the `Transfer` is created with [`flags.imported`](#flagsimported) _not_ set
+
+  It is set by TigerBeetle to the moment the transfer arrives at the cluster.
+
 - Must be greater than `0` and less than `2^63` when the `Transfer` is created with
   [`flags.imported`](#flagsimported) set
 

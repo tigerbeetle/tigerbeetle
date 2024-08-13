@@ -177,7 +177,7 @@ many applications should handle `exists` exactly as [`ok`](#ok).
 This result only applies when [Account.flags.imported](../account.md#flagsimported) is set.
 
 The account was not created. The user-defined [`Account.timestamp`](../account.md#timestamp)
-regressed, but it must be greater than the last timestamp assigned to any `Account` in the cluster.
+regressed, but it must be greater than the last timestamp assigned to any `Account` in the cluster and cannot be equal to the timestamp of any existing [`Transfer`](../transfer.md).
 
 ## Client libraries
 
