@@ -1835,7 +1835,7 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                return self.post_or_void_pending_transfer(t);
+                return self.post_or_void_pending_transfer(client_release, t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
@@ -2011,8 +2011,14 @@ pub fn StateMachineType(
                 cr_account_new.credits_posted += amount;
             }
 
-            if (amount != 0) {
+            if (amount == 0) {
+                assert(mem.eql(u8, std.mem.asBytes(dr_account), std.mem.asBytes(&dr_account_new)));
+                assert(mem.eql(u8, std.mem.asBytes(cr_account), std.mem.asBytes(&cr_account_new)));
+            } else {
                 assert(!forbid_zero_amounts(client_release));
+                assert(!mem.eql(u8, std.mem.asBytes(dr_account), std.mem.asBytes(&dr_account_new)));
+                assert(!mem.eql(u8, std.mem.asBytes(cr_account), std.mem.asBytes(&cr_account_new)));
+
                 self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
                 self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
             }
@@ -2089,6 +2095,7 @@ pub fn StateMachineType(
 
         fn post_or_void_pending_transfer(
             self: *StateMachine,
+            client_release: vsr.Release,
             t: *const Transfer,
         ) CreateTransferResult {
             assert(t.id != 0);
@@ -2119,7 +2126,7 @@ pub fn StateMachineType(
             assert(cr_account.id == p.credit_account_id);
             assert(p.timestamp > dr_account.timestamp);
             assert(p.timestamp > cr_account.timestamp);
-            assert(p.amount > 0);
+            if (forbid_zero_amounts(client_release)) assert(p.amount > 0);
 
             if (t.debit_account_id > 0 and t.debit_account_id != p.debit_account_id) {
                 return .pending_transfer_has_different_debit_account_id;
@@ -2134,14 +2141,31 @@ pub fn StateMachineType(
             }
             if (t.code > 0 and t.code != p.code) return .pending_transfer_has_different_code;
 
-            const amount = if (t.amount > 0) t.amount else p.amount;
-            if (amount > p.amount) return .exceeds_pending_transfer_amount;
+            const amount = amount: {
+                if (forbid_zero_amounts(client_release)) {
+                    break :amount if (t.amount > 0) t.amount else p.amount;
+                } else {
+                    if (t.flags.void_pending_transfer) {
+                        break :amount if (t.amount > 0) t.amount else p.amount;
+                    } else {
+                        break :amount @min(t.amount, p.amount);
+                    }
+                }
+            };
+
+            if (forbid_zero_amounts(client_release) or
+                t.flags.void_pending_transfer)
+            {
+                if (amount > p.amount) return .exceeds_pending_transfer_amount;
+            }
 
             if (t.flags.void_pending_transfer and amount < p.amount) {
                 return .pending_transfer_has_different_amount;
             }
 
-            if (self.get_transfer(t.id)) |e| return post_or_void_pending_transfer_exists(t, e, p);
+            if (self.get_transfer(t.id)) |e| {
+                return post_or_void_pending_transfer_exists(client_release, t, e, p);
+            }
 
             if (t.flags.imported) {
                 // Allows past timestamp, but validates whether it regressed from the last
@@ -2235,14 +2259,25 @@ pub fn StateMachineType(
             cr_account_new.credits_pending -= p.amount;
 
             if (t2.flags.post_pending_transfer) {
-                assert(amount > 0);
+                if (forbid_zero_amounts(client_release)) {
+                    assert(amount > 0);
+                }
                 assert(amount <= p.amount);
                 dr_account_new.debits_posted += amount;
                 cr_account_new.credits_posted += amount;
             }
 
-            self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
-            self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+            if (p.amount == 0 and amount == 0) {
+                assert(mem.eql(u8, std.mem.asBytes(dr_account), std.mem.asBytes(&dr_account_new)));
+                assert(mem.eql(u8, std.mem.asBytes(cr_account), std.mem.asBytes(&cr_account_new)));
+            } else {
+                assert(!forbid_zero_amounts(client_release));
+                assert(!mem.eql(u8, std.mem.asBytes(dr_account), std.mem.asBytes(&dr_account_new)));
+                assert(!mem.eql(u8, std.mem.asBytes(cr_account), std.mem.asBytes(&cr_account_new)));
+
+                self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+            }
 
             self.historical_balance(.{
                 .transfer = &t2,
@@ -2256,6 +2291,7 @@ pub fn StateMachineType(
         }
 
         fn post_or_void_pending_transfer_exists(
+            client_release: vsr.Release,
             t: *const Transfer,
             e: *const Transfer,
             p: *const Transfer,
@@ -2264,16 +2300,24 @@ pub fn StateMachineType(
             assert(t.id != p.id);
             assert(p.flags.pending);
             assert(t.pending_id == p.id);
+            assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
 
             // Do not assume that `e` is necessarily a posting or voiding transfer.
             if (@as(u16, @bitCast(t.flags)) != @as(u16, @bitCast(e.flags))) {
                 return .exists_with_different_flags;
             }
 
-            if (t.amount == 0) {
-                if (e.amount != p.amount) return .exists_with_different_amount;
+            if (forbid_zero_amounts(client_release) or
+                t.flags.void_pending_transfer)
+            {
+                if (t.amount == 0) {
+                    if (e.amount != p.amount) return .exists_with_different_amount;
+                } else {
+                    if (t.amount != e.amount) return .exists_with_different_amount;
+                }
             } else {
-                if (t.amount != e.amount) return .exists_with_different_amount;
+                assert(t.flags.post_pending_transfer);
+                if (@min(p.amount, t.amount) != e.amount) return .exists_with_different_amount;
             }
 
             // If `e` posted or voided a different pending transfer, then the accounts will differ.
@@ -2635,6 +2679,11 @@ pub fn StateMachineType(
 
 // TODO(client_release_min): When client_release_min is bumped, remove this function and the
 // legacy code it gates.
+//
+// Specifically, when forbid_zero_amounts() is true:
+// - Zero-amount transfers are forbidden (`amount_must_not_be_zero`).
+// - Post-pending-transfer uses amount=0 as a sentinel for "post full amount".
+// - Balancing transfers use amount=0 as a sentinel for `maxInt(u128)`.
 fn forbid_zero_amounts(client_release: vsr.Release) bool {
     const release_min_inclusive = vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
     const release_max_exclusive = vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 0 });
@@ -3716,11 +3765,12 @@ test "create/lookup 2-phase transfers" {
         \\ transfer   T4 A1 A2   15   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _  _ _ _ ok
         \\ transfer   T5 A1 A2    7   _ U9 U9 U9   50 L1 C1   _ PEN   _   _   _   _  _ _ _ ok
         \\ transfer   T6 A1 A2    1   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ _ ok
+        \\ transfer   T7 A1 A2    1   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ _ ok
         \\ commit create_transfers
 
         // Check balances before resolving.
-        \\ lookup_account A1 53 15  0  0
-        \\ lookup_account A2  0  0 53 15
+        \\ lookup_account A1 54 15  0  0
+        \\ lookup_account A2  0  0 54 15
         \\ commit lookup_accounts
 
         // Bump the state machine time in +1s for testing the timeout expiration.
@@ -3768,19 +3818,42 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T102 A1 A2   15  T4 U1 U1 U1    _ L1 C1   _   _   _ VOI   _   _  _ _ _ pending_transfer_expired
 
         // Transfers posted/voided with optional fields must not raise `exists_with_different_*`.
-        \\ transfer T105 A0 A0    _  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ ok
-        \\ transfer T105 A0 A0    _  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists
+        // But transfers posted with posted.amount≠pending.amount may return
+        // exists_with_different_amount.
+        \\ transfer T101 A0 A0   14  T2 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists_with_different_amount // t.amount > e.amount
+        \\ transfer T101 A0 A0   14  T2 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists_with_different_amount
+        \\ transfer T101 A0 A0   12  T2 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists_with_different_amount // t.amount < e.amount
+        \\
+        \\ transfer T105 A0 A0   -0  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ ok
         \\ transfer T105 A0 A0    7  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists
-        \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ ok
-        \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists
-        \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists
+        \\ transfer T105 A0 A0    7  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists // ledger/code = 0
+        \\ transfer T105 A0 A0    8  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists // t.amount > p.amount
+        \\ transfer T105 A0 A0    0  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists_with_different_amount // t.amount < e.amount
+        \\ transfer T105 A0 A0    0  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists_with_different_amount
+        \\ transfer T105 A0 A0    6  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists_with_different_amount
+        \\
+        \\ transfer T106 A0 A0    2  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ ok
         \\ transfer T106 A0 A0    1  T6 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists
+        \\ transfer T106 A0 A0    2  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists
+        \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists_with_different_amount
+        \\
+        \\ transfer T107 A0 A0    0  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ ok
+        \\ transfer T107 A0 A0    0  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists
+        \\ transfer T107 A0 A0    1  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists_with_different_amount // t.amount > e.amount
         \\ commit create_transfers
 
         // Check balances after resolving.
         \\ lookup_account A1  0 36  0  0
         \\ lookup_account A2  0  0  0 36
         \\ commit lookup_accounts
+
+        // The posted transfer amounts are set to the actual amount posted (which may be less than
+        // the "client" set as the amount).
+        \\ lookup_transfer T101 amount 13
+        \\ lookup_transfer T105 amount 7
+        \\ lookup_transfer T106 amount 1
+        \\ lookup_transfer T107 amount 0
+        \\ commit lookup_transfers
     );
 }
 
@@ -4154,7 +4227,7 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
         \\ lookup_account A2  0 10 10  0
         \\ commit lookup_accounts
         \\
-        \\ transfer   T4 A1 A2    0  T1  _  _  _    _ L1 C1   _   _ POS   _   _   _  _ _ _ ok
+        \\ transfer   T4 A1 A2    3  T1  _  _  _    _ L1 C1   _   _ POS   _   _   _  _ _ _ ok
         \\ transfer   T5 A1 A2    5  T2  _  _  _    _ L1 C1   _   _ POS   _   _   _  _ _ _ ok
         \\ commit create_transfers
         \\
@@ -4470,7 +4543,7 @@ test "get_account_balances: two-phase" {
         \\ commit create_accounts
         \\
         \\ transfer T1 A1 A2    1   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ _ ok
-        \\ transfer T2 A1 A2    _  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ _ ok
+        \\ transfer T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ _ ok
         \\ commit create_transfers
         \\
         \\ get_account_balances A1 _ _ 10 DR CR  _
