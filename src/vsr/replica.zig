@@ -8948,57 +8948,6 @@ pub fn ReplicaType(
             self.sync_dispatch(.awaiting_checkpoint);
         }
 
-        fn sync_requesting_checkpoint_callback(
-            self: *Self,
-            checkpoint_state: *const vsr.CheckpointState,
-        ) void {
-            assert(!self.solo());
-            assert(self.syncing == .requesting_checkpoint);
-            assert(!self.superblock.updating(.checkpoint));
-            assert(self.commit_stage == .idle);
-            assert(self.commit_prepare == null);
-            assert(self.sync_tables == null);
-            assert(self.grid.read_global_queue.empty());
-            assert(self.grid.write_queue.empty());
-            assert(self.grid_repair_tables.executing() == 0);
-            assert(self.grid_repair_writes.executing() == 0);
-            assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
-
-            if (self.status == .normal) assert(!self.primary());
-
-            const stage: *const SyncStage.RequestingCheckpoint =
-                &self.syncing.requesting_checkpoint;
-            assert(stage.target.checkpoint_id == vsr.checksum(std.mem.asBytes(checkpoint_state)));
-            assert(stage.target.view >= checkpoint_state.header.view);
-
-            log.debug("{[replica]}: sync_requesting_checkpoint_callback: " ++
-                "checkpoint_op={[checkpoint_op]} checkpoint_id={[checkpoint_id]x:0>32} " ++
-                "release={[release]} " ++
-                "manifest_oldest_checksum={[manifest_oldest_checksum]} " ++
-                "manifest_oldest_address={[manifest_oldest_address]} " ++
-                "manifest_newest_checksum={[manifest_newest_checksum]} " ++
-                "manifest_newest_address={[manifest_newest_address]} ", .{
-                .replica = self.replica,
-                .checkpoint_op = stage.target.checkpoint_op,
-                .checkpoint_id = stage.target.checkpoint_id,
-                .release = checkpoint_state.release,
-                .manifest_oldest_checksum = checkpoint_state.manifest_oldest_checksum,
-                .manifest_oldest_address = checkpoint_state.manifest_oldest_address,
-                .manifest_newest_checksum = checkpoint_state.manifest_newest_checksum,
-                .manifest_newest_address = checkpoint_state.manifest_newest_address,
-            });
-
-            // Faulty bits will be set in sync_content().
-            while (self.client_replies.faulty.findFirstSet()) |slot| {
-                self.client_replies.faulty.unset(slot);
-            }
-
-            self.sync_dispatch(.{ .updating_superblock = .{
-                .target = stage.target,
-                .checkpoint_state = checkpoint_state.*,
-            } });
-        }
-
         fn sync_superblock_update_start(self: *Self) void {
             assert(!self.solo());
             assert(self.syncing == .updating_superblock);
@@ -9021,6 +8970,11 @@ pub fn ReplicaType(
             self.grid.free_set_checkpoint.reset();
             self.client_sessions_checkpoint.reset();
             self.client_sessions.reset();
+
+            // Faulty bits will be set in sync_content().
+            while (self.client_replies.faulty.findFirstSet()) |slot| {
+                self.client_replies.faulty.unset(slot);
+            }
         }
 
         fn sync_superblock_update_finish(self: *Self) void {
@@ -9617,27 +9571,6 @@ pub fn ReplicaType(
             message.header.set_checksum();
 
             self.send_message_to_replica(self.choose_any_other_replica(), message);
-        }
-
-        fn send_request_sync_checkpoint(self: *Self) void {
-            assert(!self.solo());
-            assert(self.syncing == .requesting_checkpoint);
-            assert(self.sync_message_timeout.ticking);
-
-            const stage: *const SyncStage.RequestingCheckpoint =
-                &self.syncing.requesting_checkpoint;
-
-            self.send_header_to_replica(
-                self.choose_any_other_replica(),
-                @bitCast(Header.RequestSyncCheckpoint{
-                    .command = .request_sync_checkpoint,
-                    .cluster = self.cluster,
-                    .replica = self.replica,
-                    .size = @sizeOf(Header),
-                    .checkpoint_id = stage.target.checkpoint_id,
-                    .checkpoint_op = stage.target.checkpoint_op,
-                }),
-            );
         }
 
         fn send_sync_checkpoint(self: *Self, parameters: struct { replica: u8 }) void {
