@@ -178,7 +178,7 @@ fn tidy_control_characters(file: SourceFile) ?u8 {
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 441; // build in build.zig
+const function_line_count_max = 377; // release.zig
 
 fn tidy_long_functions(
     file: SourceFile,
