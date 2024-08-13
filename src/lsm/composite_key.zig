@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 
 const stdx = @import("../stdx.zig");
+const constants = @import("../constants.zig");
 
 pub fn CompositeKeyType(comptime Field: type) type {
     // The type if zeroed padding is needed.
@@ -44,7 +45,7 @@ pub fn CompositeKeyType(comptime Field: type) type {
         }
 
         pub inline fn key_from_value(value: *const CompositeKey) Key {
-            assert(value.padding == 0);
+            if (constants.verify) assert(value.padding == 0);
             return @as(Key, value.timestamp & ~tombstone_bit) | (@as(Key, value.field) << 64);
         }
 
@@ -53,7 +54,7 @@ pub fn CompositeKeyType(comptime Field: type) type {
         }
 
         pub inline fn tombstone(value: *const CompositeKey) bool {
-            assert(value.padding == 0);
+            if (constants.verify) assert(value.padding == 0);
             return (value.timestamp & tombstone_bit) != 0;
         }
 
