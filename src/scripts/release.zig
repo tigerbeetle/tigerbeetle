@@ -1151,12 +1151,40 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             1024 * 1024,
         );
 
+        const oldest_included_release = blk: {
+            shell.project_root.deleteFile("tigerbeetle") catch {};
+            defer shell.project_root.deleteFile("tigerbeetle") catch {};
+
+            try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+            const past_binary = try shell.cwd
+                .openFile("tigerbeetle", .{ .mode = .read_only });
+            defer past_binary.close();
+
+            const past_binary_contents = try past_binary.readToEndAllocOptions(
+                shell.arena.allocator(),
+                multiversion_binary_size_max,
+                null,
+                8,
+                null,
+            );
+
+            const parsed_offsets = try multiversioning.parse_elf(past_binary_contents);
+            const header_bytes = past_binary_contents[parsed_offsets.header_offset..][0..@sizeOf(
+                multiversioning.MultiversionHeader,
+            )];
+
+            const header = try multiversioning.MultiversionHeader.init_from_bytes(header_bytes);
+
+            break :blk multiversioning.Release{ .value = header.past.releases[0] };
+        };
+
         const notes = try shell.fmt(
-            \\{[release_triple]s}
+            \\# {[release_triple]s}
             \\
-            \\**NOTE**: You must run the same version of server and client. We do
-            \\not yet follow semantic versioning where all patch releases are
-            \\interchangeable.
+            \\### Supported upgrade versions
+            \\
+            \\Oldest supported client version: {[release_triple_client_min]s}
+            \\Oldest upgradable replica version: {[oldest_included_release]s}
             \\
             \\## Server
             \\
@@ -1181,6 +1209,8 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             \\{[changelog]s}
         , .{
             .release_triple = info.release_triple,
+            .release_triple_client_min = info.release_triple_client_min,
+            .oldest_included_release = oldest_included_release,
             .changelog = latest_changelog_entry(full_changelog),
         });
 
