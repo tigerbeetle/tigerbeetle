@@ -20,10 +20,10 @@ Given a set of accounts:
 
 The "closing entries" for accounts `A` and `B` are:
 
-| Debit Account   | Credit Account | Amount  | Amount (recorded) | Flags              | Notes               |
-| --------------: | -------------: | ------: | ----------------: | ------------------ | ------------------- |
-|             `A` |            `C` | `0`     |                10 | `balancing_debit`  | (close account `A`) |
-|             `C` |            `B` | `0`     |                25 | `balancing_credit` | (close account `B`) |
+| Debit Account   | Credit Account | Amount       | Amount (recorded) | Flags              | Notes               |
+| --------------: | -------------: | -----------: | ----------------: | ------------------ | ------------------- |
+|             `A` |            `C` | `AMOUNT_MAX` |                10 | `balancing_debit`  | (close account `A`) |
+|             `C` |            `B` | `AMOUNT_MAX` |                25 | `balancing_credit` | (close account `B`) |
 
 (Pass `0` as the `Transfer.amount` so that the application does not need to know (or query) the balance prior to closing the account.
 The stored transfer's `amount` will be set to the actual (non-zero) amount transferred.)

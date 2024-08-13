@@ -50,7 +50,7 @@ Fields used by each mode of transfer:
 | `id`                          | required     | required | required     | required     |
 | `debit_account_id`            | required     | required | optional     | optional     |
 | `credit_account_id`           | required     | required | optional     | optional     |
-| `amount`                      | required     | required | optional     | optional     |
+| `amount`                      | required     | required | required     | optional     |
 | `pending_id`                  | none         | none     | required     | required     |
 | `user_data_128`               | optional     | optional | optional     | optional     |
 | `user_data_64`                | optional     | optional | optional     | optional     |
@@ -142,13 +142,12 @@ negative balances as well as
   where the actual transfer amount is determined by the debit account's constraints.
 - When `flags.balancing_credit` is set, this is the maximum amount that will be debited/credited,
   where the actual transfer amount is determined by the credit account's constraints.
+- When `flags.post_pending_transfer` is set, the amount posted will be
+  `min(posting_transfer.amount, pending_transfer.amount)`.
 
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes)
-- When `flags.post_pending_transfer` is set:
-  - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
-  - If `amount` is nonzero, it must be less than or equal to the pending transfer's `amount`.
 - When `flags.void_pending_transfer` is set:
   - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
   - If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
@@ -156,6 +155,11 @@ Constraints:
 <details>
 <summary>Client release < 0.16.0</summary>
 
+Additional constraints:
+
+- When `flags.post_pending_transfer` is set:
+  - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
+  - If `amount` is nonzero, it must be less than or equal to the pending transfer's `amount`.
 - When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero, it will
   automatically be set to the maximum amount that does not violate the corresponding account limits.
   (Equivalent to setting `amount = 2^128 - 1`).
