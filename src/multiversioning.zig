@@ -941,7 +941,7 @@ pub const Multiversion = struct {
             MultiversionHeader,
         )];
         const header = try MultiversionHeader.init_from_bytes(source_buffer_header);
-        var header_inactive_platform: ?MultiversionHeader = undefined;
+        var header_inactive_platform: ?MultiversionHeader = null;
 
         // MachO's checksum_binary_without_header works slightly differently since there are
         // actually two headers, once for x86_64 and one for aarch64. It zeros them both.
@@ -1293,7 +1293,9 @@ const HeaderBodyOffsets = struct {
     header_offset: u32,
     header_offset_inactive_platform: ?u32 = null,
     body_offset: u32,
+    body_offset_inactive_platform: ?u32 = null,
     body_size: u32,
+    body_size_inactive_platform: ?u32 = null,
     format: enum { elf, pe, macho },
 };
 
@@ -1440,7 +1442,9 @@ pub fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
     var header_offset: ?u32 = null;
     var header_offset_inactive_platform: ?u32 = null;
     var body_offset: ?u32 = null;
+    var body_offset_inactive_platform: ?u32 = null;
     var body_size: ?u32 = null;
+    var body_size_inactive_platform: ?u32 = null;
     for (0..6) |i| {
         const offset = @sizeOf(std.macho.fat_header) + @sizeOf(std.macho.fat_arch) * i;
         if (offset + @sizeOf(std.macho.fat_arch) > buffer.len) return error.InvalidMacho;
@@ -1458,6 +1462,12 @@ pub fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
             } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64)) {
                 assert(header_offset == null);
                 header_offset = @byteSwap(fat_arch.offset);
+            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64)) {
+                // .tb_mvb for _x86_64_ - the opposite of what we're matching on above.
+                assert(body_offset_inactive_platform == null and
+                    body_size_inactive_platform == null);
+                body_offset_inactive_platform = @byteSwap(fat_arch.offset);
+                body_size_inactive_platform = @byteSwap(fat_arch.size);
             } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64)) {
                 // .tb_mvh for _x86_64_ - the opposite of what we're matching on above.
                 assert(header_offset_inactive_platform == null);
@@ -1473,6 +1483,12 @@ pub fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
             } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64)) {
                 assert(header_offset == null);
                 header_offset = @byteSwap(fat_arch.offset);
+            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64)) {
+                // .tb_mvb for _aarch64_ - the opposite of what we're matching on.
+                assert(body_offset_inactive_platform == null and
+                    body_size_inactive_platform == null);
+                body_offset_inactive_platform = @byteSwap(fat_arch.offset);
+                body_size_inactive_platform = @byteSwap(fat_arch.size);
             } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64)) {
                 // .tb_mvh for _aarch64_ - the opposite of what we're matching on.
                 assert(header_offset_inactive_platform == null);
@@ -1485,7 +1501,17 @@ pub fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
         return error.MultiversionHeaderOrBodyNotFound;
     }
 
+    if (header_offset_inactive_platform == null or body_offset_inactive_platform == null) {
+        return error.MultiversionHeaderOrBodyNotFound;
+    }
+
     if (body_offset.? + body_size.? > header_offset.?) {
+        return error.MultiversionBodyOverlapsHeader;
+    }
+
+    if (body_offset_inactive_platform.? + body_size_inactive_platform.? >
+        header_offset_inactive_platform.?)
+    {
         return error.MultiversionBodyOverlapsHeader;
     }
 
@@ -1493,7 +1519,9 @@ pub fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
         .header_offset = header_offset.?,
         .header_offset_inactive_platform = header_offset_inactive_platform.?,
         .body_offset = body_offset.?,
+        .body_offset_inactive_platform = body_offset_inactive_platform.?,
         .body_size = body_size.?,
+        .body_size_inactive_platform = body_size_inactive_platform.?,
         .format = .macho,
     };
 }
