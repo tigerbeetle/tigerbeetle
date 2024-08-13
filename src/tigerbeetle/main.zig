@@ -350,7 +350,7 @@ const Command = struct {
             .release_client_min = config.process.release_client_min,
             .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
-            .multiversion = if (multiversion) |*multiversion_| multiversion_ else null,
+            .release_execute_context = if (multiversion) |*pointer| pointer else null,
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
@@ -504,10 +504,12 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != replica.release.value);
     assert(release.value != vsr.Release.zero.value);
     assert(release.value != vsr.Release.minimum.value);
-
-    const multiversion = replica.multiversion orelse {
+    const release_execute_context = replica.release_execute_context orelse {
         @panic("replica_release_execute unsupported");
     };
+
+    const multiversion: *vsr.multiversioning.Multiversion =
+        @ptrCast(@alignCast(release_execute_context));
 
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
