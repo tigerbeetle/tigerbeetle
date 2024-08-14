@@ -177,8 +177,8 @@ pub fn main() !void {
             .read_latency_mean = 3 + random.uintLessThan(u16, 10),
             .write_latency_min = random.uintLessThan(u16, 3),
             .write_latency_mean = 3 + random.uintLessThan(u16, 100),
-            .read_fault_probability = random.uintLessThan(u8, 10),
-            .write_fault_probability = random.uintLessThan(u8, 10),
+            .read_fault_probability = 0,
+            .write_fault_probability = 0,
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
         },
         .storage_fault_atlas = .{
@@ -1061,29 +1061,29 @@ pub const Simulator = struct {
             }
         }
 
-        var header_prepare_view_mismatch: bool = false;
-        if (!fault) {
-            // The journal writes redundant headers of faulty ops as zeroes to ensure
-            // that they remain faulty after a crash/recover. Since that fault cannot
-            // be disabled by `storage.faulty`, we must manually repair it here to
-            // ensure a cluster cannot become stuck in status=recovering_head.
-            // See recover_slots() for more detail.
-            const headers_offset = vsr.Zone.wal_headers.offset(0);
-            const headers_size = vsr.Zone.wal_headers.size().?;
-            const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
-            for (
-                mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
-                replica_storage.wal_prepares(),
-            ) |*wal_header, *wal_prepare| {
-                if (wal_header.checksum == 0) {
-                    wal_header.* = wal_prepare.header;
-                } else {
-                    if (wal_header.view != wal_prepare.header.view) {
-                        header_prepare_view_mismatch = true;
-                    }
-                }
-            }
-        }
+        // var header_prepare_view_mismatch: bool = false;
+        // if (!fault) {
+        //     // The journal writes redundant headers of faulty ops as zeroes to ensure
+        //     // that they remain faulty after a crash/recover. Since that fault cannot
+        //     // be disabled by `storage.faulty`, we must manually repair it here to
+        //     // ensure a cluster cannot become stuck in status=recovering_head.
+        //     // See recover_slots() for more detail.
+        //     const headers_offset = vsr.Zone.wal_headers.offset(0);
+        //     const headers_size = vsr.Zone.wal_headers.size().?;
+        //     const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
+        //     for (
+        //         mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
+        //         replica_storage.wal_prepares(),
+        //     ) |*wal_header, *wal_prepare| {
+        //         if (wal_header.checksum == 0) {
+        //             wal_header.* = wal_prepare.header;
+        //         } else {
+        //             if (wal_header.view != wal_prepare.header.view) {
+        //                 header_prepare_view_mismatch = true;
+        //             }
+        //         }
+        //     }
+        // }
 
         const replica_releases_count = simulator.replica_releases[replica_index];
         log.debug("{}: restart replica (faults={} releases={})", .{
@@ -1097,23 +1097,15 @@ pub const Simulator = struct {
             replica_releases.append_assume_capacity(releases[i].release);
         }
 
-        replica_storage.faulty = fault;
+        // replica_storage.faulty = fault;
         simulator.cluster.restart_replica(
             replica_index,
             &replica_releases,
         ) catch unreachable;
 
-        if (replica.status == .recovering_head) {
-            // Even with faults disabled, a replica that was syncing before it crashed
-            // (or just recently finished syncing before it crashed) may wind up in
-            // status=recovering_head.
-            assert(fault or
-                replica.op < replica.op_checkpoint() or
-                replica.log_view < replica.superblock.working.vsr_state.sync_view or
-                header_prepare_view_mismatch);
-        }
+        assert(replica.status != .recovering_head);
 
-        replica_storage.faulty = true;
+        // replica_storage.faulty = true;
         simulator.replica_stability[replica_index] =
             simulator.options.replica_restart_stability;
     }

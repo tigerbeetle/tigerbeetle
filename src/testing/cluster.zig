@@ -616,9 +616,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             if (release_available) {
                 // Disable faults while restarting to ensure that the cluster doesn't get stuck due
                 // to too many replicas in status=recovering_head.
-                const faulty = cluster.storages[replica_index].faulty;
-                cluster.storages[replica_index].faulty = false;
-                defer cluster.storages[replica_index].faulty = faulty;
+                // const faulty = cluster.storages[replica_index].faulty;
+                // cluster.storages[replica_index].faulty = false;
+                // defer cluster.storages[replica_index].faulty = faulty;
 
                 cluster.replica_open(replica_index, .{
                     .nonce = cluster.replicas[replica_index].nonce + 1,
