@@ -124,6 +124,8 @@ using (var client = new Client(clusterID, addresses))
     // section:transfer-flags-post
     transfers = new Transfer[] { new Transfer {
         Id = 2,
+        // Post the entire pending amount.
+        Amount = Transfer.AmountMax,
         PendingId = 1,
         Flags = TransferFlags.PostPendingTransfer,
     }};

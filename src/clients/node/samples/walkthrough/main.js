@@ -10,6 +10,7 @@ const {
   CreateTransferError,
   CreateAccountError,
   AccountFilterFlags,
+  amount_max,
 } = require("tigerbeetle-node");
 
 async function main() {
@@ -270,7 +271,8 @@ async function main() {
     id: 5n,
     debit_account_id: 102n,
     credit_account_id: 103n,
-    amount: 10n,
+    // Post the entire pending amount.
+    amount: amount_max,
     pending_id: 4n,
     user_data_128: 0n,
     user_data_64: 0n,

@@ -417,6 +417,8 @@ transfers = new TransferBatch(1);
 transfers.add();
 // Code to fill out fields for first transfer
 transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
+// Post the entire pending amount.
+transfers.setAmount(TransferBatch.getAmountMax());
 transferErrors = client.createTransfers(transfers);
 ```
 
