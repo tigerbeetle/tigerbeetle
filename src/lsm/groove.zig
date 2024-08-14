@@ -947,12 +947,12 @@ pub fn GrooveType(
             destin: ?PrefetchDestin = null,
 
             fn lookup_start_next(worker: *PrefetchWorker) void {
+                assert(worker.destin == null);
                 const prefetch_entry = worker.context.key_iterator.next() orelse {
                     worker.context.worker_finished();
                     return;
                 };
 
-                assert(worker.destin == null);
                 worker.destin = prefetch_entry.value_ptr.destin;
 
                 // prefetch_enqueue() ensures that the tree's cache is checked before queueing the
@@ -988,6 +988,7 @@ pub fn GrooveType(
             ) void {
                 const worker = LookupContext.parent(.id, completion);
                 worker.lookup = undefined;
+                assert(worker.destin != null);
 
                 if (result) |id_tree_value| {
                     if (!id_tree_value.tombstone()) {
@@ -996,10 +997,13 @@ pub fn GrooveType(
                     }
                 }
 
+                worker.destin = null;
                 worker.lookup_start_next();
             }
 
             fn lookup_by_timestamp(worker: *PrefetchWorker, timestamp: u64) void {
+                assert(worker.destin != null);
+
                 switch (worker.context.groove.objects.lookup_from_levels_cache(
                     worker.context.snapshot,
                     timestamp,
