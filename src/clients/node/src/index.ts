@@ -73,6 +73,8 @@ export type Event = Account | Transfer | AccountID | TransferID | AccountFilter 
 export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer | AccountBalance
 export type ResultCallback = (error: Error | null, results: Result[] | null) => void
 
+export const amount_max: bigint = 340282366920938463463374607431768211455n // 2**128 - 1
+
 interface BindingInitArgs {
   cluster_id: bigint, // u128
   replica_addresses: Buffer,

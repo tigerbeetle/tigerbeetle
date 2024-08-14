@@ -219,6 +219,7 @@ public struct Transfer
 {
     public const int SIZE = 128;
 
+    public static UInt128 AmountMax => UInt128.MaxValue;
     private UInt128 id;
 
     private UInt128 debitAccountId;

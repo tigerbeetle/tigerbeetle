@@ -40,6 +40,11 @@ import (
 
 ///////////////////////////////////////////////////////////////
 
+var AmountMax = types.BytesToUint128([16]byte{
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+})
+
 type Client interface {
 	CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
 	CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
