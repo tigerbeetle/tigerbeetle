@@ -2870,8 +2870,15 @@ pub fn ReplicaType(
         fn grid_repair_block_callback(grid_write: *Grid.Write) void {
             const write: *BlockWrite = @fieldParentPtr("write", grid_write);
             const self = write.replica;
-            defer self.grid_repair_writes.release(write);
-
+            defer {
+                self.grid_repair_writes.release(write);
+                // Proactively send another request_blocks request if there are enough write IOPs.
+                if (self.grid.callback != .cancel and
+                    self.grid_repair_writes.available() >= constants.grid_repair_request_max)
+                {
+                    self.send_request_blocks();
+                }
+            }
             log.debug("{}: on_block: repair done address={}", .{
                 self.replica,
                 grid_write.address,
