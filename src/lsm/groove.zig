@@ -435,13 +435,14 @@ pub fn GrooveType(
             self.map.clearRetainingCapacity();
         }
 
-        fn get_or_put(self: *TimestampSet, timestamp: u64) bool {
+        /// Includes the timestamp into the set, so it can be checked later by `exists`.
+        /// Returns `true` if it was included, or `false` if it was a duplicated entry.
+        fn enroll(self: *TimestampSet, timestamp: u64) bool {
             const gop = self.map.getOrPutAssumeCapacity(timestamp);
-            if (!gop.found_existing) {
-                gop.value_ptr.* = false;
-            }
+            if (gop.found_existing) return false;
 
-            return gop.value_ptr.*;
+            gop.value_ptr.* = false;
+            return true;
         }
 
         fn found(self: *TimestampSet, timestamp: u64) void {
@@ -721,6 +722,9 @@ pub fn GrooveType(
         /// We tolerate duplicate IDs enqueued by the state machine.
         /// For example, if all unique operations require the same two dependencies.
         pub fn prefetch_enqueue(groove: *Groove, key: PrimaryKey) void {
+            // No need to check again if the key is already present.
+            if (groove.prefetch_keys.contains(.{ .id = key })) return;
+
             if (has_id) {
                 if (!groove.ids.key_range_contains(groove.prefetch_snapshot.?, key)) return;
 
@@ -742,27 +746,28 @@ pub fn GrooveType(
             groove: *Groove,
             timestamp: u64,
         ) void {
-            if (!groove.timestamps.get_or_put(timestamp)) {
-                if (has_id) {
-                    // The mutable table needs to be sorted in order to find by timestamp.
-                    groove.objects.table_mutable.sort();
-                    if (groove.objects.table_mutable.get(timestamp) orelse
-                        groove.objects.table_immutable.get(timestamp)) |object|
-                    {
-                        assert(object.timestamp == timestamp);
-                        groove.timestamps.found(timestamp);
-                        return;
-                    }
-                } else {
-                    if (groove.objects_cache.get(timestamp)) |object| {
-                        assert(object.timestamp == timestamp);
-                        groove.timestamps.found(timestamp);
-                        return;
-                    }
-                }
+            // No need to check again if the timestamp is already present.
+            if (!groove.timestamps.enroll(timestamp)) return;
 
-                groove.prefetch_from_memory_by_timestamp(timestamp, .timestamps);
+            if (has_id) {
+                // The mutable table needs to be sorted in order to find by timestamp.
+                groove.objects.table_mutable.sort();
+                if (groove.objects.table_mutable.get(timestamp) orelse
+                    groove.objects.table_immutable.get(timestamp)) |object|
+                {
+                    assert(object.timestamp == timestamp);
+                    groove.timestamps.found(timestamp);
+                    return;
+                }
+            } else {
+                if (groove.objects_cache.get(timestamp)) |object| {
+                    assert(object.timestamp == timestamp);
+                    groove.timestamps.found(timestamp);
+                    return;
+                }
             }
+
+            groove.prefetch_from_memory_by_timestamp(timestamp, .timestamps);
         }
 
         /// This function attempts to prefetch a value for the given id from the IdTree's
