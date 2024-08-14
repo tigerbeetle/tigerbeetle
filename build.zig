@@ -6,6 +6,9 @@ const Mode = std.builtin.Mode;
 
 const config = @import("./src/config.zig");
 
+const VoprStateMachine = enum { testing, accounting };
+const VoprLog = enum { short, full };
+
 // TigerBeetle binary requires certain CPU feature and supports a closed set of CPUs. Here, we
 // specify exactly which features the binary needs.
 fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.ResolvedTarget {
@@ -103,12 +106,12 @@ pub fn build(b: *std.Build) !void {
             "Log hashes (used for debugging non-deterministic executions).",
         ) orelse .none,
         .vopr_state_machine = b.option(
-            enum { testing, accounting },
+            VoprStateMachine,
             "vopr-state-machine",
             "State machine.",
         ) orelse .accounting,
         .vopr_log = b.option(
-            enum { full, short },
+            VoprLog,
             "vopr-log",
             "Log only state transitions (short) or everything (full).",
         ) orelse .short,
@@ -137,105 +140,11 @@ pub fn build(b: *std.Build) !void {
     vsr_options.addOption(bool, "config_aof_recovery", build_options.config_aof_recovery);
     vsr_options.addOption(config.HashLogMode, "hash_log_mode", build_options.hash_log_mode);
 
-    const vsr_module: *std.Build.Module = vsr: {
-        const module = b.addModule("vsr", .{
-            .root_source_file = b.path("src/vsr.zig"),
-        });
-        module.addOptions("vsr_options", vsr_options);
-
-        switch (build_options.tracer_backend) {
-            .none => {},
-            .tracy => {
-                // Code here is based on
-                // https://github.com/ziglang/zig/blob/a660df4900520c505a0865707552dcc777f4b791/build.zig#L382
-
-                // On mingw, we need to opt into windows 7+ to get some features required by tracy.
-                const tracy_c_flags: []const []const u8 = if (target.result.isMinGW())
-                    &[_][]const u8{
-                        "-DTRACY_ENABLE=1",
-                        "-DTRACY_FIBERS=1",
-                        "-fno-sanitize=undefined",
-                        "-D_WIN32_WINNT=0x601",
-                    }
-                else
-                    &[_][]const u8{
-                        "-DTRACY_ENABLE=1",
-                        "-DTRACY_FIBERS=1",
-                        "-fno-sanitize=undefined",
-                    };
-
-                const tracy = b.addSystemCommand(&.{
-                    "git",
-                    "clone",
-                    "--branch=v0.9.1",
-                    "https://github.com/wolfpld/tracy.git",
-                }).addOutputDirectoryArg("tracy");
-
-                module.addCSourceFile(.{
-                    .file = tracy.path(b, "./public/TracyClient.cpp"),
-                    .flags = tracy_c_flags,
-                });
-                module.addIncludePath(tracy.path(b, "./public/tracy"));
-                module.link_libc = true;
-                module.link_libcpp = true;
-
-                if (target.result.os.tag == .windows) {
-                    module.linkSystemLibrary("dbghelp", .{});
-                    module.linkSystemLibrary("ws2_32", .{});
-                }
-            },
-        }
-        break :vsr module;
-    };
-
-    { // zig build check
-
-        // Run a tigerbeetle build without running codegen and waiting for llvm
-        // see <https://github.com/ziglang/zig/commit/5c0181841081170a118d8e50af2a09f5006f59e1>
-        // how it's supposed to work.
-        // In short, codegen only runs if zig build sees a dependency on the binary output of
-        // the step. So we duplicate the build definition so that it doesn't get polluted by
-        // b.installArtifact.
-        // TODO(zig): https://github.com/ziglang/zig/issues/18877
-        const tigerbeetle = b.addExecutable(.{
-            .name = "tigerbeetle",
-            .root_source_file = b.path("src/tigerbeetle/main.zig"),
-            .target = target,
-            .optimize = mode,
-        });
-        tigerbeetle.root_module.addImport("vsr", vsr_module);
-        build_steps.check.dependOn(&tigerbeetle.step);
-    }
-
-    { // zig build
-        const tigerbeetle = b.addExecutable(.{
-            .name = "tigerbeetle",
-            .root_source_file = b.path("src/tigerbeetle/main.zig"),
-            .target = target,
-            .optimize = mode,
-        });
-        tigerbeetle.root_module.addImport("vsr", vsr_module);
-        tigerbeetle.root_module.addOptions("vsr_options", vsr_options);
-        if (mode == .ReleaseSafe) {
-            tigerbeetle.root_module.strip = build_options.tracer_backend == .none;
-        }
-        // Ensure that we get stack traces even in release builds.
-        tigerbeetle.root_module.omit_frame_pointer = false;
-        if (build_options.emit_llvm_ir) {
-            _ = tigerbeetle.getEmittedLlvmIr();
-        }
-
-        b.installArtifact(tigerbeetle);
-        // "zig build install" moves the server executable to the root folder:
-        b.getInstallStep().dependOn(&b.addInstallFile(
-            tigerbeetle.getEmittedBin(),
-            b.pathJoin(&.{ "../", tigerbeetle.out_filename }),
-        ).step);
-
-        const run_cmd = b.addRunArtifact(tigerbeetle);
-        if (b.args) |args| run_cmd.addArgs(args);
-        build_steps.run.dependOn(&run_cmd.step);
-    }
+    const vsr_module: *std.Build.Module = build_vsr_module(b, .{
+        .vsr_options = vsr_options,
+        .target = target,
+        .tracer_backend = build_options.tracer_backend,
+    });
 
     const tb_client_header = blk: {
         const tb_client_header_generator = b.addExecutable(.{
@@ -251,235 +160,483 @@ pub fn build(b: *std.Build) !void {
         });
     };
 
-    { // zig build aof
-        const aof = b.addExecutable(.{
-            .name = "aof",
-            .root_source_file = b.path("src/aof.zig"),
-            .target = target,
-            .optimize = mode,
-        });
-        aof.root_module.addOptions("vsr_options", vsr_options);
-        const run_cmd = b.addRunArtifact(aof);
-        if (b.args) |args| run_cmd.addArgs(args);
-        build_steps.aof.dependOn(&run_cmd.step);
-    }
+    // zig build check
+    build_check(b, build_steps.check, .{
+        .vsr_module = vsr_module,
+        .target = target,
+        .mode = mode,
+    });
 
-    { // zig build test -- "test filter"
-        const unit_tests = b.addTest(.{
-            .root_source_file = b.path("src/unit_tests.zig"),
-            .target = target,
-            .optimize = mode,
-            .filters = b.args orelse &.{},
-        });
-        unit_tests.root_module.addOptions("vsr_options", vsr_options);
-        // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
-        unit_tests.linkLibC();
-        unit_tests.addIncludePath(tb_client_header.path.dirname());
+    // zig build, zig build run
+    build_tigerbeetle(b, .{
+        .run = build_steps.run,
+        .install = b.getInstallStep(),
+    }, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .target = target,
+        .mode = mode,
+        .emit_llvm_ir = build_options.emit_llvm_ir,
+        .tracer_backend = build_options.tracer_backend,
+    });
 
-        build_steps.test_unit_build.dependOn(&b.addInstallArtifact(unit_tests, .{}).step);
+    // zig build aof
+    build_aof(b, build_steps.aof, .{
+        .vsr_options = vsr_options,
+        .target = target,
+        .mode = mode,
+    });
 
-        const run_unit_tests = b.addRunArtifact(unit_tests);
-        run_unit_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
-        if (b.args != null) { // Don't cache test results if running a specific test.
-            run_unit_tests.has_side_effects = true;
-        }
-        build_steps.test_unit.dependOn(&run_unit_tests.step);
+    // zig build test -- "test filter"
+    build_test(b, .{
+        .test_unit_build = build_steps.test_unit_build,
+        .test_unit = build_steps.test_unit,
+        .test_integration = build_steps.test_integration,
+        .test_fmt = build_steps.test_fmt,
+        .@"test" = build_steps.@"test",
+    }, .{
+        .vsr_options = vsr_options,
+        .tb_client_header = tb_client_header,
+        .target = target,
+        .mode = mode,
+    });
 
-        const integration_tests = b.addTest(.{
-            .root_source_file = b.path("src/integration_tests.zig"),
-            .target = target,
-            .optimize = mode,
-            .filters = b.args orelse &.{},
-        });
-        const run_integration_tests = b.addRunArtifact(integration_tests);
-        if (b.args != null) { // Don't cache test results if running a specific test.
-            run_integration_tests.has_side_effects = true;
-        }
-        // Ensure integration test have tigerbeetle binary.
-        run_integration_tests.step.dependOn(b.getInstallStep());
-        build_steps.test_integration.dependOn(&run_integration_tests.step);
+    // zig build test:jni
+    try build_test_jni(b, build_steps.test_jni, .{
+        .target = target,
+        .mode = mode,
+    });
 
-        const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
-        build_steps.test_fmt.dependOn(&run_fmt.step);
+    // zig build vopr -- 42
+    build_vopr(b, .{
+        .vopr_build = build_steps.vopr_build,
+        .vopr_run = build_steps.vopr,
+    }, .{
+        .vsr_options = vsr_options,
+        .target = target,
+        .mode = mode,
+        .vopr_state_machine = build_options.vopr_state_machine,
+        .vopr_log = build_options.vopr_log,
+    });
 
-        build_steps.@"test".dependOn(&run_unit_tests.step);
-        if (b.args == null) {
-            build_steps.@"test".dependOn(&run_integration_tests.step);
-            build_steps.@"test".dependOn(&run_fmt.step);
-        }
-    }
+    // zig build fuzz -- --events-max=100 lsm_tree 123
+    build_fuzz(b, .{
+        .fuzz = build_steps.fuzz,
+        .fuzz_build = build_steps.fuzz_build,
+    }, .{
+        .vsr_options = vsr_options,
+        .target = target,
+        .mode = mode,
+    });
 
-    { // zig build test:jni
+    // zig build scripts -- ci --language=java
+    build_scripts(b, build_steps.scripts, .{
+        .vsr_options = vsr_options,
+        .target = target,
+        .mode = mode,
+    });
 
-        // JNI test require JVM to be present, and are _not_ run as a part of `zig build test`.
-        // We need libjvm.so both at build time and at a runtime, so use `FailStep` when that is not
-        // available.
-        if (b.graph.env_map.get("JAVA_HOME")) |java_home| {
-            const libjvm_path = b.pathJoin(&.{
-                java_home,
-                if (builtin.os.tag == .windows) "/lib" else "/lib/server",
-            });
+    // zig build client:$lang
+    build_go_client(b, build_steps.clients_go, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .tb_client_header = tb_client_header.path,
+        .mode = mode,
+    });
+    build_java_client(b, build_steps.clients_java, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .mode = mode,
+    });
+    build_dotnet_client(b, build_steps.clients_dotnet, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .mode = mode,
+    });
+    build_node_client(b, build_steps.clients_node, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .mode = mode,
+    });
+    build_c_client(b, build_steps.clients_c, .{
+        .vsr_options = vsr_options,
+        .tb_client_header = tb_client_header,
+        .mode = mode,
+    });
 
-            const tests = b.addTest(.{
-                .root_source_file = b.path("src/clients/java/src/jni_tests.zig"),
-                .target = target,
-                // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
-                // the stack size and causes a SEGV that is handled by Zig's panic handler.
-                // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
-                //
-                // The workaround is run the tests in "ReleaseFast" mode.
-                .optimize = if (builtin.os.tag == .windows) .ReleaseFast else mode,
-            });
-            tests.linkLibC();
+    // zig build client:c:sample
+    build_clients_c_sample(b, build_steps.clients_c_sample, .{
+        .vsr_options = vsr_options,
+        .target = target,
+        .mode = mode,
+    });
+}
 
-            tests.linkSystemLibrary("jvm");
-            tests.addLibraryPath(.{ .cwd_relative = libjvm_path });
-            if (builtin.os.tag == .linux) {
-                // On Linux, detects the abi by calling `ldd` to check if
-                // the libjvm.so is linked against libc or musl.
-                // It's reasonable to assume that ldd will be present.
-                var exit_code: u8 = undefined;
-                const stderr_behavior = .Ignore;
-                const ldd_result = try b.runAllowFail(
-                    &.{ "ldd", b.pathJoin(&.{ libjvm_path, "libjvm.so" }) },
-                    &exit_code,
-                    stderr_behavior,
-                );
+fn build_vsr_module(b: *std.Build, options: struct {
+    vsr_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    tracer_backend: config.TracerBackend,
+}) *std.Build.Module {
+    const vsr_module = b.addModule("vsr", .{
+        .root_source_file = b.path("src/vsr.zig"),
+    });
+    vsr_module.addOptions("vsr_options", options.vsr_options);
 
-                if (std.mem.indexOf(u8, ldd_result, "musl") != null) {
-                    tests.root_module.resolved_target.?.query.abi = .musl;
-                    tests.root_module.resolved_target.?.result.abi = .musl;
-                } else if (std.mem.indexOf(u8, ldd_result, "libc") != null) {
-                    tests.root_module.resolved_target.?.query.abi = .gnu;
-                    tests.root_module.resolved_target.?.result.abi = .gnu;
-                } else {
-                    std.log.err("{s}", .{ldd_result});
-                    return error.JavaAbiUnrecognized;
+    switch (options.tracer_backend) {
+        .none => {},
+        .tracy => {
+            // Code here is based on
+            // https://github.com/ziglang/zig/blob/a660df4900520c505a0865707552dcc777f4b791/build.zig#L382
+
+            // On mingw, we need to opt into windows 7+ to get some features required by tracy.
+            const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
+                &[_][]const u8{
+                    "-DTRACY_ENABLE=1",
+                    "-DTRACY_FIBERS=1",
+                    "-fno-sanitize=undefined",
+                    "-D_WIN32_WINNT=0x601",
                 }
-            }
+            else
+                &[_][]const u8{
+                    "-DTRACY_ENABLE=1",
+                    "-DTRACY_FIBERS=1",
+                    "-fno-sanitize=undefined",
+                };
 
-            switch (builtin.os.tag) {
-                .windows => set_windows_dll(b.allocator, java_home),
-                .macos => try b.graph.env_map.put("DYLD_LIBRARY_PATH", libjvm_path),
-                .linux => try b.graph.env_map.put("LD_LIBRARY_PATH", libjvm_path),
-                else => unreachable,
-            }
+            const tracy = b.addSystemCommand(&.{
+                "git",
+                "clone",
+                "--branch=v0.9.1",
+                "https://github.com/wolfpld/tracy.git",
+            }).addOutputDirectoryArg("tracy");
 
-            build_steps.test_jni.dependOn(&b.addRunArtifact(tests).step);
+            vsr_module.addCSourceFile(.{
+                .file = tracy.path(b, "./public/TracyClient.cpp"),
+                .flags = tracy_c_flags,
+            });
+            vsr_module.addIncludePath(tracy.path(b, "./public/tracy"));
+            vsr_module.link_libc = true;
+            vsr_module.link_libcpp = true;
+
+            if (options.target.result.os.tag == .windows) {
+                vsr_module.linkSystemLibrary("dbghelp", .{});
+                vsr_module.linkSystemLibrary("ws2_32", .{});
+            }
+        },
+    }
+    return vsr_module;
+}
+
+// Run a tigerbeetle build without running codegen and waiting for llvm
+// see <https://github.com/ziglang/zig/commit/5c0181841081170a118d8e50af2a09f5006f59e1>
+// how it's supposed to work.
+// In short, codegen only runs if zig build sees a dependency on the binary output of
+// the step. So we duplicate the build definition so that it doesn't get polluted by
+// b.installArtifact.
+// TODO(zig): https://github.com/ziglang/zig/issues/18877
+fn build_check(
+    b: *std.Build,
+    step_check: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const tigerbeetle = b.addExecutable(.{
+        .name = "tigerbeetle",
+        .root_source_file = b.path("src/tigerbeetle/main.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+    });
+    tigerbeetle.root_module.addImport("vsr", options.vsr_module);
+    step_check.dependOn(&tigerbeetle.step);
+}
+
+fn build_tigerbeetle(
+    b: *std.Build,
+    steps: struct {
+        run: *std.Build.Step,
+        install: *std.Build.Step,
+    },
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+        tracer_backend: config.TracerBackend,
+        emit_llvm_ir: bool,
+    },
+) void {
+    const tigerbeetle = b.addExecutable(.{
+        .name = "tigerbeetle",
+        .root_source_file = b.path("src/tigerbeetle/main.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+    });
+    tigerbeetle.root_module.addImport("vsr", options.vsr_module);
+    tigerbeetle.root_module.addOptions("vsr_options", options.vsr_options);
+    if (options.mode == .ReleaseSafe) {
+        tigerbeetle.root_module.strip = options.tracer_backend == .none;
+    }
+    // Ensure that we get stack traces even in release builds.
+    tigerbeetle.root_module.omit_frame_pointer = false;
+    if (options.emit_llvm_ir) {
+        steps.install.dependOn(&b.addInstallBinFile(
+            tigerbeetle.getEmittedLlvmIr(),
+            "tigerbeetle.ll",
+        ).step);
+    }
+
+    // "zig build install" moves the server executable to the root folder:
+    steps.install.dependOn(&b.addInstallArtifact(tigerbeetle, .{}).step);
+    steps.install.dependOn(&b.addInstallFile(
+        tigerbeetle.getEmittedBin(),
+        b.pathJoin(&.{ "../", tigerbeetle.out_filename }),
+    ).step);
+
+    const run_cmd = b.addRunArtifact(tigerbeetle);
+    if (b.args) |args| run_cmd.addArgs(args);
+    steps.run.dependOn(&run_cmd.step);
+}
+
+fn build_aof(
+    b: *std.Build,
+    step_aof: *std.Build.Step,
+    options: struct {
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const aof = b.addExecutable(.{
+        .name = "aof",
+        .root_source_file = b.path("src/aof.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+    });
+    aof.root_module.addOptions("vsr_options", options.vsr_options);
+    const run_cmd = b.addRunArtifact(aof);
+    if (b.args) |args| run_cmd.addArgs(args);
+    step_aof.dependOn(&run_cmd.step);
+}
+
+fn build_test(
+    b: *std.Build,
+    steps: struct {
+        test_unit_build: *std.Build.Step,
+        test_unit: *std.Build.Step,
+        test_integration: *std.Build.Step,
+        test_fmt: *std.Build.Step,
+        @"test": *std.Build.Step,
+    },
+    options: struct {
+        vsr_options: *std.Build.Step.Options,
+        tb_client_header: *Generated,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/unit_tests.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+        .filters = b.args orelse &.{},
+    });
+    unit_tests.root_module.addOptions("vsr_options", options.vsr_options);
+    // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
+    unit_tests.linkLibC();
+    unit_tests.addIncludePath(options.tb_client_header.path.dirname());
+
+    steps.test_unit_build.dependOn(&b.addInstallArtifact(unit_tests, .{}).step);
+
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+    run_unit_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
+    if (b.args != null) { // Don't cache test results if running a specific test.
+        run_unit_tests.has_side_effects = true;
+    }
+    steps.test_unit.dependOn(&run_unit_tests.step);
+
+    const integration_tests = b.addTest(.{
+        .root_source_file = b.path("src/integration_tests.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+        .filters = b.args orelse &.{},
+    });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+    if (b.args != null) { // Don't cache test results if running a specific test.
+        run_integration_tests.has_side_effects = true;
+    }
+    // Ensure integration test have tigerbeetle binary.
+    run_integration_tests.step.dependOn(b.getInstallStep());
+    steps.test_integration.dependOn(&run_integration_tests.step);
+
+    const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
+    steps.test_fmt.dependOn(&run_fmt.step);
+
+    steps.@"test".dependOn(&run_unit_tests.step);
+    if (b.args == null) {
+        steps.@"test".dependOn(&run_integration_tests.step);
+        steps.@"test".dependOn(&run_fmt.step);
+    }
+}
+
+fn build_test_jni(
+    b: *std.Build,
+    step_test_jni: *std.Build.Step,
+    options: struct {
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) !void {
+    const java_home = b.graph.env_map.get("JAVA_HOME") orelse {
+        step_test_jni.dependOn(&FailStep.add(
+            b,
+            "can't build jni tests tests, JAVA_HOME is not set",
+        ).step);
+        return;
+    };
+
+    // JNI test require JVM to be present, and are _not_ run as a part of `zig build test`.
+    // We need libjvm.so both at build time and at a runtime, so use `FailStep` when that is not
+    // available.
+    const libjvm_path = b.pathJoin(&.{
+        java_home,
+        if (builtin.os.tag == .windows) "/lib" else "/lib/server",
+    });
+
+    const tests = b.addTest(.{
+        .root_source_file = b.path("src/clients/java/src/jni_tests.zig"),
+        .target = options.target,
+        // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
+        // the stack size and causes a SEGV that is handled by Zig's panic handler.
+        // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
+        //
+        // The workaround is run the tests in "ReleaseFast" mode.
+        .optimize = if (builtin.os.tag == .windows) .ReleaseFast else options.mode,
+    });
+    tests.linkLibC();
+
+    tests.linkSystemLibrary("jvm");
+    tests.addLibraryPath(.{ .cwd_relative = libjvm_path });
+    if (builtin.os.tag == .linux) {
+        // On Linux, detects the abi by calling `ldd` to check if
+        // the libjvm.so is linked against libc or musl.
+        // It's reasonable to assume that ldd will be present.
+        var exit_code: u8 = undefined;
+        const stderr_behavior = .Ignore;
+        const ldd_result = try b.runAllowFail(
+            &.{ "ldd", b.pathJoin(&.{ libjvm_path, "libjvm.so" }) },
+            &exit_code,
+            stderr_behavior,
+        );
+
+        if (std.mem.indexOf(u8, ldd_result, "musl") != null) {
+            tests.root_module.resolved_target.?.query.abi = .musl;
+            tests.root_module.resolved_target.?.result.abi = .musl;
+        } else if (std.mem.indexOf(u8, ldd_result, "libc") != null) {
+            tests.root_module.resolved_target.?.query.abi = .gnu;
+            tests.root_module.resolved_target.?.result.abi = .gnu;
         } else {
-            build_steps.test_jni.dependOn(&FailStep.add(
-                b,
-                "can't build jni tests tests, JAVA_HOME is not set",
-            ).step);
+            std.log.err("{s}", .{ldd_result});
+            return error.JavaAbiUnrecognized;
         }
     }
 
-    { // zig build vopr -- 42
-        const vopr_options = b.addOptions();
+    switch (builtin.os.tag) {
+        .windows => set_windows_dll(b.allocator, java_home),
+        .macos => try b.graph.env_map.put("DYLD_LIBRARY_PATH", libjvm_path),
+        .linux => try b.graph.env_map.put("LD_LIBRARY_PATH", libjvm_path),
+        else => unreachable,
+    }
 
+    step_test_jni.dependOn(&b.addRunArtifact(tests).step);
+}
+
+fn build_vopr(
+    b: *std.Build,
+    steps: struct {
+        vopr_build: *std.Build.Step,
+        vopr_run: *std.Build.Step,
+    },
+    options: struct {
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+        vopr_state_machine: VoprStateMachine,
+        vopr_log: VoprLog,
+    },
+) void {
+    const vopr_options = b.addOptions();
+
+    vopr_options.addOption(VoprStateMachine, "state_machine", options.vopr_state_machine);
+    vopr_options.addOption(VoprLog, "log", options.vopr_log);
+
+    const vopr = b.addExecutable(.{
+        .name = "vopr",
+        .root_source_file = b.path("src/vopr.zig"),
+        .target = options.target,
         // When running without a SEED, default to release.
-        const vopr_mode = if (b.args == null) .ReleaseSafe else mode;
-        vopr_options.addOption(
-            @TypeOf(build_options.vopr_state_machine),
-            "state_machine",
-            build_options.vopr_state_machine,
-        );
-        vopr_options.addOption(
-            @TypeOf(build_options.vopr_log),
-            "log",
-            build_options.vopr_log,
-        );
+        .optimize = if (b.args == null) .ReleaseSafe else options.mode,
+    });
+    vopr.root_module.addOptions("vsr_options", options.vsr_options);
+    vopr.root_module.addOptions("vsr_vopr_options", vopr_options);
+    // Ensure that we get stack traces even in release builds.
+    vopr.root_module.omit_frame_pointer = false;
+    steps.vopr_build.dependOn(&b.addInstallArtifact(vopr, .{}).step);
 
-        const vopr = b.addExecutable(.{
-            .name = "vopr",
-            .root_source_file = b.path("src/vopr.zig"),
-            .target = target,
-            .optimize = vopr_mode,
-        });
-        vopr.root_module.addOptions("vsr_options", vsr_options);
-        vopr.root_module.addOptions("vsr_vopr_options", vopr_options);
-        // Ensure that we get stack traces even in release builds.
-        vopr.root_module.omit_frame_pointer = false;
-        build_steps.vopr_build.dependOn(&b.addInstallArtifact(vopr, .{}).step);
+    const run_cmd = b.addRunArtifact(vopr);
+    if (b.args) |args| run_cmd.addArgs(args);
+    steps.vopr_run.dependOn(&run_cmd.step);
+}
 
-        const run_cmd = b.addRunArtifact(vopr);
-        if (b.args) |args| run_cmd.addArgs(args);
-        build_steps.vopr.dependOn(&run_cmd.step);
-    }
+fn build_fuzz(
+    b: *std.Build,
+    steps: struct {
+        fuzz: *std.Build.Step,
+        fuzz_build: *std.Build.Step,
+    },
+    options: struct {
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const fuzz_exe = b.addExecutable(.{
+        .name = "fuzz",
+        .root_source_file = b.path("src/fuzz_tests.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+    });
+    fuzz_exe.root_module.addOptions("vsr_options", options.vsr_options);
+    fuzz_exe.root_module.omit_frame_pointer = false;
+    steps.fuzz_build.dependOn(&b.addInstallArtifact(fuzz_exe, .{}).step);
 
-    { // zig build fuzz -- --events-max=100 lsm_tree 123
-        const fuzz_exe = b.addExecutable(.{
-            .name = "fuzz",
-            .root_source_file = b.path("src/fuzz_tests.zig"),
-            .target = target,
-            .optimize = mode,
-        });
-        fuzz_exe.root_module.addOptions("vsr_options", vsr_options);
-        fuzz_exe.root_module.omit_frame_pointer = false;
-        build_steps.fuzz_build.dependOn(&b.addInstallArtifact(fuzz_exe, .{}).step);
+    const fuzz_run = b.addRunArtifact(fuzz_exe);
+    if (b.args) |args| fuzz_run.addArgs(args);
+    steps.fuzz.dependOn(&fuzz_run.step);
+}
 
-        const fuzz_run = b.addRunArtifact(fuzz_exe);
-        if (b.args) |args| fuzz_run.addArgs(args);
-        build_steps.fuzz.dependOn(&fuzz_run.step);
-    }
-
-    { // zig build scripts -- ci --language=java
-        const scripts = b.addExecutable(.{
-            .name = "scripts",
-            .root_source_file = b.path("src/scripts.zig"),
-            .target = target,
-            .optimize = mode,
-        });
-        scripts.root_module.addOptions("vsr_options", vsr_options);
-        const scripts_run = b.addRunArtifact(scripts);
-        scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
-        if (b.args) |args| scripts_run.addArgs(args);
-        build_steps.scripts.dependOn(&scripts_run.step);
-    }
-
-    { // zig build client:$lang
-        go_client(b, build_steps.clients_go, mode, vsr_module, vsr_options, tb_client_header.path);
-        java_client(b, build_steps.clients_java, mode, vsr_module, vsr_options);
-        dotnet_client(b, build_steps.clients_dotnet, mode, vsr_module, vsr_options);
-        node_client(b, build_steps.clients_node, mode, vsr_module, vsr_options);
-        c_client(b, build_steps.clients_c, mode, vsr_options, tb_client_header);
-    }
-
-    { // zig build client:c:sample
-        const static_lib = b.addStaticLibrary(.{
-            .name = "tb_client",
-            .root_source_file = b.path("src/tb_client_exports.zig"),
-            .target = target,
-            .optimize = mode,
-        });
-        static_lib.linkLibC();
-        static_lib.pie = true;
-        static_lib.bundle_compiler_rt = true;
-        static_lib.root_module.addOptions("vsr_options", vsr_options);
-        build_steps.clients_c_sample.dependOn(&static_lib.step);
-
-        const sample = b.addExecutable(.{
-            .name = "c_sample",
-            .target = target,
-            .optimize = mode,
-        });
-        sample.addCSourceFile(.{
-            .file = b.path("src/clients/c/samples/main.c"),
-        });
-        sample.linkLibrary(static_lib);
-        sample.linkLibC();
-
-        if (target.result.os.tag == .windows) {
-            static_lib.linkSystemLibrary("ws2_32");
-            static_lib.linkSystemLibrary("advapi32");
-
-            // TODO: Illegal instruction on Windows:
-            sample.root_module.sanitize_c = false;
-        }
-
-        const install_step = b.addInstallArtifact(sample, .{});
-        build_steps.clients_c_sample.dependOn(&install_step.step);
-    }
+fn build_scripts(
+    b: *std.Build,
+    step_scripts: *std.Build.Step,
+    options: struct {
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const scripts = b.addExecutable(.{
+        .name = "scripts",
+        .root_source_file = b.path("src/scripts.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+    });
+    scripts.root_module.addOptions("vsr_options", options.vsr_options);
+    const scripts_run = b.addRunArtifact(scripts);
+    scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
+    if (b.args) |args| scripts_run.addArgs(args);
+    step_scripts.dependOn(&scripts_run.step);
 }
 
 // Zig cross-targets, Dotnet RID (Runtime Identifier), CPU features.
@@ -501,17 +658,19 @@ fn strip_glibc_version(triple: []const u8) []const u8 {
     return triple;
 }
 
-fn go_client(
+fn build_go_client(
     b: *std.Build,
-    build_step: *std.Build.Step,
-    mode: Mode,
-    vsr_module: *std.Build.Module,
-    vsr_options: *std.Build.Step.Options,
-    tb_client_header: std.Build.LazyPath,
+    step_clients_go: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        tb_client_header: std.Build.LazyPath,
+        mode: Mode,
+    },
 ) void {
     // Updates the generated header file:
     const tb_client_header_copy = Generated.file_copy(b, .{
-        .from = tb_client_header,
+        .from = options.tb_client_header,
         .path = "./src/clients/go/pkg/native/tb_client.h",
     });
 
@@ -520,8 +679,8 @@ fn go_client(
         .root_source_file = b.path("src/clients/go/go_bindings.zig"),
         .target = b.graph.host,
     });
-    go_bindings_generator.root_module.addImport("vsr", vsr_module);
-    go_bindings_generator.root_module.addOptions("vsr_options", vsr_options);
+    go_bindings_generator.root_module.addImport("vsr", options.vsr_module);
+    go_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
     go_bindings_generator.step.dependOn(&tb_client_header_copy.step);
     const bindings = Generated.file(b, .{
         .generator = go_bindings_generator,
@@ -549,38 +708,40 @@ fn go_client(
             .name = "tb_client",
             .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
-            .optimize = mode,
+            .optimize = options.mode,
         });
         lib.linkLibC();
         lib.pie = true;
         lib.bundle_compiler_rt = true;
         lib.root_module.stack_protector = false;
-        lib.root_module.addOptions("vsr_options", vsr_options);
+        lib.root_module.addOptions("vsr_options", options.vsr_options);
 
         lib.step.dependOn(&bindings.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
-        build_step.dependOn(&b.addInstallFile(
+        step_clients_go.dependOn(&b.addInstallFile(
             lib.getEmittedBin(),
             b.pathJoin(&.{ "../src/clients/go/pkg/native/", name, lib.out_filename }),
         ).step);
     }
 }
 
-fn java_client(
+fn build_java_client(
     b: *std.Build,
-    build_step: *std.Build.Step,
-    mode: Mode,
-    vsr_module: *std.Build.Module,
-    vsr_options: *std.Build.Step.Options,
+    step_clients_java: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        mode: Mode,
+    },
 ) void {
     const java_bindings_generator = b.addExecutable(.{
         .name = "java_bindings",
         .root_source_file = b.path("src/clients/java/java_bindings.zig"),
         .target = b.graph.host,
     });
-    java_bindings_generator.root_module.addImport("vsr", vsr_module);
-    java_bindings_generator.root_module.addOptions("vsr_options", vsr_options);
+    java_bindings_generator.root_module.addImport("vsr", options.vsr_module);
+    java_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
     const bindings = Generated.directory(b, .{
         .generator = java_bindings_generator,
         .path = "./src/clients/java/src/main/java/com/tigerbeetle/",
@@ -597,7 +758,7 @@ fn java_client(
             .name = "tb_jniclient",
             .root_source_file = b.path("src/clients/java/src/client.zig"),
             .target = resolved_target,
-            .optimize = mode,
+            .optimize = options.mode,
         });
         lib.linkLibC();
 
@@ -606,13 +767,13 @@ fn java_client(
             lib.linkSystemLibrary("advapi32");
         }
 
-        lib.root_module.addImport("vsr", vsr_module);
-        lib.root_module.addOptions("vsr_options", vsr_options);
+        lib.root_module.addImport("vsr", options.vsr_module);
+        lib.root_module.addOptions("vsr_options", options.vsr_options);
 
         lib.step.dependOn(&bindings.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
-        build_step.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
+        step_clients_java.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/java/src/main/resources/lib/",
             strip_glibc_version(platform[0]),
             lib.out_filename,
@@ -620,20 +781,22 @@ fn java_client(
     }
 }
 
-fn dotnet_client(
+fn build_dotnet_client(
     b: *std.Build,
-    build_step: *std.Build.Step,
-    mode: Mode,
-    vsr_module: *std.Build.Module,
-    vsr_options: *std.Build.Step.Options,
+    step_clients_dotnet: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        mode: Mode,
+    },
 ) void {
     const dotnet_bindings_generator = b.addExecutable(.{
         .name = "dotnet_bindings",
         .root_source_file = b.path("src/clients/dotnet/dotnet_bindings.zig"),
         .target = b.graph.host,
     });
-    dotnet_bindings_generator.root_module.addImport("vsr", vsr_module);
-    dotnet_bindings_generator.root_module.addOptions("vsr_options", vsr_options);
+    dotnet_bindings_generator.root_module.addImport("vsr", options.vsr_module);
+    dotnet_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
     const bindings = Generated.file(b, .{
         .generator = dotnet_bindings_generator,
         .path = "./src/clients/dotnet/TigerBeetle/Bindings.cs",
@@ -650,7 +813,7 @@ fn dotnet_client(
             .name = "tb_client",
             .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
-            .optimize = mode,
+            .optimize = options.mode,
         });
         lib.linkLibC();
 
@@ -659,11 +822,11 @@ fn dotnet_client(
             lib.linkSystemLibrary("advapi32");
         }
 
-        lib.root_module.addOptions("vsr_options", vsr_options);
+        lib.root_module.addOptions("vsr_options", options.vsr_options);
 
         lib.step.dependOn(&bindings.step);
 
-        build_step.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
+        step_clients_dotnet.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/dotnet/TigerBeetle/runtimes/",
             platform[1],
             "native",
@@ -672,20 +835,22 @@ fn dotnet_client(
     }
 }
 
-fn node_client(
+fn build_node_client(
     b: *std.Build,
-    build_step: *std.Build.Step,
-    mode: Mode,
-    vsr_module: *std.Build.Module,
-    vsr_options: *std.Build.Step.Options,
+    step_clients_node: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        mode: Mode,
+    },
 ) void {
     const node_bindings_generator = b.addExecutable(.{
         .name = "node_bindings",
         .root_source_file = b.path("src/clients/node/node_bindings.zig"),
         .target = b.graph.host,
     });
-    node_bindings_generator.root_module.addImport("vsr", vsr_module);
-    node_bindings_generator.root_module.addOptions("vsr_options", vsr_options);
+    node_bindings_generator.root_module.addImport("vsr", options.vsr_module);
+    node_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
     const bindings = Generated.file(b, .{
         .generator = node_bindings_generator,
         .path = "./src/clients/node/src/bindings.ts",
@@ -737,7 +902,7 @@ fn node_client(
             .name = "tb_nodeclient",
             .root_source_file = b.path("src/node.zig"),
             .target = resolved_target,
-            .optimize = mode,
+            .optimize = options.mode,
         });
         lib.linkLibC();
 
@@ -754,11 +919,11 @@ fn node_client(
             lib.linkSystemLibrary("node");
         }
 
-        lib.root_module.addOptions("vsr_options", vsr_options);
+        lib.root_module.addOptions("vsr_options", options.vsr_options);
 
         lib.step.dependOn(&bindings.step);
 
-        build_step.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
+        step_clients_node.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/node/dist/bin",
             strip_glibc_version(platform[0]),
             "/client.node",
@@ -766,14 +931,16 @@ fn node_client(
     }
 }
 
-fn c_client(
+fn build_c_client(
     b: *std.Build,
-    build_step: *std.Build.Step,
-    mode: Mode,
-    vsr_options: *std.Build.Step.Options,
-    tb_client_header: *Generated,
+    step_clients_c: *std.Build.Step,
+    options: struct {
+        vsr_options: *std.Build.Step.Options,
+        tb_client_header: *Generated,
+        mode: Mode,
+    },
 ) void {
-    build_step.dependOn(&tb_client_header.step);
+    step_clients_c.dependOn(&options.tb_client_header.step);
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{
@@ -786,13 +953,13 @@ fn c_client(
             .name = "tb_client",
             .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
-            .optimize = mode,
+            .optimize = options.mode,
         });
         const static_lib = b.addStaticLibrary(.{
             .name = "tb_client",
             .root_source_file = b.path("src/tb_client_exports.zig"),
             .target = resolved_target,
-            .optimize = mode,
+            .optimize = options.mode,
         });
 
         static_lib.bundle_compiler_rt = true;
@@ -806,9 +973,9 @@ fn c_client(
                 lib.linkSystemLibrary("advapi32");
             }
 
-            lib.root_module.addOptions("vsr_options", vsr_options);
+            lib.root_module.addOptions("vsr_options", options.vsr_options);
 
-            build_step.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
+            step_clients_c.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
                 "../src/clients/c/lib/",
                 platform[0],
                 lib.out_filename,
@@ -817,12 +984,57 @@ fn c_client(
     }
 }
 
+fn build_clients_c_sample(
+    b: *std.Build,
+    step_clients_c_sample: *std.Build.Step,
+    options: struct {
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const static_lib = b.addStaticLibrary(.{
+        .name = "tb_client",
+        .root_source_file = b.path("src/tb_client_exports.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+    });
+    static_lib.linkLibC();
+    static_lib.pie = true;
+    static_lib.bundle_compiler_rt = true;
+    static_lib.root_module.addOptions("vsr_options", options.vsr_options);
+    step_clients_c_sample.dependOn(&static_lib.step);
+
+    const sample = b.addExecutable(.{
+        .name = "c_sample",
+        .target = options.target,
+        .optimize = options.mode,
+    });
+    sample.addCSourceFile(.{
+        .file = b.path("src/clients/c/samples/main.c"),
+    });
+    sample.linkLibrary(static_lib);
+    sample.linkLibC();
+
+    if (options.target.result.os.tag == .windows) {
+        static_lib.linkSystemLibrary("ws2_32");
+        static_lib.linkSystemLibrary("advapi32");
+
+        // TODO: Illegal instruction on Windows:
+        sample.root_module.sanitize_c = false;
+    }
+
+    const install_step = b.addInstallArtifact(sample, .{});
+    step_clients_c_sample.dependOn(&install_step.step);
+}
+
 /// Steps which unconditionally fails with a message.
 ///
 /// This is useful for cases where at configuration time you can determine that a certain step
 /// can't succeeded (e.g., a system library is not preset on the host system), but you only want
 /// to fail the step once the user tries to run it. That is, you don't want to fail the whole build,
 /// as other steps might run fine.
+// TODO(Zig): switch to https://github.com/ziglang/zig/pull/20312 in 0.14
 const FailStep = struct {
     step: std.Build.Step,
     message: []const u8,
