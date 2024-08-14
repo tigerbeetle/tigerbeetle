@@ -34,8 +34,11 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
     try shell.project_root.deleteFile("tigerbeetle");
 
+    // The build script needs a run number that's newer than the current published release for
+    // multiversion binaries. Pick 255 as the largest supported run number (for now, it's a u8),
+    // that's higher than what the real release run number will be currently (~200).
     try shell.zig(
-        \\build scripts -- release --build --run-number=193 --sha={sha}
+        \\build scripts -- release --build --run-number=255 --sha={sha}
         \\    --language=zig
     , .{ .sha = cli_args.sha });
     try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});

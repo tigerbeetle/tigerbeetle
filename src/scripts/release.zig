@@ -612,6 +612,10 @@ fn build_multiversion_body(
         past_binary_contents[parsed_offsets.header_offset..][0..@sizeOf(
             multiversioning.MultiversionHeader,
         )];
+    const body_offset = if (macos and std.mem.eql(u8, target, "aarch64-macos"))
+        parsed_offsets.body_offset_inactive_platform.?
+    else
+        parsed_offsets.body_offset;
 
     var header = try multiversioning.MultiversionHeader.init_from_bytes(header_bytes);
     if (header.current_release == (try multiversioning.Release.parse("0.15.4")).value) {
@@ -720,7 +724,7 @@ fn build_multiversion_body(
         errdefer past_release_file.close();
 
         try past_release_file.writeAll(
-            past_binary_contents[parsed_offsets.body_offset..][past_offset..][0..past_size],
+            past_binary_contents[body_offset..][past_offset..][0..past_size],
         );
         past_release_file.close();
 
@@ -1151,12 +1155,40 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             1024 * 1024,
         );
 
+        const release_included_min = blk: {
+            shell.project_root.deleteFile("tigerbeetle") catch {};
+            defer shell.project_root.deleteFile("tigerbeetle") catch {};
+
+            try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+            const past_binary = try shell.cwd
+                .openFile("tigerbeetle", .{ .mode = .read_only });
+            defer past_binary.close();
+
+            const past_binary_contents = try past_binary.readToEndAllocOptions(
+                shell.arena.allocator(),
+                multiversion_binary_size_max,
+                null,
+                8,
+                null,
+            );
+
+            const parsed_offsets = try multiversioning.parse_elf(past_binary_contents);
+            const header_bytes = past_binary_contents[parsed_offsets.header_offset..][0..@sizeOf(
+                multiversioning.MultiversionHeader,
+            )];
+
+            const header = try multiversioning.MultiversionHeader.init_from_bytes(header_bytes);
+
+            break :blk multiversioning.Release{ .value = header.past.releases[0] };
+        };
+
         const notes = try shell.fmt(
-            \\{[release_triple]s}
+            \\# {[release_triple]s}
             \\
-            \\**NOTE**: You must run the same version of server and client. We do
-            \\not yet follow semantic versioning where all patch releases are
-            \\interchangeable.
+            \\### Supported upgrade versions
+            \\
+            \\Oldest supported client version: {[release_triple_client_min]s}
+            \\Oldest upgradable replica version: {[release_included_min]s}
             \\
             \\## Server
             \\
@@ -1181,6 +1213,8 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             \\{[changelog]s}
         , .{
             .release_triple = info.release_triple,
+            .release_triple_client_min = info.release_triple_client_min,
+            .release_included_min = release_included_min,
             .changelog = latest_changelog_entry(full_changelog),
         });
 
