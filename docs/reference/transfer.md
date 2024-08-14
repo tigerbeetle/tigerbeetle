@@ -153,7 +153,7 @@ Constraints:
   - If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 Additional constraints:
 
@@ -375,7 +375,7 @@ pending transfer will never exceed/overflow either account's limits.
 `flags.balancing_debit` is compatible with (and orthogonal to) `flags.balancing_credit`.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
 such that
@@ -414,7 +414,7 @@ pending transfer will never exceed/overflow either account's limits.
 `flags.balancing_credit` is compatible with (and orthogonal to) `flags.balancing_debit`.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
 such that

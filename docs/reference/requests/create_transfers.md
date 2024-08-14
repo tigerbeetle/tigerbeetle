@@ -193,7 +193,7 @@ The transfer was not created. [`Transfer.timeout`](../transfer.md#timeout) is no
 Since `0.16.0`, zero-amount transfers are permitted.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 The transfer was not created. [`Transfer.amount`](../transfer.md#amount) is zero, but must be
 nonzero.
@@ -292,7 +292,7 @@ Since `0.16.0`, a posting transfer with an amount that exceeds the pending trans
 post the full pending amount.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 The transfer was not created. The transfer's [`amount`](../transfer.md#amount) exceeds the `amount`
 of its [pending](../transfer.md#pending_id) transfer.
@@ -310,7 +310,7 @@ To partially void a transfer, create a [posting transfer](../transfer.md#flagspo
 with an amount less than the pending transfer's `amount`.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 To partially void a transfer, create a [posting transfer](../transfer.md#flagspost_pending_transfer)
 with an amount between `0` and the pending transfer's `amount`.
@@ -404,7 +404,7 @@ set, then the existing transfer may have a different [`amount`](../transfer.md#a
 - Otherwise, the transfer amount must be greater than or equal to the pending amount.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
 [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
@@ -507,7 +507,7 @@ The [debit account](../transfer.md#debit_account_id) has
 `debit_account.credits_posted`.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 If [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) is set, then
 `debit_account.debits_pending + debit_account.debits_posted + 1` would exceed
@@ -525,7 +525,7 @@ The [credit account](../transfer.md#credit_account_id) has
 `credit_account.debits_posted`.
 
 <details>
-<summary>Client release < 0.16.0</summary>
+<summary>Client release &lt; 0.16.0</summary>
 
 If [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) is set, then
 `credit_account.credits_pending + credit_account.credits_posted + 1` would exceed

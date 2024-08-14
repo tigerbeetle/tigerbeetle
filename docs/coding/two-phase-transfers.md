@@ -37,7 +37,7 @@ its destination.
   amount, then only this amount is posted, and the remainder is restored to its original accounts.
 
 <details>
-<summary>Client < 0.16.0</summary>
+<summary>Client &lt; 0.16.0</summary>
 
 - If the posted [`amount`](../reference/transfer.md#amount) is 0, the full pending transfer's
   amount is posted.
