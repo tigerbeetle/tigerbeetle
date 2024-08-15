@@ -236,7 +236,7 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
     });
 
-    // zig build client:$lang
+    // zig build clients:$lang
     build_go_client(b, build_steps.clients_go, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
@@ -264,7 +264,7 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
     });
 
-    // zig build client:c:sample
+    // zig build clients:c:sample
     build_clients_c_sample(b, build_steps.clients_c_sample, .{
         .vsr_options = vsr_options,
         .target = target,
