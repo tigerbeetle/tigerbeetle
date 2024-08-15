@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	TIGERBEETLE_PORT                   = "3000"
-	TIGERBEETLE_CLUSTER_ID      uint64 = 0
-	TIGERBEETLE_REPLICA_ID      uint32 = 0
-	TIGERBEETLE_REPLICA_COUNT   uint32 = 1
+	TIGERBEETLE_PORT                 = "3000"
+	TIGERBEETLE_CLUSTER_ID    uint64 = 0
+	TIGERBEETLE_REPLICA_ID    uint32 = 0
+	TIGERBEETLE_REPLICA_COUNT uint32 = 1
 )
 
 func HexStringToUint128(value string) types.Uint128 {
@@ -114,6 +114,32 @@ func doTestClient(t *testing.T, client Client) {
 
 		return accountA, accountB
 	}
+
+	/// Consistency of U128 across Zig and the language clients.
+	/// It must be kept in sync with all platforms.
+	t.Run("u128 consistency", func(t *testing.T) {
+		t.Parallel()
+
+		// Binary little endian representation:
+		// Using signed bytes for convenience to match Java's representation:
+		binary := [16]byte{
+			0xe6, 0xe5, 0xe4, 0xe3, 0xe2, 0xe1,
+			0xd2, 0xd1,
+			0xc2, 0xc1,
+			0xb2, 0xb1,
+			0xa4, 0xa3, 0xa2, 0xa1,
+		}
+		decimal, ok := big.NewInt(0).SetString("214850178493633095719753766415838275046", 10)
+		if !ok {
+			t.Fatal()
+		}
+
+		u128 := types.BytesToUint128(binary)
+
+		assert.Equal(t, u128.Bytes(), binary)
+		assert.Equal(t, u128.BigInt(), *decimal)
+		assert.Equal(t, types.BigIntToUint128(*decimal).Bytes(), u128.Bytes())
+	})
 
 	t.Run("can create accounts", func(t *testing.T) {
 		t.Parallel()
