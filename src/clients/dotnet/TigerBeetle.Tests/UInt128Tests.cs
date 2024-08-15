@@ -16,11 +16,12 @@ public class UInt128Tests
     /// It must be kept in sync with all platforms.
     /// </summary>
     [TestMethod]
-    public void ConsistencyTest() {
+    public void ConsistencyTest()
+    {
         // Decimal representation:
         ulong upper = 11647051514084770242;
         ulong lower = 15119395263638463974;
-        var u128 =  new UInt128(upper, lower);
+        var u128 = new UInt128(upper, lower);
         Assert.AreEqual("214850178493633095719753766415838275046", u128.ToString());
 
         // Binary representation:
