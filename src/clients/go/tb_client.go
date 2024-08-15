@@ -31,8 +31,8 @@ import (
 	e "errors"
 	"runtime"
 	"strings"
-	"unsafe"
 	"sync"
+	"unsafe"
 
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
@@ -61,7 +61,7 @@ type request struct {
 
 type c_client struct {
 	tb_client C.tb_client_t
-	mutex sync.Mutex
+	mutex     sync.Mutex
 }
 
 func NewClient(
@@ -180,7 +180,7 @@ func (c *c_client) doRequest(
 	var req request
 	req.result = result
 	req.ready = make(chan struct{}, 1) // buffered chan prevents completion handler blocking for Go.
-	
+
 	// NOTE: packet must be its own allocation and cannot live in request as then CGO is unable to
 	// correctly track it (panic: runtime error: cgo argument has Go pointer to unpinned Go pointer)
 	packet := new(C.tb_packet_t)
@@ -189,16 +189,16 @@ func (c *c_client) doRequest(
 	packet.status = C.TB_PACKET_OK
 	packet.data_size = C.uint32_t(count * int(getEventSize(op)))
 	packet.data = data
-	
-	// NOTE: Pin all go-allocated refs that will be accessed by onGoPacketCompletion after submit(). 
+
+	// NOTE: Pin all go-allocated refs that will be accessed by onGoPacketCompletion after submit().
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
 	pinner.Pin(&req)
 	pinner.Pin(data)
 	pinner.Pin(result)
 	pinner.Pin(packet)
-	
-	// Lock the mutex when accessing the `c.tb_client` handle. 
+
+	// Lock the mutex when accessing the `c.tb_client` handle.
 	c.mutex.Lock()
 	if c.tb_client != nil {
 		C.tb_client_submit(c.tb_client, packet)

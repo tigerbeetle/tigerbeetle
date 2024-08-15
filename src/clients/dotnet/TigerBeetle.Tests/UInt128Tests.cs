@@ -11,6 +11,34 @@ namespace TigerBeetle.Tests;
 [TestClass]
 public class UInt128Tests
 {
+    /// <summary>
+    /// Consistency of U128 across Zig and the language clients.
+    /// It must be kept in sync with all platforms.
+    /// </summary>
+    [TestMethod]
+    public void ConsistencyTest() {
+        // Decimal representation:
+        ulong upper = 11647051514084770242;
+        ulong lower = 15119395263638463974;
+        var u128 =  new UInt128(upper, lower);
+        Assert.AreEqual("214850178493633095719753766415838275046", u128.ToString());
+
+        // Binary representation:
+        byte[] binary = new byte[] {
+            0xe6, 0xe5, 0xe4, 0xe3, 0xe2, 0xe1,
+            0xd2, 0xd1,
+            0xc2, 0xc1,
+            0xb2, 0xb1,
+            0xa4, 0xa3, 0xa2, 0xa1,
+        };
+        Assert.IsTrue(binary.SequenceEqual(u128.ToArray()));
+
+        // GUID representation:
+        var guid = Guid.Parse("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6");
+        Assert.AreEqual(guid, u128.ToGuid());
+        Assert.AreEqual(u128, guid.ToUInt128());
+    }
+
     [TestMethod]
     public void GuidConversion()
     {

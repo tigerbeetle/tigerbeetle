@@ -6,8 +6,6 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertSame;
 import java.util.concurrent.CountDownLatch;
 import java.math.BigInteger;
-import java.nio.ByteOrder;
-import java.nio.ByteBuffer;
 import java.util.UUID;
 import org.junit.Test;
 
@@ -15,6 +13,30 @@ public class UInt128Test {
 
     // bytes representing a pair of longs (100, 1000):
     final static byte[] bytes = new byte[] {100, 0, 0, 0, 0, 0, 0, 0, -24, 3, 0, 0, 0, 0, 0, 0};
+
+    /// Consistency of U128 across Zig and the language clients.
+    /// It must be kept in sync with all platforms.
+    @Test
+    public void consistencyTest() {
+        // Decimal representation:
+        final long upper = Long.parseUnsignedLong("11647051514084770242");
+        final long lower = Long.parseUnsignedLong("15119395263638463974");
+        final var u128 = UInt128.asBigInteger(upper, lower);
+        assertEquals("214850178493633095719753766415838275046", u128.toString());
+
+        // Binary representation:
+        final byte[] binary = new byte[] {(byte) 0xe6, (byte) 0xe5, (byte) 0xe4, (byte) 0xe3,
+                (byte) 0xe2, (byte) 0xe1, (byte) 0xd2, (byte) 0xd1, (byte) 0xc2, (byte) 0xc1,
+                (byte) 0xb2, (byte) 0xb1, (byte) 0xa4, (byte) 0xa3, (byte) 0xa2, (byte) 0xa1};
+        final var bytes = UInt128.asBytes(lower, upper);
+        assertArrayEquals(binary, bytes);
+
+        // UUID representation:
+        final var guid = UUID.fromString("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6");
+        assertEquals(guid, UInt128.asUUID(bytes));
+        assertArrayEquals(bytes, UInt128.asBytes(guid));
+        assertEquals(u128, UInt128.asBigInteger(UInt128.asBytes(guid)));
+    }
 
     @Test(expected = NullPointerException.class)
     public void testAsLongNull() {
@@ -35,6 +57,17 @@ public class UInt128Test {
 
     @Test
     public void testAsLong() {
+
+
+        var b = UInt128.asBytes(UUID.fromString("665c2cf6-e8b3-4a7a-bd67-d68e3d4482fb"));
+        var l = Long.toUnsignedString(UInt128.asLong(b, UInt128.LeastSignificant));
+        var h = Long.toUnsignedString(UInt128.asLong(b, UInt128.MostSignificant));
+        var big = UInt128.asBigInteger(b);
+
+        var l1 = Long
+                .toUnsignedString(UInt128.asLong(UInt128.asBytes(big), UInt128.LeastSignificant));
+        var h1 = Long
+                .toUnsignedString(UInt128.asLong(UInt128.asBytes(big), UInt128.MostSignificant));
 
         var ls = UInt128.asLong(bytes, UInt128.LeastSignificant);
         var ms = UInt128.asLong(bytes, UInt128.MostSignificant);
