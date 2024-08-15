@@ -21,7 +21,7 @@ public class UInt128Test {
         // Decimal representation:
         final long upper = Long.parseUnsignedLong("11647051514084770242");
         final long lower = Long.parseUnsignedLong("15119395263638463974");
-        final var u128 = UInt128.asBigInteger(upper, lower);
+        final var u128 = UInt128.asBigInteger(lower, upper);
         assertEquals("214850178493633095719753766415838275046", u128.toString());
 
         // Binary representation:
