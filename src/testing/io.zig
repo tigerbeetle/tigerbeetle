@@ -254,8 +254,6 @@ pub const IO = struct {
         operation_data: anytype,
         comptime OperationImpl: type,
     ) void {
-        std.log.info("submitted {s}", .{@tagName(operation_tag)});
-
         const on_complete_fn = struct {
             fn on_complete(io: *IO, _completion: *Completion) void {
                 // Perform the actual operation.
@@ -264,14 +262,11 @@ pub const IO = struct {
 
                 // Requeue if error.WouldBlock
                 switch (operation_tag) {
-                    .accept => {
-                        _ = result catch |err| switch (err) {
-                            error.WouldBlock => {
-                                _completion.next = null;
-                                io.completed.push(_completion);
-                                return;
-                            },
-                            else => {},
+                    .accept, .recv => {
+                        _ = result catch |err| if (err == error.WouldBlock) {
+                            _completion.next = null;
+                            io.completed.push(_completion);
+                            return;
                         };
                     },
                     else => {},
@@ -593,7 +588,7 @@ pub const IO = struct {
         );
     }
 
-    pub const RecvError = error{};
+    pub const RecvError = error{WouldBlock};
     pub fn recv(
         self: *IO,
         comptime Context: type,
@@ -619,11 +614,16 @@ pub const IO = struct {
                 .buffer = buffer,
             },
             struct {
-                fn do_operation(io: *IO, op: anytype) SendError!usize {
+                fn do_operation(io: *IO, op: anytype) RecvError!usize {
                     const socket_local = &io.sockets.items[op.socket_index];
                     assert(socket_local.* == .connected);
 
-                    return socket_local.connected.buffer_receive.pop_slice(op.buffer).len;
+                    const length_read =
+                        socket_local.connected.buffer_receive.pop_slice(op.buffer).len;
+
+                    // If nothing has been received yet, we need to wait until something
+                    // arrives, but that would block, so we return WouldBlock to requeue.
+                    return if (length_read == 0) error.WouldBlock else length_read;
                 }
             },
         );
@@ -711,7 +711,7 @@ pub const IO = struct {
                 fn do_operation(io: *IO, op: anytype) ConnectError!void {
                     const socket_listening_index = io.sockets_listening.get(op.address) orelse
                         return error.ConnectionRefused;
-                    const accept_queue =
+                    var accept_queue =
                         &io.sockets.items[socket_listening_index].listening.accept_queue;
 
                     if (accept_queue.full()) {
@@ -720,6 +720,10 @@ pub const IO = struct {
 
                     const socket_local_index = op.socket_index;
                     const socket_remote_index = try io.create_socket();
+
+                    // Must be reobtained due to potential pointer invalidation in `create_socket`.
+                    accept_queue =
+                        &io.sockets.items[socket_listening_index].listening.accept_queue;
 
                     const socket_local = &io.sockets.items[socket_local_index];
                     const socket_remote = &io.sockets.items[socket_remote_index];
