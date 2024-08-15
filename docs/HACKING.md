@@ -44,13 +44,13 @@ See [/src/fuzz_tests.zig](/src/fuzz_tests.zig) for the menu of available fuzzers
 To run TigerBeetle's long-running simulation, called *The VOPR*:
 
 ```console
-zig/zig build simulator_run
+zig/zig build vopr
 ```
 
 To run the VOPR using a specific seed:
 
 ```console
-zig/zig build simulator_run -- 123
+zig/zig build vopr -- 123
 ```
 
 *The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames,
