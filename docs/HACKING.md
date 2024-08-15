@@ -12,7 +12,7 @@ git clone https://github.com/tigerbeetle/tigerbeetle.git
 cd tigerbeetle
 ./zig/download.sh # .bat if you're on Windows.
 ./zig/zig build -Drelease
-./tigerbeetle --version
+./tigerbeetle version
 ```
 
 See the [Quick Start](./quick-start.md) for how to use a freshly-built TigerBeetle.
