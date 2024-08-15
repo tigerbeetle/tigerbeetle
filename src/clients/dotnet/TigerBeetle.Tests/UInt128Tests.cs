@@ -138,12 +138,19 @@ public class UInt128Tests
     [TestMethod]
     public void LittleEndian()
     {
-        var expected = new byte[16] { 86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        byte[] bytes_expected = new byte[16] { 86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        UInt128 decimal_expected = new UInt128(0, 0x123456);
+        BigInteger bigint_expected = BigInteger.Parse("123456", NumberStyles.HexNumber);
+        Guid guid_expected = Guid.Parse("00000000-0000-0000-0000-000000123456");
 
-        Assert.IsTrue(expected.SequenceEqual(expected.ToUInt128().ToArray()));
-        Assert.IsTrue(expected.SequenceEqual(BigInteger.Parse("123456", NumberStyles.HexNumber).ToUInt128().ToArray()));
-        Assert.IsTrue(expected.SequenceEqual(new Guid(expected).ToUInt128().ToArray()));
-        Assert.IsTrue(expected.SequenceEqual(new UInt128(0, 0x123456).ToArray()));
+        Assert.AreEqual(decimal_expected, bytes_expected.ToUInt128());
+        Assert.AreEqual(decimal_expected, bigint_expected.ToUInt128());
+        Assert.AreEqual(decimal_expected, guid_expected.ToUInt128());
+
+        Assert.IsTrue(bytes_expected.SequenceEqual(decimal_expected.ToArray()));
+        Assert.IsTrue(bytes_expected.SequenceEqual(bytes_expected.ToUInt128().ToArray()));
+        Assert.IsTrue(bytes_expected.SequenceEqual(bigint_expected.ToUInt128().ToArray()));
+        Assert.IsTrue(bytes_expected.SequenceEqual(guid_expected.ToUInt128().ToArray()));
     }
 
     [TestMethod]
