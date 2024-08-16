@@ -192,6 +192,33 @@ public class UInt128Test {
     }
 
     @Test
+    public void testLittleEndian() {
+        // Reference test:
+        // https://github.com/microsoft/windows-rs/blob/f19edde93252381b7a1789bf856a3a67df23f6db/crates/tests/core/tests/guid.rs#L25-L31
+        final var bytes_expected = new byte[] {(byte) 0x8f, (byte) 0x8c, (byte) 0x2b, (byte) 0x05,
+                (byte) 0xa4, (byte) 0x53, (byte) 0x3a, (byte) 0x82, (byte) 0xfe, (byte) 0x42,
+                (byte) 0xd2, (byte) 0xc0, (byte) 0xef, (byte) 0x3f, (byte) 0xd6, (byte) 0x1f,};
+
+        final var u128 = UInt128.asBytes(Long.parseUnsignedLong("823a53a4052b8c8f", 16),
+                Long.parseUnsignedLong("1fd63fefc0d242fe", 16));
+        final var decimal_expected = new BigInteger("1fd63fefc0d242fe823a53a4052b8c8f", 16);
+        final var uuid_expected = UUID.fromString("1fd63fef-c0d2-42fe-823a-53a4052b8c8f");
+
+        assertEquals(decimal_expected, UInt128.asBigInteger(u128));
+        assertEquals(decimal_expected, UInt128.asBigInteger(bytes_expected));
+        assertEquals(decimal_expected, UInt128.asBigInteger(UInt128.asBytes(uuid_expected)));
+
+        assertEquals(uuid_expected, UInt128.asUUID(u128));
+        assertEquals(uuid_expected, UInt128.asUUID(bytes_expected));
+        assertEquals(uuid_expected, UInt128.asUUID(UInt128.asBytes(decimal_expected)));
+
+        assertArrayEquals(bytes_expected, u128);
+        assertArrayEquals(bytes_expected, UInt128.asBytes(uuid_expected));
+        assertArrayEquals(bytes_expected, UInt128.asBytes(decimal_expected));
+
+    }
+
+    @Test
     public void testID() throws Exception {
         {
             // Generate IDs, sleeping for ~1ms occasionally to test intra-millisecond monotonicity.
