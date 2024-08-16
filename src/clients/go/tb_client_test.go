@@ -123,13 +123,13 @@ func doTestClient(t *testing.T, client Client) {
 		// Binary little endian representation:
 		// Using signed bytes for convenience to match Java's representation:
 		binary := [16]byte{
-			0xe6, 0xe5, 0xe4, 0xe3, 0xe2, 0xe1,
-			0xd2, 0xd1,
-			0xc2, 0xc1,
-			0xb2, 0xb1,
-			0xa4, 0xa3, 0xa2, 0xa1,
+			0xa1, 0xa2, 0xa3, 0xa4,
+			0xb1, 0xb2,
+			0xc1, 0xc2,
+			0xd1, 0xd2,
+			0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6,
 		}
-		decimal, ok := big.NewInt(0).SetString("214850178493633095719753766415838275046", 10)
+		decimal, ok := big.NewInt(0).SetString("306916117455534265709072286748445483681", 10)
 		if !ok {
 			t.Fatal()
 		}

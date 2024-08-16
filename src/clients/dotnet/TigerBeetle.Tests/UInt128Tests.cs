@@ -19,18 +19,18 @@ public class UInt128Tests
     public void ConsistencyTest()
     {
         // Decimal representation:
-        ulong upper = 11647051514084770242;
-        ulong lower = 15119395263638463974;
+        ulong upper = 16637956065805325009;
+        ulong lower = 14033694389904319137;
         var u128 = new UInt128(upper, lower);
-        Assert.AreEqual("214850178493633095719753766415838275046", u128.ToString());
+        Assert.AreEqual("306916117455534265709072286748445483681", u128.ToString());
 
         // Binary representation:
         byte[] binary = new byte[] {
-            0xe6, 0xe5, 0xe4, 0xe3, 0xe2, 0xe1,
-            0xd2, 0xd1,
-            0xc2, 0xc1,
-            0xb2, 0xb1,
-            0xa4, 0xa3, 0xa2, 0xa1,
+            0xa1, 0xa2, 0xa3, 0xa4,
+            0xb1, 0xb2,
+            0xc1, 0xc2,
+            0xd1, 0xd2,
+            0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6
         };
         Assert.IsTrue(binary.SequenceEqual(u128.ToArray()));
 
@@ -138,10 +138,10 @@ public class UInt128Tests
     [TestMethod]
     public void LittleEndian()
     {
-        byte[] bytes_expected = new byte[16] { 86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-        UInt128 decimal_expected = new UInt128(0, 0x123456);
-        BigInteger bigint_expected = BigInteger.Parse("123456", NumberStyles.HexNumber);
-        Guid guid_expected = Guid.Parse("00000000-0000-0000-0000-000000123456");
+        byte[] bytes_expected = new byte[16] { 0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        UInt128 decimal_expected = new UInt128(0, 0x12345678);
+        BigInteger bigint_expected = BigInteger.Parse("12345678", NumberStyles.HexNumber);
+        Guid guid_expected = Guid.Parse("78563412-0000-0000-0000-000000000000");
 
         Assert.AreEqual(decimal_expected, bytes_expected.ToUInt128());
         Assert.AreEqual(decimal_expected, bigint_expected.ToUInt128());

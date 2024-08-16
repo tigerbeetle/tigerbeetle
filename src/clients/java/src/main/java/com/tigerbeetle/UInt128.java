@@ -81,7 +81,10 @@ public enum UInt128 {
      */
     public static byte[] asBytes(final UUID uuid) {
         Objects.requireNonNull(uuid, "Uuid cannot be null");
-        return asBytes(uuid.getLeastSignificantBits(), uuid.getMostSignificantBits());
+        // Reversing the GUID to little endian:
+        final long littleEndianMostSignificant = Long.reverseBytes(uuid.getLeastSignificantBits());
+        final long littleEndianLeastSignificant = Long.reverseBytes(uuid.getMostSignificantBits());
+        return asBytes(littleEndianLeastSignificant, littleEndianMostSignificant);
     }
 
     /**
@@ -94,9 +97,22 @@ public enum UInt128 {
      * @throws IllegalArgumentException if {@code bytes} is not 16 bytes long.
      */
     public static UUID asUUID(final byte[] bytes) {
-        final long leastSignificant = asLong(bytes, UInt128.LeastSignificant);
-        final long mostSignificant = asLong(bytes, UInt128.MostSignificant);
-        return new UUID(mostSignificant, leastSignificant);
+        return asUUID(asLong(bytes, UInt128.LeastSignificant),
+                asLong(bytes, UInt128.MostSignificant));
+    }
+
+    /**
+     * Gets a {@link java.util.UUID} representing a 128-bit value.
+     *
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
+     * @return a {@link java.util.UUID}.
+     */
+    public static UUID asUUID(final long leastSignificant, final long mostSignificant) {
+        // Reversing the U128 to big endian:
+        final long bigEndianMostSignificant = Long.reverseBytes(leastSignificant);
+        final long bigEndianLeastSignificant = Long.reverseBytes(mostSignificant);
+        return new UUID(bigEndianMostSignificant, bigEndianLeastSignificant);
     }
 
     /**

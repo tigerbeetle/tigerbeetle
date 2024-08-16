@@ -38,27 +38,32 @@ public static class UInt128Extensions
         // The GUID layout is big endian.
         // This is important to preserve the string representation.
         return new Guid(
-            BinaryPrimitives.ReadInt32LittleEndian(data[12..16]),
-            BinaryPrimitives.ReadInt16LittleEndian(data[10..12]),
-            BinaryPrimitives.ReadInt16LittleEndian(data[8..10]),
-            data[7],
-            data[6],
-            data[5],
-            data[4],
-            data[3],
-            data[2],
-            data[1],
-            data[0]);
+            BinaryPrimitives.ReadInt32BigEndian(data[0..4]),
+            BinaryPrimitives.ReadInt16BigEndian(data[4..6]),
+            BinaryPrimitives.ReadInt16BigEndian(data[6..8]),
+            data[8],
+            data[9],
+            data[10],
+            data[11],
+            data[12],
+            data[13],
+            data[14],
+            data[15]);
     }
 
     public static UInt128 ToUInt128(this Guid value)
     {
         // Converting from big endian to little endian:
         Span<byte> data = stackalloc byte[SIZE];
-        _ = value.TryWriteBytes(data, bigEndian: true, bytesWritten: out _);
+        MemoryMarshal.Write(data, in value);
 
-        ulong upper = BinaryPrimitives.ReadUInt64BigEndian(data[0..8]);
-        ulong lower = BinaryPrimitives.ReadUInt64BigEndian(data[8..16]);
+        uint data1 = BinaryPrimitives.ReadUInt32BigEndian(data[0..4]);
+        ushort data2 = BinaryPrimitives.ReadUInt16BigEndian(data[4..6]);
+        ushort data3 = BinaryPrimitives.ReadUInt16BigEndian(data[6..8]);
+
+        ulong lower = ((ulong)data3 << 48) | ((ulong)data2 << 32) | (ulong)data1;
+        ulong upper = BinaryPrimitives.ReadUInt64LittleEndian(data[8..16]);
+
         return new UInt128(upper, lower);
     }
 

@@ -19,15 +19,15 @@ public class UInt128Test {
     @Test
     public void consistencyTest() {
         // Decimal representation:
-        final long upper = Long.parseUnsignedLong("11647051514084770242");
-        final long lower = Long.parseUnsignedLong("15119395263638463974");
+        final long upper = Long.parseUnsignedLong("16637956065805325009");
+        final long lower = Long.parseUnsignedLong("14033694389904319137");
         final var u128 = UInt128.asBigInteger(lower, upper);
-        assertEquals("214850178493633095719753766415838275046", u128.toString());
+        assertEquals("306916117455534265709072286748445483681", u128.toString());
 
         // Binary representation:
-        final byte[] binary = new byte[] {(byte) 0xe6, (byte) 0xe5, (byte) 0xe4, (byte) 0xe3,
-                (byte) 0xe2, (byte) 0xe1, (byte) 0xd2, (byte) 0xd1, (byte) 0xc2, (byte) 0xc1,
-                (byte) 0xb2, (byte) 0xb1, (byte) 0xa4, (byte) 0xa3, (byte) 0xa2, (byte) 0xa1};
+        final byte[] binary = new byte[] {(byte) 0xa1, (byte) 0xa2, (byte) 0xa3, (byte) 0xa4,
+                (byte) 0xb1, (byte) 0xb2, (byte) 0xc1, (byte) 0xc2, (byte) 0xd1, (byte) 0xd2,
+                (byte) 0xe1, (byte) 0xe2, (byte) 0xe3, (byte) 0xe4, (byte) 0xe5, (byte) 0xe6};
         final var bytes = UInt128.asBytes(lower, upper);
         assertArrayEquals(binary, bytes);
 
@@ -100,7 +100,7 @@ public class UInt128Test {
 
     @Test
     public void testAsBytesUUID() {
-        var uuid = new UUID(1000, 100);
+        var uuid = UInt128.asUUID(100, 1000);
         byte[] reverse = UInt128.asBytes(uuid);
         assertArrayEquals(bytes, reverse);
     }
@@ -108,7 +108,7 @@ public class UInt128Test {
     @Test
     public void testAsUUID() {
         var uuid = UInt128.asUUID(bytes);
-        assertEquals(new UUID(1000, 100), uuid);
+        assertEquals(UInt128.asUUID(100, 1000), uuid);
     }
 
     @Test(expected = NullPointerException.class)
