@@ -138,10 +138,18 @@ public class UInt128Tests
     [TestMethod]
     public void LittleEndian()
     {
-        byte[] bytes_expected = new byte[16] { 86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-        UInt128 decimal_expected = new UInt128(0, 0x123456);
-        BigInteger bigint_expected = BigInteger.Parse("123456", NumberStyles.HexNumber);
-        Guid guid_expected = Guid.Parse("00000000-0000-0000-0000-000000123456");
+        // Reference test:
+        // https://github.com/microsoft/windows-rs/blob/f19edde93252381b7a1789bf856a3a67df23f6db/crates/tests/core/tests/guid.rs#L25-L31
+        byte[] bytes_expected = new byte[16] {
+            0x8f,0x8c,0x2b,0x05,0xa4,0x53,
+            0x3a,0x82,
+            0xfe,0x42,
+            0xd2,0xc0,
+            0xef,0x3f,0xd6,0x1f,
+        };
+        UInt128 decimal_expected = UInt128.Parse("1fd63fefc0d242fe823a53a4052b8c8f", NumberStyles.HexNumber);
+        BigInteger bigint_expected = BigInteger.Parse("1fd63fefc0d242fe823a53a4052b8c8f", NumberStyles.HexNumber);
+        Guid guid_expected = Guid.Parse("1fd63fef-c0d2-42fe-823a-53a4052b8c8f");
 
         Assert.AreEqual(decimal_expected, bytes_expected.ToUInt128());
         Assert.AreEqual(decimal_expected, bigint_expected.ToUInt128());
