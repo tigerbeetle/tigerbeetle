@@ -57,18 +57,6 @@ public class UInt128Test {
 
     @Test
     public void testAsLong() {
-
-
-        var b = UInt128.asBytes(UUID.fromString("665c2cf6-e8b3-4a7a-bd67-d68e3d4482fb"));
-        var l = Long.toUnsignedString(UInt128.asLong(b, UInt128.LeastSignificant));
-        var h = Long.toUnsignedString(UInt128.asLong(b, UInt128.MostSignificant));
-        var big = UInt128.asBigInteger(b);
-
-        var l1 = Long
-                .toUnsignedString(UInt128.asLong(UInt128.asBytes(big), UInt128.LeastSignificant));
-        var h1 = Long
-                .toUnsignedString(UInt128.asLong(UInt128.asBytes(big), UInt128.MostSignificant));
-
         var ls = UInt128.asLong(bytes, UInt128.LeastSignificant);
         var ms = UInt128.asLong(bytes, UInt128.MostSignificant);
         assertEquals(100L, ls);
