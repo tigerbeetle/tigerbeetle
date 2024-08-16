@@ -522,7 +522,7 @@ pub fn GrooveType(
         /// object cache.
         objects_cache: ObjectsCache,
 
-        timestamps: TimestampSet,
+        timestamps: if (has_id) TimestampSet else void,
 
         scan_builder: ScanBuilder,
 
@@ -625,11 +625,11 @@ pub fn GrooveType(
             );
             errdefer prefetch_keys.deinit(allocator);
 
-            var timestamps = try TimestampSet.init(
+            var timestamps = if (has_id) try TimestampSet.init(
                 allocator,
                 options.prefetch_entries_for_read_max,
-            );
-            errdefer timestamps.deinit(allocator);
+            ) else {};
+            errdefer if (has_id) timestamps.deinit(allocator);
 
             var scan_builder = if (has_scan) try ScanBuilder.init(allocator) else {};
             errdefer if (has_scan) scan_builder.deinit(allocator);
@@ -659,8 +659,8 @@ pub fn GrooveType(
 
             groove.prefetch_keys.deinit(allocator);
             groove.objects_cache.deinit(allocator);
-            groove.timestamps.deinit(allocator);
 
+            if (has_id) groove.timestamps.deinit(allocator);
             if (has_scan) groove.scan_builder.deinit(allocator);
 
             groove.* = undefined;
@@ -675,8 +675,8 @@ pub fn GrooveType(
 
             groove.prefetch_keys.clearRetainingCapacity();
             groove.objects_cache.reset();
-            groove.timestamps.reset();
 
+            if (has_id) groove.timestamps.reset();
             if (has_scan) groove.scan_builder.reset();
 
             groove.* = .{
@@ -699,6 +699,10 @@ pub fn GrooveType(
         /// Returns whether an object with this timestamp exists or not.
         /// The timestamp to be checked must have been passed to `prefetch_exists_enqueue`.
         pub fn exists(groove: *const Groove, timestamp: u64) bool {
+            // Only applicable to objects with an `id` field.
+            // Use `get` if the object is already keyed by timestamp.
+            comptime assert(has_id);
+
             return groove.timestamps.exists(timestamp);
         }
 
@@ -715,7 +719,7 @@ pub fn GrooveType(
             groove.prefetch_snapshot = snapshot_target;
             assert(groove.prefetch_keys.count() == 0);
 
-            groove.timestamps.reset();
+            if (has_id) groove.timestamps.reset();
         }
 
         /// This must be called by the state machine for every key to be prefetched.
@@ -742,29 +746,30 @@ pub fn GrooveType(
             }
         }
 
+        /// This must be called by the state machine for every timestamp to be checked by `exists`.
+        /// The first call to this function may trigger the sorting of the mutable table. However,
+        /// this is likely a no-op since timestamps are strictly increasing, and the table should
+        /// already be sorted.
+        /// We tolerate duplicate timestamps enqueued by the state machine.
         pub fn prefetch_exists_enqueue(
             groove: *Groove,
             timestamp: u64,
         ) void {
+            // Only applicable to objects with an `id` field.
+            // Use `prefetch_enqueue` if the object is already keyed by timestamp.
+            comptime assert(has_id);
+
             // No need to check again if the timestamp is already present.
             if (!groove.timestamps.enroll(timestamp)) return;
 
-            if (has_id) {
-                // The mutable table needs to be sorted in order to find by timestamp.
-                groove.objects.table_mutable.sort();
-                if (groove.objects.table_mutable.get(timestamp) orelse
-                    groove.objects.table_immutable.get(timestamp)) |object|
-                {
-                    assert(object.timestamp == timestamp);
-                    groove.timestamps.found(timestamp);
-                    return;
-                }
-            } else {
-                if (groove.objects_cache.get(timestamp)) |object| {
-                    assert(object.timestamp == timestamp);
-                    groove.timestamps.found(timestamp);
-                    return;
-                }
+            // The mutable table needs to be sorted in order to find by timestamp.
+            groove.objects.table_mutable.sort();
+            if (groove.objects.table_mutable.get(timestamp) orelse
+                groove.objects.table_immutable.get(timestamp)) |object|
+            {
+                assert(object.timestamp == timestamp);
+                groove.timestamps.found(timestamp);
+                return;
             }
 
             groove.prefetch_from_memory_by_timestamp(timestamp, .timestamps);
@@ -815,7 +820,10 @@ pub fn GrooveType(
                     assert(!ObjectTreeHelpers(Object).tombstone(object));
                     switch (destin) {
                         .objects_cache => groove.objects_cache.upsert(object),
-                        .timestamps => groove.timestamps.found(object.timestamp),
+                        .timestamps => if (has_id)
+                            groove.timestamps.found(object.timestamp)
+                        else
+                            unreachable,
                     }
                 },
                 .possible => |level| {
@@ -1044,11 +1052,9 @@ pub fn GrooveType(
 
                     switch (destin) {
                         .objects_cache => worker.context.groove.objects_cache.upsert(object),
-                        .timestamps => {
-                            worker.context.groove.timestamps.found(
-                                object.timestamp,
-                            );
-                        },
+                        .timestamps => if (has_id) worker.context.groove.timestamps.found(
+                            object.timestamp,
+                        ) else unreachable,
                     }
                 } else {
                     // If the object wasn't found, it should've been prefetched by timestamp,
