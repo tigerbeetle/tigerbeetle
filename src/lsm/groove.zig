@@ -747,9 +747,9 @@ pub fn GrooveType(
         }
 
         /// This must be called by the state machine for every timestamp to be checked by `exists`.
-        /// The first call to this function may trigger the sorting of the mutable table. However,
-        /// this is likely a no-op since timestamps are strictly increasing, and the table should
-        /// already be sorted.
+        /// The first call to this function may trigger the sorting of the mutable table, which is
+        /// likely a no-op since timestamps are strictly increasing and the table should already
+        /// be sorted, except for objects that are frequently updated (e.g., accounts).
         /// We tolerate duplicate timestamps enqueued by the state machine.
         pub fn prefetch_exists_enqueue(
             groove: *Groove,
@@ -762,11 +762,10 @@ pub fn GrooveType(
             // No need to check again if the timestamp is already present.
             if (!groove.timestamps.enroll(timestamp)) return;
 
-            // The mutable table needs to be sorted in order to find by timestamp.
+            // The mutable table needs to be sorted to enable searching by timestamp.
+            // The immutable table will be searched by `prefetch_from_memory_by_timestamp`.
             groove.objects.table_mutable.sort();
-            if (groove.objects.table_mutable.get(timestamp) orelse
-                groove.objects.table_immutable.get(timestamp)) |object|
-            {
+            if (groove.objects.table_mutable.get(timestamp)) |object| {
                 assert(object.timestamp == timestamp);
                 groove.timestamps.found(timestamp);
                 return;
