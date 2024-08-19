@@ -72,16 +72,16 @@ comptime {
     //   batch's updates were not persisted as part of the former checkpoint – they are only in
     //   memory until they are compacted by the *next* batch of commits (i.e. the first batch of
     //   the following checkpoint).
-    // - `2 * pipeline_prepare_queue_max` (rounded up to the nearest batch multiple): This margin
-    //    ensures that the entries prepared immediately following a checkpoint's prepare max never
-    //    overwrite an entry from the previous WAL wrap until a quorum of replicas has reached that
-    //    checkpoint. The first pipeline_prepare_queue_max is the maximum number of entries a
-    //    replica can prepare after a checkpoint trigger, so checkpointing doesn't stall normal
-    //    processing (referred to as the checkpoint's prepare_max). The second
-    //    pipeline_prepare_queue_max ensures entries prepared after a checkpoint's prepare_max
-    //    don't overwrite entries from the previous WAL wrap. By the time we start preparing entries
-    //    after the second pipeline_prepare_queue_max, a quorum of replicas is guaranteed to have
-    //    already reached the former checkpoint.
+    // - `2 * pipeline_prepare_queue_max` (rounded up to the nearest lsm_compaction_ops multiple):
+    //    This margin ensures that the entries prepared immediately following a checkpoint's prepare
+    //    max never overwrite an entry from the previous WAL wrap until a quorum of replicas has
+    //    reached that checkpoint. The first pipeline_prepare_queue_max is the maximum number of
+    //    entries a replica can prepare after a checkpoint trigger, so checkpointing doesn't stall
+    //    normal processing (referred to as the checkpoint's prepare_max). The second
+    //    pipeline_prepare_queue_max ensures entries prepared after a checkpoint's prepare_max don't
+    //    overwrite entries from the previous WAL wrap. By the time we start preparing entries after
+    //    the second pipeline_prepare_queue_max, a quorum of replicas is guaranteed to have already
+    //    reached the former checkpoint.
     assert(vsr_checkpoint_interval + lsm_compaction_ops + pipeline_prepare_queue_max * 2 <=
         journal_slot_count);
     assert(vsr_checkpoint_interval >= pipeline_prepare_queue_max);
@@ -638,9 +638,15 @@ comptime {
     assert(lsm_manifest_compact_extra_blocks > 0);
 }
 
-/// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
-/// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
-/// means that the transfer tree's mutable table will be sized to 8190 * 4 = 32760 transfers.
+/// Number of prepares accumulated in the in-memory table before flushing to disk.
+///
+/// This is a batch of batches. Each prepare can contain at most 8_190 transfers. With
+/// lsm_compaction_ops=32, 32 prepares are processed to fill the in-memory table with 262_080
+/// transfers. During processing of the next 32 prepares, this in-memory table is flushed to disk.
+/// Simultaneously, compaction is run to free up enough space to flush the in-memory table from the
+/// next batch of lsm_compaction_ops prepares.
+///
+/// Together with message_body_size_max, lsm_compaction_ops determines the size a table on disk.
 pub const lsm_compaction_ops = config.cluster.lsm_compaction_ops;
 
 comptime {
