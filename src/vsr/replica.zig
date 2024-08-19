@@ -7229,6 +7229,7 @@ pub fn ReplicaType(
             assert(header.replica == self.primary_index(header.view));
             assert(header.view <= self.view);
             assert(header.op <= self.op or header.view < self.view);
+            maybe(!self.sync_content_done());
 
             if (self.status != .normal) {
                 log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
@@ -7246,6 +7247,18 @@ pub fn ReplicaType(
                 log.debug("{}: send_prepare_ok: not sending (sync_status={s})", .{
                     self.replica,
                     @tagName(self.syncing),
+                });
+                return;
+            }
+            // To avoid falsely contributing to the durability of the current checkpoint, replicas
+            // syncing table blocks should not send prepare_oks for prepares past (and including)
+            // the next checkpoint's trigger.
+            if (!self.sync_content_done() and self.op_checkpoint() > 0 and
+                header.op >= vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?)
+            {
+                log.debug("{}: send_prepare_ok: not sending (sync_content_done={})", .{
+                    self.replica,
+                    self.sync_content_done(),
                 });
                 return;
             }
