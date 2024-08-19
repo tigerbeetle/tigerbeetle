@@ -1,5 +1,49 @@
 # TigerBeetle Changelog
 
+## 2024-08-19
+
+### Safety And Performance
+
+- [#1951](https://github.com/tigerbeetle/tigerbeetle/pull/1951),
+  [#2212](https://github.com/tigerbeetle/tigerbeetle/pull/2212)
+
+  Add new state sync protocol, fixing a couple of liveness issues.
+  State sync is now performed as part of the view change.
+
+- [#2207](https://github.com/tigerbeetle/tigerbeetle/pull/2207)
+
+  Major state sync performance improvements.
+
+### Features
+
+- [#2224](https://github.com/tigerbeetle/tigerbeetle/pull/2224),
+  [#2225](https://github.com/tigerbeetle/tigerbeetle/pull/2225),
+  [#2226](https://github.com/tigerbeetle/tigerbeetle/pull/2226)
+
+  Ensure `u128` (and related type) consistency across client implementations.
+
+- [#2213](https://github.com/tigerbeetle/tigerbeetle/pull/2213)
+
+  Fix multiversioning builds for aarch64 macOS.
+
+### Internals
+
+- [#2210](https://github.com/tigerbeetle/tigerbeetle/pull/2210)
+
+  Automatically include oldest supported releases in release notes.
+
+- [#2214](https://github.com/tigerbeetle/tigerbeetle/pull/2214)
+
+  Refactor `build.zig` to break up the biggest function in the codebase.
+
+- [#2178](https://github.com/tigerbeetle/tigerbeetle/pull/2178)
+
+  Minor improvements to zig install scripts.
+
+### TigerTracks 🎧
+
+- [End of the Line](https://www.youtube.com/watch?v=UMVjToYOjbM)
+
 ## 2024-08-12
 
 Highlight of this release is fully rolled-out support for multiversion binaries. This means that,
