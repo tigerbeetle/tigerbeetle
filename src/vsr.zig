@@ -1454,9 +1454,9 @@ const ViewChangeHeadersArray = struct {
     }
 };
 
-/// For a replica with journal_slot_count=10, lsm_batch_multiple=2, pipeline_prepare_queue_max=2,
+/// For a replica with journal_slot_count=10, lsm_compaction_ops=2, pipeline_prepare_queue_max=2,
 /// and checkpoint_interval=4, which can be computed as follows:
-/// journal_slot_count - (lsm_batch_multiple + 2 * pipeline_prepare_queue_max) = 4
+/// journal_slot_count - (lsm_compaction_ops + 2 * pipeline_prepare_queue_max) = 4
 ///
 ///   checkpoint() call           0   1   2   3   4
 ///   op_checkpoint               0   3   7  11  15
@@ -1481,8 +1481,8 @@ const ViewChangeHeadersArray = struct {
 ///    [ ] range of ops from a checkpoint
 pub const Checkpoint = struct {
     comptime {
-        assert(constants.journal_slot_count > constants.lsm_batch_multiple);
-        assert(constants.journal_slot_count % constants.lsm_batch_multiple == 0);
+        assert(constants.journal_slot_count > constants.lsm_compaction_ops);
+        assert(constants.journal_slot_count % constants.lsm_compaction_ops == 0);
     }
 
     pub fn checkpoint_after(checkpoint: u64) u64 {
@@ -1500,7 +1500,7 @@ pub const Checkpoint = struct {
             }
         };
 
-        assert((result + 1) % constants.lsm_batch_multiple == 0);
+        assert((result + 1) % constants.lsm_compaction_ops == 0);
         assert(valid(result));
 
         return result;
@@ -1512,7 +1512,7 @@ pub const Checkpoint = struct {
         if (checkpoint == 0) {
             return null;
         } else {
-            return checkpoint + constants.lsm_batch_multiple;
+            return checkpoint + constants.lsm_compaction_ops;
         }
     }
 
@@ -1527,11 +1527,11 @@ pub const Checkpoint = struct {
     }
 
     pub fn valid(op: u64) bool {
-        // Divide by `lsm_batch_multiple` instead of `vsr_checkpoint_interval`:
+        // Divide by `lsm_compaction_ops` instead of `vsr_checkpoint_interval`:
         // although today in practice checkpoints are evenly spaced, the LSM layer doesn't assume
         // that. LSM allows any bar boundary to become a checkpoint which happens, e.g., in the tree
         // fuzzer.
-        return op == 0 or (op + 1) % constants.lsm_batch_multiple == 0;
+        return op == 0 or (op + 1) % constants.lsm_compaction_ops == 0;
     }
 };
 
@@ -1547,14 +1547,14 @@ test "Checkpoint ops diagram" {
 
     try string.writer().print(
         \\journal_slot_count={[journal_slot_count]}
-        \\lsm_batch_multiple={[lsm_batch_multiple]}
+        \\lsm_compaction_ops={[lsm_compaction_ops]}
         \\pipeline_prepare_queue_max={[pipeline_prepare_queue_max]}
         \\vsr_checkpoint_interval={[vsr_checkpoint_interval]}
         \\
         \\
     , .{
         .journal_slot_count = constants.journal_slot_count,
-        .lsm_batch_multiple = constants.lsm_batch_multiple,
+        .lsm_compaction_ops = constants.lsm_compaction_ops,
         .pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max,
         .vsr_checkpoint_interval = constants.vsr_checkpoint_interval,
     });
@@ -1563,7 +1563,7 @@ test "Checkpoint ops diagram" {
     var checkpoint_next: u64 = 0;
     var checkpoint_count: u32 = 0;
     for (0..constants.journal_slot_count * 10) |op| {
-        const last_beat = (op + 1) % constants.lsm_batch_multiple == 0;
+        const last_beat = (op + 1) % constants.lsm_compaction_ops == 0;
         const last_slot = (op + 1) % constants.journal_slot_count == 0;
 
         const op_type: enum {
@@ -1616,7 +1616,7 @@ test "Checkpoint ops diagram" {
 
     try snap(@src(),
         \\journal_slot_count=32
-        \\lsm_batch_multiple=4
+        \\lsm_compaction_ops=4
         \\pipeline_prepare_queue_max=4
         \\vsr_checkpoint_interval=20
         \\

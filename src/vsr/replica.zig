@@ -2190,7 +2190,7 @@ pub fn ReplicaType(
             assert(message.header.replica == self.primary_index(message.header.view));
             assert(message.header.commit >= message.header.checkpoint_op);
             assert(message.header.commit - message.header.checkpoint_op <=
-                constants.vsr_checkpoint_interval + constants.lsm_batch_multiple);
+                constants.vsr_checkpoint_interval + constants.lsm_compaction_ops);
             assert(message.header.op >= message.header.commit);
             assert(message.header.op - message.header.commit <=
                 constants.pipeline_prepare_queue_max);
@@ -3990,7 +3990,7 @@ pub fn ReplicaType(
 
             if (op == self.op_checkpoint_next_trigger()) {
                 assert(op <= self.op);
-                assert((op + 1) % constants.lsm_batch_multiple == 0);
+                assert((op + 1) % constants.lsm_compaction_ops == 0);
                 log.debug("{}: commit_op_compact_callback: checkpoint start " ++
                     "(op={} current_checkpoint={} next_checkpoint={})", .{
                     self.replica,
@@ -4092,7 +4092,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint_next_trigger() <= self.commit_max);
             self.grid.assert_only_repairing();
 
-            // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
+            // For the given WAL (journal_slot_count=8, lsm_compaction_ops=2, op=commit_min=7):
             //
             //   A  B  C  D  E
             //   |01|23|45|67|
@@ -4163,7 +4163,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op <= self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
 
-            assert(self.op_checkpoint() == self.commit_min - constants.lsm_batch_multiple);
+            assert(self.op_checkpoint() == self.commit_min - constants.lsm_compaction_ops);
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.checkpoint.header.op);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.checkpoint.header.op);
             self.grid.assert_only_repairing();
@@ -9257,7 +9257,7 @@ pub fn ReplicaType(
                     return self.release;
                 }
             }
-            assert(found_upgrade == constants.lsm_batch_multiple);
+            assert(found_upgrade == constants.lsm_compaction_ops);
             assert(self.upgrade_release != null);
             return self.upgrade_release.?;
         }

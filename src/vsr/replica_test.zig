@@ -53,7 +53,7 @@ const releases = .{
 comptime {
     // The tests are written for these configuration values in particular.
     assert(constants.journal_slot_count == 32);
-    assert(constants.lsm_batch_multiple == 4);
+    assert(constants.lsm_compaction_ops == 4);
 }
 
 test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
@@ -118,7 +118,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
     t.replica(.R0).stop();
 
     // Corrupt op_checkpoint (27) and all ops that follow.
-    var slot: usize = slot_count - constants.lsm_batch_multiple - 1;
+    var slot: usize = slot_count - constants.lsm_compaction_ops - 1;
     while (slot < slot_count) : (slot += 1) {
         t.replica(.R0).corrupt(.{ .wal_prepare = slot });
     }
@@ -1218,13 +1218,13 @@ test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
         .{
             // The entire last bar before the operation is free for operation=upgrade's, so when we
             // hit the checkpoint trigger we can immediately upgrade the cluster.
-            .request = checkpoint_1_trigger - constants.lsm_batch_multiple,
+            .request = checkpoint_1_trigger - constants.lsm_compaction_ops,
             .checkpoint = checkpoint_1,
         },
         .{
             // Since there is a non-upgrade request in the last bar, the replica cannot upgrade
             // during checkpoint_1 and must pad ahead to the next checkpoint.
-            .request = checkpoint_1_trigger - constants.lsm_batch_multiple + 1,
+            .request = checkpoint_1_trigger - constants.lsm_compaction_ops + 1,
             .checkpoint = checkpoint_2,
         },
     }) |data| {

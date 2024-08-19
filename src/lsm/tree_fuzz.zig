@@ -88,7 +88,7 @@ const FuzzOp = union(enum) {
 
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
 const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Value));
-const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
+const value_count_max = constants.lsm_compaction_ops * commit_entries_max;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const table_count_max = @import("tree.zig").table_count_max;
 
@@ -100,12 +100,12 @@ const scan_results_max = 4096;
 const events_max = 10_000_000;
 
 // We must call compact after every 'batch'.
-// Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
+// Every `lsm_compaction_ops` batches may put/remove `value_count_max` values.
 // Every `FuzzOp.put` issues one remove and one put.
 const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
 const compacts_per_checkpoint = stdx.div_ceil(
     constants.journal_slot_count,
-    constants.lsm_batch_multiple,
+    constants.lsm_compaction_ops,
 );
 
 fn EnvironmentType(comptime table_usage: TableUsage) type {
@@ -310,11 +310,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn compact(env: *Environment, op: u64) void {
-            const compaction_beat = op % constants.lsm_batch_multiple;
+            const compaction_beat = op % constants.lsm_compaction_ops;
 
             const last_half_beat =
-                compaction_beat == @divExact(constants.lsm_batch_multiple, 2) - 1;
-            const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
+                compaction_beat == @divExact(constants.lsm_compaction_ops, 2) - 1;
+            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
             if (!last_beat and !last_half_beat) return;
 
@@ -371,7 +371,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 compaction.beat_grid_forfeit();
             }
 
-            if (op >= constants.lsm_batch_multiple) {
+            if (op >= constants.lsm_compaction_ops) {
                 env.change_state(.fuzzing, .manifest_log_compact);
                 env.manifest_log.compact(manifest_log_compact_callback, op);
                 env.tick_until_state_change(.manifest_log_compact, .fuzzing);
@@ -384,7 +384,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             assert(env.block_pool.count == env.block_pool_raw.len);
 
-            if (op >= constants.lsm_batch_multiple) {
+            if (op >= constants.lsm_compaction_ops) {
                 env.manifest_log.compact_end();
             }
 
@@ -424,7 +424,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.fuzzing, .grid_checkpoint);
             env.tick_until_state_change(.grid_checkpoint, .fuzzing);
 
-            const checkpoint_op = op - constants.lsm_batch_multiple;
+            const checkpoint_op = op - constants.lsm_compaction_ops;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .header = header: {
                     var header = vsr.Header.Prepare.root(cluster);
@@ -775,13 +775,13 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (random.boolean()) 0 else 1,
         // Always do puts, and always more puts than removes.
-        .put = constants.lsm_batch_multiple * 2,
+        .put = constants.lsm_compaction_ops * 2,
         // Maybe do some removes.
-        .remove = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .remove = if (random.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some gets.
-        .get = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .get = if (random.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
-        .scan = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .scan = if (random.boolean()) 0 else constants.lsm_compaction_ops,
     };
     log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
@@ -845,8 +845,8 @@ fn generate_compact(
 ) FuzzOp {
     const checkpoint =
         // Can only checkpoint on the last beat of the bar.
-        options.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-        options.op > constants.lsm_batch_multiple and
+        options.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
+        options.op > constants.lsm_compaction_ops and
         // Checkpoint at roughly the same rate as log wraparound.
         random.uintLessThan(usize, compacts_per_checkpoint) == 0;
     return FuzzOp{ .compact = .{

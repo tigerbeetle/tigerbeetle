@@ -386,20 +386,20 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
-            const compaction_beat = op % constants.lsm_batch_multiple;
+            const compaction_beat = op % constants.lsm_compaction_ops;
 
             const first_beat = compaction_beat == 0;
             const last_half_beat = compaction_beat ==
-                @divExact(constants.lsm_batch_multiple, 2) - 1;
-            const half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2);
-            const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
+                @divExact(constants.lsm_compaction_ops, 2) - 1;
+            const half_beat = compaction_beat == @divExact(constants.lsm_compaction_ops, 2);
+            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
             assert(@as(usize, @intFromBool(first_beat)) + @intFromBool(last_half_beat) +
                 @intFromBool(half_beat) + @intFromBool(last_beat) <= 1);
 
-            log.debug("entering forest.compact() op={} constants.lsm_batch_multiple={} " ++
+            log.debug("entering forest.compact() op={} constants.lsm_compaction_ops={} " ++
                 "first_beat={} last_half_beat={} half_beat={} last_beat={}", .{
                 op,
-                constants.lsm_batch_multiple,
+                constants.lsm_compaction_ops,
                 first_beat,
                 last_half_beat,
                 half_beat,
@@ -411,9 +411,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .callback = callback,
             } };
 
-            // Compaction only starts > lsm_batch_multiple because nothing compacts in the first
+            // Compaction only starts > lsm_compaction_ops because nothing compacts in the first
             // bar.
-            assert(op >= constants.lsm_batch_multiple or
+            assert(op >= constants.lsm_compaction_ops or
                 forest.compaction_pipeline.compactions.count() == 0);
             assert(forest.compaction_progress == .idle);
 
@@ -429,7 +429,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // balances out, because we expect to naturally do less other compaction work on the
             // last beat.
             // The first bar has no manifest compaction.
-            if ((last_beat or last_half_beat) and op > constants.lsm_batch_multiple) {
+            if ((last_beat or last_half_beat) and op > constants.lsm_compaction_ops) {
                 forest.manifest_log_progress = .compacting;
                 forest.manifest_log.compact(compact_manifest_log_callback, op);
                 forest.compaction_progress = .trees_and_manifest;
@@ -459,12 +459,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.progress.? == .compact);
             const op = forest.progress.?.compact.op;
 
-            const compaction_beat = op % constants.lsm_batch_multiple;
+            const compaction_beat = op % constants.lsm_compaction_ops;
             const last_half_beat = compaction_beat == @divExact(
-                constants.lsm_batch_multiple,
+                constants.lsm_compaction_ops,
                 2,
             ) - 1;
-            const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
+            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
             // Apply the changes to the manifest. This will run at the target compaction beat
             // that is requested.
@@ -966,9 +966,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             op: u64,
             callback: Forest.Callback,
         ) void {
-            const compaction_beat = op % constants.lsm_batch_multiple;
+            const compaction_beat = op % constants.lsm_compaction_ops;
             const first_beat = compaction_beat == 0;
-            const half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2);
+            const half_beat = compaction_beat == @divExact(constants.lsm_compaction_ops, 2);
 
             if (self.forest == null) self.forest = forest;
             assert(self.forest == forest);
@@ -1058,7 +1058,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                     switch (Forest.tree_id_cast(compaction.tree_id)) {
                         inline else => |tree_id| {
                             self.tree_compaction(tree_id, compaction.level_b).bar_setup_budget(
-                                @divExact(constants.lsm_batch_multiple, 2),
+                                @divExact(constants.lsm_compaction_ops, 2),
                                 target_index_blocks,
                                 immutable_table_a_block,
                             );
@@ -1091,9 +1091,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             self.callback = callback;
 
             if (self.compactions.count() == 0) {
-                // No compactions - we're done! Likely we're < lsm_batch_multiple but it could
+                // No compactions - we're done! Likely we're < lsm_compaction_ops but it could
                 // be that empty ops were pulsed through.
-                maybe(op < constants.lsm_batch_multiple);
+                maybe(op < constants.lsm_compaction_ops);
 
                 self.grid.on_next_tick(beat_finished_next_tick, &self.next_tick);
                 return;
