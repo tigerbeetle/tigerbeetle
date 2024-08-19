@@ -7250,11 +7250,17 @@ pub fn ReplicaType(
                 });
                 return;
             }
+
             // To avoid falsely contributing to the durability of the current checkpoint, replicas
-            // syncing table blocks should not send prepare_oks for prepares past (and including)
-            // the next checkpoint's trigger.
-            if (!self.sync_content_done() and self.op_checkpoint() > 0 and
-                header.op >= vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?)
+            // syncing table blocks should not send prepare_oks for prepares past the current
+            // checkpoint's prepare_max. However, ops past prepare_max + pipeline_prepare_queue_max
+            // can be safely prepare_ok'd. This is because if the primary prepared these ops,
+            // prepare_max + 1 is committed and the checkpoint is durable on a commit quorum!
+            const prepare_max_current_checkpoint =
+                vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint());
+            if (!self.sync_content_done() and header.op > prepare_max_current_checkpoint.? and
+                (header.op <= prepare_max_current_checkpoint.? +
+                constants.pipeline_prepare_queue_max))
             {
                 log.debug("{}: send_prepare_ok: not sending (sync_content_done={})", .{
                     self.replica,
