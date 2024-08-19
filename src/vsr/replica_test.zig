@@ -690,7 +690,7 @@ test "Cluster: repair: primary checkpoint, backup crash before checkpoint, prima
     // 6. A0 prepares a message.
     // 7. B1 restarts. The very first entry in its WAL is corrupt.
     // A0 has *not* already overwritten the corresponding entry in its own WAL, thanks to the
-    // pipeline component of the vsr_checkpoint_interval.
+    // pipeline component of the vsr_checkpoint_ops.
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
@@ -989,7 +989,7 @@ test "Cluster: repair: R=2 (primary checkpoints, but backup lags behind)" {
     try expectEqual(b1.op_checkpoint(), 0);
 
     // On B1, corrupt the same slot that A0 is about to overwrite with a new prepare.
-    // (B1 doesn't have any prepare in this slot, thanks to the vsr_checkpoint_interval.)
+    // (B1 doesn't have any prepare in this slot, thanks to the vsr_checkpoint_ops.)
     b1.stop();
     b1.pass(.R_, .incoming, .commit);
     b1.corrupt(.{ .wal_prepare = (checkpoint_1_trigger + 2) % slot_count });
@@ -1282,7 +1282,7 @@ test "Cluster: upgrade: state-sync to new release" {
     try t.replica(.R1).open_upgrade(&[_]u8{ 10, 20 });
     t.run();
     try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
-    try c.request(constants.vsr_checkpoint_interval, constants.vsr_checkpoint_interval);
+    try c.request(constants.vsr_checkpoint_ops, constants.vsr_checkpoint_ops);
     try expectEqual(t.replica(.R0).commit(), checkpoint_2_trigger);
 
     // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...

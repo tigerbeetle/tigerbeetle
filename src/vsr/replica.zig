@@ -1707,7 +1707,7 @@ pub fn ReplicaType(
             // for why op=prepare_max+1 being committed implies that.
             const op_overwritten = (self.op + 1) -| constants.journal_slot_count;
             const op_checkpoint_previous = self.op_checkpoint() -|
-                constants.vsr_checkpoint_interval;
+                constants.vsr_checkpoint_ops;
             if (op_overwritten > op_checkpoint_previous) {
                 assert(self.commit_max >
                     vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?);
@@ -2190,7 +2190,7 @@ pub fn ReplicaType(
             assert(message.header.replica == self.primary_index(message.header.view));
             assert(message.header.commit >= message.header.checkpoint_op);
             assert(message.header.commit - message.header.checkpoint_op <=
-                constants.vsr_checkpoint_interval + constants.lsm_compaction_ops);
+                constants.vsr_checkpoint_ops + constants.lsm_compaction_ops);
             assert(message.header.op >= message.header.commit);
             assert(message.header.op - message.header.commit <=
                 constants.pipeline_prepare_queue_max);
@@ -2241,7 +2241,7 @@ pub fn ReplicaType(
             //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
             //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
             //  prepares in this replica's WAL are no longer needed.
-                message.header.commit > self.op_prepare_max() + constants.vsr_checkpoint_interval or
+                message.header.commit > self.op_prepare_max() + constants.vsr_checkpoint_ops or
                 // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
                 // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
                 // there's evidence that the repair can't be completed.
@@ -4751,8 +4751,8 @@ pub fn ReplicaType(
             // The SV includes headers corresponding to the op_prepare_max for preceding
             // checkpoints (as many as we have and can help repair, which is at most 2).
             for ([_]u64{
-                self.op_prepare_max() -| constants.vsr_checkpoint_interval,
-                self.op_prepare_max() -| constants.vsr_checkpoint_interval * 2,
+                self.op_prepare_max() -| constants.vsr_checkpoint_ops,
+                self.op_prepare_max() -| constants.vsr_checkpoint_ops * 2,
             }) |op_hook| {
                 if (op > op_hook and op_hook >= op_min) {
                     op = op_hook;
@@ -5952,7 +5952,7 @@ pub fn ReplicaType(
             const checkpoint_next_1 = vsr.Checkpoint.checkpoint_after(checkpoint_now);
             const checkpoint_next_2 = vsr.Checkpoint.checkpoint_after(checkpoint_next_1);
 
-            if (op + constants.vsr_checkpoint_interval <= checkpoint_now) {
+            if (op + constants.vsr_checkpoint_ops <= checkpoint_now) {
                 // Case 1: op is from a too distant past for us to know its checkpoint id.
                 return null;
             }
@@ -6015,7 +6015,7 @@ pub fn ReplicaType(
                     break :repair_min self.op_checkpoint() + 1;
                 } else {
                     break :repair_min (self.op_checkpoint() + 1) -|
-                        constants.vsr_checkpoint_interval;
+                        constants.vsr_checkpoint_ops;
                 }
             };
 

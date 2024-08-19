@@ -1491,12 +1491,12 @@ pub const Checkpoint = struct {
         const result = op: {
             if (checkpoint == 0) {
                 // First wrap: op_checkpoint_next = 6-1 = 5
-                // -1: vsr_checkpoint_interval is a count, result is an inclusive index.
-                break :op constants.vsr_checkpoint_interval - 1;
+                // -1: vsr_checkpoint_ops is a count, result is an inclusive index.
+                break :op constants.vsr_checkpoint_ops - 1;
             } else {
                 // Second wrap: op_checkpoint_next = 5+6 = 11
                 // Third wrap: op_checkpoint_next = 11+6 = 17
-                break :op checkpoint + constants.vsr_checkpoint_interval;
+                break :op checkpoint + constants.vsr_checkpoint_ops;
             }
         };
 
@@ -1527,7 +1527,7 @@ pub const Checkpoint = struct {
     }
 
     pub fn valid(op: u64) bool {
-        // Divide by `lsm_compaction_ops` instead of `vsr_checkpoint_interval`:
+        // Divide by `lsm_compaction_ops` instead of `vsr_checkpoint_ops`:
         // although today in practice checkpoints are evenly spaced, the LSM layer doesn't assume
         // that. LSM allows any bar boundary to become a checkpoint which happens, e.g., in the tree
         // fuzzer.
@@ -1549,14 +1549,14 @@ test "Checkpoint ops diagram" {
         \\journal_slot_count={[journal_slot_count]}
         \\lsm_compaction_ops={[lsm_compaction_ops]}
         \\pipeline_prepare_queue_max={[pipeline_prepare_queue_max]}
-        \\vsr_checkpoint_interval={[vsr_checkpoint_interval]}
+        \\vsr_checkpoint_ops={[vsr_checkpoint_ops]}
         \\
         \\
     , .{
         .journal_slot_count = constants.journal_slot_count,
         .lsm_compaction_ops = constants.lsm_compaction_ops,
         .pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max,
-        .vsr_checkpoint_interval = constants.vsr_checkpoint_interval,
+        .vsr_checkpoint_ops = constants.vsr_checkpoint_ops,
     });
 
     var checkpoint_prev: u64 = 0;
@@ -1618,7 +1618,7 @@ test "Checkpoint ops diagram" {
         \\journal_slot_count=32
         \\lsm_compaction_ops=4
         \\pipeline_prepare_queue_max=4
-        \\vsr_checkpoint_interval=20
+        \\vsr_checkpoint_ops=20
         \\
         \\OPS: [__0  __1  __2  __3   __4  __5  __6  __7   __8  __9  _10  _11   _12  _13  _14  _15   _16  _17  _18 {_19   _20  _21  _22 <_23>  _24  _25  _26  _27]  _28  _29  _30  _31
         \\OPS:  _32  _33  _34  _35   _36  _37  _38 [_39   _40  _41  _42 <_43>  _44  _45  _46  _47}  _48  _49  _50  _51   _52  _53  _54  _55   _56  _57  _58 {_59   _60  _61  _62 <_63>

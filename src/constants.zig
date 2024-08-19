@@ -53,7 +53,7 @@ comptime {
 
 /// The checkpoint interval is chosen to be the highest possible value that satisfies the
 /// constraints described below.
-pub const vsr_checkpoint_interval = journal_slot_count -
+pub const vsr_checkpoint_ops = journal_slot_count -
     lsm_compaction_ops -
     lsm_compaction_ops * stdx.div_ceil(pipeline_prepare_queue_max * 2, lsm_compaction_ops);
 
@@ -82,11 +82,11 @@ comptime {
     //    overwrite entries from the previous WAL wrap. By the time we start preparing entries after
     //    the second pipeline_prepare_queue_max, a quorum of replicas is guaranteed to have already
     //    reached the former checkpoint.
-    assert(vsr_checkpoint_interval + lsm_compaction_ops + pipeline_prepare_queue_max * 2 <=
+    assert(vsr_checkpoint_ops + lsm_compaction_ops + pipeline_prepare_queue_max * 2 <=
         journal_slot_count);
-    assert(vsr_checkpoint_interval >= pipeline_prepare_queue_max);
-    assert(vsr_checkpoint_interval >= lsm_compaction_ops);
-    assert(vsr_checkpoint_interval % lsm_compaction_ops == 0);
+    assert(vsr_checkpoint_ops >= pipeline_prepare_queue_max);
+    assert(vsr_checkpoint_ops >= lsm_compaction_ops);
+    assert(vsr_checkpoint_ops % lsm_compaction_ops == 0);
 }
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
