@@ -1563,8 +1563,8 @@ test "Checkpoint ops diagram" {
     var checkpoint_next: u64 = 0;
     var checkpoint_count: u32 = 0;
     for (0..constants.journal_slot_count * 10) |op| {
-        const last_beat = op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1;
-        const last_slot = (op % constants.journal_slot_count) + 1 == constants.journal_slot_count;
+        const last_beat = (op + 1) % constants.lsm_batch_multiple == 0;
+        const last_slot = (op + 1) % constants.journal_slot_count == 0;
 
         const op_type: enum {
             normal,
