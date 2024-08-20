@@ -118,7 +118,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(config.name.len > 0);
 
             const value_count_limit =
-                options.batch_value_count_limit * constants.lsm_batch_multiple;
+                options.batch_value_count_limit * constants.lsm_compaction_ops;
             assert(value_count_limit > 0);
             assert(value_count_limit <= TreeTable.value_count_max);
 
@@ -500,7 +500,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             tree.manifest.verify(snapshot_latest);
             assert(tree.compaction_op.? == 0 or
-                (tree.compaction_op.? + 1) % constants.lsm_batch_multiple == 0);
+                (tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
             maybe(tree.key_range == null);
         }
 
@@ -513,7 +513,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(snapshot_min < snapshot_latest);
 
             // TODO
-            // assert((tree.compaction_op.? + 1) % constants.lsm_batch_multiple == 0);
+            // assert((tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
 
             // The immutable table must be visible to the next bar.
             // In addition, the immutable table is conceptually an output table of this compaction
@@ -530,8 +530,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         pub fn assert_between_bars(tree: *const Tree) void {
             // Assert that this is the last beat in the compaction bar.
-            // const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
-            // const last_beat_in_bar = constants.lsm_batch_multiple - 1;
+            // const compaction_beat = tree.compaction_op.? % constants.lsm_compaction_ops;
+            // const last_beat_in_bar = constants.lsm_compaction_ops - 1;
             // assert(last_beat_in_bar == compaction_beat);
 
             // Assert no outstanding compactions.
@@ -601,7 +601,7 @@ test "TreeType" {
         CompositeKey.sentinel_key,
         CompositeKey.tombstone,
         CompositeKey.tombstone_from_key,
-        constants.state_machine_config.lsm_batch_multiple * 1024,
+        constants.state_machine_config.lsm_compaction_ops * 1024,
         .secondary_index,
     );
 

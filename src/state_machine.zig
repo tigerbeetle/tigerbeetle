@@ -45,7 +45,7 @@ pub fn StateMachineType(
     comptime config: global_constants.StateMachineConfig,
 ) type {
     assert(config.message_body_size_max > 0);
-    assert(config.lsm_batch_multiple > 0);
+    assert(config.lsm_compaction_ops > 0);
     assert(config.vsr_operations_reserved > 0);
 
     return struct {
@@ -2672,7 +2672,7 @@ const TestContext = struct {
     const StateMachine = StateMachineType(Storage, .{
         // Overestimate the batch size because the test never compacts.
         .message_body_size_max = TestContext.message_body_size_max,
-        .lsm_batch_multiple = global_constants.lsm_batch_multiple,
+        .lsm_compaction_ops = global_constants.lsm_compaction_ops,
         .vsr_operations_reserved = 128,
     });
     const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
@@ -4660,7 +4660,7 @@ test "StateMachine: ref all decls" {
 
     const StateMachine = StateMachineType(Storage, .{
         .message_body_size_max = global_constants.message_body_size_max,
-        .lsm_batch_multiple = 1,
+        .lsm_compaction_ops = 1,
         .vsr_operations_reserved = 128,
     });
 

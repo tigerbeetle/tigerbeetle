@@ -660,9 +660,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // half-bar.
             // This is because otherwise it would mess with our grid reserve / forfeit ordering,
             // since we now reserve / forfeit per beat.
-            assert((op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0);
+            assert((op + 1) % @divExact(constants.lsm_compaction_ops, 2) == 0);
 
-            if (op < constants.lsm_batch_multiple or
+            if (op < constants.lsm_compaction_ops or
                 manifest_log.superblock.working.vsr_state.op_compacted(op))
             {
                 manifest_log.read_callback = callback;

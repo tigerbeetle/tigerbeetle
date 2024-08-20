@@ -94,17 +94,17 @@ const Environment = struct {
     const free_set_fragment_size = 67;
 
     // We must call compact after every 'batch'.
-    // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values per index.
+    // Every `lsm_compaction_ops` batches may put/remove `value_count_max` values per index.
     // Every `FuzzOp.put_account` issues one remove and one put per index.
     const puts_since_compact_max = @divTrunc(
         Forest.groove_config.accounts.ObjectTree.Table.value_count_max,
-        2 * constants.lsm_batch_multiple,
+        2 * constants.lsm_compaction_ops,
     );
 
     const compacts_per_checkpoint = std.math.divCeil(
         usize,
         constants.journal_slot_count,
-        constants.lsm_batch_multiple,
+        constants.lsm_compaction_ops,
     ) catch unreachable;
 
     const State = enum {
@@ -278,7 +278,7 @@ const Environment = struct {
 
     pub fn checkpoint(env: *Environment, op: u64) !void {
         assert(env.checkpoint_op == null);
-        env.checkpoint_op = op - constants.lsm_batch_multiple;
+        env.checkpoint_op = op - constants.lsm_compaction_ops;
 
         env.change_state(.fuzzing, .forest_checkpoint);
         env.forest.checkpoint(forest_checkpoint_callback);
@@ -519,7 +519,7 @@ const Environment = struct {
         }
 
         pub fn checkpoint(model: *Model, op: u64) !void {
-            const checkpointable = op - (op % constants.lsm_batch_multiple) -| 1;
+            const checkpointable = op - (op % constants.lsm_compaction_ops) -| 1;
             const log_size = model.log.readableLength();
             var log_index: usize = 0;
             while (log_index < log_size) : (log_index += 1) {
@@ -759,11 +759,11 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (random.boolean()) 0 else 1,
         // Always do puts.
-        .put_account = constants.lsm_batch_multiple * 2,
+        .put_account = constants.lsm_compaction_ops * 2,
         // Maybe do some gets.
-        .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .get_account = if (random.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
-        .scan_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .scan_account = if (random.boolean()) 0 else constants.lsm_compaction_ops,
     };
     log.info("action_distribution = {:.2}", .{action_distribution});
 
@@ -799,7 +799,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 });
                 op += 1;
                 if (action.compact.checkpoint) {
-                    persisted_op = op - constants.lsm_batch_multiple;
+                    persisted_op = op - constants.lsm_compaction_ops;
                 }
                 break :action action;
             },
@@ -890,10 +890,10 @@ fn generate_compact(
 ) FuzzOpAction {
     const checkpoint =
         // Can only checkpoint on the last beat of the bar.
-        options.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-        options.op > constants.lsm_batch_multiple and
+        options.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
+        options.op > constants.lsm_compaction_ops and
         // Never checkpoint at the same op twice
-        options.op > options.persisted_op + constants.lsm_batch_multiple and
+        options.op > options.persisted_op + constants.lsm_compaction_ops and
         // Checkpoint at roughly the same rate as log wraparound.
         random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
     return FuzzOpAction{ .compact = .{

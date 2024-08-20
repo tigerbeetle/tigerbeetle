@@ -117,7 +117,7 @@ comptime {
 fn IndexTreeType(
     comptime Storage: type,
     comptime Field: type,
-    comptime value_count_max: usize,
+    comptime table_value_count_max: usize,
 ) type {
     const CompositeKey = CompositeKeyType(IndexCompositeKeyType(Field));
     const Table = TableType(
@@ -127,7 +127,7 @@ fn IndexTreeType(
         CompositeKey.sentinel_key,
         CompositeKey.tombstone,
         CompositeKey.tombstone_from_key,
-        value_count_max,
+        table_value_count_max,
         .secondary_index,
     );
 
@@ -186,12 +186,9 @@ pub fn GrooveType(
         }
 
         if (!ignored) {
-            const IndexTree = IndexTreeType(
-                Storage,
-                field.type,
-                @field(groove_options.batch_value_count_max, field.name) *
-                    constants.lsm_batch_multiple,
-            );
+            const table_value_count_max = constants.lsm_compaction_ops *
+                @field(groove_options.batch_value_count_max, field.name);
+            const IndexTree = IndexTreeType(Storage, field.type, table_value_count_max);
             index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
                     .name = field.name,
@@ -229,11 +226,9 @@ pub fn GrooveType(
         };
 
         const DerivedType = derive_return_type;
-        const IndexTree = IndexTreeType(
-            Storage,
-            DerivedType,
-            @field(groove_options.batch_value_count_max, field.name) * constants.lsm_batch_multiple,
-        );
+        const table_value_count_max = constants.lsm_compaction_ops *
+            @field(groove_options.batch_value_count_max, field.name);
+        const IndexTree = IndexTreeType(Storage, DerivedType, table_value_count_max);
 
         index_fields = index_fields ++ [_]std.builtin.Type.StructField{
             .{
@@ -261,6 +256,8 @@ pub fn GrooveType(
     }
 
     const _ObjectTree = blk: {
+        const table_value_count_max = constants.lsm_compaction_ops *
+            groove_options.batch_value_count_max.timestamp;
         const Table = TableType(
             u64, // key = timestamp
             Object,
@@ -268,13 +265,15 @@ pub fn GrooveType(
             ObjectTreeHelpers(Object).sentinel_key,
             ObjectTreeHelpers(Object).tombstone,
             ObjectTreeHelpers(Object).tombstone_from_key,
-            groove_options.batch_value_count_max.timestamp * constants.lsm_batch_multiple,
+            table_value_count_max,
             .general,
         );
         break :blk TreeType(Table, Storage);
     };
 
     const _IdTree = if (!has_id) void else blk: {
+        const table_value_count_max = constants.lsm_compaction_ops *
+            groove_options.batch_value_count_max.id;
         const Table = TableType(
             u128,
             IdTreeValue,
@@ -282,7 +281,7 @@ pub fn GrooveType(
             IdTreeValue.sentinel_key,
             IdTreeValue.tombstone,
             IdTreeValue.tombstone_from_key,
-            groove_options.batch_value_count_max.id * constants.lsm_batch_multiple,
+            table_value_count_max,
             .general,
         );
         break :blk TreeType(Table, Storage);
@@ -489,7 +488,7 @@ pub fn GrooveType(
             options: Options,
         ) !Groove {
             assert(options.tree_options_object.batch_value_count_limit *
-                constants.lsm_batch_multiple <= ObjectTree.Table.value_count_max);
+                constants.lsm_compaction_ops <= ObjectTree.Table.value_count_max);
 
             var objects_cache = try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
@@ -498,7 +497,7 @@ pub fn GrooveType(
                 // beat (to contain either TableMutable or TableImmutable) as well as the maximum
                 // number of prefetches a bar may perform, excluding prefetches already accounted
                 // for by batch_value_count_limit.
-                .map_value_count_max = constants.lsm_batch_multiple *
+                .map_value_count_max = constants.lsm_compaction_ops *
                     (options.tree_options_object.batch_value_count_limit +
                     options.prefetch_entries_for_read_max),
 
@@ -1074,8 +1073,8 @@ pub fn GrooveType(
         pub fn compact(groove: *Groove, op: u64) void {
             // Compact the objects_cache on the last beat of the bar, just like the trees do to
             // their mutable tables.
-            const compaction_beat = op % constants.lsm_batch_multiple;
-            if (compaction_beat == constants.lsm_batch_multiple - 1) {
+            const compaction_beat = op % constants.lsm_compaction_ops;
+            if (compaction_beat == constants.lsm_compaction_ops - 1) {
                 groove.objects_cache.compact();
             }
         }

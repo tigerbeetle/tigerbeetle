@@ -983,8 +983,8 @@ const Environment = struct {
 
         const checkpoint =
             // Can only checkpoint on the last beat of the bar.
-            env.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-            env.op > constants.lsm_batch_multiple;
+            env.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
+            env.op > constants.lsm_compaction_ops;
 
         env.change_state(.fuzzing, .forest_compact);
         env.forest.compact(forest_compact_callback, env.op);
@@ -992,7 +992,7 @@ const Environment = struct {
 
         if (checkpoint) {
             assert(env.checkpoint_op == null);
-            env.checkpoint_op = env.op - constants.lsm_batch_multiple;
+            env.checkpoint_op = env.op - constants.lsm_compaction_ops;
 
             env.change_state(.fuzzing, .forest_checkpoint);
             env.forest.checkpoint(forest_checkpoint_callback);
