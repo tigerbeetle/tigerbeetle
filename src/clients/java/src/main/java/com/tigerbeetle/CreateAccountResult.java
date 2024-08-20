@@ -38,9 +38,9 @@ public enum CreateAccountResult {
     TimestampMustBeZero((int) 3),
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_be_zero">imported_event_timestamp_must_not_be_zero</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_out_of_range">imported_event_timestamp_out_of_range</a>
      */
-    ImportedEventTimestampMustNotBeZero((int) 24),
+    ImportedEventTimestampOutOfRange((int) 24),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance">imported_event_timestamp_must_not_advance</a>

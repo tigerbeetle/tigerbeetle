@@ -345,9 +345,9 @@ public enum CreateAccountResult : uint
     TimestampMustBeZero = 3,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_out_of_range
     /// </summary>
-    ImportedEventTimestampMustNotBeZero = 24,
+    ImportedEventTimestampOutOfRange = 24,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance
@@ -744,9 +744,9 @@ public enum CreateTransferResult : uint
     ImportedEventNotExpected = 57,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_be_zero
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_out_of_range
     /// </summary>
-    ImportedEventTimestampMustNotBeZero = 58,
+    ImportedEventTimestampOutOfRange = 58,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance

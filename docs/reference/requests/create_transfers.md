@@ -53,16 +53,16 @@ must be zero. The cluster is responsible for setting this field.
 The [`Transfer.timestamp`](../transfer.md#timestamp) can only be assigned when creating transfers
 with [Transfer.flags.imported](../transfer.md#flagsimported) set.
 
-### `imported_event_timestamp_must_not_be_zero`
+### `imported_event_timestamp_out_of_range`
 
-This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
-The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is zero, but must
-be a user-defined timestamp.
+The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is out of range,
+but must be a user-defined timestamp greater than `0` and less than `2^63`.
 
 ### `imported_event_timestamp_must_not_advance`
 
-This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
 The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp) is
 greater than the current [cluster time](../../coding/time.md), but it must be a past timestamp.
@@ -376,14 +376,14 @@ many applications should handle `exists` exactly as [`ok`](#ok).
 
 ### `imported_event_timestamp_must_not_regress`
 
-This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
 The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp)
 regressed, but it must be greater than the last timestamp assigned to any `Transfer` in the cluster and cannot be equal to the timestamp of any existing [`Account`](../account.md).
 
 ### `imported_event_timestamp_must_postdate_debit_account`
 
-This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
 The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
 refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than the
@@ -391,7 +391,7 @@ refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than 
 
 ### `imported_event_timestamp_must_postdate_credit_account`
 
-This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
 The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
 refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than the
@@ -399,7 +399,7 @@ refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than 
 
 ### `imported_event_timeout_must_be_zero`
 
-This result only applies when [Transfer.flags.imported](../transfer.md#flagsimported) is set.
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
 The transfer was not created. The [`Transfer.timeout`](../transfer.md#timeout) is nonzero, but
 must be zero.

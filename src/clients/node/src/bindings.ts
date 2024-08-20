@@ -296,9 +296,9 @@ export enum CreateAccountError {
   timestamp_must_be_zero = 3,
 
   /**
-  * See [imported_event_timestamp_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_be_zero)
+  * See [imported_event_timestamp_out_of_range](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_out_of_range)
   */
-  imported_event_timestamp_must_not_be_zero = 24,
+  imported_event_timestamp_out_of_range = 24,
 
   /**
   * See [imported_event_timestamp_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance)
@@ -698,9 +698,9 @@ export enum CreateTransferError {
   imported_event_not_expected = 57,
 
   /**
-  * See [imported_event_timestamp_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_be_zero)
+  * See [imported_event_timestamp_out_of_range](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_out_of_range)
   */
-  imported_event_timestamp_must_not_be_zero = 58,
+  imported_event_timestamp_out_of_range = 58,
 
   /**
   * See [imported_event_timestamp_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance)

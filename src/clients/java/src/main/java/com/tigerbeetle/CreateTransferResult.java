@@ -298,9 +298,9 @@ public enum CreateTransferResult {
     ImportedEventNotExpected((int) 57),
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_be_zero">imported_event_timestamp_must_not_be_zero</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_out_of_range">imported_event_timestamp_out_of_range</a>
      */
-    ImportedEventTimestampMustNotBeZero((int) 58),
+    ImportedEventTimestampOutOfRange((int) 58),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance">imported_event_timestamp_must_not_advance</a>

@@ -154,7 +154,7 @@ pub const CreateAccountResult = enum(u32) {
 
     timestamp_must_be_zero = 3,
 
-    imported_event_timestamp_must_not_be_zero = 24,
+    imported_event_timestamp_out_of_range = 24,
     imported_event_timestamp_must_not_advance = 25,
 
     reserved_field = 4,
@@ -204,7 +204,7 @@ pub const CreateTransferResult = enum(u32) {
 
     timestamp_must_be_zero = 3,
 
-    //imported_event_timestamp_must_not_be_zero = 58,
+    //imported_event_timestamp_out_of_range = 58,
     //imported_event_timestamp_must_not_advance = 59,
 
     reserved_flag = 4,
@@ -291,7 +291,7 @@ pub const CreateTransferResult = enum(u32) {
     // https://github.com/ziglang/zig/blob/66b71273a2555da23f6d706c22e3d85f43fe602b/lib/std/enums.zig#L1278-L1280
     imported_event_expected = 56,
     imported_event_not_expected = 57,
-    imported_event_timestamp_must_not_be_zero = 58,
+    imported_event_timestamp_out_of_range = 58,
     imported_event_timestamp_must_not_advance = 59,
     imported_event_timestamp_must_not_regress = 60,
     imported_event_timestamp_must_postdate_debit_account = 61,

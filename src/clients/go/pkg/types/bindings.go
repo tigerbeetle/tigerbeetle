@@ -190,7 +190,7 @@ const (
 	AccountImportedEventExpected                CreateAccountResult = 22
 	AccountImportedEventNotExpected             CreateAccountResult = 23
 	AccountTimestampMustBeZero                  CreateAccountResult = 3
-	AccountImportedEventTimestampMustNotBeZero  CreateAccountResult = 24
+	AccountImportedEventTimestampOutOfRange     CreateAccountResult = 24
 	AccountImportedEventTimestampMustNotAdvance CreateAccountResult = 25
 	AccountReservedField                        CreateAccountResult = 4
 	AccountReservedFlag                         CreateAccountResult = 5
@@ -227,8 +227,8 @@ func (i CreateAccountResult) String() string {
 		return "AccountImportedEventNotExpected"
 	case AccountTimestampMustBeZero:
 		return "AccountTimestampMustBeZero"
-	case AccountImportedEventTimestampMustNotBeZero:
-		return "AccountImportedEventTimestampMustNotBeZero"
+	case AccountImportedEventTimestampOutOfRange:
+		return "AccountImportedEventTimestampOutOfRange"
 	case AccountImportedEventTimestampMustNotAdvance:
 		return "AccountImportedEventTimestampMustNotAdvance"
 	case AccountReservedField:
@@ -334,7 +334,7 @@ const (
 	TransferExceedsDebits                                   CreateTransferResult = 55
 	TransferImportedEventExpected                           CreateTransferResult = 56
 	TransferImportedEventNotExpected                        CreateTransferResult = 57
-	TransferImportedEventTimestampMustNotBeZero             CreateTransferResult = 58
+	TransferImportedEventTimestampOutOfRange                CreateTransferResult = 58
 	TransferImportedEventTimestampMustNotAdvance            CreateTransferResult = 59
 	TransferImportedEventTimestampMustNotRegress            CreateTransferResult = 60
 	TransferImportedEventTimestampMustPostdateDebitAccount  CreateTransferResult = 61
@@ -460,8 +460,8 @@ func (i CreateTransferResult) String() string {
 		return "TransferImportedEventExpected"
 	case TransferImportedEventNotExpected:
 		return "TransferImportedEventNotExpected"
-	case TransferImportedEventTimestampMustNotBeZero:
-		return "TransferImportedEventTimestampMustNotBeZero"
+	case TransferImportedEventTimestampOutOfRange:
+		return "TransferImportedEventTimestampOutOfRange"
 	case TransferImportedEventTimestampMustNotAdvance:
 		return "TransferImportedEventTimestampMustNotAdvance"
 	case TransferImportedEventTimestampMustNotRegress:

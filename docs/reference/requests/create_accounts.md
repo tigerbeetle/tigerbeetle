@@ -51,16 +51,16 @@ must be zero. The cluster is responsible for setting this field.
 The [`Account.timestamp`](../account.md#timestamp) can only be assigned when creating accounts
 with [Account.flags.imported](../account.md#flagsimported) set.
 
-### `imported_event_timestamp_must_not_be_zero`
+### `imported_event_timestamp_out_of_range`
 
-This result only applies when [Account.flags.imported](../account.md#flagsimported) is set.
+This result only applies when [`Account.flags.imported`](../account.md#flagsimported) is set.
 
-The account was not created. The [`Account.timestamp`](../account.md#timestamp) is zero, but must
-be a user-defined timestamp.
+The account was not created. The [`Account.timestamp`](../account.md#timestamp) is out of range,
+but must be a user-defined timestamp greater than `0` and less than `2^63`.
 
 ### `imported_event_timestamp_must_not_advance`
 
-This result only applies when [Account.flags.imported](../account.md#flagsimported) is set.
+This result only applies when [`Account.flags.imported`](../account.md#flagsimported) is set.
 
 The account was not created. The user-defined [`Account.timestamp`](../account.md#timestamp) is
 greater than the current [cluster time](../../coding/time.md), but it must be a past timestamp.

@@ -768,9 +768,15 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.prefetch_enqueue(t.debit_account_id);
                     self.forest.grooves.accounts.prefetch_enqueue(t.credit_account_id);
                 }
+            }
 
-                if (t.flags.imported) {
-                    // Looking for accounts with the same timestamp.
+            if (transfers.len > 0 and
+                transfers[0].flags.imported)
+            {
+                // Looking for accounts with the same timestamp.
+                // This logic could be in the loop above, but we choose to iterate again,
+                // avoiding an extra comparison in the more common case of non-imported batches.
+                for (transfers) |*t| {
                     self.forest.grooves.accounts.prefetch_exists_enqueue(t.timestamp);
                 }
             }
@@ -1506,8 +1512,10 @@ pub fn StateMachineType(
                     }
 
                     if (event.flags.imported) {
-                        if (event.timestamp == 0) {
-                            break :blk .imported_event_timestamp_must_not_be_zero;
+                        if (event.timestamp < TimestampRange.timestamp_min or
+                            event.timestamp > TimestampRange.timestamp_max)
+                        {
+                            break :blk .imported_event_timestamp_out_of_range;
                         }
                         if (event.timestamp >= timestamp) {
                             break :blk .imported_event_timestamp_must_not_advance;
@@ -2111,6 +2119,8 @@ pub fn StateMachineType(
                     return .imported_event_timestamp_must_not_regress;
                 }
             }
+            assert(t.timestamp > dr_account.timestamp);
+            assert(t.timestamp > cr_account.timestamp);
 
             const transfer_pending = self.get_transfer_pending(p.timestamp).?;
             assert(p.timestamp == transfer_pending.timestamp);
@@ -4058,7 +4068,8 @@ test "imported events: timestamp" {
     try check(
         \\ tick 10 nanoseconds
         \\
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  0 imported_event_timestamp_must_not_be_zero
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  0 imported_event_timestamp_out_of_range
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ -1 imported_event_timestamp_out_of_range
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ 99 imported_event_timestamp_must_not_advance
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  2 ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  1 imported_event_timestamp_must_not_regress
@@ -4073,7 +4084,8 @@ test "imported events: timestamp" {
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  9 exists
         \\ commit create_accounts
         \\
-        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  0 imported_event_timestamp_must_not_be_zero
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  0 imported_event_timestamp_out_of_range
+        \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ -1 imported_event_timestamp_out_of_range
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ 99 imported_event_timestamp_must_not_advance
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  2 imported_event_timestamp_must_not_regress // The same timestamp as the dr account.
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  3 imported_event_timestamp_must_not_regress // The same timestamp as the cr account.
@@ -4135,7 +4147,7 @@ test "imported events: linked chain" {
         \\
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   LNK  _  _  _ IMP _  1 linked_event_failed
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   LNK  _  _  _ IMP _  2 linked_event_failed
-        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  0 imported_event_timestamp_must_not_be_zero
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _  0 imported_event_timestamp_out_of_range
         \\ commit create_accounts
         \\
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   LNK  _  _  _ IMP _  1 ok
@@ -4145,7 +4157,7 @@ test "imported events: linked chain" {
         \\
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  4 linked_event_failed
         \\ transfer   T2 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  5 linked_event_failed
-        \\ transfer   T3 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  0 imported_event_timestamp_must_not_be_zero
+        \\ transfer   T3 A1 A2    3   _  _  _  _    _ L1 C2   _     _   _   _   _   _  IMP _  0 imported_event_timestamp_out_of_range
         \\ commit create_transfers
         \\
         \\ transfer   T1 A1 A2    3   _  _  _  _    _ L1 C2   LNK   _   _   _   _   _  IMP _  4 ok
