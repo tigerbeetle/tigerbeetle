@@ -7253,20 +7253,19 @@ pub fn ReplicaType(
 
             // To avoid falsely contributing to the durability of the current checkpoint, replicas
             // syncing table blocks should not send prepare_oks for prepares past the current
-            // checkpoint's prepare_max. However, ops past prepare_max + pipeline_prepare_queue_max
-            // can be safely prepare_ok'd. This is because if the primary prepared these ops,
-            // prepare_max + 1 is committed and the checkpoint is durable on a commit quorum!
-            const prepare_max_current_checkpoint =
-                vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint());
-            if (!self.sync_content_done() and header.op > prepare_max_current_checkpoint.? and
-                (header.op <= prepare_max_current_checkpoint.? +
-                constants.pipeline_prepare_queue_max))
-            {
-                log.debug("{}: send_prepare_ok: not sending (sync_content_done={})", .{
-                    self.replica,
-                    self.sync_content_done(),
-                });
-                return;
+            // checkpoint's prepare_max.
+            if (!self.sync_content_done()) {
+                const prepare_max_current_checkpoint =
+                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
+                if (self.commit_max <= prepare_max_current_checkpoint and
+                    header.op > prepare_max_current_checkpoint)
+                {
+                    log.debug("{}: send_prepare_ok: not sending (sync_content_done={})", .{
+                        self.replica,
+                        self.sync_content_done(),
+                    });
+                    return;
+                }
             }
 
             assert(self.status == .normal);
@@ -9098,12 +9097,7 @@ pub fn ReplicaType(
                 return true;
             } else {
                 // Trailers/manifest haven't yet been synced.
-                if (self.client_sessions_checkpoint.size_transferred <
-                    self.superblock.working.client_sessions_reference().trailer_size or
-                    !self.grid.free_set.opened or !self.state_machine_opened)
-                {
-                    return false;
-                }
+                if (!self.state_machine_opened) return false;
 
                 for (0..constants.clients_max) |entry_slot| {
                     if (self.client_sessions.entries_free.isSet(entry_slot)) continue;
