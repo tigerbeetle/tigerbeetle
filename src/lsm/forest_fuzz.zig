@@ -409,8 +409,7 @@ const Environment = struct {
     }
 
     fn get_account(env: *Environment, id: u128) ?*const Account {
-        const account = env.forest.grooves.accounts.get(id) orelse return null;
-        return account;
+        return env.forest.grooves.accounts.get(id);
     }
 
     fn exists(env: *Environment, timestamp: u64) bool {
