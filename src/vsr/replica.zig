@@ -9097,6 +9097,14 @@ pub fn ReplicaType(
             if (self.superblock.staging.vsr_state.sync_op_max == 0) {
                 return true;
             } else {
+                // Trailers/manifest haven't yet been synced.
+                if (self.client_sessions_checkpoint.size_transferred <
+                    self.superblock.working.client_sessions_reference().trailer_size or
+                    !self.grid.free_set.opened or !self.state_machine_opened)
+                {
+                    return false;
+                }
+
                 for (0..constants.clients_max) |entry_slot| {
                     if (self.client_sessions.entries_free.isSet(entry_slot)) continue;
 
