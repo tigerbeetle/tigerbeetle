@@ -553,6 +553,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .release_client_min = release_client_min,
                     .releases_bundled = &cluster.releases_bundled[replica_index],
                     .release_execute = replica_release_execute_soon,
+                    .release_execute_context = null,
                     .test_context = cluster,
                 },
             );

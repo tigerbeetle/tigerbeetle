@@ -297,30 +297,35 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
-        var multiversion: ?vsr.multiversioning.Multiversion =
+        var multiversion: ?vsr.multiversioning.Multiversion = blk: {
             if (constants.config.process.release.value ==
-            vsr.multiversioning.Release.minimum.value)
-        blk: {
-            log.info(
-                "multiversioning: disabled for development ({}) release.",
-                .{constants.config.process.release},
+                vsr.multiversioning.Release.minimum.value)
+            {
+                log.info("multiversioning: disabled for development ({}) release.", .{
+                    constants.config.process.release,
+                });
+                break :blk null;
+            }
+            if (args.development) {
+                log.info("multiversioning: disabled due to --development.", .{});
+                break :blk null;
+            }
+            if (args.experimental) {
+                log.info("multiversioning: disabled due to --experimental.", .{});
+                break :blk null;
+            }
+            if (constants.aof_recovery) {
+                log.info("multiversioning: disabled due to aof_recovery.", .{});
+                break :blk null;
+            }
+
+            break :blk try vsr.multiversioning.Multiversion.init(
+                allocator,
+                &command.io,
+                command.self_exe_path,
+                .native,
             );
-            break :blk null;
-        } else if (args.development) blk: {
-            log.info("multiversioning: disabled due to --development.", .{});
-            break :blk null;
-        } else if (args.experimental) blk: {
-            log.info("multiversioning: disabled due to --experimental.", .{});
-            break :blk null;
-        } else if (constants.aof_recovery) blk: {
-            log.info("multiversioning: disabled due to aof_recovery.", .{});
-            break :blk null;
-        } else try vsr.multiversioning.Multiversion.init(
-            allocator,
-            &command.io,
-            command.self_exe_path,
-            .native,
-        );
+        };
 
         defer if (multiversion != null) multiversion.?.deinit(allocator);
 
@@ -350,7 +355,7 @@ const Command = struct {
             .release_client_min = config.process.release_client_min,
             .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
-            .multiversion = if (multiversion) |*multiversion_| multiversion_ else null,
+            .release_execute_context = if (multiversion) |*pointer| pointer else null,
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
@@ -378,11 +383,7 @@ const Command = struct {
             else => |e| return e,
         };
 
-        // Enable checking for new binaries on disk after the replica has been opened. Only
-        // supported on Linux.
-        if (multiversion != null and builtin.target.os.tag == .linux) {
-            multiversion.?.timeout_enable();
-        }
+        if (multiversion != null) multiversion.?.timeout_start(replica.replica);
 
         // Note that this does not account for the fact that any allocations will be rounded up to
         // the nearest page by `std.heap.page_allocator`.
@@ -444,6 +445,7 @@ const Command = struct {
 
         while (true) {
             replica.tick();
+            if (multiversion != null) multiversion.?.tick();
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
     }
@@ -504,10 +506,12 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != replica.release.value);
     assert(release.value != vsr.Release.zero.value);
     assert(release.value != vsr.Release.minimum.value);
-
-    const multiversion = replica.multiversion orelse {
+    const release_execute_context = replica.release_execute_context orelse {
         @panic("replica_release_execute unsupported");
     };
+
+    const multiversion: *vsr.multiversioning.Multiversion =
+        @ptrCast(@alignCast(release_execute_context));
 
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
