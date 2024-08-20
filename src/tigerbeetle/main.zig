@@ -26,8 +26,7 @@ const MessagePool = vsr.message_pool.MessagePool;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Grid = vsr.GridType(Storage);
 
-const AOFType = if (constants.aof_record) AOF else void;
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOFType);
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
@@ -260,13 +259,13 @@ const Command = struct {
         } });
         defer message_pool.deinit(allocator);
 
-        var aof: AOFType = undefined;
-        if (constants.aof_record) {
+        var aof: ?AOF = if (args.aof) blk: {
             const aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
             defer allocator.free(aof_path);
 
-            aof = try AOF.from_absolute_path(aof_path);
-        }
+            break :blk try AOF.from_absolute_path(aof_path);
+        } else null;
+        defer if (aof != null) aof.?.close();
 
         const grid_cache_size = @as(u64, args.cache_grid_blocks) * constants.block_size;
         const grid_cache_size_min = constants.block_size * Grid.Cache.value_count_max_multiple;
@@ -359,7 +358,7 @@ const Command = struct {
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
-            .aof = &aof,
+            .aof = if (aof != null) &aof.? else null,
             .message_pool = &message_pool,
             .nonce = nonce,
             .time = .{},
@@ -414,6 +413,13 @@ const Command = struct {
         if (constants.verify) {
             log.warn("{}: started with constants.verify - expect reduced performance. " ++
                 "Recompile with -Dconfig=production if unexpected.", .{replica.replica});
+        }
+
+        if (replica.aof != null) {
+            log.warn(
+                "{}: started with --aof - expect much reduced performance.",
+                .{replica.replica},
+            );
         }
 
         // It is possible to start tigerbeetle passing `0` as an address:

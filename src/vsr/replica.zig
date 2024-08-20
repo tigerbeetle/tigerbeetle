@@ -539,7 +539,7 @@ pub fn ReplicaType(
         tracer_slot_commit: ?tracer.SpanStart = null,
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
-        aof: *AOF,
+        aof: ?*AOF,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -549,7 +549,7 @@ pub fn ReplicaType(
             message_pool: *MessagePool,
             nonce: Nonce,
             time: Time,
-            aof: *AOF,
+            aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
@@ -949,7 +949,7 @@ pub fn ReplicaType(
             nonce: Nonce,
             time: Time,
             storage: *Storage,
-            aof: *AOF,
+            aof: ?*AOF,
             message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
@@ -4275,8 +4275,8 @@ pub fn ReplicaType(
             //
             // It should be impossible for a client to receive a response without the request
             // being logged by at least one replica.
-            if (AOF != void) {
-                self.aof.write(prepare, .{
+            if (self.aof) |aof| {
+                aof.write(prepare, .{
                     .replica = self.replica,
                     .primary = self.primary_index(self.view),
                 }) catch @panic("aof failure");

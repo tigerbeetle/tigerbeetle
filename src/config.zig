@@ -21,7 +21,6 @@ const BuildOptions = struct {
     git_commit: ?[40]u8,
     release: ?[]const u8,
     release_client_min: ?[]const u8,
-    config_aof_record: bool,
     config_aof_recovery: bool,
 };
 
@@ -135,7 +134,6 @@ const ConfigProcess = struct {
     grid_repair_reads_max: usize = 4,
     grid_missing_blocks_max: usize = 30,
     grid_missing_tables_max: usize = 6,
-    aof_record: bool = false,
     grid_scrubber_reads_max: usize = 1,
     grid_scrubber_cycle_ms: usize = std.time.ms_per_day * 180,
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
@@ -341,7 +339,6 @@ pub const configs = struct {
         base.process.release = release;
         base.process.release_client_min = release_client_min;
         base.process.git_commit = build_options.git_commit;
-        base.process.aof_record = build_options.config_aof_record;
         base.process.aof_recovery = build_options.config_aof_recovery;
 
         assert(base.process.release.value >= base.process.release_client_min.value);

@@ -780,13 +780,6 @@ pub const state_machine_config = StateMachineConfig{
 /// only during unit tests of the data structure.
 pub const verify = config.process.verify;
 
-/// AOF (Append Only File) logs all transactions synchronously to disk before replying
-/// to the client. The logic behind this code has been kept as simple as possible -
-/// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple log
-/// consisting of logged requests. Much like a redis AOF with fsync=on.
-/// Enabling this will have performance implications.
-pub const aof_record = config.process.aof_record;
-
 /// Place us in a special recovery state, where we accept timestamps passed in to us. Used to
 /// replay our AOF.
 pub const aof_recovery = config.process.aof_recovery;
