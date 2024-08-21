@@ -9,9 +9,9 @@ import java.nio.ByteBuffer;
 import java.math.BigInteger;
 
 public final class TransferBatch extends Batch {
-    public static byte[] getAmountMax() {
-        return UInt128.asBytes(Long.MIN_VALUE, Long.MIN_VALUE);
-    }
+
+    public static final BigInteger AMOUNT_MAX =
+        UInt128.asBigInteger(Long.MIN_VALUE, Long.MIN_VALUE);
 
     interface Struct {
         int SIZE = 128;

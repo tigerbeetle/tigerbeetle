@@ -270,6 +270,7 @@ fn emit_struct(
         \\    public const int SIZE = {};
         \\
         \\{s}
+        \\
     , .{
         @tagName(mapping.visibility),
         if (mapping.visibility == .internal) "unsafe " else "",

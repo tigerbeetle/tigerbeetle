@@ -2674,22 +2674,28 @@ pub fn StateMachineType(
                 @divFloor(constants.message_body_size_max, result_size),
             );
         }
+
+        // TODO(client_release_min): When client_release_min is bumped, remove this function and the
+        // legacy code it gates.
+        //
+        // Specifically, when forbid_zero_amounts() is true:
+        // - Zero-amount transfers are forbidden (`amount_must_not_be_zero`).
+        // - Post-pending-transfer uses amount=0 as a sentinel for "post full amount".
+        // - Balancing transfers use amount=0 as a sentinel for `maxInt(u128)`.
+        fn forbid_zero_amounts(client_release: vsr.Release) bool {
+            const release_min_inclusive =
+                vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
+            const release_max_exclusive =
+                vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 0 });
+            const release_max_transition =
+                comptime vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
+
+            comptime assert(config.release.value < release_max_transition.value);
+
+            return client_release.value >= release_min_inclusive.value and
+                client_release.value < release_max_exclusive.value;
+        }
     };
-}
-
-// TODO(client_release_min): When client_release_min is bumped, remove this function and the
-// legacy code it gates.
-//
-// Specifically, when forbid_zero_amounts() is true:
-// - Zero-amount transfers are forbidden (`amount_must_not_be_zero`).
-// - Post-pending-transfer uses amount=0 as a sentinel for "post full amount".
-// - Balancing transfers use amount=0 as a sentinel for `maxInt(u128)`.
-fn forbid_zero_amounts(client_release: vsr.Release) bool {
-    const release_min_inclusive = vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
-    const release_max_exclusive = vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 0 });
-
-    return client_release.value >= release_min_inclusive.value and
-        client_release.value < release_max_exclusive.value;
 }
 
 fn sum_overflows(comptime Int: type, a: Int, b: Int) bool {
@@ -2891,6 +2897,7 @@ const TestContext = struct {
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("vsr/grid.zig").GridType(Storage);
     const StateMachine = StateMachineType(Storage, .{
+        .release = vsr.Release.minimum,
         // Overestimate the batch size because the test never compacts.
         .message_body_size_max = TestContext.message_body_size_max,
         .lsm_compaction_ops = global_constants.lsm_compaction_ops,
@@ -5076,6 +5083,7 @@ test "StateMachine: ref all decls" {
     const Storage = @import("storage.zig").Storage(IO);
 
     const StateMachine = StateMachineType(Storage, .{
+        .release = vsr.Release.minimum,
         .message_body_size_max = global_constants.message_body_size_max,
         .lsm_compaction_ops = 1,
         .vsr_operations_reserved = 128,

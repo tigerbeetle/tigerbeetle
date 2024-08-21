@@ -121,6 +121,7 @@ public struct Account
 {
     public const int SIZE = 128;
 
+
     private UInt128 id;
 
     private UInt128 debitsPending;
@@ -220,6 +221,7 @@ public struct Transfer
     public const int SIZE = 128;
 
     public static UInt128 AmountMax => UInt128.MaxValue;
+
     private UInt128 id;
 
     private UInt128 debitAccountId;
@@ -781,6 +783,7 @@ public struct CreateAccountsResult
 {
     public const int SIZE = 8;
 
+
     private uint index;
 
     private CreateAccountResult result;
@@ -796,6 +799,7 @@ public struct CreateTransfersResult
 {
     public const int SIZE = 8;
 
+
     private uint index;
 
     private CreateTransferResult result;
@@ -810,6 +814,7 @@ public struct CreateTransfersResult
 public struct AccountFilter
 {
     public const int SIZE = 64;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
@@ -890,6 +895,7 @@ public struct AccountBalance
 {
     public const int SIZE = 128;
 
+
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
     {
@@ -968,6 +974,7 @@ public struct AccountBalance
 public struct QueryFilter
 {
     public const int SIZE = 64;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
@@ -1129,6 +1136,7 @@ internal enum TBOperation : byte
 internal unsafe struct TBPacket
 {
     public const int SIZE = 64;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData

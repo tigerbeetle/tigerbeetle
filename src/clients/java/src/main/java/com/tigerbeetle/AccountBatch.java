@@ -10,6 +10,7 @@ import java.math.BigInteger;
 
 public final class AccountBatch extends Batch {
 
+
     interface Struct {
         int SIZE = 128;
 

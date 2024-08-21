@@ -106,9 +106,8 @@ const type_mappings = .{
             .readonly_fields = &.{},
             .docs_link = "reference/transfer#",
             .constants =
-            \\    public static byte[] getAmountMax() {
-            \\        return UInt128.asBytes(Long.MIN_VALUE, Long.MIN_VALUE);
-            \\    }
+            \\    public static final BigInteger AMOUNT_MAX =
+            \\        UInt128.asBigInteger(Long.MIN_VALUE, Long.MIN_VALUE);
             \\
             ,
         },
@@ -412,6 +411,7 @@ fn emit_batch(
         \\{[big_integer_import]s}
         \\
         \\{[visibility]s}final class {[name]s} extends Batch {{
+        \\
         \\{[constants]s}
         \\    interface Struct {{
         \\        int SIZE = {[size]d};
