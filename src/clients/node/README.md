@@ -348,7 +348,7 @@ one at a time like so:
 ```javascript
 for (let i = 0; i < transfers.len; i++) {
   const transferErrors = await client.createTransfers(transfers[i]);
-  // error handling omitted
+  // Error handling omitted.
 }
 ```
 
@@ -364,7 +364,7 @@ for (let i = 0; i < transfers.length; i += BATCH_SIZE) {
   const transferErrors = await client.createTransfers(
     transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)),
   );
-  // error handling omitted
+  // Error handling omitted.
 }
 ```
 
@@ -727,4 +727,61 @@ const errors = await client.createTransfers(batch);
  *  { index: 7, error: 1 },  // linked_event_failed
  * ]
  */
+```
+
+## Imported Events
+
+When the `imported` flag is specified for an account when creating accounts or
+a transfer when creating transfers, it allows importing historical events with
+a user-defined timestamp.
+
+The entire batch of events must be set with the flag `imported`.
+
+It's recommended to submit the whole batch as a `linked` chain of events, ensuring that
+if any event fails, none of them are committed, preserving the last timestamp unchanged.
+This approach gives the application a chance to correct failed imported events, re-submitting
+the batch again with the same user-defined timestamps.
+
+```javascript
+// First, load and import all accounts with their timestamps from the historical source.
+const accountsBatch = [];
+for (let index = 0; i < historicalAccounts.length; i++) {
+  let account = historicalAccounts[i];
+  // Set a unique and strictly increasing timestamp.
+  historicalTimestamp += 1;
+  account.timestamp = historicalTimestamp;
+  // Set the account as `imported`.
+  account.flags = AccountFlags.imported;
+  // To ensure atomicity, the entire batch (except the last event in the chain)
+  // must be `linked`.
+  if (index < historicalAccounts.length - 1) {
+    account.flags |= AccountFlags.linked;
+  }
+
+  accountsBatch.push(account);
+}
+accountErrors = await client.createAccounts(accountsBatch);
+
+// Error handling omitted.
+// Then, load and import all transfers with their timestamps from the historical source.
+const transfersBatch = [];
+for (let index = 0; i < historicalTransfers.length; i++) {
+  let transfer = historicalTransfers[i];
+  // Set a unique and strictly increasing timestamp.
+  historicalTimestamp += 1;
+  transfer.timestamp = historicalTimestamp;
+  // Set the account as `imported`.
+  transfer.flags = TransferFlags.imported;
+  // To ensure atomicity, the entire batch (except the last event in the chain)
+  // must be `linked`.
+  if (index < historicalTransfers.length - 1) {
+    transfer.flags |= TransferFlags.linked;
+  }
+
+  transfersBatch.push(transfer);
+}
+transferErrors = await client.createAccounts(transfersBatch);
+// Error handling omitted.
+// Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+// with the same historical timestamps without regressing the cluster timestamp.
 ```

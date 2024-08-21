@@ -29,10 +29,41 @@ The account was not created. The [`Account.flags.linked`](../account.md#flagslin
 the last event in the batch, which is not legal. (`flags.linked` indicates that the chain continues
 to the next operation).
 
+### `imported_event_expected`
+
+The account was not created. The [`Account.flags.imported`](../account.md#flagsimported) was
+set on the first account of the batch, but not all accounts in the batch.
+Batches cannot mix imported accounts with non-imported accounts.
+
+### `imported_event_not_expected`
+
+The account was not created. The [`Account.flags.imported`](../account.md#flagsimported) was
+expected to _not_ be set, as it's not allowed to mix accounts with different `imported` flag
+in the same batch. The first account determines the entire operation.
+
 ### `timestamp_must_be_zero`
 
-The account was not created. The [`Account.timestamp`](../account.md#timestamp) is nonzero, but must
-be zero. The cluster is responsible for setting this field.
+This result only applies when [Account.flags.imported](../account.md#flagsimported) is _not_ set.
+
+The account was not created. The [`Account.timestamp`](../account.md#timestamp) is nonzero, but
+must be zero. The cluster is responsible for setting this field.
+
+The [`Account.timestamp`](../account.md#timestamp) can only be assigned when creating accounts
+with [Account.flags.imported](../account.md#flagsimported) set.
+
+### `imported_event_timestamp_out_of_range`
+
+This result only applies when [`Account.flags.imported`](../account.md#flagsimported) is set.
+
+The account was not created. The [`Account.timestamp`](../account.md#timestamp) is out of range,
+but must be a user-defined timestamp greater than `0` and less than `2^63`.
+
+### `imported_event_timestamp_must_not_advance`
+
+This result only applies when [`Account.flags.imported`](../account.md#flagsimported) is set.
+
+The account was not created. The user-defined [`Account.timestamp`](../account.md#timestamp) is
+greater than the current [cluster time](../../coding/time.md), but it must be a past timestamp.
 
 ### `reserved_field`
 
@@ -132,6 +163,7 @@ An account with the same `id` already exists.
 With the possible exception of the following fields, the existing account is identical to the
 account in the request:
 
+- `timestamp`
 - `debits_pending`
 - `debits_posted`
 - `credits_pending`
@@ -139,6 +171,13 @@ account in the request:
 
 To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
 many applications should handle `exists` exactly as [`ok`](#ok).
+
+### `imported_event_timestamp_must_not_regress`
+
+This result only applies when [Account.flags.imported](../account.md#flagsimported) is set.
+
+The account was not created. The user-defined [`Account.timestamp`](../account.md#timestamp)
+regressed, but it must be greater than the last timestamp assigned to any `Account` in the cluster and cannot be equal to the timestamp of any existing [`Transfer`](../transfer.md).
 
 ## Client libraries
 

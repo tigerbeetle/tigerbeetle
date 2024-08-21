@@ -20,7 +20,7 @@ pub const Account = extern struct {
     /// A chart of accounts code describing the type of account (e.g. clearing, settlement).
     code: u16,
     flags: AccountFlags,
-    timestamp: u64 = 0,
+    timestamp: u64,
 
     comptime {
         assert(stdx.no_padding(Account));
@@ -54,7 +54,8 @@ pub const AccountFlags = packed struct(u16) {
     debits_must_not_exceed_credits: bool = false,
     credits_must_not_exceed_debits: bool = false,
     history: bool = false,
-    padding: u12 = 0,
+    imported: bool = false,
+    padding: u11 = 0,
 
     comptime {
         assert(@sizeOf(AccountFlags) == @sizeOf(u16));
@@ -95,7 +96,7 @@ pub const Transfer = extern struct {
     /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement).
     code: u16,
     flags: TransferFlags,
-    timestamp: u64 = 0,
+    timestamp: u64,
 
     // Converts the timeout from seconds to ns.
     pub fn timeout_ns(self: *const Transfer) u64 {
@@ -131,7 +132,8 @@ pub const TransferFlags = packed struct(u16) {
     void_pending_transfer: bool = false,
     balancing_debit: bool = false,
     balancing_credit: bool = false,
-    padding: u10 = 0,
+    imported: bool = false,
+    padding: u9 = 0,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
@@ -146,7 +148,14 @@ pub const CreateAccountResult = enum(u32) {
     ok = 0,
     linked_event_failed = 1,
     linked_event_chain_open = 2,
+
+    imported_event_expected = 22,
+    imported_event_not_expected = 23,
+
     timestamp_must_be_zero = 3,
+
+    imported_event_timestamp_out_of_range = 24,
+    imported_event_timestamp_must_not_advance = 25,
 
     reserved_field = 4,
     reserved_flag = 5,
@@ -172,8 +181,11 @@ pub const CreateAccountResult = enum(u32) {
     exists_with_different_code = 20,
     exists = 21,
 
+    imported_event_timestamp_must_not_regress = 26,
+
     comptime {
-        for (std.enums.values(CreateAccountResult), 0..) |result, index| {
+        for (0..std.enums.values(CreateAccountResult).len) |index| {
+            const result: CreateAccountResult = @enumFromInt(index);
             assert(@intFromEnum(result) == index);
         }
     }
@@ -186,7 +198,14 @@ pub const CreateTransferResult = enum(u32) {
     ok = 0,
     linked_event_failed = 1,
     linked_event_chain_open = 2,
+
+    //imported_event_expected = 56,
+    //imported_event_not_expected = 57,
+
     timestamp_must_be_zero = 3,
+
+    //imported_event_timestamp_out_of_range = 58,
+    //imported_event_timestamp_must_not_advance = 59,
 
     reserved_flag = 4,
 
@@ -246,6 +265,11 @@ pub const CreateTransferResult = enum(u32) {
     exists_with_different_code = 45,
     exists = 46,
 
+    //imported_event_timestamp_must_not_regress = 60,
+    //imported_event_timestamp_must_postdate_debit_account = 61,
+    //imported_event_timestamp_must_postdate_credit_account = 62,
+    //imported_event_timeout_must_be_zero = 63,
+
     overflows_debits_pending = 47,
     overflows_credits_pending = 48,
     overflows_debits_posted = 49,
@@ -257,8 +281,26 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_credits = 54,
     exceeds_debits = 55,
 
+    // TODO(zig): This enum should be ordered by precedence, but it crashes
+    // `EnumSet`, and `@setEvalBranchQuota()` isn't propagating correctly:
+    // https://godbolt.org/z/6a45bx6xs
+    // error: evaluation exceeded 1000 backwards branches
+    // note: use @setEvalBranchQuota() to raise the branch limit from 1000.
+    //
+    // Workaround:
+    // https://github.com/ziglang/zig/blob/66b71273a2555da23f6d706c22e3d85f43fe602b/lib/std/enums.zig#L1278-L1280
+    imported_event_expected = 56,
+    imported_event_not_expected = 57,
+    imported_event_timestamp_out_of_range = 58,
+    imported_event_timestamp_must_not_advance = 59,
+    imported_event_timestamp_must_not_regress = 60,
+    imported_event_timestamp_must_postdate_debit_account = 61,
+    imported_event_timestamp_must_postdate_credit_account = 62,
+    imported_event_timeout_must_be_zero = 63,
+
     comptime {
-        for (std.enums.values(CreateTransferResult), 0..) |result, index| {
+        for (0..std.enums.values(CreateTransferResult).len) |index| {
+            const result: CreateTransferResult = @enumFromInt(index);
             assert(@intFromEnum(result) == index);
         }
     }

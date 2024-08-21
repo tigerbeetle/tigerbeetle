@@ -83,7 +83,6 @@ const type_mappings = .{
             "credits_pending",
             "debits_posted",
             "credits_posted",
-            "timestamp",
         },
         .docs_link = "reference/account#",
     } },
@@ -102,7 +101,7 @@ const type_mappings = .{
     .{ tb.Transfer, TypeMapping{
         .name = "TransferBatch",
         .private_fields = &.{"reserved"},
-        .readonly_fields = &.{"timestamp"},
+        .readonly_fields = &.{},
         .docs_link = "reference/transfer#",
     } },
     .{ tb.CreateAccountResult, TypeMapping{
@@ -266,17 +265,28 @@ fn emit_enum(
         \\
         \\    public final {[int_type]s} value;
         \\
+        \\    static final {[name]s}[] enumByValue;
+        \\    static {{
+        \\    final var values = values();
+        \\      enumByValue = new {[name]s}[values.length];
+        \\       for (final var item : values) {{
+        \\          enumByValue[item.value] = item;
+        \\      }}
+        \\    }}
+        \\
         \\    {[name]s}({[int_type]s} value) {{
         \\        this.value = value;
         \\    }}
         \\
         \\    public static {[name]s} fromValue({[int_type]s} value) {{
-        \\        var values = {[name]s}.values();
-        \\        if (value < 0 || value >= values.length)
+        \\        if (value < 0 || value >= enumByValue.length)
         \\            throw new IllegalArgumentException(
         \\                    String.format("Invalid {[name]s} value=%d", value));
         \\
-        \\        return values[value];
+        \\        final var item = enumByValue[value];
+        \\        AssertionError.assertTrue(item.value == value,
+        \\          "Unexpected {[name]s}: found=%d expected=%d", item.value, value);
+        \\        return item;
         \\    }}
         \\}}
         \\

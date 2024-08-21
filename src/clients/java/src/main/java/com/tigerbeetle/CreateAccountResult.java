@@ -23,9 +23,29 @@ public enum CreateAccountResult {
     LinkedEventChainOpen((int) 2),
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_expected">imported_event_expected</a>
+     */
+    ImportedEventExpected((int) 22),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_not_expected">imported_event_not_expected</a>
+     */
+    ImportedEventNotExpected((int) 23),
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero">timestamp_must_be_zero</a>
      */
     TimestampMustBeZero((int) 3),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_out_of_range">imported_event_timestamp_out_of_range</a>
+     */
+    ImportedEventTimestampOutOfRange((int) 24),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance">imported_event_timestamp_must_not_advance</a>
+     */
+    ImportedEventTimestampMustNotAdvance((int) 25),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field">reserved_field</a>
@@ -115,21 +135,37 @@ public enum CreateAccountResult {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#exists">exists</a>
      */
-    Exists((int) 21);
+    Exists((int) 21),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_regress">imported_event_timestamp_must_not_regress</a>
+     */
+    ImportedEventTimestampMustNotRegress((int) 26);
 
     public final int value;
+
+    static final CreateAccountResult[] enumByValue;
+    static {
+    final var values = values();
+      enumByValue = new CreateAccountResult[values.length];
+       for (final var item : values) {
+          enumByValue[item.value] = item;
+      }
+    }
 
     CreateAccountResult(int value) {
         this.value = value;
     }
 
     public static CreateAccountResult fromValue(int value) {
-        var values = CreateAccountResult.values();
-        if (value < 0 || value >= values.length)
+        if (value < 0 || value >= enumByValue.length)
             throw new IllegalArgumentException(
                     String.format("Invalid CreateAccountResult value=%d", value));
 
-        return values[value];
+        final var item = enumByValue[value];
+        AssertionError.assertTrue(item.value == value,
+          "Unexpected CreateAccountResult: found=%d expected=%d", item.value, value);
+        return item;
     }
 }
 

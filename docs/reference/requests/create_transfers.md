@@ -31,10 +31,41 @@ The transfer was not created. The [`Transfer.flags.linked`](../transfer.md#flags
 on the last event in the batch, which is not legal. (`flags.linked` indicates that the chain
 continues to the next operation).
 
+### `imported_event_expected`
+
+The transfer was not created. The [`Transfer.flags.imported`](../transfer.md#flagsimported) was
+set on the first transfer of the batch, but not all transfers in the batch.
+Batches cannot mix imported transfers with non-imported transfers.
+
+### `imported_event_not_expected`
+
+The transfer was not created. The [`Transfer.flags.imported`](../transfer.md#flagsimported) was
+expected to _not_ be set, as it's not allowed to mix transfers with different `imported` flag
+in the same batch. The first transfer determines the entire operation.
+
 ### `timestamp_must_be_zero`
 
-The transfer was not created. The [`Transfer.timestamp`](../account.md#timestamp) is nonzero, but
+This result only applies when [Account.flags.imported](../account.md#flagsimported) is _not_ set.
+
+The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is nonzero, but
 must be zero. The cluster is responsible for setting this field.
+
+The [`Transfer.timestamp`](../transfer.md#timestamp) can only be assigned when creating transfers
+with [Transfer.flags.imported](../transfer.md#flagsimported) set.
+
+### `imported_event_timestamp_out_of_range`
+
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is out of range,
+but must be a user-defined timestamp greater than `0` and less than `2^63`.
+
+### `imported_event_timestamp_must_not_advance`
+
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp) is
+greater than the current [cluster time](../../coding/time.md), but it must be a past timestamp.
 
 ### `reserved_flag`
 
@@ -61,26 +92,37 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+- [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✓ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✓ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
 
 ### `debit_account_id_must_not_be_zero`
 
@@ -326,10 +368,47 @@ If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debi
 transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
 (if non-zero) `amount` of the transfer in the request.
 
-Otherwise, the existing transfer is identical to the transfer in the request.
+Otherwise, with the possible exception of the `timestamp` field, the existing transfer is identical
+to the transfer in the request.
 
 To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
 many applications should handle `exists` exactly as [`ok`](#ok).
+
+### `imported_event_timestamp_must_not_regress`
+
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp)
+regressed, but it must be greater than the last timestamp assigned to any `Transfer` in the cluster and cannot be equal to the timestamp of any existing [`Account`](../account.md).
+
+### `imported_event_timestamp_must_postdate_debit_account`
+
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
+
+The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
+refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than the
+[`Transfer.timestamp`](../transfer.md#timestamp).
+
+### `imported_event_timestamp_must_postdate_credit_account`
+
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
+
+The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
+refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than the
+[`Transfer.timestamp`](../transfer.md#timestamp).
+
+### `imported_event_timeout_must_be_zero`
+
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The [`Transfer.timeout`](../transfer.md#timeout) is nonzero, but
+must be zero.
+
+It's possible to import [pending](../transfer.md#flagspending) transfers with a user-defined
+timestamp, but since it's not driven by the cluster clock, it cannot define a timeout for
+automatic expiration.
+In those cases, the [two-phase post or rollback](../../coding/two-phase-transfers.md) must be
+done manually.
 
 ### `overflows_debits_pending`
 

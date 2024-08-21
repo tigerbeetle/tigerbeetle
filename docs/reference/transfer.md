@@ -55,7 +55,7 @@ Fields used by each mode of transfer:
 | `user_data_128`               | optional     | optional | optional     | optional     |
 | `user_data_64`                | optional     | optional | optional     | optional     |
 | `user_data_32`                | optional     | optional | optional     | optional     |
-| `timeout`                     | none         | optional | none         | none         |
+| `timeout`                     | none         | optional¹| none         | none         |
 | `ledger`                      | required     | required | optional     | optional     |
 | `code`                        | required     | required | optional     | optional     |
 | `flags.linked`                | optional     | optional | optional     | optional     |
@@ -64,7 +64,11 @@ Fields used by each mode of transfer:
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
 | `flags.balancing_debit`       | optional     | optional | false        | false        |
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
-| `timestamp`                   | none         | none     | none         | none         |
+| `flags.imported`              | optional     | optional | optional     | optional     |
+| `timestamp`                   | none²        | none²    | none²        | none²        |
+
+> _¹ None if `flags.imported` is set._<br/>
+  _² Required if `flags.imported` is set._
 
 ## Fields
 
@@ -93,7 +97,7 @@ This refers to the account to debit the transfer's [`amount`](#amount).
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes)
-- When `flags.post_pending_transfer` and `flags.void_pending_transfer` are unset:
+- When `flags.post_pending_transfer` and `flags.void_pending_transfer` are _not_ set:
   - Must match an existing account
   - Must not be the same as `credit_account_id`
 - When `flags.post_pending_transfer` or `flags.void_pending_transfer` are set:
@@ -101,6 +105,9 @@ Constraints:
     `debit_account_id`.
   - If `debit_account_id` is nonzero, it must match the corresponding pending transfer's
     `debit_account_id`.
+- When `flags.imported` is set:
+  - The matching account's [timestamp](account.md#timestamp) must be less than or equal to the
+    transfer's [timestamp](#timestamp).
 
 ### `credit_account_id`
 
@@ -109,7 +116,7 @@ This refers to the account to credit the transfer's [`amount`](#amount).
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes)
-- When `flags.post_pending_transfer` and `flags.void_pending_transfer` are unset:
+- When `flags.post_pending_transfer` and `flags.void_pending_transfer` are _not_ set:
   - Must match an existing account
   - Must not be the same as `debit_account_id`
 - When `flags.post_pending_transfer` or `flags.void_pending_transfer` are set:
@@ -117,6 +124,9 @@ Constraints:
     `credit_account_id`.
   - If `credit_account_id` is nonzero, it must match the corresponding pending transfer's
     `credit_account_id`.
+- When `flags.imported` is set:
+  - The matching account's [timestamp](account.md#timestamp) must be less than or equal to the
+    transfer's [timestamp](#timestamp).
 
 ### `amount`
 
@@ -229,6 +239,8 @@ This is the interval in seconds after a [`pending`](#flagspending) transfer's
 
 Non-pending transfers cannot have a timeout.
 
+Imported transfers cannot have a timeout.
+
 TigerBeetle makes a best-effort approach to remove pending balances of expired transfers
 automatically:
 
@@ -253,6 +265,7 @@ Constraints:
 
 - Type is 32-bit unsigned integer (4 bytes)
 - Must be zero if `flags.pending` is _not_ set
+- Must be zero if `flags.imported` is set.
 
 The `timeout` is an interval in seconds rather than an absolute timestamp because this is more
 robust to clock skew between the cluster and the application. (Watch this talk on
@@ -389,18 +402,64 @@ pending transfer will never exceed/overflow either account's limits.
 
 - [Close Account](../coding/recipes/close-account.md)
 
+#### `flags.imported`
+
+When set, allows importing historical `Transfer`s with their original [`timestamp`](#timestamp).
+
+TigerBeetle will not use the [cluster clock](../coding/time.md) to assign the timestamp, allowing
+the user to define it, expressing _when_ the transfer was effectively created by an external
+event.
+
+To maintain system invariants regarding auditability and traceability, some constraints are
+necessary:
+
+- It is not allowed to mix events with the `imported` flag set and _not_ set in the same batch.
+  The application must submit batches of imported events separately.
+
+- User-defined timestamps must be **unique** and expressed as nanoseconds since the UNIX epoch.
+  No two objects can have the same timestamp, even different objects like an `Account` and a `Transfer` cannot share the same timestamp.
+
+- User-defined timestamps must be a past date, never ahead of the cluster clock at the time the
+  request arrives.
+
+- Timestamps must be strictly increasing.
+
+  Even user-defined timestamps that are required to be past dates need to be at least one
+  nanosecond ahead of the timestamp of the last transfer committed by the cluster.
+
+  Since the timestamp cannot regress, importing past events can be naturally restrictive without
+  coordination, as the last timestamp can be updated using the cluster clock during regular
+  cluster activity. Instead, it's recommended to import events only on a fresh cluster or
+  during a scheduled maintenance window.
+
+  It's recommended to submit the entire batch as a [linked chain](#flagslinked), ensuring that
+  if any transfer fails, none of them are committed, preserving the last timestamp unchanged.
+  This approach gives the application a chance to correct failed imported transfers, re-submitting
+  the batch again with the same user-defined timestamps.
+
+- Imported transfers cannot have a [`timeout`](#timeout).
+
+  It's possible to import [pending](#flagspending) transfers with a user-defined timestamp,
+  but since it's not driven by the cluster clock, it cannot define a
+  [`timeout`](#timeout) for automatic expiration.
+  In those cases, the [two-phase post or rollback](../coding/two-phase-transfers.md) must be
+  done manually.
+
+
 ### `timestamp`
 
 This is the time the transfer was created, as nanoseconds since UNIX epoch.
-
-It is set by TigerBeetle to the moment the transfer arrives at the cluster.
-
 You can read more about [Time in TigerBeetle](../coding/time.md).
 
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must be set to `0` by the user when the `Transfer` is created
+- Must be `0` when the `Transfer` is created with [`flags.imported`](#flagsimported) _not_ set
+
+  It is set by TigerBeetle to the moment the transfer arrives at the cluster.
+
+- Must be greater than `0` and less than `2^63` when the `Transfer` is created with
+  [`flags.imported`](#flagsimported) set
 
 ## Internals
 

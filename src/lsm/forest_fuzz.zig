@@ -35,7 +35,6 @@ const FreeSet = vsr.FreeSet;
 const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
 
 const FuzzOpAction = union(enum) {
-    // TODO Test secondary index lookups and range queries.
     compact: struct {
         op: u64,
         checkpoint: bool,
@@ -45,6 +44,7 @@ const FuzzOpAction = union(enum) {
         account: Account,
     },
     get_account: u128,
+    exists_account: u64,
     scan_account: ScanParams,
 };
 const FuzzOpActionTag = std.meta.Tag(FuzzOpAction);
@@ -333,7 +333,7 @@ const Environment = struct {
     }
 
     fn prefetch_account(env: *Environment, id: u128) !void {
-        const Getter = struct {
+        const Context = struct {
             _id: u128,
             _groove_accounts: *GrooveAccounts,
 
@@ -348,18 +348,52 @@ const Environment = struct {
             }
 
             fn prefetch_callback(prefetch_context: *GrooveAccounts.PrefetchContext) void {
-                const getter: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
-                assert(!getter.finished);
-                getter.finished = true;
+                const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
+                assert(!context.finished);
+                context.finished = true;
             }
         };
 
-        var getter = Getter{
+        var context = Context{
             ._id = id,
             ._groove_accounts = &env.forest.grooves.accounts,
         };
-        getter.prefetch_start();
-        while (!getter.finished) {
+        context.prefetch_start();
+        while (!context.finished) {
+            if (env.ticks_remaining == 0) return error.OutOfTicks;
+            env.ticks_remaining -= 1;
+            env.storage.tick();
+        }
+    }
+
+    fn prefetch_exists_account(env: *Environment, timestamp: u64) !void {
+        const Context = struct {
+            _timestamp: u64,
+            _groove_accounts: *GrooveAccounts,
+
+            finished: bool = false,
+            prefetch_context: GrooveAccounts.PrefetchContext = undefined,
+
+            fn prefetch_start(getter: *@This()) void {
+                const groove = getter._groove_accounts;
+                groove.prefetch_setup(null);
+                groove.prefetch_exists_enqueue(getter._timestamp);
+                groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
+            }
+
+            fn prefetch_callback(prefetch_context: *GrooveAccounts.PrefetchContext) void {
+                const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
+                assert(!context.finished);
+                context.finished = true;
+            }
+        };
+
+        var context = Context{
+            ._timestamp = timestamp,
+            ._groove_accounts = &env.forest.grooves.accounts,
+        };
+        context.prefetch_start();
+        while (!context.finished) {
             if (env.ticks_remaining == 0) return error.OutOfTicks;
             env.ticks_remaining -= 1;
             env.storage.tick();
@@ -375,8 +409,11 @@ const Environment = struct {
     }
 
     fn get_account(env: *Environment, id: u128) ?*const Account {
-        const account = env.forest.grooves.accounts.get(id) orelse return null;
-        return account;
+        return env.forest.grooves.accounts.get(id);
+    }
+
+    fn exists(env: *Environment, timestamp: u64) bool {
+        return env.forest.grooves.accounts.exists(timestamp);
     }
 
     fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveAccounts.IndexTrees)) type {
@@ -476,22 +513,33 @@ const Environment = struct {
 
     // The forest should behave like a simple key-value data-structure.
     const Model = struct {
-        checkpointed: KVType, // represents persistent state
-        log: LogType, // represents in-memory state
-
-        const KVType = std.hash_map.AutoHashMap(u128, Account);
+        const Map = std.hash_map.AutoHashMap(u128, Account);
+        const Set = std.hash_map.AutoHashMap(u64, void);
         const LogEntry = struct { op: u64, account: Account };
-        const LogType = std.fifo.LinearFifo(LogEntry, .Dynamic);
+        const Log = std.fifo.LinearFifo(LogEntry, .Dynamic);
+
+        // Represents persistent state:
+        checkpointed: struct {
+            objects: Map,
+            timestamps: Set,
+        },
+
+        // Represents in-memory state:
+        log: Log,
 
         pub fn init() Model {
             return .{
-                .checkpointed = KVType.init(allocator),
-                .log = LogType.init(allocator),
+                .checkpointed = .{
+                    .objects = Map.init(allocator),
+                    .timestamps = Set.init(allocator),
+                },
+                .log = Log.init(allocator),
             };
         }
 
         pub fn deinit(model: *Model) void {
-            model.checkpointed.deinit();
+            model.checkpointed.objects.deinit();
+            model.checkpointed.timestamps.deinit();
             model.log.deinit();
         }
 
@@ -500,6 +548,19 @@ const Environment = struct {
         }
 
         pub fn get_account(model: *const Model, id: u128) ?Account {
+            return model.get_account_from_log(.{ .id = id }) orelse
+                model.checkpointed.objects.get(id);
+        }
+
+        pub fn exists_account(model: *const Model, timestamp: u64) bool {
+            return model.get_account_from_log(.{ .timestamp = timestamp }) != null or
+                model.checkpointed.timestamps.contains(timestamp);
+        }
+
+        fn get_account_from_log(
+            model: *const Model,
+            key: union(enum) { id: u128, timestamp: u64 },
+        ) ?Account {
             var latest_op: ?u64 = null;
             const log_size = model.log.readableLength();
             var log_left = log_size;
@@ -511,11 +572,14 @@ const Environment = struct {
 
                 assert(latest_op.? >= entry.op);
 
-                if (entry.account.id == id) {
+                if (switch (key) {
+                    .id => |id| entry.account.id == id,
+                    .timestamp => |timestamp| entry.account.timestamp == timestamp,
+                }) {
                     return entry.account;
                 }
             }
-            return model.checkpointed.get(id);
+            return null;
         }
 
         pub fn checkpoint(model: *Model, op: u64) !void {
@@ -528,7 +592,8 @@ const Environment = struct {
                     break;
                 }
 
-                try model.checkpointed.put(entry.account.id, entry.account);
+                try model.checkpointed.objects.put(entry.account.id, entry.account);
+                try model.checkpointed.timestamps.put(entry.account.timestamp, {});
             }
             model.log.discard(log_index);
         }
@@ -554,7 +619,8 @@ const Environment = struct {
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
             const model_size = brk: {
-                const account_count = model.log.readableLength() + model.checkpointed.count();
+                const account_count = model.log.readableLength() +
+                    model.checkpointed.objects.count();
                 break :brk account_count * @sizeOf(Account);
             };
             // NOTE: This isn't accurate anymore because the model can contain multiple copies of
@@ -610,7 +676,7 @@ const Environment = struct {
                 while (log_index < log_size) : (log_index += 1) {
                     const entry = model.log.peekItem(log_index);
                     const id = entry.account.id;
-                    if (model.checkpointed.get(id)) |*checkpointed_account| {
+                    if (model.checkpointed.objects.get(id)) |*checkpointed_account| {
                         try env.prefetch_account(id);
                         if (env.get_account(id)) |lsm_account| {
                             assert(stdx.equal_bytes(Account, lsm_account, checkpointed_account));
@@ -667,6 +733,12 @@ const Environment = struct {
                 } else {
                     assert(stdx.equal_bytes(Account, &model_account.?, lsm_account.?));
                 }
+            },
+            .exists_account => |timestamp| {
+                try env.prefetch_exists_account(timestamp);
+                const lsm_found = env.exists(timestamp);
+                const model_found = model.exists_account(timestamp);
+                assert(lsm_found == model_found);
             },
             .scan_account => |params| {
                 const accounts = try env.scan_accounts(params);
@@ -762,6 +834,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         .put_account = constants.lsm_compaction_ops * 2,
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        // Maybe do some exists.
+        .exists_account = if (random.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
         .scan_account = if (random.boolean()) 0 else constants.lsm_compaction_ops,
     };
@@ -812,6 +886,10 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 break :action action;
             },
             .get_account => FuzzOpAction{ .get_account = random_id(random, u128) },
+            .exists_account => FuzzOpAction{
+                // Not all ops generate accounts, so the timestamp may or may not be found.
+                .exists_account = random.intRangeAtMost(u64, 0, fuzz_op_index),
+            },
             .scan_account => blk: {
                 @setEvalBranchQuota(10_000);
                 const Index = std.meta.FieldEnum(GrooveAccounts.IndexTrees);
@@ -846,6 +924,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .compact => puts_since_compact = 0,
             .put_account => puts_since_compact += 1,
             .get_account => {},
+            .exists_account => {},
             .scan_account => {},
         }
         // TODO(jamii)

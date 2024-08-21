@@ -95,7 +95,7 @@ using (var client = new Client(clusterID, addresses))
     foreach (var t in transfers)
     {
         createTransfersError = client.CreateTransfers(new[] { t });
-        // error handling omitted
+        // Error handling omitted.
     }
     // endsection:no-batch
 
@@ -109,7 +109,7 @@ using (var client = new Client(clusterID, addresses))
             batchSize = transfers.Length - i;
         }
         createTransfersError = client.CreateTransfers(transfers[i..batchSize]);
-        // error handling omitted
+        // Error handling omitted.
     }
     // endsection:batch
 
@@ -122,27 +122,25 @@ using (var client = new Client(clusterID, addresses))
     // endsection:transfer-flags-link
 
     // section:transfer-flags-post
-    var transfer = new Transfer
-    {
+    transfers = new Transfer[] { new Transfer {
         Id = 2,
         PendingId = 1,
         Flags = TransferFlags.PostPendingTransfer,
-    };
+    }};
 
-    createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
-    // error handling omitted
+    createTransfersError = client.CreateTransfers(transfers);
+    // Error handling omitted.
     // endsection:transfer-flags-post
 
     // section:transfer-flags-void
-    transfer = new Transfer
-    {
+    transfers = new Transfer[] { new Transfer {
         Id = 2,
         PendingId = 1,
         Flags = TransferFlags.PostPendingTransfer,
-    };
+    }};
 
-    createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
-    // error handling omitted
+    createTransfersError = client.CreateTransfers(transfers);
+    // Error handling omitted.
     // endsection:transfer-flags-void
 
     // section:lookup-transfers
@@ -238,6 +236,63 @@ using (var client = new Client(clusterID, addresses))
     batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ });
 
     createTransfersError = client.CreateTransfers(batch.ToArray());
-    // error handling omitted
+    // Error handling omitted.
     // endsection:linked-events
+
+    // External source of time
+    ulong historicalTimestamp = 0UL;
+    var historicalAccounts = Array.Empty<Account>();
+    var historicalTransfers = Array.Empty<Transfer>();
+
+    // section:imported-events
+    // First, load and import all accounts with their timestamps from the historical source.
+    var accountsBatch = new System.Collections.Generic.List<Account>();
+    for (var index = 0; index < historicalAccounts.Length; index++)
+    {
+        var account = historicalAccounts[index];
+
+        // Set a unique and strictly increasing timestamp.
+        historicalTimestamp += 1;
+        account.Timestamp = historicalTimestamp;
+        // Set the account as `imported`.
+        account.Flags = AccountFlags.Imported;
+        // To ensure atomicity, the entire batch (except the last event in the chain)
+        // must be `linked`.
+        if (index < historicalAccounts.Length - 1)
+        {
+            account.Flags |= AccountFlags.Linked;
+        }
+
+        accountsBatch.Add(account);
+    }
+
+    createAccountsError = client.CreateAccounts(accountsBatch.ToArray());
+    // Error handling omitted.
+
+    // Then, load and import all transfers with their timestamps from the historical source.
+    var transfersBatch = new System.Collections.Generic.List<Transfer>();
+    for (var index = 0; index < historicalTransfers.Length; index++)
+    {
+        var transfer = historicalTransfers[index];
+
+        // Set a unique and strictly increasing timestamp.
+        historicalTimestamp += 1;
+        transfer.Timestamp = historicalTimestamp;
+        // Set the account as `imported`.
+        transfer.Flags = TransferFlags.Imported;
+        // To ensure atomicity, the entire batch (except the last event in the chain)
+        // must be `linked`.
+        if (index < historicalTransfers.Length - 1)
+        {
+            transfer.Flags |= TransferFlags.Linked;
+        }
+
+        transfersBatch.Add(transfer);
+    }
+
+    createTransfersError = client.CreateTransfers(transfersBatch.ToArray());
+    // Error handling omitted.
+    // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+    // with the same historical timestamps without regressing the cluster timestamp.
+    // endsection:imported-events
 }
