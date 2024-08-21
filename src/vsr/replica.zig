@@ -7076,6 +7076,7 @@ pub fn ReplicaType(
             assert(header.replica == self.primary_index(header.view));
             assert(header.view <= self.view);
             assert(header.op <= self.op or header.view < self.view);
+            maybe(!self.sync_content_done());
 
             if (self.status != .normal) {
                 log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
@@ -7095,6 +7096,23 @@ pub fn ReplicaType(
                     @tagName(self.syncing),
                 });
                 return;
+            }
+
+            // To avoid falsely contributing to the durability of the current checkpoint, replicas
+            // syncing table blocks should not send prepare_oks for prepares past the current
+            // checkpoint's prepare_max.
+            if (!self.sync_content_done()) {
+                const prepare_max_current_checkpoint =
+                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
+                if (self.commit_max <= prepare_max_current_checkpoint and
+                    header.op > prepare_max_current_checkpoint)
+                {
+                    log.debug("{}: send_prepare_ok: not sending (sync_content_done={})", .{
+                        self.replica,
+                        self.sync_content_done(),
+                    });
+                    return;
+                }
             }
 
             assert(self.status == .normal);
@@ -8925,6 +8943,9 @@ pub fn ReplicaType(
             if (self.superblock.staging.vsr_state.sync_op_max == 0) {
                 return true;
             } else {
+                // Trailers/manifest haven't yet been synced.
+                if (!self.state_machine_opened) return false;
+
                 for (0..constants.clients_max) |entry_slot| {
                     if (self.client_sessions.entries_free.isSet(entry_slot)) continue;
 
