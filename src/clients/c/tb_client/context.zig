@@ -252,7 +252,7 @@ pub fn ContextType(
         pub fn run(self: *Context) void {
             self.batch_size_limit = null;
             self.client.register(client_register_callback, @intFromPtr(self));
-            
+
             while (!self.shutdown.load(.acquire)) {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
@@ -387,7 +387,7 @@ pub fn ContextType(
                 root.batch_count_packets += 1;
                 root.batch_count_events += event_count;
                 root.batch_count_results += packet.batch_count_results;
-                
+
                 root.batch_tail.?.batch_next = packet;
                 root.batch_tail = packet;
                 return;
@@ -475,7 +475,7 @@ pub fn ContextType(
                     message.header.size += writer.wrote;
                 },
             }
-            
+
             self.client.raw_request(
                 Context.on_result,
                 @bitCast(UserData{

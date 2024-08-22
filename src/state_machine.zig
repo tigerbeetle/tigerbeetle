@@ -2877,7 +2877,7 @@ pub fn StateMachineType(
         }
 
         pub fn operation_result_max(
-            comptime operation: Operation, 
+            comptime operation: Operation,
             events: []const Event(operation),
         ) u32 {
             switch (operation) {

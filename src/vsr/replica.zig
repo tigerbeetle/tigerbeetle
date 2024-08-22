@@ -4000,15 +4000,22 @@ pub fn ReplicaType(
             }
 
             if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
-                self.state_machine.prefetch_timestamp = prepare.header.timestamp;
-                self.state_machine.prefetch(
-                    commit_prefetch_callback,
-                    prepare.header.release,
-                    prepare.header.op,
-                    prepare_operation,
-                    prepare.body_used(),
-                );
-                return .pending;
+                switch (prepare_operation) {
+                    inline else => |operation| {
+                        const Reader = vsr.RequestBatch.ReaderType(StateMachine.Event(operation));
+                        const prepare_bytes = Reader.init(prepare.body()).values;
+
+                        self.state_machine.prefetch_timestamp = prepare.header.timestamp;
+                        self.state_machine.prefetch(
+                            commit_prefetch_callback,
+                            prepare.header.release,
+                            prepare.header.op,
+                            prepare_operation,
+                            @alignCast(std.mem.sliceAsBytes(prepare_bytes)),
+                        );
+                        return .pending;
+                    },
+                }
             } else {
                 assert(prepare.header.operation.vsr_reserved());
                 return .ready;
@@ -4461,15 +4468,41 @@ pub fn ReplicaType(
                     reply.buffer[@sizeOf(Header)..],
                 ),
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
-                else => self.state_machine.commit(
-                    prepare.header.client,
-                    prepare.header.release,
-                    prepare.header.op,
-                    prepare.header.timestamp,
-                    prepare.header.operation.cast(StateMachine),
-                    prepare.body_used(),
-                    reply.buffer[@sizeOf(Header)..],
-                ),
+                else => switch (prepare.header.operation.cast(StateMachine)) {
+                    inline else => |operation| blk: {
+                        const Reader = vsr.RequestBatch.ReaderType(StateMachine.Event(operation));
+                        const Writer = vsr.RequestBatch.WriterType(StateMachine.Result(operation));
+
+                        var prev_count: ?u64 = null;
+                        var reader = Reader.init(prepare.body());
+                        var writer = Writer.init(reply.buffer[@sizeOf(Header)..]);
+                        while (reader.next()) |events| {
+                            if (prev_count) |count| {
+                                self.state_machine.commit_timestamp = prepare.header.timestamp;
+                                prepare.header.timestamp += count;
+                            }
+                            prev_count = events.len;
+
+                            // Commit each batched set of events separately instead of together
+                            const bytes_written = self.state_machine.commit(
+                                prepare.header.client,
+                                prepare.header.release,
+                                prepare.header.op,
+                                prepare.header.timestamp,
+                                operation,
+                                @alignCast(std.mem.sliceAsBytes(events)),
+                                @alignCast(std.mem.sliceAsBytes(writer.writable())),
+                            );
+
+                            switch (@sizeOf(StateMachine.Result(operation))) {
+                                0 => {},
+                                else => |n| writer.advance(@intCast(@divExact(bytes_written, n))),
+                            }
+                        }
+
+                        break :blk writer.wrote;
+                    },
+                },
             };
 
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or

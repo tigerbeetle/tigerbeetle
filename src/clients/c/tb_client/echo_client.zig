@@ -192,4 +192,3 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
         }
     };
 }
-
