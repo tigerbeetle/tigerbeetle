@@ -12,6 +12,7 @@ const TypeMapping = struct {
     readonly_fields: []const []const u8 = &.{},
     docs_link: ?[]const u8 = null,
     visibility: enum { public, internal } = .public,
+    constants: []const u8 = "",
 
     pub fn is_private(comptime self: @This(), name: []const u8) bool {
         inline for (self.private_fields) |field| {
@@ -98,12 +99,19 @@ const type_mappings = .{
         },
         .docs_link = "reference/account-balances#",
     } },
-    .{ tb.Transfer, TypeMapping{
-        .name = "TransferBatch",
-        .private_fields = &.{"reserved"},
-        .readonly_fields = &.{},
-        .docs_link = "reference/transfer#",
-    } },
+    .{
+        tb.Transfer, TypeMapping{
+            .name = "TransferBatch",
+            .private_fields = &.{"reserved"},
+            .readonly_fields = &.{},
+            .docs_link = "reference/transfer#",
+            .constants =
+            \\    public static final BigInteger AMOUNT_MAX =
+            \\        UInt128.asBigInteger(Long.MIN_VALUE, Long.MIN_VALUE);
+            \\
+            ,
+        },
+    },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
         .docs_link = "reference/requests/create_accounts#",
@@ -404,6 +412,7 @@ fn emit_batch(
         \\
         \\{[visibility]s}final class {[name]s} extends Batch {{
         \\
+        \\{[constants]s}
         \\    interface Struct {{
         \\        int SIZE = {[size]d};
         \\
@@ -417,6 +426,7 @@ fn emit_batch(
             "import java.math.BigInteger;"
         else
             "",
+        .constants = mapping.constants,
     });
 
     // Fields offset:

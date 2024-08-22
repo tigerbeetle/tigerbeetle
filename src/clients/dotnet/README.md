@@ -329,6 +329,8 @@ appropriate accounts and apply them to the `debits_posted` and
 ```cs
 transfers = new Transfer[] { new Transfer {
     Id = 2,
+    // Post the entire pending amount.
+    Amount = Transfer.AmountMax,
     PendingId = 1,
     Flags = TransferFlags.PostPendingTransfer,
 }};

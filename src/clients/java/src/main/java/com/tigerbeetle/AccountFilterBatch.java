@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 
 final class AccountFilterBatch extends Batch {
 
+
     interface Struct {
         int SIZE = 64;
 

@@ -10,6 +10,9 @@ import java.math.BigInteger;
 
 public final class TransferBatch extends Batch {
 
+    public static final BigInteger AMOUNT_MAX =
+        UInt128.asBigInteger(Long.MIN_VALUE, Long.MIN_VALUE);
+
     interface Struct {
         int SIZE = 128;
 

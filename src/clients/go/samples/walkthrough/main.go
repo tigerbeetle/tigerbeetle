@@ -154,6 +154,8 @@ func main() {
 	// section:transfer-flags-post
 	transfer := Transfer{
 		ID:        ToUint128(2),
+		// Post the entire pending amount.
+		Amount:    AmountMax,
 		PendingID: ToUint128(1),
 		Flags:     TransferFlags{PostPendingTransfer: true}.ToUint16(),
 		Timestamp: 0,

@@ -31,11 +31,22 @@ A post-pending transfer, denoted by
 pending transfer to "post", transferring some or all of the pending transfer's reserved amount to
 its destination.
 
+- If the posted [`amount`](../reference/transfer.md#amount) is greater than or equal to the pending
+  transfer's amount, the full pending transfer's amount is posted.
+  The transfer's recorded value is set to the pending transfer amount.
+- If the posted [`amount`](../reference/transfer.md#amount) is less than the pending transfer's
+  amount, then only this amount is posted, and the remainder is restored to its original accounts.
+
+<details>
+<summary>Client &lt; 0.16.0</summary>
+
 - If the posted [`amount`](../reference/transfer.md#amount) is 0, the full pending transfer's
   amount is posted.
 - If the posted [`amount`](../reference/transfer.md#amount) is nonzero, then only this amount
   is posted, and the remainder is restored to its original accounts. It must be less than or equal
   to the pending transfer's amount.
+
+</details>
 
 Additionally, when `flags.post_pending_transfer` is set:
 

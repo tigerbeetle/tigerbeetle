@@ -225,13 +225,13 @@ pub fn StateMachineType(
         pub fn commit(
             state_machine: *StateMachine,
             client: u128,
+            client_release: vsr.Release,
             op: u64,
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            _ = client;
             assert(op != 0);
 
             switch (operation) {
@@ -239,10 +239,18 @@ pub fn StateMachineType(
                     const thing = state_machine.forest.grooves.things.get(op);
                     assert(thing == null);
 
+                    var value = vsr.ChecksumStream.init();
+                    value.add(std.mem.asBytes(&client));
+                    value.add(std.mem.asBytes(&op));
+                    value.add(std.mem.asBytes(&timestamp));
+                    value.add(std.mem.asBytes(&operation));
+                    value.add(std.mem.asBytes(&client_release));
+                    value.add(input);
+
                     state_machine.forest.grooves.things.insert(&.{
                         .timestamp = timestamp,
                         .id = op,
-                        .value = @as(u64, @truncate(vsr.checksum(input))),
+                        .value = @as(u64, @truncate(value.checksum())),
                     });
 
                     stdx.copy_disjoint(.inexact, u8, output, input);

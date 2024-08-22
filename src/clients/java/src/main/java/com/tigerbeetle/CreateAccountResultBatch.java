@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 
 public final class CreateAccountResultBatch extends Batch {
 
+
     interface Struct {
         int SIZE = 8;
 

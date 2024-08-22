@@ -189,11 +189,19 @@ The transfer was not created. [`Transfer.timeout`](../transfer.md#timeout) is no
 
 ### `amount_must_not_be_zero`
 
+**Deprecated**: This error code is only returned to clients prior to release `0.16.0`.
+Since `0.16.0`, zero-amount transfers are permitted.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
 The transfer was not created. [`Transfer.amount`](../transfer.md#amount) is zero, but must be
 nonzero.
 
 Every transfer must move value. Only posting and voiding transfer amounts may be zero — when zero,
 they will move the full pending amount.
+
+</details>
 
 ### `ledger_must_not_be_zero`
 
@@ -279,8 +287,17 @@ The post/void transfer's `code` must either be `0` or identical to the pending t
 
 ### `exceeds_pending_transfer_amount`
 
+**Deprecated**: This error code is only returned to clients prior to release `0.16.0`.
+Since `0.16.0`, a posting transfer with an amount that exceeds the pending transfer's amount will
+post the full pending amount.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
 The transfer was not created. The transfer's [`amount`](../transfer.md#amount) exceeds the `amount`
 of its [pending](../transfer.md#pending_id) transfer.
+
+</details>
 
 ### `pending_transfer_has_different_amount`
 
@@ -290,7 +307,15 @@ The transfer was not created. The transfer is attempting to
 transfer.
 
 To partially void a transfer, create a [posting transfer](../transfer.md#flagspost_pending_transfer)
+with an amount less than the pending transfer's `amount`.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
+To partially void a transfer, create a [posting transfer](../transfer.md#flagspost_pending_transfer)
 with an amount between `0` and the pending transfer's `amount`.
+
+</details>
 
 ### `pending_transfer_already_posted`
 
@@ -330,6 +355,10 @@ If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debi
 [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the actual amount
 transferred exceeds this failed transfer's `amount`.
 
+If the transfer has [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+set, then the `amount` is not equal to
+`min(pending_transfer.amount, existing_posting_transfer.amount)`.
+
 ### `exists_with_different_pending_id`
 
 A transfer with the same `id` already exists, but with a different
@@ -366,7 +395,23 @@ A transfer with the same `id` already exists.
 If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
 [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
 transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
-(if non-zero) `amount` of the transfer in the request.
+`amount` of the transfer in the request.
+
+If the transfer has [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+set, then the existing transfer may have a different [`amount`](../transfer.md#amount):
+- If the original posted amount was less than the pending amount,
+  then the transfer amount must be equal to the posted amount.
+- Otherwise, the transfer amount must be greater than or equal to the pending amount.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
+If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
+transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
+`amount` of the transfer in the request.
+
+</details>
 
 Otherwise, with the possible exception of the `timestamp` field, the existing transfer is identical
 to the transfer in the request.
@@ -456,27 +501,37 @@ replica, not the `0` value sent by the client.
 
 The transfer was not created.
 
+The [debit account](../transfer.md#debit_account_id) has
+[`flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) set, but
+`debit_account.debits_pending + debit_account.debits_posted + transfer.amount` would exceed
+`debit_account.credits_posted`.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
 If [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) is set, then
 `debit_account.debits_pending + debit_account.debits_posted + 1` would exceed
 `debit_account.credits_posted`.
 
-Otherwise, the [debit account](../transfer.md#debit_account_id) has
-[`flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) set, but
-`debit_account.debits_pending + debit_account.debits_posted + transfer.amount` would exceed
-`debit_account.credits_posted`.
+</details>
 
 ### `exceeds_debits`
 
 The transfer was not created.
 
+The [credit account](../transfer.md#credit_account_id) has
+[`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) set, but
+`credit_account.credits_pending + credit_account.credits_posted + transfer.amount` would exceed
+`credit_account.debits_posted`.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
 If [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) is set, then
 `credit_account.credits_pending + credit_account.credits_posted + 1` would exceed
 `credit_account.debits_posted`.
 
-Otherwise, the [credit account](../transfer.md#credit_account_id) has
-[`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) set, but
-`credit_account.credits_pending + credit_account.credits_posted + transfer.amount` would exceed
-`credit_account.debits_posted`.
+</details>
 
 ## Client libraries
 

@@ -50,7 +50,7 @@ Fields used by each mode of transfer:
 | `id`                          | required     | required | required     | required     |
 | `debit_account_id`            | required     | required | optional     | optional     |
 | `credit_account_id`           | required     | required | optional     | optional     |
-| `amount`                      | required     | required | optional     | optional     |
+| `amount`                      | required     | required | required     | optional     |
 | `pending_id`                  | none         | none     | required     | required     |
 | `user_data_128`               | optional     | optional | optional     | optional     |
 | `user_data_64`                | optional     | optional | optional     | optional     |
@@ -142,16 +142,24 @@ negative balances as well as
   where the actual transfer amount is determined by the debit account's constraints.
 - When `flags.balancing_credit` is set, this is the maximum amount that will be debited/credited,
   where the actual transfer amount is determined by the credit account's constraints.
+- When `flags.post_pending_transfer` is set, the amount posted will be
+  `min(posting_transfer.amount, pending_transfer.amount)`.
 
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes)
-- When `flags.post_pending_transfer` is set:
-  - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
-  - If `amount` is nonzero, it must be less than or equal to the pending transfer's `amount`.
 - When `flags.void_pending_transfer` is set:
   - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
   - If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
+Additional constraints:
+
+- When `flags.post_pending_transfer` is set:
+  - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
+  - If `amount` is nonzero, it must be less than or equal to the pending transfer's `amount`.
 - When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero, it will
   automatically be set to the maximum amount that does not violate the corresponding account limits.
   (Equivalent to setting `amount = 2^128 - 1`).
@@ -160,6 +168,8 @@ Constraints:
   - `flags.void_pending_transfer`
   - `flags.balancing_debit`
   - `flags.balancing_credit`
+
+</details>
 
 #### Examples
 
@@ -346,11 +356,7 @@ Mark the transfer as a
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
 such that
-`debit_account.debits_pending + debit_account.debits_posted ≤ debit_account.credits_posted`. If
-`amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
-
-If the highest amount transferable is `0`, returns
-[`exceeds_credits`](./requests/create_transfers.md#exceeds_credits).
+`debit_account.debits_pending + debit_account.debits_posted ≤ debit_account.credits_posted`.
 
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
@@ -368,6 +374,19 @@ pending transfer will never exceed/overflow either account's limits.
 
 `flags.balancing_debit` is compatible with (and orthogonal to) `flags.balancing_credit`.
 
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
+Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
+such that
+`debit_account.debits_pending + debit_account.debits_posted ≤ debit_account.credits_posted`. If
+`amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
+
+If the highest amount transferable is `0`, returns
+[`exceeds_credits`](./requests/create_transfers.md#exceeds_credits).
+
+</details>
+
 ##### Examples
 
 - [Close Account](../coding/recipes/close-account.md)
@@ -376,11 +395,7 @@ pending transfer will never exceed/overflow either account's limits.
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
 such that
-`credit_account.credits_pending + credit_account.credits_posted ≤ credit_account.debits_posted`. If
-`amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
-
-If the highest amount transferable is `0`, returns
-[`exceeds_debits`](./requests/create_transfers.md#exceeds_debits).
+`credit_account.credits_pending + credit_account.credits_posted ≤ credit_account.debits_posted`.
 
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
@@ -397,6 +412,19 @@ differs from the original value.
 pending transfer will never exceed/overflow either account's limits.
 
 `flags.balancing_credit` is compatible with (and orthogonal to) `flags.balancing_debit`.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
+Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
+such that
+`credit_account.credits_pending + credit_account.credits_posted ≤ credit_account.debits_posted`. If
+`amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
+
+If the highest amount transferable is `0`, returns
+[`exceeds_debits`](./requests/create_transfers.md#exceeds_debits).
+
+</details>
 
 ##### Examples
 
