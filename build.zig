@@ -73,6 +73,11 @@ pub fn build(b: *std.Build) !void {
     // Build options passed with `-D` flags.
     const build_options = .{
         .target = b.option([]const u8, "target", "The CPU architecture and OS to build for"),
+        .multiversion = b.option(
+            []const u8,
+            "multiversion",
+            "Past version to include for upgrades",
+        ),
         .config = b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
         .config_aof_recovery = b.option(
             bool,
@@ -170,8 +175,9 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
-        .emit_llvm_ir = build_options.emit_llvm_ir,
         .tracer_backend = build_options.tracer_backend,
+        .emit_llvm_ir = build_options.emit_llvm_ir,
+        .multiversion = build_options.multiversion,
     });
 
     // zig build aof
@@ -359,9 +365,62 @@ fn build_tigerbeetle(
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
         tracer_backend: config.TracerBackend,
+        multiversion: ?[]const u8,
         emit_llvm_ir: bool,
     },
 ) void {
+    const tigerbeetle_bin = if (options.multiversion) |version_past| bin: {
+        assert(!options.emit_llvm_ir);
+        break :bin build_tigerbeetle_executable_multiversion(b, .{
+            .vsr_module = options.vsr_module,
+            .vsr_options = options.vsr_options,
+            .multiversion = version_past,
+            .target = options.target,
+            .mode = options.mode,
+            .tracer_backend = options.tracer_backend,
+        });
+    } else bin: {
+        const tigerbeetle_exe = build_tigerbeetle_executable(b, .{
+            .vsr_module = options.vsr_module,
+            .vsr_options = options.vsr_options,
+            .target = options.target,
+            .mode = options.mode,
+            .tracer_backend = options.tracer_backend,
+        });
+        if (options.emit_llvm_ir) {
+            steps.install.dependOn(&b.addInstallBinFile(
+                tigerbeetle_exe.getEmittedLlvmIr(),
+                "tigerbeetle.ll",
+            ).step);
+        }
+        break :bin tigerbeetle_exe.getEmittedBin();
+    };
+
+    const out_filename = if (options.target.result.os.tag == .windows)
+        "tigerbeetle.exe"
+    else
+        "tigerbeetle";
+
+    steps.install.dependOn(&b.addInstallBinFile(tigerbeetle_bin, out_filename).step);
+    // "zig build install" moves the server executable to the root folder:
+    steps.install.dependOn(&b.addInstallFile(
+        tigerbeetle_bin,
+        b.pathJoin(&.{ "../", out_filename }),
+    ).step);
+
+    const run_cmd = std.Build.Step.Run.create(b, b.fmt("run tigerbeetle", .{}));
+    run_cmd.addFileArg(tigerbeetle_bin);
+    if (b.args) |args| run_cmd.addArgs(args);
+    steps.run.dependOn(&run_cmd.step);
+}
+
+fn build_tigerbeetle_executable(b: *std.Build, options: struct {
+    vsr_module: *std.Build.Module,
+    vsr_options: *std.Build.Step.Options,
+    target: std.Build.ResolvedTarget,
+    mode: std.builtin.OptimizeMode,
+    tracer_backend: config.TracerBackend,
+}) *std.Build.Step.Compile {
     const tigerbeetle = b.addExecutable(.{
         .name = "tigerbeetle",
         .root_source_file = b.path("src/tigerbeetle/main.zig"),
@@ -375,25 +434,79 @@ fn build_tigerbeetle(
     }
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.root_module.omit_frame_pointer = false;
-    if (options.emit_llvm_ir) {
-        steps.install.dependOn(&b.addInstallBinFile(
-            tigerbeetle.getEmittedLlvmIr(),
-            "tigerbeetle.ll",
-        ).step);
-    }
     // TODO: investigate why do we need to grow the stack when adding new indexes.
     tigerbeetle.stack_size = 18 * 1024 * 1024;
+    return tigerbeetle;
+}
 
-    // "zig build install" moves the server executable to the root folder:
-    steps.install.dependOn(&b.addInstallArtifact(tigerbeetle, .{}).step);
-    steps.install.dependOn(&b.addInstallFile(
-        tigerbeetle.getEmittedBin(),
-        b.pathJoin(&.{ "../", tigerbeetle.out_filename }),
-    ).step);
+fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
+    vsr_module: *std.Build.Module,
+    vsr_options: *std.Build.Step.Options,
+    multiversion: []const u8,
+    target: std.Build.ResolvedTarget,
+    mode: std.builtin.OptimizeMode,
+    tracer_backend: config.TracerBackend,
+}) std.Build.LazyPath {
+    // build_multiversion a custom step that would take care of packing several releases into one
+    const build_multiversion_exe = b.addExecutable(.{
+        .name = "build_multiversion",
+        .root_source_file = b.path("src/build_multiversion.zig"),
+        // Enable aes extensions for vsr.checksum on the host.
+        .target = resolve_target(b, null) catch @panic("unsupported host"),
+    });
+    // Ideally, we should pass `vsr_options` here at runtime. Making them comptime
+    // parameters is inelegant, but practical!
+    build_multiversion_exe.root_module.addOptions("vsr_options", options.vsr_options);
 
-    const run_cmd = b.addRunArtifact(tigerbeetle);
-    if (b.args) |args| run_cmd.addArgs(args);
-    steps.run.dependOn(&run_cmd.step);
+    const build_multiversion = b.addRunArtifact(build_multiversion_exe);
+    if (options.target.result.os.tag == .macos) {
+        build_multiversion.addArg("--target=macos");
+        inline for (.{ "x86_64", "aarch64" }, .{ "x86-64", "aarch64" }) |arch, flag| {
+            build_multiversion.addPrefixedFileArg(
+                "--tigerbeetle-current-" ++ flag ++ "=",
+                build_tigerbeetle_executable(b, .{
+                    .vsr_module = options.vsr_module,
+                    .vsr_options = options.vsr_options,
+                    .target = resolve_target(b, arch ++ "-macos") catch unreachable,
+                    .mode = options.mode,
+                    .tracer_backend = options.tracer_backend,
+                }).getEmittedBin(),
+            );
+        }
+    } else {
+        build_multiversion.addArg(b.fmt("--target={s}-{s}", .{
+            @tagName(options.target.result.cpu.arch),
+            @tagName(options.target.result.os.tag),
+        }));
+        build_multiversion.addPrefixedFileArg(
+            "--tigerbeetle-current=",
+            build_tigerbeetle_executable(b, .{
+                .vsr_module = options.vsr_module,
+                .vsr_options = options.vsr_options,
+                .target = options.target,
+                .mode = options.mode,
+                .tracer_backend = options.tracer_backend,
+            }).getEmittedBin(),
+        );
+    }
+
+    if (options.mode == .Debug) {
+        build_multiversion.addArg("--debug");
+    }
+
+    build_multiversion.addPrefixedFileArg(
+        "--tigerbeetle-past=",
+        download_release(b, options.multiversion, options.target, options.mode),
+    );
+    build_multiversion.addArg(b.fmt(
+        "--tmp={s}",
+        .{b.cache_root.join(b.allocator, &.{"tmp"}) catch @panic("OOM")},
+    ));
+    const basename = if (options.target.result.os.tag == .windows)
+        "tigerbeetle.exe"
+    else
+        "tigerbeetle";
+    return build_multiversion.addPrefixedOutputFileArg("--output=", basename);
 }
 
 fn build_aof(
@@ -1319,3 +1432,51 @@ const Generated = struct {
         return result;
     }
 };
+
+fn download_release(
+    b: *std.Build,
+    version_or_latest: []const u8,
+    target: std.Build.ResolvedTarget,
+    mode: std.builtin.OptimizeMode,
+) std.Build.LazyPath {
+    const os = switch (target.result.os.tag) {
+        .windows => "windows",
+        .linux => "linux",
+        .macos => "macos",
+        else => @panic("unsupported OS"),
+    };
+    const arch = if (target.result.os.tag == .macos)
+        "universal"
+    else switch (target.result.cpu.arch) {
+        .x86_64 => "x86_64",
+        .aarch64 => "aarch64",
+        else => @panic("unsupported CPU"),
+    };
+    const debug = switch (mode) {
+        .ReleaseSafe => "",
+        .Debug => "-debug",
+        else => @panic("unsupported mode"),
+    };
+
+    const version = if (std.mem.eql(u8, version_or_latest, "latest"))
+        std.mem.trimRight(
+            u8,
+            b.run(&.{ "gh", "release", "view", "--json", "tagName", "--jq", ".tagName" }),
+            "\n",
+        )
+    else
+        version_or_latest;
+
+    const release_archive = b.addSystemCommand(&.{
+        "gh",        "release",
+        "download",  version,
+        "--pattern", b.fmt("tigerbeetle-{s}-{s}{s}.zip", .{ arch, os, debug }),
+        "--output",  "-",
+    });
+    release_archive.max_stdio_size = 512 * 1024 * 1024;
+
+    const unzip = b.addSystemCommand(&.{ "unzip", "-p" });
+    unzip.addFileArg(release_archive.captureStdOut());
+    unzip.max_stdio_size = 512 * 1024 * 1024;
+    return unzip.captureStdOut();
+}
