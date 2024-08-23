@@ -123,14 +123,20 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
 }) !void {
     assert(options.target != .macos);
 
+    try assert_deterministic(shell, .{
+        .llvm_objcopy = options.llvm_objcopy,
+        .source = options.tigerbeetle_current,
+        .tmp_path = options.tmp_path,
+    });
+
     // We will be modifying this binary in-place.
     const tigerbeetle_working = try shell.fmt("{s}/tigerbeetle-working", .{options.tmp_path});
 
-    const current_checksum = try make_deterministic(shell, .{
-        .llvm_objcopy = options.llvm_objcopy,
-        .source = options.tigerbeetle_current,
-        .output = tigerbeetle_working,
-    });
+    const current_checksum = try checksum_file(
+        shell,
+        options.tigerbeetle_current,
+        multiversion_binary_size_max,
+    );
 
     const sections = .{
         .header_zero = try shell.fmt("{s}/multiversion-zero.header", .{options.tmp_path}),
@@ -168,11 +174,13 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
         \\    --add-section .tb_mvh={header_zero}
         \\    --set-section-flags .tb_mvh=contents,noload,readonly
         \\
+        \\    {current}
         \\    {working}
     , .{
         .llvm_objcopy = options.llvm_objcopy,
         .body = sections.body,
         .header_zero = sections.header_zero,
+        .current = options.tigerbeetle_current,
         .working = tigerbeetle_working,
     });
 
@@ -236,6 +244,17 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
     output: []const u8,
 }) !void {
     assert(options.target == .macos);
+
+    try assert_deterministic(shell, .{
+        .llvm_objcopy = options.llvm_objcopy,
+        .source = options.tigerbeetle_current_x86_64,
+        .tmp_path = options.tmp_path,
+    });
+    try assert_deterministic(shell, .{
+        .llvm_objcopy = options.llvm_objcopy,
+        .source = options.tigerbeetle_current_aarch64,
+        .tmp_path = options.tmp_path,
+    });
 
     const tigerbeetle_zero_header = try shell.fmt("{s}/tigerbeetle-zero-header", .{options.tmp_path});
 
@@ -388,31 +407,44 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
     });
 }
 
-fn make_deterministic(shell: *Shell, options: struct {
+// Ensure we're round trip deterministic between adding and removing sections:
+// `llvm-objcopy --add-section ... src dst_added` followed by
+// `llvm-objcopy --remove-section ... dst_added src_back` means
+// checksum(src) == checksum(src_back)
+fn assert_deterministic(shell: *Shell, options: struct {
     llvm_objcopy: []const u8,
     source: []const u8,
-    output: []const u8,
-}) !u128 {
-    // Copy the object using llvm-objcopy before taking our hash. This is to ensure we're
-    // round trip deterministic between adding and removing sections:
-    // `llvm-objcopy --add-section ... src dst_added` followed by
-    // `llvm-objcopy --remove-section ... dst_added src_back` means
-    // checksum(src) == checksum(src_back)
-    // Note: actually don't think this is needed, we could assert it?
+    tmp_path: []const u8,
+}) !void {
+    const working = try shell.fmt("{s}/detcheck", .{options.tmp_path});
+
+    const checksum_a = try checksum_file(shell, options.source, multiversion_binary_size_max);
+
     try shell.exec(
-        \\{llvm_objcopy} --enable-deterministic-archives
+        \\{llvm_objcopy} --enable-deterministic-archives --keep-undefined
+        \\    --add-section .tb_mvb={dummy}
         \\    {source} {working}
     , .{
         .llvm_objcopy = options.llvm_objcopy,
+        .dummy = @src().file, // Need to use _something_ as a section, might as well use this file.
         .source = options.source,
-        .working = options.output,
+        .working = working,
     });
+    const checksum_b = try checksum_file(shell, working, multiversion_binary_size_max);
 
-    return try checksum_file(
-        shell,
-        options.output,
-        multiversioning.multiversion_binary_size_max,
-    );
+    try shell.exec(
+        \\{llvm_objcopy} --enable-deterministic-archives --keep-undefined
+        \\    --remove-section .tb_mvb
+        \\    {working}
+    , .{
+        .llvm_objcopy = options.llvm_objcopy,
+        .working = working,
+    });
+    const checksum_c = try checksum_file(shell, working, multiversion_binary_size_max);
+
+    assert(checksum_a != checksum_b);
+    assert(checksum_a == checksum_c);
+    try shell.cwd.deleteFile(working);
 }
 
 fn build_multiversion_body(shell: *Shell, options: struct {
