@@ -433,11 +433,6 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     past_releases: MultiversionHeader.PastReleases,
     unpacked: []const []const u8,
 } {
-    // TODO: parse_macho needlessly depends on builtin.target.cpu.arch
-    const inactive = options.target == .macos and
-        ((options.arch == .x86_64 and builtin.target.cpu.arch == .aarch64) or
-        (options.arch == .aarch64 and builtin.target.cpu.arch == .x86_64));
-
     const past_binary_contents: []align(8) const u8 = try shell.cwd.readFileAllocOptions(
         shell.arena.allocator(),
         options.tigerbeetle_past,
@@ -452,19 +447,13 @@ fn build_multiversion_body(shell: *Shell, options: struct {
         .macos => try multiversioning.parse_macho(past_binary_contents),
         .linux => try multiversioning.parse_elf(past_binary_contents),
     };
+    const arch_offsets = switch (options.arch) {
+        .x86_64 => parsed_offsets.x86_64.?,
+        .aarch64 => parsed_offsets.aarch64.?,
+    };
 
-    const header_bytes = if (inactive)
-        past_binary_contents[parsed_offsets.header_offset_inactive_platform.?..][0..@sizeOf(
-            MultiversionHeader,
-        )]
-    else
-        past_binary_contents[parsed_offsets.header_offset..][0..@sizeOf(
-            MultiversionHeader,
-        )];
-    const body_offset = if (inactive)
-        parsed_offsets.body_offset_inactive_platform.?
-    else
-        parsed_offsets.body_offset;
+    const header_bytes =
+        past_binary_contents[arch_offsets.header_offset..][0..@sizeOf(MultiversionHeader)];
 
     var header = try MultiversionHeader.init_from_bytes(header_bytes);
     if (header.current_release == (try multiversioning.Release.parse("0.15.4")).value) {
@@ -578,7 +567,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
         const mode_exec = if (builtin.os.tag == .windows) 0 else 0o777;
         try shell.cwd.writeFile(.{
             .sub_path = past_name,
-            .data = past_binary_contents[body_offset..][past_offset..][0..past_size],
+            .data = past_binary_contents[arch_offsets.body_offset..][past_offset..][0..past_size],
             .flags = .{ .exclusive = true, .mode = mode_exec },
         });
         try unpacked.append(past_name);
