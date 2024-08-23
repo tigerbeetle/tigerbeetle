@@ -423,12 +423,12 @@ test "tidy no large blobs" {
 
     const MiB = 1024 * 1024;
     const rev_list = try shell.exec_stdout_options(
-        .{ .max_output_bytes = 50 * MiB },
+        .{ .output_bytes_max = 50 * MiB },
         "git rev-list --objects HEAD",
         .{},
     );
     const objects = try shell.exec_stdout_options(
-        .{ .max_output_bytes = 50 * MiB, .stdin_slice = rev_list },
+        .{ .output_bytes_max = 50 * MiB, .stdin_slice = rev_list },
         "git cat-file --batch-check={format}",
         .{ .format = "%(objecttype) %(objectsize) %(rest)" },
     );
