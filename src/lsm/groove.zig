@@ -1121,7 +1121,7 @@ pub fn GrooveType(
                 const Helper = IndexTreeFieldHelperType(field.name);
 
                 const index = Helper.derive_index(object);
-                if (index != 0 or index_zeroes(field)) {
+                if (index != 0 or comptime index_zeroes(field)) {
                     @field(groove.indexes, field.name).put(&.{
                         .timestamp = object.timestamp,
                         .field = index,
@@ -1178,14 +1178,14 @@ pub fn GrooveType(
 
                 // Only update the indexes that change.
                 if (old_index != new_index) {
-                    if (old_index != 0 or index_zeroes(field)) {
+                    if (old_index != 0 or comptime index_zeroes(field)) {
                         @field(groove.indexes, field.name).remove(&.{
                             .timestamp = old.timestamp,
                             .field = old_index,
                         });
                     }
 
-                    if (new_index != 0 or index_zeroes(field)) {
+                    if (new_index != 0 or comptime index_zeroes(field)) {
                         @field(groove.indexes, field.name).put(&.{
                             .timestamp = new.timestamp,
                             .field = new_index,
@@ -1223,7 +1223,7 @@ pub fn GrooveType(
                 const Helper = IndexTreeFieldHelperType(field.name);
 
                 const index = Helper.derive_index(object);
-                if (index != 0 or index_zeroes(field)) {
+                if (index != 0 or comptime index_zeroes(field)) {
                     @field(groove.indexes, field.name).remove(&.{
                         .timestamp = object.timestamp,
                         .field = index,
