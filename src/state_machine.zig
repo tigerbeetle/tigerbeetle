@@ -2012,10 +2012,10 @@ pub fn StateMachineType(
             }
 
             if (amount == 0) {
+                assert(!forbid_zero_amounts(client_release));
                 assert(mem.eql(u8, std.mem.asBytes(dr_account), std.mem.asBytes(&dr_account_new)));
                 assert(mem.eql(u8, std.mem.asBytes(cr_account), std.mem.asBytes(&cr_account_new)));
             } else {
-                assert(!forbid_zero_amounts(client_release));
                 assert(!mem.eql(u8, std.mem.asBytes(dr_account), std.mem.asBytes(&dr_account_new)));
                 assert(!mem.eql(u8, std.mem.asBytes(cr_account), std.mem.asBytes(&cr_account_new)));
 
@@ -2264,10 +2264,10 @@ pub fn StateMachineType(
             }
 
             if (p.amount == 0 and amount == 0) {
+                assert(!forbid_zero_amounts(client_release));
                 assert(mem.eql(u8, std.mem.asBytes(dr_account), std.mem.asBytes(&dr_account_new)));
                 assert(mem.eql(u8, std.mem.asBytes(cr_account), std.mem.asBytes(&cr_account_new)));
             } else {
-                assert(!forbid_zero_amounts(client_release));
                 assert(!mem.eql(u8, std.mem.asBytes(dr_account), std.mem.asBytes(&dr_account_new)));
                 assert(!mem.eql(u8, std.mem.asBytes(cr_account), std.mem.asBytes(&cr_account_new)));
 
