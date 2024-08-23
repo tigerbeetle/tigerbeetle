@@ -2059,7 +2059,7 @@ pub fn ReplicaType(
                     .replica_count = self.replica_count,
                 },
             );
-            const op_head = switch (headers) {
+            const header_head = switch (headers) {
                 .awaiting_quorum => {
                     log.debug(
                         "{}: on_do_view_change: view={} waiting for quorum",
@@ -2083,7 +2083,7 @@ pub fn ReplicaType(
                     self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
                 },
-                .complete_valid => |*quorum_headers| quorum_headers.next().?.op,
+                .complete_valid => |*quorum_headers| quorum_headers.next().?,
             };
 
             log.debug("{}: on_do_view_change: view={} quorum received", .{
@@ -2094,19 +2094,14 @@ pub fn ReplicaType(
 
             const op_checkpoint_max =
                 DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
-            if (op_checkpoint_max > self.op_checkpoint() and op_head > self.op_prepare_max()) {
-                // When:
-                // 1. the cluster is at a checkpoint ahead of the local checkpoint,
-                // 2. AND the quorum's head op is part of a future checkpoint,
-                //    abdicate as primary, jumping to a new view.
-                //
-                // - If 1 and ¬2, then the ops in the next checkpoint are uncommitted and our
-                //   current checkpoint is sufficient.
-                // - If 2 and ¬1, then the ops past the checkpoint's op-prepare-max must be
-                //   uncommitted because no replica in the DVC quorum even prepared them.
-                //   (They are present anyway because the origin of the DVC is reusing its SV
-                //   headers as a DVC since it has not completed repair.)
-                //
+            const commit_max = @max(
+                self.commit_max,
+                DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
+            );
+            // We are lagging from the cluster by at least a checkpoint, and that checkpoint is
+            // durable on a commit quorum of replicas. Forfeit the view change and prefer the
+            // replica with the durable checkpoint for primary.
+            if (commit_max > self.op_prepare_max()) {
                 // This serves a few purposes:
                 // 1. Availability: We pick a primary to minimize the number of WAL repairs, to
                 //    minimize the likelihood of a repair-deadlock.
@@ -2145,6 +2140,7 @@ pub fn ReplicaType(
                 self.do_view_change_quorum = true;
 
                 self.primary_set_log_from_do_view_change_messages();
+
                 // We aren't status=normal yet, but our headers from our prior log_view may have
                 // been replaced. If we participate in another DVC (before reaching status=normal,
                 // which would update our log_view), we must disambiguate our (new) headers from the
@@ -2152,7 +2148,17 @@ pub fn ReplicaType(
                 // identify an unambiguous set of canonical headers.
                 self.log_view = self.view;
 
-                assert(self.op == op_head);
+                // Canonical DVC headers may have ops greater than op_prepare_max which cannot be
+                // accomodated in the WAL right now. Store them in view_headers, which are used to
+                // fetch these prepares in primary_repair_pipeline, *after* the replica has
+                // advanced to the next checkpoint.
+                self.view_headers.array.clear();
+                self.view_headers.append(header_head);
+                while (headers.complete_valid.next()) |header| {
+                    self.view_headers.append(header);
+                }
+
+                assert(self.op == @min(header_head.op, self.op_prepare_max()));
                 assert(self.op >= self.commit_max);
                 assert(self.state_machine.prepare_timestamp >=
                     self.journal.header_with_op(self.op).?.timestamp);
@@ -6510,6 +6516,19 @@ pub fn ReplicaType(
                 return .busy;
             }
 
+            const view_headers_op_max = self.view_headers.array.get(0).op;
+            if (view_headers_op_max > self.op) {
+                assert(view_headers_op_max <= self.op_prepare_max());
+                self.op = view_headers_op_max;
+
+                var op = self.commit_max + 1;
+                while (op <= view_headers_op_max) : (op += 1) {
+                    const op_header =
+                        &self.view_headers.array.const_slice()[view_headers_op_max - op];
+                    self.replace_header(op_header);
+                }
+            }
+
             if (self.primary_repair_pipeline_op()) |_| {
                 log.debug("{}: primary_repair_pipeline: repairing", .{self.replica});
                 assert(!self.pipeline_repairing);
@@ -6571,9 +6590,14 @@ pub fn ReplicaType(
             assert(self.pipeline == .cache);
 
             var op = self.commit_max + 1;
-            while (op <= self.op) : (op += 1) {
-                const op_header = self.journal.header_with_op(op).?;
+            const view_headers_op_max = self.view_headers.array.get(0).op;
+
+            while (op <= view_headers_op_max) : (op += 1) {
+                const op_header =
+                    &self.view_headers.array.const_slice()[view_headers_op_max - op];
                 if (!self.pipeline.cache.contains_header(op_header)) {
+                    log.debug("not found in pipeline cache {}", .{op});
+
                     return op;
                 }
             }
@@ -6588,8 +6612,10 @@ pub fn ReplicaType(
             assert(self.pipeline == .cache);
             assert(self.pipeline_repairing);
 
+            const view_headers_op_max = self.view_headers.array.get(0).op;
             const op = self.primary_repair_pipeline_op().?;
-            const op_checksum = self.journal.header_with_op(op).?.checksum;
+            const op_checksum =
+                self.view_headers.array.const_slice()[view_headers_op_max - op].checksum;
             log.debug("{}: primary_repair_pipeline_read: op={} checksum={}", .{
                 self.replica,
                 op,
@@ -8052,42 +8078,31 @@ pub fn ReplicaType(
             assert(header_head.op >= self.op_checkpoint());
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
-            assert(header_head.op <= self.op_prepare_max());
+            maybe(header_head.op <= self.op_prepare_max());
             for (dvcs_all.const_slice()) |dvc| assert(header_head.op >= dvc.header.commit_min);
 
-            // When computing the new commit_max, we cannot simply rely on the fact that our own
-            // commit_min is attached to our own DVC in the quorum.
-            // Consider the case:
-            // 1. Start committing op=N…M.
-            // 2. Send `do_view_change` to self.
-            // 3. Finish committing op=N…M.
-            // 4. Remaining `do_view_change` messages arrive, completing the quorum.
-            // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
-            // Don't let the commit backtrack.
-            const commit_max = @max(
-                self.commit_min,
-                DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
-            );
             assert(self.commit_min >=
                 self.do_view_change_from_all_replicas[self.replica].?.header.commit_min);
 
             {
                 // "`replica.op` exists" invariant may be broken briefly between
                 // set_op_and_commit_max() and replace_header().
-
-                self.set_op_and_commit_max(header_head.op, commit_max, @src());
+                self.set_op_and_commit_max(
+                    @min(header_head.op, self.op_prepare_max()),
+                    DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
+                    @src(),
+                );
                 assert(self.commit_max <= self.op_prepare_max());
                 assert(self.commit_max <= self.op);
                 maybe(self.journal.header_with_op(self.op) == null);
-
-                self.replace_header(header_head);
-                assert(self.journal.header_with_op(self.op) != null);
+                if (header_head.op <= self.op_prepare_max()) self.replace_header(header_head);
             }
 
             while (quorum_headers.next()) |header| {
                 assert(header.op < header_head.op);
-                self.replace_header(header);
+                if (header.op <= self.op_prepare_max()) self.replace_header(header);
             }
+            assert(self.journal.header_with_op(self.op) != null);
             assert(self.journal.header_with_op(self.commit_max) != null);
 
             const dvcs_uncanonical =

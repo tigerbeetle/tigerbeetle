@@ -833,6 +833,74 @@ test "Cluster: view-change: duel of the primaries" {
     try expectEqual(t.replica(.R2).commit(), 3);
 }
 
+test "Cluster: view_change: lagging replica advances checkpoint during view change" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+    var c = t.clients(0, t.cluster.clients.len);
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    b2.stop();
+
+    // Ensure b1 only commits up till checkpoint_2_trigger - 1, so it stays at checkpoint_1 while
+    // a0 moves to checkpoint_2.
+    b1.drop(.R_, .incoming, .commit);
+
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    try expectEqual(a0.commit(), checkpoint_2_trigger);
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+    try expectEqual(b1.commit(), checkpoint_2_trigger - 1);
+    try expectEqual(b1.op_checkpoint(), checkpoint_1);
+
+    b1.stop();
+
+    try b2.open();
+    // Don't allow b2 to repair its grid, otherwise it could help a0 commit past op_prepare_max for
+    // checkpoint_2.
+    b2.drop(.R_, .incoming, .block);
+
+    t.run();
+
+    try expectEqual(b2.op_checkpoint(), checkpoint_2);
+    try expectEqual(b2.commit_max(), checkpoint_2_trigger);
+    try expectEqual(b2.status(), .normal);
+
+    // Progress a0 & b2's head past op_prepare_max for checkpoint_2 (but commit_max stays at
+    // op_prepare_max).
+    try c.request(
+        checkpoint_2_prepare_max + constants.pipeline_prepare_queue_max,
+        checkpoint_2_prepare_max,
+    );
+
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+    try expectEqual(a0.commit_max(), checkpoint_2_prepare_max);
+
+    try expectEqual(b2.op_checkpoint(), checkpoint_2);
+    try expectEqual(b2.commit_max(), checkpoint_2_prepare_max);
+
+    b2.stop();
+
+    a0.stop();
+    // Drop incoming DVCs to a0 to check if b1 steps up as primary.
+    a0.drop(.R_, .incoming, .do_view_change);
+    try a0.open();
+
+    try b1.open();
+    b1.pass(.R_, .incoming, .commit);
+
+    t.run();
+
+    try expectEqual(a0.status(), .normal);
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+
+    // b1 is able to advance its checkpoint during view change and become primary.
+    try expectEqual(b1.role(), .primary);
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b1.op_checkpoint(), checkpoint_2);
+}
+
 test "Cluster: view-change: primary with dirty log" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
