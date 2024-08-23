@@ -2148,16 +2148,12 @@ pub fn StateMachineType(
                     if (t.flags.void_pending_transfer) {
                         break :amount if (t.amount > 0) t.amount else p.amount;
                     } else {
-                        break :amount @min(t.amount, p.amount);
+                        break :amount if (t.amount == std.math.maxInt(u128)) p.amount else t.amount;
                     }
                 }
             };
 
-            if (forbid_zero_amounts(client_release) or
-                t.flags.void_pending_transfer)
-            {
-                if (amount > p.amount) return .exceeds_pending_transfer_amount;
-            }
+            if (amount > p.amount) return .exceeds_pending_transfer_amount;
 
             if (t.flags.void_pending_transfer and amount < p.amount) {
                 return .pending_transfer_has_different_amount;
@@ -2317,7 +2313,12 @@ pub fn StateMachineType(
                 }
             } else {
                 assert(t.flags.post_pending_transfer);
-                if (@min(p.amount, t.amount) != e.amount) return .exists_with_different_amount;
+                assert(e.amount <= p.amount);
+                if (t.amount == std.math.maxInt(u128)) {
+                    if (e.amount != p.amount) return .exists_with_different_amount;
+                } else {
+                    if (t.amount != e.amount) return .exists_with_different_amount;
+                }
             }
 
             // If `e` posted or voided a different pending transfer, then the accounts will differ.
@@ -3834,14 +3835,16 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T105 A0 A0   -0  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ ok
         \\ transfer T105 A0 A0    7  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists
         \\ transfer T105 A0 A0    7  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists // ledger/code = 0
-        \\ transfer T105 A0 A0    8  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists // t.amount > p.amount
+        \\ transfer T105 A0 A0    8  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exceeds_pending_transfer_amount // t.amount > p.amount
         \\ transfer T105 A0 A0    0  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists_with_different_amount // t.amount < e.amount
         \\ transfer T105 A0 A0    0  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists_with_different_amount
         \\ transfer T105 A0 A0    6  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists_with_different_amount
         \\
-        \\ transfer T106 A0 A0    2  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ ok
+        \\ transfer T106 A0 A0   -1  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exceeds_pending_transfer_amount
+        \\ transfer T106 A0 A0   -0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ ok
+        \\ transfer T106 A0 A0   -0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists
         \\ transfer T106 A0 A0    1  T6 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ exists
-        \\ transfer T106 A0 A0    2  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists
+        \\ transfer T106 A0 A0    2  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exceeds_pending_transfer_amount
         \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ exists_with_different_amount
         \\
         \\ transfer T107 A0 A0    0  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ ok
@@ -3860,6 +3863,30 @@ test "create/lookup 2-phase transfers" {
         \\ lookup_transfer T105 amount 7
         \\ lookup_transfer T106 amount 1
         \\ lookup_transfer T107 amount 0
+        \\ commit lookup_transfers
+    );
+}
+
+test "create/lookup 2-phase transfers (amount=maxInt)" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ ok
+        \\ commit create_accounts
+
+        // Posting maxInt(u128) is a pun – it is interpreted as "send full pending amount", which in
+        // this case is exactly maxInt(u127).
+        \\ transfer T1 A1 A2   -0   _  _  _  _ _ L1 C1   _ PEN   _   _   _   _  _ _ _ ok
+        \\ transfer T2 A1 A2   -0  T1  _  _  _ _ L1 C1   _   _ POS   _   _   _  _ _ _ ok
+        \\ transfer T2 A1 A2   -0  T1  _  _  _ _ L1 C1   _   _ POS   _   _   _  _ _ _ exists
+        \\ commit create_transfers
+
+        // Check balances after resolving.
+        \\ lookup_account A1  0 -0  0  0
+        \\ lookup_account A2  0  0  0 -0
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 amount -0
+        \\ lookup_transfer T2 amount -0
         \\ commit lookup_transfers
     );
 }
