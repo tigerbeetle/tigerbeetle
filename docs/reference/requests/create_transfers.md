@@ -287,17 +287,8 @@ The post/void transfer's `code` must either be `0` or identical to the pending t
 
 ### `exceeds_pending_transfer_amount`
 
-**Deprecated**: This error code is only returned to clients prior to release `0.16.0`.
-Since `0.16.0`, a posting transfer with an amount that exceeds the pending transfer's amount will
-post the full pending amount.
-
-<details>
-<summary>Client release &lt; 0.16.0</summary>
-
 The transfer was not created. The transfer's [`amount`](../transfer.md#amount) exceeds the `amount`
 of its [pending](../transfer.md#pending_id) transfer.
-
-</details>
 
 ### `pending_transfer_has_different_amount`
 
@@ -354,10 +345,6 @@ A transfer with the same `id` already exists, but with a different
 If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
 [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the actual amount
 transferred exceeds this failed transfer's `amount`.
-
-If the transfer has [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
-set, then the `amount` is not equal to
-`min(pending_transfer.amount, existing_posting_transfer.amount)`.
 
 ### `exists_with_different_pending_id`
 

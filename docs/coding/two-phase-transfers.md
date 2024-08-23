@@ -31,11 +31,14 @@ A post-pending transfer, denoted by
 pending transfer to "post", transferring some or all of the pending transfer's reserved amount to
 its destination.
 
-- If the posted [`amount`](../reference/transfer.md#amount) is greater than or equal to the pending
-  transfer's amount, the full pending transfer's amount is posted.
-  The transfer's recorded value is set to the pending transfer amount.
 - If the posted [`amount`](../reference/transfer.md#amount) is less than the pending transfer's
   amount, then only this amount is posted, and the remainder is restored to its original accounts.
+- If the posted [`amount`](../reference/transfer.md#amount) is equal to the pending transfer's
+  amount or equal to `AMOUNT_MAX` (`2^128 - 1`), the full pending transfer's amount is posted.
+- If the posted [`amount`](../reference/transfer.md#amount) is greater than the pending transfer's
+  amount (but less than `AMOUNT_MAX`),
+  [`exceeds_pending_transfer_amount`](../reference/requests/create_transfers.md#exceeds_pending_transfer_amount)
+  is returned.
 
 <details>
 <summary>Client &lt; 0.16.0</summary>

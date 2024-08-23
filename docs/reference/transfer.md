@@ -142,8 +142,10 @@ negative balances as well as
   where the actual transfer amount is determined by the debit account's constraints.
 - When `flags.balancing_credit` is set, this is the maximum amount that will be debited/credited,
   where the actual transfer amount is determined by the credit account's constraints.
-- When `flags.post_pending_transfer` is set, the amount posted will be
-  `min(posting_transfer.amount, pending_transfer.amount)`.
+- When `flags.post_pending_transfer` is set, the amount posted will be:
+  - the pending transfer's amount, when the posted transfer's `amount` is `AMOUNT_MAX`
+  - the posting transfer's amount, when the posted transfer's `amount` is less than or equal to the
+    pending transfer's amount.
 
 Constraints:
 
@@ -151,6 +153,11 @@ Constraints:
 - When `flags.void_pending_transfer` is set:
   - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
   - If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
+- When `flags.post_pending_transfer` is set:
+  - If `amount` is `AMOUNT_MAX` (`2^128 - 1`), it will automatically be set to the pending
+    transfer's `amount`.
+  - If `amount` is not `AMOUNT_MAX`, it must be less than or equal to the pending transfer's
+    `amount`.
 
 <details>
 <summary>Client release &lt; 0.16.0</summary>
