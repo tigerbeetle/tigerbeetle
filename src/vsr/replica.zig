@@ -6595,11 +6595,7 @@ pub fn ReplicaType(
             while (op <= view_headers_op_max) : (op += 1) {
                 const op_header =
                     &self.view_headers.array.const_slice()[view_headers_op_max - op];
-                if (!self.pipeline.cache.contains_header(op_header)) {
-                    log.debug("not found in pipeline cache {}", .{op});
-
-                    return op;
-                }
+                if (!self.pipeline.cache.contains_header(op_header)) return op;
             }
             return null;
         }
@@ -8624,13 +8620,6 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.log_view == self.view) or
                 (self.status == .view_change and self.log_view == self.view));
 
-            const primary_repairing =
-                self.status == .view_change and self.log_view == self.view;
-            if (primary_repairing) {
-                assert(self.primary_index(self.view) == self.replica);
-                assert(self.do_view_change_quorum);
-            }
-
             assert(self.view == self.log_view);
 
             // The DVC headers include:
@@ -8645,22 +8634,20 @@ pub fn ReplicaType(
             //
             // DVC headers are stitched together from the journal and existing view headers (they
             // might belong to the next log wrap), to guarantee that a DVC with log_view=v includes
-            // all uncommitted ops with views <v. Special case: a primary that has collected a DVC
-            // quorum and installed surviving headers into the journal ignores view headers (they
-            // might have some truncated ops).
+            // all uncommitted ops with views <v.
             var view_headers_updated = vsr.Headers.ViewChangeArray{
                 .command = .do_view_change,
                 .array = .{},
             };
 
             const view_headers_op_max = self.view_headers.array.get(0).op;
-            var op = if (primary_repairing) self.op else @max(self.op, view_headers_op_max);
+            var op = @max(self.op, view_headers_op_max);
             for (0..constants.pipeline_prepare_queue_max + 1) |_| {
                 const header_journal: ?*const vsr.Header.Prepare =
                     self.journal.header_with_op(op);
 
                 const header_view: ?*const vsr.Header.Prepare = header: {
-                    if (primary_repairing or op > view_headers_op_max) break :header null;
+                    if (op > view_headers_op_max) break :header null;
 
                     const header = &self.view_headers.array.const_slice()[view_headers_op_max - op];
                     break :header switch (vsr.Headers.dvc_header_type(header)) {
