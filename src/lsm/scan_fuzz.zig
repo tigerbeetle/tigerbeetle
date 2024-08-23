@@ -195,6 +195,7 @@ const ThingsGroove = GrooveType(
             .timestamp = batch_max,
         },
         .ignored = &[_][]const u8{"checksum"},
+        .optional = &[_][]const u8{},
         .derived = .{},
     },
 );

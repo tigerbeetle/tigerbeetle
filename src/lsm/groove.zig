@@ -152,6 +152,10 @@ pub fn GrooveType(
     /// - ignored: [][]const u8:
     ///     An array of fields on the Object type that should not be given index trees
     ///
+    /// - optional: [][]const u8:
+    ///     An array of index names (object fields and derived indexes) that should *not* index
+    ///     zero values.
+    ///
     /// - derived: { .field = *const fn (*const Object) DerivedType }:
     ///     An anonymous struct which contain fields that don't exist on the Object
     ///     but can be derived from an Object instance using the field's corresponding function.
@@ -253,6 +257,15 @@ pub fn GrooveType(
                 .alignment = @alignOf(IndexTree.Options),
             },
         };
+    }
+
+    // Verify that every tree referenced by "optional" corresponds to an actual index.
+    for (groove_options.optional) |field_name| {
+        for (index_options_fields) |index_field| {
+            if (std.mem.eql(u8, index_field.name, field_name)) break;
+        } else {
+            std.debug.panic("optional: unrecognized index name: {s}", .{field_name});
+        }
     }
 
     const _ObjectTree = blk: {
@@ -1108,8 +1121,7 @@ pub fn GrooveType(
                 const Helper = IndexTreeFieldHelperType(field.name);
 
                 const index = Helper.derive_index(object);
-                // Fields with `value == 0` are not indexed.
-                if (index != 0) {
+                if (index != 0 or index_zeroes(field)) {
                     @field(groove.indexes, field.name).put(&.{
                         .timestamp = object.timestamp,
                         .field = index,
@@ -1166,14 +1178,14 @@ pub fn GrooveType(
 
                 // Only update the indexes that change.
                 if (old_index != new_index) {
-                    if (old_index != 0) {
+                    if (old_index != 0 or index_zeroes(field)) {
                         @field(groove.indexes, field.name).remove(&.{
                             .timestamp = old.timestamp,
                             .field = old_index,
                         });
                     }
 
-                    if (new_index != 0) {
+                    if (new_index != 0 or index_zeroes(field)) {
                         @field(groove.indexes, field.name).put(&.{
                             .timestamp = new.timestamp,
                             .field = new_index,
@@ -1211,7 +1223,7 @@ pub fn GrooveType(
                 const Helper = IndexTreeFieldHelperType(field.name);
 
                 const index = Helper.derive_index(object);
-                if (index != 0) {
+                if (index != 0 or index_zeroes(field)) {
                     @field(groove.indexes, field.name).remove(&.{
                         .timestamp = object.timestamp,
                         .field = index,
@@ -1288,6 +1300,13 @@ pub fn GrooveType(
             };
         }
 
+        fn index_zeroes(comptime field: std.builtin.Type.StructField) bool {
+            for (groove_options.optional) |field_name| {
+                if (std.mem.eql(u8, field_name, field.name)) return false;
+            }
+            return true;
+        }
+
         pub fn assert_between_bars(groove: *const Groove) void {
             if (has_id) groove.ids.assert_between_bars();
             groove.objects.assert_between_bars();
@@ -1332,6 +1351,7 @@ test "Groove" {
                 .amount = 1,
             },
             .ignored = [_][]const u8{ "user_data_128", "user_data_64", "user_data_32", "flags" },
+            .optional = &[_][]const u8{},
             .derived = .{},
         },
     );

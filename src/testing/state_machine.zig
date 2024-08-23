@@ -88,6 +88,7 @@ pub fn StateMachineType(
                     .value = 1,
                 },
                 .ignored = &[_][]const u8{},
+                .optional = &[_][]const u8{},
                 .derived = .{},
             },
         );
