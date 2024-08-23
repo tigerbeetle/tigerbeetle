@@ -200,6 +200,11 @@ pub fn StateMachineType(
                     "flags",
                     "reserved",
                 },
+                .optional = &[_][]const u8{
+                    "user_data_128",
+                    "user_data_64",
+                    "user_data_32",
+                },
                 .derived = .{},
             },
         );
@@ -211,6 +216,13 @@ pub fn StateMachineType(
                 .ids = constants.tree_ids.transfers,
                 .batch_value_count_max = batch_value_count_max.transfers,
                 .ignored = &[_][]const u8{ "timeout", "flags" },
+                .optional = &[_][]const u8{
+                    "pending_id",
+                    "user_data_128",
+                    "user_data_64",
+                    "user_data_32",
+                    "expires_at",
+                },
                 .derived = .{
                     .expires_at = struct {
                         fn expires_at(object: *const Transfer) u64 {
@@ -231,6 +243,7 @@ pub fn StateMachineType(
                 .ids = constants.tree_ids.transfers_pending,
                 .batch_value_count_max = batch_value_count_max.transfers_pending,
                 .ignored = &[_][]const u8{"padding"},
+                .optional = &[_][]const u8{"status"},
                 .derived = .{},
             },
         );
@@ -266,6 +279,7 @@ pub fn StateMachineType(
                     "cr_credits_posted",
                     "reserved",
                 },
+                .optional = &[_][]const u8{},
                 .derived = .{},
             },
         );
@@ -4783,7 +4797,7 @@ test "query_transfers" {
         \\ commit create_accounts
 
         // Creating transfers:
-        \\ transfer T1 A1 A2   10  _ U1000 U10 U1 _ L1 C1 _ _ _ _ _ _ _ _ _ ok
+        \\ transfer T1 A1 A2    0  _ U1000 U10 U1 _ L1 C1 _ _ _ _ _ _ _ _ _ ok
         \\ transfer T2 A3 A4   11  _ U1000 U11 U2 _ L2 C2 _ _ _ _ _ _ _ _ _ ok
         \\ transfer T3 A2 A1   12  _ U1000 U10 U3 _ L1 C3 _ _ _ _ _ _ _ _ _ ok
         \\ transfer T4 A4 A3   13  _ U1000 U11 U4 _ L2 C4 _ _ _ _ _ _ _ _ _ ok
