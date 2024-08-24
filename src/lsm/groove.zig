@@ -336,8 +336,7 @@ pub fn GrooveType(
     assert(indexes_count_actual == indexes_count_expect);
     assert(indexes_count_actual == std.meta.fields(_IndexTreeOptions).len);
 
-    // Generate a helper function for interacting with an Index field type.
-    const IndexTreeFieldHelperType = struct {
+    const _IndexTreeFieldHelperType = struct {
         /// Returns true if the field is a derived field.
         fn is_derived(comptime field_name: []const u8) bool {
             comptime var derived = false;
@@ -364,8 +363,8 @@ pub fn GrooveType(
 
         fn HelperType(comptime field_name: []const u8) type {
             return struct {
-                const Index = IndexType(field_name);
-                const IndexPrefix = switch (@typeInfo(Index)) {
+                pub const Index = IndexType(field_name);
+                pub const IndexPrefix = switch (@typeInfo(Index)) {
                     .Void => void,
                     .Int => Index,
                     .Enum => |info| info.tag_type,
@@ -490,6 +489,9 @@ pub fn GrooveType(
         pub const IndexTrees = _IndexTrees;
         pub const ObjectsCache = _ObjectsCache;
         pub const config = groove_options;
+
+        /// Helper function for interacting with an Index field type.
+        pub const IndexTreeFieldHelperType = _IndexTreeFieldHelperType;
 
         const Grid = GridType(Storage);
         const ManifestLog = ManifestLogType(Storage);

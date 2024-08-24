@@ -419,7 +419,7 @@ const Environment = struct {
     fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveAccounts.IndexTrees)) type {
         const Tree = std.meta.fieldInfo(GrooveAccounts.IndexTrees, index).type;
         const Value = Tree.Table.Value;
-        const Prefix = std.meta.fieldInfo(Value, .field).type;
+        const Index = GrooveAccounts.IndexTreeFieldHelperType(@tagName(index)).Index;
 
         const ScanRange = ScanRangeType(
             Tree,
@@ -454,9 +454,19 @@ const Environment = struct {
                 env: *Environment,
                 params: ScanParams,
             ) ![]const tb.Account {
-                const min: Prefix = @intCast(params.min);
-                const max: Prefix = @intCast(params.max);
-                assert(min <= max);
+                const min: Index, const max: Index = switch (Index) {
+                    void => range: {
+                        assert(params.min == 0);
+                        assert(params.max == 0);
+                        break :range .{ {}, {} };
+                    },
+                    else => range: {
+                        const min: Index = @intCast(params.min);
+                        const max: Index = @intCast(params.max);
+                        assert(min <= max);
+                        break :range .{ min, max };
+                    },
+                };
 
                 const scan_buffer_pool = &env.forest.scan_buffer_pool;
                 const groove_accounts = &env.forest.grooves.accounts;
@@ -748,11 +758,22 @@ const Environment = struct {
 
                 // Asserting the positive space:
                 // all objects found by the scan must exist in our model.
-                for (accounts) |account| {
+                for (accounts) |*account| {
                     const prefix_current: u128 = switch (params.index) {
-                        inline else => |field| @field(account, @tagName(field)),
+                        .imported => index: {
+                            assert(params.min == 0 and params.max == 0);
+                            assert(account.flags.imported);
+                            break :index 0;
+                        },
+                        inline else => |field| index: {
+                            const Helper = GrooveAccounts.IndexTreeFieldHelperType(@tagName(field));
+                            comptime assert(Helper.Index != void);
+
+                            const value = Helper.derive_index(account).?;
+                            assert(value >= params.min and value <= params.max);
+                            break :index value;
+                        },
                     };
-                    assert(prefix_current >= params.min and prefix_current <= params.max);
 
                     const model_account = model.get_account(account.id).?;
                     assert(model_account.id == account.id);
@@ -762,7 +783,11 @@ const Environment = struct {
                     assert(model_account.timestamp == account.timestamp);
                     assert(model_account.ledger == account.ledger);
                     assert(model_account.code == account.code);
-                    assert(std.meta.eql(model_account.flags, account.flags));
+                    assert(stdx.equal_bytes(
+                        tb.AccountFlags,
+                        &model_account.flags,
+                        &account.flags,
+                    ));
 
                     if (params.min == params.max) {
                         // If exact match (min == max), it's expected to be sorted by timestamp.
@@ -896,17 +921,20 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 const index = random.enumValue(Index);
                 break :blk switch (index) {
                     inline else => |field| {
-                        const FieldType = std.meta.fieldInfo(
-                            tb.Account,
-                            comptime std.meta.stringToEnum(
-                                std.meta.FieldEnum(tb.Account),
-                                @tagName(field),
-                            ).?,
-                        ).type;
-                        var min = random_id(random, FieldType);
-                        var max = if (random.boolean()) min else random_id(random, FieldType);
-                        if (min > max) std.mem.swap(FieldType, &min, &max);
-                        assert(min <= max);
+                        const Helper = GrooveAccounts.IndexTreeFieldHelperType(@tagName(field));
+                        const min: u128, const max: u128 = switch (Helper.Index) {
+                            void => .{ 0, 0 },
+                            else => range: {
+                                var min = random_id(random, Helper.Index);
+                                var max = if (random.boolean()) min else random_id(
+                                    random,
+                                    Helper.Index,
+                                );
+                                if (min > max) std.mem.swap(Helper.Index, &min, &max);
+                                assert(min <= max);
+                                break :range .{ min, max };
+                            },
+                        };
 
                         break :blk FuzzOpAction{
                             .scan_account = .{
@@ -1000,6 +1028,7 @@ fn generate_put_account(
         .flags = .{
             .debits_must_not_exceed_credits = random.boolean(),
             .credits_must_not_exceed_debits = random.boolean(),
+            .imported = random.boolean(),
         },
         .debits_pending = 0,
         .debits_posted = 0,

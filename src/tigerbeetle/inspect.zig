@@ -1170,8 +1170,8 @@ fn print_table_info(
         const Field = @TypeOf(f.field);
         const key_min_timestamp: u64 = @truncate(key_min & std.math.maxInt(u64));
         const key_max_timestamp: u64 = @truncate(key_max & std.math.maxInt(u64));
-        const key_min_field: Field = @intCast(key_min >> 64);
-        const key_max_field: Field = @intCast(key_max >> 64);
+        const key_min_field: Field = Value.key_prefix(key_min);
+        const key_max_field: Field = Value.key_prefix(key_max);
 
         try output.print(" K={:_>6}:{}..{:_>6}:{}", .{
             key_min_field,
