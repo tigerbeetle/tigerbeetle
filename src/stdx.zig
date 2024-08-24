@@ -300,6 +300,7 @@ fn has_pointers(comptime T: type) bool {
 /// Checks that a type does not have implicit padding.
 pub fn no_padding(comptime T: type) bool {
     comptime switch (@typeInfo(T)) {
+        .Void => return true,
         .Int => return @bitSizeOf(T) == 8 * @sizeOf(T),
         .Array => |info| return no_padding(info.child),
         .Struct => |info| {
