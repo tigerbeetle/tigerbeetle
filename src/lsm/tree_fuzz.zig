@@ -259,7 +259,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.grid.open(grid_open_callback);
 
             env.tick_until_state_change(.free_set_open, .tree_init);
-            env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, .{
+            try env.tree.init(allocator, &env.node_pool, &env.grid, .{
                 .id = 1,
                 .name = "Key.Value",
             }, .{

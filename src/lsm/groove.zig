@@ -547,15 +547,30 @@ pub fn GrooveType(
         };
 
         pub fn init(
+            groove: *Groove,
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
             options: Options,
-        ) !Groove {
+        ) !void {
             assert(options.tree_options_object.batch_value_count_limit *
                 constants.lsm_compaction_ops <= ObjectTree.Table.value_count_max);
 
-            var objects_cache = try ObjectsCache.init(allocator, .{
+            groove.* = Groove{
+                .grid = grid,
+                .objects = undefined,
+                .ids = undefined,
+                .indexes = undefined,
+
+                .prefetch_keys = undefined,
+                .prefetch_snapshot = null,
+                .objects_cache = undefined,
+                .timestamps = undefined,
+
+                .scan_builder = undefined,
+            };
+
+            groove.objects_cache = try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
 
                 // In the worst case, each Map must be able to store batch_value_count_limit per
@@ -572,10 +587,10 @@ pub fn GrooveType(
 
                 .name = @typeName(Object),
             });
-            errdefer objects_cache.deinit(allocator);
+            errdefer groove.objects_cache.deinit(allocator);
 
             // Initialize the object LSM tree.
-            var object_tree = try ObjectTree.init(
+            try groove.objects.init(
                 allocator,
                 node_pool,
                 grid,
@@ -585,9 +600,9 @@ pub fn GrooveType(
                 },
                 options.tree_options_object,
             );
-            errdefer object_tree.deinit(allocator);
+            errdefer groove.objects.deinit(allocator);
 
-            var id_tree = if (!has_id) {} else (try IdTree.init(
+            if (has_id) try groove.ids.init(
                 allocator,
                 node_pool,
                 grid,
@@ -596,22 +611,20 @@ pub fn GrooveType(
                     .name = @typeName(Object) ++ ".id",
                 },
                 options.tree_options_id,
-            ));
-            errdefer if (has_id) id_tree.deinit(allocator);
+            );
+            errdefer if (has_id) groove.ids.deinit(allocator);
 
             var index_trees_initialized: usize = 0;
-            var index_trees: IndexTrees = undefined;
-
             // Make sure to deinit initialized index LSM trees on error.
             errdefer inline for (std.meta.fields(IndexTrees), 0..) |field, field_index| {
                 if (index_trees_initialized >= field_index + 1) {
-                    @field(index_trees, field.name).deinit(allocator);
+                    @field(groove.indexes, field.name).deinit(allocator);
                 }
             };
 
             // Initialize index LSM trees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(index_trees, field.name) = try field.type.init(
+                try @field(groove.indexes, field.name).init(
                     allocator,
                     node_pool,
                     grid,
@@ -624,35 +637,21 @@ pub fn GrooveType(
                 index_trees_initialized += 1;
             }
 
-            var prefetch_keys: PrefetchKeys = .{};
-            try prefetch_keys.ensureTotalCapacity(
+            groove.prefetch_keys = .{};
+            try groove.prefetch_keys.ensureTotalCapacity(
                 allocator,
                 options.prefetch_entries_for_read_max + options.prefetch_entries_for_update_max,
             );
-            errdefer prefetch_keys.deinit(allocator);
+            errdefer groove.prefetch_keys.deinit(allocator);
 
-            var timestamps = if (has_id) try TimestampSet.init(
+            groove.timestamps = if (has_id) try TimestampSet.init(
                 allocator,
                 options.prefetch_entries_for_read_max,
             ) else {};
-            errdefer if (has_id) timestamps.deinit(allocator);
+            errdefer if (has_id) groove.timestamps.deinit(allocator);
 
-            var scan_builder = if (has_scan) try ScanBuilder.init(allocator) else {};
-            errdefer if (has_scan) scan_builder.deinit(allocator);
-
-            return Groove{
-                .grid = grid,
-                .objects = object_tree,
-                .ids = id_tree,
-                .indexes = index_trees,
-
-                .prefetch_keys = prefetch_keys,
-                .prefetch_snapshot = null,
-                .objects_cache = objects_cache,
-                .timestamps = timestamps,
-
-                .scan_builder = scan_builder,
-            };
+            groove.scan_builder = if (has_scan) try ScanBuilder.init(allocator) else {};
+            errdefer if (has_scan) groove.scan_builder.deinit(allocator);
         }
 
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {

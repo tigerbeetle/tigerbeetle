@@ -237,66 +237,64 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         scan_buffer_pool: ScanBufferPool,
 
         pub fn init(
+            forest: *Forest,
             allocator: mem.Allocator,
             grid: *Grid,
             options: Options,
             // (e.g.) .{ .transfers = .{ .cache_entries_max = 128, … }, .accounts = … }
             grooves_options: GroovesOptions,
-        ) !Forest {
+        ) !void {
             assert(options.compaction_block_count >= Options.compaction_block_count_min);
 
+            forest.* = Forest{
+                .grid = grid,
+                .grooves = undefined,
+                .node_pool = undefined,
+                .manifest_log = undefined,
+                .compaction_pipeline = undefined,
+                .scan_buffer_pool = undefined,
+            };
+
             // NodePool must be allocated to pass in a stable address for the Grooves.
-            const node_pool = try allocator.create(NodePool);
-            errdefer allocator.destroy(node_pool);
+            forest.node_pool = try allocator.create(NodePool);
+            errdefer allocator.destroy(forest.node_pool);
 
             // TODO: look into using lsm_table_size_max for the node_count.
-            node_pool.* = try NodePool.init(allocator, options.node_count);
-            errdefer node_pool.deinit(allocator);
+            forest.node_pool.* = try NodePool.init(allocator, options.node_count);
+            errdefer forest.node_pool.deinit(allocator);
 
-            var manifest_log = try ManifestLog.init(allocator, grid, .{
+            forest.manifest_log = try ManifestLog.init(allocator, grid, .{
                 .tree_id_min = tree_id_range.min,
                 .tree_id_max = tree_id_range.max,
                 // TODO Make this a runtime argument (from the CLI, derived from storage-size-max if
                 // possible).
                 .forest_table_count_max = table_count_max,
             });
-            errdefer manifest_log.deinit(allocator);
+            errdefer forest.manifest_log.deinit(allocator);
 
-            var grooves: Grooves = undefined;
             var grooves_initialized: usize = 0;
 
             errdefer inline for (std.meta.fields(Grooves), 0..) |field, field_index| {
                 if (grooves_initialized >= field_index + 1) {
-                    @field(grooves, field.name).deinit(allocator);
+                    @field(forest.grooves, field.name).deinit(allocator);
                 }
             };
 
             inline for (std.meta.fields(Grooves)) |groove_field| {
-                const groove = &@field(grooves, groove_field.name);
+                const groove = &@field(forest.grooves, groove_field.name);
                 const Groove = @TypeOf(groove.*);
                 const groove_options: Groove.Options = @field(grooves_options, groove_field.name);
 
-                groove.* = try Groove.init(allocator, node_pool, grid, groove_options);
+                try groove.init(allocator, forest.node_pool, grid, groove_options);
                 grooves_initialized += 1;
             }
 
-            var compaction_pipeline =
+            forest.compaction_pipeline =
                 try CompactionPipeline.init(allocator, grid, options.compaction_block_count);
-            errdefer compaction_pipeline.deinit(allocator);
+            errdefer forest.compaction_pipeline.deinit(allocator);
 
-            const scan_buffer_pool = try ScanBufferPool.init(allocator);
-            errdefer scan_buffer_pool.deinit(allocator);
-
-            return Forest{
-                .grid = grid,
-                .grooves = grooves,
-                .node_pool = node_pool,
-                .manifest_log = manifest_log,
-
-                .compaction_pipeline = compaction_pipeline,
-
-                .scan_buffer_pool = scan_buffer_pool,
-            };
+            forest.scan_buffer_pool = try ScanBufferPool.init(allocator);
+            errdefer forest.scan_buffer_pool.deinit(allocator);
         }
 
         pub fn deinit(forest: *Forest, allocator: mem.Allocator) void {

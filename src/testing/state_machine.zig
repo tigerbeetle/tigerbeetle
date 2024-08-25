@@ -109,10 +109,21 @@ pub fn StateMachineType(
         prefetch_context: ThingGroove.PrefetchContext = undefined,
         callback: ?*const fn (state_machine: *StateMachine) void = null,
 
-        pub fn init(allocator: std.mem.Allocator, grid: *Grid, options: Options) !StateMachine {
+        pub fn init(
+            self: *StateMachine,
+            allocator: std.mem.Allocator,
+            grid: *Grid,
+            options: Options,
+        ) !void {
+            self.* = StateMachine{
+                .options = options,
+                .forest = undefined,
+            };
+
             const things_cache_entries_max =
                 ThingGroove.ObjectsCache.Cache.value_count_max_multiple;
-            var forest = try Forest.init(
+
+            try self.forest.init(
                 allocator,
                 grid,
                 .{
@@ -130,12 +141,7 @@ pub fn StateMachineType(
                     },
                 },
             );
-            errdefer forest.deinit(allocator);
-
-            return StateMachine{
-                .options = options,
-                .forest = forest,
-            };
+            errdefer self.forest.deinit(allocator);
         }
 
         pub fn deinit(state_machine: *StateMachine, allocator: std.mem.Allocator) void {

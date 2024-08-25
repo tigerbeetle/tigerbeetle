@@ -965,7 +965,7 @@ const Environment = struct {
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
 
-        env.forest = try Forest.init(allocator, &env.grid, .{
+        try env.forest.init(allocator, &env.grid, .{
             .compaction_block_count = Forest.Options.compaction_block_count_min,
             .node_count = node_count,
         }, forest_options);
