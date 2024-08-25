@@ -171,6 +171,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     };
 
     comptime {
+        @setEvalBranchQuota(10_000);
         assert(std.enums.values(_TreeID).len == _tree_infos.len);
         for (std.enums.values(_TreeID)) |tree_id| {
             const tree_info = _tree_infos[@intFromEnum(tree_id) - _tree_infos[0].tree_id];

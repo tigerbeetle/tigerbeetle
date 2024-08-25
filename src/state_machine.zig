@@ -110,6 +110,14 @@ pub fn StateMachineType(
                     .code = 17,
                     .timestamp = 18,
                     .expires_at = 19,
+                    .place_holder_1 = 23,
+                    .place_holder_2 = 24,
+                    .place_holder_3 = 25,
+                    .place_holder_4 = 26,
+                    .place_holder_5 = 27,
+                    .place_holder_6 = 28,
+                    .place_holder_7 = 29,
+                    .place_holder_8 = 30,
                 };
 
                 pub const transfers_pending = .{
@@ -232,6 +240,55 @@ pub fn StateMachineType(
                             return 0;
                         }
                     }.expires_at,
+                    // Adding dummy indexes:
+                    .place_holder_1 = struct {
+                        fn action(object: *const Transfer) u64 {
+                            _ = object;
+                            return 1;
+                        }
+                    }.action,
+                    .place_holder_2 = struct {
+                        fn action(object: *const Transfer) u64 {
+                            _ = object;
+                            return 1;
+                        }
+                    }.action,
+                    .place_holder_3 = struct {
+                        fn action(object: *const Transfer) u64 {
+                            _ = object;
+                            return 1;
+                        }
+                    }.action,
+                    .place_holder_4 = struct {
+                        fn action(object: *const Transfer) u64 {
+                            _ = object;
+                            return 1;
+                        }
+                    }.action,
+                    .place_holder_5 = struct {
+                        fn action(object: *const Transfer) u64 {
+                            _ = object;
+                            return 1;
+                        }
+                    }.action,
+                    .place_holder_6 = struct {
+                        fn action(object: *const Transfer) u64 {
+                            _ = object;
+                            return 1;
+                        }
+                    }.action,
+                    .place_holder_7 = struct {
+                        fn action(object: *const Transfer) u64 {
+                            _ = object;
+                            return 1;
+                        }
+                    }.action,
+                    .place_holder_8 = struct {
+                        fn action(object: *const Transfer) u64 {
+                            _ = object;
+                            return 1;
+                        }
+                    }.action,
                 },
             },
         );
@@ -2623,6 +2680,14 @@ pub fn StateMachineType(
                 ledger: u32,
                 code: u32,
                 expires_at: u32,
+                place_holder_1: u32,
+                place_holder_2: u32,
+                place_holder_3: u32,
+                place_holder_4: u32,
+                place_holder_5: u32,
+                place_holder_6: u32,
+                place_holder_7: u32,
+                place_holder_8: u32,
             },
             transfers_pending: struct {
                 timestamp: u32,
@@ -2664,6 +2729,14 @@ pub fn StateMachineType(
                     .ledger = batch_create_transfers,
                     .code = batch_create_transfers,
                     .expires_at = batch_create_transfers,
+                    .place_holder_1 = batch_create_transfers,
+                    .place_holder_2 = batch_create_transfers,
+                    .place_holder_3 = batch_create_transfers,
+                    .place_holder_4 = batch_create_transfers,
+                    .place_holder_5 = batch_create_transfers,
+                    .place_holder_6 = batch_create_transfers,
+                    .place_holder_7 = batch_create_transfers,
+                    .place_holder_8 = batch_create_transfers,
                 },
                 .transfers_pending = .{
                     // Objects are mutated when the pending transfer is posted/voided/expired.
