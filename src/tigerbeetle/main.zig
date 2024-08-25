@@ -347,8 +347,7 @@ const Command = struct {
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
-        const replica: *Replica = try allocator.create(Replica);
-        defer allocator.destroy(replica);
+        var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
             .release = config.process.release,
