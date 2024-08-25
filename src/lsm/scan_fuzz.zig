@@ -873,7 +873,7 @@ const Environment = struct {
             query_spec.reversed,
         );
         env.scan_lookup = ScanLookup.init(
-            &env.forest.grooves.things,
+            env.forest.grooves.things,
             scan,
         );
 
@@ -894,7 +894,7 @@ const Environment = struct {
         reversed: bool,
     ) *Scan {
         const scan_buffer_pool = &env.forest.scan_buffer_pool;
-        const things_groove = &env.forest.grooves.things;
+        const things_groove = env.forest.grooves.things;
         const scan_builder: *ThingsGroove.ScanBuilder = &things_groove.scan_builder;
 
         var stack = stdx.BoundedArray(*Scan, index_max){};

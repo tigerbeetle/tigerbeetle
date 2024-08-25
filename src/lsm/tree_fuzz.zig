@@ -150,7 +150,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         grid: Grid,
         manifest_log: ManifestLog,
         node_pool: NodePool,
-        tree: Tree,
+        tree: *Tree,
         scan_tree: ScanTree,
         lookup_context: Tree.LookupContext,
         lookup_value: ?Value,
@@ -323,7 +323,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 if (last_half_beat and compaction.level_b % 2 != 0) continue;
                 if (last_beat and compaction.level_b % 2 == 0) continue;
 
-                const maybe_compaction_work = compaction.bar_setup(&env.tree, op);
+                const maybe_compaction_work = compaction.bar_setup(env.tree, op);
                 if (maybe_compaction_work != null) {
                     compaction_work.append_assume_capacity(compaction);
                 }
@@ -495,7 +495,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.change_state(.fuzzing, .scan_tree);
             env.scan_tree = ScanTree.init(
-                &env.tree,
+                env.tree,
                 &env.scan_buffer,
                 snapshot_latest,
                 key_min,

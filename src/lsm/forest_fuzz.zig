@@ -62,7 +62,7 @@ const FuzzOp = struct {
 
 const GrooveAccounts = type: {
     const forest: Forest = undefined;
-    break :type @TypeOf(forest.grooves.accounts);
+    break :type std.meta.Child(@TypeOf(forest.grooves.accounts));
 };
 
 const ScanParams = struct {
@@ -356,7 +356,7 @@ const Environment = struct {
 
         var context = Context{
             ._id = id,
-            ._groove_accounts = &env.forest.grooves.accounts,
+            ._groove_accounts = env.forest.grooves.accounts,
         };
         context.prefetch_start();
         while (!context.finished) {
@@ -390,7 +390,7 @@ const Environment = struct {
 
         var context = Context{
             ._timestamp = timestamp,
-            ._groove_accounts = &env.forest.grooves.accounts,
+            ._groove_accounts = env.forest.grooves.accounts,
         };
         context.prefetch_start();
         while (!context.finished) {
@@ -417,9 +417,9 @@ const Environment = struct {
     }
 
     fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveAccounts.IndexTrees)) type {
-        const Tree = std.meta.fieldInfo(GrooveAccounts.IndexTrees, index).type;
+        const Tree = std.meta.Child(std.meta.FieldType(GrooveAccounts.IndexTrees, index));
         const Value = Tree.Table.Value;
-        const Prefix = std.meta.fieldInfo(Value, .field).type;
+        const Prefix = std.meta.FieldType(Value, .field);
 
         const ScanRange = ScanRangeType(
             Tree,
@@ -459,7 +459,7 @@ const Environment = struct {
                 assert(min <= max);
 
                 const scan_buffer_pool = &env.forest.scan_buffer_pool;
-                const groove_accounts = &env.forest.grooves.accounts;
+                const groove_accounts = env.forest.grooves.accounts;
                 defer scan_buffer_pool.reset();
 
                 // It's not expected to exceed `lsm_scans_max` here.
@@ -467,7 +467,7 @@ const Environment = struct {
 
                 var scan_range = ScanRange.init(
                     {},
-                    &@field(groove_accounts.indexes, @tagName(index)),
+                    @field(groove_accounts.indexes, @tagName(index)),
                     scan_buffer,
                     lsm.snapshot_latest,
                     Value.key_from_value(&.{
