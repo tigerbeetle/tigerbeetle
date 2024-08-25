@@ -186,8 +186,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 inline for (Forest.tree_infos) |tree_info| {
                     const tree_id = comptime Forest.tree_id_cast(tree_info.tree_id);
                     const tree = scrubber.forest.tree_for_id_const(tree_id);
-                    const levels = &tree.manifest.levels;
-                    const tree_level_weight = @as(u64, levels[level].tables.len()) *
+                    const tree_level_weight = @as(u64, tree.manifest.levels[level].tables.len()) *
                         tree_info.Tree.Table.index.data_block_count_max;
                     if (tree_level_weight > 0) {
                         weights_sum += tree_level_weight;

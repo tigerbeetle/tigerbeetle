@@ -107,7 +107,7 @@ pub fn ScanBuilderType(
             return self.scan_add(
                 field,
                 ScanImpl.init(
-                    &@field(self.groove().indexes, @tagName(index)),
+                    @field(self.groove().indexes, @tagName(index)),
                     buffer,
                     snapshot,
                     key_from_value(index, prefix, timestamp_range.min),
@@ -157,7 +157,7 @@ pub fn ScanBuilderType(
             return self.scan_add(
                 .timestamp,
                 ScanImpl.init(
-                    &self.groove().objects,
+                    self.groove().objects,
                     buffer,
                     snapshot,
                     timestamp_range.min,
@@ -259,7 +259,7 @@ pub fn ScanBuilderType(
         }
 
         fn CompositeKeyType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
-            const IndexTree = std.meta.fieldInfo(Groove.IndexTrees, index).type;
+            const IndexTree = std.meta.Child(std.meta.FieldType(Groove.IndexTrees, index));
             return IndexTree.Table.Value;
         }
 
@@ -269,7 +269,7 @@ pub fn ScanBuilderType(
         }
 
         fn ScanImplType(comptime field: std.meta.FieldEnum(Scan.Dispatcher)) type {
-            return std.meta.fieldInfo(Scan.Dispatcher, field).type;
+            return std.meta.FieldType(Scan.Dispatcher, field);
         }
 
         fn key_from_value(
@@ -356,7 +356,7 @@ pub fn ScanType(
 
             // Union fields for each index tree:
             for (std.meta.fields(Groove.IndexTrees)) |field| {
-                const IndexTree = field.type;
+                const IndexTree = std.meta.Child(field.type);
                 const ScanTree = ScanTreeType(*Context, IndexTree, Storage);
                 type_info.Union.fields = type_info.Union.fields ++
                     [_]std.builtin.Type.UnionField{.{

@@ -931,7 +931,7 @@ pub fn StateMachineType(
 
                 var scan_lookup = self.scan_lookup.get(.transfers);
                 scan_lookup.* = TransfersScanLookup.init(
-                    &self.forest.grooves.transfers,
+                    self.forest.grooves.transfers,
                     scan,
                 );
 
@@ -1004,7 +1004,7 @@ pub fn StateMachineType(
 
                         var scan_lookup = self.scan_lookup.get(.account_balances);
                         scan_lookup.* = AccountBalancesScanLookup.init(
-                            &self.forest.grooves.account_balances,
+                            self.forest.grooves.account_balances,
                             scan,
                         );
 
@@ -1077,7 +1077,7 @@ pub fn StateMachineType(
 
             if (!filter_valid) return null;
 
-            const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
+            const transfers_groove: *TransfersGroove = self.forest.grooves.transfers;
             const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
 
             const timestamp_range: TimestampRange = .{
@@ -1146,7 +1146,7 @@ pub fn StateMachineType(
 
             if (self.get_scan_from_query_filter(
                 AccountsGroove,
-                &self.forest.grooves.accounts,
+                self.forest.grooves.accounts,
                 filter,
             )) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
@@ -1160,7 +1160,7 @@ pub fn StateMachineType(
 
                 const scan_lookup = self.scan_lookup.get(.accounts);
                 scan_lookup.* = AccountsScanLookup.init(
-                    &self.forest.grooves.accounts,
+                    self.forest.grooves.accounts,
                     scan,
                 );
 
@@ -1200,7 +1200,7 @@ pub fn StateMachineType(
 
             if (self.get_scan_from_query_filter(
                 TransfersGroove,
-                &self.forest.grooves.transfers,
+                self.forest.grooves.transfers,
                 filter,
             )) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
@@ -1214,7 +1214,7 @@ pub fn StateMachineType(
 
                 var scan_lookup = self.scan_lookup.get(.transfers);
                 scan_lookup.* = TransfersScanLookup.init(
-                    &self.forest.grooves.transfers,
+                    self.forest.grooves.transfers,
                     scan,
                 );
 
@@ -1337,9 +1337,9 @@ pub fn StateMachineType(
                 self.scan_lookup_buffer[0..scan_buffer_size],
             );
 
-            const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
+            const transfers_groove: *TransfersGroove = self.forest.grooves.transfers;
             const scan = self.expire_pending_transfers.scan(
-                &transfers_groove.indexes.expires_at,
+                transfers_groove.indexes.expires_at,
                 self.forest.scan_buffer_pool.acquire_assume_capacity(),
                 .{
                     .snapshot = transfers_groove.prefetch_snapshot.?,
@@ -2812,7 +2812,7 @@ fn ExpirePendingTransfersType(
         const EvaluateNext = @import("lsm/scan_range.zig").EvaluateNext;
         const ScanLookupStatus = @import("lsm/scan_lookup.zig").ScanLookupStatus;
 
-        const Tree = std.meta.FieldType(TransfersGroove.IndexTrees, .expires_at);
+        const Tree = std.meta.Child(std.meta.FieldType(TransfersGroove.IndexTrees, .expires_at));
         const Key = Tree.Table.Key;
         const Value = Tree.Table.Value;
 

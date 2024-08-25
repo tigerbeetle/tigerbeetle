@@ -37,10 +37,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         groove_fields = groove_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
-                .type = Groove,
+                .type = *Groove,
                 .default_value = null,
                 .is_comptime = false,
-                .alignment = @alignOf(Groove),
+                .alignment = @alignOf(*Groove),
             },
         };
 
@@ -78,7 +78,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         comptime var ids: []const u16 = &.{};
 
         inline for (std.meta.fields(_Grooves)) |groove_field| {
-            const Groove = groove_field.type;
+            const Groove = std.meta.Child(groove_field.type);
 
             for (std.meta.fields(@TypeOf(Groove.config.ids))) |field| {
                 const id = @field(Groove.config.ids, field.name);
@@ -104,7 +104,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     const _tree_infos = tree_infos: {
         var tree_infos: []const TreeInfo = &[_]TreeInfo{};
         for (std.meta.fields(_Grooves)) |groove_field| {
-            const Groove = groove_field.type;
+            const Groove = std.meta.Child(groove_field.type);
 
             tree_infos = tree_infos ++ &[_]TreeInfo{.{
                 .Tree = Groove.ObjectTree,
@@ -126,7 +126,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             for (std.meta.fields(Groove.IndexTrees)) |tree_field| {
                 tree_infos = tree_infos ++ &[_]TreeInfo{.{
-                    .Tree = tree_field.type,
+                    .Tree = std.meta.Child(tree_field.type),
                     .tree_name = groove_field.name ++ "." ++ tree_field.name,
                     .tree_id = @field(Groove.config.ids, tree_field.name),
                     .groove_name = groove_field.name,
@@ -232,7 +232,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         manifest_log: ManifestLog,
         manifest_log_progress: enum { idle, compacting, done, skip } = .idle,
 
-        compaction_pipeline: CompactionPipeline,
+        compaction_pipeline: *CompactionPipeline,
 
         scan_buffer_pool: ScanBufferPool,
 
@@ -272,16 +272,23 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             };
 
             inline for (std.meta.fields(Grooves)) |groove_field| {
-                const groove = &@field(grooves, groove_field.name);
-                const Groove = @TypeOf(groove.*);
+                const Groove = std.meta.Child(groove_field.type);
                 const groove_options: Groove.Options = @field(grooves_options, groove_field.name);
 
-                groove.* = try Groove.init(allocator, node_pool, grid, groove_options);
+                @field(grooves, groove_field.name) = try Groove.init(
+                    allocator,
+                    node_pool,
+                    grid,
+                    groove_options,
+                );
                 grooves_initialized += 1;
             }
 
-            var compaction_pipeline =
-                try CompactionPipeline.init(allocator, grid, options.compaction_block_count);
+            const compaction_pipeline = try CompactionPipeline.init(
+                allocator,
+                grid,
+                options.compaction_block_count,
+            );
             errdefer compaction_pipeline.deinit(allocator);
 
             const scan_buffer_pool = try ScanBufferPool.init(allocator);
@@ -600,12 +607,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             const tree_info = tree_infos[@intFromEnum(tree_id) - tree_id_range.min];
             assert(tree_info.tree_id == @intFromEnum(tree_id));
 
-            var groove = &@field(forest.grooves, tree_info.groove_name);
+            const groove = @field(forest.grooves, tree_info.groove_name);
 
             switch (tree_info.groove_tree) {
-                .objects => return &groove.objects,
-                .ids => return &groove.ids,
-                .indexes => |index_name| return &@field(groove.indexes, index_name),
+                .objects => return groove.objects,
+                .ids => return groove.ids,
+                .indexes => |index_name| return @field(groove.indexes, index_name),
             }
         }
 
@@ -616,12 +623,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             const tree_info = tree_infos[@intFromEnum(tree_id) - tree_id_range.min];
             assert(tree_info.tree_id == @intFromEnum(tree_id));
 
-            const groove = &@field(forest.grooves, tree_info.groove_name);
+            const groove = @field(forest.grooves, tree_info.groove_name);
 
             switch (tree_info.groove_tree) {
-                .objects => return &groove.objects,
-                .ids => return &groove.ids,
-                .indexes => |index_name| return &@field(groove.indexes, index_name),
+                .objects => return groove.objects,
+                .ids => return groove.ids,
+                .indexes => |index_name| return @field(groove.indexes, index_name),
             }
         }
 
@@ -859,7 +866,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         forest: ?*Forest = null,
         callback: ?*const fn (*Forest) void = null,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid, block_count: u32) !CompactionPipeline {
+        pub fn init(allocator: mem.Allocator, grid: *Grid, block_count: u32) !*CompactionPipeline {
             log.debug("block_count={}", .{block_count});
             assert(block_count >= block_count_min);
 
@@ -883,16 +890,21 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             }
             errdefer for (block_pool_raw) |block| allocator.free(block.block);
 
-            return .{
+            const self = try allocator.create(CompactionPipeline);
+            errdefer allocator.destroy(self);
+            self.* = .{
                 .block_pool = block_pool,
                 .block_pool_raw = block_pool_raw,
                 .grid = grid,
             };
+
+            return self;
         }
 
         pub fn deinit(self: *CompactionPipeline, allocator: mem.Allocator) void {
             for (self.block_pool_raw) |block| allocator.free(block.block);
             allocator.free(self.block_pool_raw);
+            allocator.destroy(self);
         }
 
         pub fn reset(self: *CompactionPipeline) void {

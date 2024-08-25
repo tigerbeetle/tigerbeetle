@@ -803,8 +803,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.scan.state == .seeking or
                 self.scan.state == .buffering);
 
-            const manifest: *Manifest = &self.scan.tree.manifest;
-            if (manifest.next_table(.{
+            if (self.scan.tree.manifest.next_table(.{
                 .level = self.level_index,
                 .snapshot = self.scan.snapshot,
                 .key_min = self.scan.key_min,

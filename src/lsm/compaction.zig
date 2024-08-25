@@ -1964,7 +1964,7 @@ pub fn CompactionType(
             // bar to ensure:
             // - manifest log updates are ordered deterministically relative to one another, and
             // - manifest updates are not visible until after the blocks are all on disk.
-            const manifest = &bar.tree.manifest;
+            const manifest = bar.tree.manifest;
             const level_b = compaction.level_b;
             const snapshot_max = snapshot_max_for_table_input(bar.op_min);
 

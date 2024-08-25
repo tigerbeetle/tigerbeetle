@@ -195,23 +195,31 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
 
-        pub fn init(allocator: mem.Allocator, node_pool: *NodePool, config: TreeConfig) !Manifest {
-            var levels: [constants.lsm_levels]Level = undefined;
-            for (&levels, 0..) |*level, i| {
-                errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
-                level.* = try Level.init(allocator);
-            }
-            errdefer for (&levels) |*level| level.deinit(allocator, node_pool);
-
-            return Manifest{
+        pub fn init(
+            allocator: mem.Allocator,
+            node_pool: *NodePool,
+            config: TreeConfig,
+        ) !*Manifest {
+            const manifest = try allocator.create(Manifest);
+            errdefer allocator.destroy(manifest);
+            manifest.* = .{
                 .node_pool = node_pool,
                 .config = config,
-                .levels = levels,
+                .levels = undefined,
             };
+
+            for (&manifest.levels, 0..) |*level, i| {
+                errdefer for (manifest.levels[0..i]) |*l| l.deinit(allocator, node_pool);
+                level.* = try Level.init(allocator);
+            }
+            errdefer for (&manifest.levels) |*level| level.deinit(allocator, node_pool);
+
+            return manifest;
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
             for (&manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
+            allocator.destroy(manifest);
         }
 
         pub fn reset(manifest: *Manifest) void {

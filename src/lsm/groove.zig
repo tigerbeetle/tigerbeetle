@@ -196,10 +196,10 @@ pub fn GrooveType(
             index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
                     .name = field.name,
-                    .type = IndexTree,
+                    .type = *IndexTree,
                     .default_value = null,
                     .is_comptime = false,
-                    .alignment = @alignOf(IndexTree),
+                    .alignment = @alignOf(*IndexTree),
                 },
             };
         }
@@ -237,17 +237,17 @@ pub fn GrooveType(
         index_fields = index_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
-                .type = IndexTree,
+                .type = *IndexTree,
                 .default_value = null,
                 .is_comptime = false,
-                .alignment = @alignOf(IndexTree),
+                .alignment = @alignOf(*IndexTree),
             },
         };
     }
 
     comptime var index_options_fields: []const std.builtin.Type.StructField = &.{};
     for (index_fields) |index_field| {
-        const IndexTree = index_field.type;
+        const IndexTree = std.meta.Child(index_field.type);
         index_options_fields = index_options_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = index_field.name,
@@ -284,7 +284,7 @@ pub fn GrooveType(
         break :blk TreeType(Table, Storage);
     };
 
-    const _IdTree = if (!has_id) void else blk: {
+    const _IdTree = if (has_id) blk: {
         const table_value_count_max = constants.lsm_compaction_ops *
             groove_options.batch_value_count_max.id;
         const Table = TableType(
@@ -298,7 +298,7 @@ pub fn GrooveType(
             .general,
         );
         break :blk TreeType(Table, Storage);
-    };
+    } else void;
 
     const _IndexTrees = @Type(.{
         .Struct = .{
@@ -499,8 +499,8 @@ pub fn GrooveType(
         pub const ScanBuilder = if (has_scan) ScanBuilderType(Groove, Storage) else void;
 
         grid: *Grid,
-        objects: ObjectTree,
-        ids: IdTree,
+        objects: *ObjectTree,
+        ids: if (has_id) *IdTree else void,
         indexes: IndexTrees,
 
         /// Object IDs and timestamps enqueued to be prefetched.
@@ -551,7 +551,7 @@ pub fn GrooveType(
             node_pool: *NodePool,
             grid: *Grid,
             options: Options,
-        ) !Groove {
+        ) !*Groove {
             assert(options.tree_options_object.batch_value_count_limit *
                 constants.lsm_compaction_ops <= ObjectTree.Table.value_count_max);
 
@@ -575,7 +575,7 @@ pub fn GrooveType(
             errdefer objects_cache.deinit(allocator);
 
             // Initialize the object LSM tree.
-            var object_tree = try ObjectTree.init(
+            const object_tree = try ObjectTree.init(
                 allocator,
                 node_pool,
                 grid,
@@ -587,7 +587,7 @@ pub fn GrooveType(
             );
             errdefer object_tree.deinit(allocator);
 
-            var id_tree = if (!has_id) {} else (try IdTree.init(
+            const id_tree = if (!has_id) {} else (try IdTree.init(
                 allocator,
                 node_pool,
                 grid,
@@ -611,7 +611,8 @@ pub fn GrooveType(
 
             // Initialize index LSM trees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(index_trees, field.name) = try field.type.init(
+                const IndexTree = std.meta.Child(field.type);
+                @field(index_trees, field.name) = try IndexTree.init(
                     allocator,
                     node_pool,
                     grid,
@@ -640,7 +641,9 @@ pub fn GrooveType(
             var scan_builder = if (has_scan) try ScanBuilder.init(allocator) else {};
             errdefer if (has_scan) scan_builder.deinit(allocator);
 
-            return Groove{
+            const groove = try allocator.create(Groove);
+            errdefer allocator.destroy(Groove);
+            groove.* = .{
                 .grid = grid,
                 .objects = object_tree,
                 .ids = id_tree,
@@ -653,6 +656,8 @@ pub fn GrooveType(
 
                 .scan_builder = scan_builder,
             };
+
+            return groove;
         }
 
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
@@ -669,7 +674,7 @@ pub fn GrooveType(
             if (has_id) groove.timestamps.deinit(allocator);
             if (has_scan) groove.scan_builder.deinit(allocator);
 
-            groove.* = undefined;
+            allocator.destroy(groove);
         }
 
         pub fn reset(groove: *Groove) void {

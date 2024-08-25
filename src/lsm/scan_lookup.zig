@@ -175,9 +175,8 @@ pub fn ScanLookupType(
                 worker.index_produced = self.buffer_produced_len.?;
                 self.buffer_produced_len = self.buffer_produced_len.? + 1;
 
-                const objects = &self.groove.objects;
-                if (objects.table_mutable.get(timestamp) orelse
-                    objects.table_immutable.get(timestamp)) |object|
+                if (self.groove.objects.table_mutable.get(timestamp) orelse
+                    self.groove.objects.table_immutable.get(timestamp)) |object|
                 {
                     // TODO(batiati) Handle this properly when we implement snapshot queries.
                     assert(self.scan.snapshot() == snapshot_latest);
@@ -186,7 +185,7 @@ pub fn ScanLookupType(
                     // continue the loop to fetch the next one.
                     self.buffer.?[worker.index_produced.?] = object.*;
                     continue;
-                } else switch (objects.lookup_from_levels_cache(
+                } else switch (self.groove.objects.lookup_from_levels_cache(
                     self.scan.snapshot(),
                     timestamp,
                 )) {
@@ -204,7 +203,7 @@ pub fn ScanLookupType(
                     // The object needs to be loaded from storage, returning now,
                     // the iteration will be resumed when we receive the callback.
                     .possible => |level_min| {
-                        objects.lookup_from_levels_storage(.{
+                        self.groove.objects.lookup_from_levels_storage(.{
                             .callback = lookup_worker_callback,
                             .context = &worker.lookup_context,
                             .snapshot = self.scan.snapshot(),

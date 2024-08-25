@@ -77,7 +77,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         table_mutable: TableMemory,
         table_immutable: TableMemory,
 
-        manifest: Manifest,
+        manifest: *Manifest,
 
         /// The forest can run compactions in any order, potentially even concurrently across all
         /// levels and trees simultaneously. There's a + 1 here for the immmutable table to level
@@ -115,7 +115,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             grid: *Grid,
             config: Config,
             options: Options,
-        ) !Tree {
+        ) !*Tree {
             assert(grid.superblock.opened);
             assert(config.id != 0); // id=0 is reserved.
             assert(config.name.len > 0);
@@ -138,26 +138,28 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             );
             errdefer table_immutable.deinit(allocator);
 
-            var manifest = try Manifest.init(allocator, node_pool, config);
+            const manifest = try Manifest.init(allocator, node_pool, config);
             errdefer manifest.deinit(allocator);
 
-            var compactions: [constants.lsm_levels]Compaction = undefined;
-
-            for (0..compactions.len) |i| {
-                errdefer for (compactions[0..i]) |*c| c.deinit();
-                compactions[i] = try Compaction.init(config, grid, @intCast(i));
-            }
-            errdefer for (compactions) |*c| c.deinit();
-
-            return Tree{
+            const tree = try allocator.create(Tree);
+            errdefer allocator.destroy(tree);
+            tree.* = .{
                 .grid = grid,
                 .config = config,
                 .options = options,
                 .table_mutable = table_mutable,
                 .table_immutable = table_immutable,
                 .manifest = manifest,
-                .compactions = compactions,
+                .compactions = undefined,
             };
+
+            for (0..tree.compactions.len) |i| {
+                errdefer for (tree.compactions[0..i]) |*c| c.deinit();
+                tree.compactions[i] = try Compaction.init(config, grid, @intCast(i));
+            }
+            errdefer for (tree.compactions) |*c| c.deinit();
+
+            return tree;
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
@@ -168,6 +170,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.deinit(allocator);
             tree.table_immutable.deinit(allocator);
             tree.table_mutable.deinit(allocator);
+
+            allocator.destroy(tree);
         }
 
         pub fn reset(tree: *Tree) void {
