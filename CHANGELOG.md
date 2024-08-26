@@ -39,7 +39,7 @@
 
 - [#2215](https://github.com/tigerbeetle/tigerbeetle/pull/2215)
 
-  Refactor the _Multiversion_ API, bringing it in line with pre-existing code patterns,
+  Refactor the _Multiversion_ API, bringing it in line with pre-existing code patterns.
 
 - [#2218](https://github.com/tigerbeetle/tigerbeetle/pull/2218)
 
