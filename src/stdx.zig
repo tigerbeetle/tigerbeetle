@@ -5,6 +5,8 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 pub const BoundedArray = @import("./stdx/bounded_array.zig").BoundedArray;
+pub const ZipfianGenerator = @import("./stdx/zipfian.zig").ZipfianGenerator;
+pub const ShuffledZipfian = @import("./stdx/zipfian.zig").ShuffledZipfian;
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
