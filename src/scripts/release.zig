@@ -61,8 +61,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     // If you change this, make sure to change the validation code in release_validate.zig!
     const release_triple = multiversioning.ReleaseTriple{
         .major = 0,
-        .minor = 15,
-        .patch = @intCast(cli_args.run_number - 188),
+        .minor = 16,
+        .patch = 0, // TODO: Read the version number from `changelog.md`.
     };
 
     // Ensure we're building a version newer than the first multiversion release. That was

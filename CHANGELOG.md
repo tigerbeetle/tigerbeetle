@@ -1,5 +1,61 @@
 # TigerBeetle Changelog
 
+## 2024-08-26
+
+### Safety And Performance
+
+- [#2221](https://github.com/tigerbeetle/tigerbeetle/pull/2221)
+
+  Change how replicas that haven't finished syncing send a `prepare_ok` message,
+  preventing them from falsely contributing to the durability of a checkpoint, which could
+  potentially cause liveness issues in the event of storage faults.
+
+### Features
+
+- [#2171](https://github.com/tigerbeetle/tigerbeetle/pull/2171)
+
+  Add the new `imported` flag to allow user-defined timestamps when creating
+  `Account`s and `Transfer`s from historical events.
+
+- [#2220](https://github.com/tigerbeetle/tigerbeetle/pull/2220),
+  [#2237](https://github.com/tigerbeetle/tigerbeetle/pull/2237),
+  [#2238](https://github.com/tigerbeetle/tigerbeetle/pull/2238),
+  [#2239](https://github.com/tigerbeetle/tigerbeetle/pull/2239)
+
+  Allow `Transfer`s with `amount=0` and change behavior for _balancing_ and _pending_ transfers,
+  introducing the constant `AMOUNT_MAX` to replace the use of the zero sentinel when representing
+  the maximum/original value in such cases.
+
+  Also, explicitly define _optional indexes_, which previously were determined simply by not
+  indexing zeroed values.
+
+### Internals
+
+- [#2211](https://github.com/tigerbeetle/tigerbeetle/pull/2211)
+
+  Deprecates the old state sync protocol, no longer supporting both protocols simultaneously.
+  As planned for this release, it only ignores old messages, allowing replicas to upgrade normally.
+  In the next release, replicas would panic if they receive an old message.
+
+- [#2215](https://github.com/tigerbeetle/tigerbeetle/pull/2215)
+
+  Refactor the _Multiversion_ API, bringing it in line with pre-existing code patterns,
+
+- [#2218](https://github.com/tigerbeetle/tigerbeetle/pull/2218)
+
+  Make the experimental feature `aof` (append-only file) a runtime flag instead of a build-time
+  setting. This simplifies operations, allowing the use of the same standard release binary in
+  environments that require `aof`.
+
+- [#2228](https://github.com/tigerbeetle/tigerbeetle/pull/2228)
+
+  Renames the LSM constant `lsm_batch_multiple` to `lsm_compaction_ops`, providing clearer meaning
+  on how it relates to the pace at which LSM tree compaction is triggered.
+
+### TigerTracks 🎧
+
+- [Used To Love Her](https://www.youtube.com/watch?v=FDIvIb06abI)
+
 ## 2024-08-19
 
 ### Safety And Performance
