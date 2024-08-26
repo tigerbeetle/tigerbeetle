@@ -6,10 +6,11 @@ const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 
 /// Combines a field (the key prefix) with a timestamp (the primary key).
-/// To keep alignment, it supports either `u64` or `u128` prefixes (which can be truncated
-/// to smaller types to fit the correct field data type).
-/// It also supports composite keys without a prefix (`Field == void`), which is useful for
-/// indexing flags that are only checked with "exists".
+/// - To keep alignment, it supports either `u64` or `u128` prefixes (which can be truncated
+///   to smaller types to fit the correct field data type).
+/// - "Deleted" values are denoted by a tombstone bit in the timestamp.
+/// - It also supports composite keys without a prefix (`Field == void`), which is useful for
+///   indexing flags that are only checked with "exists".
 pub fn CompositeKeyType(comptime Field: type) type {
     // The type if zeroed padding is needed.
     const Pad = switch (Field) {
@@ -134,6 +135,11 @@ test "composite_key - u64 and u128" {
         }
 
         {
+            const value = CompositeKey{ .field = 1, .timestamp = 100 };
+            try std.testing.expect(!CompositeKey.tombstone(&value));
+        }
+
+        {
             const key = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 100 });
             const value = CompositeKey.tombstone_from_key(key);
             try std.testing.expect(CompositeKey.tombstone(&value));
@@ -161,6 +167,11 @@ test "composite_key - void" {
             .timestamp = 100,
         });
         try std.testing.expect(a == b);
+    }
+
+    {
+        const value = CompositeKey{ .field = {}, .timestamp = 100 };
+        try std.testing.expect(!CompositeKey.tombstone(&value));
     }
 
     {

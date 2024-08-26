@@ -761,15 +761,17 @@ const Environment = struct {
                 for (accounts) |*account| {
                     const prefix_current: u128 = switch (params.index) {
                         .imported => index: {
-                            assert(params.min == 0 and params.max == 0);
+                            assert(params.min == 0);
+                            assert(params.max == 0);
+                            assert(prefix_last == null);
                             assert(account.flags.imported);
-                            break :index 0;
+                            break :index undefined;
                         },
                         inline else => |field| index: {
                             const Helper = GrooveAccounts.IndexTreeFieldHelperType(@tagName(field));
                             comptime assert(Helper.Index != void);
 
-                            const value = Helper.derive_index(account).?;
+                            const value = Helper.index_from_object(account).?;
                             assert(value >= params.min and value <= params.max);
                             break :index value;
                         },
@@ -799,6 +801,8 @@ const Environment = struct {
                         }
                         timestamp_last = account.timestamp;
                     } else {
+                        assert(params.index != .imported);
+
                         // If not exact, it's expected to be sorted by prefix and then timestamp.
                         if (prefix_last) |prefix| {
                             // If range (between min .. max), it's expected to be sorted by prefix.
