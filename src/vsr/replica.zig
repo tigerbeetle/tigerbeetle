@@ -2151,12 +2151,17 @@ pub fn ReplicaType(
                 // Canonical DVC headers may have ops greater than op_prepare_max which cannot be
                 // accomodated in the WAL right now. Store them in view_headers, which are used to
                 // fetch these prepares in primary_repair_pipeline, *after* the replica has
-                // advanced to the next checkpoint.
+                // advanced to the next checkpoint. We can't verify these as start_view headers,
+                // though. This is because *start_view* headers are guaranteed to hold at least a
+                // pipeline of headers, which we can't ensure here because this potential primary
+                // hasn't initiated repair yet.
                 self.view_headers.array.clear();
+                self.view_headers.command = .do_view_change;
                 self.view_headers.append(header_head);
                 while (headers.complete_valid.next()) |header| {
                     self.view_headers.append(header);
                 }
+                self.view_headers.verify();
 
                 assert(self.op == @min(header_head.op, self.op_prepare_max()));
                 assert(self.op >= self.commit_max);
@@ -6516,16 +6521,21 @@ pub fn ReplicaType(
                 return .busy;
             }
 
+            // view_headers may include headers that couldn't be accommodated in the WAL of a
+            // lagging potential primary (in on_do_view_change). These headers can now be
+            // accomomodated in the WAL, since the potential primary is not lagging post repair!
             const view_headers_op_max = self.view_headers.array.get(0).op;
             if (view_headers_op_max > self.op) {
                 assert(view_headers_op_max <= self.op_prepare_max());
-                self.op = view_headers_op_max;
+                assert(self.op == vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()));
+                self.set_op_and_commit_max(view_headers_op_max, self.commit_max, @src());
 
                 var op = self.commit_max + 1;
                 while (op <= view_headers_op_max) : (op += 1) {
-                    const op_header =
+                    const header_view =
                         &self.view_headers.array.const_slice()[view_headers_op_max - op];
-                    self.replace_header(op_header);
+
+                    self.replace_header(header_view);
                 }
             }
 
@@ -6588,14 +6598,20 @@ pub fn ReplicaType(
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
+            assert(self.view_headers.command == .do_view_change);
 
             var op = self.commit_max + 1;
             const view_headers_op_max = self.view_headers.array.get(0).op;
 
             while (op <= view_headers_op_max) : (op += 1) {
-                const op_header =
+                const header_view =
                     &self.view_headers.array.const_slice()[view_headers_op_max - op];
-                if (!self.pipeline.cache.contains_header(op_header)) return op;
+                const header_journal = self.journal.header_with_op(op).?;
+
+                assert(header_journal.op == header_view.op);
+                assert(header_journal.view == header_view.view);
+                assert(header_journal.checksum == header_view.checksum);
+                if (!self.pipeline.cache.contains_header(header_view)) return op;
             }
             return null;
         }
