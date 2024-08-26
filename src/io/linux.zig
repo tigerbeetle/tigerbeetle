@@ -40,6 +40,19 @@ pub const IO = struct {
             @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
         }
 
+        errdefer |err| switch (err) {
+            error.SystemOutdated => {
+                log.err("io_uring is not available", .{});
+                log.err("likely cause: the syscall is disabled by seccomp", .{});
+            },
+            error.PermissionDenied => {
+                log.err("io_uring is not available", .{});
+                log.err("likely cause: the syscall is disabled by sysctl, " ++
+                    "try 'sysctl -w kernel.io_uring_disabled=0'", .{});
+            },
+            else => {},
+        };
+
         return IO{ .ring = try IO_Uring.init(entries, flags) };
     }
 
