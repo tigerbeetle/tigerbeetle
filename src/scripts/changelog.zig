@@ -9,7 +9,11 @@ const log = std.log;
 pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     _ = gpa;
 
-    const today = try date_iso(shell);
+    const now_utc = stdx.DateTimeUTC.now();
+    const today = try shell.fmt(
+        "{:0>4}-{:0>2}-{:0>2}",
+        .{ now_utc.year, now_utc.month, now_utc.day },
+    );
 
     try shell.exec("git fetch origin --quiet", .{});
     try shell.exec("git switch --create release-{today} origin/main", .{ .today = today });
@@ -133,8 +137,4 @@ fn format_changelog_cut_single_merge(merges_left: *[]const u8) !?struct {
     merges_left.* = cut.suffix;
 
     return .{ .pr = pr, .summary = summary };
-}
-
-fn date_iso(shell: *Shell) ![]const u8 {
-    return try shell.exec_stdout("date --iso", .{});
 }
