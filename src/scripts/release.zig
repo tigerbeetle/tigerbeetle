@@ -33,7 +33,7 @@ const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
 pub const CliArgs = struct {
-    run_number: u32,
+    run_number: u32, // TODO: increment the version number from `changelog.md`.
     sha: []const u8,
     language: ?Language = null,
     build: bool = false,

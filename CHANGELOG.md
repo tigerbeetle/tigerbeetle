@@ -1,6 +1,9 @@
 # TigerBeetle Changelog
 
-## 2024-08-26
+Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+to receive notifications about breaking changes!
+
+## 2024-08-26 (No release: Queued up to improve indexing flags)
 
 ### Safety And Performance
 
@@ -24,7 +27,8 @@
 
   Allow `Transfer`s with `amount=0` and change behavior for _balancing_ and _pending_ transfers,
   introducing the constant `AMOUNT_MAX` to replace the use of the zero sentinel when representing
-  the maximum/original value in such cases.
+  the maximum/original value in such cases.  Note that this is a
+  [**breaking change**](https://github.com/tigerbeetle/tigerbeetle/issues/2231#issuecomment-2305132591).
 
   Also, explicitly define _optional indexes_, which previously were determined simply by not
   indexing zeroed values.
