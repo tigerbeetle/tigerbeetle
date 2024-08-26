@@ -25,7 +25,7 @@ to receive notifications about breaking changes!
   [#2238](https://github.com/tigerbeetle/tigerbeetle/pull/2238),
   [#2239](https://github.com/tigerbeetle/tigerbeetle/pull/2239)
 
-  Allow `Transfer`s with `amount=0` and change behavior for _balancing_ and _pending_ transfers,
+  Allow `Transfer`s with `amount=0` and change behavior for _balancing_ and _post-pending_ transfers,
   introducing the constant `AMOUNT_MAX` to replace the use of the zero sentinel when representing
   the maximum/original value in such cases.  Note that this is a
   [**breaking change**](https://github.com/tigerbeetle/tigerbeetle/issues/2231#issuecomment-2305132591).
