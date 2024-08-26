@@ -381,6 +381,8 @@ fn build_tigerbeetle(
             "tigerbeetle.ll",
         ).step);
     }
+    // TODO: investigate why do we need to grow the stack when adding new indexes.
+    tigerbeetle.stack_size = 18 * 1024 * 1024;
 
     // "zig build install" moves the server executable to the root folder:
     steps.install.dependOn(&b.addInstallArtifact(tigerbeetle, .{}).step);

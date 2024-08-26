@@ -95,6 +95,7 @@ pub fn StateMachineType(
                     .ledger = 5,
                     .code = 6,
                     .timestamp = 7,
+                    .imported = 23,
                 };
 
                 pub const transfers = .{
@@ -110,6 +111,7 @@ pub fn StateMachineType(
                     .code = 17,
                     .timestamp = 18,
                     .expires_at = 19,
+                    .imported = 24,
                 };
 
                 pub const transfers_pending = .{
@@ -205,7 +207,13 @@ pub fn StateMachineType(
                     "user_data_64",
                     "user_data_32",
                 },
-                .derived = .{},
+                .derived = .{
+                    .imported = struct {
+                        fn imported(object: *const Account) ?void {
+                            return if (object.flags.imported) {} else null;
+                        }
+                    }.imported,
+                },
             },
         );
 
@@ -221,17 +229,21 @@ pub fn StateMachineType(
                     "user_data_128",
                     "user_data_64",
                     "user_data_32",
-                    "expires_at",
                 },
                 .derived = .{
                     .expires_at = struct {
-                        fn expires_at(object: *const Transfer) u64 {
+                        fn expires_at(object: *const Transfer) ?u64 {
                             if (object.flags.pending and object.timeout > 0) {
                                 return object.timestamp + object.timeout_ns();
                             }
-                            return 0;
+                            return null;
                         }
                     }.expires_at,
+                    .imported = struct {
+                        fn imported(object: *const Transfer) ?void {
+                            return if (object.flags.imported) {} else null;
+                        }
+                    }.imported,
                 },
             },
         );
@@ -2209,9 +2221,9 @@ pub fn StateMachineType(
                 },
             }
 
-            const expires_at_maybe: ?u64 = if (p.timeout == 0) null else expires_at: {
+            const expires_at: ?u64 = if (p.timeout == 0) null else expires_at: {
                 assert(!p.flags.imported);
-                const expires_at = p.timestamp + p.timeout_ns();
+                const expires_at: u64 = p.timestamp + p.timeout_ns();
                 if (expires_at <= t.timestamp) {
                     // TODO: It's still possible for an operation to see an expired transfer
                     // if there's more than one batch of transfers to expire in a single `pulse`
@@ -2242,16 +2254,16 @@ pub fn StateMachineType(
             };
             self.forest.grooves.transfers.insert(&t2);
 
-            if (expires_at_maybe) |expires_at| {
+            if (expires_at) |timestamp| {
                 // Removing the pending `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
-                    .field = expires_at,
+                    .field = timestamp,
                     .timestamp = p.timestamp,
                 });
 
                 // In case the pending transfer's timeout is exactly the one we are using
                 // as flag, we need to zero the value to run the next `pulse`.
-                if (self.expire_pending_transfers.pulse_next_timestamp == expires_at) {
+                if (self.expire_pending_transfers.pulse_next_timestamp == timestamp) {
                     self.expire_pending_transfers.pulse_next_timestamp =
                         TimestampRange.timestamp_min;
                 }
@@ -2609,6 +2621,7 @@ pub fn StateMachineType(
                 ledger: u32,
                 code: u32,
                 timestamp: u32,
+                imported: u32,
             },
             transfers: struct {
                 timestamp: u32,
@@ -2623,6 +2636,7 @@ pub fn StateMachineType(
                 ledger: u32,
                 code: u32,
                 expires_at: u32,
+                imported: u32,
             },
             transfers_pending: struct {
                 timestamp: u32,
@@ -2650,6 +2664,7 @@ pub fn StateMachineType(
                     // Transfers mutate the account balance for debits/credits pending/posted.
                     // Each transfer modifies two accounts.
                     .timestamp = @max(batch_create_accounts, 2 * batch_create_transfers),
+                    .imported = batch_create_accounts,
                 },
                 .transfers = .{
                     .timestamp = batch_create_transfers,
@@ -2664,6 +2679,7 @@ pub fn StateMachineType(
                     .ledger = batch_create_transfers,
                     .code = batch_create_transfers,
                     .expires_at = batch_create_transfers,
+                    .imported = batch_create_transfers,
                 },
                 .transfers_pending = .{
                     // Objects are mutated when the pending transfer is posted/voided/expired.

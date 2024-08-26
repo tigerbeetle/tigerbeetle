@@ -79,6 +79,7 @@ const IdTreeValue = extern struct {
 /// Normalizes index tree field types into either u64 or u128 for CompositeKey
 fn IndexCompositeKeyType(comptime Field: type) type {
     switch (@typeInfo(Field)) {
+        .Void => return void,
         .Enum => |e| {
             return switch (@bitSizeOf(e.tag_type)) {
                 0...@bitSizeOf(u64) => u64,
@@ -101,6 +102,10 @@ fn IndexCompositeKeyType(comptime Field: type) type {
 }
 
 comptime {
+    assert(IndexCompositeKeyType(void) == void);
+    assert(IndexCompositeKeyType(u0) == u64);
+    assert(IndexCompositeKeyType(enum(u0) { x }) == u64);
+
     assert(IndexCompositeKeyType(u1) == u64);
     assert(IndexCompositeKeyType(u16) == u64);
     assert(IndexCompositeKeyType(enum(u16) { x }) == u64);
@@ -153,10 +158,9 @@ pub fn GrooveType(
     ///     An array of fields on the Object type that should not be given index trees
     ///
     /// - optional: [][]const u8:
-    ///     An array of index names (object fields and derived indexes) that should *not* index
-    ///     zero values.
+    ///     An array of fields that should *not* index zero values.
     ///
-    /// - derived: { .field = *const fn (*const Object) DerivedType }:
+    /// - derived: { .field = *const fn (*const Object) ?DerivedType }:
     ///     An anonymous struct which contain fields that don't exist on the Object
     ///     but can be derived from an Object instance using the field's corresponding function.
     comptime groove_options: anytype,
@@ -225,11 +229,16 @@ pub fn GrooveType(
         }
 
         // Get the return value from the derived field as the DerivedType.
-        const derive_return_type = derive_func_info.return_type orelse {
+        if (derive_func_info.return_type == null) {
             @compileError("expected derive fn to return valid tree index type");
-        };
+        }
 
-        const DerivedType = derive_return_type;
+        const derive_return_type = @typeInfo(derive_func_info.return_type.?);
+        if (derive_return_type != .Optional) {
+            @compileError("expected derive fn to return optional tree index type");
+        }
+
+        const DerivedType = derive_return_type.Optional.child;
         const table_value_count_max = constants.lsm_compaction_ops *
             @field(groove_options.batch_value_count_max, field.name);
         const IndexTree = IndexTreeType(Storage, DerivedType, table_value_count_max);
@@ -259,12 +268,10 @@ pub fn GrooveType(
         };
     }
 
-    // Verify that every tree referenced by "optional" corresponds to an actual index.
+    // Verify that every tree referenced by "optional" corresponds to an actual field.
     for (groove_options.optional) |field_name| {
-        for (index_options_fields) |index_field| {
-            if (std.mem.eql(u8, index_field.name, field_name)) break;
-        } else {
-            std.debug.panic("optional: unrecognized index name: {s}", .{field_name});
+        if (!@hasField(Object, field_name)) {
+            std.debug.panic("optional: unrecognized field name: {s}", .{field_name});
         }
     }
 
@@ -330,38 +337,52 @@ pub fn GrooveType(
     assert(indexes_count_actual == indexes_count_expect);
     assert(indexes_count_actual == std.meta.fields(_IndexTreeOptions).len);
 
-    // Generate a helper function for interacting with an Index field type.
-    const IndexTreeFieldHelperType = struct {
-        /// Returns true if the field is a derived field.
-        fn is_derived(comptime field_name: []const u8) bool {
-            comptime var derived = false;
-            inline for (derived_fields) |derived_field| {
-                derived = derived or std.mem.eql(u8, derived_field.name, field_name);
-            }
-            return derived;
-        }
-
-        /// Gets the index type from the index name (even if the index is derived).
-        fn IndexType(comptime field_name: []const u8) type {
-            if (!is_derived(field_name)) {
-                return @TypeOf(@field(@as(Object, undefined), field_name));
-            }
-
-            const derived_fn = @TypeOf(@field(groove_options.derived, field_name));
-            return @typeInfo(derived_fn).Fn.return_type.?;
-        }
-
+    const _IndexTreeFieldHelperType = struct {
         fn HelperType(comptime field_name: []const u8) type {
             return struct {
-                const Index = IndexType(field_name);
-                const IndexInteger = switch (@typeInfo(Index)) {
+                pub const Index = type: {
+                    if (is_derived) {
+                        const derived_fn = @typeInfo(@TypeOf(@field(
+                            groove_options.derived,
+                            field_name,
+                        )));
+                        assert(derived_fn == .Fn);
+                        assert(derived_fn.Fn.return_type != null);
+
+                        const return_type = @typeInfo(derived_fn.Fn.return_type.?);
+                        assert(return_type == .Optional);
+                        break :type return_type.Optional.child;
+                    }
+
+                    break :type @TypeOf(@field(@as(Object, undefined), field_name));
+                };
+                pub const IndexPrefix = switch (@typeInfo(Index)) {
+                    .Void => void,
                     .Int => Index,
                     .Enum => |info| info.tag_type,
                     else => @compileError("Unsupported index type for " ++ field_name),
                 };
 
-                inline fn int_from_index(index: Index) IndexInteger {
+                const is_derived: bool = is_derived: {
+                    for (derived_fields) |derived_field| {
+                        if (std.mem.eql(u8, derived_field.name, field_name)) break :is_derived true;
+                    }
+                    break :is_derived false;
+                };
+
+                const allow_zero: bool = allow_zero: {
+                    for (groove_options.optional) |optional| {
+                        if (std.mem.eql(u8, field_name, optional)) {
+                            assert(!is_derived);
+                            break :allow_zero false;
+                        }
+                    }
+                    break :allow_zero true;
+                };
+
+                inline fn as_prefix(index: Index) IndexPrefix {
                     return switch (@typeInfo(Index)) {
+                        .Void => {},
                         .Int => index,
                         .Enum => @intFromEnum(index),
                         else => unreachable,
@@ -369,11 +390,19 @@ pub fn GrooveType(
                 }
 
                 /// Try to extract an index from the object, deriving it when necessary.
-                pub fn derive_index(object: *const Object) IndexInteger {
-                    if (comptime is_derived(field_name)) {
-                        return int_from_index(@field(groove_options.derived, field_name)(object));
+                /// Null means the value should not be indexed.
+                pub fn index_from_object(object: *const Object) ?IndexPrefix {
+                    if (is_derived) {
+                        return if (@field(groove_options.derived, field_name)(object)) |value|
+                            as_prefix(value)
+                        else
+                            null;
                     } else {
-                        return int_from_index(@field(object, field_name));
+                        const value = as_prefix(@field(object, field_name));
+                        return if (allow_zero or value != 0)
+                            value
+                        else
+                            null;
                     }
                 }
             };
@@ -474,6 +503,9 @@ pub fn GrooveType(
         pub const IndexTrees = _IndexTrees;
         pub const ObjectsCache = _ObjectsCache;
         pub const config = groove_options;
+
+        /// Helper function for interacting with an Index field type.
+        pub const IndexTreeFieldHelperType = _IndexTreeFieldHelperType;
 
         const Grid = GridType(Storage);
         const ManifestLog = ManifestLogType(Storage);
@@ -1119,12 +1151,10 @@ pub fn GrooveType(
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
-
-                const index = Helper.derive_index(object);
-                if (index != 0 or comptime index_zeroes(field)) {
+                if (Helper.index_from_object(object)) |value| {
                     @field(groove.indexes, field.name).put(&.{
                         .timestamp = object.timestamp,
-                        .field = index,
+                        .field = value,
                     });
                 }
             }
@@ -1173,22 +1203,21 @@ pub fn GrooveType(
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
-                const old_index = Helper.derive_index(old);
-                const new_index = Helper.derive_index(new);
+                const old_index = Helper.index_from_object(old);
+                const new_index = Helper.index_from_object(new);
 
                 // Only update the indexes that change.
                 if (old_index != new_index) {
-                    if (old_index != 0 or comptime index_zeroes(field)) {
+                    if (old_index) |value| {
                         @field(groove.indexes, field.name).remove(&.{
                             .timestamp = old.timestamp,
-                            .field = old_index,
+                            .field = value,
                         });
                     }
-
-                    if (new_index != 0 or comptime index_zeroes(field)) {
+                    if (new_index) |value| {
                         @field(groove.indexes, field.name).put(&.{
                             .timestamp = new.timestamp,
-                            .field = new_index,
+                            .field = value,
                         });
                     }
                 }
@@ -1221,12 +1250,10 @@ pub fn GrooveType(
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
-
-                const index = Helper.derive_index(object);
-                if (index != 0 or comptime index_zeroes(field)) {
+                if (Helper.index_from_object(object)) |value| {
                     @field(groove.indexes, field.name).remove(&.{
                         .timestamp = object.timestamp,
-                        .field = index,
+                        .field = value,
                     });
                 }
             }
@@ -1298,13 +1325,6 @@ pub fn GrooveType(
                 .objects => ObjectTree,
                 .index => |field| @TypeOf(@field(@as(IndexTrees, undefined), field)),
             };
-        }
-
-        fn index_zeroes(comptime field: std.builtin.Type.StructField) bool {
-            for (groove_options.optional) |field_name| {
-                if (std.mem.eql(u8, field_name, field.name)) return false;
-            }
-            return true;
         }
 
         pub fn assert_between_bars(groove: *const Groove) void {
