@@ -6225,18 +6225,7 @@ pub fn ReplicaType(
                         .op_max = range.op_max,
                     }),
                 );
-
-                if (range.op_max > self.op_checkpoint()) {
-                    // If there's a header break after checkpoint, wait until it is repaired.
-                    // Otherwise, concurrently repair headers before checkpoint, while trying
-                    // to commit everything after the checkpoint.
-                    return;
-                }
             }
-            assert(self.valid_hash_chain_between(
-                @min(self.op_checkpoint() + 1, self.op),
-                self.op,
-            ));
 
             if (self.journal.dirty.count > 0) {
                 // Request and repair any dirty or faulty prepares.
@@ -6246,6 +6235,18 @@ pub fn ReplicaType(
                     self.op_repair_min();
                 self.repair_prepares(op_min);
             }
+
+            if (header_break != null and header_break.?.op_max > self.op_checkpoint()) {
+                return;
+            }
+
+            // The hash chain is anchored at both ends: `self.op` and `self.op_checkpoint`.
+            // It is safe to start committing.
+            // The replica might still be repairing headers and prepares before the checkpoint.
+            assert(self.valid_hash_chain_between(
+                @min(self.op_checkpoint() + 1, self.op),
+                self.op,
+            ));
 
             if (self.commit_min < self.commit_max) {
                 // Try to the commit prepares we already have, even if we don't have all of them.
@@ -6336,7 +6337,7 @@ pub fn ReplicaType(
         /// http://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf.
         ///
         /// * Do not replace an op belonging to the current WAL wrap with an op belonging to a
-        ///   previous wrap. In other words, don't repair checkpointed ops.
+        ///   previous wrap.
         ///
         fn repair_header(self: *Self, header: *const Header.Prepare) bool {
             assert(self.status == .normal or self.status == .view_change);
@@ -6447,6 +6448,7 @@ pub fn ReplicaType(
                 return false;
             }
             assert(header.checkpoint_id == self.checkpoint_id_for_op(header.op).?);
+            assert(header.op + constants.journal_slot_count > self.op);
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
@@ -6668,9 +6670,8 @@ pub fn ReplicaType(
 
         fn repair_prepares(self: *Self, op_min: u64) void {
             assert(self.status == .normal or self.status == .view_change);
-            assert(op_min <= self.op_checkpoint() + 1);
-            assert(op_min <= self.op);
             assert(self.op_repair_min() <= op_min);
+            assert(op_min <= self.op);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
@@ -9129,7 +9130,10 @@ pub fn ReplicaType(
         }
 
         /// Whether it is safe to commit or send prepare_ok messages.
-        /// Returns true if the hash chain is valid and up to date for the current view.
+        /// Returns true if the hash chain is valid:
+        ///   - connects to the checkpoint
+        ///   - connects to the head
+        ///   - the head is up to date for the current view.
         /// This is a stronger guarantee than `valid_hash_chain_between()` below.
         fn valid_hash_chain(self: *const Self, source: SourceLocation) bool {
             assert(self.op_checkpoint() <= self.commit_min);
@@ -9170,6 +9174,7 @@ pub fn ReplicaType(
             // When commit_min=op_checkpoint, the checkpoint may be missing.
             // valid_hash_chain_between() will still verify that we are connected.
             const op_verify_min = @max(self.commit_min, self.op_checkpoint() + 1);
+            assert(op_verify_min <= self.commit_min + 1);
 
             // We must validate the hash chain as far as possible, since `self.op` may disclose a
             // fork:
@@ -9188,8 +9193,6 @@ pub fn ReplicaType(
         /// chain, between `op_min` and `op_max` (both inclusive).
         fn valid_hash_chain_between(self: *const Self, op_min: u64, op_max: u64) bool {
             assert(op_min <= op_max);
-            assert(op_min <= self.commit_min + 1);
-            assert(op_min <= self.commit_min or self.commit_min == self.op_checkpoint());
             assert(op_max >= self.op_checkpoint());
 
             // If we use anything less than self.op then we may commit ops for a forked hash chain
