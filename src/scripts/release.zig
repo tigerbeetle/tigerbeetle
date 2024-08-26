@@ -106,8 +106,8 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     var section = try shell.open_section("build all");
     defer section.close();
 
-    try shell.project_root.deleteTree("dist");
-    var dist_dir = try shell.project_root.makeOpenPath("dist", .{});
+    try shell.project_root.deleteTree("zig-out/dist");
+    var dist_dir = try shell.project_root.makeOpenPath("zig-out/dist", .{});
     defer dist_dir.close();
 
     log.info("building TigerBeetle distribution into {s}", .{
@@ -374,7 +374,7 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     var section = try shell.open_section("publish all");
     defer section.close();
 
-    assert(try shell.dir_exists("dist"));
+    assert(try shell.dir_exists("zig-out/dist"));
 
     if (languages.contains(.zig)) {
         _ = try shell.env_get("GITHUB_TOKEN");
@@ -393,13 +393,10 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             shell.project_root.deleteFile("tigerbeetle") catch {};
             defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
-            try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
-            const past_binary = try shell.cwd
-                .openFile("tigerbeetle", .{ .mode = .read_only });
-            defer past_binary.close();
-
-            const past_binary_contents = try past_binary.readToEndAllocOptions(
+            try shell.exec("unzip ./zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+            const past_binary_contents = try shell.cwd.readFileAllocOptions(
                 shell.arena.allocator(),
+                "tigerbeetle",
                 multiversion_binary_size_max,
                 null,
                 8,
@@ -413,8 +410,11 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             )];
 
             const header = try multiversioning.MultiversionHeader.init_from_bytes(header_bytes);
+            const release_min = header.past.releases[0];
+            const release_max = header.past.releases[header.past.count - 1];
+            assert(release_min < release_max);
 
-            break :blk multiversioning.Release{ .value = header.past.releases[0] };
+            break :blk multiversioning.Release{ .value = release_min };
         };
 
         const notes = try shell.fmt(
@@ -467,14 +467,14 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
         // Here and elsewhere for publishing we explicitly spell out the files we are uploading
         // instead of using a for loop to double-check the logic in `build`.
         const artifacts: []const []const u8 = &.{
-            "dist/tigerbeetle/tigerbeetle-aarch64-linux-debug.zip",
-            "dist/tigerbeetle/tigerbeetle-aarch64-linux.zip",
-            "dist/tigerbeetle/tigerbeetle-universal-macos-debug.zip",
-            "dist/tigerbeetle/tigerbeetle-universal-macos.zip",
-            "dist/tigerbeetle/tigerbeetle-x86_64-linux-debug.zip",
-            "dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
-            "dist/tigerbeetle/tigerbeetle-x86_64-windows-debug.zip",
-            "dist/tigerbeetle/tigerbeetle-x86_64-windows.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-aarch64-linux-debug.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-aarch64-linux.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-universal-macos-debug.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-universal-macos.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux-debug.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-windows-debug.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-windows.zip",
         };
         try shell.exec("gh release upload {tag} {artifacts}", .{
             .tag = info.release_triple,
@@ -535,7 +535,7 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish dotnet");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/dotnet"));
+    assert(try shell.dir_exists("zig-out/dist/dotnet"));
 
     const nuget_key = try shell.env_get("NUGET_KEY");
     try shell.exec(
@@ -545,7 +545,7 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
         \\    {package}
     , .{
         .nuget_key = nuget_key,
-        .package = try shell.fmt("dist/dotnet/tigerbeetle.{s}.nupkg", .{info.release_triple}),
+        .package = try shell.fmt("zig-out/dist/dotnet/tigerbeetle.{s}.nupkg", .{info.release_triple}),
     });
 }
 
@@ -553,7 +553,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish go");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/go"));
+    assert(try shell.dir_exists("zig-out/dist/go"));
 
     const token = try shell.env_get("TIGERBEETLE_GO_PAT");
     try shell.exec(
@@ -564,7 +564,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
         shell.project_root.deleteTree("tigerbeetle-go") catch {};
     }
 
-    const dist_files = try shell.find(.{ .where = &.{"dist/go"} });
+    const dist_files = try shell.find(.{ .where = &.{"zig-out/dist/go"} });
     assert(dist_files.len > 10);
     for (dist_files) |file| {
         try Shell.copy_path(
@@ -575,7 +575,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
                 u8,
                 shell.arena.allocator(),
                 file,
-                "dist/go",
+                "zig-out/dist/go",
                 "tigerbeetle-go",
             ),
         );
@@ -609,7 +609,7 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish java");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/java"));
+    assert(try shell.dir_exists("zig-out/dist/java"));
 
     // These variables don't have a special meaning in maven, and instead are a part of
     // settings.xml generated by GitHub actions.
@@ -648,7 +648,7 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish node");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/node"));
+    assert(try shell.dir_exists("zig-out/dist/node"));
 
     // `NODE_AUTH_TOKEN` env var doesn't have a special meaning in npm. It does have special meaning
     // in GitHub Actions, which adds a literal
@@ -658,7 +658,7 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     // to the .npmrc file (that is, node config file itself supports env variables).
     _ = try shell.env_get("NODE_AUTH_TOKEN");
     try shell.exec("npm publish {package}", .{
-        .package = try shell.fmt("dist/node/tigerbeetle-node-{s}.tgz", .{info.release_triple}),
+        .package = try shell.fmt("zig-out/dist/node/tigerbeetle-node-{s}.tgz", .{info.release_triple}),
     });
 }
 
@@ -666,7 +666,7 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish docker");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/tigerbeetle"));
+    assert(try shell.dir_exists("zig-out/dist/tigerbeetle"));
 
     try shell.exec(
         \\docker login --username tigerbeetle --password {password} ghcr.io
@@ -685,7 +685,7 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             // We need to unzip binaries from dist. For simplicity, don't bother with a temporary
             // directory.
             shell.project_root.deleteFile("tigerbeetle") catch {};
-            try shell.exec("unzip ./dist/tigerbeetle/tigerbeetle-{triple}{debug}.zip", .{
+            try shell.exec("unzip ./zig-out/dist/tigerbeetle/tigerbeetle-{triple}{debug}.zip", .{
                 .triple = triple,
                 .debug = if (debug) "-debug" else "",
             });
