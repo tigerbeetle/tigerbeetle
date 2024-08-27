@@ -55,7 +55,8 @@ pub const AccountFlags = packed struct(u16) {
     credits_must_not_exceed_debits: bool = false,
     history: bool = false,
     imported: bool = false,
-    padding: u11 = 0,
+    closed: bool = false,
+    padding: u10 = 0,
 
     comptime {
         assert(@sizeOf(AccountFlags) == @sizeOf(u16));
@@ -133,7 +134,9 @@ pub const TransferFlags = packed struct(u16) {
     balancing_debit: bool = false,
     balancing_credit: bool = false,
     imported: bool = false,
-    padding: u9 = 0,
+    closing_debit_account: bool = false,
+    closing_credit_account: bool = false,
+    padding: u7 = 0,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
@@ -297,6 +300,9 @@ pub const CreateTransferResult = enum(u32) {
     imported_event_timestamp_must_postdate_debit_account = 61,
     imported_event_timestamp_must_postdate_credit_account = 62,
     imported_event_timeout_must_be_zero = 63,
+
+    debit_account_closed = 64,
+    credit_account_closed = 65,
 
     comptime {
         for (0..std.enums.values(CreateTransferResult).len) |index| {
