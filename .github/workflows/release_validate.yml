@@ -12,6 +12,9 @@ on:
     # in systems we do not control.
     - cron: 0 */6 * * *
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
