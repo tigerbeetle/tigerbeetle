@@ -124,6 +124,9 @@ Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code fore
   - On occasion, you may use a blatantly true assertion instead of a comment as stronger
     documentation where the assertion condition is critical and surprising.
 
+  - Split compound assertions: prefer `assert(a); assert(b);` over `assert(a and b);`.
+    The former is simpler to read, and provides more precise information if the condition fails.
+
   - **Assert the relationships of compile-time constants** as a sanity check, and also to document
     and enforce [subtle
     invariants](https://github.com/coilhq/tigerbeetle/blob/db789acfb93584e5cb9f331f9d6092ef90b53ea6/src/vsr/journal.zig#L45-L47)
