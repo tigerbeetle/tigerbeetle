@@ -84,14 +84,14 @@ pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) typ
     };
 }
 
-fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
+fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type {
     const testing = std.testing;
     const TestPool = NodePoolType(node_size, node_alignment);
 
     const log = false;
 
     return struct {
-        const NodePool = @This();
+        const TestContext = @This();
 
         node_count: u32,
         random: std.rand.Random,
@@ -102,7 +102,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
         acquires: u64 = 0,
         releases: u64 = 0,
 
-        fn init(context: *NodePool, random: std.rand.Random, node_count: u32) !void {
+        fn init(context: *TestContext, random: std.rand.Random, node_count: u32) !void {
             context.* = .{
                 .node_count = node_count,
                 .random = random,
@@ -120,12 +120,12 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             errdefer context.node_map.deinit();
         }
 
-        fn deinit(context: *NodePool) void {
+        fn deinit(context: *TestContext) void {
             context.node_pool.deinit(testing.allocator);
             context.node_map.deinit();
         }
 
-        fn run(context: *NodePool) !void {
+        fn run(context: *TestContext) !void {
             {
                 var i: usize = 0;
                 while (i < context.node_count * 4) : (i += 1) {
@@ -151,7 +151,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             try context.release_all();
         }
 
-        fn acquire(context: *NodePool) !void {
+        fn acquire(context: *TestContext) !void {
             if (context.node_map.count() == context.node_count) return;
 
             const node = context.node_pool.acquire();
@@ -172,7 +172,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             context.acquires += 1;
         }
 
-        fn release(context: *NodePool) !void {
+        fn release(context: *TestContext) !void {
             if (context.node_map.count() == 0) return;
 
             const index = context.random.uintLessThanBiased(usize, context.node_map.count());
@@ -191,7 +191,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             context.releases += 1;
         }
 
-        fn release_all(context: *NodePool) !void {
+        fn release_all(context: *TestContext) !void {
             while (context.node_map.count() > 0) try context.release();
 
             // Verify that nothing in the entire buffer has been acquired.
@@ -231,11 +231,11 @@ test "NodePool" {
         Tuple{ .node_size = 32, .node_alignment = 16 },
         Tuple{ .node_size = 128, .node_alignment = 16 },
     }) |tuple| {
-        const Context = TestContext(tuple.node_size, tuple.node_alignment);
+        const TestContext = TestContextType(tuple.node_size, tuple.node_alignment);
 
         var i: u32 = 1;
         while (i < 64) : (i += 1) {
-            var context: Context = undefined;
+            var context: TestContext = undefined;
             try context.init(random, i);
             defer context.deinit();
 
