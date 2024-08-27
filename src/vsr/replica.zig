@@ -4726,42 +4726,6 @@ pub fn ReplicaType(
             return message.ref();
         }
 
-        /// Discards uncommitted ops during a view change from after and including `op`.
-        /// This is required to maximize availability in the presence of storage faults.
-        /// Refer to the CTRL protocol from Protocol-Aware Recovery for Consensus-Based Storage.
-        fn primary_discard_uncommitted_ops_from(self: *Self, op: u64, checksum: u128) void {
-            assert(self.status == .view_change);
-            assert(self.primary_index(self.view) == self.replica);
-            assert(self.repairs_allowed());
-
-            assert(self.valid_hash_chain(@src()));
-
-            const slot = self.journal.slot_with_op(op).?;
-            assert(op > self.commit_max);
-            assert(op <= self.op);
-            assert(self.journal.header_with_op_and_checksum(op, checksum) != null);
-            assert(self.journal.dirty.bit(slot));
-
-            log.debug("{}: primary_discard_uncommitted_ops_from: ops={}..{} view={}", .{
-                self.replica,
-                op,
-                self.op,
-                self.view,
-            });
-
-            self.op = op - 1;
-            self.journal.remove_entries_from(op);
-
-            assert(self.journal.header_for_op(op) == null);
-            assert(!self.journal.dirty.bit(slot));
-            assert(!self.journal.faulty.bit(slot));
-
-            // We require that `self.op` always exists. Rewinding `self.op` could change that.
-            // However, we do this only as the primary within a view change, with all headers
-            // intact.
-            assert(self.journal.header_with_op(self.op) != null);
-        }
-
         fn flush_loopback_queue(self: *Self) void {
             // There are five cases where a replica will send a message to itself:
             // However, of these five cases, all but one call send_message_to_replica().
