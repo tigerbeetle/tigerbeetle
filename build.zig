@@ -434,8 +434,6 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
     }
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.root_module.omit_frame_pointer = false;
-    // TODO: investigate why do we need to grow the stack when adding new indexes.
-    tigerbeetle.stack_size = 18 * 1024 * 1024;
     return tigerbeetle;
 }
 
