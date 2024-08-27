@@ -5055,11 +5055,9 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.solo()) {
-                if (self.view_durable_updating()) {
-                    log.debug("{}: on_request: ignoring (still persisting view)", .{self.replica});
-                    return true;
-                }
+            if (self.view_durable_updating()) {
+                log.debug("{}: on_request: ignoring (still persisting view)", .{self.replica});
+                return true;
             }
 
             if (self.ignore_request_message_upgrade(message)) return true;
@@ -9516,7 +9514,9 @@ pub fn ReplicaType(
             assert(self.state_machine.pulse_needed(self.state_machine.prepare_timestamp));
 
             self.send_request_to_self(.pulse, &.{});
-            assert(self.pipeline.queue.contains_operation(.pulse));
+            if (!self.pipeline.queue.contains_operation(.pulse)) {
+                assert(self.view_durable_updating());
+            }
         }
 
         fn send_request_upgrade_to_self(self: *Self) void {
@@ -9527,7 +9527,9 @@ pub fn ReplicaType(
 
             const upgrade = vsr.UpgradeRequest{ .release = self.upgrade_release.? };
             self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
-            assert(self.pipeline.queue.contains_operation(.upgrade));
+            if (!self.pipeline.queue.contains_operation(.upgrade)) {
+                assert(self.view_durable_updating());
+            }
         }
 
         fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {
