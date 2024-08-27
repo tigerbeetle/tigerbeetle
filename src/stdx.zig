@@ -262,7 +262,7 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     // Pick the biggest "word" for word-wise comparison, and don't try to early-return on the first
     // mismatch, so that a compiler can vectorize the loop.
 
-    const Word = inline for (.{ u64, u32, u16, u8 }) |Word| {
+    const Word = comptime for (.{ u64, u32, u16, u8 }) |Word| {
         if (@alignOf(T) >= @alignOf(Word) and @sizeOf(T) % @sizeOf(Word) == 0) break Word;
     } else unreachable;
 
@@ -271,8 +271,7 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     assert(a_words.len == b_words.len);
 
     var total: Word = 0;
-    for (a_words, 0..) |a_word, i| {
-        const b_word = b_words[i];
+    for (a_words, b_words) |a_word, b_word| {
         total |= a_word ^ b_word;
     }
 
