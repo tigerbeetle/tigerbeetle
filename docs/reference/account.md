@@ -250,6 +250,22 @@ necessary:
   This approach gives the application a chance to correct failed imported accounts, re-submitting
   the batch again with the same user-defined timestamps.
 
+#### `flags.closed`
+
+When set, the account will reject further transfers.
+
+- This flag can be set during the account creation.
+- This flag can be set by a [`Transfer`](transfer.md)
+  marked with the flag [`Transfer.flags.closing_debit_account`](transfer.md#flagsclosing_debit_account)
+  or [`Transfer.flags.closing_credit_account`](transfer.md#flagsclosing_credit_account).
+
+  Note that, to make closing an account a **reversible** operation,
+  the flag [`Transfer.flags.pending`](transfer.md#flagspending) also must be set.
+
+  The pending closing transfer can then be either [voided](transfer.md#flagsvoid_pending_transfer)
+  to reopen the account or [posted](transfer.md#flagspost_pending_transfer) to make it
+  permanently closed.
+
 ### `timestamp`
 
 This is the time the account was created, as nanoseconds since UNIX epoch.
