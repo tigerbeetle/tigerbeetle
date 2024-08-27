@@ -178,7 +178,7 @@ fn tidy_control_characters(file: SourceFile) ?u8 {
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 377; // release.zig
+const function_line_count_max = 345; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -375,6 +375,7 @@ const DeadDetector = struct {
             "node_bindings.zig",
             "java_bindings.zig",
             "build.zig",
+            "build_multiversion.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;

@@ -41,6 +41,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         \\build scripts -- release --build --run-number=255 --sha={sha}
         \\    --language=zig
     , .{ .sha = cli_args.sha });
+    try shell.project_root.deleteFile("tigerbeetle");
     try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
 
     const benchmark_result = try shell.exec_stdout(
