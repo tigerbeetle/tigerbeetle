@@ -33,6 +33,11 @@ public interface AccountFlags {
      */
     int IMPORTED = (int) (1 << 4);
 
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/account#flagsclosed">closed</a>
+     */
+    int CLOSED = (int) (1 << 5);
+
     static boolean hasLinked(final int flags) {
         return (flags & LINKED) == LINKED;
     }
@@ -51,6 +56,10 @@ public interface AccountFlags {
 
     static boolean hasImported(final int flags) {
         return (flags & IMPORTED) == IMPORTED;
+    }
+
+    static boolean hasClosed(final int flags) {
+        return (flags & CLOSED) == CLOSED;
     }
 
 }

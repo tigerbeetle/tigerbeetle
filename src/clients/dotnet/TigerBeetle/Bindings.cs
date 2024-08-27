@@ -38,6 +38,11 @@ public enum AccountFlags : ushort
     /// </summary>
     Imported = 1 << 4,
 
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account#flagsclosed
+    /// </summary>
+    Closed = 1 << 5,
+
 }
 
 [Flags]
@@ -79,6 +84,16 @@ public enum TransferFlags : ushort
     /// https://docs.tigerbeetle.com/reference/transfer#flagsimported
     /// </summary>
     Imported = 1 << 6,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit_account
+    /// </summary>
+    ClosingDebitAccount = 1 << 7,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit_account
+    /// </summary>
+    ClosingCreditAccount = 1 << 8,
 
 }
 
@@ -775,6 +790,16 @@ public enum CreateTransferResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero
     /// </summary>
     ImportedEventTimeoutMustBeZero = 63,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_closed
+    /// </summary>
+    DebitAccountClosed = 64,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_closed
+    /// </summary>
+    CreditAccountClosed = 65,
 
 }
 
