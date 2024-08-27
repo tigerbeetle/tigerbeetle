@@ -17,7 +17,7 @@ const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
 
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
-const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;

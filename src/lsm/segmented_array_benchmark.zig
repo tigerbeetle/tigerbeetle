@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
-const NodePoolType = @import("node_pool.zig").NodePool;
+const NodePoolType = @import("node_pool.zig").NodePoolType;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const table_count_max_for_tree = @import("tree.zig").table_count_max_for_tree;
 const SortedSegmentedArray = @import("segmented_array.zig").SortedSegmentedArray;

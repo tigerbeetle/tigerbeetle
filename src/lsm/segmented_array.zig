@@ -952,8 +952,8 @@ test "SortedSegmentedArray duplicate elements" {
     // Create [0, 0, 0, 100, 100, 100, ~0, ~0, ~0] array, verify that the search is left-biased.
     const testing = std.testing;
 
-    const NodePool = @import("node_pool.zig").NodePool;
-    const TestPool = NodePool(128 * @sizeOf(u32), 2 * @alignOf(u32));
+    const NodePoolType = @import("node_pool.zig").NodePoolType;
+    const TestPool = NodePoolType(128 * @sizeOf(u32), 2 * @alignOf(u32));
     const TestArray = SortedSegmentedArray(
         u32,
         TestPool,
@@ -1051,10 +1051,10 @@ fn FuzzContextType(
         const testing = std.testing;
         const log = false;
 
-        const NodePool = @import("node_pool.zig").NodePool;
+        const NodePoolType = @import("node_pool.zig").NodePoolType;
 
         // Test overaligned nodes to catch compile errors for missing @alignCast()
-        const TestPool = NodePool(node_size, 2 * @alignOf(T));
+        const TestPool = NodePoolType(node_size, 2 * @alignOf(T));
         const TestArray = switch (element_order) {
             .sorted => SortedSegmentedArray(
                 T,

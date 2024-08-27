@@ -794,9 +794,9 @@ pub fn TestContext(
         );
 
         const TableInfo = @import("manifest.zig").TreeTableInfoType(Table);
-        const NodePool = @import("node_pool.zig").NodePool;
+        const NodePoolType = @import("node_pool.zig").NodePoolType;
 
-        const TestPool = NodePool(node_size, @alignOf(TableInfo));
+        const TestPool = NodePoolType(node_size, @alignOf(TableInfo));
         const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, table_count_max);
         const KeyRange = TestLevel.KeyRange;
 
