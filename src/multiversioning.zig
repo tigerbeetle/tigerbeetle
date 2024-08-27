@@ -934,26 +934,25 @@ pub const Multiversion = struct {
                 parse_macho(source_buffer) catch return error.NoValidPlatformDetected,
         };
 
-        if (offsets.header_offset + @sizeOf(MultiversionHeader) > source_buffer.len) {
+        const active = offsets.active() orelse return error.NoValidPlatformDetected;
+
+        if (active.header_offset + @sizeOf(MultiversionHeader) > source_buffer.len) {
             return error.FileTooSmall;
         }
 
         // `init_from_bytes` validates the header checksum internally.
-        const source_buffer_header = source_buffer[offsets.header_offset..][0..@sizeOf(
-            MultiversionHeader,
-        )];
+        const source_buffer_header =
+            source_buffer[active.header_offset..][0..@sizeOf(MultiversionHeader)];
         const header = try MultiversionHeader.init_from_bytes(source_buffer_header);
         var header_inactive_platform: ?MultiversionHeader = null;
 
         // MachO's checksum_binary_without_header works slightly differently since there are
         // actually two headers, once for x86_64 and one for aarch64. It zeros them both.
-        if (offsets.header_offset_inactive_platform) |header_offset_inactive_platform| {
+        if (offsets.inactive()) |inactive| {
             assert(offsets.format == .macho);
 
-            const buffer = source_buffer[header_offset_inactive_platform..][0..@sizeOf(
-                MultiversionHeader,
-            )];
-            const source_buffer_header_inactive_platform = buffer; // Line length limits.
+            const source_buffer_header_inactive_platform =
+                source_buffer[inactive.header_offset..][0..@sizeOf(MultiversionHeader)];
             header_inactive_platform = try MultiversionHeader.init_from_bytes(
                 source_buffer_header_inactive_platform,
             );
@@ -980,11 +979,10 @@ pub const Multiversion = struct {
             std.mem.asBytes(&header),
         );
 
-        if (offsets.header_offset_inactive_platform) |header_offset_inactive_platform| {
-            const buffer = source_buffer[header_offset_inactive_platform..][0..@sizeOf(
-                MultiversionHeader,
-            )];
-            const source_buffer_header_inactive_platform = buffer; // Line length limits.
+        if (offsets.inactive()) |inactive| {
+            assert(offsets.format == .macho);
+            const source_buffer_header_inactive_platform =
+                source_buffer[inactive.header_offset..][0..@sizeOf(MultiversionHeader)];
 
             stdx.copy_disjoint(
                 .exact,
@@ -1056,8 +1054,8 @@ pub const Multiversion = struct {
         try target_file.pwriteAll(source_buffer, 0);
 
         self.target_header = header;
-        self.target_body_offset = offsets.body_offset;
-        self.target_body_size = offsets.body_size;
+        self.target_body_offset = active.body_offset;
+        self.target_body_size = active.body_size;
 
         self.stage = .ready;
     }
@@ -1288,13 +1286,31 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
 }
 
 const HeaderBodyOffsets = struct {
-    header_offset: u32,
-    header_offset_inactive_platform: ?u32 = null,
-    body_offset: u32,
-    body_offset_inactive_platform: ?u32 = null,
-    body_size: u32,
-    body_size_inactive_platform: ?u32 = null,
+    const Offsets = struct {
+        header_offset: u32,
+        body_offset: u32,
+        body_size: u32,
+    };
+
     format: enum { elf, pe, macho },
+    aarch64: ?Offsets,
+    x86_64: ?Offsets,
+
+    fn active(header_body_offsets: HeaderBodyOffsets) ?Offsets {
+        return switch (builtin.target.cpu.arch) {
+            .x86_64 => header_body_offsets.x86_64,
+            .aarch64 => header_body_offsets.aarch64,
+            else => comptime unreachable,
+        };
+    }
+
+    fn inactive(header_body_offsets: HeaderBodyOffsets) ?Offsets {
+        return switch (builtin.target.cpu.arch) {
+            .x86_64 => header_body_offsets.aarch64,
+            .aarch64 => header_body_offsets.x86_64,
+            else => comptime unreachable,
+        };
+    }
 };
 
 /// Parse an untrusted, unverified, and potentially corrupt ELF file. This parsing happens before
@@ -1420,11 +1436,17 @@ pub fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBody
         return error.MultiversionBodyOverlapsHeader;
     }
 
-    return .{
+    const offsets: HeaderBodyOffsets.Offsets = .{
         .header_offset = header_offset.?,
         .body_offset = body_offset.?,
         .body_size = body_size.?,
-        .format = .elf,
+    };
+    const arch = elf_header.machine.toTargetCpuArch() orelse
+        return error.UnknownArchitecture;
+    return switch (arch) {
+        .aarch64 => .{ .format = .elf, .aarch64 = offsets, .x86_64 = null },
+        .x86_64 => .{ .format = .elf, .aarch64 = null, .x86_64 = offsets },
+        else => return error.UnknownArchitecture,
     };
 }
 
@@ -1437,12 +1459,12 @@ pub fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
     if (fat_header.magic != std.macho.FAT_CIGAM) return error.InvalidMachoMagic;
     if (@byteSwap(fat_header.nfat_arch) != 6) return error.InvalidMachoArches;
 
-    var header_offset: ?u32 = null;
-    var header_offset_inactive_platform: ?u32 = null;
-    var body_offset: ?u32 = null;
-    var body_offset_inactive_platform: ?u32 = null;
-    var body_size: ?u32 = null;
-    var body_size_inactive_platform: ?u32 = null;
+    var header_offset_aarch64: ?u32 = null;
+    var header_offset_x86_64: ?u32 = null;
+    var body_offset_aarch64: ?u32 = null;
+    var body_offset_x86_64: ?u32 = null;
+    var body_size_aarch64: ?u32 = null;
+    var body_size_x86_64: ?u32 = null;
     for (0..6) |i| {
         const offset = @sizeOf(std.macho.fat_header) + @sizeOf(std.macho.fat_arch) * i;
         if (offset + @sizeOf(std.macho.fat_arch) > buffer.len) return error.InvalidMacho;
@@ -1452,75 +1474,57 @@ pub fn parse_macho(buffer: []const u8) !HeaderBodyOffsets {
         );
         const fat_arch_cpu_type = @byteSwap(fat_arch.cputype);
 
-        if (builtin.target.cpu.arch == .aarch64) {
-            if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64)) {
-                assert(body_offset == null and body_size == null);
-                body_offset = @byteSwap(fat_arch.offset);
-                body_size = @byteSwap(fat_arch.size);
-            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64)) {
-                assert(header_offset == null);
-                header_offset = @byteSwap(fat_arch.offset);
-            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64)) {
-                // .tb_mvb for _x86_64_ - the opposite of what we're matching on above.
-                assert(body_offset_inactive_platform == null and
-                    body_size_inactive_platform == null);
-                body_offset_inactive_platform = @byteSwap(fat_arch.offset);
-                body_size_inactive_platform = @byteSwap(fat_arch.size);
-            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64)) {
-                // .tb_mvh for _x86_64_ - the opposite of what we're matching on above.
-                assert(header_offset_inactive_platform == null);
-                header_offset_inactive_platform = @byteSwap(fat_arch.offset);
-            }
-        }
-
-        if (builtin.target.cpu.arch == .x86_64) {
-            if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64)) {
-                assert(body_offset == null and body_size == null);
-                body_offset = @byteSwap(fat_arch.offset);
-                body_size = @byteSwap(fat_arch.size);
-            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64)) {
-                assert(header_offset == null);
-                header_offset = @byteSwap(fat_arch.offset);
-            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64)) {
-                // .tb_mvb for _aarch64_ - the opposite of what we're matching on.
-                assert(body_offset_inactive_platform == null and
-                    body_size_inactive_platform == null);
-                body_offset_inactive_platform = @byteSwap(fat_arch.offset);
-                body_size_inactive_platform = @byteSwap(fat_arch.size);
-            } else if (fat_arch_cpu_type == @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64)) {
-                // .tb_mvh for _aarch64_ - the opposite of what we're matching on.
-                assert(header_offset_inactive_platform == null);
-                header_offset_inactive_platform = @byteSwap(fat_arch.offset);
-            }
+        switch (fat_arch_cpu_type) {
+            @intFromEnum(section_to_macho_cpu.tb_mvb_aarch64) => {
+                assert(body_offset_aarch64 == null and body_size_aarch64 == null);
+                body_offset_aarch64 = @byteSwap(fat_arch.offset);
+                body_size_aarch64 = @byteSwap(fat_arch.size);
+            },
+            @intFromEnum(section_to_macho_cpu.tb_mvh_aarch64) => {
+                assert(header_offset_aarch64 == null);
+                header_offset_aarch64 = @byteSwap(fat_arch.offset);
+            },
+            @intFromEnum(section_to_macho_cpu.tb_mvb_x86_64) => {
+                assert(body_offset_x86_64 == null and body_size_x86_64 == null);
+                body_offset_x86_64 = @byteSwap(fat_arch.offset);
+                body_size_x86_64 = @byteSwap(fat_arch.size);
+            },
+            @intFromEnum(section_to_macho_cpu.tb_mvh_x86_64) => {
+                assert(header_offset_x86_64 == null);
+                header_offset_x86_64 = @byteSwap(fat_arch.offset);
+            },
+            else => {},
         }
     }
 
-    if (header_offset == null or body_offset == null) {
+    if (header_offset_aarch64 == null or body_offset_aarch64 == null) {
         return error.MultiversionHeaderOrBodyNotFound;
     }
 
-    if (header_offset_inactive_platform == null or body_offset_inactive_platform == null) {
+    if (header_offset_x86_64 == null or body_offset_x86_64 == null) {
         return error.MultiversionHeaderOrBodyNotFound;
     }
 
-    if (body_offset.? + body_size.? > header_offset.?) {
+    if (body_offset_aarch64.? + body_size_aarch64.? > header_offset_aarch64.?) {
         return error.MultiversionBodyOverlapsHeader;
     }
 
-    if (body_offset_inactive_platform.? + body_size_inactive_platform.? >
-        header_offset_inactive_platform.?)
-    {
+    if (body_offset_x86_64.? + body_size_x86_64.? > header_offset_x86_64.?) {
         return error.MultiversionBodyOverlapsHeader;
     }
 
     return .{
-        .header_offset = header_offset.?,
-        .header_offset_inactive_platform = header_offset_inactive_platform.?,
-        .body_offset = body_offset.?,
-        .body_offset_inactive_platform = body_offset_inactive_platform.?,
-        .body_size = body_size.?,
-        .body_size_inactive_platform = body_size_inactive_platform.?,
         .format = .macho,
+        .aarch64 = .{
+            .header_offset = header_offset_aarch64.?,
+            .body_offset = body_offset_aarch64.?,
+            .body_size = body_size_aarch64.?,
+        },
+        .x86_64 = .{
+            .header_offset = header_offset_x86_64.?,
+            .body_offset = body_offset_x86_64.?,
+            .body_size = body_size_x86_64.?,
+        },
     };
 }
 
@@ -1543,11 +1547,18 @@ pub fn parse_pe(buffer: []const u8) !HeaderBodyOffsets {
         return error.MultiversionBodyOverlapsHeader;
     }
 
-    return .{
+    const offsets: HeaderBodyOffsets.Offsets = .{
         .header_offset = header_offset,
         .body_offset = body_offset,
         .body_size = body_size,
-        .format = .pe,
+    };
+
+    const arch = coff.getCoffHeader().machine.toTargetCpuArch() orelse
+        return error.UnknownArchitecture;
+    return switch (arch) {
+        .aarch64 => .{ .format = .pe, .aarch64 = offsets, .x86_64 = null },
+        .x86_64 => .{ .format = .pe, .aarch64 = null, .x86_64 = offsets },
+        else => return error.UnknownArchitecture,
     };
 }
 
@@ -1575,6 +1586,8 @@ fn test_elf_build_header(buffer: []align(8) u8) !*elf.Elf64_Ehdr {
     elf_header.e_ident[elf.EI_CLASS] = elf.ELFCLASS64;
     try expect_any_error(parse_elf(buffer));
 
+    elf_header.e_machine = elf.EM.X86_64;
+    try expect_any_error(parse_elf(buffer));
     elf_header.e_shnum = 4;
     try expect_any_error(parse_elf(buffer));
     elf_header.e_shoff = 8192;
@@ -1643,7 +1656,7 @@ fn test_elf_build_section(
 
 // Not quite a fuzzer, but build up an ELF, checking that there's an error after each step, with a
 // full range of values is the undefined intermediate bits.
-test "parse_elf" {
+test parse_elf {
     var buffer: [32768]u8 align(8) = undefined;
     for (0..256) |i| {
         @memset(&buffer, @as(u8, @intCast(i)));
@@ -1679,8 +1692,8 @@ test "parse_elf" {
         section_mvb.sh_size = 8192;
         const parsed = try parse_elf(&buffer);
 
-        assert(parsed.body_offset == 16384);
-        assert(parsed.header_offset == 24576);
+        assert(parsed.x86_64.?.body_offset == 16384);
+        assert(parsed.x86_64.?.header_offset == 24576);
     }
 }
 

@@ -407,7 +407,8 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             );
 
             const parsed_offsets = try multiversioning.parse_elf(past_binary_contents);
-            const header_bytes = past_binary_contents[parsed_offsets.header_offset..][0..@sizeOf(
+            const header_bytes =
+                past_binary_contents[parsed_offsets.x86_64.?.header_offset..][0..@sizeOf(
                 multiversioning.MultiversionHeader,
             )];
 
