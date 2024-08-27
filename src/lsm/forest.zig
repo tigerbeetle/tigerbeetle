@@ -227,7 +227,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         grid: *Grid,
         grooves: Grooves,
-        node_pool: *NodePool,
+        node_pool: NodePool,
         manifest_log: ManifestLog,
         manifest_log_progress: enum { idle, compacting, done, skip } = .idle,
 
@@ -236,76 +236,71 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         scan_buffer_pool: ScanBufferPool,
 
         pub fn init(
+            forest: *Forest,
             allocator: mem.Allocator,
             grid: *Grid,
             options: Options,
             // (e.g.) .{ .transfers = .{ .cache_entries_max = 128, … }, .accounts = … }
             grooves_options: GroovesOptions,
-        ) !Forest {
+        ) !void {
             assert(options.compaction_block_count >= Options.compaction_block_count_min);
 
-            // NodePool must be allocated to pass in a stable address for the Grooves.
-            const node_pool = try allocator.create(NodePool);
-            errdefer allocator.destroy(node_pool);
+            forest.* = .{
+                .grid = grid,
+                .grooves = undefined,
+                .node_pool = undefined,
+                .manifest_log = undefined,
+                .compaction_pipeline = undefined,
+                .scan_buffer_pool = undefined,
+            };
 
             // TODO: look into using lsm_table_size_max for the node_count.
-            node_pool.* = try NodePool.init(allocator, options.node_count);
-            errdefer node_pool.deinit(allocator);
+            try forest.node_pool.init(allocator, options.node_count);
+            errdefer forest.node_pool.deinit(allocator);
 
-            var manifest_log = try ManifestLog.init(allocator, grid, .{
+            try forest.manifest_log.init(allocator, grid, .{
                 .tree_id_min = tree_id_range.min,
                 .tree_id_max = tree_id_range.max,
                 // TODO Make this a runtime argument (from the CLI, derived from storage-size-max if
                 // possible).
                 .forest_table_count_max = table_count_max,
             });
-            errdefer manifest_log.deinit(allocator);
+            errdefer forest.manifest_log.deinit(allocator);
 
-            var grooves: Grooves = undefined;
             var grooves_initialized: usize = 0;
-
             errdefer inline for (std.meta.fields(Grooves), 0..) |field, field_index| {
                 if (grooves_initialized >= field_index + 1) {
-                    @field(grooves, field.name).deinit(allocator);
+                    const Groove = field.type;
+                    const groove: *Groove = &@field(forest.grooves, field.name);
+                    groove.deinit(allocator);
                 }
             };
 
-            inline for (std.meta.fields(Grooves)) |groove_field| {
-                const groove = &@field(grooves, groove_field.name);
-                const Groove = @TypeOf(groove.*);
-                const groove_options: Groove.Options = @field(grooves_options, groove_field.name);
+            inline for (std.meta.fields(Grooves)) |field| {
+                const Groove = field.type;
+                const groove: *Groove = &@field(forest.grooves, field.name);
+                const groove_options: Groove.Options = @field(grooves_options, field.name);
 
-                groove.* = try Groove.init(allocator, node_pool, grid, groove_options);
+                try groove.init(allocator, &forest.node_pool, grid, groove_options);
                 grooves_initialized += 1;
             }
 
-            var compaction_pipeline =
-                try CompactionPipeline.init(allocator, grid, options.compaction_block_count);
-            errdefer compaction_pipeline.deinit(allocator);
+            try forest.compaction_pipeline.init(allocator, grid, options.compaction_block_count);
+            errdefer forest.compaction_pipeline.deinit(allocator);
 
-            const scan_buffer_pool = try ScanBufferPool.init(allocator);
-            errdefer scan_buffer_pool.deinit(allocator);
-
-            return Forest{
-                .grid = grid,
-                .grooves = grooves,
-                .node_pool = node_pool,
-                .manifest_log = manifest_log,
-
-                .compaction_pipeline = compaction_pipeline,
-
-                .scan_buffer_pool = scan_buffer_pool,
-            };
+            try forest.scan_buffer_pool.init(allocator);
+            errdefer forest.scan_buffer_pool.deinit(allocator);
         }
 
         pub fn deinit(forest: *Forest, allocator: mem.Allocator) void {
             inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).deinit(allocator);
+                const Groove = field.type;
+                const groove: *Groove = &@field(forest.grooves, field.name);
+                groove.deinit(allocator);
             }
 
             forest.manifest_log.deinit(allocator);
             forest.node_pool.deinit(allocator);
-            allocator.destroy(forest.node_pool);
 
             forest.compaction_pipeline.deinit(allocator);
             forest.scan_buffer_pool.deinit(allocator);
@@ -858,35 +853,41 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         forest: ?*Forest = null,
         callback: ?*const fn (*Forest) void = null,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid, block_count: u32) !CompactionPipeline {
+        pub fn init(
+            self: *CompactionPipeline,
+            allocator: mem.Allocator,
+            grid: *Grid,
+            block_count: u32,
+        ) !void {
             log.debug("block_count={}", .{block_count});
             assert(block_count >= block_count_min);
 
-            var block_pool: CompactionBlockFIFO = .{
+            self.* = .{
+                .grid = grid,
+
+                .block_pool = undefined,
+                .block_pool_raw = undefined,
+            };
+
+            self.block_pool = .{
                 .name = "block_pool",
                 .verify_push = false,
             };
 
-            const block_pool_raw = try allocator.alloc(
+            self.block_pool_raw = try allocator.alloc(
                 CompactionHelper.CompactionBlock,
                 block_count,
             );
-            errdefer allocator.free(block_pool_raw);
+            errdefer allocator.free(self.block_pool_raw);
 
-            for (block_pool_raw, 0..) |*compaction_block, i| {
-                errdefer for (block_pool_raw[0..i]) |block| allocator.free(block.block);
+            for (self.block_pool_raw, 0..) |*compaction_block, i| {
+                errdefer for (self.block_pool_raw[0..i]) |block| allocator.free(block.block);
                 compaction_block.* = .{
                     .block = try allocate_block(allocator),
                 };
-                block_pool.push(compaction_block);
+                self.block_pool.push(compaction_block);
             }
-            errdefer for (block_pool_raw) |block| allocator.free(block.block);
-
-            return .{
-                .block_pool = block_pool,
-                .block_pool_raw = block_pool_raw,
-                .grid = grid,
-            };
+            errdefer for (self.block_pool_raw) |block| allocator.free(block.block);
         }
 
         pub fn deinit(self: *CompactionPipeline, allocator: mem.Allocator) void {

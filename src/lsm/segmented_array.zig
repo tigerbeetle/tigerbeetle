@@ -967,7 +967,8 @@ test "SortedSegmentedArray duplicate elements" {
         .{ .verify = true },
     );
 
-    var pool = try TestPool.init(testing.allocator, TestArray.node_count_max);
+    var pool: TestPool = undefined;
+    try pool.init(testing.allocator, TestArray.node_count_max);
     defer pool.deinit(testing.allocator);
 
     var array = try TestArray.init(testing.allocator);
@@ -1078,7 +1079,8 @@ fn FuzzContextType(
         removes: u64 = 0,
 
         fn init(allocator: std.mem.Allocator, random: std.rand.Random) !Self {
-            var pool = try TestPool.init(allocator, TestArray.node_count_max);
+            var pool: TestPool = undefined;
+            try pool.init(allocator, TestArray.node_count_max);
             errdefer pool.deinit(allocator);
 
             var array = try TestArray.init(allocator);

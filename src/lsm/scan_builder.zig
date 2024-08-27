@@ -57,19 +57,20 @@ pub fn ScanBuilderType(
         scan_slots: *ScanSlots,
         merge_slots: *MergeSlots,
 
-        pub fn init(allocator: Allocator) !ScanBuilder {
-            const scan_slots = try allocator.create(ScanSlots);
-            errdefer allocator.destroy(scan_slots);
-            scan_slots.* = .{};
-
-            const merge_slots = try allocator.create(MergeSlots);
-            errdefer allocator.destroy(merge_slots);
-            merge_slots.* = .{};
-
-            return ScanBuilder{
-                .scan_slots = scan_slots,
-                .merge_slots = merge_slots,
+        pub fn init(self: *ScanBuilder, allocator: Allocator) !void {
+            self.* = .{
+                .scan_slots = undefined,
+                .merge_slots = undefined,
             };
+
+            // TODO: Heap allocating a bounded array? ... maybe a ArrayList here is better.
+            self.scan_slots = try allocator.create(ScanSlots);
+            errdefer allocator.destroy(self.scan_slots);
+            self.scan_slots.* = .{};
+
+            self.merge_slots = try allocator.create(MergeSlots);
+            errdefer allocator.destroy(self.merge_slots);
+            self.merge_slots.* = .{};
         }
 
         pub fn deinit(self: *ScanBuilder, allocator: Allocator) void {

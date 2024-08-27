@@ -110,12 +110,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         };
 
         pub fn init(
+            tree: *Tree,
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
             config: Config,
             options: Options,
-        ) !Tree {
+        ) !void {
             assert(grid.superblock.opened);
             assert(config.id != 0); // id=0 is reserved.
             assert(config.name.len > 0);
@@ -125,39 +126,38 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(value_count_limit > 0);
             assert(value_count_limit <= TreeTable.value_count_max);
 
-            var table_mutable = try TableMemory.init(allocator, .mutable, config.name, .{
+            tree.* = .{
+                .grid = grid,
+                .config = config,
+                .options = options,
+
+                .table_mutable = undefined,
+                .table_immutable = undefined,
+                .manifest = undefined,
+                .compactions = undefined,
+            };
+
+            try tree.table_mutable.init(allocator, .mutable, config.name, .{
                 .value_count_limit = value_count_limit,
             });
-            errdefer table_mutable.deinit(allocator);
+            errdefer tree.table_mutable.deinit(allocator);
 
-            var table_immutable = try TableMemory.init(
+            try tree.table_immutable.init(
                 allocator,
                 .{ .immutable = .{} },
                 config.name,
                 .{ .value_count_limit = value_count_limit },
             );
-            errdefer table_immutable.deinit(allocator);
+            errdefer tree.table_immutable.deinit(allocator);
 
-            var manifest = try Manifest.init(allocator, node_pool, config);
-            errdefer manifest.deinit(allocator);
+            try tree.manifest.init(allocator, node_pool, config);
+            errdefer tree.manifest.deinit(allocator);
 
-            var compactions: [constants.lsm_levels]Compaction = undefined;
-
-            for (0..compactions.len) |i| {
-                errdefer for (compactions[0..i]) |*c| c.deinit();
-                compactions[i] = try Compaction.init(config, grid, @intCast(i));
+            for (0..tree.compactions.len) |i| {
+                errdefer for (tree.compactions[0..i]) |*c| c.deinit();
+                tree.compactions[i] = Compaction.init(config, grid, @intCast(i));
             }
-            errdefer for (compactions) |*c| c.deinit();
-
-            return Tree{
-                .grid = grid,
-                .config = config,
-                .options = options,
-                .table_mutable = table_mutable,
-                .table_immutable = table_immutable,
-                .manifest = manifest,
-                .compactions = compactions,
-            };
+            errdefer for (tree.compactions) |*c| c.deinit();
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {

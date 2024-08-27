@@ -24,20 +24,19 @@ pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) typ
         buffer: []align(node_alignment) u8,
         free: std.bit_set.DynamicBitSetUnmanaged,
 
-        pub fn init(allocator: mem.Allocator, node_count: u32) !NodePool {
+        pub fn init(pool: *NodePool, allocator: mem.Allocator, node_count: u32) !void {
             assert(node_count > 0);
 
-            const size = node_size * node_count;
-            const buffer = try allocator.alignedAlloc(u8, node_alignment, size);
-            errdefer allocator.free(buffer);
-
-            const free = try std.bit_set.DynamicBitSetUnmanaged.initFull(allocator, node_count);
-            errdefer free.deinit(allocator);
-
-            return NodePool{
-                .buffer = buffer,
-                .free = free,
+            pool.* = .{
+                .buffer = undefined,
+                .free = undefined,
             };
+            const size = node_size * node_count;
+            pool.buffer = try allocator.alignedAlloc(u8, node_alignment, size);
+            errdefer allocator.free(pool.buffer);
+
+            pool.free = try std.bit_set.DynamicBitSetUnmanaged.initFull(allocator, node_count);
+            errdefer pool.free.deinit(allocator);
         }
 
         pub fn deinit(pool: *NodePool, allocator: mem.Allocator) void {
@@ -96,30 +95,29 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
 
         node_count: u32,
         random: std.rand.Random,
+        sentinel: u64,
         node_pool: TestPool,
         node_map: std.AutoArrayHashMap(TestPool.Node, u64),
-        sentinel: u64,
 
         acquires: u64 = 0,
         releases: u64 = 0,
 
-        fn init(random: std.rand.Random, node_count: u32) !NodePool {
-            var node_pool = try TestPool.init(testing.allocator, node_count);
-            errdefer node_pool.deinit(testing.allocator);
-
-            var node_map = std.AutoArrayHashMap(TestPool.Node, u64).init(testing.allocator);
-            errdefer node_map.deinit();
-
-            const sentinel = random.int(u64);
-            @memset(mem.bytesAsSlice(u64, node_pool.buffer), sentinel);
-
-            return NodePool{
+        fn init(context: *NodePool, random: std.rand.Random, node_count: u32) !void {
+            context.* = .{
                 .node_count = node_count,
                 .random = random,
-                .node_pool = node_pool,
-                .node_map = node_map,
-                .sentinel = sentinel,
+                .sentinel = random.int(u64),
+
+                .node_pool = undefined,
+                .node_map = undefined,
             };
+
+            try context.node_pool.init(testing.allocator, node_count);
+            errdefer context.node_pool.deinit(testing.allocator);
+            @memset(mem.bytesAsSlice(u64, context.node_pool.buffer), context.sentinel);
+
+            context.node_map = std.AutoArrayHashMap(TestPool.Node, u64).init(testing.allocator);
+            errdefer context.node_map.deinit();
         }
 
         fn deinit(context: *NodePool) void {
@@ -237,7 +235,8 @@ test "NodePool" {
 
         var i: u32 = 1;
         while (i < 64) : (i += 1) {
-            var context = try Context.init(random, i);
+            var context: Context = undefined;
+            try context.init(random, i);
             defer context.deinit();
 
             try context.run();

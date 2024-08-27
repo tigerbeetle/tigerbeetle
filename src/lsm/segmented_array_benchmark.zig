@@ -98,7 +98,8 @@ test "benchmark: segmented array" {
         defer arena.deinit();
         const allocator = arena.allocator();
 
-        var node_pool = try NodePool.init(allocator, SegmentedArray.node_count_max);
+        var node_pool: NodePool = undefined;
+        try node_pool.init(allocator, SegmentedArray.node_count_max);
         defer node_pool.deinit(allocator);
 
         var array = try SegmentedArray.init(allocator);

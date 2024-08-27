@@ -1078,7 +1078,7 @@ pub fn ReplicaType(
             }
             errdefer for (self.grid_repair_write_blocks) |b| allocator.free(b);
 
-            self.state_machine = try StateMachine.init(
+            try self.state_machine.init(
                 allocator,
                 &self.grid,
                 options.state_machine_options,
