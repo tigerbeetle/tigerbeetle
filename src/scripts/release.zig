@@ -25,6 +25,7 @@ const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
+const changelog = @import("./changelog.zig");
 
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
 const multiversion_binary_platform_size_max = multiversioning.multiversion_binary_platform_size_max;
@@ -33,15 +34,20 @@ const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
 pub const CliArgs = struct {
-    run_number: u32, // TODO: increment the version number from `changelog.md`.
     sha: []const u8,
     language: ?Language = null,
     build: bool = false,
     publish: bool = false,
+    // Set if there's no changelog entry for the current code. That is, if the top changelog
+    // entry describes a past release, and not the release we are creating here.
+    //
+    // This flag is used to test the release process on the main branch.
+    no_changelog: bool = false,
 };
 
 const VersionInfo = struct {
     release_triple: []const u8,
+    release_triple_multiversion: []const u8,
     release_triple_client_min: []const u8,
     sha: []const u8,
 };
@@ -56,20 +62,45 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     else
         LanguageSet.initFull();
 
-    // Run number is a monotonically incremented integer. Map it to a three-component version
-    // number.
-    // If you change this, make sure to change the validation code in release_validate.zig!
-    const release_triple = multiversioning.ReleaseTriple{
-        .major = 0,
-        .minor = 16,
-        .patch = 0, // TODO: Read the version number from `changelog.md`.
+    const changelog_text = try shell.project_root.readFileAlloc(
+        shell.arena.allocator(),
+        "CHANGELOG.md",
+        1024 * 1024,
+    );
+    var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
+    const release, const release_multiversion, const changelog_body = blk: {
+        if (cli_args.no_changelog) {
+            var last_release = changelog_iteratator.next_changelog().?;
+            while (last_release.release == null) {
+                last_release = changelog_iteratator.next_changelog().?;
+            }
+
+            break :blk .{
+                multiversioning.Release.from(.{
+                    .major = last_release.release.?.triple().major,
+                    .minor = last_release.release.?.triple().minor,
+                    .patch = last_release.release.?.triple().patch + 1,
+                }),
+                last_release.release.?,
+                "",
+            };
+        } else {
+            const changelog_current = changelog_iteratator.next_changelog().?;
+            const changelog_previous = changelog_iteratator.next_changelog().?;
+            break :blk .{
+                changelog_current.release.?,
+                changelog_previous.release.?,
+                changelog_current.text_body,
+            };
+        }
     };
+    assert(multiversioning.Release.less_than({}, release_multiversion, release));
 
     // Ensure we're building a version newer than the first multiversion release. That was
     // bootstrapped with code to do a custom build of the release before that (see git history)
     // whereas now past binaries are downloaded and the multiversion parts extracted.
     const first_multiversion_release = "0.15.4";
-    assert((multiversioning.Release.from(release_triple)).value >
+    assert(release.value >
         (try multiversioning.Release.parse(first_multiversion_release)).value);
 
     // The minimum client version allowed to connect. This has implications for backwards
@@ -84,7 +115,14 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     };
 
     const version_info = VersionInfo{
-        .release_triple = try shell.fmt("{[major]}.{[minor]}.{[patch]}", release_triple),
+        .release_triple = try shell.fmt(
+            "{[major]}.{[minor]}.{[patch]}",
+            release.triple(),
+        ),
+        .release_triple_multiversion = try shell.fmt(
+            "{[major]}.{[minor]}.{[patch]}",
+            release_multiversion.triple(),
+        ),
         .release_triple_client_min = try shell.fmt(
             "{[major]}.{[minor]}.{[patch]}",
             release_triple_client_min,
@@ -98,7 +136,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     }
 
     if (cli_args.publish) {
-        try publish(shell, languages, version_info);
+        assert(!cli_args.no_changelog);
+        try publish(shell, languages, changelog_body, version_info);
     }
 }
 
@@ -177,13 +216,14 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Dgit-commit={commit}
                 \\    -Dconfig-release={release_triple}
                 \\    -Dconfig-release-client-min={release_triple_client_min}
-                \\    -Dmultiversion=latest
+                \\    -Dmultiversion={release_triple_multiversion}
             , .{
                 .target = target,
                 .release = if (debug) "false" else "true",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
                 .release_triple_client_min = info.release_triple_client_min,
+                .release_triple_multiversion = info.release_triple_multiversion,
             });
 
             const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
@@ -370,9 +410,35 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     );
 }
 
-fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
+fn publish(
+    shell: *Shell,
+    languages: LanguageSet,
+    changelog_body: []const u8,
+    info: VersionInfo,
+) !void {
     var section = try shell.open_section("publish all");
     defer section.close();
+
+    {
+        // Sanity check that the new release doesn't exist but the multiversion does.
+        var release_multiversion_exists = false;
+        var release_exists = false;
+        const releases_exiting = try shell.exec_stdout(
+            "gh release list --json tagName --jq {query}",
+            .{ .query = ".[].tagName" },
+        );
+        var it = std.mem.split(u8, releases_exiting, "\n");
+        while (it.next()) |release_existing| {
+            assert(std.mem.trim(u8, release_existing, " \t\n\r").len == release_existing.len);
+            if (std.mem.eql(u8, release_existing, info.release_triple)) {
+                release_exists = true;
+            }
+            if (std.mem.eql(u8, release_existing, info.release_triple_multiversion)) {
+                release_multiversion_exists = true;
+            }
+        }
+        assert(!release_exists and release_multiversion_exists);
+    }
 
     assert(try shell.dir_exists("zig-out/dist"));
 
@@ -382,12 +448,6 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             fatal("can't find gh", .{});
         };
         log.info("gh version {s}", .{gh_version});
-
-        const full_changelog = try shell.project_root.readFileAlloc(
-            shell.arena.allocator(),
-            "CHANGELOG.md",
-            1024 * 1024,
-        );
 
         const release_included_min = blk: {
             shell.project_root.deleteFile("tigerbeetle") catch {};
@@ -450,7 +510,7 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             .release_triple = info.release_triple,
             .release_triple_client_min = info.release_triple_client_min,
             .release_included_min = release_included_min,
-            .changelog = latest_changelog_entry(full_changelog),
+            .changelog = changelog_body,
         });
 
         try shell.exec(
@@ -500,37 +560,6 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     }
 }
 
-fn latest_changelog_entry(changelog: []const u8) []const u8 {
-    // Extract the first entry between two `## ` headers, excluding the header itself
-    const changelog_with_header = stdx.cut(stdx.cut(changelog, "\n## ").?.suffix, "\n## ").?.prefix;
-    return stdx.cut(changelog_with_header, "\n\n").?.suffix;
-}
-
-test latest_changelog_entry {
-    const changelog =
-        \\# TigerBeetle Changelog
-        \\
-        \\## 2023-10-23
-        \\
-        \\This is the start of the changelog.
-        \\
-        \\### Features
-        \\
-        \\
-        \\## 1970-01-01
-        \\
-        \\ The beginning.
-        \\
-    ;
-    try std.testing.expectEqualStrings(latest_changelog_entry(changelog),
-        \\This is the start of the changelog.
-        \\
-        \\### Features
-        \\
-        \\
-    );
-}
-
 fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish dotnet");
     defer section.close();
@@ -545,7 +574,9 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
         \\    {package}
     , .{
         .nuget_key = nuget_key,
-        .package = try shell.fmt("zig-out/dist/dotnet/tigerbeetle.{s}.nupkg", .{info.release_triple}),
+        .package = try shell.fmt("zig-out/dist/dotnet/tigerbeetle.{s}.nupkg", .{
+            info.release_triple,
+        }),
     });
 }
 
@@ -658,7 +689,9 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     // to the .npmrc file (that is, node config file itself supports env variables).
     _ = try shell.env_get("NODE_AUTH_TOKEN");
     try shell.exec("npm publish {package}", .{
-        .package = try shell.fmt("zig-out/dist/node/tigerbeetle-node-{s}.tgz", .{info.release_triple}),
+        .package = try shell.fmt("zig-out/dist/node/tigerbeetle-node-{s}.tgz", .{
+            info.release_triple,
+        }),
     });
 }
 
