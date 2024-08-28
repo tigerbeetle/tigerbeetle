@@ -3901,7 +3901,9 @@ pub fn ReplicaType(
             assert(self.commit_min == self.commit_prepare.?.header.op);
             assert(self.commit_min <= self.commit_max);
 
-            if (self.status == .normal and self.primary() and !self.view_durable_updating()) {
+            if (self.status == .normal and self.primary()) {
+                assert(!self.view_durable_updating());
+
                 if (self.pipeline.queue.pop_request()) |request| {
                     // Start preparing the next request in the queue (if any).
                     self.primary_pipeline_prepare(request);
