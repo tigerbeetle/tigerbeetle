@@ -42,6 +42,20 @@ fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.Resol
     return b.resolveTargetQuery(query);
 }
 
+const zig_version = std.SemanticVersion{
+    .major = 0,
+    .minor = 13,
+    .patch = 0,
+};
+
+comptime {
+    if (builtin.zig_version.order(zig_version) != .eq) {
+        std.log.err("expected zig version: {}", .{zig_version});
+        std.log.err("found zig version:    {}", .{builtin.zig_version});
+        @panic("unsupported zig version");
+    }
+}
+
 pub fn build(b: *std.Build) !void {
     // A compile error stack trace of 10 is arbitrary in size but helps with debugging.
     b.reference_trace = 10;
