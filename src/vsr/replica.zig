@@ -1705,7 +1705,7 @@ pub fn ReplicaType(
                 constants.vsr_checkpoint_ops;
             if (op_overwritten > op_checkpoint_previous) {
                 assert(self.commit_max >
-                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?);
+                    vsr.Checkpoint.durability_commit_for_checkpoint(self.op_checkpoint()).?);
             }
 
             // We must advance our op and set the header as dirty before replicating and
@@ -2059,7 +2059,7 @@ pub fn ReplicaType(
                     .replica_count = self.replica_count,
                 },
             );
-            const header_head = switch (headers) {
+            const op_head = switch (headers) {
                 .awaiting_quorum => {
                     log.debug(
                         "{}: on_do_view_change: view={} waiting for quorum",
@@ -2083,7 +2083,7 @@ pub fn ReplicaType(
                     self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
                 },
-                .complete_valid => |*quorum_headers| quorum_headers.next().?,
+                .complete_valid => |*quorum_headers| quorum_headers.next().?.op,
             };
 
             log.debug("{}: on_do_view_change: view={} quorum received", .{
@@ -2098,10 +2098,13 @@ pub fn ReplicaType(
                 self.commit_max,
                 DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
             );
+
             // We are lagging from the cluster by at least a checkpoint, and that checkpoint is
             // durable on a commit quorum of replicas. Forfeit the view change and prefer the
             // replica with the durable checkpoint for primary.
-            if (commit_max > self.op_prepare_max()) {
+            if (commit_max >
+                vsr.Checkpoint.durability_commit_for_checkpoint(self.op_checkpoint_next()).?)
+            {
                 // This serves a few purposes:
                 // 1. Availability: We pick a primary to minimize the number of WAL repairs, to
                 //    minimize the likelihood of a repair-deadlock.
@@ -2148,22 +2151,7 @@ pub fn ReplicaType(
                 // identify an unambiguous set of canonical headers.
                 self.log_view = self.view;
 
-                // Canonical DVC headers may have ops greater than op_prepare_max which cannot be
-                // accomodated in the WAL right now. Store them in view_headers, which are used to
-                // fetch these prepares in primary_repair_pipeline, *after* the replica has
-                // advanced to the next checkpoint. We can't verify these as start_view headers,
-                // though. This is because *start_view* headers are guaranteed to hold at least a
-                // pipeline of headers, which we can't ensure here because this potential primary
-                // hasn't initiated repair yet.
-                self.view_headers.array.clear();
-                self.view_headers.command = .do_view_change;
-                self.view_headers.append(header_head);
-                while (headers.complete_valid.next()) |header| {
-                    self.view_headers.append(header);
-                }
-                self.view_headers.verify();
-
-                assert(self.op == @min(header_head.op, self.op_prepare_max()));
+                assert(self.op == op_head);
                 assert(self.op >= self.commit_max);
                 assert(self.state_machine.prepare_timestamp >=
                     self.journal.header_with_op(self.op).?.timestamp);
@@ -2241,11 +2229,14 @@ pub fn ReplicaType(
             assert(view_headers[0].op == message.header.op);
             assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
 
-            if (message.header.commit > self.op_prepare_max() and (
+            const durability_commit_for_next_checkpoint =
+                vsr.Checkpoint.durability_commit_for_checkpoint(self.op_checkpoint_next()).?;
+            if (message.header.commit > durability_commit_for_next_checkpoint and (
             //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
             //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
             //  prepares in this replica's WAL are no longer needed.
-                message.header.commit > self.op_prepare_max() + constants.vsr_checkpoint_ops or
+                message.header.commit > durability_commit_for_next_checkpoint +
+                constants.vsr_checkpoint_ops or
                 // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
                 // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
                 // there's evidence that the repair can't be completed.
@@ -5857,11 +5848,9 @@ pub fn ReplicaType(
                     break :repair_min 0;
                 }
 
-                const prepare_max_for_current_checkpoint =
-                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
-                // After state sync, commit_max might lag behind checkpoint_op.
-                maybe(self.commit_max < prepare_max_for_current_checkpoint);
-                if (self.commit_max > prepare_max_for_current_checkpoint) {
+                if (self.commit_max >
+                    vsr.Checkpoint.durability_commit_for_checkpoint(self.op_checkpoint()).?)
+                {
                     if (self.op == self.op_checkpoint()) {
                         // Don't allow "op_repair_min > op_head".
                         // See https://github.com/tigerbeetle/tigerbeetle/pull/1589 for why
@@ -6521,24 +6510,6 @@ pub fn ReplicaType(
                 return .busy;
             }
 
-            // view_headers may include headers that couldn't be accommodated in the WAL of a
-            // lagging potential primary (in on_do_view_change). These headers can now be
-            // accomomodated in the WAL, since the potential primary is not lagging post repair!
-            const view_headers_op_max = self.view_headers.array.get(0).op;
-            if (view_headers_op_max > self.op) {
-                assert(view_headers_op_max <= self.op_prepare_max());
-                assert(self.op == vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()));
-                self.set_op_and_commit_max(view_headers_op_max, self.commit_max, @src());
-
-                var op = self.commit_max + 1;
-                while (op <= view_headers_op_max) : (op += 1) {
-                    const header_view =
-                        &self.view_headers.array.const_slice()[view_headers_op_max - op];
-
-                    self.replace_header(header_view);
-                }
-            }
-
             if (self.primary_repair_pipeline_op()) |_| {
                 log.debug("{}: primary_repair_pipeline: repairing", .{self.replica});
                 assert(!self.pipeline_repairing);
@@ -6598,20 +6569,13 @@ pub fn ReplicaType(
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
-            assert(self.view_headers.command == .do_view_change);
 
             var op = self.commit_max + 1;
-            const view_headers_op_max = self.view_headers.array.get(0).op;
-
-            while (op <= view_headers_op_max) : (op += 1) {
-                const header_view =
-                    &self.view_headers.array.const_slice()[view_headers_op_max - op];
-                const header_journal = self.journal.header_with_op(op).?;
-
-                assert(header_journal.op == header_view.op);
-                assert(header_journal.view == header_view.view);
-                assert(header_journal.checksum == header_view.checksum);
-                if (!self.pipeline.cache.contains_header(header_view)) return op;
+            while (op <= self.op) : (op += 1) {
+                const op_header = self.journal.header_with_op(op).?;
+                if (!self.pipeline.cache.contains_header(op_header)) {
+                    return op;
+                }
             }
             return null;
         }
@@ -6624,10 +6588,8 @@ pub fn ReplicaType(
             assert(self.pipeline == .cache);
             assert(self.pipeline_repairing);
 
-            const view_headers_op_max = self.view_headers.array.get(0).op;
             const op = self.primary_repair_pipeline_op().?;
-            const op_checksum =
-                self.view_headers.array.const_slice()[view_headers_op_max - op].checksum;
+            const op_checksum = self.journal.header_with_op(op).?.checksum;
             log.debug("{}: primary_repair_pipeline_read: op={} checksum={}", .{
                 self.replica,
                 op,
@@ -7142,10 +7104,10 @@ pub fn ReplicaType(
             // syncing table blocks should not send prepare_oks for prepares past the current
             // checkpoint's prepare_max.
             if (!self.sync_content_done()) {
-                const prepare_max_current_checkpoint =
-                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
-                if (self.commit_max <= prepare_max_current_checkpoint and
-                    header.op > prepare_max_current_checkpoint)
+                if (self.commit_max <=
+                    vsr.Checkpoint.durability_commit_for_checkpoint(self.op_checkpoint()).? and
+                    header.op >
+                    vsr.Checkpoint.durability_commit_for_checkpoint(self.op_checkpoint()).?)
                 {
                     log.debug("{}: send_prepare_ok: not sending (sync_content_done={})", .{
                         self.replica,
@@ -8063,8 +8025,7 @@ pub fn ReplicaType(
             assert(dvcs_all.count() >= self.quorum_view_change);
 
             for (dvcs_all.const_slice()) |message| {
-                assert(message.header.op <=
-                    self.op_prepare_max() + constants.pipeline_prepare_queue_max);
+                assert(message.header.op <= self.op_prepare_max());
             }
 
             // The `prepare_timestamp` prevents a primary's own clock from running backwards.
@@ -8090,7 +8051,7 @@ pub fn ReplicaType(
             assert(header_head.op >= self.op_checkpoint());
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
-            maybe(header_head.op <= self.op_prepare_max());
+            assert(header_head.op <= self.op_prepare_max());
             for (dvcs_all.const_slice()) |dvc| assert(header_head.op >= dvc.header.commit_min);
 
             assert(self.commit_min >=
@@ -8100,21 +8061,21 @@ pub fn ReplicaType(
                 // "`replica.op` exists" invariant may be broken briefly between
                 // set_op_and_commit_max() and replace_header().
                 self.set_op_and_commit_max(
-                    @min(header_head.op, self.op_prepare_max()),
+                    header_head.op,
                     DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
                     @src(),
                 );
                 assert(self.commit_max <= self.op_prepare_max());
                 assert(self.commit_max <= self.op);
                 maybe(self.journal.header_with_op(self.op) == null);
-                if (header_head.op <= self.op_prepare_max()) self.replace_header(header_head);
+                self.replace_header(header_head);
+                assert(self.journal.header_with_op(self.op) != null);
             }
 
             while (quorum_headers.next()) |header| {
                 assert(header.op < header_head.op);
-                if (header.op <= self.op_prepare_max()) self.replace_header(header);
+                self.replace_header(header);
             }
-            assert(self.journal.header_with_op(self.op) != null);
             assert(self.journal.header_with_op(self.commit_max) != null);
 
             const dvcs_uncanonical =
@@ -8636,6 +8597,13 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.log_view == self.view) or
                 (self.status == .view_change and self.log_view == self.view));
 
+            const primary_repairing =
+                self.status == .view_change and self.log_view == self.view;
+            if (primary_repairing) {
+                assert(self.primary_index(self.view) == self.replica);
+                assert(self.do_view_change_quorum);
+            }
+
             assert(self.view == self.log_view);
 
             // The DVC headers include:
@@ -8650,20 +8618,22 @@ pub fn ReplicaType(
             //
             // DVC headers are stitched together from the journal and existing view headers (they
             // might belong to the next log wrap), to guarantee that a DVC with log_view=v includes
-            // all uncommitted ops with views <v.
+            // all uncommitted ops with views <v. Special case: a primary that has collected a DVC
+            // quorum and installed surviving headers into the journal ignores view headers (they
+            // might have some truncated ops).
             var view_headers_updated = vsr.Headers.ViewChangeArray{
                 .command = .do_view_change,
                 .array = .{},
             };
 
             const view_headers_op_max = self.view_headers.array.get(0).op;
-            var op = @max(self.op, view_headers_op_max);
+            var op = if (primary_repairing) self.op else @max(self.op, view_headers_op_max);
             for (0..constants.pipeline_prepare_queue_max + 1) |_| {
                 const header_journal: ?*const vsr.Header.Prepare =
                     self.journal.header_with_op(op);
 
                 const header_view: ?*const vsr.Header.Prepare = header: {
-                    if (op > view_headers_op_max) break :header null;
+                    if (primary_repairing or op > view_headers_op_max) break :header null;
 
                     const header = &self.view_headers.array.const_slice()[view_headers_op_max - op];
                     break :header switch (vsr.Headers.dvc_header_type(header)) {
