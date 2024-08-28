@@ -65,8 +65,8 @@ Fields used by each mode of transfer:
 | `flags.balancing_debit`       | optional     | optional | false        | false        |
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
 | `flags.imported`              | optional     | optional | optional     | optional     |
-| `flags.closing_debit_account` | optional     | optional | false        | false        |
-| `flags.closing_credit_account`| optional     | optional | false        | false        |
+| `flags.closing_debit`         | optional     | optional | false        | false        |
+| `flags.closing_credit`        | optional     | optional | false        | false        |
 | `timestamp`                   | none²        | none²    | none²        | none²        |
 
 > _¹ None if `flags.imported` is set._<br/>
@@ -482,14 +482,14 @@ necessary:
   In those cases, the [two-phase post or rollback](../coding/two-phase-transfers.md) must be
   done manually.
 
-#### `flags.closing_debit_account`
+#### `flags.closing_debit`
 
 When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
 of the [debit account](#debit_account_id) to be set if the transfer succeeds.
 
 This action can be reverted when combined with the flag [`flags.pending`](#flagspending).
 
-#### `flags.closing_credit_account`
+#### `flags.closing_credit`
 
 When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
 of the [credit account](#credit_account_id) to be set if the transfer succeeds.

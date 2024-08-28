@@ -256,8 +256,8 @@ When set, the account will reject further transfers.
 
 - This flag can be set during the account creation.
 - This flag can be set by a [`Transfer`](transfer.md)
-  marked with the flag [`Transfer.flags.closing_debit_account`](transfer.md#flagsclosing_debit_account)
-  or [`Transfer.flags.closing_credit_account`](transfer.md#flagsclosing_credit_account).
+  marked with the flag [`Transfer.flags.closing_debit`](transfer.md#flagsclosing_debit)
+  or [`Transfer.flags.closing_credit`](transfer.md#flagsclosing_credit).
 
   Note that, to make closing an account a **reversible** operation,
   the flag [`Transfer.flags.pending`](transfer.md#flagspending) also must be set.
