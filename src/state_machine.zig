@@ -2328,13 +2328,15 @@ pub fn StateMachineType(
                 }
             }
 
-            const dr_updated = amount > 0 or dr_account_new.flags.closed;
+            const dr_updated = amount > 0 or p.amount > 0 or
+                dr_account_new.flags.closed != dr_account.flags.closed;
             assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
             if (dr_updated) {
                 self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             }
 
-            const cr_updated = amount > 0 or cr_account_new.flags.closed;
+            const cr_updated = amount > 0 or p.amount > 0 or
+                cr_account_new.flags.closed != cr_account.flags.closed;
             assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
             if (cr_updated) {
                 self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
