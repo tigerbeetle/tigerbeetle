@@ -302,6 +302,12 @@ pub fn ReplicaType(
         /// Invariants:
         /// - If syncing≠idle then sync_tables=null.
         sync_tables: ?ForestTableIterator = null,
+        /// Tracks wal repair progress to decide when to switch to state sync.
+        /// Updated on repair_sync_timeout.
+        sync_wal_repair_progress: struct {
+            commit_min: u64 = 0,
+            advanced: bool = true,
+        } = .{},
 
         /// The release we are currently upgrading towards.
         ///
@@ -367,9 +373,9 @@ pub fn ReplicaType(
         ///
         /// Invariants (not applicable during status=recovering):
         /// * `replica.commit_min` exists in the Journal OR `replica.commit_min == op_checkpoint`.
-        /// * `replica.commit_min ≤ replica.op`
+        /// * `replica.commit_min ≤ replica.op`.
         /// * `replica.commit_min ≥ replica.op_checkpoint`.
-        /// * never decreases while the replica is alive
+        /// * never decreases while the replica is alive and not state-syncing.
         commit_min: u64,
 
         /// The op number of the latest committed operation (according to the cluster).
@@ -2277,7 +2283,7 @@ pub fn ReplicaType(
                     .awaiting_checkpoint => {},
                 }
 
-                log.debug(
+                log.mark.debug(
                     \\{}: on_start_view: sync started view={} op_checkpoint={} op_checkpoint_new={}
                 , .{
                     self.replica,
@@ -2327,9 +2333,17 @@ pub fn ReplicaType(
             }
 
             if (self.syncing == .updating_superblock) {
+                // State sync can "truncate" the first batch of committed ops!
                 maybe(self.commit_min >
                     self.syncing.updating_superblock.checkpoint_state.header.op);
+                assert(self.commit_min < constants.lsm_compaction_ops +
+                    self.syncing.updating_superblock.checkpoint_state.header.op);
+
                 self.commit_min = self.syncing.updating_superblock.checkpoint_state.header.op;
+                self.sync_wal_repair_progress = .{
+                    .commit_min = self.commit_min,
+                    .advanced = true,
+                };
             }
 
             self.view_headers.replace(.start_view, view_headers);
@@ -3122,6 +3136,13 @@ pub fn ReplicaType(
             assert(self.backup());
             assert(self.repair_sync_timeout.ticking);
             self.repair_sync_timeout.reset();
+
+            const commit_min_previous = self.sync_wal_repair_progress.commit_min;
+            assert(commit_min_previous <= self.commit_min);
+            self.sync_wal_repair_progress = .{
+                .commit_min = self.commit_min,
+                .advanced = commit_min_previous < self.commit_min,
+            };
 
             if (self.syncing == .awaiting_checkpoint or self.repair_stuck()) {
                 log.warn("{}: on_repair_sync_timeout: request sync; lagging behind cluster " ++
@@ -6906,6 +6927,9 @@ pub fn ReplicaType(
 
             if (self.status == .recovering_head) return false;
 
+            if (self.sync_wal_repair_progress.advanced) return false;
+            if (self.sync_wal_repair_progress.commit_min < self.commit_min) return false;
+
             const commit_next = self.commit_min + 1;
             const commit_next_slot = self.journal.slot_with_op(commit_next);
 
@@ -6917,7 +6941,7 @@ pub fn ReplicaType(
 
             const stuck_grid = !self.grid.read_global_queue.empty();
 
-            return stuck_header or stuck_prepare or stuck_grid;
+            return (stuck_header or stuck_prepare or stuck_grid);
         }
 
         /// Replaces the header if the header is different and at least op_repair_min.
