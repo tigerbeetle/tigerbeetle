@@ -4525,6 +4525,7 @@ test "create_transfers: closing accounts" {
         // Temporarily closing the debit account.
         \\ transfer   T1 A1 A2   15   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ ok
         \\ transfer   T2 A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ ok
+        \\ transfer   T2 A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ exists
         \\ transfer   T3 A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
         \\ transfer   T3 A2 A1    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ commit create_transfers
@@ -4545,6 +4546,7 @@ test "create_transfers: closing accounts" {
         // No other pending transfer can be posted or voided in a closed account.
         \\ transfer   T5 A1 A2   10   _  _   _  _    1 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
         \\ transfer   T6 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ ok // Temporarly closing the credit account.
+        \\ transfer   T6 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ exists
         \\ transfer   T7 A1 A2   10   T5 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ transfer   T7 A1 A2   10   T5 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ credit_account_already_closed
         \\ commit create_transfers
@@ -4567,6 +4569,7 @@ test "create_transfers: closing accounts" {
         \\
         // Closing both accounts permanently.
         \\ transfer   T7 A1 A2    0   _  _   _  _    0 L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ ok
+        \\ transfer   T7 A1 A2    0   _  _   _  _    0 L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ exists
         \\ transfer   T8 A1 A3    1   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
         \\ transfer   T8 A3 A2    1   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ commit create_transfers
