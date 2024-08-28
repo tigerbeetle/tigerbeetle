@@ -81,19 +81,19 @@ public enum TransferFlags : ushort
     BalancingCredit = 1 << 5,
 
     /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit
+    /// </summary>
+    ClosingDebit = 1 << 6,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit
+    /// </summary>
+    ClosingCredit = 1 << 7,
+
+    /// <summary>
     /// https://docs.tigerbeetle.com/reference/transfer#flagsimported
     /// </summary>
-    Imported = 1 << 6,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit_account
-    /// </summary>
-    ClosingDebitAccount = 1 << 7,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit_account
-    /// </summary>
-    ClosingCreditAccount = 1 << 8,
+    Imported = 1 << 8,
 
 }
 
@@ -792,14 +792,14 @@ public enum CreateTransferResult : uint
     ImportedEventTimeoutMustBeZero = 63,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_closed
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed
     /// </summary>
-    DebitAccountClosed = 64,
+    DebitAccountAlreadyClosed = 64,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_closed
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed
     /// </summary>
-    CreditAccountClosed = 65,
+    CreditAccountAlreadyClosed = 65,
 
 }
 

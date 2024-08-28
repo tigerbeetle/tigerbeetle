@@ -39,19 +39,19 @@ public interface TransferFlags {
     int BALANCING_CREDIT = (int) (1 << 5);
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit">closing_debit</a>
+     */
+    int CLOSING_DEBIT = (int) (1 << 6);
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit">closing_credit</a>
+     */
+    int CLOSING_CREDIT = (int) (1 << 7);
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsimported">imported</a>
      */
-    int IMPORTED = (int) (1 << 6);
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit_account">closing_debit_account</a>
-     */
-    int CLOSING_DEBIT_ACCOUNT = (int) (1 << 7);
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit_account">closing_credit_account</a>
-     */
-    int CLOSING_CREDIT_ACCOUNT = (int) (1 << 8);
+    int IMPORTED = (int) (1 << 8);
 
     static boolean hasLinked(final int flags) {
         return (flags & LINKED) == LINKED;
@@ -77,16 +77,16 @@ public interface TransferFlags {
         return (flags & BALANCING_CREDIT) == BALANCING_CREDIT;
     }
 
+    static boolean hasClosingDebit(final int flags) {
+        return (flags & CLOSING_DEBIT) == CLOSING_DEBIT;
+    }
+
+    static boolean hasClosingCredit(final int flags) {
+        return (flags & CLOSING_CREDIT) == CLOSING_CREDIT;
+    }
+
     static boolean hasImported(final int flags) {
         return (flags & IMPORTED) == IMPORTED;
-    }
-
-    static boolean hasClosingDebitAccount(final int flags) {
-        return (flags & CLOSING_DEBIT_ACCOUNT) == CLOSING_DEBIT_ACCOUNT;
-    }
-
-    static boolean hasClosingCreditAccount(final int flags) {
-        return (flags & CLOSING_CREDIT_ACCOUNT) == CLOSING_CREDIT_ACCOUNT;
     }
 
 }
