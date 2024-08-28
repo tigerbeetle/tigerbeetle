@@ -3217,7 +3217,13 @@ pub fn ReplicaType(
 
             if (self.state_machine.pulse_needed(timestamp)) {
                 self.state_machine.prepare_timestamp = timestamp;
-                self.send_request_pulse_to_self();
+                if (self.view_durable_updating()) {
+                    log.debug("{}: on_pulse_timeout: ignoring (still persisting view)", .{
+                        self.replica,
+                    });
+                } else {
+                    self.send_request_pulse_to_self();
+                }
             }
         }
 
@@ -3236,9 +3242,7 @@ pub fn ReplicaType(
                 //   progress, it needs to start preparing more upgrades.
                 const release_next = self.release_for_next_checkpoint();
                 if (release_next == null or release_next.?.value != upgrade_release.value) {
-                    if (self.solo() and self.view_durable_updating()) {
-                        // Solo replica just after recovering is still updating its view and ignores
-                        // requests, postpone until the next timer expiry.
+                    if (self.view_durable_updating()) {
                         log.debug("{}: on_upgrade_timeout: ignoring (still persisting view)", .{
                             self.replica,
                         });
@@ -3897,7 +3901,7 @@ pub fn ReplicaType(
             assert(self.commit_min == self.commit_prepare.?.header.op);
             assert(self.commit_min <= self.commit_max);
 
-            if (self.status == .normal and self.primary()) {
+            if (self.status == .normal and self.primary() and !self.view_durable_updating()) {
                 if (self.pipeline.queue.pop_request()) |request| {
                     // Start preparing the next request in the queue (if any).
                     self.primary_pipeline_prepare(request);
@@ -5869,6 +5873,7 @@ pub fn ReplicaType(
         fn primary_pipeline_prepare(self: *Self, request: Request) void {
             assert(self.status == .normal);
             assert(self.primary());
+            assert(!self.view_durable_updating());
             assert(self.commit_min == self.commit_max);
             assert(self.commit_max + self.pipeline.queue.prepare_queue.count == self.op);
             assert(!self.pipeline.queue.prepare_queue.full());
@@ -9472,28 +9477,26 @@ pub fn ReplicaType(
             assert(!constants.aof_recovery);
             assert(self.status == .normal);
             assert(self.primary());
+            assert(!self.view_durable_updating());
             assert(!self.pipeline.queue.full());
             assert(!self.pipeline.queue.contains_operation(.pulse));
             assert(self.pulse_enabled());
             assert(self.state_machine.pulse_needed(self.state_machine.prepare_timestamp));
 
             self.send_request_to_self(.pulse, &.{});
-            if (!self.pipeline.queue.contains_operation(.pulse)) {
-                assert(self.view_durable_updating());
-            }
+            assert(self.pipeline.queue.contains_operation(.pulse));
         }
 
         fn send_request_upgrade_to_self(self: *Self) void {
             assert(self.status == .normal);
             assert(self.primary());
+            assert(!self.view_durable_updating());
             assert(self.upgrade_release.?.value > self.release.value);
             maybe(self.pipeline.queue.contains_operation(.upgrade));
 
             const upgrade = vsr.UpgradeRequest{ .release = self.upgrade_release.? };
             self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
-            if (!self.pipeline.queue.contains_operation(.upgrade)) {
-                assert(self.view_durable_updating());
-            }
+            assert(self.pipeline.queue.contains_operation(.upgrade));
         }
 
         fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {
