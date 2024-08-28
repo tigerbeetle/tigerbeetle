@@ -471,9 +471,10 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(r_lag.status(), .normal);
     try expectEqual(r_lag.op_checkpoint(), 0);
 
-    // Allow repair, but ensure that state sync doesn't run.
-    r_lag.drop(.__, .bidirectional, .sync_checkpoint);
+    // Allow repair, but check that state sync doesn't run.
+    const mark = marks.check("sync started");
     t.run();
+    try mark.expect_not_hit();
 
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
