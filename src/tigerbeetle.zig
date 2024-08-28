@@ -133,9 +133,9 @@ pub const TransferFlags = packed struct(u16) {
     void_pending_transfer: bool = false,
     balancing_debit: bool = false,
     balancing_credit: bool = false,
+    closing_debit: bool = false,
+    closing_credit: bool = false,
     imported: bool = false,
-    closing_debit_account: bool = false,
-    closing_credit_account: bool = false,
     padding: u7 = 0,
 
     comptime {
@@ -301,8 +301,8 @@ pub const CreateTransferResult = enum(u32) {
     imported_event_timestamp_must_postdate_credit_account = 62,
     imported_event_timeout_must_be_zero = 63,
 
-    debit_account_closed = 64,
-    credit_account_closed = 65,
+    debit_account_already_closed = 64,
+    credit_account_already_closed = 65,
 
     comptime {
         for (0..std.enums.values(CreateTransferResult).len) |index| {

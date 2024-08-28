@@ -1942,8 +1942,8 @@ pub fn StateMachineType(
             assert(t.timestamp > dr_account.timestamp);
             assert(t.timestamp > cr_account.timestamp);
 
-            if (dr_account.flags.closed) return .debit_account_closed;
-            if (cr_account.flags.closed) return .credit_account_closed;
+            if (dr_account.flags.closed) return .debit_account_already_closed;
+            if (cr_account.flags.closed) return .credit_account_already_closed;
 
             const amount = amount: {
                 var amount = t.amount;
@@ -2050,13 +2050,18 @@ pub fn StateMachineType(
             // Closing accounts:
             assert(!dr_account_new.flags.closed);
             assert(!cr_account_new.flags.closed);
-            if (t2.flags.closing_debit_account) dr_account_new.flags.closed = true;
-            if (t2.flags.closing_credit_account) cr_account_new.flags.closed = true;
+            if (t2.flags.closing_debit) dr_account_new.flags.closed = true;
+            if (t2.flags.closing_credit) cr_account_new.flags.closed = true;
 
-            if (!stdx.equal_bytes(Account, dr_account, &dr_account_new)) {
+            const dr_updated = amount > 0 or dr_account_new.flags.closed;
+            assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
+            if (dr_updated) {
                 self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             }
-            if (!stdx.equal_bytes(Account, cr_account, &cr_account_new)) {
+
+            const cr_updated = amount > 0 or cr_account_new.flags.closed;
+            assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
+            if (cr_updated) {
                 self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
             }
 
@@ -2146,8 +2151,8 @@ pub fn StateMachineType(
             if (t.flags.pending) return .flags_are_mutually_exclusive;
             if (t.flags.balancing_debit) return .flags_are_mutually_exclusive;
             if (t.flags.balancing_credit) return .flags_are_mutually_exclusive;
-            if (t.flags.closing_credit_account) return .flags_are_mutually_exclusive;
-            if (t.flags.closing_debit_account) return .flags_are_mutually_exclusive;
+            if (t.flags.closing_credit) return .flags_are_mutually_exclusive;
+            if (t.flags.closing_debit) return .flags_are_mutually_exclusive;
 
             if (t.pending_id == 0) return .pending_id_must_not_be_zero;
             if (t.pending_id == math.maxInt(u128)) return .pending_id_must_not_be_int_max;
@@ -2250,11 +2255,11 @@ pub fn StateMachineType(
 
             // The only movement allowed in a closed account is
             // posting or voiding the closing transfer:
-            if (dr_account.flags.closed and !p.flags.closing_debit_account) {
-                return .debit_account_closed;
+            if (dr_account.flags.closed and !p.flags.closing_debit) {
+                return .debit_account_already_closed;
             }
-            if (cr_account.flags.closed and !p.flags.closing_credit_account) {
-                return .credit_account_closed;
+            if (cr_account.flags.closed and !p.flags.closing_credit) {
+                return .credit_account_already_closed;
             }
 
             // After this point, the transfer must succeed.
@@ -2313,20 +2318,25 @@ pub fn StateMachineType(
             }
             if (t2.flags.void_pending_transfer) {
                 // Reverts the closing account operation:
-                if (p.flags.closing_debit_account) {
+                if (p.flags.closing_debit) {
                     assert(dr_account.flags.closed);
                     dr_account_new.flags.closed = false;
                 }
-                if (p.flags.closing_credit_account) {
+                if (p.flags.closing_credit) {
                     assert(cr_account.flags.closed);
                     cr_account_new.flags.closed = false;
                 }
             }
 
-            if (!stdx.equal_bytes(Account, dr_account, &dr_account_new)) {
+            const dr_updated = amount > 0 or dr_account_new.flags.closed;
+            assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
+            if (dr_updated) {
                 self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             }
-            if (!stdx.equal_bytes(Account, cr_account, &cr_account_new)) {
+
+            const cr_updated = amount > 0 or cr_account_new.flags.closed;
+            assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
+            if (cr_updated) {
                 self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
             }
 
@@ -2523,11 +2533,11 @@ pub fn StateMachineType(
                 dr_account_new.debits_pending -= expired.amount;
                 cr_account_new.credits_pending -= expired.amount;
 
-                if (expired.flags.closing_debit_account) {
+                if (expired.flags.closing_debit) {
                     assert(dr_account_new.flags.closed);
                     dr_account_new.flags.closed = false;
                 }
-                if (expired.flags.closing_credit_account) {
+                if (expired.flags.closing_credit) {
                     assert(cr_account_new.flags.closed);
                     cr_account_new.flags.closed = false;
                 }
@@ -3229,8 +3239,8 @@ const TestCreateTransfer = struct {
                 .balancing_debit = t.flags_balancing_debit != null,
                 .balancing_credit = t.flags_balancing_credit != null,
                 .imported = t.flags_imported != null,
-                .closing_debit_account = t.flags_closing_debit != null,
-                .closing_credit_account = t.flags_closing_credit != null,
+                .closing_debit = t.flags_closing_debit != null,
+                .closing_credit = t.flags_closing_credit != null,
                 .padding = t.flags_padding,
             },
             .timestamp = timestamp orelse t.timestamp,
@@ -4513,8 +4523,8 @@ test "create_transfers: closing accounts" {
         // Temporarily closing the debit account.
         \\ transfer   T1 A1 A2   15   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ ok
         \\ transfer   T2 A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ ok
-        \\ transfer   T3 A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_closed
-        \\ transfer   T3 A2 A1    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_closed
+        \\ transfer   T3 A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
+        \\ transfer   T3 A2 A1    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ commit create_transfers
         \\
         \\ lookup_account A1  0 15  0   0  CLSD
@@ -4533,8 +4543,8 @@ test "create_transfers: closing accounts" {
         // No other pending transfer can be posted or voided in a closed account.
         \\ transfer   T5 A1 A2   10   _  _   _  _    1 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
         \\ transfer   T6 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ ok // Temporarly closing the credit account.
-        \\ transfer   T7 A1 A2   10   T5 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ credit_account_closed
-        \\ transfer   T7 A1 A2   10   T5 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ credit_account_closed
+        \\ transfer   T7 A1 A2   10   T5 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ credit_account_already_closed
+        \\ transfer   T7 A1 A2   10   T5 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ credit_account_already_closed
         \\ commit create_transfers
         \\
         \\ lookup_account A1 10 20  0   0  _
@@ -4555,14 +4565,18 @@ test "create_transfers: closing accounts" {
         \\
         // Closing both accounts permanently.
         \\ transfer   T7 A1 A2    0   _  _   _  _    0 L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ ok
-        \\ transfer   T8 A1 A3    1   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_closed
-        \\ transfer   T8 A3 A2    1   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_closed
+        \\ transfer   T8 A1 A3    1   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
+        \\ transfer   T8 A3 A2    1   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ commit create_transfers
         \\
-        \\ tick 60 seconds
         \\ lookup_account A1  0 20  0   0  CLSD
         \\ lookup_account A2  0  0  0  20  CLSD
         \\ commit lookup_accounts
+        \\
+        // Cannot close an already closed account.
+        \\ transfer   T8 A1 A3    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR _   _ _ debit_account_already_closed
+        \\ transfer   T8 A3 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   CCR _ _ credit_account_already_closed
+        \\ commit create_transfers
     );
 }
 
