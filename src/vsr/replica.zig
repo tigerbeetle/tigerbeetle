@@ -1699,12 +1699,12 @@ pub fn ReplicaType(
 
             // If we are going to overwrite an op from the previous WAL wrap, assert that it's part
             // of a checkpoint that is durable on a commit quorum of replicas. See `op_repair_min`
-            // for why op=prepare_max+1 being committed implies that.
+            // for when a checkpoint can be considered durable on a quorum of replicas.
             const op_overwritten = (self.op + 1) -| constants.journal_slot_count;
             const op_checkpoint_previous = self.op_checkpoint() -|
                 constants.vsr_checkpoint_ops;
             if (op_overwritten > op_checkpoint_previous) {
-                assert(self.commit_max > self.op_checkpoint_durability());
+                assert(vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max));
             }
 
             // We must advance our op and set the header as dirty before replicating and
@@ -2101,7 +2101,7 @@ pub fn ReplicaType(
             // We are lagging from the cluster by at least a checkpoint, and that checkpoint is
             // durable on a commit quorum of replicas. Forfeit the view change and prefer the
             // replica with the durable checkpoint for primary.
-            if (commit_max > self.op_checkpoint_next_durability()) {
+            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), commit_max)) {
                 // This serves a few purposes:
                 // 1. Availability: We pick a primary to minimize the number of WAL repairs, to
                 //    minimize the likelihood of a repair-deadlock.
@@ -2226,12 +2226,12 @@ pub fn ReplicaType(
             assert(view_headers[0].op == message.header.op);
             assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
 
-            if (message.header.commit > self.op_checkpoint_next_durability() and (
+            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit) and (
             //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
             //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
             //  prepares in this replica's WAL are no longer needed.
-                message.header.commit > self.op_checkpoint_next_durability() +
-                constants.vsr_checkpoint_ops or
+                vsr.Checkpoint.durable(self.op_checkpoint_next() +
+                constants.vsr_checkpoint_ops, message.header.commit) or
                 // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
                 // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
                 // there's evidence that the repair can't be completed.
@@ -5753,23 +5753,17 @@ pub fn ReplicaType(
             return checkpoint_next;
         }
 
-        /// Returns the commit_max op past which the current checkpoint can be considered durable
-        /// on a commit quorum of replicas.
-        fn op_checkpoint_durability(self: *const Self) u64 {
-            return vsr.Checkpoint.durability_commit_for_checkpoint(self.op_checkpoint()).?;
-        }
-
-        /// Returns the commit_max op past which the next checkpoint can be considered durable
-        /// on a commit quorum of replicas.
-        fn op_checkpoint_next_durability(self: *const Self) u64 {
-            return vsr.Checkpoint.durability_commit_for_checkpoint(self.op_checkpoint_next()).?;
-        }
-
         /// Returns the next op that will trigger a checkpoint.
         ///
         /// See `op_checkpoint_next` for more detail.
         fn op_checkpoint_next_trigger(self: *const Self) u64 {
             return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint_next()).?;
+        }
+
+        /// Returns the op that triggered the current checkpoint.
+        fn op_checkpoint_trigger(self: *const Self) u64 {
+            assert(self.op_checkpoint() != 0);
+            return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
         }
 
         /// Returns the highest op that this replica can safely prepare to its WAL.
@@ -5790,6 +5784,27 @@ pub fn ReplicaType(
                     self.syncing.updating_superblock.checkpoint_state.header.op,
                 ),
             ).?;
+        }
+
+        /// Returns the highest op that this replica can safely prepare_ok.
+        ///
+        /// Sending prepare_ok for a op higher than `op_prepare_ok_max` causes a replica to falsely
+        /// contribute to the durability of a checkpoint:
+        /// * A replica could sync to a checkpoint that is not yet durable on a quorum of
+        ///   replicas. To avoid falsely contributing to checkpoint durability, syncing replicas
+        ///   must withhold some prepare_oks till they haven't synced all tables.
+        /// * Replicas can safely write two pipeline_prepare_queue_max worth of ops past
+        ///   the next checkpoint's trigger to their WAL (see `op_prepare_max`). To avoid falsely
+        ///   contributing to the next checkpoint's durability, they must not send prepare_oks for
+        ///   ops past the first pipeline_prepare_queue_max.
+        fn op_prepare_ok_max(self: *const Self) u64 {
+            if (!self.sync_content_done() and
+                !vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max))
+            {
+                return self.op_checkpoint_trigger() + constants.pipeline_prepare_queue_max;
+            } else {
+                return self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max;
+            }
         }
 
         /// Returns checkpoint id associated with the op.
@@ -5855,7 +5870,7 @@ pub fn ReplicaType(
                     break :repair_min 0;
                 }
 
-                if (self.commit_max > self.op_checkpoint_durability()) {
+                if (vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max)) {
                     if (self.op == self.op_checkpoint()) {
                         // Don't allow "op_repair_min > op_head".
                         // See https://github.com/tigerbeetle/tigerbeetle/pull/1589 for why
@@ -5949,9 +5964,7 @@ pub fn ReplicaType(
                     );
 
                     if (self.release.value == upgrade_request.release.value) {
-                        const op_checkpoint_trigger =
-                            vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint());
-                        assert(op_checkpoint_trigger.? > self.op + 1);
+                        assert(self.op_checkpoint_trigger() > self.op + 1);
                     }
                 },
                 else => {
@@ -7104,27 +7117,15 @@ pub fn ReplicaType(
                 });
                 return;
             }
-
-            if (!self.sync_content_done()) {
-                // To avoid falsely contributing to the durability of the *current* checkpoint,
-                // replicas syncing table blocks should not send prepare_oks for prepares past the
-                // *current* checkpoint's durability commit.
-                if (self.commit_max <= self.op_checkpoint_durability() and
-                    header.op > self.op_checkpoint_durability())
-                {
+            if (header.op > self.op_prepare_ok_max()) {
+                if (!self.sync_content_done()) {
                     log.debug("{}: send_prepare_ok: not sending (syncing replica falsely " ++
                         "contributes to durability of the current checkpoint)", .{self.replica});
-                    return;
-                }
-            } else {
-                // Backups can write a pipeline_prepare_queue_max worth of ops past the *next*
-                // checkpoint's durability op into their WAL, but they cannot prepare_ok these ops
-                // till they have actually reached the next checkpoint.
-                if (header.op > self.op_checkpoint_next_durability()) {
+                } else {
                     log.debug("{}: send_prepare_ok: not sending (falsely contributes to " ++
                         "durability of the next checkpoint)", .{self.replica});
-                    return;
                 }
+                return;
             }
 
             assert(self.status == .normal);
