@@ -337,6 +337,41 @@ Beyond these rules:
   is more than 16 bytes, then pass the argument as `*const`. This will catch bugs where the caller
   makes an accidental copy on the stack before calling the function.
 
+- Construct larger structs _in-place_ by passing an _out pointer_ during initialization.
+
+  In-place initializations can assume **pointer stability** and **immovable types** while
+  eliminating intermediate copy-move allocations, which can lead to undesirable stack growth.
+
+  Keep in mind that in-place initializations are viral — if any field is initialized
+  in-place, the entire container struct should be initialized in-place as well.
+
+  **Prefer:**
+  ```zig
+  fn init(target: *LargeStruct) !void {
+    target.* = .{
+      // in-place initialization.
+    };
+  }
+
+  fn main() !void {
+    var target: LargeStruct = undefined;
+    try target.init();
+  }
+  ```
+
+  **Over:**
+  ```zig
+  fn init() !LargeStruct {
+    return LargeStruct {
+      // moving the initialized object.
+    }
+  }
+
+  fn main() !void {
+    var target = try LargeStruct.init();
+  }
+  ```
+
 - **Shrink the scope** to minimize the number of variables at play and reduce the probability that
   the wrong variable is used.
 

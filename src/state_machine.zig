@@ -467,13 +467,28 @@ pub fn StateMachineType(
 
         tracer_slot: ?tracer.SpanStart = null,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
+        pub fn init(
+            self: *StateMachine,
+            allocator: mem.Allocator,
+            grid: *Grid,
+            options: Options,
+        ) !void {
             assert(options.batch_size_limit <= config.message_body_size_max);
             inline for (comptime std.enums.values(Operation)) |operation| {
                 assert(options.batch_size_limit >= @sizeOf(Event(operation)));
             }
 
-            var forest = try Forest.init(
+            self.* = .{
+                .batch_size_limit = options.batch_size_limit,
+                .prefetch_timestamp = 0,
+                .prepare_timestamp = 0,
+                .commit_timestamp = 0,
+
+                .forest = undefined,
+                .scan_lookup_buffer = undefined,
+            };
+
+            try self.forest.init(
                 allocator,
                 grid,
                 .{
@@ -482,21 +497,13 @@ pub fn StateMachineType(
                 },
                 forest_options(options),
             );
-            errdefer forest.deinit(allocator);
+            errdefer self.forest.deinit(allocator);
 
-            const scan_lookup_buffer = try allocator.alignedAlloc(u8, 16, @max(
+            self.scan_lookup_buffer = try allocator.alignedAlloc(u8, 16, @max(
                 constants.batch_max.get_account_transfers * @sizeOf(Transfer),
                 constants.batch_max.get_account_balances * @sizeOf(AccountBalancesGrooveValue),
             ));
-
-            return StateMachine{
-                .batch_size_limit = options.batch_size_limit,
-                .prefetch_timestamp = 0,
-                .prepare_timestamp = 0,
-                .commit_timestamp = 0,
-                .forest = forest,
-                .scan_lookup_buffer = scan_lookup_buffer,
-            };
+            errdefer allocator.free(self.scan_lookup_buffer);
         }
 
         pub fn deinit(self: *StateMachine, allocator: mem.Allocator) void {
@@ -2972,7 +2979,7 @@ const TestContext = struct {
         });
         errdefer ctx.grid.deinit(allocator);
 
-        ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
+        try ctx.state_machine.init(allocator, &ctx.grid, .{
             .batch_size_limit = message_body_size_max,
             .lsm_forest_compaction_block_count = StateMachine.Forest.Options
                 .compaction_block_count_min,

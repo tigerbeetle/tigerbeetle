@@ -34,24 +34,26 @@ pub fn TableMemoryType(comptime Table: type) type {
         name: []const u8,
 
         pub fn init(
+            table: *TableMemory,
             allocator: mem.Allocator,
             mutability: Mutability,
             name: []const u8,
             options: struct {
                 value_count_limit: u32,
             },
-        ) !TableMemory {
+        ) !void {
             assert(options.value_count_limit <= Table.value_count_max);
 
-            const values = try allocator.alloc(Value, options.value_count_limit);
-            errdefer allocator.free(values);
-
-            return TableMemory{
-                .values = values,
+            table.* = .{
                 .value_context = .{},
                 .mutability = mutability,
                 .name = name,
+
+                .values = undefined,
             };
+
+            table.values = try allocator.alloc(Value, options.value_count_limit);
+            errdefer allocator.free(table.values);
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
@@ -195,7 +197,8 @@ test "table_memory: unit" {
     const TableMemory = TableMemoryType(TestTable);
 
     const allocator = testing.allocator;
-    var table_memory = try TableMemory.init(allocator, .mutable, "test", .{
+    var table_memory: TableMemory = undefined;
+    try table_memory.init(allocator, .mutable, "test", .{
         .value_count_limit = TestTable.value_count_max,
     });
     defer table_memory.deinit(allocator);

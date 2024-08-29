@@ -22,7 +22,7 @@ const StateMachine =
     @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const GridType = @import("../vsr/grid.zig").GridType;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
-const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
 const TableType = @import("table.zig").TableType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
@@ -181,20 +181,20 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             });
             defer env.grid.deinit(allocator);
 
-            env.manifest_log = try ManifestLog.init(allocator, &env.grid, .{
+            try env.manifest_log.init(allocator, &env.grid, .{
                 .tree_id_min = 1,
                 .tree_id_max = 1,
                 .forest_table_count_max = table_count_max,
             });
             defer env.manifest_log.deinit(allocator);
 
-            env.node_pool = try NodePool.init(allocator, node_count);
+            try env.node_pool.init(allocator, node_count);
             defer env.node_pool.deinit(allocator);
 
             env.tree = undefined;
             env.lookup_value = null;
 
-            env.scan_buffer = try ScanBuffer.init(allocator);
+            try env.scan_buffer.init(allocator);
             defer env.scan_buffer.deinit(allocator);
 
             env.scan_results = try allocator.alloc(Value, scan_results_max);
@@ -259,7 +259,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.grid.open(grid_open_callback);
 
             env.tick_until_state_change(.free_set_open, .tree_init);
-            env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, .{
+            try env.tree.init(allocator, &env.node_pool, &env.grid, .{
                 .id = 1,
                 .name = "Key.Value",
             }, .{
@@ -524,7 +524,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-            var model = try Model.init(table_usage);
+            var model: Model = undefined;
+            try model.init(table_usage);
             defer model.deinit();
 
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
@@ -647,20 +648,34 @@ const Model = struct {
         .{ .verify = false },
     );
 
-    array: Array,
-    node_pool: NodePool,
     table_usage: TableUsage,
+    node_pool: NodePool,
+    array: Array,
 
-    fn init(table_usage: TableUsage) !Model {
+    fn init(model: *Model, table_usage: TableUsage) !void {
+        model.* = .{
+            .table_usage = table_usage,
+
+            .node_pool = undefined,
+            .array = undefined,
+        };
+
         const model_node_count = stdx.div_ceil(
             events_max * @sizeOf(Value),
             NodePool.node_size,
         );
-        return .{
-            .array = try Array.init(allocator),
-            .node_pool = try NodePool.init(allocator, model_node_count),
-            .table_usage = table_usage,
-        };
+
+        try model.node_pool.init(allocator, model_node_count);
+        errdefer model.node_pool.deinit(allocator);
+
+        model.array = try Array.init(allocator);
+        errdefer model.array.deinit(allocator, &model.node_pool);
+    }
+
+    fn deinit(model: *Model) void {
+        model.array.deinit(allocator, &model.node_pool);
+        model.node_pool.deinit(allocator);
+        model.* = undefined;
     }
 
     fn count(model: *const Model) u32 {
@@ -745,12 +760,6 @@ const Model = struct {
                 1,
             );
         }
-    }
-
-    fn deinit(model: *Model) void {
-        model.array.deinit(allocator, &model.node_pool);
-        model.node_pool.deinit(allocator);
-        model.* = undefined;
     }
 };
 

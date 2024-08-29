@@ -518,7 +518,7 @@ pub fn CompactionType(
         bar: ?Bar,
         beat: ?Beat,
 
-        pub fn init(tree_config: Tree.Config, grid: *Grid, level_b: u8) !Compaction {
+        pub fn init(tree_config: Tree.Config, grid: *Grid, level_b: u8) Compaction {
             assert(level_b < constants.lsm_levels);
 
             return Compaction{
