@@ -229,6 +229,8 @@ pub const CreateTransferResult = enum(u32) {
     pending_id_must_be_different = 16,
     timeout_reserved_for_pending_transfer = 17,
 
+    //closing_transfer_must_be_pending = 64
+
     amount_must_not_be_zero = 18,
     ledger_must_not_be_zero = 19,
     code_must_not_be_zero = 20,
@@ -301,8 +303,9 @@ pub const CreateTransferResult = enum(u32) {
     imported_event_timestamp_must_postdate_credit_account = 62,
     imported_event_timeout_must_be_zero = 63,
 
-    debit_account_already_closed = 64,
-    credit_account_already_closed = 65,
+    closing_transfer_must_be_pending = 64,
+    debit_account_already_closed = 65,
+    credit_account_already_closed = 66,
 
     comptime {
         for (0..std.enums.values(CreateTransferResult).len) |index| {

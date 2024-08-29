@@ -1883,6 +1883,9 @@ pub fn StateMachineType(
             if (t.pending_id != 0) return .pending_id_must_be_zero;
             if (!t.flags.pending) {
                 if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
+                if (t.flags.closing_debit or t.flags.closing_credit) {
+                    return .closing_transfer_must_be_pending;
+                }
             }
             if (forbid_zero_amounts(client_release)) {
                 if (!t.flags.balancing_debit and !t.flags.balancing_credit) {
@@ -2253,12 +2256,11 @@ pub fn StateMachineType(
                 break :expires_at expires_at;
             };
 
-            // The only movement allowed in a closed account is
-            // posting or voiding the closing transfer:
-            if (dr_account.flags.closed and !p.flags.closing_debit) {
+            // The only movement allowed in a closed account is voiding a pending transfer.
+            if (dr_account.flags.closed and !t.flags.void_pending_transfer) {
                 return .debit_account_already_closed;
             }
-            if (cr_account.flags.closed and !p.flags.closing_credit) {
+            if (cr_account.flags.closed and !t.flags.void_pending_transfer) {
                 return .credit_account_already_closed;
             }
 
@@ -2309,6 +2311,8 @@ pub fn StateMachineType(
             cr_account_new.credits_pending -= p.amount;
 
             if (t2.flags.post_pending_transfer) {
+                assert(!p.flags.closing_debit);
+                assert(!p.flags.closing_credit);
                 if (forbid_zero_amounts(client_release)) {
                     assert(amount > 0);
                 }
@@ -3798,33 +3802,35 @@ test "create_transfers/lookup_transfers" {
         \\ tick -3 seconds
 
         // Test errors by descending precedence.
-        \\ transfer   T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _ _ _ P1 1 timestamp_must_be_zero
-        \\ transfer   T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _ _ _ P1 _ reserved_flag
-        \\ transfer   T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ id_must_not_be_zero
-        \\ transfer   -0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ id_must_not_be_int_max
-        \\ transfer   T1 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ debit_account_id_must_not_be_zero
-        \\ transfer   T1 -0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ debit_account_id_must_not_be_int_max
-        \\ transfer   T1 A8 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ credit_account_id_must_not_be_zero
-        \\ transfer   T1 A8 -0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ credit_account_id_must_not_be_int_max
-        \\ transfer   T1 A8 A8    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ accounts_must_be_different
-        \\ transfer   T1 A8 A9    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ pending_id_must_be_zero
-        \\ transfer   T1 A8 A9    9   _  _  _  _    1 L0 C0   _   _   _   _   _   _ _  _ _ _ _ timeout_reserved_for_pending_transfer
-        \\ transfer   T1 A8 A9    9   _  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _ _ _ _ ledger_must_not_be_zero
-        \\ transfer   T1 A8 A9    9   _  _  _  _    _ L9 C0   _ PEN   _   _   _   _ _  _ _ _ _ code_must_not_be_zero
-        \\ transfer   T1 A8 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _ _ _ _ debit_account_not_found
-        \\ transfer   T1 A1 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _ _ _ _ credit_account_not_found
-        \\ transfer   T1 A1 A2    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _ _ _ _ accounts_must_have_the_same_ledger
-        \\ transfer   T1 A1 A3    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _ _ _ _ transfer_must_have_the_same_ledger_as_accounts
-        \\ transfer   T1 A1 A3  -99   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ overflows_debits_pending  // amount = max - A1.debits_pending + 1
-        \\ transfer   T1 A1 A3 -109   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ overflows_credits_pending // amount = max - A3.credits_pending + 1
-        \\ transfer   T1 A1 A3 -199   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ overflows_debits_posted   // amount = max - A1.debits_posted + 1
-        \\ transfer   T1 A1 A3 -209   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ overflows_credits_posted  // amount = max - A3.credits_posted + 1
-        \\ transfer   T1 A1 A3 -299   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ overflows_debits          // amount = max - A1.debits_pending - A1.debits_posted + 1
-        \\ transfer   T1 A1 A3 -319   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ overflows_credits         // amount = max - A3.credits_pending - A3.credits_posted + 1
-        \\ transfer   T1 A4 A5  199   _  _  _  _  999 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ overflows_timeout
-        \\ transfer   T1 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _ _ _ _ exceeds_credits           // amount = A4.credits_posted - A4.debits_pending - A4.debits_posted + 1
-        \\ transfer   T1 A4 A5   91   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _ _ _ _ exceeds_debits            // amount = A5.debits_posted - A5.credits_pending - A5.credits_posted + 1
-        \\ transfer   T1 A1 A3  123   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ ok
+        \\ transfer   T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _ _    _   P1 1 timestamp_must_be_zero
+        \\ transfer   T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _ _    _   P1 _ reserved_flag
+        \\ transfer   T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ id_must_not_be_zero
+        \\ transfer   -0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ id_must_not_be_int_max
+        \\ transfer   T1 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_id_must_not_be_zero
+        \\ transfer   T1 -0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_id_must_not_be_int_max
+        \\ transfer   T1 A8 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_id_must_not_be_zero
+        \\ transfer   T1 A8 -0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_id_must_not_be_int_max
+        \\ transfer   T1 A8 A8    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ accounts_must_be_different
+        \\ transfer   T1 A8 A9    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ pending_id_must_be_zero
+        \\ transfer   T1 A8 A9    9   _  _  _  _    1 L0 C0   _   _   _   _   _   _ _  _   _   _ _ timeout_reserved_for_pending_transfer
+        \\ transfer   T1 A8 A9    9   _  _  _  _    _ L0 C0   _   _   _   _   _   _ _  CDR _   _ _ closing_transfer_must_be_pending
+        \\ transfer   T1 A8 A9    9   _  _  _  _    _ L0 C0   _   _   _   _   _   _ _  _   CCR _ _ closing_transfer_must_be_pending
+        \\ transfer   T1 A8 A9    9   _  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ ledger_must_not_be_zero
+        \\ transfer   T1 A8 A9    9   _  _  _  _    _ L9 C0   _ PEN   _   _   _   _ _  _   _   _ _ code_must_not_be_zero
+        \\ transfer   T1 A8 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_not_found
+        \\ transfer   T1 A1 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_not_found
+        \\ transfer   T1 A1 A2    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ accounts_must_have_the_same_ledger
+        \\ transfer   T1 A1 A3    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ transfer_must_have_the_same_ledger_as_accounts
+        \\ transfer   T1 A1 A3  -99   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_pending  // amount = max - A1.debits_pending + 1
+        \\ transfer   T1 A1 A3 -109   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_pending // amount = max - A3.credits_pending + 1
+        \\ transfer   T1 A1 A3 -199   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_posted   // amount = max - A1.debits_posted + 1
+        \\ transfer   T1 A1 A3 -209   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_posted  // amount = max - A3.credits_posted + 1
+        \\ transfer   T1 A1 A3 -299   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits          // amount = max - A1.debits_pending - A1.debits_posted + 1
+        \\ transfer   T1 A1 A3 -319   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits         // amount = max - A3.credits_pending - A3.credits_posted + 1
+        \\ transfer   T1 A4 A5  199   _  _  _  _  999 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_timeout
+        \\ transfer   T1 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits           // amount = A4.credits_posted - A4.debits_pending - A4.debits_posted + 1
+        \\ transfer   T1 A4 A5   91   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_debits            // amount = A5.debits_posted - A5.credits_pending - A5.credits_posted + 1
+        \\ transfer   T1 A1 A3  123   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ ok
 
         // Ensure that idempotence is only checked after validation.
         \\ transfer   T1 A1 A3  123   _  _  _  _    1 L2 C1   _ PEN   _   _   _   _ _  _ _ _ _ transfer_must_have_the_same_ledger_as_accounts
@@ -4522,8 +4528,9 @@ test "create_transfers: closing accounts" {
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _  _  _ _ _ _ _ _ ok
         \\ commit create_accounts
         \\
-        // Temporarily closing the debit account.
+        // Closing the debit account.
         \\ transfer   T1 A1 A2   15   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ ok
+        \\ transfer   T2 A1 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR _   _ _ closing_transfer_must_be_pending
         \\ transfer   T2 A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ ok
         \\ transfer   T2 A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ exists
         \\ transfer   T3 A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
@@ -4534,7 +4541,9 @@ test "create_transfers: closing accounts" {
         \\ lookup_account A2  0  0  0  15  _
         \\ commit lookup_accounts
         \\
+        \\ transfer   T3 A1 A2    0   T2 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ debit_account_already_closed
         \\ transfer   T3 A1 A2    0   T2 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ ok // Re-opening the account.
+        \\ transfer   T3 A1 A2    0   T2 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ exists
         \\ transfer   T4 A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ ok
         \\ commit create_transfers
         \\
@@ -4542,20 +4551,21 @@ test "create_transfers: closing accounts" {
         \\ lookup_account A2  0  0  0  20  _
         \\ commit lookup_accounts
         \\
-        // Temporarily closing the credit account with a timeout.
-        // No other pending transfer can be posted or voided in a closed account.
+        // Closing the credit account with a timeout.
+        // Pending transfer can be voided, but not posted in a closed account.
         \\ transfer   T5 A1 A2   10   _  _   _  _    1 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
-        \\ transfer   T6 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ ok // Temporarly closing the credit account.
-        \\ transfer   T6 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ exists
-        \\ transfer   T7 A1 A2   10   T5 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ credit_account_already_closed
-        \\ transfer   T7 A1 A2   10   T5 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ credit_account_already_closed
+        \\ transfer   T6 A1 A2   10   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
+        \\ transfer   T7 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ ok
+        \\ transfer   T7 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ exists
+        \\ transfer   T8 A1 A2   10   T6 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ credit_account_already_closed
+        \\ transfer   T8 A1 A2   10   T6 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 10 20  0   0  _
         \\ lookup_account A2  0  0 10  20  CLSD
         \\ commit lookup_accounts
         \\
-        // Pending balance can expire even for closed accounts.
+        // Pending balance can expire for closed accounts.
         \\ tick 1 seconds
         \\ lookup_account A1  0 20  0   0  _
         \\ lookup_account A2  0  0  0  20  CLSD
@@ -4567,11 +4577,12 @@ test "create_transfers: closing accounts" {
         \\ lookup_account A2  0  0  0  20  _
         \\ commit lookup_accounts
         \\
-        // Closing both accounts permanently.
-        \\ transfer   T7 A1 A2    0   _  _   _  _    0 L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ ok
-        \\ transfer   T7 A1 A2    0   _  _   _  _    0 L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ exists
-        \\ transfer   T8 A1 A3    1   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
-        \\ transfer   T8 A3 A2    1   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
+        // Closing both accounts.
+        \\ transfer   T9  A1 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ closing_transfer_must_be_pending
+        \\ transfer   T9  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR CCR _ _ ok
+        \\ transfer   T9  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR CCR _ _ exists
+        \\ transfer   T10 A1 A3    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
+        \\ transfer   T10 A3 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ commit create_transfers
         \\
         \\ lookup_account A1  0 20  0   0  CLSD
@@ -4579,8 +4590,8 @@ test "create_transfers: closing accounts" {
         \\ commit lookup_accounts
         \\
         // Cannot close an already closed account.
-        \\ transfer   T8 A1 A3    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR _   _ _ debit_account_already_closed
-        \\ transfer   T8 A3 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   CCR _ _ credit_account_already_closed
+        \\ transfer   T10 A1 A3    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  CDR _   _ _ debit_account_already_closed
+        \\ transfer   T10 A3 A2    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  _   CCR _ _ credit_account_already_closed
         \\ commit create_transfers
     );
 }
