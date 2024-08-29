@@ -759,13 +759,13 @@ pub fn ManifestLevelType(
     };
 }
 
-pub fn TestContext(
+pub fn TestContextType(
     comptime node_size: u32,
     comptime Key: type,
     comptime table_count_max: u32,
 ) type {
     return struct {
-        const ManifestLevel = @This();
+        const TestContext = @This();
 
         const testing = std.testing;
 
@@ -827,30 +827,29 @@ pub fn TestContext(
         inserts: u64 = 0,
         removes: u64 = 0,
 
-        fn init(random: std.rand.Random) !ManifestLevel {
-            var pool: TestPool = undefined;
-            try pool.init(
+        fn init(context: *TestContext, random: std.rand.Random) !void {
+            context.* = .{
+                .random = random,
+
+                .pool = undefined,
+                .level = undefined,
+                .reference = undefined,
+            };
+
+            try context.pool.init(
                 testing.allocator,
                 TestLevel.Keys.node_count_max + TestLevel.Tables.node_count_max,
             );
-            errdefer pool.deinit(testing.allocator);
+            errdefer context.pool.deinit(testing.allocator);
 
-            var level: TestLevel = undefined;
-            try level.init(testing.allocator);
-            errdefer level.deinit(testing.allocator, &pool);
+            try context.level.init(testing.allocator);
+            errdefer context.level.deinit(testing.allocator, &context.pool);
 
-            var reference = std.ArrayList(TableInfo).init(testing.allocator);
-            errdefer reference.deinit();
-
-            return ManifestLevel{
-                .random = random,
-                .pool = pool,
-                .level = level,
-                .reference = reference,
-            };
+            context.reference = std.ArrayList(TableInfo).init(testing.allocator);
+            errdefer context.reference.deinit();
         }
 
-        fn deinit(context: *ManifestLevel) void {
+        fn deinit(context: *TestContext) void {
             context.level.deinit(testing.allocator, &context.pool);
             context.pool.deinit(testing.allocator);
 
@@ -859,7 +858,7 @@ pub fn TestContext(
             context.reference.deinit();
         }
 
-        fn run(context: *ManifestLevel) !void {
+        fn run(context: *TestContext) !void {
             if (log) std.debug.print("\n", .{});
 
             {
@@ -891,7 +890,7 @@ pub fn TestContext(
             try context.remove_all();
         }
 
-        fn insert_tables(context: *ManifestLevel) !void {
+        fn insert_tables(context: *TestContext) !void {
             const count_free = table_count_max - context.level.keys.len();
 
             if (count_free == 0) return;
@@ -935,7 +934,7 @@ pub fn TestContext(
             try context.verify();
         }
 
-        fn random_greater_non_overlapping_table(context: *ManifestLevel, key: Key) TableInfo {
+        fn random_greater_non_overlapping_table(context: *TestContext, key: Key) TableInfo {
             var new_key_min = key + context.random.uintLessThanBiased(Key, 31) + 1;
 
             assert(new_key_min > key);
@@ -977,7 +976,7 @@ pub fn TestContext(
         }
 
         /// See Manifest.take_snapshot()
-        fn take_snapshot(context: *ManifestLevel) u64 {
+        fn take_snapshot(context: *TestContext) u64 {
             // A snapshot cannot be 0 as this is a reserved value in the superblock.
             assert(context.snapshot_max > 0);
             // The constant snapshot_latest must compare greater than any issued snapshot.
@@ -989,7 +988,7 @@ pub fn TestContext(
             return context.snapshot_max;
         }
 
-        fn create_snapshot(context: *ManifestLevel) !void {
+        fn create_snapshot(context: *TestContext) !void {
             if (context.snapshots.full()) return;
 
             context.snapshots.append_assume_capacity(context.take_snapshot());
@@ -999,7 +998,7 @@ pub fn TestContext(
             try tables.insertSlice(0, context.reference.items);
         }
 
-        fn drop_snapshot(context: *ManifestLevel) !void {
+        fn drop_snapshot(context: *TestContext) !void {
             if (context.snapshots.empty()) return;
 
             const index = context.random.uintLessThanBiased(usize, context.snapshots.count());
@@ -1030,7 +1029,7 @@ pub fn TestContext(
             }
         }
 
-        fn delete_tables(context: *ManifestLevel) !void {
+        fn delete_tables(context: *TestContext) !void {
             const reference_len: u32 = @intCast(context.reference.items.len);
             if (reference_len == 0) return;
 
@@ -1115,7 +1114,7 @@ pub fn TestContext(
             try context.verify();
         }
 
-        fn remove_all(context: *ManifestLevel) !void {
+        fn remove_all(context: *TestContext) !void {
             while (context.snapshots.count() > 0) try context.drop_snapshot();
             while (context.reference.items.len > 0) try context.delete_tables();
 
@@ -1134,7 +1133,7 @@ pub fn TestContext(
             try context.verify();
         }
 
-        fn verify(context: *ManifestLevel) !void {
+        fn verify(context: *TestContext) !void {
             try context.verify_snapshot(lsm.snapshot_latest, context.reference.items);
 
             for (context.snapshots.slice(), 0..) |snapshot, i| {
@@ -1143,7 +1142,7 @@ pub fn TestContext(
         }
 
         fn verify_snapshot(
-            context: *ManifestLevel,
+            context: *TestContext,
             snapshot: u64,
             reference: []const TableInfo,
         ) !void {
@@ -1266,13 +1265,14 @@ test "ManifestLevel" {
         Options{ .key_type = u64, .node_size = 512, .table_count_max = 1024 },
         Options{ .key_type = u64, .node_size = 1024, .table_count_max = 1024 },
     }) |options| {
-        const Context = TestContext(
+        const TestContext = TestContextType(
             options.node_size,
             options.key_type,
             options.table_count_max,
         );
 
-        var context = try Context.init(random);
+        var context: TestContext = undefined;
+        try context.init(random);
         defer context.deinit();
 
         try context.run();

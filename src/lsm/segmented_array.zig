@@ -1047,7 +1047,7 @@ fn FuzzContextType(
     comptime options: Options,
 ) type {
     return struct {
-        const Self = @This();
+        const FuzzContext = @This();
 
         const testing = std.testing;
         const log = false;
@@ -1078,35 +1078,38 @@ fn FuzzContextType(
         inserts: u64 = 0,
         removes: u64 = 0,
 
-        fn init(allocator: std.mem.Allocator, random: std.rand.Random) !Self {
-            var pool: TestPool = undefined;
-            try pool.init(allocator, TestArray.node_count_max);
-            errdefer pool.deinit(allocator);
-
-            var array = try TestArray.init(allocator);
-            errdefer array.deinit(allocator, &pool);
-
-            var reference = std.ArrayList(T).init(allocator);
-            errdefer reference.deinit();
-
-            try reference.ensureTotalCapacity(element_count_max);
-
-            return Self{
+        fn init(
+            context: *FuzzContext,
+            allocator: std.mem.Allocator,
+            random: std.rand.Random,
+        ) !void {
+            context.* = .{
                 .random = random,
-                .pool = pool,
-                .array = array,
-                .reference = reference,
+
+                .pool = undefined,
+                .array = undefined,
+                .reference = undefined,
             };
+
+            try context.pool.init(allocator, TestArray.node_count_max);
+            errdefer context.pool.deinit(allocator);
+
+            context.array = try TestArray.init(allocator);
+            errdefer context.array.deinit(allocator, &context.pool);
+
+            context.reference = std.ArrayList(T).init(allocator);
+            errdefer context.reference.deinit();
+            try context.reference.ensureTotalCapacity(element_count_max);
         }
 
-        fn deinit(context: *Self, allocator: std.mem.Allocator) void {
+        fn deinit(context: *FuzzContext, allocator: std.mem.Allocator) void {
             context.array.deinit(allocator, &context.pool);
             context.pool.deinit(allocator);
 
             context.reference.deinit();
         }
 
-        fn run(context: *Self) !void {
+        fn run(context: *FuzzContext) !void {
             {
                 var i: usize = 0;
                 while (i < element_count_max * 2) : (i += 1) {
@@ -1157,7 +1160,7 @@ fn FuzzContextType(
             }
         }
 
-        fn insert(context: *Self) !void {
+        fn insert(context: *FuzzContext) !void {
             const reference_len: u32 = @intCast(context.reference.items.len);
             const count_free = element_count_max - reference_len;
 
@@ -1192,7 +1195,7 @@ fn FuzzContextType(
             try context.verify();
         }
 
-        fn remove(context: *Self) !void {
+        fn remove(context: *FuzzContext) !void {
             const reference_len: u32 = @intCast(context.reference.items.len);
             if (reference_len == 0) return;
 
@@ -1211,7 +1214,7 @@ fn FuzzContextType(
             try context.verify();
         }
 
-        fn insert_before_first(context: *Self) !void {
+        fn insert_before_first(context: *FuzzContext) !void {
             assert(element_order == .unsorted);
 
             const insert_index = context.array.absolute_index_for_cursor(context.array.first());
@@ -1227,7 +1230,7 @@ fn FuzzContextType(
             try context.verify();
         }
 
-        fn remove_last(context: *Self) !void {
+        fn remove_last(context: *FuzzContext) !void {
             assert(element_order == .unsorted);
 
             const remove_index = context.array.absolute_index_for_cursor(context.array.last());
@@ -1240,7 +1243,7 @@ fn FuzzContextType(
             try context.verify();
         }
 
-        fn remove_all(context: *Self) !void {
+        fn remove_all(context: *FuzzContext) !void {
             while (context.reference.items.len > 0) try context.remove();
 
             try testing.expectEqual(@as(u32, 0), context.array.len());
@@ -1257,7 +1260,7 @@ fn FuzzContextType(
             try context.verify();
         }
 
-        fn verify(context: *Self) !void {
+        fn verify(context: *FuzzContext) !void {
             if (log) {
                 std.debug.print("expect: ", .{});
                 for (context.reference.items) |i| std.debug.print("{}, ", .{i});
@@ -1334,7 +1337,7 @@ fn FuzzContextType(
             if (element_order == .sorted) try context.verify_search();
         }
 
-        fn verify_search(context: *Self) !void {
+        fn verify_search(context: *FuzzContext) !void {
             var queries: [20]Key = undefined;
             context.random.bytes(mem.sliceAsBytes(&queries));
 
@@ -1375,7 +1378,7 @@ fn FuzzContextType(
             }
         }
 
-        fn reference_index(context: *const Self, key: Key) u32 {
+        fn reference_index(context: *const FuzzContext, key: Key) u32 {
             return binary_search_values_upsert_index(
                 Key,
                 T,
@@ -1445,7 +1448,7 @@ pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Optio
         TestOptions{ .element_type = TableInfo, .node_size = 1024, .element_count_max = 1024 },
     }) |test_options| {
         inline for (.{ .sorted, .unsorted }) |order| {
-            const Context = FuzzContextType(
+            const FuzzContext = FuzzContextType(
                 test_options.element_type,
                 test_options.node_size,
                 test_options.element_count_max,
@@ -1458,7 +1461,8 @@ pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Optio
                 options,
             );
 
-            var context = try Context.init(allocator, random);
+            var context: FuzzContext = undefined;
+            try context.init(allocator, random);
             defer context.deinit(allocator);
 
             try context.run();
@@ -1466,7 +1470,7 @@ pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Optio
             if (test_options.node_size % @sizeOf(test_options.element_type) != 0) {
                 tested_padding = true;
             }
-            if (Context.TestArray.node_capacity == 2) tested_node_capacity_min = true;
+            if (FuzzContext.TestArray.node_capacity == 2) tested_node_capacity_min = true;
         }
     }
 
