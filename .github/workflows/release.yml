@@ -49,7 +49,7 @@ jobs:
       - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
 
       - run: ./zig/download.sh
-      - run: ./zig/zig build scripts -- release --build --publish --run-number=${{ github.run_number }} --sha=${{ github.sha }}
+      - run: ./zig/zig build scripts -- release --build --publish --sha=${{ github.sha }}
         env:
           NUGET_KEY: ${{ secrets.NUGET_KEY }}
           TIGERBEETLE_GO_PAT: ${{ secrets.TIGERBEETLE_GO_PAT }}

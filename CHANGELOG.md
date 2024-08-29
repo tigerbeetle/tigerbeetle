@@ -1,9 +1,11 @@
-# TigerBeetle Changelog
+# Changelog
 
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
-## 2024-08-26 (No release: Queued up to improve indexing flags)
+## TigerBeetle (unreleased)
+
+Released: 2024-08-26
 
 ### Safety And Performance
 
@@ -64,7 +66,9 @@ to receive notifications about breaking changes!
 
 - [Used To Love Her](https://www.youtube.com/watch?v=FDIvIb06abI)
 
-## 2024-08-19
+## TigerBeetle 0.15.6
+
+Released: 2024-08-19
 
 ### Safety And Performance
 
@@ -108,7 +112,9 @@ to receive notifications about breaking changes!
 
 - [End of the Line](https://www.youtube.com/watch?v=UMVjToYOjbM)
 
-## 2024-08-12
+## TigerBeetle 0.15.5
+
+Released 2024-08-12
 
 Highlight of this release is fully rolled-out support for multiversion binaries. This means that,
 from now on, the upgrade procedure is going to be as simple as dropping the new version of

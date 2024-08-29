@@ -161,6 +161,10 @@ pub fn zeroed(bytes: []const u8) bool {
 const Cut = struct {
     prefix: []const u8,
     suffix: []const u8,
+
+    pub fn unpack(self: Cut) struct { []const u8, []const u8 } {
+        return .{ self.prefix, self.suffix };
+    }
 };
 
 /// Splits the `haystack` around the first occurrence of `needle`, returning parts before and after.
