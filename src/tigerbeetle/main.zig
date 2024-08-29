@@ -162,6 +162,11 @@ const Command = struct {
             development: bool,
         },
     ) !void {
+        // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
+        // is not available) there won't be a dangling file.
+        command.io = try IO.init(128, 0);
+        errdefer command.io.deinit();
+
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
         // TODO Handle physical volumes where there is no directory to fsync.
         const dirname = std.fs.path.dirname(path) orelse ".";
@@ -185,9 +190,6 @@ const Command = struct {
         );
         errdefer std.posix.close(command.fd);
 
-        command.io = try IO.init(128, 0);
-        errdefer command.io.deinit();
-
         command.storage = try Storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
 
@@ -198,9 +200,9 @@ const Command = struct {
     fn deinit(command: *Command, allocator: mem.Allocator) void {
         allocator.free(command.self_exe_path);
         command.storage.deinit();
-        command.io.deinit();
         std.posix.close(command.fd);
         std.posix.close(command.dir_fd);
+        command.io.deinit();
     }
 
     pub fn format(
