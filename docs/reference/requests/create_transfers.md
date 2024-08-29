@@ -127,14 +127,6 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
-- [`flags.imported`](../transfer.md#flagsimported)
-  - ✓ [`flags.pending`](../transfer.md#flagspending)
-  - ✓ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
-  - ✓ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
-  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
-  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
-  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
-  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
 - [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
@@ -151,6 +143,14 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+- [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✓ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✓ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
 
 ### `debit_account_id_must_not_be_zero`
 
@@ -214,6 +214,15 @@ transfer.
 
 The transfer was not created. [`Transfer.timeout`](../transfer.md#timeout) is nonzero, but only
 [pending](../transfer.md#flagspending) transfers have nonzero timeouts.
+
+### `closing_transfer_must_be_pending`
+
+The transfer was not created. [`Transfer.flags.pending`](../transfer.md#flagspending) is not set,
+but it should be `true`.
+
+Transfers with the [Transfer.flags.closing_debit](../transfer.md#flagsclosing_debit) or
+[Transfer.flags.closing_credit](../transfer.md#flagsclosing_credit) flags must be a two-phase
+pending transfer.
 
 ### `amount_must_not_be_zero`
 

@@ -252,19 +252,15 @@ necessary:
 
 #### `flags.closed`
 
-When set, the account will reject further transfers.
+When set, the account will reject further transfers,
+except for [voiding two-phase transfers](transfer.md#modes) that are still pending.
 
 - This flag can be set during the account creation.
-- This flag can be set by a [`Transfer`](transfer.md)
-  marked with the flag [`Transfer.flags.closing_debit`](transfer.md#flagsclosing_debit)
-  or [`Transfer.flags.closing_credit`](transfer.md#flagsclosing_credit).
-
-  Note that, to make closing an account a **reversible** operation,
-  the flag [`Transfer.flags.pending`](transfer.md#flagspending) also must be set.
-
-  The pending closing transfer can then be either [voided](transfer.md#flagsvoid_pending_transfer)
-  to reopen the account or [posted](transfer.md#flagspost_pending_transfer) to make it
-  permanently closed.
+- This flag can also be set by sending a [two-phase pending transfer](transfer.md#flagspending)
+  with the [`Transfer.flags.closing_debit`](transfer.md#flagsclosing_debit)
+  and/or [`Transfer.flags.closing_credit`](transfer.md#flagsclosing_credit) flags set.
+- This flag can be _unset_ by [voiding](#flagsvoid_pending_transfer) the two-phase pending
+  transfer that closed the account.
 
 ### `timestamp`
 

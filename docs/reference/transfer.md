@@ -64,9 +64,9 @@ Fields used by each mode of transfer:
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
 | `flags.balancing_debit`       | optional     | optional | false        | false        |
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
+| `flags.closing_debit`         | optional     | true     | false        | false        |
+| `flags.closing_credit`        | optional     | true     | false        | false        |
 | `flags.imported`              | optional     | optional | optional     | optional     |
-| `flags.closing_debit`         | optional     | optional | false        | false        |
-| `flags.closing_credit`        | optional     | optional | false        | false        |
 | `timestamp`                   | none²        | none²    | none²        | none²        |
 
 > _¹ None if `flags.imported` is set._<br/>
@@ -439,6 +439,28 @@ If the highest amount transferable is `0`, returns
 
 - [Close Account](../coding/recipes/close-account.md)
 
+#### `flags.closing_debit`
+
+This flag requires a [two-phase transfer](#modes), so the flag [`flags.pending`](#flagspending)
+must also be set.
+
+When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
+of the [debit account](#debit_account_id) to be set if the transfer succeeds.
+
+The [`Account.flags.closed`](account.md#flagsclosed) can be _unset_ by
+[voiding](#flagsvoid_pending_transfer) the two-phase transfer that closed the account.
+
+#### `flags.closing_credit`
+
+This flag requires a [two-phase transfer](#modes), so the flag [`flags.pending`](#flagspending)
+must also be set.
+
+When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
+of the [credit account](#credit_account_id) to be set if the transfer succeeds.
+
+The [`Account.flags.closed`](account.md#flagsclosed) can be _unset_ by
+[voiding](#flagsvoid_pending_transfer) the two-phase transfer that closed the account.
+
 #### `flags.imported`
 
 When set, allows importing historical `Transfer`s with their original [`timestamp`](#timestamp).
@@ -481,20 +503,6 @@ necessary:
   [`timeout`](#timeout) for automatic expiration.
   In those cases, the [two-phase post or rollback](../coding/two-phase-transfers.md) must be
   done manually.
-
-#### `flags.closing_debit`
-
-When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
-of the [debit account](#debit_account_id) to be set if the transfer succeeds.
-
-This action can be reverted when combined with the flag [`flags.pending`](#flagspending).
-
-#### `flags.closing_credit`
-
-When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
-of the [credit account](#credit_account_id) to be set if the transfer succeeds.
-
-This action can be reverted when combined with the flag [`flags.pending`](#flagspending).
 
 ### `timestamp`
 
