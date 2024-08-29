@@ -1526,16 +1526,6 @@ pub const Checkpoint = struct {
         }
     }
 
-    pub fn durability_commit_for_checkpoint(checkpoint: u64) ?u64 {
-        assert(valid(checkpoint));
-
-        if (trigger_for_checkpoint(checkpoint)) |trigger| {
-            return trigger + constants.pipeline_prepare_queue_max;
-        } else {
-            return null;
-        }
-    }
-
     pub fn durable(checkpoint: u64, commit_max: u64) bool {
         assert(valid(checkpoint));
 

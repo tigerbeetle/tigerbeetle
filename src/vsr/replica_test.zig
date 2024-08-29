@@ -30,12 +30,8 @@ const checkpoint_3_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_3)
 const checkpoint_1_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_1).?;
 const checkpoint_2_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_2).?;
 const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_3).?;
-const checkpoint_1_durability_commit =
-    vsr.Checkpoint.durability_commit_for_checkpoint(checkpoint_1).?;
-const checkpoint_2_durability_commit =
-    vsr.Checkpoint.durability_commit_for_checkpoint(checkpoint_2).?;
-const checkpoint_3_durability_commit =
-    vsr.Checkpoint.durability_commit_for_checkpoint(checkpoint_1).?;
+const checkpoint_1_prepare_ok_max = checkpoint_1_trigger + constants.pipeline_prepare_queue_max;
+const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_prepare_queue_max;
 
 const log_level = std.log.Level.err;
 
@@ -875,17 +871,17 @@ test "Cluster: view_change: lagging replica advances checkpoint during view chan
     try expectEqual(b2.status(), .normal);
 
     // Progress a0 & b2's head past op_prepare_max for checkpoint_2 (but commit_max stays at
-    // op_prepare_max).
+    // op_prepare_ok_max).
     try c.request(
         checkpoint_2_prepare_max,
-        checkpoint_2_durability_commit,
+        checkpoint_2_prepare_ok_max,
     );
 
     try expectEqual(a0.op_checkpoint(), checkpoint_2);
-    try expectEqual(a0.commit_max(), checkpoint_2_durability_commit);
+    try expectEqual(a0.commit_max(), checkpoint_2_prepare_ok_max);
 
     try expectEqual(b2.op_checkpoint(), checkpoint_2);
-    try expectEqual(b2.commit_max(), checkpoint_2_durability_commit);
+    try expectEqual(b2.commit_max(), checkpoint_2_prepare_ok_max);
 
     b2.stop();
 
@@ -1271,17 +1267,17 @@ test "Cluster: prepare beyond checkpoint trigger" {
     t.replica(.R_).drop(.__, .bidirectional, .prepare_ok);
 
     // Prepare ops beyond the checkpoint.
-    try c.request(checkpoint_1_durability_commit - 1, checkpoint_1_trigger - 1);
+    try c.request(checkpoint_1_prepare_ok_max, checkpoint_1_trigger - 1);
     try expectEqual(t.replica(.R_).op_checkpoint(), 0);
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
-    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_durability_commit - 1);
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_prepare_ok_max - 1);
 
     t.replica(.R_).pass(.__, .bidirectional, .prepare_ok);
     t.run();
-    try expectEqual(c.replies(), checkpoint_1_durability_commit - 1);
+    try expectEqual(c.replies(), checkpoint_1_prepare_ok_max);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_durability_commit - 1);
-    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_durability_commit - 1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_prepare_ok_max);
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_prepare_ok_max);
 }
 
 test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
