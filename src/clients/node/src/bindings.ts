@@ -743,14 +743,19 @@ export enum CreateTransferError {
   imported_event_timeout_must_be_zero = 63,
 
   /**
+  * See [closing_transfer_must_be_pending](https://docs.tigerbeetle.com/reference/requests/create_transfers#closing_transfer_must_be_pending)
+  */
+  closing_transfer_must_be_pending = 64,
+
+  /**
   * See [debit_account_already_closed](https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed)
   */
-  debit_account_already_closed = 64,
+  debit_account_already_closed = 65,
 
   /**
   * See [credit_account_already_closed](https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed)
   */
-  credit_account_already_closed = 65,
+  credit_account_already_closed = 66,
 }
 
 export type CreateAccountsError = {

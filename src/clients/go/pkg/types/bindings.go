@@ -358,8 +358,9 @@ const (
 	TransferImportedEventTimestampMustPostdateDebitAccount  CreateTransferResult = 61
 	TransferImportedEventTimestampMustPostdateCreditAccount CreateTransferResult = 62
 	TransferImportedEventTimeoutMustBeZero                  CreateTransferResult = 63
-	TransferDebitAccountAlreadyClosed                       CreateTransferResult = 64
-	TransferCreditAccountAlreadyClosed                      CreateTransferResult = 65
+	TransferClosingTransferMustBePending                    CreateTransferResult = 64
+	TransferDebitAccountAlreadyClosed                       CreateTransferResult = 65
+	TransferCreditAccountAlreadyClosed                      CreateTransferResult = 66
 )
 
 func (i CreateTransferResult) String() string {
@@ -492,6 +493,8 @@ func (i CreateTransferResult) String() string {
 		return "TransferImportedEventTimestampMustPostdateCreditAccount"
 	case TransferImportedEventTimeoutMustBeZero:
 		return "TransferImportedEventTimeoutMustBeZero"
+	case TransferClosingTransferMustBePending:
+		return "TransferClosingTransferMustBePending"
 	case TransferDebitAccountAlreadyClosed:
 		return "TransferDebitAccountAlreadyClosed"
 	case TransferCreditAccountAlreadyClosed:

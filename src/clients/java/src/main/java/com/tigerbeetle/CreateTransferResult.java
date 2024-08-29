@@ -328,14 +328,19 @@ public enum CreateTransferResult {
     ImportedEventTimeoutMustBeZero((int) 63),
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#closing_transfer_must_be_pending">closing_transfer_must_be_pending</a>
+     */
+    ClosingTransferMustBePending((int) 64),
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed">debit_account_already_closed</a>
      */
-    DebitAccountAlreadyClosed((int) 64),
+    DebitAccountAlreadyClosed((int) 65),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed">credit_account_already_closed</a>
      */
-    CreditAccountAlreadyClosed((int) 65);
+    CreditAccountAlreadyClosed((int) 66);
 
     public final int value;
 
