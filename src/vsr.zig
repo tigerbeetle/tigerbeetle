@@ -203,9 +203,6 @@ pub const Command = enum(u8) {
 
     start_view_change = 10,
     do_view_change = 11,
-    // Historical version of SV, without checkpoint. Currently  both `start_view_deprecated` and
-    // `start_view` are handled. Next release will ignore `start_view_deprecated`.
-    start_view_deprecated = 12,
 
     request_start_view = 13,
     request_headers = 14,
@@ -218,14 +215,29 @@ pub const Command = enum(u8) {
     request_blocks = 19,
     block = 20,
 
-    request_sync_checkpoint = 21,
-    sync_checkpoint = 22,
-
     start_view = 23,
 
+    // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
+    const gaps = .{
+        12, // start_view without checkpoint
+        21, // request_sync_checkpoint
+        22, // sync_checkpoint
+    };
+
     comptime {
-        for (std.enums.values(Command), 0..) |result, index| {
-            assert(@intFromEnum(result) == index);
+        var value_previous: ?u8 = null;
+        for (std.enums.values(Command)) |command| {
+            const value_current = @intFromEnum(command);
+            assert(std.mem.indexOfScalar(u8, &gaps, value_current) == null);
+            if (value_previous == null) {
+                assert(value_current == 0);
+            } else {
+                assert(value_previous.? < value_current);
+                for (value_previous.? + 1..value_current) |value_gap| {
+                    assert(std.mem.indexOfScalar(u8, &gaps, value_gap) != null);
+                }
+            }
+            value_previous = value_current;
         }
     }
 };

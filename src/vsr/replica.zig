@@ -1411,13 +1411,6 @@ pub fn ReplicaType(
                     });
                     return;
                 },
-                .sync_checkpoint, .request_sync_checkpoint, .start_view_deprecated => {
-                    log.warn("{}: on_message: ignoring old protocol ({s})", .{
-                        self.replica,
-                        @tagName(message.header.command),
-                    });
-                    return;
-                },
                 .reserved => unreachable,
             }
 
@@ -2180,8 +2173,7 @@ pub fn ReplicaType(
         // haven’t executed previously, advance their commit number, and update the information in
         // their client table.
         fn on_start_view(self: *Self, message: *const Message.StartView) void {
-            assert(message.header.command == .start_view or
-                message.header.command == .start_view_deprecated);
+            assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message.base_const())) return;
 
             assert(self.status == .view_change or
@@ -4744,7 +4736,6 @@ pub fn ReplicaType(
                     header.command == .request_headers or
                     header.command == .request_prepare or
                     header.command == .request_reply or
-                    header.command == .request_sync_checkpoint or
                     header.command == .reply or
                     header.command == .ping or header.command == .pong,
             );
@@ -5465,8 +5456,7 @@ pub fn ReplicaType(
 
         fn ignore_view_change_message(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .do_view_change or
-                message.header.command == .start_view or
-                message.header.command == .start_view_deprecated);
+                message.header.command == .start_view);
             assert(self.status != .recovering); // Single node clusters don't have view changes.
             assert(message.header.replica < self.replica_count);
 
@@ -5478,7 +5468,7 @@ pub fn ReplicaType(
             }
 
             switch (message.header.into_any()) {
-                .start_view, .start_view_deprecated => |message_header| {
+                .start_view => |message_header| {
                     // This may be caused by faults in the network topology.
                     if (message.header.replica == self.replica) {
                         log.warn("{}: on_{s}: misdirected message (self)", .{
@@ -7597,7 +7587,7 @@ pub fn ReplicaType(
                     assert(header.checkpoint_op == self.op_checkpoint());
                     assert(header.log_view == self.log_view);
                 },
-                .start_view, .start_view_deprecated => |header| {
+                .start_view => |header| {
                     assert(!self.standby());
                     assert(self.status == .normal);
                     assert(!self.do_view_change_quorum);
@@ -7673,18 +7663,6 @@ pub fn ReplicaType(
                 .block => {
                     assert(!self.standby());
                 },
-                .request_sync_checkpoint => {
-                    maybe(self.standby());
-                    assert(self.syncing != .idle);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                },
-                .sync_checkpoint => {
-                    assert(!self.standby());
-                    assert(self.syncing == .idle);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                },
             }
             // Critical:
             // Do not advertise a view/log_view before it is durable. We only need perform these
@@ -7716,7 +7694,6 @@ pub fn ReplicaType(
                 // - A SV or a prepare_ok imply the log_view.
                 if (message.header.command == .do_view_change or
                     message.header.command == .start_view or
-                    message.header.command == .start_view_deprecated or
                     message.header.command == .prepare_ok)
                 {
                     if (self.log_view_durable() < self.log_view) {
@@ -9282,7 +9259,7 @@ pub fn ReplicaType(
                 => if (self.status == .recovering_head) Status.normal else .view_change,
                 // on_start_view() handles the (possible) transition to view-change manually, before
                 // transitioning to normal.
-                .start_view, .start_view_deprecated => return,
+                .start_view => return,
                 else => return,
             };
 
