@@ -2552,10 +2552,17 @@ pub fn StateMachineType(
                 maybe(dr_account_new.flags.closed);
                 maybe(cr_account_new.flags.closed);
 
-                if (!stdx.equal_bytes(Account, dr_account, &dr_account_new)) {
+                const dr_updated = expired.amount > 0 or
+                    dr_account_new.flags.closed != dr_account.flags.closed;
+                assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
+                if (dr_updated) {
                     grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
                 }
-                if (!stdx.equal_bytes(Account, cr_account, &cr_account_new)) {
+
+                const cr_updated = expired.amount > 0 or
+                    cr_account_new.flags.closed != cr_account.flags.closed;
+                assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
+                if (cr_updated) {
                     grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
                 }
 
