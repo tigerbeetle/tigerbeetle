@@ -2336,7 +2336,7 @@ pub fn ReplicaType(
                 // State sync can "truncate" the first batch of committed ops!
                 maybe(self.commit_min >
                     self.syncing.updating_superblock.checkpoint_state.header.op);
-                assert(self.commit_min < constants.lsm_compaction_ops +
+                assert(self.commit_min <= constants.lsm_compaction_ops +
                     self.syncing.updating_superblock.checkpoint_state.header.op);
 
                 self.commit_min = self.syncing.updating_superblock.checkpoint_state.header.op;
