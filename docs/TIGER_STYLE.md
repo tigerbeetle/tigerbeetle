@@ -362,7 +362,7 @@ Beyond these rules:
   **Over:**
   ```zig
   fn init() !LargeStruct {
-    return LargeObject {
+    return LargeStruct {
       // moving the initialized object.
     }
   }
