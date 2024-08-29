@@ -46,42 +46,42 @@ pub fn ScanBuilderType(
         const ScanBuilder = @This();
 
         pub const Scan = ScanType(Groove, Storage);
-        const Slots = std.ArrayListUnmanaged(Scan);
 
-        scan_slots: Slots,
-        merge_slots: Slots,
+        /// Each `ScanTree` consumes memory and I/O, so they are limited by `lsm_scans_max`.
+        scans: *[constants.lsm_scans_max]Scan,
+        scan_count: u32 = 0,
+
+        /// Merging `ScanTree`s does not require additional resources, so `ScanMerge`s are stored
+        /// in a separate buffer limited to `lsm_scans_max - 1`.
+        /// If `lsm_scans_max = 4`, we can have at most 4 scans and 3 merge operations:
+        /// M₁(M₂(S₁, S₂), M₃(S₃, S₄)).
+        merges: *[constants.lsm_scans_max - 1]Scan,
+        merge_count: u32 = 0,
 
         pub fn init(self: *ScanBuilder, allocator: Allocator) !void {
             self.* = .{
-                .scan_slots = .{},
-                .merge_slots = .{},
+                .scans = undefined,
+                .merges = undefined,
             };
 
-            // Since `ScanTree` consume memory and IO, it is limited by `lsm_scans_max`,
-            // however, merging scans does not require resources.
-            // If `lsm_scans_max = 4` we can have at most 3 merge operations:
-            // M₁(M₂(C₁, C₂), M₃(C₃, C₄))
-            try self.scan_slots.ensureTotalCapacity(allocator, constants.lsm_scans_max);
-            errdefer self.scan_slots.deinit(allocator);
+            self.scans = try allocator.create([constants.lsm_scans_max]Scan);
+            errdefer allocator.destroy(self.scans);
 
-            try self.merge_slots.ensureTotalCapacity(allocator, constants.lsm_scans_max - 1);
-            errdefer self.merge_slots.deinit(allocator);
+            self.merges = try allocator.create([constants.lsm_scans_max - 1]Scan);
+            errdefer allocator.destroy(self.merges);
         }
 
         pub fn deinit(self: *ScanBuilder, allocator: Allocator) void {
-            self.scan_slots.deinit(allocator);
-            self.merge_slots.deinit(allocator);
+            allocator.destroy(self.scans);
+            allocator.destroy(self.merges);
 
             self.* = undefined;
         }
 
         pub fn reset(self: *ScanBuilder) void {
-            self.scan_slots.clearRetainingCapacity();
-            self.merge_slots.clearRetainingCapacity();
-
             self.* = .{
-                .scan_slots = self.scan_slots,
-                .merge_slots = self.merge_slots,
+                .scans = self.scans,
+                .merges = self.merges,
             };
         }
 
@@ -219,11 +219,14 @@ pub fn ScanBuilderType(
             comptime field: std.meta.FieldEnum(Scan.Dispatcher),
             init_expression: ScanImplType(field),
         ) Error!*Scan {
-            if (self.scan_slots.items.len == self.scan_slots.capacity) {
+            if (self.scan_count == self.scans.len) {
                 return Error.ScansMaxExceeded;
             }
 
-            const scan = self.scan_slots.addOneAssumeCapacity();
+            const scan = &self.scans[self.scan_count];
+            self.scan_count += 1;
+            assert(self.scan_count <= self.scans.len);
+
             scan.* = .{
                 .dispatcher = @unionInit(
                     Scan.Dispatcher,
@@ -241,11 +244,14 @@ pub fn ScanBuilderType(
             comptime field: std.meta.FieldEnum(Scan.Dispatcher),
             init_expression: ScanImplType(field),
         ) Error!*Scan {
-            if (self.merge_slots.items.len == self.merge_slots.capacity) {
+            if (self.merge_count == self.merges.len) {
                 return Error.ScansMaxExceeded;
             }
 
-            const scan = self.merge_slots.addOneAssumeCapacity();
+            const scan = &self.merges[self.merge_count];
+            self.merge_count += 1;
+            assert(self.merge_count <= self.merges.len);
+
             scan.* = .{
                 .dispatcher = @unionInit(
                     Scan.Dispatcher,
