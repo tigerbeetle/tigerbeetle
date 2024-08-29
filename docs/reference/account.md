@@ -259,8 +259,8 @@ except for [voiding two-phase transfers](transfer.md#modes) that are still pendi
 - This flag can also be set by sending a [two-phase pending transfer](transfer.md#flagspending)
   with the [`Transfer.flags.closing_debit`](transfer.md#flagsclosing_debit)
   and/or [`Transfer.flags.closing_credit`](transfer.md#flagsclosing_credit) flags set.
-- This flag can be _unset_ by [voiding](#flagsvoid_pending_transfer) the two-phase pending
-  transfer that closed the account.
+- This flag can be _unset_ by [voiding](transfer.md#flagsvoid_pending_transfer) the two-phase
+  pending transfer that closed the account.
 
 ### `timestamp`
 
