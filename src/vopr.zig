@@ -67,7 +67,7 @@ pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
 
-const CliArgs = struct {
+const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
     ticks_max_requests: u32 = 40_000_000,
@@ -87,7 +87,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CliArgs);
+    const cli_args = flags.parse(&args, CLIArgs);
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {

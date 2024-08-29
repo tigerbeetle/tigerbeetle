@@ -13,9 +13,9 @@ const Shell = @import("../shell.zig");
 
 const log = std.log;
 
-pub const CliArgs = struct {};
+pub const CLIArgs = struct {};
 
-pub fn main(shell: *Shell, _: std.mem.Allocator, _: CliArgs) !void {
+pub fn main(shell: *Shell, _: std.mem.Allocator, _: CLIArgs) !void {
     const kcov_version = shell.exec_stdout("kcov --version", .{}) catch {
         log.err("can't find kcov", .{});
         std.process.exit(1);

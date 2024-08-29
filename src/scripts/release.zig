@@ -33,7 +33,7 @@ const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
-pub const CliArgs = struct {
+pub const CLIArgs = struct {
     sha: []const u8,
     language: ?Language = null,
     build: bool = false,
@@ -52,7 +52,7 @@ const VersionInfo = struct {
     sha: []const u8,
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(builtin.target.os.tag == .linux);
     assert(builtin.target.cpu.arch == .x86_64);
     _ = gpa;

@@ -24,12 +24,12 @@ const LanguageCI = .{
     .node = @import("../clients/node/ci.zig"),
 };
 
-pub const CliArgs = struct {
+pub const CLIArgs = struct {
     language: ?Language = null,
     validate_release: bool = false,
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (cli_args.validate_release) {
         try validate_release(shell, gpa, cli_args.language);
     } else {

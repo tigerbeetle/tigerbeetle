@@ -25,14 +25,14 @@ const kcov = @import("./scripts/kcov.zig");
 const changelog = @import("./scripts/changelog.zig");
 const upgrader = @import("./scripts/upgrader.zig");
 
-const CliArgs = union(enum) {
-    cfo: cfo.CliArgs,
-    ci: ci.CliArgs,
-    release: release.CliArgs,
-    devhub: devhub.CliArgs,
-    kcov: kcov.CliArgs,
+const CLIArgs = union(enum) {
+    cfo: cfo.CLIArgs,
+    ci: ci.CLIArgs,
+    release: release.CLIArgs,
+    devhub: devhub.CLIArgs,
+    kcov: kcov.CLIArgs,
     changelog: void,
-    upgrader: upgrader.CliArgs,
+    upgrader: upgrader.CLIArgs,
 
     pub const help =
         \\Usage:
@@ -84,7 +84,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CliArgs);
+    const cli_args = flags.parse(&args, CLIArgs);
 
     switch (cli_args) {
         .cfo => |args_cfo| try cfo.main(shell, gpa, args_cfo),

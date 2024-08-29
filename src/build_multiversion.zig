@@ -35,7 +35,7 @@ const Target = union(enum) {
     }
 };
 
-const CliArgs = struct {
+const CLIArgs = struct {
     target: []const u8,
     debug: bool = false,
     tigerbeetle_current: ?[]const u8 = null,
@@ -65,7 +65,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CliArgs);
+    const cli_args = flags.parse(&args, CLIArgs);
 
     const tmp_dir_path = try shell.fmt("{s}/{d}", .{
         cli_args.tmp,

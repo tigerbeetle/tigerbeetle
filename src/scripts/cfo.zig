@@ -55,7 +55,7 @@ const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 
-pub const CliArgs = struct {
+pub const CLIArgs = struct {
     budget_minutes: u64 = 10,
     hang_minutes: u64 = 30,
     concurrency: ?u32 = null,
@@ -109,7 +109,7 @@ const Fuzzer = enum {
     }
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
         return error.NotSupported;
     }

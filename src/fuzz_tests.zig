@@ -44,7 +44,7 @@ const Fuzzers = .{
 
 const FuzzersEnum = std.meta.FieldEnum(@TypeOf(Fuzzers));
 
-const CliArgs = struct {
+const CLIArgs = struct {
     events_max: ?usize = null,
     positional: struct {
         fuzzer: FuzzersEnum,
@@ -56,7 +56,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(fuzz.allocator);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CliArgs);
+    const cli_args = flags.parse(&args, CLIArgs);
 
     switch (cli_args.positional.fuzzer) {
         .smoke => {
@@ -105,7 +105,7 @@ fn main_smoke() !void {
     log.info("done in {}", .{std.fmt.fmtDuration(timer_all.lap())});
 }
 
-fn main_single(cli_args: CliArgs) !void {
+fn main_single(cli_args: CLIArgs) !void {
     assert(cli_args.positional.fuzzer != .smoke);
 
     const seed = cli_args.positional.seed orelse std.crypto.random.int(u64);

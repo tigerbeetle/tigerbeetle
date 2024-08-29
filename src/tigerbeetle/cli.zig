@@ -29,7 +29,7 @@ const StateMachine = vsr.state_machine.StateMachineType(
     constants.state_machine_config,
 );
 
-const CliArgs = union(enum) {
+const CLIArgs = union(enum) {
     const Format = struct {
         cluster: u128,
         replica: ?u8 = null,
@@ -365,7 +365,7 @@ const start_defaults_development = StartDefaults{
 const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
 const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
-/// While CliArgs store raw arguments as passed on the command line, Command ensures that
+/// While CLIArgs store raw arguments as passed on the command line, Command ensures that
 /// arguments are properly validated and desugared (e.g, sizes converted to counts where
 ///  appropriate).
 pub const Command = union(enum) {
@@ -486,7 +486,7 @@ pub const Command = union(enum) {
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
 pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
-    const cli_args = flags.parse(args_iterator, CliArgs);
+    const cli_args = flags.parse(args_iterator, CLIArgs);
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },
@@ -499,7 +499,7 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
     };
 }
 
-fn parse_args_format(format: CliArgs.Format) Command.Format {
+fn parse_args_format(format: CLIArgs.Format) Command.Format {
     if (format.replica_count == 0) {
         flags.fatal("--replica-count: value needs to be greater than zero", .{});
     }
@@ -555,7 +555,7 @@ fn parse_args_format(format: CliArgs.Format) Command.Format {
     };
 }
 
-fn parse_args_start(start: CliArgs.Start) Command.Start {
+fn parse_args_start(start: CLIArgs.Start) Command.Start {
     // Allowlist of stable flags. --development will disable automatic multiversion
     // upgrades too, but the flag itself is stable.
     const stable_args = .{
@@ -772,13 +772,13 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
     };
 }
 
-fn parse_args_version(version: CliArgs.Version) Command.Version {
+fn parse_args_version(version: CLIArgs.Version) Command.Version {
     return .{
         .verbose = version.verbose,
     };
 }
 
-fn parse_args_repl(repl: CliArgs.Repl) Command.Repl {
+fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
     const addresses = parse_addresses(repl.addresses);
 
     return .{
@@ -789,7 +789,7 @@ fn parse_args_repl(repl: CliArgs.Repl) Command.Repl {
     };
 }
 
-fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
+fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
         parse_addresses(addresses)
     else
@@ -827,7 +827,7 @@ fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
     };
 }
 
-fn parse_args_inspect(inspect: CliArgs.Inspect) Command.Inspect {
+fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
         inline else => |args| args.positional.path,
     };
@@ -857,7 +857,7 @@ fn parse_args_inspect(inspect: CliArgs.Inspect) Command.Inspect {
     };
 }
 
-fn parse_args_multiversion(multiversion: CliArgs.Multiversion) Command.Multiversion {
+fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multiversion {
     return .{
         .path = multiversion.positional.path,
     };
