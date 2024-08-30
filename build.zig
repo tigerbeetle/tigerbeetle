@@ -134,6 +134,11 @@ pub fn build(b: *std.Build) !void {
             "tracer-backend",
             "Which backend to use for tracing.",
         ) orelse .none,
+        .llvm_objcopy = b.option(
+            []const u8,
+            "llvm-objcopy",
+            "Use this llvm-objcopy instead of downloading one",
+        ),
     };
     const target = try resolve_target(b, build_options.target);
     const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
@@ -187,6 +192,7 @@ pub fn build(b: *std.Build) !void {
     }, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .llvm_objcopy = build_options.llvm_objcopy,
         .target = target,
         .mode = mode,
         .tracer_backend = build_options.tracer_backend,
@@ -376,6 +382,7 @@ fn build_tigerbeetle(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        llvm_objcopy: ?[]const u8,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
         tracer_backend: config.TracerBackend,
@@ -388,6 +395,7 @@ fn build_tigerbeetle(
         break :bin build_tigerbeetle_executable_multiversion(b, .{
             .vsr_module = options.vsr_module,
             .vsr_options = options.vsr_options,
+            .llvm_objcopy = options.llvm_objcopy,
             .multiversion = version_past,
             .target = options.target,
             .mode = options.mode,
@@ -454,6 +462,7 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
 fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     vsr_module: *std.Build.Module,
     vsr_options: *std.Build.Step.Options,
+    llvm_objcopy: ?[]const u8,
     multiversion: []const u8,
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
@@ -471,10 +480,14 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     build_multiversion_exe.root_module.addOptions("vsr_options", options.vsr_options);
 
     const build_multiversion = b.addRunArtifact(build_multiversion_exe);
-    build_multiversion.addPrefixedFileArg(
-        "--llvm-objcopy=",
-        build_tigerbeetle_executable_get_objcopy(b),
-    );
+    if (options.llvm_objcopy) |path| {
+        build_multiversion.addArg(b.fmt("--llvm-objcopy={s}", .{path}));
+    } else {
+        build_multiversion.addPrefixedFileArg(
+            "--llvm-objcopy=",
+            build_tigerbeetle_executable_get_objcopy(b),
+        );
+    }
     if (options.target.result.os.tag == .macos) {
         build_multiversion.addArg("--target=macos");
         inline for (.{ "x86_64", "aarch64" }, .{ "x86-64", "aarch64" }) |arch, flag| {
