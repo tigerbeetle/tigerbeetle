@@ -38,6 +38,7 @@ const Target = union(enum) {
 const CliArgs = struct {
     target: []const u8,
     debug: bool = false,
+    llvm_objcopy: []const u8,
     tigerbeetle_current: ?[]const u8 = null,
     tigerbeetle_current_x86_64: ?[]const u8 = null, // NB: Will be x86-64 on the CLI!
     tigerbeetle_current_aarch64: ?[]const u8 = null,
@@ -77,25 +78,20 @@ pub fn main() !void {
         std.fs.cwd().deleteTree(tmp_dir_path) catch {};
     }
 
-    const llvm_objcopy = for (@as([2][]const u8, .{
-        "llvm-objcopy-16",
-        "llvm-objcopy",
-    })) |llvm_objcopy| {
-        if (shell.exec_stdout("{llvm_objcopy} --version", .{
-            .llvm_objcopy = llvm_objcopy,
-        })) |llvm_objcopy_version| {
-            log.info("llvm-objcopy version {s}", .{llvm_objcopy_version});
-            break llvm_objcopy;
-        } else |_| {}
-    } else {
-        fatal("can't find llvm-objcopy", .{});
-    };
-
     const target = try Target.parse(cli_args.target);
+
+    if (builtin.os.tag != .windows) {
+        // When we fetch llvm-objcopy in build.zig, there isn't an easy way to mark it as
+        // executable, so do it here.
+        const fd = try shell.cwd.openFile(cli_args.llvm_objcopy, .{ .mode = .read_write });
+        defer fd.close();
+
+        try fd.chmod(0o777);
+    }
 
     switch (target) {
         .windows, .linux => try build_multiversion_single_arch(shell, .{
-            .llvm_objcopy = llvm_objcopy,
+            .llvm_objcopy = cli_args.llvm_objcopy,
             .tmp_path = tmp_dir_path,
             .target = target,
             .debug = cli_args.debug,
@@ -104,7 +100,7 @@ pub fn main() !void {
             .output = cli_args.output,
         }),
         .macos => try build_multiversion_universal(shell, .{
-            .llvm_objcopy = llvm_objcopy,
+            .llvm_objcopy = cli_args.llvm_objcopy,
             .tmp_path = tmp_dir_path,
             .target = target,
             .debug = cli_args.debug,

@@ -471,6 +471,10 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     build_multiversion_exe.root_module.addOptions("vsr_options", options.vsr_options);
 
     const build_multiversion = b.addRunArtifact(build_multiversion_exe);
+    build_multiversion.addPrefixedFileArg(
+        "--llvm-objcopy=",
+        build_tigerbeetle_executable_get_objcopy(b),
+    );
     if (options.target.result.os.tag == .macos) {
         build_multiversion.addArg("--target=macos");
         inline for (.{ "x86_64", "aarch64" }, .{ "x86-64", "aarch64" }) |arch, flag| {
@@ -519,6 +523,41 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     else
         "tigerbeetle";
     return build_multiversion.addPrefixedOutputFileArg("--output=", basename);
+}
+
+// Downloads a pre-build llvm-objcopy from <https://github.com/tigerbeetle/dependencies>.
+fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
+    const llvm_objcopy_artifact: struct { name: []const u8, checksum: u256 } =
+        switch (b.graph.host.result.os.tag) {
+        .linux => .{
+            .name = "llvm-objcopy-x86_64-linux",
+            .checksum = 0x3e2fe8f359c63eb62069e322f9bc079b2876301510afb15f70d117b30a2eea36,
+        },
+        .windows => .{
+            .name = "llvm-objcopy-x86_64-windows.exe",
+            .checksum = 0x890ea11a8197032a398c8ba168db2f2713e925a070ac3a622ee327c8099c1c3f,
+        },
+        .macos => .{
+            .name = "llvm-objcopy-aarch64-macos",
+            .checksum = 0x5202a686b82c8f613b264619188fc788fcd3c22cfa5c3da568ddb27f1fb4cb29,
+        },
+        else => @panic("unsupported host"),
+    };
+
+    const llvm_objcopy_unverified = b.addSystemCommand(&.{
+        "gh",        "release",
+        "download",  "18.1.8",
+        "--repo",    "tigerbeetle/dependencies",
+        "--pattern", llvm_objcopy_artifact.name,
+
+        "--output",
+    }).addOutputFileArg(llvm_objcopy_artifact.name);
+
+    return VerifyChecksum.create(
+        b,
+        llvm_objcopy_unverified,
+        llvm_objcopy_artifact.checksum,
+    ).target;
 }
 
 fn build_aof(
@@ -1492,3 +1531,56 @@ fn download_release(
     unzip.max_stdio_size = 512 * 1024 * 1024;
     return unzip.captureStdOut();
 }
+
+const VerifyChecksum = struct {
+    step: std.Build.Step,
+    source: std.Build.LazyPath,
+    target: std.Build.LazyPath,
+    checksum: u256,
+    generated_file: std.Build.GeneratedFile,
+
+    fn create(b: *std.Build, source: std.Build.LazyPath, checksum: u256) *VerifyChecksum {
+        const result = b.allocator.create(VerifyChecksum) catch @panic("OOM");
+        result.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = "verify checksum",
+                .owner = b,
+                .makeFn = make,
+            }),
+            .source = source,
+            .target = .{ .generated = .{ .file = &result.generated_file } },
+            .generated_file = .{ .step = &result.step },
+            .checksum = checksum,
+        };
+        result.source.addStepDependencies(&result.step);
+
+        return result;
+    }
+
+    fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
+        _ = prog_node;
+        const b = step.owner;
+        const verify_checksum: *VerifyChecksum = @alignCast(@fieldParentPtr("step", step));
+        const source_path = verify_checksum.source.getPath2(b, step);
+        const contents = try std.fs.cwd().readFileAlloc(
+            b.allocator,
+            source_path,
+            32 * 1024 * 1024,
+        );
+        defer b.allocator.free(contents);
+
+        var hash_bytes: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(contents, &hash_bytes, .{});
+        const hash = std.mem.readInt(u256, &hash_bytes, .big);
+        if (hash != verify_checksum.checksum) {
+            std.log.err("checksum mismatch, specified '{x}', got '{x}'", .{
+                verify_checksum.checksum,
+                hash,
+            });
+            return error.ChecksumMismatch;
+        }
+        step.result_cached = true;
+        verify_checksum.generated_file.path = source_path;
+    }
+};
