@@ -281,6 +281,72 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
 	})
 
+	t.Run("can close accounts", func(t *testing.T) {
+		t.Parallel()
+		accountA, accountB := createTwoAccounts(t)
+
+		closingTransfer := types.Transfer{
+			ID:              types.ID(),
+			CreditAccountID: accountA.ID,
+			DebitAccountID:  accountB.ID,
+			Amount:          types.ToUint128(0),
+			Flags: types.TransferFlags{
+				ClosingDebit:  true,
+				ClosingCredit: true,
+				Pending:       true,
+			}.ToUint16(),
+			Code:   1,
+			Ledger: 1,
+		}
+		results, err := client.CreateTransfers([]types.Transfer{closingTransfer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, results, 0)
+
+		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, accounts, 2)
+
+		assert.NotEqual(t, accountA.Flags, accounts[0].Flags)
+		assert.True(t, accounts[0].AccountFlags().Closed)
+
+		assert.NotEqual(t, accountB.Flags, accounts[1].Flags)
+		assert.True(t, accounts[1].AccountFlags().Closed)
+
+		voidingTransfer := types.Transfer{
+			ID:              types.ID(),
+			CreditAccountID: accountA.ID,
+			DebitAccountID:  accountB.ID,
+			Amount:          types.ToUint128(0),
+			Flags: types.TransferFlags{
+				VoidPendingTransfer: true,
+			}.ToUint16(),
+			PendingID: closingTransfer.ID,
+			Code:      1,
+			Ledger:    1,
+		}
+		results, err = client.CreateTransfers([]types.Transfer{voidingTransfer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, results, 0)
+
+		accounts, err = client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, accounts, 2)
+
+		assert.Equal(t, accountA.Flags, accounts[0].Flags)
+		assert.True(t, !accounts[0].AccountFlags().Closed)
+
+		assert.Equal(t, accountB.Flags, accounts[1].Flags)
+		assert.True(t, !accounts[1].AccountFlags().Closed)
+	})
+
 	t.Run("can create concurrent transfers", func(t *testing.T) {
 		accountA, accountB := createTwoAccounts(t)
 

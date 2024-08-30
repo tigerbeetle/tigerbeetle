@@ -808,6 +808,53 @@ public class IntegrationTests
         Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
     }
 
+    [TestMethod]
+    public void CreateClosingTransfer()
+    {
+        var accounts = GenerateAccounts();
+        var accountResults = client.CreateAccounts(accounts);
+        Assert.IsTrue(accountResults.Length == 0);
+
+        var closingTransfer = new Transfer
+        {
+            Id = ID.Create(),
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 0,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.ClosingDebit | TransferFlags.ClosingCredit | TransferFlags.Pending,
+        };
+
+        var result = client.CreateTransfer(closingTransfer);
+        Assert.IsTrue(result == CreateTransferResult.Ok);
+
+        var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        Assert.AreNotEqual(lookupAccounts[0].Flags, accounts[0].Flags);
+        Assert.IsTrue(lookupAccounts[0].Flags.HasFlag(AccountFlags.Closed));
+
+        Assert.AreNotEqual(lookupAccounts[1].Flags, accounts[1].Flags);
+        Assert.IsTrue(lookupAccounts[1].Flags.HasFlag(AccountFlags.Closed));
+
+        var voidingTransfer = new Transfer
+        {
+            Id = ID.Create(),
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            PendingId = closingTransfer.Id,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.VoidPendingTransfer,
+        };
+
+        var voidingResult = client.CreateTransfer(voidingTransfer);
+        Assert.IsTrue(voidingResult == CreateTransferResult.Ok);
+
+        lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        Assert.IsFalse(lookupAccounts[0].Flags.HasFlag(AccountFlags.Closed));
+        Assert.IsFalse(lookupAccounts[1].Flags.HasFlag(AccountFlags.Closed));
+    }
 
     [TestMethod]
     public void CreateAccountTooMuchData()

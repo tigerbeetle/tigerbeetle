@@ -436,6 +436,61 @@ test('cannot void an expired transfer', async (): Promise<void> => {
   assert.deepStrictEqual(errors[0], { index: 0, result: CreateTransferError.pending_transfer_expired })
 })
 
+test('can close accounts', async (): Promise<void> => {
+  const closing_transfer: Transfer = {
+    id: id(),
+    debit_account_id: accountB.id,
+    credit_account_id: accountA.id,
+    amount: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: TransferFlags.closing_debit | TransferFlags.closing_credit | TransferFlags.pending,
+    timestamp: 0n, // will be set correctly by the TigerBeetle server
+  }
+  let errors = await client.createTransfers([closing_transfer])
+  assert.strictEqual(errors.length, 0)
+
+  let accounts = await client.lookupAccounts([accountA.id, accountB.id])
+  assert.strictEqual(accounts.length, 2)
+  assert.ok(accountA.flags != accounts[0].flags)
+  assert.ok((accounts[0].flags & AccountFlags.closed) != 0)
+
+  assert.ok(accountB.flags != accounts[1].flags)
+  assert.ok((accounts[1].flags & AccountFlags.closed) != 0)
+
+  const voiding_transfer: Transfer = {
+    id: id(),
+    debit_account_id: accountB.id,
+    credit_account_id: accountA.id,
+    amount: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: TransferFlags.void_pending_transfer,
+    pending_id: closing_transfer.id,
+    timestamp: 0n, // will be set correctly by the TigerBeetle server
+  }
+
+  errors = await client.createTransfers([voiding_transfer])
+  assert.strictEqual(errors.length, 0)
+
+  accounts = await client.lookupAccounts([accountA.id, accountB.id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accountA.flags, accounts[0].flags)
+  assert.ok((accounts[0].flags & AccountFlags.closed) == 0)
+
+  assert.strictEqual(accountB.flags, accounts[1].flags)
+  assert.ok((accounts[1].flags & AccountFlags.closed) == 0)
+})
+
 test('can get account transfers', async (): Promise<void> => {
   const accountC: Account = {
     id: 21n,
