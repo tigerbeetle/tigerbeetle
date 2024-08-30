@@ -142,9 +142,9 @@ pub fn build(b: *std.Build) !void {
     const vsr_options, const vsr_module = build_vsr_module(b, .{
         .target = target,
         .git_commit = build_options.git_commit[0..40].*,
+        .config_verify = build_options.config_verify,
         .config_release = build_options.config_release,
         .config_release_client_min = build_options.config_release_client_min,
-        .config_base = build_options.config,
         .config_log_level = build_options.config_log_level,
         .config_aof_recovery = build_options.config_aof_recovery,
         .hash_log_mode = build_options.hash_log_mode,
@@ -282,6 +282,7 @@ pub fn build(b: *std.Build) !void {
 fn build_vsr_module(b: *std.Build, options: struct {
     target: std.Build.ResolvedTarget,
     git_commit: [40]u8,
+    config_verify: bool,
     config_release: ?[]const u8,
     config_release_client_min: ?[]const u8,
     config_log_level: std.log.Level,
@@ -296,6 +297,7 @@ fn build_vsr_module(b: *std.Build, options: struct {
     // essentially re-create identical module.
     const vsr_options = b.addOptions();
     vsr_options.addOption(?[40]u8, "git_commit", options.git_commit[0..40].*);
+    vsr_options.addOption(bool, "config_verify", options.config_verify);
     vsr_options.addOption(?[]const u8, "release", options.config_release);
     vsr_options.addOption(
         ?[]const u8,
@@ -362,7 +364,7 @@ fn build_tigerbeetle(
             .vsr_module = options.vsr_module,
             .vsr_options = options.vsr_options,
             .llvm_objcopy = options.llvm_objcopy,
-            .multiversion = version_past,
+            .tigerbeetle_past = download_release(b, version_past, options.target, options.mode),
             .target = options.target,
             .mode = options.mode,
         });
@@ -424,7 +426,7 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     vsr_module: *std.Build.Module,
     vsr_options: *std.Build.Step.Options,
     llvm_objcopy: ?[]const u8,
-    multiversion: []const u8,
+    tigerbeetle_past: std.Build.LazyPath,
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
 }) std.Build.LazyPath {
@@ -481,10 +483,7 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
         build_multiversion.addArg("--debug");
     }
 
-    build_multiversion.addPrefixedFileArg(
-        "--tigerbeetle-past=",
-        download_release(b, options.multiversion, options.target, options.mode),
-    );
+    build_multiversion.addPrefixedFileArg("--tigerbeetle-past=", options.tigerbeetle_past);
     build_multiversion.addArg(b.fmt(
         "--tmp={s}",
         .{b.cache_root.join(b.allocator, &.{"tmp"}) catch @panic("OOM")},
@@ -616,26 +615,26 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
     const vsr_options, const vsr_module = build_vsr_module(b, .{
         .target = options.target,
         .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
-        .config_base = .production,
+        .config_verify = true,
         .config_release = "0.16.99",
         .config_release_client_min = "0.15.3",
         .config_log_level = .info,
         .config_aof_recovery = false,
-        .tracer_backend = .none,
         .hash_log_mode = .none,
     });
+    const tigerbeetle_past = download_release(b, "latest", options.target, options.mode);
     const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .llvm_objcopy = options.llvm_objcopy,
-        .multiversion = "latest",
+        .tigerbeetle_past = tigerbeetle_past,
         .target = options.target,
         .mode = options.mode,
-        .tracer_backend = .none,
     });
 
     const integration_tests_options = b.addOptions();
     integration_tests_options.addOptionPath("tigerbeetle_exe", tigerbeetle);
+    integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_past);
     const integration_tests = b.addTest(.{
         .root_source_file = b.path("src/integration_tests.zig"),
         .target = options.target,
@@ -647,6 +646,7 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
     if (b.args != null) { // Don't cache test results if running a specific test.
         run_integration_tests.has_side_effects = true;
     }
+    run_integration_tests.has_side_effects = true;
     step_test_integration.dependOn(&run_integration_tests.step);
 }
 
