@@ -113,6 +113,7 @@ pub fn StateMachineType(
                     .timestamp = 18,
                     .expires_at = 19,
                     .imported = 24,
+                    .closing = 26,
                 };
 
                 pub const transfers_pending = .{
@@ -250,6 +251,15 @@ pub fn StateMachineType(
                             return if (object.flags.imported) {} else null;
                         }
                     }.imported,
+                    .closing = struct {
+                        fn closing(object: *const Transfer) ?void {
+                            if (object.flags.closing_debit or object.flags.closing_credit) {
+                                return {};
+                            } else {
+                                return null;
+                            }
+                        }
+                    }.closing,
                 },
             },
         );
@@ -2154,8 +2164,8 @@ pub fn StateMachineType(
             if (t.flags.pending) return .flags_are_mutually_exclusive;
             if (t.flags.balancing_debit) return .flags_are_mutually_exclusive;
             if (t.flags.balancing_credit) return .flags_are_mutually_exclusive;
-            if (t.flags.closing_credit) return .flags_are_mutually_exclusive;
             if (t.flags.closing_debit) return .flags_are_mutually_exclusive;
+            if (t.flags.closing_credit) return .flags_are_mutually_exclusive;
 
             if (t.pending_id == 0) return .pending_id_must_not_be_zero;
             if (t.pending_id == math.maxInt(u128)) return .pending_id_must_not_be_int_max;
@@ -2199,7 +2209,7 @@ pub fn StateMachineType(
                     }
                 }
             };
-            assert((p.amount > 0 and amount > 0) or !forbid_zero_amounts(client_release));
+            if (p.amount > 0 and amount == 0) assert(!forbid_zero_amounts(client_release));
 
             if (amount > p.amount) return .exceeds_pending_transfer_amount;
 
@@ -2705,6 +2715,7 @@ pub fn StateMachineType(
                 code: u32,
                 expires_at: u32,
                 imported: u32,
+                closing: u32,
             },
             transfers_pending: struct {
                 timestamp: u32,
@@ -2750,6 +2761,7 @@ pub fn StateMachineType(
                     .code = batch_create_transfers,
                     .expires_at = batch_create_transfers,
                     .imported = batch_create_transfers,
+                    .closing = batch_create_transfers,
                 },
                 .transfers_pending = .{
                     // Objects are mutated when the pending transfer is posted/voided/expired.
