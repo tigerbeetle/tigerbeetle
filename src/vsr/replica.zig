@@ -4140,6 +4140,9 @@ pub fn ReplicaType(
                 .checkpoint,
             );
 
+            // Send prepare_oks that may have been wittheld by virtue of `op_prepare_ok_max`.
+            self.send_prepare_oks_after_checkpoint();
+
             if (self.event_callback) |hook| hook(self, .checkpoint_completed);
             self.commit_dispatch(.cleanup);
         }
@@ -5760,12 +5763,6 @@ pub fn ReplicaType(
             return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
-        /// Returns the op that triggered the current checkpoint.
-        fn op_checkpoint_trigger(self: *const Self) u64 {
-            assert(self.op_checkpoint() != 0);
-            return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
-        }
-
         /// Returns the highest op that this replica can safely prepare to its WAL.
         ///
         /// Receiving and storing an op higher than `op_prepare_max()` is forbidden;
@@ -5801,7 +5798,9 @@ pub fn ReplicaType(
             if (!self.sync_content_done() and
                 !vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max))
             {
-                return self.op_checkpoint_trigger() + constants.pipeline_prepare_queue_max;
+                const op_checkpoint_trigger =
+                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+                return op_checkpoint_trigger + constants.pipeline_prepare_queue_max;
             } else {
                 return self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max;
             }
@@ -5964,7 +5963,9 @@ pub fn ReplicaType(
                     );
 
                     if (self.release.value == upgrade_request.release.value) {
-                        assert(self.op_checkpoint_trigger() > self.op + 1);
+                        const op_checkpoint_trigger =
+                            vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+                        assert(op_checkpoint_trigger > self.op + 1);
                     }
                 },
                 else => {
@@ -7181,6 +7182,26 @@ pub fn ReplicaType(
             } else {
                 log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.replica});
                 return;
+            }
+        }
+
+        fn send_prepare_oks_after_checkpoint(self: *Self) void {
+            assert(self.status == .normal or self.status == .view_change);
+
+            const op_checkpoint_trigger =
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+            assert(self.commit_min == op_checkpoint_trigger);
+
+            var op = op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1;
+            while (op <= self.op) : (op += 1) {
+                // We may have breaks or stale headers in our uncommitted chain here. However:
+                // * being able to send what we have will allow the pipeline to commit earlier, and
+                // * the primary will drop any prepare_ok for a prepare not in the pipeline.
+                // This is safe only because the primary can verify against the prepare checksum.
+                if (self.journal.header_with_op(op)) |header| {
+                    self.send_prepare_ok(header);
+                    defer self.flush_loopback_queue();
+                }
             }
         }
 
