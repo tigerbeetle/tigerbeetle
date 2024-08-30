@@ -67,6 +67,7 @@ const CliArgs = union(enum) {
         cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
+        trace: bool = false,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
@@ -395,6 +396,7 @@ pub const Command = union(enum) {
         cache_grid_blocks: u32,
         lsm_forest_compaction_block_count: u32,
         lsm_forest_node_count: u32,
+        trace: bool,
         development: bool,
         experimental: bool,
         aof: bool,
@@ -767,6 +769,7 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
         .lsm_forest_node_count = lsm_forest_node_count,
         .development = start.development,
         .experimental = start.experimental,
+        .trace = start.trace,
         .aof = start.aof,
         .path = start.positional.path,
     };

@@ -379,6 +379,9 @@ const Command = struct {
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
+            .tracer_options = .{
+                .writer = if (args.trace) std.io.getStdOut().writer().any() else null,
+            },
         }) catch |err| switch (err) {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => |e| return e,

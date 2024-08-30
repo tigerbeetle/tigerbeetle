@@ -542,6 +542,7 @@ pub fn ReplicaType(
         /// The prepare message being committed.
         commit_prepare: ?*Message.Prepare = null,
 
+        trace: vsr.trace.Tracer,
         tracer_slot_commit: ?tracer.SpanStart = null,
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
@@ -558,6 +559,7 @@ pub fn ReplicaType(
             aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
+            tracer_options: vsr.trace.Tracer.Options = .{},
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
             release_client_min: vsr.Release,
@@ -580,6 +582,9 @@ pub fn ReplicaType(
             self.static_allocator = StaticAllocator.init(parent_allocator);
             const allocator = self.static_allocator.allocator();
 
+            // Once initialized, the replica is responsible for deinitializing replica components.
+            var initialized = false;
+
             self.superblock = try SuperBlock.init(
                 allocator,
                 .{
@@ -587,9 +592,6 @@ pub fn ReplicaType(
                     .storage_size_limit = options.storage_size_limit,
                 },
             );
-
-            // Once initialized, the replica is in charge of calling superblock.deinit().
-            var initialized = false;
             errdefer if (!initialized) self.superblock.deinit(allocator);
 
             // Open the superblock:
@@ -611,6 +613,9 @@ pub fn ReplicaType(
                 });
                 return error.NoAddress;
             }
+
+            self.trace = try vsr.trace.Tracer.init(allocator, replica, options.tracer_options);
+            errdefer if (!initialized) self.trace.deinit(allocator);
 
             // Initialize the replica:
             try self.init(allocator, .{
@@ -1072,6 +1077,7 @@ pub fn ReplicaType(
 
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
+                .trace = &self.trace,
                 .cache_blocks_count = options.grid_cache_blocks_count,
                 .missing_blocks_max = constants.grid_missing_blocks_max,
                 .missing_tables_max = constants.grid_missing_tables_max,
@@ -1227,6 +1233,7 @@ pub fn ReplicaType(
                 },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
+                .trace = self.trace,
                 .test_context = options.test_context,
                 .aof = options.aof,
             };
@@ -1250,6 +1257,7 @@ pub fn ReplicaType(
 
             self.static_allocator.transition_from_static_to_deinit();
 
+            self.trace.deinit(allocator);
             self.grid_scrubber.deinit(allocator);
             self.client_replies.deinit();
             self.client_sessions_checkpoint.deinit(allocator);

@@ -145,6 +145,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         state: State,
         storage: *Storage,
+        trace: vsr.trace.Tracer,
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context,
         grid: Grid,
@@ -168,6 +169,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = .init;
             env.storage = storage;
 
+            env.trace = try vsr.trace.Tracer.init(allocator, replica, .{});
+            defer env.trace.deinit(allocator);
+
             env.superblock = try SuperBlock.init(allocator, .{
                 .storage = env.storage,
                 .storage_size_limit = constants.storage_size_limit_max,
@@ -176,6 +180,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.grid = try Grid.init(allocator, .{
                 .superblock = &env.superblock,
+                .trace = &env.trace,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
             });

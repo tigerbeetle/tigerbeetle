@@ -3026,6 +3026,7 @@ const TestContext = struct {
     const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
     storage: Storage,
+    trace: vsr.trace.Tracer,
     superblock: SuperBlock,
     grid: Grid,
     state_machine: StateMachine,
@@ -3044,6 +3045,9 @@ const TestContext = struct {
         );
         errdefer ctx.storage.deinit(allocator);
 
+        ctx.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        errdefer ctx.trace.deinit(allocator);
+
         ctx.superblock = try SuperBlock.init(allocator, .{
             .storage = &ctx.storage,
             .storage_size_limit = data_file_size_min,
@@ -3056,6 +3060,7 @@ const TestContext = struct {
 
         ctx.grid = try Grid.init(allocator, .{
             .superblock = &ctx.superblock,
+            .trace = &ctx.trace,
             .missing_blocks_max = 0,
             .missing_tables_max = 0,
         });
@@ -3075,10 +3080,11 @@ const TestContext = struct {
     }
 
     fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
-        ctx.storage.deinit(allocator);
-        ctx.superblock.deinit(allocator);
-        ctx.grid.deinit(allocator);
         ctx.state_machine.deinit(allocator);
+        ctx.grid.deinit(allocator);
+        ctx.superblock.deinit(allocator);
+        ctx.trace.deinit(allocator);
+        ctx.storage.deinit(allocator);
         ctx.* = undefined;
     }
 
