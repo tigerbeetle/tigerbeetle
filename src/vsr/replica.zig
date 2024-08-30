@@ -8096,7 +8096,10 @@ pub fn ReplicaType(
 
             assert(self.commit_min >=
                 self.do_view_change_from_all_replicas[self.replica].?.header.commit_min);
-            assert(self.commit_min <= DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
+
+            maybe(self.commit_min > DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
+            maybe(self.commit_max >
+                DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
             {
                 // "`replica.op` exists" invariant may be broken briefly between
                 // set_op_and_commit_max() and replace_header().
@@ -8105,8 +8108,6 @@ pub fn ReplicaType(
                     DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
                     @src(),
                 );
-                maybe(self.commit_max >
-                    DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
                 assert(self.commit_max <= self.op_prepare_max());
                 assert(self.commit_max <= self.op);
                 maybe(self.journal.header_with_op(self.op) == null);
