@@ -520,6 +520,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(snapshot_min > 0);
             assert(snapshot_min < snapshot_latest);
 
+            tree.grid.trace.start(.compact_mutable, .{ .tree = tree.config.name });
+            defer tree.grid.trace.stop(.compact_mutable, .{ .tree = tree.config.name });
+
             // TODO
             // assert((tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
 
