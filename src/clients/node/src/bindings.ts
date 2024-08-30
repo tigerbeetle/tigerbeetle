@@ -34,6 +34,11 @@ export enum AccountFlags {
   * See [imported](https://docs.tigerbeetle.com/reference/account#flagsimported)
   */
   imported = (1 << 4),
+
+  /**
+  * See [closed](https://docs.tigerbeetle.com/reference/account#flagsclosed)
+  */
+  closed = (1 << 5),
 }
 
 
@@ -74,9 +79,19 @@ export enum TransferFlags {
   balancing_credit = (1 << 5),
 
   /**
+  * See [closing_debit](https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit)
+  */
+  closing_debit = (1 << 6),
+
+  /**
+  * See [closing_credit](https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit)
+  */
+  closing_credit = (1 << 7),
+
+  /**
   * See [imported](https://docs.tigerbeetle.com/reference/transfer#flagsimported)
   */
-  imported = (1 << 6),
+  imported = (1 << 8),
 }
 
 
@@ -726,6 +741,21 @@ export enum CreateTransferError {
   * See [imported_event_timeout_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero)
   */
   imported_event_timeout_must_be_zero = 63,
+
+  /**
+  * See [closing_transfer_must_be_pending](https://docs.tigerbeetle.com/reference/requests/create_transfers#closing_transfer_must_be_pending)
+  */
+  closing_transfer_must_be_pending = 64,
+
+  /**
+  * See [debit_account_already_closed](https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed)
+  */
+  debit_account_already_closed = 65,
+
+  /**
+  * See [credit_account_already_closed](https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed)
+  */
+  credit_account_already_closed = 66,
 }
 
 export type CreateAccountsError = {

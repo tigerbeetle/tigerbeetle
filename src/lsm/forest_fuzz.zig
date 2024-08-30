@@ -767,6 +767,13 @@ const Environment = struct {
                             assert(account.flags.imported);
                             break :index undefined;
                         },
+                        .closed => index: {
+                            assert(params.min == 0);
+                            assert(params.max == 0);
+                            assert(prefix_last == null);
+                            assert(account.flags.closed);
+                            break :index undefined;
+                        },
                         inline else => |field| index: {
                             const Helper = GrooveAccounts.IndexTreeFieldHelperType(@tagName(field));
                             comptime assert(Helper.Index != void);
@@ -1033,6 +1040,7 @@ fn generate_put_account(
             .debits_must_not_exceed_credits = random.boolean(),
             .credits_must_not_exceed_debits = random.boolean(),
             .imported = random.boolean(),
+            .closed = random.boolean(),
         },
         .debits_pending = 0,
         .debits_posted = 0,

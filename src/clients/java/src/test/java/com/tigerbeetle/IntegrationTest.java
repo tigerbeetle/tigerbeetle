@@ -20,6 +20,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -777,6 +778,68 @@ public class IntegrationTest {
 
         assertTransfers(transfers, lookupTransfers);
         assertNotEquals(0L, lookupTransfers.getTimestamp());
+    }
+
+    @Test
+    public void testCreateClosingTransfers() throws Throwable {
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        final var closingTransferId = UInt128.id();
+
+        final var accounts = generateAccounts(account1Id, account2Id);
+
+        final var createAccountErrors = client.createAccounts(accounts);
+        assertTrue(createAccountErrors.getLength() == 0);
+
+        var transfers = new TransferBatch(1);
+        transfers.add();
+        transfers.setId(closingTransferId);
+        transfers.setCreditAccountId(account1Id);
+        transfers.setDebitAccountId(account2Id);
+        transfers.setLedger(720);
+        transfers.setCode(1);
+        transfers.setAmount(0);
+        transfers.setFlags(
+                TransferFlags.CLOSING_CREDIT | TransferFlags.CLOSING_DEBIT | TransferFlags.PENDING);
+
+        var createTransfersErrors = client.createTransfers(transfers);
+        assertTrue(createTransfersErrors.getLength() == 0);
+
+        var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
+        assertEquals(2, lookupAccounts.getLength());
+
+        accounts.beforeFirst();
+
+        while (lookupAccounts.next()) {
+            assertTrue(accounts.next());
+            assertFalse(accounts.getFlags() == lookupAccounts.getFlags());
+            assertTrue(AccountFlags.hasClosed(lookupAccounts.getFlags()));
+        }
+
+        transfers = new TransferBatch(1);
+        transfers.add();
+        transfers.setId(UInt128.id());
+        transfers.setCreditAccountId(account1Id);
+        transfers.setDebitAccountId(account2Id);
+        transfers.setLedger(720);
+        transfers.setCode(1);
+        transfers.setAmount(0);
+        transfers.setPendingId(closingTransferId);
+        transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
+
+        createTransfersErrors = client.createTransfers(transfers);
+        assertTrue(createTransfersErrors.getLength() == 0);
+
+        lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
+        assertEquals(2, lookupAccounts.getLength());
+
+        accounts.beforeFirst();
+
+        while (lookupAccounts.next()) {
+            assertTrue(accounts.next());
+            assertAccounts(accounts, lookupAccounts);
+            assertFalse(AccountFlags.hasClosed(lookupAccounts.getFlags()));
+        }
     }
 
     @Test

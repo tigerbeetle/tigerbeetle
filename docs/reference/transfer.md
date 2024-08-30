@@ -64,6 +64,8 @@ Fields used by each mode of transfer:
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
 | `flags.balancing_debit`       | optional     | optional | false        | false        |
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
+| `flags.closing_debit`         | optional     | true     | false        | false        |
+| `flags.closing_credit`        | optional     | true     | false        | false        |
 | `flags.imported`              | optional     | optional | optional     | optional     |
 | `timestamp`                   | none²        | none²    | none²        | none²        |
 
@@ -437,6 +439,28 @@ If the highest amount transferable is `0`, returns
 
 - [Close Account](../coding/recipes/close-account.md)
 
+#### `flags.closing_debit`
+
+When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
+of the [debit account](#debit_account_id) to be set if the transfer succeeds.
+
+This flag requires a [two-phase transfer](#modes), so the flag [`flags.pending`](#flagspending)
+must also be set. This ensures that closing transfers are reversible by
+[voiding](#flagsvoid_pending_transfer) the pending transfer, and requires that the reversal
+operation references the corresponding closing transfer, guarding against unexpected interleaving
+of close/unclose operations.
+
+#### `flags.closing_credit`
+
+When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
+of the [credit account](#credit_account_id) to be set if the transfer succeeds.
+
+This flag requires a [two-phase transfer](#modes), so the flag [`flags.pending`](#flagspending)
+must also be set. This ensures that closing transfers are reversible by
+[voiding](#flagsvoid_pending_transfer) the pending transfer, and requires that the reversal
+operation references the corresponding closing transfer, guarding against unexpected interleaving
+of close/unclose operations.
+
 #### `flags.imported`
 
 When set, allows importing historical `Transfer`s with their original [`timestamp`](#timestamp).
@@ -479,7 +503,6 @@ necessary:
   [`timeout`](#timeout) for automatic expiration.
   In those cases, the [two-phase post or rollback](../coding/two-phase-transfers.md) must be
   done manually.
-
 
 ### `timestamp`
 

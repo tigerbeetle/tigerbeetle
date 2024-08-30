@@ -250,6 +250,18 @@ necessary:
   This approach gives the application a chance to correct failed imported accounts, re-submitting
   the batch again with the same user-defined timestamps.
 
+#### `flags.closed`
+
+When set, the account will reject further transfers,
+except for [voiding two-phase transfers](transfer.md#modes) that are still pending.
+
+- This flag can be set during the account creation.
+- This flag can also be set by sending a [two-phase pending transfer](transfer.md#flagspending)
+  with the [`Transfer.flags.closing_debit`](transfer.md#flagsclosing_debit)
+  and/or [`Transfer.flags.closing_credit`](transfer.md#flagsclosing_credit) flags set.
+- This flag can be _unset_ by [voiding](transfer.md#flagsvoid_pending_transfer) the two-phase
+  pending transfer that closed the account.
+
 ### `timestamp`
 
 This is the time the account was created, as nanoseconds since UNIX epoch.

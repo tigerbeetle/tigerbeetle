@@ -17,6 +17,7 @@ type AccountFlags struct {
 	CreditsMustNotExceedDebits bool
 	History                    bool
 	Imported                   bool
+	Closed                     bool
 }
 
 func (f AccountFlags) ToUint16() uint16 {
@@ -42,6 +43,10 @@ func (f AccountFlags) ToUint16() uint16 {
 		ret |= (1 << 4)
 	}
 
+	if f.Closed {
+		ret |= (1 << 5)
+	}
+
 	return ret
 }
 
@@ -52,6 +57,8 @@ type TransferFlags struct {
 	VoidPendingTransfer bool
 	BalancingDebit      bool
 	BalancingCredit     bool
+	ClosingDebit        bool
+	ClosingCredit       bool
 	Imported            bool
 }
 
@@ -82,8 +89,16 @@ func (f TransferFlags) ToUint16() uint16 {
 		ret |= (1 << 5)
 	}
 
-	if f.Imported {
+	if f.ClosingDebit {
 		ret |= (1 << 6)
+	}
+
+	if f.ClosingCredit {
+		ret |= (1 << 7)
+	}
+
+	if f.Imported {
+		ret |= (1 << 8)
 	}
 
 	return ret
@@ -150,6 +165,7 @@ func (o Account) AccountFlags() AccountFlags {
 	f.CreditsMustNotExceedDebits = ((o.Flags >> 2) & 0x1) == 1
 	f.History = ((o.Flags >> 3) & 0x1) == 1
 	f.Imported = ((o.Flags >> 4) & 0x1) == 1
+	f.Closed = ((o.Flags >> 5) & 0x1) == 1
 	return f
 }
 
@@ -177,7 +193,9 @@ func (o Transfer) TransferFlags() TransferFlags {
 	f.VoidPendingTransfer = ((o.Flags >> 3) & 0x1) == 1
 	f.BalancingDebit = ((o.Flags >> 4) & 0x1) == 1
 	f.BalancingCredit = ((o.Flags >> 5) & 0x1) == 1
-	f.Imported = ((o.Flags >> 6) & 0x1) == 1
+	f.ClosingDebit = ((o.Flags >> 6) & 0x1) == 1
+	f.ClosingCredit = ((o.Flags >> 7) & 0x1) == 1
+	f.Imported = ((o.Flags >> 8) & 0x1) == 1
 	return f
 }
 
@@ -340,6 +358,9 @@ const (
 	TransferImportedEventTimestampMustPostdateDebitAccount  CreateTransferResult = 61
 	TransferImportedEventTimestampMustPostdateCreditAccount CreateTransferResult = 62
 	TransferImportedEventTimeoutMustBeZero                  CreateTransferResult = 63
+	TransferClosingTransferMustBePending                    CreateTransferResult = 64
+	TransferDebitAccountAlreadyClosed                       CreateTransferResult = 65
+	TransferCreditAccountAlreadyClosed                      CreateTransferResult = 66
 )
 
 func (i CreateTransferResult) String() string {
@@ -472,6 +493,12 @@ func (i CreateTransferResult) String() string {
 		return "TransferImportedEventTimestampMustPostdateCreditAccount"
 	case TransferImportedEventTimeoutMustBeZero:
 		return "TransferImportedEventTimeoutMustBeZero"
+	case TransferClosingTransferMustBePending:
+		return "TransferClosingTransferMustBePending"
+	case TransferDebitAccountAlreadyClosed:
+		return "TransferDebitAccountAlreadyClosed"
+	case TransferCreditAccountAlreadyClosed:
+		return "TransferCreditAccountAlreadyClosed"
 	}
 	return "CreateTransferResult(" + strconv.FormatInt(int64(i+1), 10) + ")"
 }

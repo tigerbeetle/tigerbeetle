@@ -93,36 +93,64 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
 - [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✗ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✗ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
 - [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✗ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✗ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
 - [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
 - [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+- [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+- [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
 - [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✓ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
 
 ### `debit_account_id_must_not_be_zero`
 
@@ -186,6 +214,20 @@ transfer.
 
 The transfer was not created. [`Transfer.timeout`](../transfer.md#timeout) is nonzero, but only
 [pending](../transfer.md#flagspending) transfers have nonzero timeouts.
+
+### `closing_transfer_must_be_pending`
+
+The transfer was not created. [`Transfer.flags.pending`](../transfer.md#flagspending) is not set,
+but closing transfers must be two-phase pending transfers.
+
+If either [`Transfer.flags.closing_debit`](../transfer.md#flagsclosing_debit) or
+[`Transfer.flags.closing_credit`](../transfer.md#flagsclosing_credit) is set,
+[`Transfer.flags.pending`](../transfer.md#flagspending) must also be set.
+
+This ensures that closing transfers are reversible by
+[voiding](../transfer.md#flagsvoid_pending_transfer) the pending transfer, and requires that the
+reversal operation references the corresponding closing transfer, guarding against unexpected
+interleaving of close/unclose operations.
 
 ### `amount_must_not_be_zero`
 
@@ -441,6 +483,16 @@ timestamp, but since it's not driven by the cluster clock, it cannot define a ti
 automatic expiration.
 In those cases, the [two-phase post or rollback](../../coding/two-phase-transfers.md) must be
 done manually.
+
+### `debit_account_already_closed`
+
+The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
+refer to an `Account` whose [`Account.flags.closed`](../account.md#flagsclosed) is not already set.
+
+### `debit_account_already_closed`
+
+The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
+refer to an `Account` whose [`Account.flags.closed`](../account.md#flagsclosed) is not already set.
 
 ### `overflows_debits_pending`
 
