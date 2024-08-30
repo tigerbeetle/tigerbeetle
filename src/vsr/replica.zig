@@ -3602,6 +3602,16 @@ pub fn ReplicaType(
                 self.commit_min,
             });
 
+            if (stage_old != .idle) {
+                self.trace.stop(.replica_commit, .{ .stage = @tagName(stage_old) });
+            }
+            if (stage_new != .idle) {
+                self.trace.start(.replica_commit, .{
+                    .stage = @tagName(stage_new),
+                    .op = self.commit_min,
+                });
+            }
+
             switch (self.commit_stage) {
                 .next => unreachable,
                 .next_journal => self.commit_journal_next(),
@@ -8801,6 +8811,7 @@ pub fn ReplicaType(
                 assert(self.commit_prepare == null);
             } else {
                 if (self.commit_prepare) |prepare| self.message_bus.unref(prepare);
+                self.trace.reset(.replica_commit);
                 self.commit_prepare = null;
                 self.commit_stage = .idle;
             }
