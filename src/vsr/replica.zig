@@ -5792,19 +5792,30 @@ pub fn ReplicaType(
 
         /// Returns the highest op that this replica can safely prepare_ok.
         ///
-        /// Sending prepare_ok for a op higher than `op_prepare_ok_max` causes a replica to falsely
-        /// contribute to the durability of a checkpoint:
-        /// * A replica could sync to a checkpoint that is not yet durable on a quorum of
-        ///   replicas. To avoid falsely contributing to checkpoint durability, syncing replicas
-        ///   must withhold some prepare_oks till they haven't synced all tables.
-        /// * Replicas can safely write two pipeline_prepare_queue_max worth of ops past
-        ///   the next checkpoint's trigger to their WAL (see `op_prepare_max`). To avoid falsely
-        ///   contributing to the next checkpoint's durability, they must not send prepare_oks for
-        ///   ops past the first pipeline_prepare_queue_max.
+        /// Sending prepare_ok for op=N signifies that a replica has a sufficiently fresh checkpoint.
+        /// Specifically, if replica's current checkpoint is Cₙ, it won't send a prepare_ok for ops
+        /// larger than Cₙ + checkpoint_ops + compaction_interval + pipeline_prepare_queue_max.
+        /// Sending prepare_ok past this op would allow primary at Cₙ₊₁ to overwrite ops from Cₙ,
+        /// which should only be allowed if a commit quorom of replicas are on Cₙ₊₁.
+        ///
+        /// For example, assume the following constants:
+        /// slot_count=32, compaction_interval=4, pipeline_prepare_queue_max=4, checkpoint_ops=20.
+        ///
+        /// Further, assume:
+        /// * Primary R1 is at op_checkpoint=19, op=27, op_prepare_max=51, preparing op=28.
+        /// * Backup R2 is at op_checkpoint=0, op=22, op_prepare_max=31.
+        ///
+        /// R2 writes op=28 to its WAL but does *not* prepare_ok it, because that would allow R1 to
+        /// prepare op=32, overwriting op=0 from the previous wrap *before* op_checkpoint=19 is
+        /// durable on a commit quorum of replicas. Instead, R2 waits till it commits op=23 and
+        /// reaches op_checkpoint=19. Thereafter, it sends withheld prepare_oks for ops 28 → 31.
         fn op_prepare_ok_max(self: *const Self) u64 {
             if (!self.sync_content_done() and
                 !vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max))
             {
+                //  A replica could sync to a checkpoint that is not yet durable on a quorum of
+                //  replicas. To avoid falsely contributing to checkpoint durability, syncing
+                //  replicas must withhold some prepare_oks till they haven't synced all tables.
                 const op_checkpoint_trigger =
                     vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
                 return op_checkpoint_trigger + constants.pipeline_prepare_queue_max;
@@ -8097,17 +8108,13 @@ pub fn ReplicaType(
             assert(self.commit_min >=
                 self.do_view_change_from_all_replicas[self.replica].?.header.commit_min);
 
-            maybe(self.commit_min > DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
-            maybe(self.commit_max >
-                DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
+            const commit_max = DVCQuorum.commit_max(self.do_view_change_from_all_replicas);
+            maybe(self.commit_min > commit_max);
+            maybe(self.commit_max > commit_max);
             {
                 // "`replica.op` exists" invariant may be broken briefly between
                 // set_op_and_commit_max() and replace_header().
-                self.set_op_and_commit_max(
-                    header_head.op,
-                    DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
-                    @src(),
-                );
+                self.set_op_and_commit_max(header_head.op, commit_max, @src());
                 assert(self.commit_max <= self.op_prepare_max());
                 assert(self.commit_max <= self.op);
                 maybe(self.journal.header_with_op(self.op) == null);
