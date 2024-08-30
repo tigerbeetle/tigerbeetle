@@ -218,11 +218,16 @@ The transfer was not created. [`Transfer.timeout`](../transfer.md#timeout) is no
 ### `closing_transfer_must_be_pending`
 
 The transfer was not created. [`Transfer.flags.pending`](../transfer.md#flagspending) is not set,
-but it should be `true`.
+but closing transfers must be two-phase pending transfers.
 
-Transfers with the [Transfer.flags.closing_debit](../transfer.md#flagsclosing_debit) or
-[Transfer.flags.closing_credit](../transfer.md#flagsclosing_credit) flags must be a two-phase
-pending transfer.
+If either [`Transfer.flags.closing_debit`](../transfer.md#flagsclosing_debit) or
+[`Transfer.flags.closing_credit`](../transfer.md#flagsclosing_credit) is set,
+[`Transfer.flags.pending`](../transfer.md#flagspending) must also be set.
+
+This ensures that closing transfers are reversible by
+[voiding](../transfer.md#flagsvoid_pending_transfer) the pending transfer, and requires that the
+reversal operation references the corresponding closing transfer, guarding against unexpected
+interleaving of close/unclose operations.
 
 ### `amount_must_not_be_zero`
 

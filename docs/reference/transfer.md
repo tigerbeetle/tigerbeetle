@@ -441,25 +441,25 @@ If the highest amount transferable is `0`, returns
 
 #### `flags.closing_debit`
 
-This flag requires a [two-phase transfer](#modes), so the flag [`flags.pending`](#flagspending)
-must also be set.
-
 When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
 of the [debit account](#debit_account_id) to be set if the transfer succeeds.
 
-The [`Account.flags.closed`](account.md#flagsclosed) can be _unset_ by
-[voiding](#flagsvoid_pending_transfer) the two-phase transfer that closed the account.
+This flag requires a [two-phase transfer](#modes), so the flag [`flags.pending`](#flagspending)
+must also be set. This ensures that closing transfers are reversible by
+[voiding](#flagsvoid_pending_transfer) the pending transfer, and requires that the reversal
+operation references the corresponding closing transfer, guarding against unexpected interleaving
+of close/unclose operations.
 
 #### `flags.closing_credit`
-
-This flag requires a [two-phase transfer](#modes), so the flag [`flags.pending`](#flagspending)
-must also be set.
 
 When set, it will cause the [`Account.flags.closed`](account.md#flagsclosed) flag
 of the [credit account](#credit_account_id) to be set if the transfer succeeds.
 
-The [`Account.flags.closed`](account.md#flagsclosed) can be _unset_ by
-[voiding](#flagsvoid_pending_transfer) the two-phase transfer that closed the account.
+This flag requires a [two-phase transfer](#modes), so the flag [`flags.pending`](#flagspending)
+must also be set. This ensures that closing transfers are reversible by
+[voiding](#flagsvoid_pending_transfer) the pending transfer, and requires that the reversal
+operation references the corresponding closing transfer, guarding against unexpected interleaving
+of close/unclose operations.
 
 #### `flags.imported`
 
