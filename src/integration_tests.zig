@@ -14,13 +14,7 @@ const Snap = @import("./testing/snaptest.zig").Snap;
 const snap = Snap.snap;
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
-// TODO(Zig): inject executable name via build.zig:
-//    <https://ziggit.dev/t/how-to-write-integration-tests-for-cli-utilities/2806>
-fn tigerbeetle_exe(shell: *Shell) ![]const u8 {
-    const exe = comptime "tigerbeetle" ++ builtin.target.exeFileExt();
-    _ = try shell.project_root.statFile(exe);
-    return try shell.project_root.realpathAlloc(shell.arena.allocator(), exe);
-}
+const tigerbeetle: []const u8 = @import("test_options").tigerbeetle_exe;
 
 test "repl integration" {
     const Context = struct {
@@ -33,8 +27,6 @@ test "repl integration" {
         fn init() !Context {
             const shell = try Shell.create(std.testing.allocator);
             errdefer shell.destroy();
-
-            const tigerbeetle = try tigerbeetle_exe(shell);
 
             var tmp_beetle = try TmpTigerBeetle.init(std.testing.allocator, .{
                 .prebuilt = tigerbeetle,
@@ -245,7 +237,6 @@ test "benchmark/inspect smoke" {
     const shell = try Shell.create(std.testing.allocator);
     defer shell.destroy();
 
-    const tigerbeetle = try tigerbeetle_exe(shell);
     const status_ok_benchmark = try shell.exec_status_ok(
         "{tigerbeetle} benchmark --transfer-count=10_000 --transfer-batch-size=10 --validate " ++
             "--file={file}",
@@ -273,8 +264,6 @@ test "benchmark/inspect smoke" {
 test "help/version smoke" {
     const shell = try Shell.create(std.testing.allocator);
     defer shell.destroy();
-
-    const tigerbeetle = try tigerbeetle_exe(shell);
 
     // The substring is chosen to be mostly stable, but from (near) the end of the output, to catch
     // a missed buffer flush.

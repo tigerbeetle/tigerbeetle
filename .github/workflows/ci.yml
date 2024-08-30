@@ -12,6 +12,7 @@ on:
 
 env:
   CI: 1 # build.zig enables extra sanity checks if CI is set.
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
   smoke:
@@ -31,7 +32,7 @@ jobs:
       # Docker restricts io_uring by default, running unconfined then.
       options: --security-opt seccomp=unconfined
     steps:
-      - run: apk add -U git
+      - run: apk add -U git -U github-cli
       # https://github.com/actions/checkout/issues/1169
       - run: git config --system --add safe.directory '*'
       - uses: actions/checkout@v4

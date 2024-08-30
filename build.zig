@@ -138,23 +138,16 @@ pub fn build(b: *std.Build) !void {
     const target = try resolve_target(b, build_options.target);
     const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
 
-    const vsr_options = b.addOptions();
     assert(build_options.git_commit.len == 40);
-    vsr_options.addOption(?[40]u8, "git_commit", build_options.git_commit[0..40].*);
-    vsr_options.addOption(?[]const u8, "release", build_options.config_release);
-    vsr_options.addOption(
-        ?[]const u8,
-        "release_client_min",
-        build_options.config_release_client_min,
-    );
-    vsr_options.addOption(bool, "config_verify", build_options.config_verify);
-    vsr_options.addOption(std.log.Level, "config_log_level", build_options.config_log_level);
-    vsr_options.addOption(bool, "config_aof_recovery", build_options.config_aof_recovery);
-    vsr_options.addOption(config.HashLogMode, "hash_log_mode", build_options.hash_log_mode);
-
-    const vsr_module: *std.Build.Module = build_vsr_module(b, .{
-        .vsr_options = vsr_options,
+    const vsr_options, const vsr_module = build_vsr_module(b, .{
         .target = target,
+        .git_commit = build_options.git_commit[0..40].*,
+        .config_release = build_options.config_release,
+        .config_release_client_min = build_options.config_release_client_min,
+        .config_base = build_options.config,
+        .config_log_level = build_options.config_log_level,
+        .config_aof_recovery = build_options.config_aof_recovery,
+        .hash_log_mode = build_options.hash_log_mode,
     });
 
     const tb_client_header = blk: {
@@ -207,7 +200,9 @@ pub fn build(b: *std.Build) !void {
         .test_fmt = build_steps.test_fmt,
         .@"test" = build_steps.@"test",
     }, .{
+        .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .llvm_objcopy = build_options.llvm_objcopy,
         .tb_client_header = tb_client_header,
         .target = target,
         .mode = mode,
@@ -285,14 +280,38 @@ pub fn build(b: *std.Build) !void {
 }
 
 fn build_vsr_module(b: *std.Build, options: struct {
-    vsr_options: *std.Build.Step.Options,
     target: std.Build.ResolvedTarget,
-}) *std.Build.Module {
+    git_commit: [40]u8,
+    config_release: ?[]const u8,
+    config_release_client_min: ?[]const u8,
+    config_log_level: std.log.Level,
+    config_aof_recovery: bool,
+    hash_log_mode: config.HashLogMode,
+}) struct { *std.Build.Step.Options, *std.Build.Module } {
+    // Ideally, we would return _just_ the module here, and keep options an implementation detail.
+    // However, currently Zig makes it awkward to provide multiple entry points for a module:
+    // https://ziggit.dev/t/suggested-project-layout-for-multiple-entry-point-for-zig-0-12/4219
+    //
+    // For this reason, we have to return options as well, so that other entry points can
+    // essentially re-create identical module.
+    const vsr_options = b.addOptions();
+    vsr_options.addOption(?[40]u8, "git_commit", options.git_commit[0..40].*);
+    vsr_options.addOption(?[]const u8, "release", options.config_release);
+    vsr_options.addOption(
+        ?[]const u8,
+        "release_client_min",
+        options.config_release_client_min,
+    );
+    vsr_options.addOption(std.log.Level, "config_log_level", options.config_log_level);
+    vsr_options.addOption(bool, "config_aof_recovery", options.config_aof_recovery);
+    vsr_options.addOption(config.HashLogMode, "hash_log_mode", options.hash_log_mode);
+
     const vsr_module = b.addModule("vsr", .{
         .root_source_file = b.path("src/vsr.zig"),
     });
-    vsr_module.addOptions("vsr_options", options.vsr_options);
-    return vsr_module;
+    vsr_module.addOptions("vsr_options", vsr_options);
+
+    return .{ vsr_options, vsr_module };
 }
 
 // Run a tigerbeetle build without running codegen and waiting for llvm
@@ -543,6 +562,8 @@ fn build_test(
         @"test": *std.Build.Step,
     },
     options: struct {
+        llvm_objcopy: ?[]const u8,
+        vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         tb_client_header: *Generated,
         target: std.Build.ResolvedTarget,
@@ -569,28 +590,64 @@ fn build_test(
     }
     steps.test_unit.dependOn(&run_unit_tests.step);
 
-    const integration_tests = b.addTest(.{
-        .root_source_file = b.path("src/integration_tests.zig"),
+    build_test_integration(b, steps.test_integration, .{
+        .llvm_objcopy = options.llvm_objcopy,
         .target = options.target,
-        .optimize = options.mode,
-        .filters = b.args orelse &.{},
+        .mode = options.mode,
     });
-    const run_integration_tests = b.addRunArtifact(integration_tests);
-    if (b.args != null) { // Don't cache test results if running a specific test.
-        run_integration_tests.has_side_effects = true;
-    }
-    // Ensure integration test have tigerbeetle binary.
-    run_integration_tests.step.dependOn(b.getInstallStep());
-    steps.test_integration.dependOn(&run_integration_tests.step);
 
     const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
     steps.test_fmt.dependOn(&run_fmt.step);
 
     steps.@"test".dependOn(&run_unit_tests.step);
     if (b.args == null) {
-        steps.@"test".dependOn(&run_integration_tests.step);
-        steps.@"test".dependOn(&run_fmt.step);
+        steps.@"test".dependOn(steps.test_integration);
+        steps.@"test".dependOn(steps.test_fmt);
     }
+}
+
+fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step, options: struct {
+    llvm_objcopy: ?[]const u8,
+    target: std.Build.ResolvedTarget,
+    mode: std.builtin.OptimizeMode,
+}) void {
+    // For integration tests, we build an independent copy of TigerBeetle with "real" config and
+    // multiversioning.
+    const vsr_options, const vsr_module = build_vsr_module(b, .{
+        .target = options.target,
+        .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
+        .config_base = .production,
+        .config_release = "0.16.99",
+        .config_release_client_min = "0.15.3",
+        .config_log_level = .info,
+        .config_aof_recovery = false,
+        .tracer_backend = .none,
+        .hash_log_mode = .none,
+    });
+    const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .llvm_objcopy = options.llvm_objcopy,
+        .multiversion = "latest",
+        .target = options.target,
+        .mode = options.mode,
+        .tracer_backend = .none,
+    });
+
+    const integration_tests_options = b.addOptions();
+    integration_tests_options.addOptionPath("tigerbeetle_exe", tigerbeetle);
+    const integration_tests = b.addTest(.{
+        .root_source_file = b.path("src/integration_tests.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+        .filters = b.args orelse &.{},
+    });
+    integration_tests.root_module.addOptions("test_options", integration_tests_options);
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+    if (b.args != null) { // Don't cache test results if running a specific test.
+        run_integration_tests.has_side_effects = true;
+    }
+    step_test_integration.dependOn(&run_integration_tests.step);
 }
 
 fn build_test_jni(
@@ -1461,21 +1518,23 @@ fn download_release(
         else => @panic("unsupported mode"),
     };
 
-    const version = if (std.mem.eql(u8, version_or_latest, "latest"))
-        std.mem.trimRight(
-            u8,
-            b.run(&.{ "gh", "release", "view", "--json", "tagName", "--jq", ".tagName" }),
-            "\n",
-        )
+    const release_archive = if (std.mem.eql(u8, version_or_latest, "latest"))
+        b.addSystemCommand(&.{
+            "gh",
+            "release",
+            "download",
+            "--pattern",
+            b.fmt("tigerbeetle-{s}-{s}{s}.zip", .{ arch, os, debug }),
+            "--output",
+            "-",
+        })
     else
-        version_or_latest;
-
-    const release_archive = b.addSystemCommand(&.{
-        "gh",        "release",
-        "download",  version,
-        "--pattern", b.fmt("tigerbeetle-{s}-{s}{s}.zip", .{ arch, os, debug }),
-        "--output",  "-",
-    });
+        b.addSystemCommand(&.{
+            "gh",        "release",
+            "download",  version_or_latest,
+            "--pattern", b.fmt("tigerbeetle-{s}-{s}{s}.zip", .{ arch, os, debug }),
+            "--output",  "-",
+        });
     release_archive.max_stdio_size = 512 * 1024 * 1024;
 
     const unzip = b.addSystemCommand(&.{ "unzip", "-p" });
