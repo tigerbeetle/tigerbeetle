@@ -2093,6 +2093,13 @@ pub fn ReplicaType(
 
             const op_checkpoint_max =
                 DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
+
+            assert(self.commit_min <= DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
+
+            // self.commit_max could be more up-to-date than the commit_max in our DVC headers.
+            // For instance, if we checkpoint (and persist commit_max) in our superblock
+            // right before crashing, our persistent view_headers could still have an older
+            // commit_max. We could restart and use these view_headers as DVC headers.
             const commit_max = @max(
                 self.commit_max,
                 DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
@@ -7186,7 +7193,8 @@ pub fn ReplicaType(
         }
 
         fn send_prepare_oks_after_checkpoint(self: *Self) void {
-            assert(self.status == .normal or self.status == .view_change);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.solo()));
 
             const op_checkpoint_trigger =
                 vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
@@ -8088,7 +8096,7 @@ pub fn ReplicaType(
 
             assert(self.commit_min >=
                 self.do_view_change_from_all_replicas[self.replica].?.header.commit_min);
-
+            assert(self.commit_min <= DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
             {
                 // "`replica.op` exists" invariant may be broken briefly between
                 // set_op_and_commit_max() and replace_header().
@@ -8097,6 +8105,8 @@ pub fn ReplicaType(
                     DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
                     @src(),
                 );
+                maybe(self.commit_max >
+                    DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
                 assert(self.commit_max <= self.op_prepare_max());
                 assert(self.commit_max <= self.op);
                 maybe(self.journal.header_with_op(self.op) == null);
