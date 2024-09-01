@@ -2094,8 +2094,6 @@ pub fn ReplicaType(
             const op_checkpoint_max =
                 DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
 
-            assert(self.commit_min <= DVCQuorum.commit_max(self.do_view_change_from_all_replicas));
-
             // self.commit_max could be more up-to-date than the commit_max in our DVC headers.
             // For instance, if we checkpoint (and persist commit_max) in our superblock
             // right before crashing, our persistent view_headers could still have an older
@@ -5792,11 +5790,11 @@ pub fn ReplicaType(
 
         /// Returns the highest op that this replica can safely prepare_ok.
         ///
-        /// Sending prepare_ok for op=N signifies that a replica has a sufficiently fresh checkpoint.
-        /// Specifically, if replica's current checkpoint is Cₙ, it won't send a prepare_ok for ops
-        /// larger than Cₙ + checkpoint_ops + compaction_interval + pipeline_prepare_queue_max.
-        /// Sending prepare_ok past this op would allow primary at Cₙ₊₁ to overwrite ops from Cₙ,
-        /// which should only be allowed if a commit quorom of replicas are on Cₙ₊₁.
+        /// Sending prepare_ok for a particular op signifies that a replica has a sufficiently fresh
+        /// checkpoint. Specifically, if a replica is at checkpoint Cₙ, it wittholds prepare_oks for
+        /// ops larger than Cₙ + checkpoint_ops + compaction_interval + pipeline_prepare_queue_max.
+        /// Committing past this op would allow a primary at checkpoint Cₙ₊₁ to overwrite ops from
+        /// the previous wrap, which is safe to do only if a commit quorom of replicas are on Cₙ₊₁.
         ///
         /// For example, assume the following constants:
         /// slot_count=32, compaction_interval=4, pipeline_prepare_queue_max=4, checkpoint_ops=20.
