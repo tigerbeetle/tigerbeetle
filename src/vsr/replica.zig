@@ -2344,7 +2344,7 @@ pub fn ReplicaType(
             switch (self.status) {
                 .view_change => {
                     self.transition_to_normal_from_view_change_status(message.header.view);
-                    self.send_prepare_oks_from(self.commit_max + 1);
+                    self.send_prepare_oks_after_view_change();
                     self.commit_journal();
                 },
                 .recovering_head => {
@@ -4148,13 +4148,7 @@ pub fn ReplicaType(
             );
 
             // Send prepare_oks that may have been wittheld by virtue of `op_prepare_ok_max`.
-            const op_checkpoint_trigger =
-                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
-            assert(self.commit_min == op_checkpoint_trigger);
-            self.send_prepare_oks_from(@max(
-                self.commit_max + 1,
-                op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1,
-            ));
+            self.send_prepare_oks_after_checkpoint();
 
             if (self.event_callback) |hook| hook(self, .checkpoint_completed);
             self.commit_dispatch(.cleanup);
@@ -7209,6 +7203,24 @@ pub fn ReplicaType(
             }
         }
 
+        fn send_prepare_oks_after_view_change(self: *Self) void {
+            assert(self.status == .normal);
+            self.send_prepare_oks_from(self.commit_max + 1);
+        }
+
+        fn send_prepare_oks_after_checkpoint(self: *Self) void {
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.solo()));
+
+            const op_checkpoint_trigger =
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+            assert(self.commit_min == op_checkpoint_trigger);
+            self.send_prepare_oks_from(@max(
+                self.commit_max + 1,
+                op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1,
+            ));
+        }
+
         fn send_prepare_oks_from(self: *Self, op_: u64) void {
             var op = op_;
             while (op <= self.op) : (op += 1) {
@@ -7951,7 +7963,7 @@ pub fn ReplicaType(
                     assert(start_view.header.nonce == 0);
                     self.send_message_to_other_replicas(start_view);
                 } else {
-                    self.send_prepare_oks_from(self.commit_max + 1);
+                    self.send_prepare_oks_after_view_change();
                 }
             }
 
@@ -8240,7 +8252,7 @@ pub fn ReplicaType(
             assert(self.log_view > self.log_view_durable());
 
             // Send prepare_ok messages to ourself to contribute to the pipeline.
-            self.send_prepare_oks_from(self.commit_max + 1);
+            self.send_prepare_oks_after_view_change();
         }
 
         fn transition_to_recovering_head(self: *Self) void {
