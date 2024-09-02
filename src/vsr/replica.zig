@@ -4151,7 +4151,6 @@ pub fn ReplicaType(
             const op_checkpoint_trigger =
                 vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
             assert(self.commit_min == op_checkpoint_trigger);
-            // Send prepare_oks that may have been withheld by virtue of `op_prepare_ok_max`.
             self.send_prepare_oks_from(@max(
                 self.commit_max + 1,
                 op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1,
