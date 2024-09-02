@@ -1,4 +1,4 @@
-version: '3.0'
+version: "3.0"
 
 services:
   replica0:
@@ -38,48 +38,16 @@ services:
       antithesis-net:
         ipv4_address: 10.20.20.12
 
-  api0:
-    container_name: api0
-    hostname: api0
-    image: "api:${TAG}"
-    environment:
-      - CLUSTER=1
-      - REPLICAS=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
-      - HOST=10.20.20.100
-      - PORT=3000
-    networks:
-      antithesis-net:
-        ipv4_address: 10.20.20.100
-  api1:
-    container_name: api1
-    hostname: api1
-    image: "api:${TAG}"
-    environment:
-      - CLUSTER=1
-      - REPLICAS=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
-      - HOST=10.20.20.101
-      - PORT=3000
-    networks:
-      antithesis-net:
-        ipv4_address: 10.20.20.101
-
-  # Set the IPv4 with an address of 10.20.20.130 or higher to be ignored by the fault injector.
-  # From https://antithesis.com/docs/getting_started/preparing.html:
-  # > Any service(s) in the second /25 of the container network (e.g. with final IPv4 octet of 128
-  # > or higher) will not have network fault injection applied during the course of testing. You
-  # > can use this mechanism to prevent spurious test failures caused by dependencies that are
-  # > known not to be robust.
   workload:
     container_name: workload
     hostname: workload
     image: "workload:${TAG}"
     environment:
       - CLUSTER=1
-      - APIS=10.20.20.100:3000,10.20.20.101:3000
-      - SLEEP_SECONDS=5
+      - REPLICAS=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
     networks:
       antithesis-net:
-        ipv4_address: 10.20.20.140
+        ipv4_address: 10.20.20.100
 
 # The subnet provided here is an example
 # An alternate /24 can be used

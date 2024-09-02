@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+
+# TODO(owickstrom) port to build.zig
+
 set -eu
 
 usage() {
@@ -27,7 +30,6 @@ push_image() {
 	sudo docker push              "$url"
 }
 
-push_image api
 push_image config
 push_image replica
 push_image workload
