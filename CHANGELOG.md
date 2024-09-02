@@ -5,7 +5,7 @@ to receive notifications about breaking changes!
 
 ## TigerBeetle 0.16.0
 
-Released 2024-09-02
+Released: 2024-09-02
 
 This release is 0.16.0 as it includes a new breaking API change around zero amount transfers, as
 well as the behavior around posting a full pending transfer amount or balancing as much as possible.

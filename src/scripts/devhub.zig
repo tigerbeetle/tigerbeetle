@@ -12,6 +12,8 @@ const std = @import("std");
 
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
+const changelog = @import("./changelog.zig");
+const Release = @import("../multiversioning.zig").Release;
 
 const log = std.log;
 
@@ -34,10 +36,41 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
     try shell.project_root.deleteFile("tigerbeetle");
 
-    try shell.zig(
-        \\build scripts -- release --build --no-changelog --sha={sha}
-        \\    --language=zig
-    , .{ .sha = cli_args.sha });
+    // When doing a release, the latest release in the changelog on main will be newer than the
+    // latest release on GitHub. In this case, don't pass in --no-changelog - as doing that casuses
+    // the release code to try and look for a version which doesn't yet exist!
+    const no_changelog_flag = blk: {
+        const changelog_text = try shell.project_root.readFileAlloc(
+            shell.arena.allocator(),
+            "CHANGELOG.md",
+            1024 * 1024,
+        );
+        var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
+
+        const last_release_changelog = changelog_iteratator.next_changelog().?.release.?;
+        const last_release_published = try Release.parse(try shell.exec_stdout(
+            "gh release list --json tagName --jq {query} --limit 1",
+            .{ .query = ".[].tagName" },
+        ));
+
+        if (Release.less_than({}, last_release_published, last_release_changelog)) {
+            break :blk false;
+        } else {
+            break :blk true;
+        }
+    };
+
+    if (no_changelog_flag) {
+        try shell.zig(
+            \\build scripts -- release --build --no-changelog --sha={sha}
+            \\    --language=zig
+        , .{ .sha = cli_args.sha });
+    } else {
+        try shell.zig(
+            \\build scripts -- release --build --sha={sha}
+            \\    --language=zig
+        , .{ .sha = cli_args.sha });
+    }
     try shell.project_root.deleteFile("tigerbeetle");
     try shell.exec("unzip zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
 
