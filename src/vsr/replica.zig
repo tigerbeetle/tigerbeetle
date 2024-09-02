@@ -2344,7 +2344,7 @@ pub fn ReplicaType(
             switch (self.status) {
                 .view_change => {
                     self.transition_to_normal_from_view_change_status(message.header.view);
-                    self.send_prepare_oks_after_view_change();
+                    self.send_prepare_oks_from(self.commit_max + 1);
                     self.commit_journal();
                 },
                 .recovering_head => {
@@ -4127,6 +4127,8 @@ pub fn ReplicaType(
 
         fn commit_op_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
             const self: *Self = @fieldParentPtr("superblock_context", superblock_context);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.solo()));
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op <= self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
@@ -4146,7 +4148,14 @@ pub fn ReplicaType(
             );
 
             // Send prepare_oks that may have been wittheld by virtue of `op_prepare_ok_max`.
-            self.send_prepare_oks_after_checkpoint();
+            const op_checkpoint_trigger =
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+            assert(self.commit_min == op_checkpoint_trigger);
+            // Send prepare_oks that may have been withheld by virtue of `op_prepare_ok_max`.
+            self.send_prepare_oks_from(@max(
+                self.commit_max + 1,
+                op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1,
+            ));
 
             if (self.event_callback) |hook| hook(self, .checkpoint_completed);
             self.commit_dispatch(.cleanup);
@@ -5791,10 +5800,10 @@ pub fn ReplicaType(
         /// Returns the highest op that this replica can safely prepare_ok.
         ///
         /// Sending prepare_ok for a particular op signifies that a replica has a sufficiently fresh
-        /// checkpoint. Specifically, if a replica is at checkpoint Cₙ, it wittholds prepare_oks for
+        /// checkpoint. Specifically, if a replica is at checkpoint Cₙ, it withholds prepare_oks for
         /// ops larger than Cₙ + checkpoint_ops + compaction_interval + pipeline_prepare_queue_max.
         /// Committing past this op would allow a primary at checkpoint Cₙ₊₁ to overwrite ops from
-        /// the previous wrap, which is safe to do only if a commit quorom of replicas are on Cₙ₊₁.
+        /// the previous wrap, which is safe to do only if a commit quorum of replicas are on Cₙ₊₁.
         ///
         /// For example, assume the following constants:
         /// slot_count=32, compaction_interval=4, pipeline_prepare_queue_max=4, checkpoint_ops=20.
@@ -7201,31 +7210,8 @@ pub fn ReplicaType(
             }
         }
 
-        fn send_prepare_oks_after_checkpoint(self: *Self) void {
-            assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.solo()));
-
-            const op_checkpoint_trigger =
-                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
-            assert(self.commit_min == op_checkpoint_trigger);
-
-            var op = op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1;
-            while (op <= self.op) : (op += 1) {
-                // We may have breaks or stale headers in our uncommitted chain here. However:
-                // * being able to send what we have will allow the pipeline to commit earlier, and
-                // * the primary will drop any prepare_ok for a prepare not in the pipeline.
-                // This is safe only because the primary can verify against the prepare checksum.
-                if (self.journal.header_with_op(op)) |header| {
-                    self.send_prepare_ok(header);
-                    defer self.flush_loopback_queue();
-                }
-            }
-        }
-
-        fn send_prepare_oks_after_view_change(self: *Self) void {
-            assert(self.status == .normal);
-
-            var op = self.commit_max + 1;
+        fn send_prepare_oks_from(self: *Self, op_: u64) void {
+            var op = op_;
             while (op <= self.op) : (op += 1) {
                 // We may have breaks or stale headers in our uncommitted chain here. However:
                 // * being able to send what we have will allow the pipeline to commit earlier, and
@@ -7966,7 +7952,7 @@ pub fn ReplicaType(
                     assert(start_view.header.nonce == 0);
                     self.send_message_to_other_replicas(start_view);
                 } else {
-                    self.send_prepare_oks_after_view_change();
+                    self.send_prepare_oks_from(self.commit_max + 1);
                 }
             }
 
@@ -8255,7 +8241,7 @@ pub fn ReplicaType(
             assert(self.log_view > self.log_view_durable());
 
             // Send prepare_ok messages to ourself to contribute to the pipeline.
-            self.send_prepare_oks_after_view_change();
+            self.send_prepare_oks_from(self.commit_max + 1);
         }
 
         fn transition_to_recovering_head(self: *Self) void {

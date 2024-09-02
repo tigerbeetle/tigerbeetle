@@ -837,6 +837,9 @@ test "Cluster: view-change: duel of the primaries" {
 }
 
 test "Cluster: view_change: lagging replica advances checkpoint during view change" {
+    // It could be the case that the replica with the most advanced checkpoint has its checkpoint
+    // corrupted. In this case, a replica with a slightly older checkpoint must step up as primary.
+
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
     var c = t.clients(0, t.cluster.clients.len);
