@@ -1705,13 +1705,12 @@ pub fn ReplicaType(
 
             // If we are going to overwrite an op from the previous WAL wrap, assert that it's part
             // of a checkpoint that is durable on a commit quorum of replicas. See `op_repair_min`
-            // for why op=prepare_max+1 being committed implies that.
+            // for when a checkpoint can be considered durable on a quorum of replicas.
             const op_overwritten = (self.op + 1) -| constants.journal_slot_count;
             const op_checkpoint_previous = self.op_checkpoint() -|
                 constants.vsr_checkpoint_ops;
             if (op_overwritten > op_checkpoint_previous) {
-                assert(self.commit_max >
-                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?);
+                assert(vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max));
             }
 
             // We must advance our op and set the header as dirty before replicating and
@@ -2100,19 +2099,20 @@ pub fn ReplicaType(
 
             const op_checkpoint_max =
                 DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
-            if (op_checkpoint_max > self.op_checkpoint() and op_head > self.op_prepare_max()) {
-                // When:
-                // 1. the cluster is at a checkpoint ahead of the local checkpoint,
-                // 2. AND the quorum's head op is part of a future checkpoint,
-                //    abdicate as primary, jumping to a new view.
-                //
-                // - If 1 and ¬2, then the ops in the next checkpoint are uncommitted and our
-                //   current checkpoint is sufficient.
-                // - If 2 and ¬1, then the ops past the checkpoint's op-prepare-max must be
-                //   uncommitted because no replica in the DVC quorum even prepared them.
-                //   (They are present anyway because the origin of the DVC is reusing its SV
-                //   headers as a DVC since it has not completed repair.)
-                //
+
+            // self.commit_max could be more up-to-date than the commit_max in our DVC headers.
+            // For instance, if we checkpoint (and persist commit_max) in our superblock
+            // right before crashing, our persistent view_headers could still have an older
+            // commit_max. We could restart and use these view_headers as DVC headers.
+            const commit_max = @max(
+                self.commit_max,
+                DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
+            );
+
+            // We are lagging from the cluster by at least a checkpoint, and that checkpoint is
+            // durable on a commit quorum of replicas. Forfeit the view change and prefer the
+            // replica with the durable checkpoint for primary.
+            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), commit_max)) {
                 // This serves a few purposes:
                 // 1. Availability: We pick a primary to minimize the number of WAL repairs, to
                 //    minimize the likelihood of a repair-deadlock.
@@ -2151,6 +2151,7 @@ pub fn ReplicaType(
                 self.do_view_change_quorum = true;
 
                 self.primary_set_log_from_do_view_change_messages();
+
                 // We aren't status=normal yet, but our headers from our prior log_view may have
                 // been replaced. If we participate in another DVC (before reaching status=normal,
                 // which would update our log_view), we must disambiguate our (new) headers from the
@@ -2236,11 +2237,12 @@ pub fn ReplicaType(
             assert(view_headers[0].op == message.header.op);
             assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
 
-            if (message.header.commit > self.op_prepare_max() and (
+            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit) and (
             //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
             //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
             //  prepares in this replica's WAL are no longer needed.
-                message.header.commit > self.op_prepare_max() + constants.vsr_checkpoint_ops or
+                vsr.Checkpoint.durable(self.op_checkpoint_next() +
+                constants.vsr_checkpoint_ops, message.header.commit) or
                 // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
                 // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
                 // there's evidence that the repair can't be completed.
@@ -4152,6 +4154,8 @@ pub fn ReplicaType(
 
         fn commit_op_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
             const self: *Self = @fieldParentPtr("superblock_context", superblock_context);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.solo()));
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op <= self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
@@ -4169,6 +4173,9 @@ pub fn ReplicaType(
                 &self.tracer_slot_checkpoint,
                 .checkpoint,
             );
+
+            // Send prepare_oks that may have been wittheld by virtue of `op_prepare_ok_max`.
+            self.send_prepare_oks_after_checkpoint();
 
             if (self.event_callback) |hook| hook(self, .checkpoint_completed);
             self.commit_dispatch(.cleanup);
@@ -5772,6 +5779,40 @@ pub fn ReplicaType(
             ).?;
         }
 
+        /// Returns the highest op that this replica can safely prepare_ok.
+        ///
+        /// Sending prepare_ok for a particular op signifies that a replica has a sufficiently fresh
+        /// checkpoint. Specifically, if a replica is at checkpoint Cₙ, it withholds prepare_oks for
+        /// ops larger than Cₙ + checkpoint_ops + compaction_interval + pipeline_prepare_queue_max.
+        /// Committing past this op would allow a primary at checkpoint Cₙ₊₁ to overwrite ops from
+        /// the previous wrap, which is safe to do only if a commit quorum of replicas are on Cₙ₊₁.
+        ///
+        /// For example, assume the following constants:
+        /// slot_count=32, compaction_interval=4, pipeline_prepare_queue_max=4, checkpoint_ops=20.
+        ///
+        /// Further, assume:
+        /// * Primary R1 is at op_checkpoint=19, op=27, op_prepare_max=51, preparing op=28.
+        /// * Backup R2 is at op_checkpoint=0, op=22, op_prepare_max=31.
+        ///
+        /// R2 writes op=28 to its WAL but does *not* prepare_ok it, because that would allow R1 to
+        /// prepare op=32, overwriting op=0 from the previous wrap *before* op_checkpoint=19 is
+        /// durable on a commit quorum of replicas. Instead, R2 waits till it commits op=23 and
+        /// reaches op_checkpoint=19. Thereafter, it sends withheld prepare_oks for ops 28 → 31.
+        fn op_prepare_ok_max(self: *const Self) u64 {
+            if (!self.sync_content_done() and
+                !vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max))
+            {
+                //  A replica could sync to a checkpoint that is not yet durable on a quorum of
+                //  replicas. To avoid falsely contributing to checkpoint durability, syncing
+                //  replicas must withhold some prepare_oks till they haven't synced all tables.
+                const op_checkpoint_trigger =
+                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+                return op_checkpoint_trigger + constants.pipeline_prepare_queue_max;
+            } else {
+                return self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max;
+            }
+        }
+
         /// Returns checkpoint id associated with the op.
         ///
         /// Specifically, returns the checkpoint id corresponding to the checkpoint with:
@@ -5835,11 +5876,7 @@ pub fn ReplicaType(
                     break :repair_min 0;
                 }
 
-                const prepare_max_for_current_checkpoint =
-                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
-                // After state sync, commit_max might lag behind checkpoint_op.
-                maybe(self.commit_max < prepare_max_for_current_checkpoint);
-                if (self.commit_max > prepare_max_for_current_checkpoint) {
+                if (vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max)) {
                     if (self.op == self.op_checkpoint()) {
                         // Don't allow "op_repair_min > op_head".
                         // See https://github.com/tigerbeetle/tigerbeetle/pull/1589 for why
@@ -5935,8 +5972,8 @@ pub fn ReplicaType(
 
                     if (self.release.value == upgrade_request.release.value) {
                         const op_checkpoint_trigger =
-                            vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint());
-                        assert(op_checkpoint_trigger.? > self.op + 1);
+                            vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+                        assert(op_checkpoint_trigger > self.op + 1);
                     }
                 },
                 else => {
@@ -7092,22 +7129,15 @@ pub fn ReplicaType(
                 });
                 return;
             }
-
-            // To avoid falsely contributing to the durability of the current checkpoint, replicas
-            // syncing table blocks should not send prepare_oks for prepares past the current
-            // checkpoint's prepare_max.
-            if (!self.sync_content_done()) {
-                const prepare_max_current_checkpoint =
-                    vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint()).?;
-                if (self.commit_max <= prepare_max_current_checkpoint and
-                    header.op > prepare_max_current_checkpoint)
-                {
-                    log.debug("{}: send_prepare_ok: not sending (sync_content_done={})", .{
-                        self.replica,
-                        self.sync_content_done(),
-                    });
-                    return;
+            if (header.op > self.op_prepare_ok_max()) {
+                if (!self.sync_content_done()) {
+                    log.debug("{}: send_prepare_ok: not sending (syncing replica falsely " ++
+                        "contributes to durability of the current checkpoint)", .{self.replica});
+                } else {
+                    log.debug("{}: send_prepare_ok: not sending (falsely contributes to " ++
+                        "durability of the next checkpoint)", .{self.replica});
                 }
+                return;
             }
 
             assert(self.status == .normal);
@@ -7168,8 +7198,24 @@ pub fn ReplicaType(
 
         fn send_prepare_oks_after_view_change(self: *Self) void {
             assert(self.status == .normal);
+            self.send_prepare_oks_from(self.commit_max + 1);
+        }
 
-            var op = self.commit_max + 1;
+        fn send_prepare_oks_after_checkpoint(self: *Self) void {
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.solo()));
+
+            const op_checkpoint_trigger =
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+            assert(self.commit_min == op_checkpoint_trigger);
+            self.send_prepare_oks_from(@max(
+                self.commit_max + 1,
+                op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1,
+            ));
+        }
+
+        fn send_prepare_oks_from(self: *Self, op_: u64) void {
+            var op = op_;
             while (op <= self.op) : (op += 1) {
                 // We may have breaks or stale headers in our uncommitted chain here. However:
                 // * being able to send what we have will allow the pipeline to commit earlier, and
@@ -8018,8 +8064,7 @@ pub fn ReplicaType(
             assert(dvcs_all.count() >= self.quorum_view_change);
 
             for (dvcs_all.const_slice()) |message| {
-                assert(message.header.op <=
-                    self.op_prepare_max() + constants.pipeline_prepare_queue_max);
+                assert(message.header.op <= self.op_prepare_max());
             }
 
             // The `prepare_timestamp` prevents a primary's own clock from running backwards.
@@ -8048,31 +8093,19 @@ pub fn ReplicaType(
             assert(header_head.op <= self.op_prepare_max());
             for (dvcs_all.const_slice()) |dvc| assert(header_head.op >= dvc.header.commit_min);
 
-            // When computing the new commit_max, we cannot simply rely on the fact that our own
-            // commit_min is attached to our own DVC in the quorum.
-            // Consider the case:
-            // 1. Start committing op=N…M.
-            // 2. Send `do_view_change` to self.
-            // 3. Finish committing op=N…M.
-            // 4. Remaining `do_view_change` messages arrive, completing the quorum.
-            // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
-            // Don't let the commit backtrack.
-            const commit_max = @max(
-                self.commit_min,
-                DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
-            );
             assert(self.commit_min >=
                 self.do_view_change_from_all_replicas[self.replica].?.header.commit_min);
 
+            const commit_max = DVCQuorum.commit_max(self.do_view_change_from_all_replicas);
+            maybe(self.commit_min > commit_max);
+            maybe(self.commit_max > commit_max);
             {
                 // "`replica.op` exists" invariant may be broken briefly between
                 // set_op_and_commit_max() and replace_header().
-
                 self.set_op_and_commit_max(header_head.op, commit_max, @src());
                 assert(self.commit_max <= self.op_prepare_max());
                 assert(self.commit_max <= self.op);
                 maybe(self.journal.header_with_op(self.op) == null);
-
                 self.replace_header(header_head);
                 assert(self.journal.header_with_op(self.op) != null);
             }
