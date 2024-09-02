@@ -12,7 +12,7 @@ usage() {
 	EOF
 }
 
-cat /tmp/key | base64 --decode | sudo docker login -u _json_key https://us-central1-docker.pkg.dev/ --password-stdin
+# cat /tmp/key | base64 --decode | sudo docker login -u _json_key https://us-central1-docker.pkg.dev/ --password-stdin
 
 if [ $# -ne 1 ] || [ "$1" = '-h' ]; then
 	usage >&2
@@ -25,9 +25,8 @@ push_image() {
 	image=$1
 	url="$url_prefix/$image:$tag"
 
-	# XXX sudo
-	sudo docker tag "$image:$tag" "$url"
-	sudo docker push              "$url"
+	docker tag "$image:$tag" "$url"
+	docker push              "$url"
 }
 
 push_image config
