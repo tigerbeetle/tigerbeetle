@@ -3,9 +3,23 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
-## TigerBeetle (unreleased)
+## TigerBeetle 0.16.0
 
-Released: 2024-08-26
+Released 2024-09-02
+
+This release is 0.16.0 as it includes a new breaking API change around zero amount transfers, as
+well as the behavior around posting a full pending transfer amount or balancing as much as possible.
+These are all gated by the client's release version.
+
+If you're running a client older than 0.16.0, you'll see the old behavior where zero amount
+transfers are disallowed, but on newer clients these are supported and will create a transfer with
+an amount of 0.
+
+Additionally, the sentinel value to representing posting the full amount of a pending transfer, or
+doing a balancing transfer for as much as possible has changed. It's no longer 0, but instead
+`AMOUNT_MAX`.
+
+See the [**tracking issue**](https://github.com/tigerbeetle/tigerbeetle/issues/2231#issuecomment-2305132591) for more details.
 
 ### Safety And Performance
 
@@ -14,6 +28,38 @@ Released: 2024-08-26
   Change how replicas that haven't finished syncing send a `prepare_ok` message,
   preventing them from falsely contributing to the durability of a checkpoint, which could
   potentially cause liveness issues in the event of storage faults.
+
+- [#2255](https://github.com/tigerbeetle/tigerbeetle/pull/2255)
+
+  The new state sync protocol regressed the behavior where the replica would try to repair the WAL
+  before switching to state sync, and this puts the old behavior back in.
+
+  [WAL repair](https://docs.tigerbeetle.com/about/internals/vsr#protocol-repair-wal) is used when
+  the lagging replica's log still intersects with the cluster's current log, while
+  [state sync](https://docs.tigerbeetle.com/about/internals/sync) is used when when the logs no
+  longer intersect.
+
+- [#2244](https://github.com/tigerbeetle/tigerbeetle/pull/2244)
+
+  Try to repair (but not commit) prepares, even if we don't have all the headers between checkpoint
+  and head.
+
+  This makes things consistent between the normal and repair paths, and improves concurrency while
+  repairing.
+
+- [#2253](https://github.com/tigerbeetle/tigerbeetle/pull/2253)
+
+  Reject prepares on the primary if its view isn't durable, much like solo clusters.
+
+  This solves a failing VOPR seed wherein a primary accepting prepares before making its log_view
+  durable exposes a break in its hash chain.
+
+- [#2259](https://github.com/tigerbeetle/tigerbeetle/pull/2259),
+  [#2246](https://github.com/tigerbeetle/tigerbeetle/pull/2246)
+
+  A few `sysctl`s and security frameworks (eg, seccomp) might block io_uring. Print out a more
+  helpful error message, rather than a generic "permission denied" or "system outdated".
+
 
 ### Features
 
@@ -35,6 +81,15 @@ Released: 2024-08-26
   Also, explicitly define _optional indexes_, which previously were determined simply by not
   indexing zeroed values.
 
+- [#2234](https://github.com/tigerbeetle/tigerbeetle/pull/2234)
+
+  Introduce a new flag, `Account.flags.closed`, which causes an account to reject any further
+  transfers, except for voiding two-phase transfers that are still pending.
+
+  The account flag can be set during creation or through a closing transfer. In the latter case,
+  closed account can be re-opened by voiding or expiring the closing transfer.
+
+
 ### Internals
 
 - [#2211](https://github.com/tigerbeetle/tigerbeetle/pull/2211)
@@ -43,9 +98,42 @@ Released: 2024-08-26
   As planned for this release, it only ignores old messages, allowing replicas to upgrade normally.
   In the next release, replicas would panic if they receive an old message.
 
+- [#2233](https://github.com/tigerbeetle/tigerbeetle/pull/2233)
+
+  Move multiversion build logic into `build.zig` from `release.zig`. This makes it much easier to
+  build multiversion binaries as part of a regular `zig build`, without having to invoke CI or
+  release process specific code that's normally part of `release.zig`.
+
+  It also makes it possible to build multiversion binaries on platforms that aren't x86_64 Linux.
+
 - [#2215](https://github.com/tigerbeetle/tigerbeetle/pull/2215)
 
   Refactor the _Multiversion_ API, bringing it in line with pre-existing code patterns.
+
+- [#2251](https://github.com/tigerbeetle/tigerbeetle/pull/2251)
+
+  Previously, TigerBeetle release numbers were based on a finicky conversion of GitHub's internal
+  action run number to a version number.
+
+  This was error prone, and difficult to reason about before hand (what would the given version
+  number for a release be?). Instead, make it so this very changelog is the source of truth for
+  the version number which is explicitly set.
+
+- [#2252](https://github.com/tigerbeetle/tigerbeetle/pull/2252)
+
+  Change `init` function signatures to allow for in-place initialization. This addresses the silent
+  stack growth caused by intermediate copy/move allocations during the initialization of large
+  objects.
+
+  Specifically, the `Forest` struct can grow indefinitely depending on the number of
+  `Grooves`/`IndexTrees` needed to support the StateMachine's custom logic, causing TigerBeetle to
+  crash during startup due to stack-overflow.
+
+- [#2265](https://github.com/tigerbeetle/tigerbeetle/pull/2265)
+
+  Don't cancel in-progress GitHub actions on the main branch. In particular, this ensures that the
+  devhub records the benchmark measurements for every merge to main, even if those merges occur in
+  quick succession.
 
 - [#2218](https://github.com/tigerbeetle/tigerbeetle/pull/2218)
 
@@ -64,6 +152,7 @@ Released: 2024-08-26
 
 ### TigerTracks 🎧
 
+- [I Want To Break Free](https://open.spotify.com/track/7iAqvWLgZzXvH38lA06QZg?si=a5ad69b31f3a45dd)
 - [Used To Love Her](https://www.youtube.com/watch?v=FDIvIb06abI)
 
 ## TigerBeetle 0.15.6
