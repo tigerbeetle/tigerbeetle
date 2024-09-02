@@ -5,6 +5,7 @@ const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
 
 const Release = @import("../multiversioning.zig").Release;
+const ReleaseTriple = @import("../multiversioning.zig").ReleaseTriple;
 
 const log = std.log;
 
@@ -77,7 +78,7 @@ fn format_changelog(buffer: std.ArrayList(u8).Writer, options: struct {
     } else {
         try buffer.print("## TigerBeetle (unreleased)\n\n", .{});
     }
-    try buffer.print("Released {s}\n\n", .{options.today});
+    try buffer.print("Released: {s}\n\n", .{options.today});
 
     var merges_left = options.merges;
     for (0..128) |_| {
@@ -164,7 +165,7 @@ pub const ChangelogIterator = struct {
     // Mutable suffix of what's yet to be iterated.
     rest: []const u8,
 
-    release_previous: ?Release = null,
+    release_previous_iteration: ?Release = null,
 
     pub fn init(changelog: []const u8) ChangelogIterator {
         var rest = stdx.cut_prefix(changelog, "# Changelog\n\n").?;
@@ -187,11 +188,14 @@ pub const ChangelogIterator = struct {
         it.rest = it.rest[entry_end_index + 2 ..];
         const entry = parse_entry(text_full);
 
-        if (it.release_previous != null and entry.release != null) {
-            assert(Release.less_than({}, it.release_previous.?, entry.release.?));
+        if (it.release_previous_iteration != null and entry.release != null) {
+            // The changelog is ordered from newest to oldest, and that's how it's iterated. The
+            // current iteration's release is thus expected to be less than the previous iteration's
+            // release.
+            assert(Release.less_than({}, entry.release.?, it.release_previous_iteration.?));
         }
         if (entry.release != null) {
-            it.release_previous = entry.release;
+            it.release_previous_iteration = entry.release;
         }
 
         return entry;
@@ -228,7 +232,7 @@ test ChangelogIterator {
         \\
         \\## TigerBeetle 1.2.3
         \\
-        \\Released 2024-10-23
+        \\Released: 2024-10-23
         \\
         \\This is the start of the changelog.
         \\
@@ -238,7 +242,7 @@ test ChangelogIterator {
         \\
         \\## TigerBeetle 1.2.2
         \\
-        \\Released 2024-10-16
+        \\Released: 2024-10-16
         \\
         \\ The beginning.
         \\
@@ -250,7 +254,7 @@ test ChangelogIterator {
     var it = ChangelogIterator.init(changelog);
 
     var entry = it.next_changelog().?;
-    try std.testing.expectEqual(entry.release.?.triple(), .{
+    try std.testing.expectEqual(entry.release.?.triple(), ReleaseTriple{
         .major = 1,
         .minor = 2,
         .patch = 3,
@@ -258,7 +262,7 @@ test ChangelogIterator {
     try std.testing.expectEqualStrings(entry.text_full,
         \\## TigerBeetle 1.2.3
         \\
-        \\Released 2024-10-23
+        \\Released: 2024-10-23
         \\
         \\This is the start of the changelog.
         \\
@@ -268,6 +272,7 @@ test ChangelogIterator {
         \\
     );
     try std.testing.expectEqualStrings(entry.text_body,
+        \\
         \\This is the start of the changelog.
         \\
         \\### Features
@@ -277,7 +282,7 @@ test ChangelogIterator {
     );
 
     entry = it.next_changelog().?;
-    try std.testing.expectEqual(entry.release.?.triple(), .{
+    try std.testing.expectEqual(entry.release.?.triple(), ReleaseTriple{
         .major = 1,
         .minor = 2,
         .patch = 2,
