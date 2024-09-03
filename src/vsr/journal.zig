@@ -1923,13 +1923,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             });
         }
 
-        fn offset_logical_in_headers_for_message(
-            journal: *const Journal,
-            message: *const Message.Prepare,
-        ) u64 {
-            return Ring.headers.offset(journal.slot_for_header(message.header));
-        }
-
         fn write_sectors(
             journal: *Journal,
             callback: *const fn (write: *Journal.Write) void,
