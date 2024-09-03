@@ -63,7 +63,7 @@ pub const compaction_tables_input_max = 1 + constants.lsm_growth_factor;
 /// In the "worst" case, no keys are overwritten/merged, and no tombstones are dropped.
 pub const compaction_tables_output_max = compaction_tables_input_max;
 
-const half_bar_beat_count = @divExact(constants.lsm_batch_multiple, 2);
+const half_bar_beat_count = @divExact(constants.lsm_compaction_ops, 2);
 
 /// Information used when scheduling compactions. Kept unspecialized to make the forest
 /// code easier.
@@ -518,7 +518,7 @@ pub fn CompactionType(
         bar: ?Bar,
         beat: ?Beat,
 
-        pub fn init(tree_config: Tree.Config, grid: *Grid, level_b: u8) !Compaction {
+        pub fn init(tree_config: Tree.Config, grid: *Grid, level_b: u8) Compaction {
             assert(level_b < constants.lsm_levels);
 
             return Compaction{
@@ -718,7 +718,7 @@ pub fn CompactionType(
             source_a_immutable_block: *Helpers.CompactionBlock,
         ) void {
             // Limited to half bars for now.
-            assert(beats_max <= @divExact(constants.lsm_batch_multiple, 2));
+            assert(beats_max <= @divExact(constants.lsm_compaction_ops, 2));
             assert(beats_max > 0);
 
             assert(compaction.bar != null);
@@ -2200,8 +2200,8 @@ pub fn snapshot_max_for_table_input(op_min: u64) u64 {
 
 pub fn snapshot_min_for_table_output(op_min: u64) u64 {
     assert(op_min > 0);
-    assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
-    return op_min + @divExact(constants.lsm_batch_multiple, 2);
+    assert(op_min % @divExact(constants.lsm_compaction_ops, 2) == 0);
+    return op_min + @divExact(constants.lsm_compaction_ops, 2);
 }
 
 /// Returns the first op of the compaction (Compaction.op_min) for a given op/beat.
@@ -2216,7 +2216,7 @@ pub fn snapshot_min_for_table_output(op_min: u64) u64 {
 ///
 ///
 /// These charts depict the commit/compact ops over a series of
-/// commits and compactions (with lsm_batch_multiple=8).
+/// commits and compactions (with lsm_compaction_ops=8).
 ///
 /// Legend:
 ///

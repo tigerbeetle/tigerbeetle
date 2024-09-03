@@ -195,6 +195,7 @@ const ThingsGroove = GrooveType(
             .timestamp = batch_max,
         },
         .ignored = &[_][]const u8{"checksum"},
+        .optional = &[_][]const u8{},
         .derived = .{},
     },
 );
@@ -964,7 +965,7 @@ const Environment = struct {
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
 
-        env.forest = try Forest.init(allocator, &env.grid, .{
+        try env.forest.init(allocator, &env.grid, .{
             .compaction_block_count = Forest.Options.compaction_block_count_min,
             .node_count = node_count,
         }, forest_options);
@@ -983,8 +984,8 @@ const Environment = struct {
 
         const checkpoint =
             // Can only checkpoint on the last beat of the bar.
-            env.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-            env.op > constants.lsm_batch_multiple;
+            env.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
+            env.op > constants.lsm_compaction_ops;
 
         env.change_state(.fuzzing, .forest_compact);
         env.forest.compact(forest_compact_callback, env.op);
@@ -992,7 +993,7 @@ const Environment = struct {
 
         if (checkpoint) {
             assert(env.checkpoint_op == null);
-            env.checkpoint_op = env.op - constants.lsm_batch_multiple;
+            env.checkpoint_op = env.op - constants.lsm_compaction_ops;
 
             env.change_state(.fuzzing, .forest_checkpoint);
             env.forest.checkpoint(forest_checkpoint_callback);

@@ -26,8 +26,7 @@ const MessagePool = vsr.message_pool.MessagePool;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Grid = vsr.GridType(Storage);
 
-const AOFType = if (constants.aof_record) AOF else void;
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOFType);
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
@@ -163,6 +162,11 @@ const Command = struct {
             development: bool,
         },
     ) !void {
+        // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
+        // is not available) there won't be a dangling file.
+        command.io = try IO.init(128, 0);
+        errdefer command.io.deinit();
+
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
         // TODO Handle physical volumes where there is no directory to fsync.
         const dirname = std.fs.path.dirname(path) orelse ".";
@@ -186,9 +190,6 @@ const Command = struct {
         );
         errdefer std.posix.close(command.fd);
 
-        command.io = try IO.init(128, 0);
-        errdefer command.io.deinit();
-
         command.storage = try Storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
 
@@ -199,9 +200,9 @@ const Command = struct {
     fn deinit(command: *Command, allocator: mem.Allocator) void {
         allocator.free(command.self_exe_path);
         command.storage.deinit();
-        command.io.deinit();
         std.posix.close(command.fd);
         std.posix.close(command.dir_fd);
+        command.io.deinit();
     }
 
     pub fn format(
@@ -260,13 +261,13 @@ const Command = struct {
         } });
         defer message_pool.deinit(allocator);
 
-        var aof: AOFType = undefined;
-        if (constants.aof_record) {
+        var aof: ?AOF = if (args.aof) blk: {
             const aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
             defer allocator.free(aof_path);
 
-            aof = try AOF.from_absolute_path(aof_path);
-        }
+            break :blk try AOF.from_absolute_path(aof_path);
+        } else null;
+        defer if (aof != null) aof.?.close();
 
         const grid_cache_size = @as(u64, args.cache_grid_blocks) * constants.block_size;
         const grid_cache_size_min = constants.block_size * Grid.Cache.value_count_max_multiple;
@@ -297,30 +298,35 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
-        var multiversion: ?vsr.multiversioning.Multiversion =
+        var multiversion: ?vsr.multiversioning.Multiversion = blk: {
             if (constants.config.process.release.value ==
-            vsr.multiversioning.Release.minimum.value)
-        blk: {
-            log.info(
-                "multiversioning: disabled for development ({}) release.",
-                .{constants.config.process.release},
+                vsr.multiversioning.Release.minimum.value)
+            {
+                log.info("multiversioning: disabled for development ({}) release.", .{
+                    constants.config.process.release,
+                });
+                break :blk null;
+            }
+            if (args.development) {
+                log.info("multiversioning: disabled due to --development.", .{});
+                break :blk null;
+            }
+            if (args.experimental) {
+                log.info("multiversioning: disabled due to --experimental.", .{});
+                break :blk null;
+            }
+            if (constants.aof_recovery) {
+                log.info("multiversioning: disabled due to aof_recovery.", .{});
+                break :blk null;
+            }
+
+            break :blk try vsr.multiversioning.Multiversion.init(
+                allocator,
+                &command.io,
+                command.self_exe_path,
+                .native,
             );
-            break :blk null;
-        } else if (args.development) blk: {
-            log.info("multiversioning: disabled due to --development.", .{});
-            break :blk null;
-        } else if (args.experimental) blk: {
-            log.info("multiversioning: disabled due to --experimental.", .{});
-            break :blk null;
-        } else if (constants.aof_recovery) blk: {
-            log.info("multiversioning: disabled due to aof_recovery.", .{});
-            break :blk null;
-        } else try vsr.multiversioning.Multiversion.init(
-            allocator,
-            &command.io,
-            command.self_exe_path,
-            .native,
-        );
+        };
 
         defer if (multiversion != null) multiversion.?.deinit(allocator);
 
@@ -350,11 +356,11 @@ const Command = struct {
             .release_client_min = config.process.release_client_min,
             .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
-            .multiversion = if (multiversion) |*multiversion_| multiversion_ else null,
+            .release_execute_context = if (multiversion) |*pointer| pointer else null,
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
-            .aof = &aof,
+            .aof = if (aof != null) &aof.? else null,
             .message_pool = &message_pool,
             .nonce = nonce,
             .time = .{},
@@ -378,11 +384,7 @@ const Command = struct {
             else => |e| return e,
         };
 
-        // Enable checking for new binaries on disk after the replica has been opened. Only
-        // supported on Linux.
-        if (multiversion != null and builtin.target.os.tag == .linux) {
-            multiversion.?.timeout_enable();
-        }
+        if (multiversion != null) multiversion.?.timeout_start(replica.replica);
 
         // Note that this does not account for the fact that any allocations will be rounded up to
         // the nearest page by `std.heap.page_allocator`.
@@ -415,6 +417,13 @@ const Command = struct {
                 "Recompile with -Dconfig=production if unexpected.", .{replica.replica});
         }
 
+        if (replica.aof != null) {
+            log.warn(
+                "{}: started with --aof - expect much reduced performance.",
+                .{replica.replica},
+            );
+        }
+
         // It is possible to start tigerbeetle passing `0` as an address:
         //     $ tigerbeetle start --addresses=0 0_0.tigerbeetle
         // This enables a couple of special behaviors, useful in tests:
@@ -444,6 +453,7 @@ const Command = struct {
 
         while (true) {
             replica.tick();
+            if (multiversion != null) multiversion.?.tick();
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
     }
@@ -504,10 +514,12 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != replica.release.value);
     assert(release.value != vsr.Release.zero.value);
     assert(release.value != vsr.Release.minimum.value);
-
-    const multiversion = replica.multiversion orelse {
+    const release_execute_context = replica.release_execute_context orelse {
         @panic("replica_release_execute unsupported");
     };
+
+    const multiversion: *vsr.multiversioning.Multiversion =
+        @ptrCast(@alignCast(release_execute_context));
 
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;

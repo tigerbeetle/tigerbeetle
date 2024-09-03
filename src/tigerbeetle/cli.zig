@@ -29,7 +29,7 @@ const StateMachine = vsr.state_machine.StateMachineType(
     constants.state_machine_config,
 );
 
-const CliArgs = union(enum) {
+const CLIArgs = union(enum) {
     const Format = struct {
         cluster: u128,
         replica: ?u8 = null,
@@ -55,7 +55,7 @@ const CliArgs = union(enum) {
         // Everything below here is considered experimental, and requires `--experimental` to be
         // set. Experimental flags disable automatic upgrades with multiversion binaries; each
         // replica has to be manually restarted.
-        // Experimental flags must default to null.
+        // Experimental flags must default to null, except for bools which must be false.
         experimental: bool = false,
 
         limit_storage: ?flags.ByteSize = null,
@@ -67,6 +67,13 @@ const CliArgs = union(enum) {
         cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
+
+        /// AOF (Append Only File) logs all transactions synchronously to disk before replying
+        /// to the client. The logic behind this code has been kept as simple as possible -
+        /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
+        /// log consisting of logged requests. Much like a redis AOF with fsync=on.
+        /// Enabling this will have performance implications.
+        aof: bool = false,
     };
 
     const Version = struct {
@@ -89,7 +96,8 @@ const CliArgs = union(enum) {
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_count_hot: usize = 0,
-        account_balances: bool = false,
+        flag_history: bool = false,
+        flag_imported: bool = false,
         account_batch_size: usize = @divExact(
             constants.message_size_max - @sizeOf(vsr.Header),
             @sizeOf(tigerbeetle.Account),
@@ -357,7 +365,7 @@ const start_defaults_development = StartDefaults{
 const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
 const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
-/// While CliArgs store raw arguments as passed on the command line, Command ensures that
+/// While CLIArgs store raw arguments as passed on the command line, Command ensures that
 /// arguments are properly validated and desugared (e.g, sizes converted to counts where
 ///  appropriate).
 pub const Command = union(enum) {
@@ -389,6 +397,7 @@ pub const Command = union(enum) {
         lsm_forest_node_count: u32,
         development: bool,
         experimental: bool,
+        aof: bool,
         path: [:0]const u8,
     };
 
@@ -416,7 +425,8 @@ pub const Command = union(enum) {
         cache_grid: ?[]const u8,
         account_count: usize,
         account_count_hot: usize,
-        account_balances: bool,
+        flag_history: bool,
+        flag_imported: bool,
         account_batch_size: usize,
         transfer_count: usize,
         transfer_hot_percent: usize,
@@ -476,7 +486,7 @@ pub const Command = union(enum) {
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
 pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
-    const cli_args = flags.parse(args_iterator, CliArgs);
+    const cli_args = flags.parse(args_iterator, CLIArgs);
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },
@@ -489,7 +499,7 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
     };
 }
 
-fn parse_args_format(format: CliArgs.Format) Command.Format {
+fn parse_args_format(format: CLIArgs.Format) Command.Format {
     if (format.replica_count == 0) {
         flags.fatal("--replica-count: value needs to be greater than zero", .{});
     }
@@ -545,7 +555,7 @@ fn parse_args_format(format: CliArgs.Format) Command.Format {
     };
 }
 
-fn parse_args_start(start: CliArgs.Start) Command.Start {
+fn parse_args_start(start: CLIArgs.Start) Command.Start {
     // Allowlist of stable flags. --development will disable automatic multiversion
     // upgrades too, but the flag itself is stable.
     const stable_args = .{
@@ -565,9 +575,10 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
 
         // If you've added a flag and get a comptime error here, it's likely because
         // we require experimental flags to default to null.
-        assert(flags.default_value(field).? == null);
+        const required_default = if (field.type == bool) false else null;
+        assert(flags.default_value(field).? == required_default);
 
-        if (@field(start, field.name) != null and !start.experimental) {
+        if (@field(start, field.name) != required_default and !start.experimental) {
             flags.fatal(
                 "{s} is marked experimental, add `--experimental` to continue.",
                 .{flag_name},
@@ -756,17 +767,18 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
         .lsm_forest_node_count = lsm_forest_node_count,
         .development = start.development,
         .experimental = start.experimental,
+        .aof = start.aof,
         .path = start.positional.path,
     };
 }
 
-fn parse_args_version(version: CliArgs.Version) Command.Version {
+fn parse_args_version(version: CLIArgs.Version) Command.Version {
     return .{
         .verbose = version.verbose,
     };
 }
 
-fn parse_args_repl(repl: CliArgs.Repl) Command.Repl {
+fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
     const addresses = parse_addresses(repl.addresses);
 
     return .{
@@ -777,7 +789,7 @@ fn parse_args_repl(repl: CliArgs.Repl) Command.Repl {
     };
 }
 
-fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
+fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
         parse_addresses(addresses)
     else
@@ -795,7 +807,8 @@ fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
         .cache_grid = benchmark.cache_grid,
         .account_count = benchmark.account_count,
         .account_count_hot = benchmark.account_count_hot,
-        .account_balances = benchmark.account_balances,
+        .flag_history = benchmark.flag_history,
+        .flag_imported = benchmark.flag_imported,
         .account_batch_size = benchmark.account_batch_size,
         .transfer_count = benchmark.transfer_count,
         .transfer_hot_percent = benchmark.transfer_hot_percent,
@@ -814,7 +827,7 @@ fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
     };
 }
 
-fn parse_args_inspect(inspect: CliArgs.Inspect) Command.Inspect {
+fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
         inline else => |args| args.positional.path,
     };
@@ -844,7 +857,7 @@ fn parse_args_inspect(inspect: CliArgs.Inspect) Command.Inspect {
     };
 }
 
-fn parse_args_multiversion(multiversion: CliArgs.Multiversion) Command.Multiversion {
+fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multiversion {
     return .{
         .path = multiversion.positional.path,
     };

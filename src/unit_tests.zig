@@ -65,5 +65,6 @@ comptime {
     _ = @import("vsr/sync.zig");
 
     _ = @import("scripts/release.zig");
+    _ = @import("scripts/changelog.zig");
     _ = @import("scripts/cfo.zig");
 }

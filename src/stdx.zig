@@ -161,6 +161,10 @@ pub fn zeroed(bytes: []const u8) bool {
 const Cut = struct {
     prefix: []const u8,
     suffix: []const u8,
+
+    pub fn unpack(self: Cut) struct { []const u8, []const u8 } {
+        return .{ self.prefix, self.suffix };
+    }
 };
 
 /// Splits the `haystack` around the first occurrence of `needle`, returning parts before and after.
@@ -262,7 +266,7 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     // Pick the biggest "word" for word-wise comparison, and don't try to early-return on the first
     // mismatch, so that a compiler can vectorize the loop.
 
-    const Word = inline for (.{ u64, u32, u16, u8 }) |Word| {
+    const Word = comptime for (.{ u64, u32, u16, u8 }) |Word| {
         if (@alignOf(T) >= @alignOf(Word) and @sizeOf(T) % @sizeOf(Word) == 0) break Word;
     } else unreachable;
 
@@ -271,8 +275,7 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     assert(a_words.len == b_words.len);
 
     var total: Word = 0;
-    for (a_words, 0..) |a_word, i| {
-        const b_word = b_words[i];
+    for (a_words, b_words) |a_word, b_word| {
         total |= a_word ^ b_word;
     }
 
@@ -300,6 +303,7 @@ fn has_pointers(comptime T: type) bool {
 /// Checks that a type does not have implicit padding.
 pub fn no_padding(comptime T: type) bool {
     comptime switch (@typeInfo(T)) {
+        .Void => return true,
         .Int => return @bitSizeOf(T) == 8 * @sizeOf(T),
         .Array => |info| return no_padding(info.child),
         .Struct => |info| {

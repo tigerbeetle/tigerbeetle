@@ -14,14 +14,15 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.zig("build clients:dotnet -Drelease -Dconfig=production", .{});
     try shell.zig("build -Drelease -Dconfig=production", .{});
 
-    try shell.exec("dotnet format --verify-no-changes", .{});
+    try shell.exec("dotnet restore", .{});
+    try shell.exec("dotnet format --no-restore --verify-no-changes", .{});
 
     // Unit tests.
-    try shell.exec("dotnet build --configuration Release", .{});
+    try shell.exec("dotnet build --no-restore  --configuration Release", .{});
     // Disable coverage on CI, as it is flaky, see
     // <https://github.com/coverlet-coverage/coverlet/issues/865>
     try shell.exec(
-        \\dotnet test
+        \\dotnet test --no-restore
         \\    /p:CollectCoverage=false
         \\    /p:Threshold={threshold}
         \\    /p:ThresholdType={threshold_type}

@@ -327,12 +327,11 @@ const Environment = struct {
         errdefer env.grid_verify.deinit(allocator);
 
         fields_initialized += 1;
-        env.manifest_log = try ManifestLog.init(allocator, &env.grid, manifest_log_options);
+        try env.manifest_log.init(allocator, &env.grid, manifest_log_options);
         errdefer env.manifest_log.deinit(allocator);
 
         fields_initialized += 1;
-        env.manifest_log_verify =
-            try ManifestLog.init(allocator, &env.grid_verify, manifest_log_options);
+        try env.manifest_log_verify.init(allocator, &env.grid_verify, manifest_log_options);
         errdefer env.manifest_log_verify.deinit(allocator);
 
         fields_initialized += 1;
@@ -546,8 +545,7 @@ const Environment = struct {
             });
 
             test_manifest_log.deinit(env.allocator);
-            test_manifest_log.* =
-                try ManifestLog.init(env.allocator, test_grid, manifest_log_options);
+            try test_manifest_log.init(env.allocator, test_grid, manifest_log_options);
         }
 
         env.pending += 1;

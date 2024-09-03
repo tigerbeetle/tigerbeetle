@@ -142,6 +142,22 @@ pub const AOF = struct {
         return AOF{ .fd = fd };
     }
 
+    /// If a message should be replayed when recovering the AOF. This allows skipping over things
+    /// like lookup_ and queries, that have no affect on the final state, but take up a lot of time
+    /// when replaying.
+    pub fn replay_message(header: *Header.Prepare) bool {
+        if (header.operation.vsr_reserved()) return false;
+        const state_machine_operation = header.operation.cast(StateMachine);
+        switch (state_machine_operation) {
+            .create_accounts, .create_transfers => return true,
+
+            // Pulses are replayed to handle pending transfer expiry.
+            .pulse => return true,
+
+            else => return false,
+        }
+    }
+
     pub fn close(self: *AOF) void {
         std.posix.close(self.fd);
     }
@@ -353,9 +369,9 @@ pub const AOFReplayClient = struct {
         var target: AOFEntry = undefined;
 
         while (try aof.next(&target)) |entry| {
-            // Skip replaying reserved messages.
+            // Skip replaying reserved messages and messages not marked for playback.
             const header = entry.header();
-            if (header.operation.vsr_reserved()) continue;
+            if (!AOF.replay_message(header)) continue;
 
             const message = self.client.get_message().build(.request);
             errdefer self.client.release_message(message.base());
@@ -769,15 +785,19 @@ pub fn main() !void {
         const stdout = std.io.getStdOut().writer();
         while (try it.next(target)) |entry| {
             const header = entry.header();
-            try stdout.print("{} {}\n", .{ header, entry.metadata });
+            if (!AOF.replay_message(header)) continue;
+
+            try stdout.print("{} aof.AOFEntryMetadata{{ .primary = {}, .replica = {} }}\n", .{
+                header,
+                entry.metadata.primary,
+                entry.metadata.replica,
+            });
 
             // The body isn't the only important information, there's also the operation
             // and the timestamp which are in the header. Include those in our hash too.
-            if (@intFromEnum(header.operation) > constants.vsr_operations_reserved) {
-                blake3.update(std.mem.asBytes(&header.checksum_body));
-                blake3.update(std.mem.asBytes(&header.timestamp));
-                blake3.update(std.mem.asBytes(&header.operation));
-            }
+            blake3.update(std.mem.asBytes(&header.checksum_body));
+            blake3.update(std.mem.asBytes(&header.timestamp));
+            blake3.update(std.mem.asBytes(&header.operation));
         }
         blake3.final(data_checksum[0..]);
         try stdout.print(

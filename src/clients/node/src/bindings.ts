@@ -29,6 +29,16 @@ export enum AccountFlags {
   * See [history](https://docs.tigerbeetle.com/reference/account#flagshistory)
   */
   history = (1 << 3),
+
+  /**
+  * See [imported](https://docs.tigerbeetle.com/reference/account#flagsimported)
+  */
+  imported = (1 << 4),
+
+  /**
+  * See [closed](https://docs.tigerbeetle.com/reference/account#flagsclosed)
+  */
+  closed = (1 << 5),
 }
 
 
@@ -67,6 +77,21 @@ export enum TransferFlags {
   * See [balancing_credit](https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_credit)
   */
   balancing_credit = (1 << 5),
+
+  /**
+  * See [closing_debit](https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit)
+  */
+  closing_debit = (1 << 6),
+
+  /**
+  * See [closing_credit](https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit)
+  */
+  closing_credit = (1 << 7),
+
+  /**
+  * See [imported](https://docs.tigerbeetle.com/reference/transfer#flagsimported)
+  */
+  imported = (1 << 8),
 }
 
 
@@ -271,9 +296,29 @@ export enum CreateAccountError {
   linked_event_chain_open = 2,
 
   /**
+  * See [imported_event_expected](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_expected)
+  */
+  imported_event_expected = 22,
+
+  /**
+  * See [imported_event_not_expected](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_not_expected)
+  */
+  imported_event_not_expected = 23,
+
+  /**
   * See [timestamp_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero)
   */
   timestamp_must_be_zero = 3,
+
+  /**
+  * See [imported_event_timestamp_out_of_range](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_out_of_range)
+  */
+  imported_event_timestamp_out_of_range = 24,
+
+  /**
+  * See [imported_event_timestamp_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance)
+  */
+  imported_event_timestamp_must_not_advance = 25,
 
   /**
   * See [reserved_field](https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field)
@@ -364,6 +409,11 @@ export enum CreateAccountError {
   * See [exists](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
   */
   exists = 21,
+
+  /**
+  * See [imported_event_timestamp_must_not_regress](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_regress)
+  */
+  imported_event_timestamp_must_not_regress = 26,
 }
 
 
@@ -651,6 +701,61 @@ export enum CreateTransferError {
   * See [exceeds_debits](https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits)
   */
   exceeds_debits = 55,
+
+  /**
+  * See [imported_event_expected](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_expected)
+  */
+  imported_event_expected = 56,
+
+  /**
+  * See [imported_event_not_expected](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_not_expected)
+  */
+  imported_event_not_expected = 57,
+
+  /**
+  * See [imported_event_timestamp_out_of_range](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_out_of_range)
+  */
+  imported_event_timestamp_out_of_range = 58,
+
+  /**
+  * See [imported_event_timestamp_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance)
+  */
+  imported_event_timestamp_must_not_advance = 59,
+
+  /**
+  * See [imported_event_timestamp_must_not_regress](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress)
+  */
+  imported_event_timestamp_must_not_regress = 60,
+
+  /**
+  * See [imported_event_timestamp_must_postdate_debit_account](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account)
+  */
+  imported_event_timestamp_must_postdate_debit_account = 61,
+
+  /**
+  * See [imported_event_timestamp_must_postdate_credit_account](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account)
+  */
+  imported_event_timestamp_must_postdate_credit_account = 62,
+
+  /**
+  * See [imported_event_timeout_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero)
+  */
+  imported_event_timeout_must_be_zero = 63,
+
+  /**
+  * See [closing_transfer_must_be_pending](https://docs.tigerbeetle.com/reference/requests/create_transfers#closing_transfer_must_be_pending)
+  */
+  closing_transfer_must_be_pending = 64,
+
+  /**
+  * See [debit_account_already_closed](https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed)
+  */
+  debit_account_already_closed = 65,
+
+  /**
+  * See [credit_account_already_closed](https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed)
+  */
+  credit_account_already_closed = 66,
 }
 
 export type CreateAccountsError = {

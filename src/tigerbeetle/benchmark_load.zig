@@ -150,7 +150,8 @@ pub fn main(
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
         .account_count_hot = cli_args.account_count_hot,
-        .account_balances = cli_args.account_balances,
+        .flag_history = cli_args.flag_history,
+        .flag_imported = cli_args.flag_imported,
         .account_index = 0,
         .query_count = cli_args.query_count,
         .query_index = 0,
@@ -235,7 +236,8 @@ const Benchmark = struct {
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
     account_count_hot: usize,
-    account_balances: bool,
+    flag_history: bool,
+    flag_imported: bool,
     account_index: usize,
     query_count: usize,
     query_index: usize,
@@ -277,12 +279,14 @@ const Benchmark = struct {
             .ledger = 2,
             .code = 1,
             .flags = .{
-                .history = b.account_balances,
+                .history = b.flag_history,
+                .imported = b.flag_imported,
             },
             .debits_pending = 0,
             .debits_posted = 0,
             .credits_pending = 0,
             .credits_posted = 0,
+            .timestamp = if (b.flag_imported) b.account_index + 1 else 0,
         };
     }
 
@@ -364,10 +368,13 @@ const Benchmark = struct {
             .pending_id = 0,
             .ledger = 2,
             .code = random.int(u16) +| 1,
-            .flags = .{ .pending = pending },
+            .flags = .{
+                .pending = pending,
+                .imported = b.flag_imported,
+            },
             .timeout = if (pending) random.intRangeAtMost(u32, 1, 60) else 0,
             .amount = random_int_exponential(random, u64, 10_000) +| 1,
-            .timestamp = 0,
+            .timestamp = if (b.flag_imported) b.account_index + b.transfer_index + 1 else 0,
         };
     }
 

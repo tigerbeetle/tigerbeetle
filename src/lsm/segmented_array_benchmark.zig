@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
-const NodePoolType = @import("node_pool.zig").NodePool;
+const NodePoolType = @import("node_pool.zig").NodePoolType;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const table_count_max_for_tree = @import("tree.zig").table_count_max_for_tree;
 const SortedSegmentedArray = @import("segmented_array.zig").SortedSegmentedArray;
@@ -98,7 +98,8 @@ test "benchmark: segmented array" {
         defer arena.deinit();
         const allocator = arena.allocator();
 
-        var node_pool = try NodePool.init(allocator, SegmentedArray.node_count_max);
+        var node_pool: NodePool = undefined;
+        try node_pool.init(allocator, SegmentedArray.node_count_max);
         defer node_pool.deinit(allocator);
 
         var array = try SegmentedArray.init(allocator);

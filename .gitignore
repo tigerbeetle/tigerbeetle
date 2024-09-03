@@ -1,5 +1,4 @@
 src/clients/c/lib
-dist/
 /tigerbeetle
 /tigerbeetle.exe
 *_*.tigerbeetle.*

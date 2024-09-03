@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -31,24 +32,34 @@ public static class UInt128Extensions
 
     public static Guid ToGuid(this UInt128 value)
     {
-        unsafe
-        {
-            return new Guid(new ReadOnlySpan<byte>(&value, SIZE));
-        }
+        Span<byte> data = stackalloc byte[SIZE];
+        MemoryMarshal.Write(data, in value);
+
+        // The GUID layout is big endian.
+        // This is important to preserve the string representation.
+        return new Guid(
+            BinaryPrimitives.ReadInt32LittleEndian(data[12..16]),
+            BinaryPrimitives.ReadInt16LittleEndian(data[10..12]),
+            BinaryPrimitives.ReadInt16LittleEndian(data[8..10]),
+            data[7],
+            data[6],
+            data[5],
+            data[4],
+            data[3],
+            data[2],
+            data[1],
+            data[0]);
     }
 
     public static UInt128 ToUInt128(this Guid value)
     {
-        unsafe
-        {
-            UInt128 ret = UInt128.Zero;
+        // Converting from big endian to little endian:
+        Span<byte> data = stackalloc byte[SIZE];
+        _ = value.TryWriteBytes(data, bigEndian: true, bytesWritten: out _);
 
-            // Passing a fixed 16-byte span, there's no possibility
-            // of returning false.
-            _ = value.TryWriteBytes(new Span<byte>(&ret, SIZE));
-
-            return ret;
-        }
+        ulong upper = BinaryPrimitives.ReadUInt64BigEndian(data[0..8]);
+        ulong lower = BinaryPrimitives.ReadUInt64BigEndian(data[8..16]);
+        return new UInt128(upper, lower);
     }
 
     public static byte[] ToArray(this UInt128 value)

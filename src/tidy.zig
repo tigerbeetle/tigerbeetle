@@ -178,7 +178,7 @@ fn tidy_control_characters(file: SourceFile) ?u8 {
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 441; // build in build.zig
+const function_line_count_max = 345; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -375,6 +375,7 @@ const DeadDetector = struct {
             "node_bindings.zig",
             "java_bindings.zig",
             "build.zig",
+            "build_multiversion.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -423,12 +424,12 @@ test "tidy no large blobs" {
 
     const MiB = 1024 * 1024;
     const rev_list = try shell.exec_stdout_options(
-        .{ .max_output_bytes = 50 * MiB },
+        .{ .output_bytes_max = 50 * MiB },
         "git rev-list --objects HEAD",
         .{},
     );
     const objects = try shell.exec_stdout_options(
-        .{ .max_output_bytes = 50 * MiB, .stdin_slice = rev_list },
+        .{ .output_bytes_max = 50 * MiB, .stdin_slice = rev_list },
         "git cat-file --batch-check={format}",
         .{ .format = "%(objecttype) %(objectsize) %(rest)" },
     );

@@ -2,7 +2,7 @@ name: CI
 
 concurrency:
   group: core-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 on:
   merge_group:
@@ -161,9 +161,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # Needed for llvm-objcopy.
-      - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
 
       - run: ./zig/download.sh
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}

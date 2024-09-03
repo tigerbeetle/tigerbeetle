@@ -104,11 +104,11 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 // 1. Suppose op X is a checkpoint trigger.
                 // 2. We are committing op X-1 but are stuck due to a block that does not exist in
                 //    the cluster anymore.
-                // 3. When we sync, `commit_min` "backtracks", to `X - lsm_batch_multiple`.
+                // 3. When we sync, `commit_min` "backtracks", to `X - lsm_compaction_ops`.
                 const commit_min_source = state_checker.commit_mins[replica_index];
                 const commit_min_target =
                     replica.syncing.updating_superblock.checkpoint_state.header.op;
-                assert(commit_min_source <= commit_min_target + constants.lsm_batch_multiple);
+                assert(commit_min_source <= commit_min_target + constants.lsm_compaction_ops);
                 state_checker.commit_mins[replica_index] = commit_min_target;
                 return;
             }

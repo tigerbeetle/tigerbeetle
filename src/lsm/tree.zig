@@ -17,7 +17,7 @@ const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
 
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
-const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
@@ -92,7 +92,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         tracer_slot: ?tracer.SpanStart = null,
 
-        active_scope: ?TableMemory.ValueContext = null,
+        active_scope: ?struct {
+            value_context: TableMemory.ValueContext,
+            key_range: ?KeyRange,
+        } = null,
 
         /// The range of keys in this tree at snapshot_latest.
         key_range: ?KeyRange = null,
@@ -107,54 +110,54 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         };
 
         pub fn init(
+            tree: *Tree,
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
             config: Config,
             options: Options,
-        ) !Tree {
+        ) !void {
             assert(grid.superblock.opened);
             assert(config.id != 0); // id=0 is reserved.
             assert(config.name.len > 0);
 
             const value_count_limit =
-                options.batch_value_count_limit * constants.lsm_batch_multiple;
+                options.batch_value_count_limit * constants.lsm_compaction_ops;
             assert(value_count_limit > 0);
             assert(value_count_limit <= TreeTable.value_count_max);
 
-            var table_mutable = try TableMemory.init(allocator, .mutable, config.name, .{
+            tree.* = .{
+                .grid = grid,
+                .config = config,
+                .options = options,
+
+                .table_mutable = undefined,
+                .table_immutable = undefined,
+                .manifest = undefined,
+                .compactions = undefined,
+            };
+
+            try tree.table_mutable.init(allocator, .mutable, config.name, .{
                 .value_count_limit = value_count_limit,
             });
-            errdefer table_mutable.deinit(allocator);
+            errdefer tree.table_mutable.deinit(allocator);
 
-            var table_immutable = try TableMemory.init(
+            try tree.table_immutable.init(
                 allocator,
                 .{ .immutable = .{} },
                 config.name,
                 .{ .value_count_limit = value_count_limit },
             );
-            errdefer table_immutable.deinit(allocator);
+            errdefer tree.table_immutable.deinit(allocator);
 
-            var manifest = try Manifest.init(allocator, node_pool, config);
-            errdefer manifest.deinit(allocator);
+            try tree.manifest.init(allocator, node_pool, config);
+            errdefer tree.manifest.deinit(allocator);
 
-            var compactions: [constants.lsm_levels]Compaction = undefined;
-
-            for (0..compactions.len) |i| {
-                errdefer for (compactions[0..i]) |*c| c.deinit();
-                compactions[i] = try Compaction.init(config, grid, @intCast(i));
+            for (0..tree.compactions.len) |i| {
+                errdefer for (tree.compactions[0..i]) |*c| c.deinit();
+                tree.compactions[i] = Compaction.init(config, grid, @intCast(i));
             }
-            errdefer for (compactions) |*c| c.deinit();
-
-            return Tree{
-                .grid = grid,
-                .config = config,
-                .options = options,
-                .table_mutable = table_mutable,
-                .table_immutable = table_immutable,
-                .manifest = manifest,
-                .compactions = compactions,
-            };
+            errdefer for (tree.compactions) |*c| c.deinit();
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
@@ -189,15 +192,20 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// or discarded. Only one scope can be active at a time.
         pub fn scope_open(tree: *Tree) void {
             assert(tree.active_scope == null);
-            tree.active_scope = tree.table_mutable.value_context;
+            tree.active_scope = .{
+                .value_context = tree.table_mutable.value_context,
+                .key_range = tree.key_range,
+            };
         }
 
         pub fn scope_close(tree: *Tree, mode: ScopeCloseMode) void {
             assert(tree.active_scope != null);
-            assert(tree.active_scope.?.count <= tree.table_mutable.value_context.count);
+            assert(tree.active_scope.?.value_context.count <=
+                tree.table_mutable.value_context.count);
 
             if (mode == .discard) {
-                tree.table_mutable.value_context = tree.active_scope.?;
+                tree.table_mutable.value_context = tree.active_scope.?.value_context;
+                tree.key_range = tree.active_scope.?.key_range;
             }
 
             tree.active_scope = null;
@@ -500,7 +508,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             tree.manifest.verify(snapshot_latest);
             assert(tree.compaction_op.? == 0 or
-                (tree.compaction_op.? + 1) % constants.lsm_batch_multiple == 0);
+                (tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
             maybe(tree.key_range == null);
         }
 
@@ -513,7 +521,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(snapshot_min < snapshot_latest);
 
             // TODO
-            // assert((tree.compaction_op.? + 1) % constants.lsm_batch_multiple == 0);
+            // assert((tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
 
             // The immutable table must be visible to the next bar.
             // In addition, the immutable table is conceptually an output table of this compaction
@@ -530,8 +538,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         pub fn assert_between_bars(tree: *const Tree) void {
             // Assert that this is the last beat in the compaction bar.
-            // const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
-            // const last_beat_in_bar = constants.lsm_batch_multiple - 1;
+            // const compaction_beat = tree.compaction_op.? % constants.lsm_compaction_ops;
+            // const last_beat_in_bar = constants.lsm_compaction_ops - 1;
             // assert(last_beat_in_bar == compaction_beat);
 
             // Assert no outstanding compactions.
@@ -601,7 +609,7 @@ test "TreeType" {
         CompositeKey.sentinel_key,
         CompositeKey.tombstone,
         CompositeKey.tombstone_from_key,
-        constants.state_machine_config.lsm_batch_multiple * 1024,
+        constants.state_machine_config.lsm_compaction_ops * 1024,
         .secondary_index,
     );
 

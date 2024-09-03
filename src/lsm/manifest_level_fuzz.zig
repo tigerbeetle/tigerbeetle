@@ -223,7 +223,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
         const Environment = @This();
 
         const TableBuffer = std.ArrayList(TableInfo);
-        const NodePool = @import("node_pool.zig").NodePool(node_size, @alignOf(TableInfo));
+        const NodePool = @import("node_pool.zig").NodePoolType(node_size, @alignOf(TableInfo));
         pub const ManifestLevel = @import("manifest_level.zig").ManifestLevelType(
             NodePool,
             Key,
@@ -243,10 +243,10 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
 
             const node_pool_size = ManifestLevel.Keys.node_count_max +
                 ManifestLevel.Tables.node_count_max;
-            env.pool = try NodePool.init(allocator, node_pool_size);
+            try env.pool.init(allocator, node_pool_size);
             errdefer env.pool.deinit(allocator);
 
-            env.level = try ManifestLevel.init(allocator);
+            try env.level.init(allocator);
             errdefer env.level.deinit(allocator, &env.pool);
 
             env.buffer = TableBuffer.init(allocator);

@@ -804,8 +804,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .timeout = 0,
                 .ledger = transfer_template.ledger,
                 .flags = .{},
-                // +1 to avoid `.amount_must_not_be_zero`.
-                .amount = 1 + @as(u128, self.random.int(u8)),
+                .timestamp = 0,
+                .amount = @as(u128, self.random.int(u8)),
             };
 
             switch (method) {
@@ -853,11 +853,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     transfer.user_data_32 = pending_query_intersection.user_data_32;
                     transfer.code = pending_query_intersection.code;
                     if (method == .post_pending) {
-                        transfer.amount = self.random.intRangeAtMost(
-                            u128,
-                            1,
-                            pending_transfer.amount,
-                        );
+                        transfer.amount =
+                            self.random.intRangeAtMost(u128, 0, pending_transfer.amount);
                     } else {
                         transfer.amount = pending_transfer.amount;
                     }

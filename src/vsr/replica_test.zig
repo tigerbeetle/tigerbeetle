@@ -30,6 +30,9 @@ const checkpoint_3_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_3)
 const checkpoint_1_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_1).?;
 const checkpoint_2_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_2).?;
 const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_3).?;
+const checkpoint_1_prepare_ok_max = checkpoint_1_trigger + constants.pipeline_prepare_queue_max;
+const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_prepare_queue_max;
+
 const log_level = std.log.Level.err;
 
 const releases = .{
@@ -53,7 +56,7 @@ const releases = .{
 comptime {
     // The tests are written for these configuration values in particular.
     assert(constants.journal_slot_count == 32);
-    assert(constants.lsm_batch_multiple == 4);
+    assert(constants.lsm_compaction_ops == 4);
 }
 
 test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
@@ -118,7 +121,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
     t.replica(.R0).stop();
 
     // Corrupt op_checkpoint (27) and all ops that follow.
-    var slot: usize = slot_count - constants.lsm_batch_multiple - 1;
+    var slot: usize = slot_count - constants.lsm_compaction_ops - 1;
     while (slot < slot_count) : (slot += 1) {
         t.replica(.R0).corrupt(.{ .wal_prepare = slot });
     }
@@ -471,9 +474,10 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(r_lag.status(), .normal);
     try expectEqual(r_lag.op_checkpoint(), 0);
 
-    // Allow repair, but ensure that state sync doesn't run.
-    r_lag.drop(.__, .bidirectional, .sync_checkpoint);
+    // Allow repair, but check that state sync doesn't run.
+    const mark = marks.check("sync started");
     t.run();
+    try mark.expect_not_hit();
 
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
@@ -510,8 +514,7 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     b2.pass_all(.__, .bidirectional);
     b1.pass_all(.__, .bidirectional);
     a0.drop_all(.__, .bidirectional);
-    // Block state sync to prove that B1 recovers via WAL repair.
-    b1.drop(.__, .bidirectional, .sync_checkpoint);
+    // TODO: make sure that B1 uses WAL repair rather than state sync here.
     const mark = marks.check("on_do_view_change: lagging primary; forfeiting");
     t.run();
     try mark.expect_hit();
@@ -690,7 +693,7 @@ test "Cluster: repair: primary checkpoint, backup crash before checkpoint, prima
     // 6. A0 prepares a message.
     // 7. B1 restarts. The very first entry in its WAL is corrupt.
     // A0 has *not* already overwritten the corresponding entry in its own WAL, thanks to the
-    // pipeline component of the vsr_checkpoint_interval.
+    // pipeline component of the vsr_checkpoint_ops.
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
@@ -831,6 +834,77 @@ test "Cluster: view-change: duel of the primaries" {
 
     try expectEqual(t.replica(.R1).commit(), 3);
     try expectEqual(t.replica(.R2).commit(), 3);
+}
+
+test "Cluster: view_change: lagging replica advances checkpoint during view change" {
+    // It could be the case that the replica with the most advanced checkpoint has its checkpoint
+    // corrupted. In this case, a replica with a slightly older checkpoint must step up as primary.
+
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+    var c = t.clients(0, t.cluster.clients.len);
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    b2.stop();
+
+    // Ensure b1 only commits up till checkpoint_2_trigger - 1, so it stays at checkpoint_1 while
+    // a0 moves to checkpoint_2.
+    b1.drop(.R_, .incoming, .commit);
+
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    try expectEqual(a0.commit(), checkpoint_2_trigger);
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+    try expectEqual(b1.commit(), checkpoint_2_trigger - 1);
+    try expectEqual(b1.op_checkpoint(), checkpoint_1);
+
+    b1.stop();
+
+    try b2.open();
+    // Don't allow b2 to repair its grid, otherwise it could help a0 commit past op_prepare_max for
+    // checkpoint_2.
+    b2.drop(.R_, .incoming, .block);
+
+    t.run();
+
+    try expectEqual(b2.op_checkpoint(), checkpoint_2);
+    try expectEqual(b2.commit_max(), checkpoint_2_trigger);
+    try expectEqual(b2.status(), .normal);
+
+    // Progress a0 & b2's head past op_prepare_max for checkpoint_2 (but commit_max stays at
+    // op_prepare_ok_max).
+    try c.request(
+        checkpoint_2_prepare_max,
+        checkpoint_2_prepare_ok_max,
+    );
+
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+    try expectEqual(a0.commit_max(), checkpoint_2_prepare_ok_max);
+
+    try expectEqual(b2.op_checkpoint(), checkpoint_2);
+    try expectEqual(b2.commit_max(), checkpoint_2_prepare_ok_max);
+
+    b2.stop();
+
+    a0.stop();
+    // Drop incoming DVCs to a0 to check if b1 steps up as primary.
+    a0.drop(.R_, .incoming, .do_view_change);
+    try a0.open();
+
+    try b1.open();
+    b1.pass(.R_, .incoming, .commit);
+
+    t.run();
+
+    try expectEqual(a0.status(), .normal);
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+
+    // b1 is able to advance its checkpoint during view change and become primary.
+    try expectEqual(b1.role(), .primary);
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b1.op_checkpoint(), checkpoint_2);
 }
 
 test "Cluster: view-change: primary with dirty log" {
@@ -989,7 +1063,7 @@ test "Cluster: repair: R=2 (primary checkpoints, but backup lags behind)" {
     try expectEqual(b1.op_checkpoint(), 0);
 
     // On B1, corrupt the same slot that A0 is about to overwrite with a new prepare.
-    // (B1 doesn't have any prepare in this slot, thanks to the vsr_checkpoint_interval.)
+    // (B1 doesn't have any prepare in this slot, thanks to the vsr_checkpoint_ops.)
     b1.stop();
     b1.pass(.R_, .incoming, .commit);
     b1.corrupt(.{ .wal_prepare = (checkpoint_1_trigger + 2) % slot_count });
@@ -1196,17 +1270,17 @@ test "Cluster: prepare beyond checkpoint trigger" {
     t.replica(.R_).drop(.__, .bidirectional, .prepare_ok);
 
     // Prepare ops beyond the checkpoint.
-    try c.request(checkpoint_1_prepare_max - 1, checkpoint_1_trigger - 1);
+    try c.request(checkpoint_1_prepare_ok_max, checkpoint_1_trigger - 1);
     try expectEqual(t.replica(.R_).op_checkpoint(), 0);
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
-    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_prepare_max - 1);
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_prepare_ok_max - 1);
 
     t.replica(.R_).pass(.__, .bidirectional, .prepare_ok);
     t.run();
-    try expectEqual(c.replies(), checkpoint_1_prepare_max - 1);
+    try expectEqual(c.replies(), checkpoint_1_prepare_ok_max);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_prepare_max - 1);
-    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_prepare_max - 1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_prepare_ok_max);
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_prepare_ok_max);
 }
 
 test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
@@ -1218,13 +1292,13 @@ test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
         .{
             // The entire last bar before the operation is free for operation=upgrade's, so when we
             // hit the checkpoint trigger we can immediately upgrade the cluster.
-            .request = checkpoint_1_trigger - constants.lsm_batch_multiple,
+            .request = checkpoint_1_trigger - constants.lsm_compaction_ops,
             .checkpoint = checkpoint_1,
         },
         .{
             // Since there is a non-upgrade request in the last bar, the replica cannot upgrade
             // during checkpoint_1 and must pad ahead to the next checkpoint.
-            .request = checkpoint_1_trigger - constants.lsm_batch_multiple + 1,
+            .request = checkpoint_1_trigger - constants.lsm_compaction_ops + 1,
             .checkpoint = checkpoint_2,
         },
     }) |data| {
@@ -1282,7 +1356,7 @@ test "Cluster: upgrade: state-sync to new release" {
     try t.replica(.R1).open_upgrade(&[_]u8{ 10, 20 });
     t.run();
     try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
-    try c.request(constants.vsr_checkpoint_interval, constants.vsr_checkpoint_interval);
+    try c.request(constants.vsr_checkpoint_ops, constants.vsr_checkpoint_ops);
     try expectEqual(t.replica(.R0).commit(), checkpoint_2_trigger);
 
     // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
@@ -2010,7 +2084,6 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).insert(command);
-        if (command == .start_view) t.pass(peer, direction, .start_view_deprecated);
     }
 
     pub fn drop(
@@ -2021,7 +2094,6 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).remove(command);
-        if (command == .start_view) t.drop(peer, direction, .start_view_deprecated);
     }
 
     pub fn filter(

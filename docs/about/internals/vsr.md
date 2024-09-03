@@ -42,7 +42,7 @@ Storage:
 |                  `commit` | primary |       backup | [Normal](#protocol-normal)                                                                                                                 |
 |       `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                                                                           |
 |          `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                                                                                                       |
-|              `start_view` | primary |       backup | [Request/Start View](#protocol-requeststart-view)                                                                                          |
+|              `start_view` | primary |       backup | [Request/Start View](#protocol-requeststart-view), [State Sync](./sync.md)                                                                 |
 |      `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                                                                          |
 |         `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                                                                                 |
 |         `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                                                                                         |
@@ -51,8 +51,6 @@ Storage:
 |                `eviction` | primary |       client | [Client](#protocol-client)                                                                                                                 |
 |          `request_blocks` | replica |      replica | [Sync Forest](#protocol-sync-forest), [Repair Grid](#protocol-repair-grid)                                                                 |
 |                   `block` | replica |      replica | [Sync Forest](#protocol-sync-forest), [Repair Grid](#protocol-repair-grid)                                                                 |
-| `request_sync_checkpoint` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                                                                               |
-|         `sync_checkpoint` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                                                                               |
 
 ### Recovery
 
@@ -133,7 +131,7 @@ See also:
 A replica sends `command=do_view_change` to all replicas, with the `view` it is attempting to start.
 
 - The _primary_ of the `view` collects a [view-change quorum](#quorums) of DVCs.
-- The _backup_ of the `view` uses to `do_view_change` to updates its current `view` (transitioning to `status=view_change`).
+- The _backup_ of the `view` uses to `do_view_change` to update its current `view` (transitioning to `status=view_change`).
 
 DVCs include headers from prepares which are:
 
@@ -168,15 +166,20 @@ A backup sends a `command=request_start_view` to the primary of a view when any 
 
 - the backup learns about a newer view via a `command=commit` message, or
 - the backup learns about a newer view via a `command=prepare` message, or
-- the backup discovers `commit_max` exceeds `min(op_head, op_checkpoint_next_trigger)` (during repair), or
+- the backup discovers `commit_max` exceeds `min(op_head, op_checkpoint_next_trigger)` (during repair),
+- the backup can't make progress committing and needs to state sync, or
 - a replica recovers to `status=recovering_head`
 
 ### `start_view`
 
 When a `status=normal` primary receives `command=request_start_view`, it replies with a `command=start_view`.
-`command=start_view` includes the view's current suffix — the headers of the latest messages in the view.
+`command=start_view` includes:
+- The view's current suffix — the headers of the latest messages in the view.
+- The current checkpoint (see [State Sync](./sync.md)).
 
-Upon receiving a `start_view` for the new view, the backup installs the suffix, transitions to `status=normal`, and begins repair.
+Together, the checkpoint and the view headers fully specify the logical and physical state of the view.
+
+Upon receiving a `start_view` for the new view, the backup installs the checkpoint if needed, installs the suffix, transitions to `status=normal`, and begins repair.
 
 A `start_view` contains the following headers (which may overlap):
 
@@ -216,6 +219,9 @@ In response to a `request_prepare`:
 
 Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf), we do not nack corrupt entries, since they _might_ be the prepare being requested.
 
+See also [State Sync](./sync.md) protocol — the extent of WAL that the replica can/should repair
+depends on the checkpoint.
+
 ## Protocol: Repair Client Replies
 
 The replica stores the latest reply to each active client.
@@ -254,29 +260,16 @@ That is, a replica can help other replicas repair and repair itself simultaneous
 
 TODO Describe state sync fallback.
 
-## Protocol: Sync Superblock
-
-State sync synchronizes the state of a lagging replica with the healthy cluster.
-
-State sync is used when when a lagging replica's log no longer intersects with the cluster's current log —
-[WAL repair](#protocol-repair-wal) cannot catch the replica up.
-
-This protocol updates the replica's superblock with a more recent one.
-
-See [State Sync](./sync.md) for details.
-
 ## Protocol: Sync Client Replies
 
 Sync missed client replies using [Protocol: Repair Grid](#protocol-repair-client-replies).
 
-(Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).)
 See [State Sync](./sync.md) for details.
 
 ## Protocol: Sync Forest
 
 Sync missed LSM manifest and table blocks using [Protocol: Repair Grid](#protocol-repair-grid).
 
-(Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).)
 See [State Sync](./sync.md) for details.
 
 ## Protocol: Reconfiguration

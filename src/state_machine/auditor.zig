@@ -445,7 +445,7 @@ pub const AccountingAuditor = struct {
                 dr.debits_pending -= p.amount;
                 cr.credits_pending -= p.amount;
                 if (transfer.flags.post_pending_transfer) {
-                    const amount = if (transfer.amount > 0) transfer.amount else p.amount;
+                    const amount = @min(transfer.amount, p.amount);
                     dr.debits_posted += amount;
                     cr.credits_posted += amount;
                 }

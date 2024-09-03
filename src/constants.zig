@@ -53,9 +53,9 @@ comptime {
 
 /// The checkpoint interval is chosen to be the highest possible value that satisfies the
 /// constraints described below.
-pub const vsr_checkpoint_interval = journal_slot_count -
-    lsm_batch_multiple -
-    lsm_batch_multiple * stdx.div_ceil(pipeline_prepare_queue_max * 2, lsm_batch_multiple);
+pub const vsr_checkpoint_ops = journal_slot_count -
+    lsm_compaction_ops -
+    lsm_compaction_ops * stdx.div_ceil(pipeline_prepare_queue_max * 2, lsm_compaction_ops);
 
 comptime {
     // Invariant: to guarantee durability, a log entry from a previous checkpoint can be overwritten
@@ -67,26 +67,26 @@ comptime {
     //
     // More specifically, the checkpoint interval must be less than the WAL length by (at least) the
     // sum of:
-    // - `lsm_batch_multiple`: Ensure that the final batch of entries immediately preceding a
+    // - `lsm_compaction_ops`: Ensure that the final batch of entries immediately preceding a
     //   checkpoint trigger is not overwritten by the following checkpoint's entries. This final
     //   batch's updates were not persisted as part of the former checkpoint – they are only in
     //   memory until they are compacted by the *next* batch of commits (i.e. the first batch of
     //   the following checkpoint).
-    // - `2 * pipeline_prepare_queue_max` (rounded up to the nearest batch multiple): This margin
-    //    ensures that the entries prepared immediately following a checkpoint's prepare max never
-    //    overwrite an entry from the previous WAL wrap until a quorum of replicas has reached that
-    //    checkpoint. The first pipeline_prepare_queue_max is the maximum number of entries a
-    //    replica can prepare after a checkpoint trigger, so checkpointing doesn't stall normal
-    //    processing (referred to as the checkpoint's prepare_max). The second
-    //    pipeline_prepare_queue_max ensures entries prepared after a checkpoint's prepare_max
-    //    don't overwrite entries from the previous WAL wrap. By the time we start preparing entries
-    //    after the second pipeline_prepare_queue_max, a quorum of replicas is guaranteed to have
-    //    already reached the former checkpoint.
-    assert(vsr_checkpoint_interval + lsm_batch_multiple + pipeline_prepare_queue_max * 2 <=
+    // - `2 * pipeline_prepare_queue_max` (rounded up to the nearest lsm_compaction_ops multiple):
+    //    This margin ensures that the entries prepared immediately following a checkpoint's prepare
+    //    max never overwrite an entry from the previous WAL wrap until a quorum of replicas has
+    //    reached that checkpoint. The first pipeline_prepare_queue_max is the maximum number of
+    //    entries a replica can prepare after a checkpoint trigger, so checkpointing doesn't stall
+    //    normal processing (referred to as the checkpoint's prepare_max). The second
+    //    pipeline_prepare_queue_max ensures entries prepared after a checkpoint's prepare_max don't
+    //    overwrite entries from the previous WAL wrap. By the time we start preparing entries after
+    //    the second pipeline_prepare_queue_max, a quorum of replicas is guaranteed to have already
+    //    reached the former checkpoint.
+    assert(vsr_checkpoint_ops + lsm_compaction_ops + pipeline_prepare_queue_max * 2 <=
         journal_slot_count);
-    assert(vsr_checkpoint_interval >= pipeline_prepare_queue_max);
-    assert(vsr_checkpoint_interval >= lsm_batch_multiple);
-    assert(vsr_checkpoint_interval % lsm_batch_multiple == 0);
+    assert(vsr_checkpoint_ops >= pipeline_prepare_queue_max);
+    assert(vsr_checkpoint_ops >= lsm_compaction_ops);
+    assert(vsr_checkpoint_ops % lsm_compaction_ops == 0);
 }
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
@@ -217,7 +217,7 @@ pub const journal_size_headers = journal_slot_count * @sizeOf(vsr.Header);
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
 comptime {
-    // For the given WAL (lsm_batch_multiple=4):
+    // For the given WAL (lsm_compaction_ops=4):
     //
     //   A    B    C    D    E
     //   |····|····|····|····|
@@ -231,8 +231,8 @@ comptime {
     //
     // The journal must have at least two bars to ensure at least one is checkpointed.
     assert(journal_slot_count >= Config.Cluster.journal_slot_count_min);
-    assert(journal_slot_count >= lsm_batch_multiple * 2);
-    assert(journal_slot_count % lsm_batch_multiple == 0);
+    assert(journal_slot_count >= lsm_compaction_ops * 2);
+    assert(journal_slot_count % lsm_compaction_ops == 0);
     // The journal must have at least two pipelines of messages to ensure that a new, fully-repaired
     // primary has enough headers for a complete SV message, even if the view-change just truncated
     // another pipeline of messages. (See op_repair_min()).
@@ -638,14 +638,20 @@ comptime {
     assert(lsm_manifest_compact_extra_blocks > 0);
 }
 
-/// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
-/// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
-/// means that the transfer tree's mutable table will be sized to 8190 * 4 = 32760 transfers.
-pub const lsm_batch_multiple = config.cluster.lsm_batch_multiple;
+/// Number of prepares accumulated in the in-memory table before flushing to disk.
+///
+/// This is a batch of batches. Each prepare can contain at most 8_190 transfers. With
+/// lsm_compaction_ops=32, 32 prepares are processed to fill the in-memory table with 262_080
+/// transfers. During processing of the next 32 prepares, this in-memory table is flushed to disk.
+/// Simultaneously, compaction is run to free up enough space to flush the in-memory table from the
+/// next batch of lsm_compaction_ops prepares.
+///
+/// Together with message_body_size_max, lsm_compaction_ops determines the size a table on disk.
+pub const lsm_compaction_ops = config.cluster.lsm_compaction_ops;
 
 comptime {
     // The LSM tree uses half-measures to balance compaction.
-    assert(lsm_batch_multiple % 2 == 0);
+    assert(lsm_compaction_ops % 2 == 0);
 }
 
 pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
@@ -742,14 +748,16 @@ pub const clock_synchronization_window_min_ms = config.process.clock_synchroniza
 pub const clock_synchronization_window_max_ms = config.process.clock_synchronization_window_max_ms;
 
 pub const StateMachineConfig = struct {
+    release: vsr.Release,
     message_body_size_max: comptime_int,
-    lsm_batch_multiple: comptime_int,
+    lsm_compaction_ops: comptime_int,
     vsr_operations_reserved: u8,
 };
 
 pub const state_machine_config = StateMachineConfig{
+    .release = config.process.release,
     .message_body_size_max = message_body_size_max,
-    .lsm_batch_multiple = lsm_batch_multiple,
+    .lsm_compaction_ops = lsm_compaction_ops,
     .vsr_operations_reserved = vsr_operations_reserved,
 };
 
@@ -773,13 +781,6 @@ pub const state_machine_config = StateMachineConfig{
 /// Specific data structures might use a comptime parameter, to enable extra costly verification
 /// only during unit tests of the data structure.
 pub const verify = config.process.verify;
-
-/// AOF (Append Only File) logs all transactions synchronously to disk before replying
-/// to the client. The logic behind this code has been kept as simple as possible -
-/// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple log
-/// consisting of logged requests. Much like a redis AOF with fsync=on.
-/// Enabling this will have performance implications.
-pub const aof_record = config.process.aof_record;
 
 /// Place us in a special recovery state, where we accept timestamps passed in to us. Used to
 /// replay our AOF.

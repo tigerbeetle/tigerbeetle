@@ -285,21 +285,87 @@ public enum CreateTransferResult {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits">exceeds_debits</a>
      */
-    ExceedsDebits((int) 55);
+    ExceedsDebits((int) 55),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_expected">imported_event_expected</a>
+     */
+    ImportedEventExpected((int) 56),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_not_expected">imported_event_not_expected</a>
+     */
+    ImportedEventNotExpected((int) 57),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_out_of_range">imported_event_timestamp_out_of_range</a>
+     */
+    ImportedEventTimestampOutOfRange((int) 58),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance">imported_event_timestamp_must_not_advance</a>
+     */
+    ImportedEventTimestampMustNotAdvance((int) 59),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress">imported_event_timestamp_must_not_regress</a>
+     */
+    ImportedEventTimestampMustNotRegress((int) 60),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account">imported_event_timestamp_must_postdate_debit_account</a>
+     */
+    ImportedEventTimestampMustPostdateDebitAccount((int) 61),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account">imported_event_timestamp_must_postdate_credit_account</a>
+     */
+    ImportedEventTimestampMustPostdateCreditAccount((int) 62),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero">imported_event_timeout_must_be_zero</a>
+     */
+    ImportedEventTimeoutMustBeZero((int) 63),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#closing_transfer_must_be_pending">closing_transfer_must_be_pending</a>
+     */
+    ClosingTransferMustBePending((int) 64),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed">debit_account_already_closed</a>
+     */
+    DebitAccountAlreadyClosed((int) 65),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed">credit_account_already_closed</a>
+     */
+    CreditAccountAlreadyClosed((int) 66);
 
     public final int value;
+
+    static final CreateTransferResult[] enumByValue;
+    static {
+    final var values = values();
+      enumByValue = new CreateTransferResult[values.length];
+       for (final var item : values) {
+          enumByValue[item.value] = item;
+      }
+    }
 
     CreateTransferResult(int value) {
         this.value = value;
     }
 
     public static CreateTransferResult fromValue(int value) {
-        var values = CreateTransferResult.values();
-        if (value < 0 || value >= values.length)
+        if (value < 0 || value >= enumByValue.length)
             throw new IllegalArgumentException(
                     String.format("Invalid CreateTransferResult value=%d", value));
 
-        return values[value];
+        final var item = enumByValue[value];
+        AssertionError.assertTrue(item.value == value,
+          "Unexpected CreateTransferResult: found=%d expected=%d", item.value, value);
+        return item;
     }
 }
 

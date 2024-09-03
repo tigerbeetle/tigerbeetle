@@ -67,7 +67,7 @@ pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
 
-const CliArgs = struct {
+const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
     ticks_max_requests: u32 = 40_000_000,
@@ -87,7 +87,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CliArgs);
+    const cli_args = flags.parse(&args, CLIArgs);
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
@@ -1041,8 +1041,8 @@ pub const Simulator = struct {
             // If the entire Zone.wal_headers is corrupted, the replica becomes permanently
             // unavailable (returns `WALInvalid` from `open`). In the simulator, there are only two
             // WAL sectors, which could both get corrupted when a replica crashes while writing them
-            // simultaneously. To keep the replica operational, arbitrarily repair one of the
-            // sectors.
+            // simultaneously. Repair both sectors so that even if one of them becomes corrupted on
+            // startup, the replica still remains operational.
             //
             // In production `journal_iops_write_max < header_sector_count`, which makes is
             // impossible to get torn writes for all journal header sectors at the same time.
@@ -1050,14 +1050,8 @@ pub const Simulator = struct {
                 @divExact(vsr.Zone.wal_headers.start(), constants.sector_size);
             const header_sector_count =
                 @divExact(constants.journal_size_headers, constants.sector_size);
-            var header_sector_count_faulty: u32 = 0;
             for (0..header_sector_count) |header_sector_index| {
-                header_sector_count_faulty += @intFromBool(replica_storage.faults.isSet(
-                    header_sector_offset + header_sector_index,
-                ));
-            }
-            if (header_sector_count_faulty == header_sector_count) {
-                replica_storage.faults.unset(header_sector_offset);
+                replica_storage.faults.unset(header_sector_offset + header_sector_index);
             }
         }
 

@@ -364,7 +364,7 @@ pub const SuperBlockHeader = extern struct {
         /// All prepares between `CheckpointState.commit_min` (i.e. `op_checkpoint`) and
         /// `trigger_for_checkpoint(checkpoint_after(commit_min))` must be executed by this release.
         /// (Prepares with `operation=upgrade` are the exception – upgrades in the last
-        /// `lsm_batch_multiple` before a checkpoint trigger may be replayed by a different release.
+        /// `lsm_compaction_ops` before a checkpoint trigger may be replayed by a different release.
         release: vsr.Release,
 
         reserved: [472]u8 = [_]u8{0} ** 472,

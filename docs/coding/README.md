@@ -5,6 +5,9 @@ It has a fixed schema consisting of [`Account`s](../reference/account.md) and
 [`Transfer`s](../reference/transfer.md). In return for this prescriptive design, it provides
 excellent performance, integrated business logic, and powerful invariants.
 
+Subscribe to [this tracking issue](https://github.com/tigerbeetle/tigerbeetle/issues/2231) to be
+notified when there are breaking API/behavior changes that are visible to the client.
+
 To help you get started building on TigerBeetle, here is a quick overview of the most important
 concepts:
 

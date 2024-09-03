@@ -12,6 +12,7 @@ const TypeMapping = struct {
     private_fields: []const []const u8 = &.{},
     readonly_fields: []const []const u8 = &.{},
     docs_link: ?[]const u8 = null,
+    constants: []const u8 = "",
 
     pub fn is_private(comptime self: @This(), name: []const u8) bool {
         inline for (self.private_fields) |field| {
@@ -64,17 +65,22 @@ const type_mappings = .{
             "credits_pending",
             "debits_posted",
             "credits_posted",
-            "timestamp",
         },
         .docs_link = "reference/account#",
     } },
-    .{ tb.Transfer, TypeMapping{
-        .name = "Transfer",
-        .visibility = .public,
-        .private_fields = &.{"reserved"},
-        .readonly_fields = &.{"timestamp"},
-        .docs_link = "reference/transfer#",
-    } },
+    .{
+        tb.Transfer, TypeMapping{
+            .name = "Transfer",
+            .visibility = .public,
+            .private_fields = &.{"reserved"},
+            .readonly_fields = &.{},
+            .docs_link = "reference/transfer#",
+            .constants =
+            \\    public static UInt128 AmountMax => UInt128.MaxValue;
+            \\
+            ,
+        },
+    },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
         .visibility = .public,
@@ -263,12 +269,14 @@ fn emit_struct(
         \\{{
         \\    public const int SIZE = {};
         \\
+        \\{s}
         \\
     , .{
         @tagName(mapping.visibility),
         if (mapping.visibility == .internal) "unsafe " else "",
         mapping.name,
         size,
+        mapping.constants,
     });
 
     // Fixed len array are exposed as internal structs with stackalloc fields

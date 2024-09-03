@@ -33,6 +33,16 @@ public enum AccountFlags : ushort
     /// </summary>
     History = 1 << 3,
 
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account#flagsimported
+    /// </summary>
+    Imported = 1 << 4,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account#flagsclosed
+    /// </summary>
+    Closed = 1 << 5,
+
 }
 
 [Flags]
@@ -69,6 +79,21 @@ public enum TransferFlags : ushort
     /// https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_credit
     /// </summary>
     BalancingCredit = 1 << 5,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit
+    /// </summary>
+    ClosingDebit = 1 << 6,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit
+    /// </summary>
+    ClosingCredit = 1 << 7,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsimported
+    /// </summary>
+    Imported = 1 << 8,
 
 }
 
@@ -110,6 +135,7 @@ public enum QueryFilterFlags : uint
 public struct Account
 {
     public const int SIZE = 128;
+
 
     private UInt128 id;
 
@@ -200,7 +226,7 @@ public struct Account
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/account#timestamp
     /// </summary>
-    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
 }
 
@@ -208,6 +234,8 @@ public struct Account
 public struct Transfer
 {
     public const int SIZE = 128;
+
+    public static UInt128 AmountMax => UInt128.MaxValue;
 
     private UInt128 id;
 
@@ -298,7 +326,7 @@ public struct Transfer
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/transfer#timestamp
     /// </summary>
-    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
 }
 
@@ -320,9 +348,29 @@ public enum CreateAccountResult : uint
     LinkedEventChainOpen = 2,
 
     /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_expected
+    /// </summary>
+    ImportedEventExpected = 22,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_not_expected
+    /// </summary>
+    ImportedEventNotExpected = 23,
+
+    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero
     /// </summary>
     TimestampMustBeZero = 3,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_out_of_range
+    /// </summary>
+    ImportedEventTimestampOutOfRange = 24,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance
+    /// </summary>
+    ImportedEventTimestampMustNotAdvance = 25,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field
@@ -413,6 +461,11 @@ public enum CreateAccountResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists
     /// </summary>
     Exists = 21,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_regress
+    /// </summary>
+    ImportedEventTimestampMustNotRegress = 26,
 
 }
 
@@ -698,12 +751,68 @@ public enum CreateTransferResult : uint
     /// </summary>
     ExceedsDebits = 55,
 
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_expected
+    /// </summary>
+    ImportedEventExpected = 56,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_not_expected
+    /// </summary>
+    ImportedEventNotExpected = 57,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_out_of_range
+    /// </summary>
+    ImportedEventTimestampOutOfRange = 58,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance
+    /// </summary>
+    ImportedEventTimestampMustNotAdvance = 59,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress
+    /// </summary>
+    ImportedEventTimestampMustNotRegress = 60,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account
+    /// </summary>
+    ImportedEventTimestampMustPostdateDebitAccount = 61,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account
+    /// </summary>
+    ImportedEventTimestampMustPostdateCreditAccount = 62,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero
+    /// </summary>
+    ImportedEventTimeoutMustBeZero = 63,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#closing_transfer_must_be_pending
+    /// </summary>
+    ClosingTransferMustBePending = 64,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed
+    /// </summary>
+    DebitAccountAlreadyClosed = 65,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed
+    /// </summary>
+    CreditAccountAlreadyClosed = 66,
+
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct CreateAccountsResult
 {
     public const int SIZE = 8;
+
 
     private uint index;
 
@@ -720,6 +829,7 @@ public struct CreateTransfersResult
 {
     public const int SIZE = 8;
 
+
     private uint index;
 
     private CreateTransferResult result;
@@ -734,6 +844,7 @@ public struct CreateTransfersResult
 public struct AccountFilter
 {
     public const int SIZE = 64;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
@@ -814,6 +925,7 @@ public struct AccountBalance
 {
     public const int SIZE = 128;
 
+
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
     {
@@ -892,6 +1004,7 @@ public struct AccountBalance
 public struct QueryFilter
 {
     public const int SIZE = 64;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
@@ -1053,6 +1166,7 @@ internal enum TBOperation : byte
 internal unsafe struct TBPacket
 {
     public const int SIZE = 64;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData

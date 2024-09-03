@@ -20,17 +20,17 @@ pub const ScanBuffer = struct {
         index_block: BlockPtr,
         data_block: BlockPtr,
 
-        pub fn init(allocator: Allocator) !LevelBuffer {
-            const index_block = try allocate_block(allocator);
-            errdefer allocator.free(index_block);
-
-            const data_block = try allocate_block(allocator);
-            errdefer allocator.free(data_block);
-
-            return LevelBuffer{
-                .index_block = index_block,
-                .data_block = data_block,
+        pub fn init(self: *LevelBuffer, allocator: Allocator) !void {
+            self.* = .{
+                .index_block = undefined,
+                .data_block = undefined,
             };
+
+            self.index_block = try allocate_block(allocator);
+            errdefer allocator.free(self.index_block);
+
+            self.data_block = try allocate_block(allocator);
+            errdefer allocator.free(self.data_block);
         }
 
         pub fn deinit(self: *LevelBuffer, allocator: Allocator) void {
@@ -41,15 +41,15 @@ pub const ScanBuffer = struct {
 
     levels: [constants.lsm_levels]LevelBuffer,
 
-    pub fn init(allocator: Allocator) !ScanBuffer {
-        var self: ScanBuffer = undefined;
+    pub fn init(self: *ScanBuffer, allocator: Allocator) !void {
+        self.* = .{
+            .levels = undefined,
+        };
         for (&self.levels, 0..) |*level, i| {
             errdefer for (self.levels[0..i]) |*level_| level_.deinit(allocator);
-            level.* = try LevelBuffer.init(allocator);
+            try level.init(allocator);
         }
         errdefer for (&self.levels) |*level| level.deinit(allocator);
-
-        return self;
     }
 
     pub fn deinit(self: *ScanBuffer, allocator: Allocator) void {
@@ -67,18 +67,17 @@ pub const ScanBufferPool = struct {
     scan_buffers: [constants.lsm_scans_max]ScanBuffer,
     scan_buffer_used: u8,
 
-    pub fn init(allocator: Allocator) !ScanBufferPool {
-        var scan_buffers: [constants.lsm_scans_max]ScanBuffer = undefined;
-        for (&scan_buffers, 0..) |*scan_buffer, i| {
-            errdefer for (scan_buffers[0..i]) |*buffer| buffer.deinit(allocator);
-            scan_buffer.* = try ScanBuffer.init(allocator);
-        }
-        errdefer for (&scan_buffers) |*buffer| buffer.deinit(allocator);
-
-        return ScanBufferPool{
-            .scan_buffers = scan_buffers,
+    pub fn init(self: *ScanBufferPool, allocator: Allocator) !void {
+        self.* = .{
+            .scan_buffers = undefined,
             .scan_buffer_used = 0,
         };
+
+        for (&self.scan_buffers, 0..) |*scan_buffer, i| {
+            errdefer for (self.scan_buffers[0..i]) |*buffer| buffer.deinit(allocator);
+            try scan_buffer.init(allocator);
+        }
+        errdefer for (&self.scan_buffers) |*buffer| buffer.deinit(allocator);
     }
 
     pub fn deinit(self: *ScanBufferPool, allocator: Allocator) void {

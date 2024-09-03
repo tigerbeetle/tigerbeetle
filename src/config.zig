@@ -21,7 +21,6 @@ const BuildOptions = struct {
     git_commit: ?[40]u8,
     release: ?[]const u8,
     release_client_min: ?[]const u8,
-    config_aof_record: bool,
     config_aof_recovery: bool,
 };
 
@@ -131,11 +130,10 @@ const ConfigProcess = struct {
     grid_iops_read_max: u64 = 16,
     grid_iops_write_max: u64 = 16,
     grid_cache_size_default: u64 = 1024 * 1024 * 1024,
-    grid_repair_request_max: usize = 8,
-    grid_repair_reads_max: usize = 8,
+    grid_repair_request_max: usize = 4,
+    grid_repair_reads_max: usize = 4,
     grid_missing_blocks_max: usize = 30,
-    grid_missing_tables_max: usize = 3,
-    aof_record: bool = false,
+    grid_missing_tables_max: usize = 6,
     grid_scrubber_reads_max: usize = 1,
     grid_scrubber_cycle_ms: usize = std.time.ms_per_day * 180,
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
@@ -164,7 +162,7 @@ const ConfigCluster = struct {
     block_size: comptime_int = 512 * 1024,
     lsm_levels: u6 = 7,
     lsm_growth_factor: u32 = 8,
-    lsm_batch_multiple: comptime_int = 32,
+    lsm_compaction_ops: comptime_int = 32,
     lsm_snapshots_max: usize = 32,
     lsm_manifest_compact_extra_blocks: comptime_int = 1,
     lsm_table_coalescing_threshold_percent: comptime_int = 50,
@@ -288,7 +286,7 @@ pub const configs = struct {
             .message_size_max = Config.Cluster.message_size_max_min(4),
 
             .block_size = sector_size,
-            .lsm_batch_multiple = 4,
+            .lsm_compaction_ops = 4,
             .lsm_growth_factor = 4,
             // (This is higher than the production default value because the block size is smaller.)
             .lsm_manifest_compact_extra_blocks = 5,
@@ -341,7 +339,6 @@ pub const configs = struct {
         base.process.release = release;
         base.process.release_client_min = release_client_min;
         base.process.git_commit = build_options.git_commit;
-        base.process.aof_record = build_options.config_aof_record;
         base.process.aof_recovery = build_options.config_aof_recovery;
 
         assert(base.process.release.value >= base.process.release_client_min.value);

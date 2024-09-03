@@ -16,6 +16,8 @@ type AccountFlags struct {
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
 	History                    bool
+	Imported                   bool
+	Closed                     bool
 }
 
 func (f AccountFlags) ToUint16() uint16 {
@@ -37,6 +39,14 @@ func (f AccountFlags) ToUint16() uint16 {
 		ret |= (1 << 3)
 	}
 
+	if f.Imported {
+		ret |= (1 << 4)
+	}
+
+	if f.Closed {
+		ret |= (1 << 5)
+	}
+
 	return ret
 }
 
@@ -47,6 +57,9 @@ type TransferFlags struct {
 	VoidPendingTransfer bool
 	BalancingDebit      bool
 	BalancingCredit     bool
+	ClosingDebit        bool
+	ClosingCredit       bool
+	Imported            bool
 }
 
 func (f TransferFlags) ToUint16() uint16 {
@@ -74,6 +87,18 @@ func (f TransferFlags) ToUint16() uint16 {
 
 	if f.BalancingCredit {
 		ret |= (1 << 5)
+	}
+
+	if f.ClosingDebit {
+		ret |= (1 << 6)
+	}
+
+	if f.ClosingCredit {
+		ret |= (1 << 7)
+	}
+
+	if f.Imported {
+		ret |= (1 << 8)
 	}
 
 	return ret
@@ -139,6 +164,8 @@ func (o Account) AccountFlags() AccountFlags {
 	f.DebitsMustNotExceedCredits = ((o.Flags >> 1) & 0x1) == 1
 	f.CreditsMustNotExceedDebits = ((o.Flags >> 2) & 0x1) == 1
 	f.History = ((o.Flags >> 3) & 0x1) == 1
+	f.Imported = ((o.Flags >> 4) & 0x1) == 1
+	f.Closed = ((o.Flags >> 5) & 0x1) == 1
 	return f
 }
 
@@ -166,34 +193,42 @@ func (o Transfer) TransferFlags() TransferFlags {
 	f.VoidPendingTransfer = ((o.Flags >> 3) & 0x1) == 1
 	f.BalancingDebit = ((o.Flags >> 4) & 0x1) == 1
 	f.BalancingCredit = ((o.Flags >> 5) & 0x1) == 1
+	f.ClosingDebit = ((o.Flags >> 6) & 0x1) == 1
+	f.ClosingCredit = ((o.Flags >> 7) & 0x1) == 1
+	f.Imported = ((o.Flags >> 8) & 0x1) == 1
 	return f
 }
 
 type CreateAccountResult uint32
 
 const (
-	AccountOK                             CreateAccountResult = 0
-	AccountLinkedEventFailed              CreateAccountResult = 1
-	AccountLinkedEventChainOpen           CreateAccountResult = 2
-	AccountTimestampMustBeZero            CreateAccountResult = 3
-	AccountReservedField                  CreateAccountResult = 4
-	AccountReservedFlag                   CreateAccountResult = 5
-	AccountIDMustNotBeZero                CreateAccountResult = 6
-	AccountIDMustNotBeIntMax              CreateAccountResult = 7
-	AccountFlagsAreMutuallyExclusive      CreateAccountResult = 8
-	AccountDebitsPendingMustBeZero        CreateAccountResult = 9
-	AccountDebitsPostedMustBeZero         CreateAccountResult = 10
-	AccountCreditsPendingMustBeZero       CreateAccountResult = 11
-	AccountCreditsPostedMustBeZero        CreateAccountResult = 12
-	AccountLedgerMustNotBeZero            CreateAccountResult = 13
-	AccountCodeMustNotBeZero              CreateAccountResult = 14
-	AccountExistsWithDifferentFlags       CreateAccountResult = 15
-	AccountExistsWithDifferentUserData128 CreateAccountResult = 16
-	AccountExistsWithDifferentUserData64  CreateAccountResult = 17
-	AccountExistsWithDifferentUserData32  CreateAccountResult = 18
-	AccountExistsWithDifferentLedger      CreateAccountResult = 19
-	AccountExistsWithDifferentCode        CreateAccountResult = 20
-	AccountExists                         CreateAccountResult = 21
+	AccountOK                                   CreateAccountResult = 0
+	AccountLinkedEventFailed                    CreateAccountResult = 1
+	AccountLinkedEventChainOpen                 CreateAccountResult = 2
+	AccountImportedEventExpected                CreateAccountResult = 22
+	AccountImportedEventNotExpected             CreateAccountResult = 23
+	AccountTimestampMustBeZero                  CreateAccountResult = 3
+	AccountImportedEventTimestampOutOfRange     CreateAccountResult = 24
+	AccountImportedEventTimestampMustNotAdvance CreateAccountResult = 25
+	AccountReservedField                        CreateAccountResult = 4
+	AccountReservedFlag                         CreateAccountResult = 5
+	AccountIDMustNotBeZero                      CreateAccountResult = 6
+	AccountIDMustNotBeIntMax                    CreateAccountResult = 7
+	AccountFlagsAreMutuallyExclusive            CreateAccountResult = 8
+	AccountDebitsPendingMustBeZero              CreateAccountResult = 9
+	AccountDebitsPostedMustBeZero               CreateAccountResult = 10
+	AccountCreditsPendingMustBeZero             CreateAccountResult = 11
+	AccountCreditsPostedMustBeZero              CreateAccountResult = 12
+	AccountLedgerMustNotBeZero                  CreateAccountResult = 13
+	AccountCodeMustNotBeZero                    CreateAccountResult = 14
+	AccountExistsWithDifferentFlags             CreateAccountResult = 15
+	AccountExistsWithDifferentUserData128       CreateAccountResult = 16
+	AccountExistsWithDifferentUserData64        CreateAccountResult = 17
+	AccountExistsWithDifferentUserData32        CreateAccountResult = 18
+	AccountExistsWithDifferentLedger            CreateAccountResult = 19
+	AccountExistsWithDifferentCode              CreateAccountResult = 20
+	AccountExists                               CreateAccountResult = 21
+	AccountImportedEventTimestampMustNotRegress CreateAccountResult = 26
 )
 
 func (i CreateAccountResult) String() string {
@@ -204,8 +239,16 @@ func (i CreateAccountResult) String() string {
 		return "AccountLinkedEventFailed"
 	case AccountLinkedEventChainOpen:
 		return "AccountLinkedEventChainOpen"
+	case AccountImportedEventExpected:
+		return "AccountImportedEventExpected"
+	case AccountImportedEventNotExpected:
+		return "AccountImportedEventNotExpected"
 	case AccountTimestampMustBeZero:
 		return "AccountTimestampMustBeZero"
+	case AccountImportedEventTimestampOutOfRange:
+		return "AccountImportedEventTimestampOutOfRange"
+	case AccountImportedEventTimestampMustNotAdvance:
+		return "AccountImportedEventTimestampMustNotAdvance"
 	case AccountReservedField:
 		return "AccountReservedField"
 	case AccountReservedFlag:
@@ -242,6 +285,8 @@ func (i CreateAccountResult) String() string {
 		return "AccountExistsWithDifferentCode"
 	case AccountExists:
 		return "AccountExists"
+	case AccountImportedEventTimestampMustNotRegress:
+		return "AccountImportedEventTimestampMustNotRegress"
 	}
 	return "CreateAccountResult(" + strconv.FormatInt(int64(i+1), 10) + ")"
 }
@@ -249,62 +294,73 @@ func (i CreateAccountResult) String() string {
 type CreateTransferResult uint32
 
 const (
-	TransferOK                                         CreateTransferResult = 0
-	TransferLinkedEventFailed                          CreateTransferResult = 1
-	TransferLinkedEventChainOpen                       CreateTransferResult = 2
-	TransferTimestampMustBeZero                        CreateTransferResult = 3
-	TransferReservedFlag                               CreateTransferResult = 4
-	TransferIDMustNotBeZero                            CreateTransferResult = 5
-	TransferIDMustNotBeIntMax                          CreateTransferResult = 6
-	TransferFlagsAreMutuallyExclusive                  CreateTransferResult = 7
-	TransferDebitAccountIDMustNotBeZero                CreateTransferResult = 8
-	TransferDebitAccountIDMustNotBeIntMax              CreateTransferResult = 9
-	TransferCreditAccountIDMustNotBeZero               CreateTransferResult = 10
-	TransferCreditAccountIDMustNotBeIntMax             CreateTransferResult = 11
-	TransferAccountsMustBeDifferent                    CreateTransferResult = 12
-	TransferPendingIDMustBeZero                        CreateTransferResult = 13
-	TransferPendingIDMustNotBeZero                     CreateTransferResult = 14
-	TransferPendingIDMustNotBeIntMax                   CreateTransferResult = 15
-	TransferPendingIDMustBeDifferent                   CreateTransferResult = 16
-	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 17
-	TransferAmountMustNotBeZero                        CreateTransferResult = 18
-	TransferLedgerMustNotBeZero                        CreateTransferResult = 19
-	TransferCodeMustNotBeZero                          CreateTransferResult = 20
-	TransferDebitAccountNotFound                       CreateTransferResult = 21
-	TransferCreditAccountNotFound                      CreateTransferResult = 22
-	TransferAccountsMustHaveTheSameLedger              CreateTransferResult = 23
-	TransferTransferMustHaveTheSameLedgerAsAccounts    CreateTransferResult = 24
-	TransferPendingTransferNotFound                    CreateTransferResult = 25
-	TransferPendingTransferNotPending                  CreateTransferResult = 26
-	TransferPendingTransferHasDifferentDebitAccountID  CreateTransferResult = 27
-	TransferPendingTransferHasDifferentCreditAccountID CreateTransferResult = 28
-	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 29
-	TransferPendingTransferHasDifferentCode            CreateTransferResult = 30
-	TransferExceedsPendingTransferAmount               CreateTransferResult = 31
-	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 32
-	TransferPendingTransferAlreadyPosted               CreateTransferResult = 33
-	TransferPendingTransferAlreadyVoided               CreateTransferResult = 34
-	TransferPendingTransferExpired                     CreateTransferResult = 35
-	TransferExistsWithDifferentFlags                   CreateTransferResult = 36
-	TransferExistsWithDifferentDebitAccountID          CreateTransferResult = 37
-	TransferExistsWithDifferentCreditAccountID         CreateTransferResult = 38
-	TransferExistsWithDifferentAmount                  CreateTransferResult = 39
-	TransferExistsWithDifferentPendingID               CreateTransferResult = 40
-	TransferExistsWithDifferentUserData128             CreateTransferResult = 41
-	TransferExistsWithDifferentUserData64              CreateTransferResult = 42
-	TransferExistsWithDifferentUserData32              CreateTransferResult = 43
-	TransferExistsWithDifferentTimeout                 CreateTransferResult = 44
-	TransferExistsWithDifferentCode                    CreateTransferResult = 45
-	TransferExists                                     CreateTransferResult = 46
-	TransferOverflowsDebitsPending                     CreateTransferResult = 47
-	TransferOverflowsCreditsPending                    CreateTransferResult = 48
-	TransferOverflowsDebitsPosted                      CreateTransferResult = 49
-	TransferOverflowsCreditsPosted                     CreateTransferResult = 50
-	TransferOverflowsDebits                            CreateTransferResult = 51
-	TransferOverflowsCredits                           CreateTransferResult = 52
-	TransferOverflowsTimeout                           CreateTransferResult = 53
-	TransferExceedsCredits                             CreateTransferResult = 54
-	TransferExceedsDebits                              CreateTransferResult = 55
+	TransferOK                                              CreateTransferResult = 0
+	TransferLinkedEventFailed                               CreateTransferResult = 1
+	TransferLinkedEventChainOpen                            CreateTransferResult = 2
+	TransferTimestampMustBeZero                             CreateTransferResult = 3
+	TransferReservedFlag                                    CreateTransferResult = 4
+	TransferIDMustNotBeZero                                 CreateTransferResult = 5
+	TransferIDMustNotBeIntMax                               CreateTransferResult = 6
+	TransferFlagsAreMutuallyExclusive                       CreateTransferResult = 7
+	TransferDebitAccountIDMustNotBeZero                     CreateTransferResult = 8
+	TransferDebitAccountIDMustNotBeIntMax                   CreateTransferResult = 9
+	TransferCreditAccountIDMustNotBeZero                    CreateTransferResult = 10
+	TransferCreditAccountIDMustNotBeIntMax                  CreateTransferResult = 11
+	TransferAccountsMustBeDifferent                         CreateTransferResult = 12
+	TransferPendingIDMustBeZero                             CreateTransferResult = 13
+	TransferPendingIDMustNotBeZero                          CreateTransferResult = 14
+	TransferPendingIDMustNotBeIntMax                        CreateTransferResult = 15
+	TransferPendingIDMustBeDifferent                        CreateTransferResult = 16
+	TransferTimeoutReservedForPendingTransfer               CreateTransferResult = 17
+	TransferAmountMustNotBeZero                             CreateTransferResult = 18
+	TransferLedgerMustNotBeZero                             CreateTransferResult = 19
+	TransferCodeMustNotBeZero                               CreateTransferResult = 20
+	TransferDebitAccountNotFound                            CreateTransferResult = 21
+	TransferCreditAccountNotFound                           CreateTransferResult = 22
+	TransferAccountsMustHaveTheSameLedger                   CreateTransferResult = 23
+	TransferTransferMustHaveTheSameLedgerAsAccounts         CreateTransferResult = 24
+	TransferPendingTransferNotFound                         CreateTransferResult = 25
+	TransferPendingTransferNotPending                       CreateTransferResult = 26
+	TransferPendingTransferHasDifferentDebitAccountID       CreateTransferResult = 27
+	TransferPendingTransferHasDifferentCreditAccountID      CreateTransferResult = 28
+	TransferPendingTransferHasDifferentLedger               CreateTransferResult = 29
+	TransferPendingTransferHasDifferentCode                 CreateTransferResult = 30
+	TransferExceedsPendingTransferAmount                    CreateTransferResult = 31
+	TransferPendingTransferHasDifferentAmount               CreateTransferResult = 32
+	TransferPendingTransferAlreadyPosted                    CreateTransferResult = 33
+	TransferPendingTransferAlreadyVoided                    CreateTransferResult = 34
+	TransferPendingTransferExpired                          CreateTransferResult = 35
+	TransferExistsWithDifferentFlags                        CreateTransferResult = 36
+	TransferExistsWithDifferentDebitAccountID               CreateTransferResult = 37
+	TransferExistsWithDifferentCreditAccountID              CreateTransferResult = 38
+	TransferExistsWithDifferentAmount                       CreateTransferResult = 39
+	TransferExistsWithDifferentPendingID                    CreateTransferResult = 40
+	TransferExistsWithDifferentUserData128                  CreateTransferResult = 41
+	TransferExistsWithDifferentUserData64                   CreateTransferResult = 42
+	TransferExistsWithDifferentUserData32                   CreateTransferResult = 43
+	TransferExistsWithDifferentTimeout                      CreateTransferResult = 44
+	TransferExistsWithDifferentCode                         CreateTransferResult = 45
+	TransferExists                                          CreateTransferResult = 46
+	TransferOverflowsDebitsPending                          CreateTransferResult = 47
+	TransferOverflowsCreditsPending                         CreateTransferResult = 48
+	TransferOverflowsDebitsPosted                           CreateTransferResult = 49
+	TransferOverflowsCreditsPosted                          CreateTransferResult = 50
+	TransferOverflowsDebits                                 CreateTransferResult = 51
+	TransferOverflowsCredits                                CreateTransferResult = 52
+	TransferOverflowsTimeout                                CreateTransferResult = 53
+	TransferExceedsCredits                                  CreateTransferResult = 54
+	TransferExceedsDebits                                   CreateTransferResult = 55
+	TransferImportedEventExpected                           CreateTransferResult = 56
+	TransferImportedEventNotExpected                        CreateTransferResult = 57
+	TransferImportedEventTimestampOutOfRange                CreateTransferResult = 58
+	TransferImportedEventTimestampMustNotAdvance            CreateTransferResult = 59
+	TransferImportedEventTimestampMustNotRegress            CreateTransferResult = 60
+	TransferImportedEventTimestampMustPostdateDebitAccount  CreateTransferResult = 61
+	TransferImportedEventTimestampMustPostdateCreditAccount CreateTransferResult = 62
+	TransferImportedEventTimeoutMustBeZero                  CreateTransferResult = 63
+	TransferClosingTransferMustBePending                    CreateTransferResult = 64
+	TransferDebitAccountAlreadyClosed                       CreateTransferResult = 65
+	TransferCreditAccountAlreadyClosed                      CreateTransferResult = 66
 )
 
 func (i CreateTransferResult) String() string {
@@ -421,6 +477,28 @@ func (i CreateTransferResult) String() string {
 		return "TransferExceedsCredits"
 	case TransferExceedsDebits:
 		return "TransferExceedsDebits"
+	case TransferImportedEventExpected:
+		return "TransferImportedEventExpected"
+	case TransferImportedEventNotExpected:
+		return "TransferImportedEventNotExpected"
+	case TransferImportedEventTimestampOutOfRange:
+		return "TransferImportedEventTimestampOutOfRange"
+	case TransferImportedEventTimestampMustNotAdvance:
+		return "TransferImportedEventTimestampMustNotAdvance"
+	case TransferImportedEventTimestampMustNotRegress:
+		return "TransferImportedEventTimestampMustNotRegress"
+	case TransferImportedEventTimestampMustPostdateDebitAccount:
+		return "TransferImportedEventTimestampMustPostdateDebitAccount"
+	case TransferImportedEventTimestampMustPostdateCreditAccount:
+		return "TransferImportedEventTimestampMustPostdateCreditAccount"
+	case TransferImportedEventTimeoutMustBeZero:
+		return "TransferImportedEventTimeoutMustBeZero"
+	case TransferClosingTransferMustBePending:
+		return "TransferClosingTransferMustBePending"
+	case TransferDebitAccountAlreadyClosed:
+		return "TransferDebitAccountAlreadyClosed"
+	case TransferCreditAccountAlreadyClosed:
+		return "TransferCreditAccountAlreadyClosed"
 	}
 	return "CreateTransferResult(" + strconv.FormatInt(int64(i+1), 10) + ")"
 }

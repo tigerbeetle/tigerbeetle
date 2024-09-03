@@ -8,8 +8,8 @@ Documentation for (roughly) code in the `src/lsm` directory.
 
 # Glossary
 
-- _bar_: `lsm_batch_multiple` beats; unit of incremental compaction.
-- _beat_: `op % lsm_batch_multiple`; Single step of an incremental compaction.
+- _bar_: `lsm_compaction_ops` beats; unit of incremental compaction.
+- _beat_: `op % lsm_compaction_ops`; Single step of an incremental compaction.
 - _groove_: A collection of LSM trees, storing objects and their indices.
 - _immutable table_: In-memory table; one per tree. Used to periodically flush the mutable table to
   disk.
@@ -46,9 +46,9 @@ Compacting LSM trees involves merging and moving tables into the next levels as 
 To avoid write amplification stalls and bound latency, compaction is done incrementally.
 
 A full compaction phase is denoted as a bar, using terms from music notation.
-Each bar consists of `lsm_batch_multiple` beats or "compaction ticks" of work.
+Each bar consists of `lsm_compaction_ops` beats or "compaction ticks" of work.
 A compaction tick executes asynchronously immediately after every commit, with
-`beat = commit.op % lsm_batch_multiple`.
+`beat = commit.op % lsm_compaction_ops`.
 
 A bar is split in half according to the "first" beat and "middle" beat.
 The first half of the bar compacts even levels while the latter compacts odd levels.
@@ -159,7 +159,7 @@ queries against past states of the tree (unimplemented; future work).
 
 ### Snapshots and Compaction
 
-Consider the half-bar compaction beginning at op=`X` (`12`), with `lsm_batch_multiple=M` (`8`).
+Consider the half-bar compaction beginning at op=`X` (`12`), with `lsm_compaction_ops=M` (`8`).
 Each half-bar contains `N=M/2` (`4`) beats. The next half-bar begins at `Y=X+N` (`16`).
 
 During the half-bar compaction `X`:
@@ -200,7 +200,7 @@ TODO(Persistent Snapshots): Expand this section.
 - The on-disk tables visible to a snapshot `B` do not contain the updates from the commit with op `B`.
 - Rather, snapshot `B` is first visible to a prefetch from the commit with op `B`.
 
-Consider the following diagram (`lsm_batch_multiple=8`):
+Consider the following diagram (`lsm_compaction_ops=8`):
 
 ```
 0   4   8  12  16  20  24  28  (op, snapshot)
