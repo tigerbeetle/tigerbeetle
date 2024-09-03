@@ -1,6 +1,7 @@
 import java.math.BigInteger;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class Model {
@@ -44,10 +45,22 @@ public class Model {
     }
   }
 
+
+  AccountModel[] allAccounts() {
+    // We use a sorted collection of accounts for deterministic lookups.
+    var results = new AccountModel[accounts.size()];
+    var i = 0;
+    for (var account : accounts.values()) {
+      results[i] = account;
+      i++;
+    }
+    return results;
+  }
+
   AccountModel[] ledgerAccounts(int ledger) {
     // We use a sorted collection of accounts (in the given ledger) for deterministic lookups.
     var ledgerAccounts = accounts.values().stream().filter(account -> account.ledger == ledger)
-        .sorted(Comparator.comparing(account -> account.id)).collect(Collectors.toList());
+        .sorted(Comparator.comparing(account -> account.id)).toList();
 
     // Convert from list to typed array.
     var results = new AccountModel[accounts.size()];
@@ -56,6 +69,21 @@ public class Model {
       results[i] = account;
       i++;
     }
+    return results;
+  }
+
+  Map<Integer, AccountModel[]> accountsPerLedger() {
+    var ledgerAccounts =
+        accounts.values().stream().collect(Collectors.groupingBy(account -> account.ledger));
+
+    var results = new HashMap<Integer, AccountModel[]>();
+
+    for (var entry : ledgerAccounts.entrySet()) {
+      var values = new AccountModel[entry.getValue().size()];
+      entry.getValue().toArray(values);
+      results.put(entry.getKey(), values);
+    }
+
     return results;
   }
 }
