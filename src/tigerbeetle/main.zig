@@ -349,6 +349,8 @@ const Command = struct {
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
+        var stdout_writer = std.io.getStdOut().writer();
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -379,9 +381,7 @@ const Command = struct {
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
-            .tracer_options = .{
-                .writer = if (args.trace) std.io.getStdOut().writer().any() else null,
-            },
+            .tracer_options = .{ .writer = if (args.trace) stdout_writer.any() else null },
         }) catch |err| switch (err) {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => |e| return e,

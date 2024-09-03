@@ -93,6 +93,10 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.trace);
 
+const constants = @import("constants.zig");
+
+const trace_span_size_max = 1024;
+
 // TODO This could be changed to a union(enum) if variable-cardinality events are needed (for
 // example, an event per grid IOP). (`stack()` would need to be updated as well).
 pub const Event = enum {
@@ -115,8 +119,9 @@ pub const Event = enum {
 pub const Tracer = struct {
     replica_index: u8,
     options: Options,
+    buffer: []u8,
 
-    events_enabled: [Event.stack_count]bool = [_]bool{false} ** Event.stack_count,
+    events_enabled: [Event.stack_count]bool = .{false} ** Event.stack_count,
     time_start: std.time.Instant,
 
     pub const Options = struct {
@@ -125,22 +130,23 @@ pub const Tracer = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator, replica_index: u8, options: Options) !Tracer {
-        _ = allocator;
-
         if (options.writer) |writer| {
             try writer.writeAll("[\n");
         }
 
+        const buffer = try allocator.alloc(u8, trace_span_size_max);
+        errdefer allocator.free(buffer);
+
         return .{
             .replica_index = replica_index,
             .options = options,
+            .buffer = buffer,
             .time_start = std.time.Instant.now() catch @panic("std.time.Instant.now() unsupported"),
         };
     }
 
     pub fn deinit(tracer: *Tracer, allocator: std.mem.Allocator) void {
-        _ = allocator;
-
+        allocator.free(tracer.buffer);
         tracer.* = undefined;
     }
 
@@ -162,14 +168,16 @@ pub const Tracer = struct {
         const time_elapsed_ns = time_now.since(tracer.time_start);
         const time_elapsed_us = @divFloor(time_elapsed_ns, std.time.ns_per_us);
 
+        var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
+
         // String tid's would be much more useful.
         // They are supported by both Chrome and Perfetto, but rejected by Spall.
-        writer.print("{{" ++
+        buffer_stream.writer().print("{{" ++
             "\"pid\":{[process_id]}," ++
             "\"tid\":{[thread_id]}," ++
-            "\"cat\":\"{[category]s}\"," ++
             "\"ph\":\"{[event]c}\"," ++
             "\"ts\":{[timestamp]}," ++
+            "\"cat\":\"{[category]s}\"," ++
             "\"name\":\"{[name]s}{[data]}\"," ++
             "\"args\":{[args]}" ++
             "}},\n", .{
@@ -182,26 +190,10 @@ pub const Tracer = struct {
             .data = struct_format(data, .sparse),
             .args = std.json.Formatter(@TypeOf(data)){ .value = data, .options = .{} },
         }) catch unreachable;
-    }
 
-    fn start_write_data(writer: std.io.AnyWriter, data: anytype) !void {
-        comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
-
-        inline for (std.meta.fields(@TypeOf(data))) |data_field| {
-            const data_field_value = @field(data, data_field.name);
-            try writer.writeByte(' ');
-            try writer.writeAll(data_field.name);
-            try writer.writeByte('=');
-            if (data_field.type == []const u8) {
-                try writer.print("'{s}'", .{data_field_value});
-            } else if (@typeInfo(data_field.type) == .Enum or
-                @typeInfo(data_field.type) == .Union)
-            {
-                try writer.print("{s}", .{@tagName(data_field_value)});
-            } else {
-                try writer.print("{}", .{data_field_value});
-            }
-        }
+        writer.writeAll(buffer_stream.getWritten()) catch |err| {
+            std.debug.panic("Tracer.start: {}\n", .{err});
+        };
     }
 
     pub fn stop(tracer: *Tracer, event: Event, data: anytype) void {
@@ -239,7 +231,9 @@ pub const Tracer = struct {
         const time_elapsed_ns = time_now.since(tracer.time_start);
         const time_elapsed_us = @divFloor(time_elapsed_ns, std.time.ns_per_us);
 
-        writer.print(
+        var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
+
+        buffer_stream.writer().print(
             "{{" ++
                 "\"pid\":{[process_id]}," ++
                 "\"tid\":{[thread_id]}," ++
@@ -253,6 +247,10 @@ pub const Tracer = struct {
                 .timestamp = time_elapsed_us,
             },
         ) catch unreachable;
+
+        writer.writeAll(buffer_stream.getWritten()) catch |err| {
+            std.debug.panic("Tracer.start: {}\n", .{err});
+        };
     }
 };
 
@@ -294,7 +292,23 @@ fn StructFormatterType(comptime Data: type, comptime cardinality: DataFormatterC
                 if (data_field.type == []const u8 or
                     data_field.type == [:0]const u8)
                 {
-                    try writer.print("'{s}'", .{data_field_value});
+                    // This is an arbitrary limit, to ensure that the logging isn't too noisy.
+                    // (Logged strings should be low-cardinality as well, but we can't explicitly
+                    // check that.)
+                    const string_length_max = 256;
+                    assert(data_field_value.len <= string_length_max);
+
+                    // Since the string is not properly escaped before printing, assert that it
+                    // doesn't contain any special characters that would mess with the JSON.
+                    if (constants.verify) {
+                        for (data_field_value) |char| {
+                            assert(char != '\n');
+                            assert(char != '\\');
+                            assert(char != '"');
+                        }
+                    }
+
+                    try writer.print("{s}", .{data_field_value});
                 } else if (@typeInfo(data_field.type) == .Enum or
                     @typeInfo(data_field.type) == .Union)
                 {
@@ -331,7 +345,7 @@ test "trace json" {
 
     try snap(@src(),
         \\[
-        \\{"pid":0,"tid":0,"cat":"replica_commit","ph":"B","ts":<snap:ignore>,"name":"replica_commit","args":{"foo":123}},
+        \\{"pid":0,"tid":0,"ph":"B","ts":<snap:ignore>,"cat":"replica_commit","name":"replica_commit","args":{"foo":123}},
         \\{"pid":0,"tid":0,"ph":"E","ts":<snap:ignore>},
         \\
     ).diff(trace_buffer.items);
