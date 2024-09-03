@@ -60,7 +60,7 @@ public class Workload {
   }
 
   Optional<Supplier<Command>> randomCreateAccounts() {
-    int accountsCreatedCount = model.accountsCreatedCount();
+    int accountsCreatedCount = model.accounts.size();
 
     if (accountsCreatedCount < ACCOUNTS_COUNT_MAX) {
       return Optional.of(() -> {

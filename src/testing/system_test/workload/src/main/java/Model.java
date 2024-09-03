@@ -1,19 +1,16 @@
 import java.math.BigInteger;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class Model {
-  HashMap<Integer, HashMap<Long, AccountModel>> ledgers = new HashMap<>();
+  HashMap<Long, AccountModel> accounts = new HashMap<>();
 
   void accept(Command command) {
     if (command instanceof CreateAccounts) {
       CreateAccounts createAccounts = (CreateAccounts) command;
       for (var newAccount : createAccounts.accounts) {
-        var ledger = ledgers.computeIfAbsent(newAccount.ledger, i -> new HashMap<>());
-
-        assert !ledger.containsKey(newAccount.id);
+        assert !accounts.containsKey(newAccount.id);
 
         var account = new AccountModel();
         account.id = newAccount.id;
@@ -23,13 +20,15 @@ public class Model {
         account.creditsPosted = BigInteger.ZERO;
         account.flags = newAccount.flags;
 
-        ledger.put(account.id, account);
+        accounts.put(account.id, account);
       }
     } else if (command instanceof CreateTransfers) {
       CreateTransfers createTransfers = (CreateTransfers) command;
       for (var transfer : createTransfers.transfers) {
-        var debitAccount = findAccount(transfer.debitAccountId).orElseThrow();
-        var creditAccount = findAccount(transfer.creditAccountId).orElseThrow();
+        var debitAccount = accounts.get(transfer.debitAccountId);
+        var creditAccount = accounts.get(transfer.creditAccountId);
+        assert debitAccount != null;
+        assert creditAccount != null;
         assert debitAccount.ledger == creditAccount.ledger;
 
         debitAccount.debitsPosted.add(transfer.amount);
@@ -38,48 +37,26 @@ public class Model {
     } else if (command instanceof LookupAccounts) {
       LookupAccounts lookupAccounts = (LookupAccounts) command;
       for (var id : lookupAccounts.ids) {
-        assert findAccount(id).isPresent();
+        assert accounts.containsKey(id);
       }
     } else {
       throw new IllegalArgumentException("Invalid command: %s".formatted(command.pretty()));
     }
   }
 
-
-  int accountsCreatedCount() {
-    int count = 0;
-    for (var ledger : ledgers.values()) {
-      count = ledger.size();
-    }
-    return count;
-  }
-
   AccountModel[] ledgerAccounts(int ledger) {
-    var ledgerAccounts = ledgers.get(ledger);
-    if (ledgerAccounts != null) {
-      var accounts = ledgerAccounts.values().stream()
-          .sorted(Comparator.comparing(account -> account.id)).collect(Collectors.toList());
-      // Convert from list to typed array.
-      var results = new AccountModel[accounts.size()];
-      var i = 0;
-      for (var account : accounts) {
-        results[i] = account;
-        i++;
-      }
-      return results;
-    } else {
-      return new AccountModel[] {};
-    }
-  }
+    // We use a sorted collection of accounts (in the given ledger) for deterministic lookups.
+    var ledgerAccounts = accounts.values().stream().filter(account -> account.ledger == ledger)
+        .sorted(Comparator.comparing(account -> account.id)).collect(Collectors.toList());
 
-  Optional<AccountModel> findAccount(long id) {
-    for (var ledger : ledgers.values()) {
-      var account = ledger.get(id);
-      if (account != null) {
-        return Optional.of(account);
-      }
+    // Convert from list to typed array.
+    var results = new AccountModel[accounts.size()];
+    var i = 0;
+    for (var account : ledgerAccounts) {
+      results[i] = account;
+      i++;
     }
-    return Optional.empty();
+    return results;
   }
 }
 
