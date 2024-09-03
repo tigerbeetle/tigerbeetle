@@ -51,7 +51,7 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 /// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:
 ///
 /// ```
-/// const CliArgs = union(enum) {
+/// const CLIArgs = union(enum) {
 ///    start: struct { addresses: []const u8, replica: u32 },
 ///    format: struct {
 ///        verbose: bool = false,
@@ -65,16 +65,16 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///        \\ tigerbeetle format [--verbose] <path>
 /// }
 ///
-/// const cli_args = parse_commands(&args, CliArgs);
+/// const cli_args = parse_commands(&args, CLIArgs);
 /// ```
 ///
 /// `positional` field is treated specially, it designates positional arguments.
 ///
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
-pub fn parse(args: *std.process.ArgIterator, comptime CliArgs: type) CliArgs {
-    comptime assert(CliArgs != void);
+pub fn parse(args: *std.process.ArgIterator, comptime CLIArgs: type) CLIArgs {
+    comptime assert(CLIArgs != void);
     assert(args.skip()); // Discard executable name.
-    return parse_flags(args, CliArgs);
+    return parse_flags(args, CLIArgs);
 }
 
 fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
@@ -580,7 +580,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
     // For production builds, don't include the main function.
     // This is `if __name__ == "__main__":` at comptime!
 } else struct {
-    const CliArgs = union(enum) {
+    const CLIArgs = union(enum) {
         empty,
         prefix: struct {
             foo: u8 = 0,
@@ -629,7 +629,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
         var args = try std.process.argsWithAllocator(gpa);
         defer args.deinit();
 
-        const cli_args = parse(&args, CliArgs);
+        const cli_args = parse(&args, CLIArgs);
 
         const stdout = std.io.getStdOut();
         const out_stream = stdout.writer();

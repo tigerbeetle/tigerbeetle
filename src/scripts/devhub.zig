@@ -17,11 +17,11 @@ const Release = @import("../multiversioning.zig").Release;
 
 const log = std.log;
 
-pub const CliArgs = struct {
+pub const CLIArgs = struct {
     sha: []const u8,
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     _ = gpa;
 
     const commit_timestamp_str =

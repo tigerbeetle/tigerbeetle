@@ -39,7 +39,7 @@ pub const std_options = .{
     .log_level = .info,
 };
 
-const CliArgs = union(enum) {
+const CLIArgs = union(enum) {
     memcpy: struct { bytes: u32 },
     funcsize,
 };
@@ -53,7 +53,7 @@ pub fn main() !void {
 
     var args = try std.process.argsWithAllocator(allocator);
 
-    const cli_args = flags.parse(&args, CliArgs);
+    const cli_args = flags.parse(&args, CLIArgs);
 
     const line_buffer = try allocator.alloc(u8, 1024 * 1024);
     const func_buf = try allocator.alloc(u8, 4096);

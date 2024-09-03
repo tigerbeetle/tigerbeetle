@@ -16,14 +16,14 @@ const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 
-pub const CliArgs = struct {
+pub const CLIArgs = struct {
     old: []const u8,
     new: []const u8,
 };
 
 const replica_count = 3;
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     _ = gpa;
 
     const seed = std.crypto.random.int(u64);
