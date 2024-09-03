@@ -10,4 +10,4 @@ RUN apt-get update && \
 COPY src/clients/java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar ./tigerbeetle-java-0.0.1-SNAPSHOT.jar
 COPY src/testing/system_test/workload/target/workload-0.0.1-SNAPSHOT.jar ./workload-0.0.1-SNAPSHOT.jar
 
-ENTRYPOINT ["java", "-cp", "workload-0.0.1-SNAPSHOT.jar:tigerbeetle-java-0.0.1-SNAPSHOT.jar", "Main"]
+ENTRYPOINT ["java", "-ea", "-cp", "workload-0.0.1-SNAPSHOT.jar:tigerbeetle-java-0.0.1-SNAPSHOT.jar", "Main"]

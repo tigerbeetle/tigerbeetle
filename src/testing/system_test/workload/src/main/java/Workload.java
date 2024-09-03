@@ -2,6 +2,7 @@ import java.math.BigInteger;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import com.tigerbeetle.AccountBatch;
 import com.tigerbeetle.AccountFlags;
@@ -25,7 +26,7 @@ public class Workload {
   }
 
   void run() {
-    while (true) {
+    for (int i = 0; i < 1_000_000; i++) {
       var command = randomCommand();
       try {
         model.accept(command);
@@ -39,89 +40,106 @@ public class Workload {
   }
 
   Command randomCommand() {
-    var commands = List.of(randomCreateAccounts(), randomCreateTransfers(), randomLookupAccounts())
-        .stream().<Command>mapMulti(Optional::ifPresent).collect(Collectors.toList());
+    // Commands are wrapped in `Optional`, to represent if they are enabled.
+    var commandsAll =
+        List.of(randomCreateAccounts(), randomCreateTransfers(), randomLookupAccounts());
 
-    assert !commands.isEmpty();
+    // Enabled commands are further wrapped in `Supplier`s, because we don't want to use our entropy
+    // to realize all of them, when only one will be selected in the end. They're basically lazy
+    // generators.
+    //
+    // Here we select all commands that are currently enabled.
+    var commandsEnabled = commandsAll.stream().<Supplier<Command>>mapMulti(Optional::ifPresent)
+        .collect(Collectors.toList());
 
-    return commands.get(random.nextInt(0, commands.size()));
+    // There should always be at least one enabled command.
+    assert !commandsEnabled.isEmpty();
+
+    // Select and realize a single command.
+    return commandsEnabled.get(random.nextInt(0, commandsEnabled.size())).get();
   }
 
-  Optional<Command> randomCreateAccounts() {
+  Optional<Supplier<Command>> randomCreateAccounts() {
     int accountsCreatedCount = model.accountsCreatedCount();
 
     if (accountsCreatedCount < ACCOUNTS_COUNT_MAX) {
-      var newAccounts = new NewAccount[random.nextInt(1,
-          Math.min(ACCOUNTS_COUNT_MAX - accountsCreatedCount + 1, BATCH_SIZE_MAX))];
+      return Optional.of(() -> {
+        var newAccounts = new NewAccount[random.nextInt(1,
+            Math.min(ACCOUNTS_COUNT_MAX - accountsCreatedCount + 1, BATCH_SIZE_MAX))];
 
-      for (int i = 0; i < newAccounts.length; i++) {
-        var newAccount = new NewAccount();
-        newAccount.id = random.nextLong();
-        newAccount.ledger = 1;
-        newAccount.code = random.nextInt(1, 100);
-        newAccount.flags = random.nextBoolean() ? AccountFlags.HISTORY : AccountFlags.NONE;
-        newAccounts[i] = newAccount;
-      }
-      CreateAccounts command = new CreateAccounts();
-      command.accounts = newAccounts;
+        for (int i = 0; i < newAccounts.length; i++) {
+          var newAccount = new NewAccount();
+          newAccount.id = random.nextLong();
+          newAccount.ledger = 1;
+          newAccount.code = random.nextInt(1, 100);
+          newAccount.flags = random.nextBoolean() ? AccountFlags.HISTORY : AccountFlags.NONE;
+          newAccounts[i] = newAccount;
+        }
 
-      return Optional.of(command);
+        CreateAccounts command = new CreateAccounts();
+        command.accounts = newAccounts;
+        return command;
+      });
     } else {
       return Optional.empty();
     }
 
   }
 
-  Optional<Command> randomCreateTransfers() {
+  Optional<Supplier<Command>> randomCreateTransfers() {
     // TODO: transfer between accounts in multiple ledgers
     int ledger = 1;
     AccountModel[] ledgerAccounts = model.ledgerAccounts(ledger);
     if (ledgerAccounts.length >= 2) {
-      var newTransfers = new NewTransfer[random.nextInt(1, BATCH_SIZE_MAX)];
+      return Optional.of(() -> {
+        var newTransfers = new NewTransfer[random.nextInt(1, BATCH_SIZE_MAX)];
 
-      for (int i = 0; i < newTransfers.length; i++) {
-        var newTransfer = new NewTransfer();
+        for (int i = 0; i < newTransfers.length; i++) {
+          var newTransfer = new NewTransfer();
 
-        newTransfer.id = random.nextLong();
-        newTransfer.ledger = ledger;
-        newTransfer.code = random.nextInt(1, 100);
-        newTransfer.amount = BigInteger.valueOf(random.nextLong());
+          newTransfer.id = random.nextLong();
+          newTransfer.ledger = ledger;
+          newTransfer.code = random.nextInt(1, 100);
+          newTransfer.amount = BigInteger.valueOf(random.nextLong());
 
-        int debitAccountIndex = random.nextInt(0, ledgerAccounts.length);
-        int creditAccountIndex = random.ints(0, ledgerAccounts.length)
-            .filter((index) -> index != debitAccountIndex).findFirst().orElseThrow();
-        newTransfer.debitAccountId = ledgerAccounts[debitAccountIndex].id;
-        newTransfer.creditAccountId = ledgerAccounts[creditAccountIndex].id;
+          int debitAccountIndex = random.nextInt(0, ledgerAccounts.length);
+          int creditAccountIndex = random.ints(0, ledgerAccounts.length)
+              .filter((index) -> index != debitAccountIndex).findFirst().orElseThrow();
+          newTransfer.debitAccountId = ledgerAccounts[debitAccountIndex].id;
+          newTransfer.creditAccountId = ledgerAccounts[creditAccountIndex].id;
 
-        newTransfers[i] = newTransfer;
-      }
+          newTransfers[i] = newTransfer;
+        }
 
-      CreateTransfers command = new CreateTransfers();
-      command.transfers = newTransfers;
-      return Optional.of(command);
+        CreateTransfers command = new CreateTransfers();
+        command.transfers = newTransfers;
+        return command;
+      });
     }
-
 
     return Optional.empty();
   }
 
-  Optional<Command> randomLookupAccounts() {
+  Optional<Supplier<Command>> randomLookupAccounts() {
     int ledger = 1;
     AccountModel[] ledgerAccounts = model.ledgerAccounts(ledger);
     if (ledgerAccounts.length >= 1) {
-      int lookupBatchSize = random.nextInt(1, Math.min(ledgerAccounts.length, BATCH_SIZE_MAX) + 1);
-      int startIndex = ledgerAccounts.length > lookupBatchSize
-          ? random.nextInt(0, ledgerAccounts.length - lookupBatchSize)
-          : 0;
+      return Optional.of(() -> {
+        int lookupBatchSize =
+            random.nextInt(1, Math.min(ledgerAccounts.length, BATCH_SIZE_MAX) + 1);
+        int startIndex = ledgerAccounts.length > lookupBatchSize
+            ? random.nextInt(0, ledgerAccounts.length - lookupBatchSize)
+            : 0;
 
-      var ids = new long[lookupBatchSize];
-      for (int i = 0; i < lookupBatchSize; i++) {
-        ids[i] = ledgerAccounts[startIndex + i].id;
-      }
+        var ids = new long[lookupBatchSize];
+        for (int i = 0; i < lookupBatchSize; i++) {
+          ids[i] = ledgerAccounts[startIndex + i].id;
+        }
 
-      LookupAccounts command = new LookupAccounts();
-      command.ids = ids;
-      return Optional.of(command);
+        LookupAccounts command = new LookupAccounts();
+        command.ids = ids;
+        return command;
+      });
     }
 
     return Optional.empty();
@@ -130,8 +148,8 @@ public class Workload {
   void execute(Command command) {
     if (command instanceof CreateAccounts) {
       CreateAccounts createAccounts = (CreateAccounts) command;
+
       AccountBatch accounts = new AccountBatch(createAccounts.accounts.length);
-      // System.out.printf("Creating %d accounts\n", createAccounts.accounts.length);
       for (NewAccount account : createAccounts.accounts) {
         accounts.add();
         accounts.setId(account.id);
@@ -151,11 +169,10 @@ public class Workload {
       }
     } else if (command instanceof CreateTransfers) {
       CreateTransfers createTransfers = (CreateTransfers) command;
-      TransferBatch transfers = new TransferBatch(createTransfers.transfers.length);
 
+      TransferBatch transfers = new TransferBatch(createTransfers.transfers.length);
       for (NewTransfer transfer : createTransfers.transfers) {
         transfers.add();
-
         transfers.setId(transfer.id);
         transfers.setDebitAccountId(transfer.debitAccountId);
         transfers.setCreditAccountId(transfer.creditAccountId);
@@ -176,10 +193,12 @@ public class Workload {
 
     } else if (command instanceof LookupAccounts) {
       LookupAccounts lookupAccounts = (LookupAccounts) command;
+
       IdBatch ids = new IdBatch(lookupAccounts.ids.length);
       for (long id : lookupAccounts.ids) {
         ids.add(id);
       }
+
       AccountBatch accounts = client.lookupAccounts(ids);
       assert accounts.getLength() == lookupAccounts.ids.length;
       // TODO: parse batch and return query results (as model?)
