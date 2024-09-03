@@ -2887,7 +2887,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 // Don't drop pings while the view is being updated.
-                .view = @max(self.view_durable(), self.superblock.working.vsr_state.sync_view),
+                .view = self.view_durable(),
                 .release = self.release,
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .checkpoint_op = self.op_checkpoint(),
@@ -2910,14 +2910,7 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
-            // Pings advertise checkpoints, and current checkpoint's view might be greater than
-            // the replica view.
-            if (message.header.view > self.view) {
-                assert(self.status == .recovering_head);
-                assert(self.superblock.working.vsr_state.sync_view >
-                    self.superblock.working.vsr_state.view);
-            }
-
+            assert(message.header.view <= self.view);
             self.send_message_to_other_replicas_and_standbys(message.base());
         }
 
@@ -4091,20 +4084,17 @@ pub fn ReplicaType(
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_commit_min = self.op_checkpoint_next();
 
-            const vsr_state_sync: struct { op_min: u64, op_max: u64, view: u32 } = sync: {
-                if (self.sync_content_done()) {
-                    assert(self.sync_tables == null);
-                    assert(self.grid_repair_tables.executing() == 0);
-
-                    break :sync .{ .op_min = 0, .op_max = 0, .view = 0 };
-                } else {
-                    break :sync .{
-                        .op_min = self.superblock.staging.vsr_state.sync_op_min,
-                        .op_max = self.superblock.staging.vsr_state.sync_op_max,
-                        .view = self.superblock.staging.vsr_state.sync_view,
-                    };
-                }
-            };
+            if (self.sync_content_done()) {
+                assert(self.sync_tables == null);
+                assert(self.grid_repair_tables.executing() == 0);
+            }
+            const sync_op_min, const sync_op_max = if (self.sync_content_done())
+                .{ 0, 0 }
+            else
+                .{
+                    self.superblock.staging.vsr_state.sync_op_min,
+                    self.superblock.staging.vsr_state.sync_op_max,
+                };
 
             const storage_size: u64 = storage_size: {
                 var storage_size = vsr.superblock.data_file_size_min;
@@ -4119,7 +4109,7 @@ pub fn ReplicaType(
                 break :storage_size storage_size;
             };
 
-            if (self.superblock.working.vsr_state.sync_op_max != 0 and vsr_state_sync.op_max == 0) {
+            if (self.superblock.working.vsr_state.sync_op_max != 0 and sync_op_max == 0) {
                 log.info("{}: sync: done", .{self.replica});
             }
 
@@ -4129,9 +4119,8 @@ pub fn ReplicaType(
                 .{
                     .header = self.journal.header_with_op(vsr_state_commit_min).?.*,
                     .commit_max = self.commit_max,
-                    .sync_op_min = vsr_state_sync.op_min,
-                    .sync_op_max = vsr_state_sync.op_max,
-                    .sync_view = vsr_state_sync.view,
+                    .sync_op_min = sync_op_min,
+                    .sync_op_max = sync_op_max,
                     .manifest_references = self.state_machine.forest
                         .manifest_log.checkpoint_references(),
                     .free_set_reference = self.grid
@@ -5475,15 +5464,6 @@ pub fn ReplicaType(
                             self.replica,
                             command,
                         });
-                        return true;
-                    }
-
-                    if (message.header.view < self.superblock.working.vsr_state.sync_view) {
-                        assert(self.status == .recovering_head);
-                        log.debug(
-                            "{}: on_{s}: ignoring (recovering_head, checkpoint from newer view)",
-                            .{ self.replica, command },
-                        );
                         return true;
                     }
 
@@ -7670,9 +7650,7 @@ pub fn ReplicaType(
             // See view_durable()/log_view_durable().
             if (replica != self.replica and message.header.replica == self.replica) {
                 if (message.header.view > self.view_durable() and
-                    message.header.command != .request_start_view and
-                    !(message.header.command == .ping and
-                    message.header.view == self.superblock.working.vsr_state.sync_view))
+                    message.header.command != .request_start_view)
                 {
                     // Pings are used for syncing time, so they must not be
                     // blocked on persisting view.
@@ -8413,7 +8391,6 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op(self.op) != null);
             assert(!self.primary_abdicating);
             assert(self.view_headers.command == .start_view);
-            assert(self.log_view >= self.superblock.working.vsr_state.sync_view);
 
             self.status = .normal;
 

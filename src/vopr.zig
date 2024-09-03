@@ -1098,13 +1098,8 @@ pub const Simulator = struct {
         ) catch unreachable;
 
         if (replica.status == .recovering_head) {
-            // Even with faults disabled, a replica that was syncing before it crashed
-            // (or just recently finished syncing before it crashed) may wind up in
-            // status=recovering_head.
-            assert(fault or
-                replica.op < replica.op_checkpoint() or
-                replica.log_view < replica.superblock.working.vsr_state.sync_view or
-                header_prepare_view_mismatch);
+            // Even with faults disabled, a replica may wind up in status=recovering_head.
+            assert(fault or header_prepare_view_mismatch);
         }
 
         replica_storage.faulty = true;
