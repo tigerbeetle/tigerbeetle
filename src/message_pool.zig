@@ -76,7 +76,6 @@ pub const Options = union(vsr.ProcessType) {
                 // Connection.send_queue:
                 sum += connections_max * constants.connection_send_queue_max_replica;
                 sum += 1; // Handle bursts (e.g. Connection.parse_message)
-                sum += 1; // Extra burst from sending two SV variants.
                 // Handle Replica.commit_op's reply:
                 // (This is separate from the burst +1 because they may occur concurrently).
                 sum += 1;
@@ -106,10 +105,6 @@ pub const MessagePool = struct {
         pub const StartViewChange = MessageType(.start_view_change);
         pub const DoViewChange = MessageType(.do_view_change);
         pub const StartView = MessageType(.start_view);
-        pub const StartViewDeprecated = MessageType(.start_view_deprecated);
-        comptime {
-            assert(StartView == StartViewDeprecated);
-        }
         pub const RequestStartView = MessageType(.request_start_view);
         pub const RequestHeaders = MessageType(.request_headers);
         pub const RequestPrepare = MessageType(.request_prepare);
@@ -118,8 +113,6 @@ pub const MessagePool = struct {
         pub const Eviction = MessageType(.eviction);
         pub const RequestBlocks = MessageType(.request_blocks);
         pub const Block = MessageType(.block);
-        pub const RequestSyncCheckpoint = MessageType(.request_sync_checkpoint);
-        pub const SyncCheckpoint = MessageType(.sync_checkpoint);
 
         // TODO Avoid the extra level of indirection.
         // (https://github.com/tigerbeetle/tigerbeetle/pull/1295#discussion_r1394265250)
@@ -285,11 +278,9 @@ pub const MessagePool = struct {
 };
 
 fn MessageType(comptime command: vsr.Command) type {
-    const CommandHeaderUnified = Header.Type(command);
-
     return extern struct {
         const CommandMessage = @This();
-        const CommandHeader = CommandHeaderUnified;
+        const CommandHeader = Header.Type(command);
         const Message = MessagePool.Message;
 
         // The underlying structure of Message and CommandMessage should be identical, so that their
