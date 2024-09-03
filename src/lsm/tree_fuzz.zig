@@ -443,7 +443,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 .commit_max = checkpoint_op + 1,
                 .sync_op_min = 0,
                 .sync_op_max = 0,
-                .sync_view = 0,
                 .storage_size = vsr.superblock.data_file_size_min +
                     (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
                 .release = vsr.Release.minimum,

@@ -133,11 +133,11 @@ pub const SuperBlockHeader = extern struct {
         /// past them via state sync.)
         sync_op_max: u64,
 
-        /// The view where it is known that checkpoint.header is committed.
-        /// It may be greater than view --- during state sync, the replica first accepts a new
-        /// checkpoint, and then jumps view. Appending checkpoint first is required for appending
-        /// SV headers to the journal.
-        sync_view: u32,
+        /// This field was used by the old state sync protocol, but is now unused and is always set
+        /// to zero.
+        /// TODO: rename to reserved and assert that it is zero, once it is actually set to zero
+        /// in all superblocks (in the next release).
+        sync_view: u32 = 0,
 
         /// The last view in which the replica's status was normal.
         log_view: u32,
@@ -192,7 +192,6 @@ pub const SuperBlockHeader = extern struct {
                 .commit_max = 0,
                 .sync_op_min = 0,
                 .sync_op_max = 0,
-                .sync_view = 0,
                 .log_view = 0,
                 .view = 0,
             };
@@ -201,7 +200,6 @@ pub const SuperBlockHeader = extern struct {
         pub fn assert_internally_consistent(state: VSRState) void {
             assert(state.commit_max >= state.checkpoint.header.op);
             assert(state.sync_op_max >= state.sync_op_min);
-            if (state.sync_op_max == 0) assert(state.sync_view == 0);
             assert(state.view >= state.log_view);
             assert(state.replica_count > 0);
             assert(state.replica_count <= constants.replicas_max);
@@ -817,7 +815,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
             sync_op_min: u64,
             sync_op_max: u64,
-            sync_view: u32,
             manifest_references: ManifestReferences,
             free_set_reference: TrailerReference,
             client_sessions_reference: TrailerReference,
@@ -839,8 +836,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.vsr_state.checkpoint.header.checksum);
             assert(update.sync_op_min <= update.sync_op_max);
             assert(update.release.value >= superblock.staging.vsr_state.checkpoint.release.value);
-            assert(update.sync_view == 0 or
-                update.sync_view == superblock.staging.vsr_state.sync_view);
 
             assert(update.storage_size <= superblock.storage_size_limit);
             assert(update.storage_size >= data_file_size_min);
@@ -879,7 +874,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;
-            vsr_state.sync_view = update.sync_view;
+            vsr_state.sync_view = 0;
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
             context.* = .{
