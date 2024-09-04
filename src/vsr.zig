@@ -1751,11 +1751,13 @@ pub const RequestBatch = extern struct {
                 assert(self.wrote <= self.body.len);
             }
 
-            pub fn write(self: *Self, values: []const T) void {
+            pub fn write(self: *Self, value_bytes: []const u8) void {
                 if (@sizeOf(T) == 0) {
-                    assert(values.len == 0);
+                    assert(value_bytes.len == 0);
                     return;
                 }
+
+                const values = std.mem.bytesAsSlice(T, value_bytes);
 
                 const value_buffer = self.writable();
                 assert(value_buffer.len >= values.len);
@@ -1763,7 +1765,7 @@ pub const RequestBatch = extern struct {
                 const value_count: u16 = @intCast(values.len);
                 assert(self.wrote + value_count * @sizeOf(T) <= self.body.len);
 
-                stdx.copy_disjoint(.inexact, T, self.writable(), values);
+                stdx.copy_disjoint(.inexact, u8, std.mem.asBytes(value_buffer), value_bytes);
                 self.advance(value_count);
             }
         };

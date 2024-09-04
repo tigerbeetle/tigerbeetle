@@ -354,10 +354,7 @@ pub fn ContextType(
                 .pulse => unreachable,
                 inline else => |operation_comptime| StateMachine.operation_result_max(
                     operation_comptime,
-                    @alignCast(std.mem.bytesAsSlice(
-                        StateMachine.Event(operation_comptime),
-                        events,
-                    )),
+                    events,
                 ),
             });
 
@@ -465,10 +462,7 @@ pub fn ContextType(
                     var it: ?*Packet = packet;
                     while (it) |batched| {
                         it = batched.batch_next;
-                        writer.write(@alignCast(std.mem.bytesAsSlice(
-                            StateMachine.Event(operation_comptime),
-                            @as([*]u8, @ptrCast(batched.data.?))[0..batched.data_size],
-                        )));
+                        writer.write(@as([*]u8, @ptrCast(batched.data.?))[0..batched.data_size]);
                     }
 
                     assert(writer.wrote <= constants.message_body_size_max);

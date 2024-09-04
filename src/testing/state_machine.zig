@@ -223,7 +223,7 @@ pub fn StateMachineType(
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             assert(op != 0);
 
