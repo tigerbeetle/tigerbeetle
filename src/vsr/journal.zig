@@ -1954,6 +1954,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (!other.range.locked) continue;
 
                 if (other.range.overlaps(&write.range)) {
+                    assert(other.range.offset == write.range.offset);
+                    assert(other.range.buffer.len == write.range.buffer.len);
+
                     var tail = &other.range;
                     while (tail.next) |next| tail = next;
                     tail.next = &write.range;
