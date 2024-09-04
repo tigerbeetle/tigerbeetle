@@ -117,6 +117,7 @@ const CliArgs = union(enum) {
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
+        trace: ?[:0]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
@@ -441,6 +442,7 @@ pub const Command = union(enum) {
         print_batch_timings: bool,
         id_order: IdOrder,
         statsd: bool,
+        trace: ?[:0]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
         seed: ?[]const u8,
@@ -824,6 +826,7 @@ fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
         .print_batch_timings = benchmark.print_batch_timings,
         .id_order = benchmark.id_order,
         .statsd = benchmark.statsd,
+        .trace = benchmark.trace,
         .file = benchmark.file,
         .addresses = addresses,
         .seed = benchmark.seed,
