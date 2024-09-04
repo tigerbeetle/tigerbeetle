@@ -2016,13 +2016,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 current = waiting.next;
                 waiting.next = null;
                 journal.lock_sectors(@as(*Journal.Write, @fieldParentPtr("range", waiting)));
-                // Header sector locks are always an exact match, so there's no need to re-check the
-                // the waiting writes against all other writes.
-                if (range.ring == .headers) {
-                    assert(waiting.locked);
-                    waiting.next = current;
-                    break;
-                }
             }
 
             range.callback(write);
