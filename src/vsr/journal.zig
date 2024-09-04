@@ -175,13 +175,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             message: *Message.Prepare,
             trigger: Trigger,
 
-            /// True if this Write has acquired a lock on a sector of headers.
-            /// This also means that the Write is currently writing sectors or queuing to do so.
-            header_sector_locked: bool = false,
-
-            /// Linked list of Writes waiting to acquire the same header sector as this Write.
-            header_sector_next: ?*Write = null,
-
             /// This is reset to undefined and reused for each Storage.write_sectors() call.
             range: Range,
         };
@@ -1834,42 +1827,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 journal.write_prepare_release(write, null);
                 return;
             }
-
-            assert(!write.header_sector_locked);
-            assert(write.header_sector_next == null);
-
-            const write_offset = journal.offset_logical_in_headers_for_message(message);
-
-            var it = journal.writes.iterate();
-            while (it.next()) |other| {
-                if (other == write) continue;
-                if (!other.header_sector_locked) continue;
-
-                const other_offset = journal.offset_logical_in_headers_for_message(other.message);
-                if (other_offset == write_offset) {
-                    // The `other` and `write` target the same sector; append to the list.
-                    var tail = other;
-                    while (tail.header_sector_next) |next| tail = next;
-                    tail.header_sector_next = write;
-                    return;
-                }
-            }
-
-            write.header_sector_locked = true;
-            journal.write_prepare_on_lock_header_sector(write);
-        }
-
-        fn write_prepare_on_lock_header_sector(journal: *Journal, write: *Write) void {
-            assert(journal.status == .recovered);
-            assert(write.header_sector_locked);
-
             // TODO It's possible within this section that the header has since been replaced but we
             // continue writing, even when the dirty bit is no longer set. This is not a problem
             // but it would be good to stop writing as soon as we see we no longer need to.
             // For this, we'll need to have a way to tweak write_prepare_release() to release locks.
             // At present, we don't return early here simply because it doesn't yet do that.
 
-            const message = write.message;
             const slot_of_message = journal.slot_for_header(message.header);
             const offset = Ring.headers.offset(slot_of_message);
             assert(offset % constants.sector_size == 0);
@@ -1885,7 +1848,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 offset,
                 offset + constants.sector_size,
             });
-
             // Memory must not be owned by journal.headers as these may be modified concurrently:
             assert(@intFromPtr(buffer.ptr) < @intFromPtr(journal.headers.ptr) or
                 @intFromPtr(buffer.ptr) > @intFromPtr(journal.headers.ptr) + headers_size);
@@ -1896,9 +1858,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn write_prepare_on_write_header(write: *Journal.Write) void {
             const journal = write.journal;
             const message = write.message;
-
-            assert(write.header_sector_locked);
-            journal.write_prepare_unlock_header_sector(write);
 
             if (!journal.has(message.header)) {
                 journal.write_prepare_debug(message.header, "entry changed while writing headers");
@@ -1924,25 +1883,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.faulty.clear(slot);
 
             journal.write_prepare_release(write, message);
-        }
-
-        /// Release the lock held by a write on an in-memory header sector and pass
-        /// it to a waiting Write, if any.
-        fn write_prepare_unlock_header_sector(journal: *Journal, write: *Journal.Write) void {
-            assert(write.header_sector_locked);
-            write.header_sector_locked = false;
-
-            // Unlike the ranges of physical memory we lock when writing to disk,
-            // these header sector locks are always an exact match, so there's no
-            // need to re-check the waiting writes against all other writes.
-            if (write.header_sector_next) |waiting| {
-                write.header_sector_next = null;
-
-                assert(waiting.header_sector_locked == false);
-                waiting.header_sector_locked = true;
-                journal.write_prepare_on_lock_header_sector(waiting);
-            }
-            assert(write.header_sector_next == null);
         }
 
         fn write_prepare_release(
@@ -1983,13 +1923,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             });
         }
 
-        fn offset_logical_in_headers_for_message(
-            journal: *const Journal,
-            message: *const Message.Prepare,
-        ) u64 {
-            return Ring.headers.offset(journal.slot_for_header(message.header));
-        }
-
         fn write_sectors(
             journal: *Journal,
             callback: *const fn (write: *Journal.Write) void,
@@ -2021,6 +1954,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (!other.range.locked) continue;
 
                 if (other.range.overlaps(&write.range)) {
+                    assert(other.range.offset == write.range.offset);
+                    assert(other.range.buffer.len == write.range.buffer.len);
+
                     var tail = &other.range;
                     while (tail.next) |next| tail = next;
                     tail.next = &write.range;
