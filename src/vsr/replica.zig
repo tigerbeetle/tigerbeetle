@@ -284,9 +284,9 @@ pub fn ReplicaType(
         /// Durably store VSR state, the "root" of the LSM tree, and other replica metadata.
         superblock: SuperBlock,
 
-        /// Context for SuperBlock.open(), .checkpoint(), and .sync().
+        /// Context for SuperBlock.open() and .checkpoint().
         superblock_context: SuperBlock.Context = undefined,
-        /// Context for SuperBlock.view_change().
+        /// Context for SuperBlock.view_change(), which can happen concurrently to .checkpoint().
         superblock_context_view_change: SuperBlock.Context = undefined,
 
         grid: Grid,
@@ -1590,7 +1590,7 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
 
-            if (self.syncing == .updating_superblock) {
+            if (self.syncing == .updating_checkpoint) {
                 log.debug("{}: on_prepare: ignoring (sync)", .{self.replica});
                 return;
             }
@@ -1903,7 +1903,7 @@ pub fn ReplicaType(
 
         fn on_repair(self: *Self, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
-            assert(self.syncing != .updating_superblock);
+            assert(self.syncing != .updating_checkpoint);
 
             if (self.status != .normal and self.status != .view_change) {
                 log.debug("{}: on_repair: ignoring ({})", .{ self.replica, self.status });
@@ -2261,7 +2261,7 @@ pub fn ReplicaType(
                     .idle => unreachable,
                     .canceling_commit,
                     .canceling_grid,
-                    .updating_superblock,
+                    .updating_checkpoint,
                     => {
                         log.debug(
                             \\{}: on_start_view: sync {s} view={} op_checkpoint={} op_checkpoint_new={}
@@ -2286,14 +2286,12 @@ pub fn ReplicaType(
                     view_checkpoint.header.op,
                 });
 
-                self.sync_dispatch(.{ .updating_superblock = .{
-                    .checkpoint_state = view_checkpoint.*,
-                } });
+                self.sync_dispatch(.{ .updating_checkpoint = view_checkpoint.* });
 
                 // The new checkpoint will be written to the superblock asynchronously.
                 // From this point on, we are in a delicate state where we must be using this
                 // in-memory checkpoint to check validity of log messages.
-                assert(self.syncing == .updating_superblock);
+                assert(self.syncing == .updating_checkpoint);
                 assert(!self.state_machine_opened);
             }
 
@@ -2326,14 +2324,14 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.syncing == .updating_superblock) {
+            if (self.syncing == .updating_checkpoint) {
                 // State sync can "truncate" the first batch of committed ops!
                 maybe(self.commit_min >
-                    self.syncing.updating_superblock.checkpoint_state.header.op);
+                    self.syncing.updating_checkpoint.header.op);
                 assert(self.commit_min <= constants.lsm_compaction_ops +
-                    self.syncing.updating_superblock.checkpoint_state.header.op);
+                    self.syncing.updating_checkpoint.header.op);
 
-                self.commit_min = self.syncing.updating_superblock.checkpoint_state.header.op;
+                self.commit_min = self.syncing.updating_checkpoint.header.op;
                 self.sync_wal_repair_progress = .{
                     .commit_min = self.commit_min,
                     .advanced = true,
@@ -2355,13 +2353,13 @@ pub fn ReplicaType(
                 },
                 .recovering_head => {
                     self.transition_to_normal_from_recovering_head_status(message.header.view);
-                    if (self.syncing == .updating_superblock) {
+                    if (self.syncing == .updating_checkpoint) {
                         self.view_durable_update();
                     }
                     self.commit_journal();
                 },
                 .normal => {
-                    if (self.syncing == .updating_superblock) {
+                    if (self.syncing == .updating_checkpoint) {
                         self.view_durable_update();
                     }
                 },
@@ -2372,7 +2370,7 @@ pub fn ReplicaType(
             assert(message.header.view == self.log_view);
             assert(message.header.view == self.view);
             assert(self.backup());
-            if (self.syncing == .updating_superblock) assert(self.view_durable_updating());
+            if (self.syncing == .updating_checkpoint) assert(self.view_durable_updating());
 
             if (self.syncing == .idle) self.repair();
         }
@@ -4630,7 +4628,7 @@ pub fn ReplicaType(
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_start_view_message(self: *Self, nonce: u128) *Message.StartView {
             assert(self.status == .normal);
-            assert(self.syncing != .updating_superblock);
+            assert(self.syncing != .updating_checkpoint);
             assert(self.replica == self.primary_index(self.view));
             assert(self.commit_min == self.commit_max);
             assert(self.commit_min <= self.op);
@@ -5740,11 +5738,11 @@ pub fn ReplicaType(
 
         /// Like prepare_max, but takes into account yet the in-memory checkpoint during sync.
         fn op_prepare_max_sync(self: *const Self) u64 {
-            if (self.syncing != .updating_superblock) return self.op_prepare_max();
+            if (self.syncing != .updating_checkpoint) return self.op_prepare_max();
 
             return vsr.Checkpoint.prepare_max_for_checkpoint(
                 vsr.Checkpoint.checkpoint_after(
-                    self.syncing.updating_superblock.checkpoint_state.header.op,
+                    self.syncing.updating_checkpoint.header.op,
                 ),
             ).?;
         }
@@ -5837,7 +5835,7 @@ pub fn ReplicaType(
         /// for ensuring that replica.op is valid.
         fn op_repair_min(self: *const Self) u64 {
             if (self.status == .recovering) assert(self.solo());
-            assert(self.syncing == .updating_superblock or self.op >= self.op_checkpoint());
+            assert(self.syncing == .updating_checkpoint or self.op >= self.op_checkpoint());
             assert(self.op <= self.op_prepare_max_sync());
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
@@ -5863,7 +5861,7 @@ pub fn ReplicaType(
             assert(repair_min <= self.op);
             assert(repair_min <= self.commit_min + 1);
             assert(repair_min <= self.op_checkpoint() + 1);
-            assert(self.syncing == .updating_superblock or
+            assert(self.syncing == .updating_checkpoint or
                 self.op - repair_min < constants.journal_slot_count);
             assert(self.checkpoint_id_for_op(repair_min) != null);
             return repair_min;
@@ -6134,7 +6132,7 @@ pub fn ReplicaType(
             }
 
             self.repair_timeout.reset();
-            if (self.syncing == .updating_superblock) return;
+            if (self.syncing == .updating_checkpoint) return;
             if (!self.state_machine_opened) return;
 
             assert(self.status == .normal or self.status == .view_change);
@@ -6341,7 +6339,7 @@ pub fn ReplicaType(
             assert(header.valid_checksum());
             assert(header.invalid() == null);
             assert(header.command == .prepare);
-            if (self.syncing == .updating_superblock) return false;
+            if (self.syncing == .updating_checkpoint) return false;
 
             if (header.view > self.view) {
                 log.debug("{}: repair_header: op={} checksum={} view={} (newer view)", .{
@@ -6936,7 +6934,7 @@ pub fn ReplicaType(
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
-                assert(self.syncing == .updating_superblock or self.journal.has(header));
+                assert(self.syncing == .updating_checkpoint or self.journal.has(header));
             }
 
             if (header.op == self.op_checkpoint() + 1) {
@@ -7783,7 +7781,7 @@ pub fn ReplicaType(
             assert(
                 self.log_view > self.log_view_durable() or
                     self.view > self.view_durable() or
-                    self.syncing == .updating_superblock,
+                    self.syncing == .updating_checkpoint,
             );
             // The primary must only persist the SV headers after repairs are done.
             // Otherwise headers could be nacked, truncated, then restored after a crash.
@@ -7811,38 +7809,34 @@ pub fn ReplicaType(
                     .view = self.view,
                     .log_view = self.log_view,
                     .headers = &self.view_headers,
-                    .checkpoint = switch (self.syncing) {
-                        .updating_superblock => |*stage| &stage.checkpoint_state,
-                        else => &self.superblock.staging.vsr_state.checkpoint,
-                    },
-                    .sync_op_max = switch (self.syncing) {
-                        .updating_superblock => |*stage| vsr.Checkpoint.trigger_for_checkpoint(
-                            stage.checkpoint_state.header.op,
-                        ).?,
-                        else => self.superblock.staging.vsr_state.sync_op_max,
-                    },
-                    .sync_op_min = switch (self.syncing) {
-                        .updating_superblock => |_| sync_op_min: {
-                            const syncing_already =
-                                self.superblock.staging.vsr_state.sync_op_max > 0;
-                            const sync_min_old = self.superblock.staging.vsr_state.sync_op_min;
+                    .sync_checkpoint = switch (self.syncing) {
+                        .updating_checkpoint => |*checkpoint_state| .{
+                            .checkpoint = checkpoint_state,
+                            .sync_op_min = sync_op_min: {
+                                const syncing_already =
+                                    self.superblock.staging.vsr_state.sync_op_max > 0;
+                                const sync_min_old = self.superblock.staging.vsr_state.sync_op_min;
 
-                            const sync_min_new = if (vsr.Checkpoint.trigger_for_checkpoint(
-                                self.op_checkpoint(),
-                            )) |trigger|
-                                // +1 because sync_op_min is inclusive, but (when !syncing_already)
-                                // `vsr_state.checkpoint.commit_min` itself does not need to be
-                                // synced.
-                                trigger + 1
-                            else
-                                0;
+                                const sync_min_new = if (vsr.Checkpoint.trigger_for_checkpoint(
+                                    self.op_checkpoint(),
+                                )) |trigger|
+                                    // +1 because sync_op_min is inclusive, but (when
+                                    // !syncing_already) `vsr_state.checkpoint.commit_min` itself
+                                    // does not need to be synced.
+                                    trigger + 1
+                                else
+                                    0;
 
-                            break :sync_op_min if (syncing_already)
-                                @min(sync_min_old, sync_min_new)
-                            else
-                                sync_min_new;
+                                break :sync_op_min if (syncing_already)
+                                    @min(sync_min_old, sync_min_new)
+                                else
+                                    sync_min_new;
+                            },
+                            .sync_op_max = vsr.Checkpoint.trigger_for_checkpoint(
+                                checkpoint_state.header.op,
+                            ).?,
                         },
-                        else => self.superblock.staging.vsr_state.sync_op_min,
+                        else => null,
                     },
                 },
             );
@@ -7872,8 +7866,8 @@ pub fn ReplicaType(
             assert(self.log_view_durable() <= self.log_view);
 
             switch (self.syncing) {
-                .updating_superblock => |stage| {
-                    if (stage.checkpoint_state.header.op == self.op_checkpoint()) {
+                .updating_checkpoint => |checkpoint| {
+                    if (checkpoint.header.op == self.op_checkpoint()) {
                         self.sync_superblock_update_finish();
                     }
                 },
@@ -7888,8 +7882,8 @@ pub fn ReplicaType(
                 (self.replica != self.primary_index(self.view) or self.status == .normal);
             assert(!(update_dvc and update_sv));
 
-            const update_checkpoint = self.syncing == .updating_superblock and
-                self.syncing.updating_superblock.checkpoint_state.header.op > self.op_checkpoint();
+            const update_checkpoint = self.syncing == .updating_checkpoint and
+                self.syncing.updating_checkpoint.header.op > self.op_checkpoint();
 
             if (update_dvc or update_sv or update_checkpoint) self.view_durable_update();
 
@@ -8735,7 +8729,7 @@ pub fn ReplicaType(
                     assert(self.grid.read_global_queue.empty());
                 },
                 .awaiting_checkpoint => {}, // Waiting for a usable sync target.
-                .updating_superblock => self.sync_superblock_update_start(),
+                .updating_checkpoint => self.sync_superblock_update_start(),
             }
         }
 
@@ -8802,9 +8796,9 @@ pub fn ReplicaType(
 
         fn sync_superblock_update_start(self: *Self) void {
             assert(!self.solo());
-            assert(self.syncing == .updating_superblock);
+            assert(self.syncing == .updating_checkpoint);
             assert(self.superblock.working.vsr_state.checkpoint.header.op <
-                self.syncing.updating_superblock.checkpoint_state.header.checksum);
+                self.syncing.updating_checkpoint.header.checksum);
             assert(self.sync_tables == null);
             assert(self.commit_stage == .idle);
             assert(self.grid.read_global_queue.empty());
@@ -8836,21 +8830,21 @@ pub fn ReplicaType(
             assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_writes.executing() == 0);
             assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
-            assert(self.syncing == .updating_superblock);
+            assert(self.syncing == .updating_checkpoint);
             assert(!self.state_machine_opened);
             assert(self.release.value <=
                 self.superblock.working.vsr_state.checkpoint.release.value);
 
-            const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
+            const checkpoint_state: *const vsr.CheckpointState = &self.syncing.updating_checkpoint;
 
             assert(self.superblock.working.vsr_state.checkpoint.header.checksum ==
-                stage.checkpoint_state.header.checksum);
+                checkpoint_state.header.checksum);
             assert(self.superblock.staging.vsr_state.checkpoint.header.checksum ==
-                stage.checkpoint_state.header.checksum);
+                checkpoint_state.header.checksum);
             assert(stdx.equal_bytes(
                 vsr.CheckpointState,
                 &self.superblock.working.vsr_state.checkpoint,
-                &stage.checkpoint_state,
+                checkpoint_state,
             ));
 
             assert(self.commit_min == self.superblock.working.vsr_state.checkpoint.header.op);
