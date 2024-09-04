@@ -10,6 +10,8 @@ services:
       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
       - REPLICA_COUNT=3
       - REPLICA=0
+    volumes:
+      - ./volumes/database:/var/data
     networks:
       antithesis-net:
         ipv4_address: 10.20.20.10
@@ -22,6 +24,8 @@ services:
       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
       - REPLICA_COUNT=3
       - REPLICA=1
+    volumes:
+      - ./volumes/database:/var/data
     networks:
       antithesis-net:
         ipv4_address: 10.20.20.11
@@ -34,6 +38,8 @@ services:
       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
       - REPLICA_COUNT=3
       - REPLICA=2
+    volumes:
+      - ./volumes/database:/var/data
     networks:
       antithesis-net:
         ipv4_address: 10.20.20.12

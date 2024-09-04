@@ -19,15 +19,15 @@ if [ $# -ne 0 ] || [ -z "$CLUSTER" ] || [ -z "$REPLICA" ] || [ -z "$ADDRESSES" ]
 	exit 1
 fi
 
-datafile="${CLUSTER}_${REPLICA}.antithesis.tigerbeetle"
+datafile="/var/data/${CLUSTER}_${REPLICA}.antithesis.tigerbeetle"
 
-rm -f "${datafile}"
-
-./tigerbeetle format \
-	--cluster="$CLUSTER" \
-	--replica="$REPLICA" \
-	--replica-count="$REPLICA_COUNT" \
-	"${datafile}"
+if [ ! -f "${datafile}" ]; then
+  ./tigerbeetle format \
+    --cluster="$CLUSTER" \
+    --replica="$REPLICA" \
+    --replica-count="$REPLICA_COUNT" \
+    "${datafile}"
+fi
 
 exec ./tigerbeetle start \
 	--addresses="$ADDRESSES" \
