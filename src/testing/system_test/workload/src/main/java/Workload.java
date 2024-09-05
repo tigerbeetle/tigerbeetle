@@ -10,7 +10,7 @@ import com.tigerbeetle.TransferFlags;
 
 public class Workload {
   static int ACCOUNTS_COUNT_MAX = 100;
-  static int BATCH_SIZE_MAX = 8190;
+  static int BATCH_SIZE_MAX = 100;
 
   Model model = new Model();
   Random random;
@@ -22,31 +22,43 @@ public class Workload {
   }
 
   void run() {
-    for (int iteration = 0; true; iteration++) {
+    while (true) {
       var command = randomCommand();
-      System.out.printf("%d: Executing %s\n", iteration, command.getClass().getSimpleName());
+      switch (command) {
+        case CreateAccounts(var accounts) -> System.out.printf("Creating %d accounts\n",
+            accounts.size());
+        case CreateTransfers(var transfers) -> System.out.printf("Creating %d transfers\n",
+            transfers.size());
+        default -> {
+          assert false : "unknown command";
+        }
+      }
       var result = command.execute(client);
       result.reconcile(model);
+
+      lookupAllAccounts().ifPresent(query -> {
+        System.out.printf("Querying %d accounts\n", query.ids().length);
+        var response = query.execute(client);
+        response.reconcile(model);
+      });
     }
   }
 
   Command<?> randomCommand() {
-    // Commands are wrapped in `Optional`, to represent if they are enabled.
-    var commandsAll = List.of(createAccounts(), createTransfers(), lookupAllAccounts());
+    // Commands are `Supplier`s of values. They are intially wrapped in `Optional`, to represent if
+    // they are enabled. Further, they are wrapped in `WithOdds`, increasing the likelyhood of
+    // certain commands being chosen.
+    var commandsAll = List.of(WithOdds.of(1, createAccounts()), WithOdds.of(5, createTransfers()));
 
-    // Enabled commands are further wrapped in `Supplier`s, because we don't want to use our entropy
-    // to realize all of them, when only one will be selected in the end. They're basically lazy
-    // generators.
-    //
     // Here we select all commands that are currently enabled.
-    var commandsEnabled =
-        commandsAll.stream().<Supplier<? extends Command<?>>>mapMulti(Optional::ifPresent).toList();
+    var commandsEnabled = commandsAll.stream().filter(x -> x.value().isPresent())
+        .map(x -> WithOdds.of(x.odds(), x.value().get())).toList();
 
     // There should always be at least one enabled command.
     assert !commandsEnabled.isEmpty() : "no commands are enabled";
 
-    // Select and realize a single command.
-    return commandsEnabled.get(random.nextInt(0, commandsEnabled.size())).get();
+    // Select and realize a single command based on the odds.
+    return Arbitrary.odds(random, commandsEnabled).get();
   }
 
   Optional<Supplier<? extends Command<?>>> createAccounts() {
@@ -97,7 +109,7 @@ public class Workload {
         var ledger2 = ledger.getKey();
         var code = random.nextInt(1, 100);
         var amount = BigInteger.valueOf(random.nextLong(0, Long.MAX_VALUE));
-        var flags = random.nextBoolean() ? TransferFlags.LINKED : TransferFlags.NONE;
+        var flags = random.nextInt(0, 5) == 0 ? TransferFlags.LINKED : TransferFlags.NONE;
 
         int debitAccountIndex = random.nextInt(0, ledger.getValue().size());
         int creditAccountIndex = random.ints(0, accounts.size())
@@ -113,18 +125,15 @@ public class Workload {
     });
   }
 
-  Optional<Supplier<? extends Command<?>>> lookupAllAccounts() {
+  Optional<LookupAccounts> lookupAllAccounts() {
     var accounts = model.allAccounts();
     if (accounts.size() >= 1) {
-      return Optional.of(() -> {
+      var ids = new long[accounts.size()];
+      for (int i = 0; i < accounts.size(); i++) {
+        ids[i] = accounts.get(i).id();
+      }
 
-        var ids = new long[accounts.size()];
-        for (int i = 0; i < accounts.size(); i++) {
-          ids[i] = accounts.get(i).id();
-        }
-
-        return new LookupAccounts(ids);
-      });
+      return Optional.of(new LookupAccounts(ids));
     }
 
     return Optional.empty();
