@@ -21,8 +21,7 @@ pub const CLIArgs = struct {
     sha: []const u8,
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
-    _ = gpa;
+pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     try devhub_metrics(shell, cli_args);
 }
 
