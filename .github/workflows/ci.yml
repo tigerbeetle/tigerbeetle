@@ -161,7 +161,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 2147483647
+      - run: sudo apt install kcov
       - run: ./zig/download.sh
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
@@ -173,21 +175,6 @@ jobs:
         with:
           path: ./src/devhub
       - uses: actions/deploy-pages@v4
-
-  kcov:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2147483647
-      - run: sudo apt install kcov
-      - run: ./zig/download.sh
-      - run: ./zig/zig build scripts -- kcov
-      - uses: actions/upload-artifact@v4
-        with:
-          name: code-coverage-report
-          path: zig-out/kcov
 
   # Work around GitHub considering Skipped jobs success for "Require status checks before merging"
   # See also:
