@@ -6,7 +6,7 @@ sidebar_position: 1
 
 Documentation for (roughly) code in the `src/vsr` directory.
 
-# Glossary
+## Glossary
 
 Consensus:
 
@@ -25,7 +25,7 @@ Storage:
 - _WAL_: Write-ahead log. It is implemented as two on-disk ring buffers. Entries are only overwritten after they have been checkpointed.
 - _state sync_: The process of syncing checkpointed data (LSM root information, the _grid_, and the superblock freeset). When a replica lags behind the cluster far enough that their WALs no longer intersect, the lagging replica must state sync to catch up.
 
-# Protocols
+## Protocols
 
 ### Commands
 
@@ -58,15 +58,15 @@ Unlike [VRR](https://pmg.csail.mit.edu/papers/vr-revisited.pdf), TigerBeetle doe
 Instead, replicas persist their VSR state to the superblock.
 This ensures that a recovering replica never backtracks to an older view (from the point of view of the cluster).
 
-## Protocol: Ping (Replica-Replica)
+### Protocol: Ping (Replica-Replica)
 
 Replicas send `command=ping`/`command=pong` messages to one another to synchronize clocks.
 
-## Protocol: Ping (Replica-Client)
+### Protocol: Ping (Replica-Client)
 
 Clients send `command=ping_client` (and receive `command=pong_client`) messages to (from) replicas to learn the cluster's current view.
 
-## Protocol: Normal
+### Protocol: Normal
 
 Normal protocol prepares and commits requests (from clients) and sends replies (to clients).
 
@@ -105,7 +105,7 @@ See also:
 
 - [VRR](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) §4.1
 
-## Protocol: Start-View-Change
+### Protocol: Start-View-Change
 
 Start-View-Change (SVC) protocol initiates [view-changes](#protocol-view-change) with minimal disruption.
 
@@ -126,7 +126,7 @@ See also:
 - [Raft does not Guarantee Liveness in the face of Network Faults](https://decentralizedthoughts.github.io/2020-12-12-raft-liveness-full-omission/) ("PreVote and CheckQuorum")
 - ["Consensus: Bridging Theory and Practice"](https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf) §6.2 "Leaders" describes periodically committing a heartbeat to detect stale leaders.
 
-## Protocol: View-Change
+### Protocol: View-Change
 
 A replica sends `command=do_view_change` to all replicas, with the `view` it is attempting to start.
 
@@ -158,9 +158,9 @@ When the primary collects its DVC quorum:
 6. Then primary commits all prepares which are not known to be uncommitted.
 7. Then the primary transitions to `status=normal` and broadcasts a `command=start_view`.
 
-## Protocol: Request/Start View
+### Protocol: Request/Start View
 
-### `request_start_view`
+#### `request_start_view`
 
 A backup sends a `command=request_start_view` to the primary of a view when any of the following occur:
 
@@ -170,7 +170,7 @@ A backup sends a `command=request_start_view` to the primary of a view when any 
 - the backup can't make progress committing and needs to state sync, or
 - a replica recovers to `status=recovering_head`
 
-### `start_view`
+#### `start_view`
 
 When a `status=normal` primary receives `command=request_start_view`, it replies with a `command=start_view`.
 `command=start_view` includes:
@@ -187,7 +187,7 @@ A `start_view` contains the following headers (which may overlap):
 - The "hooks": the header of any previous checkpoint triggers within our repairable range.
   This helps a lagging replica catch up. (There are at most 2).
 
-## Protocol: Repair Journal
+### Protocol: Repair Journal
 
 `request_headers` and `headers` repair gaps or breaks in a replica's journal headers.
 Repaired headers are a prerequisite for [repairing prepares](#protocol-repair-wal).
@@ -200,7 +200,7 @@ Gaps/breaks in a replica's journal headers may occur:
 - On a backup, which has not finished repair.
 - On a new primary during a view-change, which has not finished repair.
 
-## Protocol: Repair WAL
+### Protocol: Repair WAL
 
 The replica's journal tracks which prepares the WAL requires — i.e. headers for which either:
 
@@ -222,7 +222,7 @@ Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/
 See also [State Sync](./sync.md) protocol — the extent of WAL that the replica can/should repair
 depends on the checkpoint.
 
-## Protocol: Repair Client Replies
+### Protocol: Repair Client Replies
 
 The replica stores the latest reply to each active client.
 
@@ -233,7 +233,7 @@ In response to a `request_reply`:
 - Respond with the `command=reply` (the requested reply), if available and valid.
 - Otherwise do not reply.
 
-## Protocol: Client
+### Protocol: Client
 
 1. Client sends `command=request operation=register` to registers with the cluster by starting a new request-reply hashchain. (See also: [Protocol: Normal](#protocol-normal)).
 2. Client receives `command=reply operation=register` from the cluster. (If the cluster is at the maximum number of clients, it evicts the oldest).
@@ -247,7 +247,7 @@ See also:
 - [Integration: Client Session Lifecycle](../../reference/sessions.md#lifecycle)
 - [Integration: Client Session Eviction](../../reference/sessions.md#eviction)
 
-## Protocol: Repair Grid
+### Protocol: Repair Grid
 
 Grid repair is triggered when a replica discovers a corrupt (or missing) grid block.
 
@@ -260,23 +260,23 @@ That is, a replica can help other replicas repair and repair itself simultaneous
 
 TODO Describe state sync fallback.
 
-## Protocol: Sync Client Replies
+### Protocol: Sync Client Replies
 
 Sync missed client replies using [Protocol: Repair Grid](#protocol-repair-client-replies).
 
 See [State Sync](./sync.md) for details.
 
-## Protocol: Sync Forest
+### Protocol: Sync Forest
 
 Sync missed LSM manifest and table blocks using [Protocol: Repair Grid](#protocol-repair-grid).
 
 See [State Sync](./sync.md) for details.
 
-## Protocol: Reconfiguration
+### Protocol: Reconfiguration
 
 TODO (Unimplemented)
 
-# Quorums
+## Quorums
 
 - The _replication quorum_ is the minimum number of replicas required to complete a commit.
 - The _view-change quorum_ is the minimum number of replicas required to complete a view-change.

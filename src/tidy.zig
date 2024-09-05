@@ -67,6 +67,15 @@ test "tidy" {
 
             try dead_detector.visit(source_file);
         }
+
+        if (mem.endsWith(u8, source_file.path, ".md")) {
+            tidy_markdown_title(source_file.text) catch |err| {
+                std.debug.print(
+                    "{s} error: invalid markdown headings, {}\n",
+                    .{ source_file.path, err },
+                );
+            };
+        }
     }
 
     try dead_detector.finish();
@@ -292,6 +301,38 @@ fn tidy_long_functions(
     return .{
         .function_line_count_longest = function_line_count_longest,
     };
+}
+
+/// Checks that each markdown document has exactly one h1.
+///
+/// There are two schools of thought regarding largest (`# War and Peace`)
+/// headings in markdown. One school says that they are _section_ titles, so
+/// you could have multiple #'s in the document. But another option is to
+/// say that a single # signifies document _title_, and there should be only
+/// one in a document.
+///
+/// We use markdown to create HTML, so # turns into h1. MDN recommends that
+/// there's only a single h1 in a page:
+///
+/// <https://developer.mozilla.org/en-US/docs/Web/HTML/Element/Heading_Elements#avoid_using_multiple_h1_elements_on_one_page>
+///
+/// For this reason,  we follow the second convention.
+fn tidy_markdown_title(text: []const u8) !void {
+    var fenced_block = false; // Avoid interpreting `# ` shell comments as titles.
+    var heading_count: u32 = 0;
+    var line_count: u32 = 0;
+    var it = std.mem.split(u8, text, "\n");
+    while (it.next()) |line| {
+        line_count += 1;
+        if (mem.startsWith(u8, line, "```")) fenced_block = !fenced_block;
+        if (!fenced_block and mem.startsWith(u8, line, "# ")) heading_count += 1;
+    }
+    assert(!fenced_block);
+    switch (heading_count) {
+        0 => if (line_count > 2) return error.MissingTitle, // No need for a title for a short note.
+        1 => {},
+        else => return error.DuplicateTitle,
+    }
 }
 
 // Zig's lazy compilation model makes it too easy to forget to include a file into the build --- if
