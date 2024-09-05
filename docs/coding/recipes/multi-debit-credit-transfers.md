@@ -49,6 +49,32 @@ This example debits multiple accounts and credits a single account. It uses the 
 |    USD |           `B` |            `X` |     50 |           true |
 |    USD |           `C` |            `X` |     10 |          false |
 
+### Multiple Debits, Single Credit, Balancing debits
+
+This example debits multiple accounts and credits a single account.
+The total amount to transfer to the credit account is known (in this case, `100`), but the balances
+of the individual debit accounts are not known. That is, each debit account should contribute as
+much as possible (in order of precedence) up to the target, cumulative transfer amount.
+
+It uses the following accounts:
+
+- Three _source accounts_ `A`, `B`, and `C`, with [`flags.debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits).
+- A _destination account_ `X`.
+- A control account `LIMIT`, with [`flags.debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits).
+- A control account `SETUP`, for setting up the `LIMIT` account.
+
+| Id | Ledger | Debit Account | Credit Account | Amount | Flags |
+| -: | -----: | ------------: | -------------: | -----: | :------------- |
+|  1 |    USD |       `SETUP` |        `LIMIT` |    100 | [`linked`](../../reference/transfer.md#flagslinked) |
+|  2 |    USD |           `A` |        `SETUP` |    100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+|  3 |    USD |           `B` |        `SETUP` |    100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+|  4 |    USD |           `C` |        `SETUP` |    100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+|  5 |    USD |       `SETUP` |            `X` |    100 | [`linked`](../../reference/transfer.md#flagslinked) |
+|  6 |    USD |       `LIMIT` |        `SETUP` |    100 | [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+
+If the cumulative [credit balance](../data-modeling.md#credit-balances) of `A + B + C` is less than
+`100`, the chain will fail (transfer `6` will return `exceeds_credits`).
+
 ## Many-to-Many Transfers
 
 Transactions with multiple debits and multiple credits are a bit more involved (but you got this!).

@@ -4408,6 +4408,68 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
     );
 }
 
+test "create_transfers: multiple debits, single credit, balancing debits" {
+    // See `recipes/multi-debit-credit-transfers.md`.
+    // Source accounts:     A1, A2, A3
+    // Control account:     A4
+    // Limit account:       A5
+    // Destination account: A6
+
+    // Sufficient funds:
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A5  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A6  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ setup A1 0 0 0 40
+        \\ setup A2 0 0 0 40
+        \\ setup A3 0 0 0 21
+        \\
+        \\ transfer T1 A4 A5  100   _  _  _  _    0 L1 C1 LNK _ _ _   _   _ _ _ _ _ _ ok
+        \\ transfer T2 A1 A4  100   _  _  _  _    0 L1 C1 LNK _ _ _ BDR BCR _ _ _ _ _ ok
+        \\ transfer T3 A2 A4  100   _  _  _  _    0 L1 C1 LNK _ _ _ BDR BCR _ _ _ _ _ ok
+        \\ transfer T4 A3 A4  100   _  _  _  _    0 L1 C1 LNK _ _ _ BDR BCR _ _ _ _ _ ok
+        \\ transfer T5 A4 A6  100   _  _  _  _    0 L1 C1 LNK _ _ _   _   _ _ _ _ _ _ ok
+        \\ transfer T6 A5 A4   -0   _  _  _  _    0 L1 C1   _ _ _ _   _ BCR _ _ _ _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 0  40 0  40 _
+        \\ lookup_account A2 0  40 0  40 _
+        \\ lookup_account A3 0  20 0  21 _
+        \\ lookup_account A4 0 200 0 200 _
+        \\ lookup_account A5 0 100 0 100 _
+        \\ lookup_account A6 0   0 0 100 _
+        \\ commit lookup_accounts
+    );
+
+    // Insufficient funds.
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A5  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A6  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ setup A1 0 0 0 40
+        \\ setup A2 0 0 0 40
+        \\ setup A3 0 0 0 19
+        \\
+        \\ transfer T1 A4 A5  100   _  _  _  _    0 L1 C1 LNK _ _ _   _   _ _ _ _ _ _ linked_event_failed
+        \\ transfer T2 A1 A4  100   _  _  _  _    0 L1 C1 LNK _ _ _ BDR BCR _ _ _ _ _ linked_event_failed
+        \\ transfer T3 A2 A4  100   _  _  _  _    0 L1 C1 LNK _ _ _ BDR BCR _ _ _ _ _ linked_event_failed
+        \\ transfer T4 A3 A4  100   _  _  _  _    0 L1 C1 LNK _ _ _ BDR BCR _ _ _ _ _ linked_event_failed
+        \\ transfer T5 A4 A6  100   _  _  _  _    0 L1 C1 LNK _ _ _   _   _ _ _ _ _ _ linked_event_failed
+        \\ transfer T6 A5 A4   -0   _  _  _  _    0 L1 C1   _ _ _ _   _ BCR _ _ _ _ _ exceeds_credits
+        \\ commit create_transfers
+    );
+}
+
 test "imported events: imported batch" {
     try check(
         \\ tick 10 nanoseconds
