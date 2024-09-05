@@ -45,7 +45,7 @@ record CreateAccounts(ArrayList<NewAccount> accounts) implements Command<CreateA
       createAccountFailedIndices.set(index);
     }
 
-    // We partition the results into created and failed using the bitset.
+    // We partition the results into created and failed.
     var created = new ArrayList<NewAccount>();
     var failed = new ArrayList<NewAccount>();
 
@@ -72,8 +72,8 @@ record CreateAccountsResult(ArrayList<NewAccount> created, ArrayList<NewAccount>
     for (var newAccount : created) {
       assert !model.accounts.containsKey(newAccount.id());
 
-      var account = new AccountModel(newAccount.id(), newAccount.ledger(), newAccount.code(),
-          newAccount.flags(), BigInteger.ZERO, BigInteger.ZERO);
+      var account = new CreatedAccount(newAccount.id(), newAccount.ledger(), newAccount.code(),
+          newAccount.flags());
 
       model.accounts.put(account.id(), account);
     }
@@ -112,7 +112,7 @@ record CreateTransfers(ArrayList<NewTransfer> transfers) implements Command<Crea
       transferFailedIndices.set(index);
     }
 
-    // We partition the results into created and failed using the bitset.
+    // We partition the results into created and failed.
     var created = new ArrayList<NewTransfer>();
     var failed = new ArrayList<NewTransfer>();
 
@@ -142,18 +142,6 @@ record CreateTransfersResult(ArrayList<NewTransfer> created, ArrayList<NewTransf
       assert debitAccount != null;
       assert creditAccount != null;
       assert debitAccount.ledger() == creditAccount.ledger();
-
-      // Update debitsPosted
-      model.accounts.put(debitAccount.id(),
-          new AccountModel(debitAccount.id(), debitAccount.ledger(), debitAccount.code(),
-              debitAccount.flags(), debitAccount.debitsPosted().add(transfer.amount()),
-              debitAccount.creditsPosted()));
-
-      // Update creditsPosted
-      model.accounts.put(creditAccount.id(),
-          new AccountModel(creditAccount.id(), creditAccount.ledger(), creditAccount.code(),
-              creditAccount.flags(), creditAccount.debitsPosted(),
-              creditAccount.creditsPosted().add(transfer.amount())));
     }
   }
 }
@@ -173,9 +161,9 @@ record LookupAccounts(long[] ids) implements Command<LookupAccountsResult> {
     // We assume all ids we lookup are from successfully created accounts.
     assert accounts.getLength() == this.ids.length : "expected all ids of lookup_accounts to exist";
 
-    var results = new ArrayList<AccountModel>(accounts.getLength());
+    var results = new ArrayList<QueriedAccount>(accounts.getLength());
     while (accounts.next()) {
-      results.add(new AccountModel(accounts.getId(UInt128.LeastSignificant), accounts.getLedger(),
+      results.add(new QueriedAccount(accounts.getId(UInt128.LeastSignificant), accounts.getLedger(),
           accounts.getCode(), accounts.getFlags(), accounts.getDebitsPosted(),
           accounts.getCreditsPosted()));
     }
@@ -185,7 +173,12 @@ record LookupAccounts(long[] ids) implements Command<LookupAccountsResult> {
 }
 
 
-record LookupAccountsResult(ArrayList<AccountModel> accountsFound) implements Result {
+record QueriedAccount(long id, int ledger, int code, int flags, BigInteger debitsPosted,
+    BigInteger creditsPosted) {
+}
+
+
+record LookupAccountsResult(ArrayList<QueriedAccount> accountsFound) implements Result {
   @Override
   public void reconcile(Model model) {
     // NOTE: These checks assume all known accounts were queried.
@@ -201,7 +194,7 @@ record LookupAccountsResult(ArrayList<AccountModel> accountsFound) implements Re
         .formatted(diff);
   }
 
-  BigInteger debitsCreditsDifference(ArrayList<AccountModel> accounts) {
+  BigInteger debitsCreditsDifference(ArrayList<QueriedAccount> accounts) {
     var debits = BigInteger.ZERO;
     var credits = BigInteger.ZERO;
     for (var account : accounts) {
