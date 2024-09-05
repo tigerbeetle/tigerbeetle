@@ -8,6 +8,14 @@ import com.tigerbeetle.AccountFlags;
 import com.tigerbeetle.Client;
 import com.tigerbeetle.TransferFlags;
 
+/**
+ * This workload runs an infinite loop, generating and executing operations on a cluster.
+ *
+ * Any sucessful operations are reconciled with a model, tracking what accounts exist. Future
+ * operations are generated based on this model.
+ *
+ * After every operation, all accounts are queried, and basic invariants are checked.
+ */
 public class Workload {
   static int ACCOUNTS_COUNT_MAX = 100;
   static int BATCH_SIZE_MAX = 100;
@@ -37,7 +45,6 @@ public class Workload {
       result.reconcile(model);
 
       lookupAllAccounts().ifPresent(query -> {
-        System.out.printf("Querying %d accounts\n", query.ids().length);
         var response = query.execute(client);
         response.reconcile(model);
       });

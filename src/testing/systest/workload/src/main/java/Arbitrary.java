@@ -2,6 +2,9 @@ import java.util.List;
 import java.util.Random;
 import java.util.function.Supplier;
 
+/**
+ * Helpers for generating random values.
+ */
 public class Arbitrary {
   static <T> T element(Random random, List<T> elements) {
     return elements.get(random.nextInt(0, elements.size()));

@@ -6,10 +6,6 @@ import com.tigerbeetle.Client;
 import com.tigerbeetle.UInt128;
 
 public final class Main {
-
-  static int ACCOUNTS_COUNT_MAX = 1024;
-  static int BATCH_SIZE_MAX = 8190;
-
   public static void main(String[] args) throws Exception {
     Map<String, String> env = System.getenv();
     String replicaAddressesArg = Objects.requireNonNull(env.get("REPLICAS"),

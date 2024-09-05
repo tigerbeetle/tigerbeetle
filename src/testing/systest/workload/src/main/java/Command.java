@@ -9,11 +9,20 @@ import com.tigerbeetle.IdBatch;
 import com.tigerbeetle.TransferBatch;
 import com.tigerbeetle.UInt128;
 
+/**
+ * A command (creation or query) that can be executed with a client.
+ * Every such command has an associated result type.
+ */
 interface Command<CommandResult extends Result> {
   CommandResult execute(Client client);
 }
 
 
+/**
+ * The result of executing some command, which can be reconciled with the model. For creations, this
+ * might mean tracking more information about successfully created entities. For queries, it's a
+ * hook to check consistency properties.
+ */
 interface Result {
   void reconcile(Model model);
 }
