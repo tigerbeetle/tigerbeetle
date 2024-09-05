@@ -42,6 +42,7 @@ const tracer = @import("../tracer.zig");
 const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
+const trace = @import("../trace.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
@@ -395,6 +396,7 @@ pub fn CompactionType(
                 timer_write: usize = 0,
             };
 
+            trace: *trace.Tracer,
             grid_reservation: Grid.Reservation,
             value_count_per_beat: u64,
 
@@ -538,6 +540,12 @@ pub fn CompactionType(
         }
 
         pub fn reset(compaction: *Compaction) void {
+            if (compaction.beat) |beat| {
+                beat.trace.reset(.compact_blip_read);
+                beat.trace.reset(.compact_blip_merge);
+                beat.trace.reset(.compact_blip_write);
+            }
+
             compaction.* = .{
                 .tree_config = compaction.tree_config,
                 .grid = compaction.grid,
@@ -808,6 +816,7 @@ pub fn CompactionType(
             });
 
             compaction.beat = .{
+                .trace = compaction.grid.trace,
                 .grid_reservation = grid_reservation,
                 .value_count_per_beat = value_count_per_beat,
             };
@@ -870,6 +879,11 @@ pub fn CompactionType(
             const beat = &compaction.beat.?;
 
             beat.activate_and_assert(.read, callback, ptr);
+
+            beat.trace.start(.compact_blip_read, .{
+                .tree = compaction.tree_config.name,
+                .level_b = compaction.level_b,
+            });
 
             if (!beat.index_read_done) {
                 compaction.blip_read_index();
@@ -1139,6 +1153,7 @@ pub fn CompactionType(
                 std.fmt.fmtDuration(duration),
                 read.*.?.timer_read,
             });
+            beat.trace.stop(.compact_blip_read, .{});
 
             beat.deactivate_assert_and_callback(.read, null);
         }
@@ -1169,6 +1184,12 @@ pub fn CompactionType(
 
             const bar = &compaction.bar.?;
             const beat = &compaction.beat.?;
+
+            beat.trace.start(.compact_blip_merge, .{
+                .tree = compaction.tree_config.name,
+                .level_b = compaction.level_b,
+            });
+            defer beat.trace.stop(.compact_blip_merge, .{});
 
             beat.activate_and_assert(.merge, callback, ptr);
             const merge = &beat.merge.?;
@@ -1750,6 +1771,11 @@ pub fn CompactionType(
 
             log.debug("blip_write({s}): scheduling IO", .{compaction.tree_config.name});
 
+            beat.trace.start(.compact_blip_write, .{
+                .tree = compaction.tree_config.name,
+                .level_b = compaction.level_b,
+            });
+
             assert(write.pending_writes == 0);
 
             // Write any complete index blocks.
@@ -1835,6 +1861,8 @@ pub fn CompactionType(
                 std.fmt.fmtDuration(duration),
                 write.*.?.timer_write,
             });
+            beat.trace.stop(.compact_blip_write, .{});
+
             beat.deactivate_assert_and_callback(.write, null);
         }
 

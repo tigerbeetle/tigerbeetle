@@ -349,6 +349,16 @@ const Command = struct {
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
+        const trace_file = if (args.trace) |trace_path|
+            std.fs.cwd().createFile(trace_path, .{ .exclusive = true }) catch |err| {
+                std.debug.panic("error creating trace file: {}", .{err});
+            }
+        else
+            null;
+        defer if (trace_file) |file| file.close();
+
+        const trace_writer = if (trace_file) |file| file.writer() else null;
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -379,6 +389,7 @@ const Command = struct {
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
+            .tracer_options = .{ .writer = if (trace_writer) |writer| writer.any() else null },
         }) catch |err| switch (err) {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => |e| return e,

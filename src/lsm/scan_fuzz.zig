@@ -602,6 +602,7 @@ const Environment = struct {
     state: State,
 
     storage: *Storage,
+    trace: vsr.trace.Tracer,
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context = undefined,
     grid: Grid,
@@ -621,10 +622,14 @@ const Environment = struct {
         storage: *Storage,
         random: std.rand.Random,
     ) !void {
+        env.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        errdefer env.trace.deinit(allocator);
+
         env.* = .{
             .storage = storage,
             .random = random,
             .state = .init,
+            .trace = env.trace,
 
             .superblock = try SuperBlock.init(allocator, .{
                 .storage = env.storage,
@@ -633,6 +638,7 @@ const Environment = struct {
 
             .grid = try Grid.init(allocator, .{
                 .superblock = &env.superblock,
+                .trace = &env.trace,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
             }),
@@ -648,6 +654,7 @@ const Environment = struct {
     fn deinit(env: *Environment) void {
         env.superblock.deinit(allocator);
         env.grid.deinit(allocator);
+        env.trace.deinit(allocator);
         allocator.free(env.scan_lookup_buffer);
     }
 

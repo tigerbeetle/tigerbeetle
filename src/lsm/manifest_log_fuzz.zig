@@ -260,6 +260,8 @@ const Environment = struct {
     allocator: std.mem.Allocator,
     storage: Storage,
     storage_verify: Storage,
+    trace: vsr.trace.Tracer,
+    trace_verify: vsr.trace.Tracer,
     superblock: SuperBlock,
     superblock_verify: SuperBlock,
     superblock_context: SuperBlock.Context,
@@ -294,6 +296,14 @@ const Environment = struct {
         errdefer env.storage_verify.deinit(allocator);
 
         fields_initialized += 1;
+        env.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        errdefer env.trace.deinit(allocator);
+
+        fields_initialized += 1;
+        env.trace_verify = try vsr.trace.Tracer.init(allocator, 0, .{});
+        errdefer env.trace_verify.deinit(allocator);
+
+        fields_initialized += 1;
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = &env.storage,
             .storage_size_limit = constants.storage_size_limit_max,
@@ -313,6 +323,7 @@ const Environment = struct {
         fields_initialized += 1;
         env.grid = try Grid.init(allocator, .{
             .superblock = &env.superblock,
+            .trace = &env.trace,
             .missing_blocks_max = 0,
             .missing_tables_max = 0,
         });
@@ -321,6 +332,7 @@ const Environment = struct {
         fields_initialized += 1;
         env.grid_verify = try Grid.init(allocator, .{
             .superblock = &env.superblock_verify,
+            .trace = &env.trace_verify,
             .missing_blocks_max = 0,
             .missing_tables_max = 0,
         });
@@ -355,6 +367,8 @@ const Environment = struct {
         env.grid.deinit(env.allocator);
         env.superblock_verify.deinit(env.allocator);
         env.superblock.deinit(env.allocator);
+        env.trace_verify.deinit(env.allocator);
+        env.trace.deinit(env.allocator);
         env.storage_verify.deinit(env.allocator);
         env.storage.deinit(env.allocator);
         env.* = undefined;
@@ -516,6 +530,7 @@ const Environment = struct {
     /// Verify that the state of a ManifestLog restored from checkpoint matches the state
     /// immediately after the checkpoint was created.
     fn verify(env: *Environment) !void {
+        const test_trace = &env.trace;
         const test_superblock = env.manifest_log_verify.superblock;
         const test_storage = test_superblock.storage;
         const test_grid = env.manifest_log_verify.grid;
@@ -524,6 +539,9 @@ const Environment = struct {
         {
             test_storage.copy(env.manifest_log.superblock.storage);
             test_storage.reset();
+
+            test_trace.deinit(env.allocator);
+            test_trace.* = try vsr.trace.Tracer.init(env.allocator, 0, .{});
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().
@@ -539,6 +557,7 @@ const Environment = struct {
             test_grid.deinit(env.allocator);
             test_grid.* = try Grid.init(env.allocator, .{
                 .superblock = test_superblock,
+                .trace = test_trace,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
             });

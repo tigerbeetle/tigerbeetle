@@ -234,6 +234,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.log_block_checksums.count ==
                 manifest_log.log_block_addresses.count);
 
+            manifest_log.grid.trace.reset(.compact_manifest);
+
             manifest_log.log_block_checksums.clear();
             manifest_log.log_block_addresses.clear();
             for (manifest_log.blocks.buffer) |block| @memset(block, 0);
@@ -668,6 +670,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // since we now reserve / forfeit per beat.
             assert((op + 1) % @divExact(constants.lsm_compaction_ops, 2) == 0);
 
+            manifest_log.grid.trace.start(.compact_manifest, .{});
+
             if (op < constants.lsm_compaction_ops or
                 manifest_log.superblock.working.vsr_state.op_compacted(op))
             {
@@ -703,6 +707,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.blocks.count == 0);
             assert(manifest_log.entry_count == 0);
             assert(manifest_log.compact_blocks == null);
+
+            manifest_log.grid.trace.stop(.compact_manifest, .{});
 
             const callback = manifest_log.read_callback.?;
             manifest_log.read_callback = null;
@@ -815,6 +821,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback != null);
             assert(manifest_log.grid_reservation != null);
             assert(manifest_log.compact_blocks.? == 0);
+
+            manifest_log.grid.trace.stop(.compact_manifest, .{});
 
             const callback = manifest_log.read_callback.?;
             manifest_log.read_callback = null;

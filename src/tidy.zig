@@ -143,6 +143,9 @@ fn tidy_long_line(file: SourceFile) !?u32 {
 
                 // vsr.zig's Checkpoint ops diagram.
                 if (std.mem.startsWith(u8, string_value, "OPS: ")) continue;
+
+                // trace.zig's JSON snapshot test.
+                if (std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":0,\"ph\":")) continue;
             }
 
             return line_index;

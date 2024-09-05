@@ -67,6 +67,7 @@ const CLIArgs = union(enum) {
         cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
+        trace: ?[:0]const u8 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
@@ -116,6 +117,7 @@ const CLIArgs = union(enum) {
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
+        trace: ?[:0]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
@@ -395,6 +397,7 @@ pub const Command = union(enum) {
         cache_grid_blocks: u32,
         lsm_forest_compaction_block_count: u32,
         lsm_forest_node_count: u32,
+        trace: ?[:0]const u8,
         development: bool,
         experimental: bool,
         aof: bool,
@@ -439,6 +442,7 @@ pub const Command = union(enum) {
         print_batch_timings: bool,
         id_order: IdOrder,
         statsd: bool,
+        trace: ?[:0]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
         seed: ?[]const u8,
@@ -767,6 +771,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .lsm_forest_node_count = lsm_forest_node_count,
         .development = start.development,
         .experimental = start.experimental,
+        .trace = start.trace,
         .aof = start.aof,
         .path = start.positional.path,
     };
@@ -821,6 +826,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .print_batch_timings = benchmark.print_batch_timings,
         .id_order = benchmark.id_order,
         .statsd = benchmark.statsd,
+        .trace = benchmark.trace,
         .file = benchmark.file,
         .addresses = addresses,
         .seed = benchmark.seed,

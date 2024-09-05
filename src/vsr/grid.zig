@@ -165,6 +165,7 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
+        trace: *vsr.trace.Tracer,
         free_set: FreeSet,
         free_set_checkpoint: CheckpointTrailer,
         blocks_missing: GridBlocksMissing,
@@ -206,6 +207,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
+            trace: *vsr.trace.Tracer,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
             missing_blocks_max: usize,
             missing_tables_max: usize,
@@ -254,6 +256,7 @@ pub fn GridType(comptime Storage: type) type {
 
             return Grid{
                 .superblock = options.superblock,
+                .trace = options.trace,
                 .free_set = free_set,
                 .free_set_checkpoint = free_set_checkpoint,
                 .blocks_missing = blocks_missing,

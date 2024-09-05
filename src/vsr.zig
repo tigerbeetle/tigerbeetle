@@ -20,6 +20,7 @@ pub const tb_client = @import("clients/c/tb_client.zig");
 pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
 pub const tracer = @import("tracer.zig");
+pub const trace = @import("trace.zig");
 pub const stdx = @import("stdx.zig");
 pub const flags = @import("flags.zig");
 pub const grid = @import("vsr/grid.zig");

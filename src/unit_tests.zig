@@ -13,6 +13,7 @@ comptime {
     _ = @import("stdx/bounded_array.zig");
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
+    _ = @import("trace.zig");
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client/echo_client.zig");
