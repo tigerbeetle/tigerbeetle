@@ -28,11 +28,7 @@ pub const Stage = union(enum) {
     awaiting_checkpoint,
 
     /// We received a new checkpoint and a log suffix are in process of writing them to disk.
-    updating_superblock: UpdatingSuperBlock,
-
-    pub const UpdatingSuperBlock = struct {
-        checkpoint_state: vsr.CheckpointState,
-    };
+    updating_checkpoint: vsr.CheckpointState,
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
         return switch (from) {
@@ -41,8 +37,8 @@ pub const Stage = union(enum) {
                 to == .awaiting_checkpoint,
             .canceling_commit => to == .canceling_grid,
             .canceling_grid => to == .awaiting_checkpoint,
-            .awaiting_checkpoint => to == .awaiting_checkpoint or to == .updating_superblock,
-            .updating_superblock => to == .idle,
+            .awaiting_checkpoint => to == .awaiting_checkpoint or to == .updating_checkpoint,
+            .updating_checkpoint => to == .idle,
         };
     }
 };

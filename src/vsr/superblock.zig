@@ -892,9 +892,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
             log_view: u32,
             view: u32,
             headers: *const vsr.Headers.ViewChangeArray,
-            checkpoint: *const vsr.CheckpointState,
-            sync_op_min: u64,
-            sync_op_max: u64,
+            sync_checkpoint: ?struct {
+                checkpoint: *const vsr.CheckpointState,
+                sync_op_min: u64,
+                sync_op_max: u64,
+            },
         };
 
         /// The replica calls view_change():
@@ -916,11 +918,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.vsr_state.commit_max <= update.commit_max);
             assert(superblock.staging.vsr_state.view <= update.view);
             assert(superblock.staging.vsr_state.log_view <= update.log_view);
-            assert(superblock.staging.vsr_state.checkpoint.header.op <=
-                update.checkpoint.header.op);
             assert(superblock.staging.vsr_state.log_view < update.log_view or
                 superblock.staging.vsr_state.view < update.view or
-                superblock.staging.vsr_state.checkpoint.header.op < update.checkpoint.header.op);
+                update.sync_checkpoint != null);
             assert((update.headers.command == .start_view and update.log_view == update.view) or
                 (update.headers.command == .do_view_change and update.log_view < update.view));
             assert(
@@ -934,9 +934,27 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.commit_max = update.commit_max;
             vsr_state.log_view = update.log_view;
             vsr_state.view = update.view;
-            vsr_state.checkpoint = update.checkpoint.*;
-            vsr_state.sync_op_min = update.sync_op_min;
-            vsr_state.sync_op_max = update.sync_op_max;
+            if (update.sync_checkpoint) |*sync_checkpoint| {
+                assert(superblock.staging.vsr_state.checkpoint.header.op <
+                    sync_checkpoint.checkpoint.header.op);
+
+                const checkpoint_next = vsr.Checkpoint.checkpoint_after(
+                    superblock.staging.vsr_state.checkpoint.header.op,
+                );
+                const checkpoint_next_next = vsr.Checkpoint.checkpoint_after(checkpoint_next);
+
+                if (sync_checkpoint.checkpoint.header.op == checkpoint_next) {
+                    assert(sync_checkpoint.checkpoint.parent_checkpoint_id ==
+                        superblock.staging.checkpoint_id());
+                } else if (sync_checkpoint.checkpoint.header.op == checkpoint_next_next) {
+                    assert(sync_checkpoint.checkpoint.grandparent_checkpoint_id ==
+                        superblock.staging.checkpoint_id());
+                }
+
+                vsr_state.checkpoint = sync_checkpoint.checkpoint.*;
+                vsr_state.sync_op_min = sync_checkpoint.sync_op_min;
+                vsr_state.sync_op_max = sync_checkpoint.sync_op_max;
+            }
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
             context.* = .{
