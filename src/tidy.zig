@@ -522,7 +522,7 @@ test "tidy extensions" {
         .{"tools/vscode/format_debug_server.sh"},            .{"src/testing/systest/replica.Dockerfile"},
         .{"src/testing/systest/workload.Dockerfile"},        .{"src/testing/systest/configuration.Dockerfile"},
         .{"src/testing/systest/scripts/build.sh"},           .{"src/testing/systest/scripts/push.sh"},
-        .{"src/testing/systest/scripts/run-tigerbeetle.sh"},
+        .{"src/testing/systest/scripts/run-tigerbeetle.sh"}, .{"src/testing/systest/config/docker-compose.yaml"},
     });
 
     const allocator = std.testing.allocator;
