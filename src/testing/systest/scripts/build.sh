@@ -3,16 +3,16 @@
 # TODO(owickstrom) port to build.zig
 
 usage() {
-	cat <<-EOF
-	usage: ${0##*/} <tag>
+  cat <<-EOF
+  usage: ${0##*/} <tag>
 
-	Build TigerBeetle Docker images for system test, with the specified tag.
-	EOF
+  Build TigerBeetle Docker images for system test, with the specified tag.
+  EOF
 }
 
 if [ $# -ne 1 ] || [ "$1" = '-h' ]; then
-	usage >&2
-	exit 1
+  usage >&2
+  exit 1
 fi
 tag=$1
 

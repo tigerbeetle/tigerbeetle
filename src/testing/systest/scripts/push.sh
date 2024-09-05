@@ -5,26 +5,26 @@
 set -eu
 
 usage() {
-	cat <<-EOF
-	usage: ${0##*/} <tag>
+  cat <<-EOF
+  usage: ${0##*/} <tag>
 
-	Push the TigerBeetle Docker images to Antithesis' registry.
-	EOF
+  Push the TigerBeetle Docker images to Antithesis' registry.
+  EOF
 }
 
 if [ $# -ne 1 ] || [ "$1" = '-h' ]; then
-	usage >&2
-	exit 1
+  usage >&2
+  exit 1
 fi
 tag=$1
 url_prefix='us-central1-docker.pkg.dev/molten-verve-216720/tigerbeetle-repository'
 
 push_image() {
-	image=$1
-	url="$url_prefix/$image:$tag"
+  image=$1
+  url="$url_prefix/$image:$tag"
 
-	docker tag "$image:$tag" "$url"
-	docker push              "$url"
+  docker tag "$image:$tag" "$url"
+  docker push              "$url"
 }
 
 push_image config
