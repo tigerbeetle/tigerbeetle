@@ -204,9 +204,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     };
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
-    // `dist`. MacOS is special cased below --- we use an extra step to merge x86 and arm binaries
-    // into one.
-    // TODO: use std.Target here
+    // `dist`.
     inline for (.{ true, false }) |debug| {
         inline for (targets) |target| {
             try shell.zig(
@@ -234,6 +232,18 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 (if (macos) "universal-macos" else target) ++
                 (if (debug) "-debug" else "") ++
                 ".zip";
+
+            if (std.mem.eql(u8, target, "x86_64-linux")) {
+                const output = try shell.exec_stdout("./{exe_name} version --verbose", .{
+                    .exe_name = exe_name,
+                });
+                assert(std.mem.indexOf(u8, output, "process.verify=true") != null);
+                const build_mode = if (debug)
+                    "build.mode=builtin.OptimizeMode.Debug"
+                else
+                    "build.mode=builtin.OptimizeMode.ReleaseSafe";
+                assert(std.mem.indexOf(u8, output, build_mode) != null);
+            }
 
             try shell.exec("touch -d 1970-01-01T00:00:00Z {exe_name}", .{
                 .exe_name = exe_name,
