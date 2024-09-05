@@ -1,6 +1,7 @@
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.stream.Collectors;
 import com.tigerbeetle.AccountBatch;
 import com.tigerbeetle.Client;
 import com.tigerbeetle.CreateAccountResultBatch;
@@ -183,14 +184,13 @@ record LookupAccountsResult(ArrayList<QueriedAccount> accountsFound) implements 
   public void reconcile(Model model) {
     // NOTE: These checks assume all known accounts were queried.
 
-    // No accounts show up that we didn't create.
-    for (var account : accountsFound) {
-      assert model.accounts.containsKey(account.id());
-    }
+    // All created accounts are found, and no others.
+    assert model.accounts.keySet().equals(accountsFound.stream().map(a -> a.id())
+        .collect(Collectors.toSet())) : "all created accounts were not found by query";
 
     // Total credits and total debits must be equal over all accounts.
     var diff = this.debitsCreditsDifference(accountsFound);
-    assert diff == BigInteger.ZERO : "Expected debits and credits to be equal, but got diff: %d"
+    assert diff == BigInteger.ZERO : "expected debits and credits to be equal, but got diff: %d"
         .formatted(diff);
   }
 
