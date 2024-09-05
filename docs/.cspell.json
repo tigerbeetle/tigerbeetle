@@ -172,6 +172,7 @@
         "swsc",
         "syscall",
         "syscalls",
+        "systest",
         "tbtest",
         "tensorush",
         "tdaly",
