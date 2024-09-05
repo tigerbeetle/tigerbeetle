@@ -188,10 +188,27 @@ record LookupAccounts(long[] ids) implements Command<LookupAccountsResult> {
 record LookupAccountsResult(ArrayList<AccountModel> accountsFound) implements Result {
   @Override
   public void reconcile(Model model) {
+    // NOTE: These checks assume all known accounts were queried.
+
+    // No accounts show up that we didn't create.
     for (var account : accountsFound) {
       assert model.accounts.containsKey(account.id());
     }
+
+    // Total credits and total debits must be equal over all accounts.
+    var diff = this.debitsCreditsDifference(accountsFound);
+    assert diff == BigInteger.ZERO : "Expected debits and credits to be equal, but got diff: %d"
+        .formatted(diff);
   }
 
+  BigInteger debitsCreditsDifference(ArrayList<AccountModel> accounts) {
+    var debits = BigInteger.ZERO;
+    var credits = BigInteger.ZERO;
+    for (var account : accounts) {
+      debits = debits.add(account.debitsPosted());
+      credits = credits.add(account.creditsPosted());
+    }
+    return debits.subtract(credits);
+  }
 }
 

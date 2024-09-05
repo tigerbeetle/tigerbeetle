@@ -32,8 +32,7 @@ public class Workload {
 
   Command<?> randomCommand() {
     // Commands are wrapped in `Optional`, to represent if they are enabled.
-    var commandsAll =
-        List.of(randomCreateAccounts(), randomCreateTransfers(), randomLookupAccounts());
+    var commandsAll = List.of(createAccounts(), createTransfers(), lookupAllAccounts());
 
     // Enabled commands are further wrapped in `Supplier`s, because we don't want to use our entropy
     // to realize all of them, when only one will be selected in the end. They're basically lazy
@@ -50,7 +49,7 @@ public class Workload {
     return commandsEnabled.get(random.nextInt(0, commandsEnabled.size())).get();
   }
 
-  Optional<Supplier<? extends Command<?>>> randomCreateAccounts() {
+  Optional<Supplier<? extends Command<?>>> createAccounts() {
     int accountsCreatedCount = model.accounts.size();
 
     if (accountsCreatedCount < ACCOUNTS_COUNT_MAX) {
@@ -75,7 +74,7 @@ public class Workload {
 
   }
 
-  Optional<Supplier<? extends Command<?>>> randomCreateTransfers() {
+  Optional<Supplier<? extends Command<?>>> createTransfers() {
     // We can only try to transfer within ledgers with at least two accounts.
     var enabledLedgers = model.accountsPerLedger().entrySet().stream()
         .filter(accounts -> accounts.getValue().size() > 2).toList();
@@ -114,18 +113,14 @@ public class Workload {
     });
   }
 
-  Optional<Supplier<? extends Command<?>>> randomLookupAccounts() {
+  Optional<Supplier<? extends Command<?>>> lookupAllAccounts() {
     var accounts = model.allAccounts();
     if (accounts.size() >= 1) {
       return Optional.of(() -> {
-        int lookupBatchSize = random.nextInt(1, Math.min(accounts.size(), BATCH_SIZE_MAX) + 1);
-        int startIndex =
-            accounts.size() > lookupBatchSize ? random.nextInt(0, accounts.size() - lookupBatchSize)
-                : 0;
 
-        var ids = new long[lookupBatchSize];
-        for (int i = 0; i < lookupBatchSize; i++) {
-          ids[i] = accounts.get(startIndex + i).id();
+        var ids = new long[accounts.size()];
+        for (int i = 0; i < accounts.size(); i++) {
+          ids[i] = accounts.get(i).id();
         }
 
         return new LookupAccounts(ids);
