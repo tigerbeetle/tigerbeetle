@@ -28,20 +28,24 @@ To test locally (run from repository root):
 # Run containers.
 cd src/testing/systest/config/
 docker compose up
+^C # shut it down when you're pleased
 ```
-
-The test is done when the `workload` container prints `workload done` and exits.
-The `replica` and `api` containers do not exit.
 
 Clean up afterwards:
 
 ```bash
-docker-compose rm
+docker compose rm
 ```
 
 ### Push Containers
 
-Push the containers to Antithesis (authorization must be already configured) - this happens automatically in CI:
+Authorization must be configured first:
+
+```bash
+cat /some/path/to/tigerbeetle.key.json | docker login -u _json_key https://us-central1-docker.pkg.dev/ --password-stdin
+```
+
+Push the containers to Antithesis:
 
 ```bash
 ./src/testing/systest/scripts/push.sh <tag>
