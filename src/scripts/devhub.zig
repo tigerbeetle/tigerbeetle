@@ -23,6 +23,29 @@ pub const CLIArgs = struct {
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     try devhub_metrics(shell, cli_args);
+    try devhub_coverage(shell);
+}
+
+fn devhub_coverage(shell: *Shell) !void {
+    const kcov_version = shell.exec_stdout("kcov --version", .{}) catch {
+        log.err("can't find kcov", .{});
+        std.process.exit(1);
+    };
+    log.info("kcov version {s}", .{kcov_version});
+
+    try shell.zig("build test:unit:build", .{});
+    try shell.zig("build vopr:build", .{});
+    try shell.zig("build fuzz:build", .{});
+
+    // Put results into src/devhub, as that folder is deployed as GitHub pages.
+    try shell.project_root.deleteTree("./src/devhub/coverage");
+    try shell.project_root.makePath("./src/devhub/coverage");
+
+    const kcov: []const []const u8 = &.{ "kcov", "--include-path=./src", "./src/devhub/coverage" };
+    try shell.exec("{kcov} ./zig-out/bin/test", .{ .kcov = kcov });
+    try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_tree 92", .{ .kcov = kcov });
+    try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_forest 92", .{ .kcov = kcov });
+    try shell.exec("{kcov} ./zig-out/bin/vopr 92", .{ .kcov = kcov });
 }
 
 fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
