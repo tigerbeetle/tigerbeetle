@@ -9,7 +9,7 @@ import com.tigerbeetle.Client;
 import com.tigerbeetle.TransferFlags;
 
 public class Workload {
-  static int ACCOUNTS_COUNT_MAX = 1024;
+  static int ACCOUNTS_COUNT_MAX = 100;
   static int BATCH_SIZE_MAX = 8190;
 
   Model model = new Model();
@@ -21,35 +21,12 @@ public class Workload {
     this.client = client;
   }
 
-  @SuppressWarnings("unchecked")
   void run() {
     for (int iteration = 0; true; iteration++) {
       var command = randomCommand();
-      try {
-        var modelResult = command.applyToModel(model);
-        var systemResult = command.execute(client);
-
-        if (iteration > 0 && iteration % 100 == 0) {
-          System.out.printf("At %d iterations...\n", iteration);
-        }
-
-        if (command instanceof LookupAccounts) {
-          assert modelResult.getClass() == systemResult.getClass();
-          var modelAccounts = (ArrayList<AccountModel>) modelResult;
-          var systemAccounts = (ArrayList<AccountModel>) systemResult;
-          assert modelAccounts.size() == systemAccounts.size();
-
-          for (int i = 0; i < modelAccounts.size(); i++) {
-            var modelAccount = modelAccounts.get(i);
-            var systemAccount = systemAccounts.get(i);
-            assert modelAccount.equals(systemAccount) : "\n model %s\n!=\nsystem %s"
-                .formatted(modelAccount, systemAccount);
-          }
-        }
-      } catch (Throwable e) {
-        System.err.printf("Failed while executing: %s\n", command);
-        throw e;
-      }
+      System.out.printf("%d: Executing %s\n", iteration, command.getClass().getSimpleName());
+      var result = command.execute(client);
+      result.reconcile(model);
     }
   }
 
@@ -86,7 +63,7 @@ public class Workload {
           var id = random.nextLong(0, Long.MAX_VALUE);
           var ledger = random.nextInt(1, 10);
           var code = random.nextInt(1, 100);
-          var flags = random.nextBoolean() ? AccountFlags.HISTORY : AccountFlags.NONE;
+          var flags = random.nextInt(0, 10) == 0 ? AccountFlags.HISTORY : AccountFlags.NONE;
           newAccounts.add(new NewAccount(id, ledger, code, flags));
         }
 
