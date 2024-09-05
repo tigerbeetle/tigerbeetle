@@ -695,6 +695,8 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     });
 }
 
+// Docker is not required and not recommended for running TigerBeetle. A container is published
+// just for convenince of consumers expecting one!
 fn publish_docker(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish docker");
     defer section.close();
@@ -727,19 +729,38 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
                 try shell.fmt("tigerbeetle-{s}", .{docker_arch}),
             );
         }
-        try shell.exec(
-            \\docker buildx build --file tools/docker/Dockerfile . --platform linux/amd64,linux/arm64
+        // Build docker container by copying pre-build executable inside.
+        //
+        // TigerBeetle doesn't install its own signal handlers, and PID 1 doesn't have a default
+        // SIGTERM signal handler. (See https://github.com/krallin/tini#why-tini). Using "tini" as
+        // PID 1 ensures that signals work as expected, so e.g. "docker stop" will not hang.
+        try shell.exec_options(
+            .{
+                .echo = true,
+                .stdin_slice =
+                \\FROM alpine:3.19
+                \\RUN apk add --no-cache tini
+                \\ARG TARGETARCH
+                \\COPY tigerbeetle-${TARGETARCH} /tigerbeetle
+                \\ENTRYPOINT ["tini", "--", "/tigerbeetle"]
+                ,
+            },
+            \\docker buildx build
+            \\   --file - .
+            \\   --platform linux/amd64,linux/arm64
             \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{release_triple}{debug}
             \\   {tag_latest}
             \\   --push
-        , .{
-            .release_triple = info.release_triple,
-            .debug = if (debug) "-debug" else "",
-            .tag_latest = @as(
-                []const []const u8,
-                if (debug) &.{} else &.{ "--tag", "ghcr.io/tigerbeetle/tigerbeetle:latest" },
-            ),
-        });
+        ,
+            .{
+                .release_triple = info.release_triple,
+                .debug = if (debug) "-debug" else "",
+                .tag_latest = @as(
+                    []const []const u8,
+                    if (debug) &.{} else &.{ "--tag", "ghcr.io/tigerbeetle/tigerbeetle:latest" },
+                ),
+            },
+        );
 
         // Sadly, there isn't an easy way to locally build & test a multiplatform image without
         // pushing it out to the registry first. As docker testing isn't covered under not rocket

@@ -368,7 +368,10 @@ pub fn exec(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
 
 pub fn exec_options(
     shell: *Shell,
-    options: struct { echo: bool },
+    options: struct {
+        stdin_slice: ?[]const u8 = null,
+        echo: bool,
+    },
     comptime cmd: []const u8,
     cmd_args: anytype,
 ) !void {
@@ -376,13 +379,20 @@ pub fn exec_options(
     defer argv.deinit();
 
     var child = try shell.create_process(argv.slice());
+    var stdin_writer: ?std.Thread = null;
+    defer if (stdin_writer) |thread| thread.join();
 
+    child.stdin_behavior = if (options.stdin_slice != null) .Pipe else .Ignore;
     if (options.echo) {
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
         echo_command(argv.slice());
 
-        const term = try child.spawnAndWait();
+        try child.spawn();
+        if (options.stdin_slice) |bytes| {
+            stdin_writer = try write_stdin(&child, bytes);
+        }
+        const term = try child.wait();
         switch (term) {
             .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
             else => return error.CommandFailed,
@@ -403,6 +413,9 @@ pub fn exec_options(
         }
 
         try child.spawn();
+        if (options.stdin_slice) |stdin_slice| {
+            stdin_writer = try write_stdin(&child, stdin_slice);
+        }
         try child.collectOutput(
             &stdout,
             &stderr,
@@ -474,20 +487,7 @@ pub fn exec_stdout_options(
     defer if (stdin_writer) |thread| thread.join();
 
     if (options.stdin_slice) |stdin_slice| {
-        assert(child.stdin != null);
-
-        stdin_writer = try std.Thread.spawn(
-            .{},
-            struct {
-                fn write_stdin(destination: std.fs.File, source: []const u8) void {
-                    defer destination.close();
-
-                    destination.writeAll(source) catch {};
-                }
-            }.write_stdin,
-            .{ child.stdin.?, stdin_slice },
-        );
-        child.stdin = null;
+        stdin_writer = try write_stdin(&child, stdin_slice);
     }
 
     try child.collectOutput(&stdout, &stderr, options.output_bytes_max);
@@ -509,6 +509,24 @@ pub fn exec_stdout_options(
         false;
     const len_without_newline = stdout.items.len - if (trailing_newline) @as(usize, 1) else 0;
     return shell.arena.allocator().dupe(u8, stdout.items[0..len_without_newline]);
+}
+
+fn write_stdin(child: *std.process.Child, stdin: []const u8) !std.Thread {
+    assert(child.stdin != null);
+    defer child.stdin = null;
+
+    // Spawn a thread to avoid deadlock between us writing to stdin and reading from stdout.
+    return try std.Thread.spawn(
+        .{},
+        struct {
+            fn write_stdin(destination: std.fs.File, source: []const u8) void {
+                defer destination.close();
+
+                destination.writeAll(source) catch {};
+            }
+        }.write_stdin,
+        .{ child.stdin.?, stdin },
+    );
 }
 
 /// Run the command and return its status, stderr and stdout. The caller is responsible for checking
