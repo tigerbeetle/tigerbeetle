@@ -1,4 +1,4 @@
-# Overview
+# systest
 
 ## Images
 
@@ -6,8 +6,9 @@ The system test, running in Antithesis, consists of 3 images:
 
 - `replica`: A TigerBeetle replica.
 - `workload`:
-    - Generate messages (create/fetch account/transfer) in a loop
-    - Check results for basic problems
+    - Generate (possibly invalid) operations (create account/transfer) in a loop
+    - Track some data about accounts after every successful operation
+    - Query accounts and check basic consistency properties
 - `config`: Package the `docker-compose.yaml` and any additional environment configuration for Antithesis.
 
 ## Resources
@@ -19,15 +20,14 @@ The system test, running in Antithesis, consists of 3 images:
 
 ### Local Test
 
-To test locally (run from `tigerbeetle/`):
+To test locally (run from repository root):
 
 ```bash
-zig build system_test_workload install
-./tools/system_test/scripts/build.sh <tag>
+./src/testing/systest/scripts/build.sh <tag>
 
 # Run containers.
-cd tools/system_test/config/
-docker-compose up
+cd src/testing/systest/config/
+docker compose up
 ```
 
 The test is done when the `workload` container prints `workload done` and exits.
@@ -44,5 +44,5 @@ docker-compose rm
 Push the containers to Antithesis (authorization must be already configured) - this happens automatically in CI:
 
 ```bash
-./scripts/push.sh <tag>
+./src/testing/systest/scripts/push.sh <tag>
 ```
