@@ -16,10 +16,9 @@ if [ $# -ne 1 ] || [ "$1" = '-h' ]; then
 fi
 tag=$1
 
-
+zig build -Dconfig=production
 (cd src/clients/java && mvn package -Dmaven.test.skip)
 (cd src/testing/systest/workload && mvn package)
-
 
 docker build --file=./src/testing/systest/configuration.Dockerfile --build-arg "TAG=$tag" --tag="config:$tag" .
 docker build --file=./src/testing/systest/replica.Dockerfile       --tag="replica:$tag" .
