@@ -3,6 +3,10 @@ import java.util.Random;
 import java.util.function.Supplier;
 
 public class Arbitrary {
+  static <T> T element(Random random, List<T> elements) {
+    return elements.get(random.nextInt(0, elements.size()));
+  }
+
   static <T> Supplier<T> odds(Random random, List<? extends WithOdds<? extends Supplier<T>>> arbs) {
     final int oddsTotal = arbs.stream().mapToInt(a -> a.odds()).sum();
     return (() -> {

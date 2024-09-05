@@ -100,6 +100,7 @@ record CreateTransfers(ArrayList<NewTransfer> transfers) implements Command<Crea
       batch.setLedger(transfer.ledger());
       batch.setCode(transfer.code());
       batch.setAmount(transfer.amount());
+      batch.setFlags(transfer.flags());
     }
 
     var transferErrors = client.createTransfers(batch);
@@ -126,6 +127,8 @@ record CreateTransfers(ArrayList<NewTransfer> transfers) implements Command<Crea
       }
       i++;
     }
+    System.err.printf("create_transfer %d/%d succeeded\n", created.size(),
+        created.size() + failed.size());
 
     return new CreateTransfersResult(created, failed);
   }

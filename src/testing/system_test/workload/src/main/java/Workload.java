@@ -74,7 +74,11 @@ public class Workload {
           var id = random.nextLong(0, Long.MAX_VALUE);
           var ledger = random.nextInt(1, 10);
           var code = random.nextInt(1, 100);
-          var flags = random.nextInt(0, 10) == 0 ? AccountFlags.HISTORY : AccountFlags.NONE;
+          var flags = Arbitrary.element(random,
+              List.of(AccountFlags.NONE, AccountFlags.LINKED,
+                  AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS,
+                  AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS, AccountFlags.HISTORY,
+                  AccountFlags.IMPORTED, AccountFlags.CLOSED));
           newAccounts.add(new NewAccount(id, ledger, code, flags));
         }
 
@@ -101,7 +105,7 @@ public class Workload {
 
       for (int i = 0; i < transfersCount; i++) {
         // For every transfer we pick a random (enabled) ledger.
-        var ledger = enabledLedgers.get(random.nextInt(0, enabledLedgers.size()));
+        var ledger = Arbitrary.element(random, enabledLedgers);
         var accounts = ledger.getValue();
 
 
@@ -109,7 +113,11 @@ public class Workload {
         var ledger2 = ledger.getKey();
         var code = random.nextInt(1, 100);
         var amount = BigInteger.valueOf(random.nextLong(0, Long.MAX_VALUE));
-        var flags = random.nextInt(0, 5) == 0 ? TransferFlags.LINKED : TransferFlags.NONE;
+        var flags = Arbitrary.element(random,
+            List.of(TransferFlags.NONE, TransferFlags.LINKED, TransferFlags.PENDING,
+                TransferFlags.POST_PENDING_TRANSFER, TransferFlags.VOID_PENDING_TRANSFER,
+                TransferFlags.BALANCING_DEBIT, TransferFlags.BALANCING_CREDIT,
+                TransferFlags.CLOSING_DEBIT, TransferFlags.CLOSING_CREDIT));
 
         int debitAccountIndex = random.nextInt(0, ledger.getValue().size());
         int creditAccountIndex = random.ints(0, accounts.size())
