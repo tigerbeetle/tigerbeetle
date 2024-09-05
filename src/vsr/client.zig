@@ -20,7 +20,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         const Self = @This();
 
         pub const StateMachine = StateMachine_;
-        pub const DemuxerType = StateMachine.DemuxerType;
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,

@@ -234,18 +234,12 @@ fn request(
         .pulse => unreachable,
     };
 
-    packet.* = .{
-        .next = null,
-        .user_data = callback_ref,
-        .operation = @intFromEnum(operation),
-        .status = .ok,
-        .data_size = @intCast(packet_data.len),
-        .data = packet_data.ptr,
-        .batch_next = undefined,
-        .batch_tail = undefined,
-        .batch_size = undefined,
-        .reserved = undefined,
-    };
+    packet.next = null;
+    packet.user_data = callback_ref;
+    packet.operation = @intFromEnum(operation);
+    packet.status = .ok;
+    packet.data_size = @intCast(packet_data.len);
+    packet.data = packet_data.ptr;
 
     tb.submit(client, packet);
 }

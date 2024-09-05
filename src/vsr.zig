@@ -1666,3 +1666,136 @@ pub const Snapshot = struct {
         return op + 1;
     }
 };
+
+pub const RequestBatch = extern struct {
+    pub const count_max = 128 - 1;
+    pub const value_size_max = constants.message_body_size_max - @sizeOf(RequestBatch);
+
+    count: u16 align(@alignOf(Header)) = 0,
+    sizes: [count_max]u16 = [_]u16{0} ** count_max,
+
+    comptime {
+        assert(@sizeOf(RequestBatch) == @sizeOf(Header));
+        assert(@alignOf(RequestBatch) == @alignOf(Header));
+    }
+
+    pub fn WriterType(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            body: []u8,
+            wrote: u32,
+
+            pub fn init(body: []u8) Self {
+                assert(body.len >= @sizeOf(RequestBatch));
+                assert(body.len <= constants.message_body_size_max);
+
+                const batch: *RequestBatch = @alignCast(@ptrCast(body.ptr));
+                batch.* = .{};
+
+                return .{
+                    .body = body,
+                    .wrote = @sizeOf(RequestBatch),
+                };
+            }
+
+            pub fn writable(self: Self) []T {
+                if (@sizeOf(T) == 0) {
+                    return &.{};
+                }
+
+                assert(self.wrote >= @sizeOf(RequestBatch));
+                assert(self.wrote <= self.body.len);
+                return @alignCast(std.mem.bytesAsSlice(T, self.body[self.wrote..]));
+            }
+
+            pub fn advance(self: *Self, value_count: u16) void {
+                if (@sizeOf(T) == 0) {
+                    assert(value_count == 0);
+                    return;
+                }
+
+                maybe(value_count == 0);
+                assert(self.writable().len >= value_count);
+
+                const batch: *RequestBatch = @alignCast(@ptrCast(self.body.ptr));
+                assert(batch.count < count_max);
+                assert(batch.sizes[batch.count] == 0);
+
+                batch.sizes[batch.count] = value_count;
+                batch.count += 1;
+
+                self.wrote += value_count * @sizeOf(T);
+                assert(self.wrote <= self.body.len);
+            }
+
+            pub fn write(self: *Self, value_bytes: []const u8) void {
+                if (@sizeOf(T) == 0) {
+                    assert(value_bytes.len == 0);
+                    return;
+                }
+
+                const values = std.mem.bytesAsSlice(T, value_bytes);
+
+                const value_buffer = self.writable();
+                assert(value_buffer.len >= values.len);
+
+                const value_count: u16 = @intCast(values.len);
+                assert(self.wrote + value_count * @sizeOf(T) <= self.body.len);
+
+                stdx.copy_disjoint(.inexact, u8, std.mem.asBytes(value_buffer), value_bytes);
+                self.advance(value_count);
+            }
+        };
+    }
+
+    pub fn ReaderType(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            sizes: []const u16,
+            values: []const T,
+
+            pub fn init(body: []const u8) Self {
+                if (@sizeOf(T) == 0) {
+                    assert(body.len == 0);
+                    return .{ .sizes = &[_]u16{0}, .values = &.{} };
+                }
+
+                assert(body.len <= constants.message_body_size_max);
+                assert(body.len >= @sizeOf(RequestBatch));
+
+                const batch: *const RequestBatch = @alignCast(@ptrCast(body.ptr));
+                assert(batch.count > 0);
+                assert(batch.count <= count_max);
+
+                var value_count: u32 = 0;
+                for (batch.sizes[0..batch.count]) |size| {
+                    maybe(size == 0);
+                    value_count += size;
+                }
+
+                assert(body.len == @sizeOf(RequestBatch) + (@sizeOf(T) * value_count));
+                return .{ .sizes = batch.sizes[0..batch.count], .values = switch (@sizeOf(T)) {
+                    0 => &.{},
+                    else => @alignCast(std.mem.bytesAsSlice(T, body[@sizeOf(RequestBatch)..])),
+                } };
+            }
+
+            pub fn next(self: *Self) ?[]const T {
+                if (self.sizes.len == 0) {
+                    assert(self.values.len == 0);
+                    return null;
+                }
+
+                const size = self.sizes[0];
+                self.sizes = self.sizes[1..];
+
+                const values = self.values[0..size];
+                self.values = self.values[size..];
+
+                return values;
+            }
+        };
+    }
+};
