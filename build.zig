@@ -93,6 +93,7 @@ pub fn build(b: *std.Build) !void {
             "Past version to include for upgrades",
         ),
         .config = b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
+        .config_verify = b.option(bool, "config_verify", "Enable extra assertions.") orelse true,
         .config_aof_recovery = b.option(
             bool,
             "config-aof-recovery",
@@ -153,6 +154,7 @@ pub fn build(b: *std.Build) !void {
         build_options.config_release_client_min,
     );
     vsr_options.addOption(config.ConfigBase, "config_base", build_options.config);
+    vsr_options.addOption(bool, "config_verify", build_options.config_verify);
     vsr_options.addOption(std.log.Level, "config_log_level", build_options.config_log_level);
     vsr_options.addOption(config.TracerBackend, "tracer_backend", build_options.tracer_backend);
     vsr_options.addOption(bool, "config_aof_recovery", build_options.config_aof_recovery);
