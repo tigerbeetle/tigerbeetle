@@ -43,13 +43,13 @@ in the same batch. The first account determines the entire operation.
 
 ### `timestamp_must_be_zero`
 
-This result only applies when [Account.flags.imported](../account.md#flagsimported) is _not_ set.
+This result only applies when [`Account.flags.imported`](../account.md#flagsimported) is _not_ set.
 
 The account was not created. The [`Account.timestamp`](../account.md#timestamp) is nonzero, but
 must be zero. The cluster is responsible for setting this field.
 
 The [`Account.timestamp`](../account.md#timestamp) can only be assigned when creating accounts
-with [Account.flags.imported](../account.md#flagsimported) set.
+with [`Account.flags.imported`](../account.md#flagsimported) set.
 
 ### `imported_event_timestamp_out_of_range`
 
@@ -174,7 +174,7 @@ many applications should handle `exists` exactly as [`ok`](#ok).
 
 ### `imported_event_timestamp_must_not_regress`
 
-This result only applies when [Account.flags.imported](../account.md#flagsimported) is set.
+This result only applies when [`Account.flags.imported`](../account.md#flagsimported) is set.
 
 The account was not created. The user-defined [`Account.timestamp`](../account.md#timestamp)
 regressed, but it must be greater than the last timestamp assigned to any `Account` in the cluster and cannot be equal to the timestamp of any existing [`Transfer`](../transfer.md).

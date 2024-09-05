@@ -45,13 +45,13 @@ in the same batch. The first transfer determines the entire operation.
 
 ### `timestamp_must_be_zero`
 
-This result only applies when [Account.flags.imported](../account.md#flagsimported) is _not_ set.
+This result only applies when [`Account.flags.imported`](../account.md#flagsimported) is _not_ set.
 
 The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is nonzero, but
 must be zero. The cluster is responsible for setting this field.
 
 The [`Transfer.timestamp`](../transfer.md#timestamp) can only be assigned when creating transfers
-with [Transfer.flags.imported](../transfer.md#flagsimported) set.
+with [`Transfer.flags.imported`](../transfer.md#flagsimported) set.
 
 ### `imported_event_timestamp_out_of_range`
 

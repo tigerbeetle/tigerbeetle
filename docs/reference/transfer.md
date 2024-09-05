@@ -208,6 +208,11 @@ event.
 When set to zero, no secondary identifier will be associated with the account, therefore only
 non-zero values can be used as [query filter](./query-filter.md).
 
+When set to zero, if
+[`flags.post_pending_transfer`](#flagspost_pending_transfer) or
+[`flags.void_pending_transfer`](#flagsvoid_pending_transfer) is set, then
+it will be automatically set to the pending transfer's `user_data_128`.
+
 As an example, you might generate a
 [TigerBeetle Time-Based Identifier](../coding/data-modeling.md#tigerbeetle-time-based-identifiers-recommended)
 that ties together a group of transfers.
@@ -226,6 +231,11 @@ event.
 When set to zero, no secondary identifier will be associated with the account, therefore only
 non-zero values can be used as [query filter](./query-filter.md).
 
+When set to zero, if
+[`flags.post_pending_transfer`](#flagspost_pending_transfer) or
+[`flags.void_pending_transfer`](#flagsvoid_pending_transfer) is set, then
+it will be automatically set to the pending transfer's `user_data_64`.
+
 As an example, you might use this field store an external timestamp.
 
 For more information, see [Data Modeling](../coding/data-modeling.md#user_data).
@@ -241,6 +251,11 @@ event.
 
 When set to zero, no secondary identifier will be associated with the account, therefore only
 non-zero values can be used as [query filter](./query-filter.md).
+
+When set to zero, if
+[`flags.post_pending_transfer`](#flagspost_pending_transfer) or
+[`flags.void_pending_transfer`](#flagsvoid_pending_transfer) is set, then
+it will be automatically set to the pending transfer's `user_data_32`.
 
 As an example, you might use this field to store a timezone or locale.
 
