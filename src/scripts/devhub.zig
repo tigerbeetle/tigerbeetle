@@ -23,7 +23,10 @@ pub const CLIArgs = struct {
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     _ = gpa;
+    try devhub_metrics(shell, cli_args);
+}
 
+fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     const commit_timestamp_str =
         try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = cli_args.sha });
     const commit_timestamp = try std.fmt.parseInt(u64, commit_timestamp_str, 10);
