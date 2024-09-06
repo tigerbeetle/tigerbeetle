@@ -76,13 +76,13 @@ func Test_ID(t *testing.T) {
 	verifier := func() {
 		idA := ID()
 		for i := 0; i < 1_000_000; i++ {
-			if i % 1_000 == 0 {
+			if i%1_000 == 0 {
 				time.Sleep(1 * time.Millisecond)
 			}
 
 			idB := ID()
-			
-			// Verify idB and idA are monotonic using BigInts. 
+
+			// Verify idB and idA are monotonic using BigInts.
 			a := idA.BigInt()
 			b := idB.BigInt()
 			if b.Cmp(&a) != 1 {
@@ -100,10 +100,10 @@ func Test_ID(t *testing.T) {
 	var barrier, finish sync.WaitGroup
 	concurrency := 10
 	barrier.Add(concurrency) // To sync up all goroutines before verifier() to maximize contetion.
-	finish.Add(concurrency) // To wait for all goroutines to finish running verifier().
+	finish.Add(concurrency)  // To wait for all goroutines to finish running verifier().
 
 	for i := 0; i < concurrency; i++ {
-		go func(){
+		go func() {
 			barrier.Done()
 			barrier.Wait()
 			verifier()
