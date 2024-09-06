@@ -2114,7 +2114,7 @@ pub fn ReplicaType(
             // replica to step up as primary:
             // * Unconditionally, when it is lagging by least a checkpoint and that checkpoint is
             //   durable.
-            // * Heurisitically, when the maximum checkpoint in the cluster is not durable. The
+            // * Heuristically, when the maximum checkpoint in the cluster is not durable. The
             //   heuristic is simple - a lagging replica gives a more-up-date replica *one* chance
             //   to step up as primary before it attempts to step up as primary.
             if (vsr.Checkpoint.durable(self.op_checkpoint_next(), commit_max) or
