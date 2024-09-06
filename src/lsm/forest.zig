@@ -543,7 +543,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
                 forest.compact_callback();
             } else {
-                // The manifest log compaction completed between compaction beats.
+                unreachable;
             }
         }
 
