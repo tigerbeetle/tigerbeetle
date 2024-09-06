@@ -2110,10 +2110,17 @@ pub fn ReplicaType(
                 DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
             );
 
-            // We are lagging from the cluster by at least a checkpoint, and that checkpoint is
-            // durable on a commit quorum of replicas. Forfeit the view change and prefer the
-            // replica with the durable checkpoint for primary.
-            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), commit_max)) {
+            // A lagging potential primary may forfeit the view change to allow a more up-to-date
+            // replica to step up as primary:
+            // * Unconditionally, when it is lagging by least a checkpoint and that checkpoint is
+            //   durable.
+            // * Heuristically, when the maximum checkpoint in the cluster is not durable. The
+            //   heuristic is simple - a lagging replica gives a more-up-date replica *one* chance
+            //   to step up as primary before it attempts to step up as primary.
+            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), commit_max) or
+                (op_checkpoint_max > self.op_checkpoint() and
+                (self.view - self.log_view < self.replica_count)))
+            {
                 // This serves a few purposes:
                 // 1. Availability: We pick a primary to minimize the number of WAL repairs, to
                 //    minimize the likelihood of a repair-deadlock.
