@@ -249,7 +249,7 @@ pub const Tracer = struct {
         ) catch unreachable;
 
         writer.writeAll(buffer_stream.getWritten()) catch |err| {
-            std.debug.panic("Tracer.start: {}\n", .{err});
+            std.debug.panic("Tracer.stop: {}\n", .{err});
         };
     }
 };
@@ -280,7 +280,7 @@ fn StructFormatterType(comptime Data: type, comptime cardinality: DataFormatterC
                         @typeInfo(data_field.type) != .Enum and
                         @typeInfo(data_field.type) != .Union)
                     {
-                        break;
+                        continue;
                     }
                 }
 
