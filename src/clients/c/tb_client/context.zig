@@ -422,7 +422,8 @@ pub fn ContextType(
             assert(packet.next == null); // (previously) inflight packet should not be pending.
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
-            // The submit() call may complete it inline so keep submitting until there's an inflight.
+            // The submit() call may complete it inline so keep submitting until there's
+            // an inflight.
             while (self.pending.pop()) |packet_next| {
                 self.submit(packet_next);
                 if (self.client.request_inflight != null) break;
