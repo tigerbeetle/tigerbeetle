@@ -46,6 +46,17 @@ fn devhub_coverage(shell: *Shell) !void {
     try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_tree 92", .{ .kcov = kcov });
     try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_forest 92", .{ .kcov = kcov });
     try shell.exec("{kcov} ./zig-out/bin/vopr 92", .{ .kcov = kcov });
+
+    var coverage_dir = try shell.cwd.openDir("./src/devhub/coverage", .{ .iterate = true });
+    defer coverage_dir.close();
+
+    // kcov adds some symlinks to the output, which prevents upload to GitHub actions from working.
+    var it = coverage_dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind == .sym_link) {
+            try coverage_dir.deleteFile(entry.name);
+        }
+    }
 }
 
 fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
