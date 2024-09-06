@@ -1505,7 +1505,7 @@ test "Cluster: eviction: no_session" {
     try expectEqual(c.eviction_reason(), null);
 }
 
-test "Cluster: eviction: release_too_low" {
+test "Cluster: eviction: client_release_too_low" {
     const t = try TestContext.init(.{
         .replica_count = 3,
         .client_release = .{ .value = releases[0].release.value - 1 },
@@ -1514,10 +1514,10 @@ test "Cluster: eviction: release_too_low" {
 
     var c0 = t.clients(0, 1);
     try c0.request(1, 0);
-    try expectEqual(c0.eviction_reason(), .release_too_low);
+    try expectEqual(c0.eviction_reason(), .client_release_too_low);
 }
 
-test "Cluster: eviction: release_too_high" {
+test "Cluster: eviction: client_release_too_high" {
     const t = try TestContext.init(.{
         .replica_count = 3,
         .client_release = .{ .value = releases[0].release.value + 1 },
@@ -1526,7 +1526,7 @@ test "Cluster: eviction: release_too_high" {
 
     var c0 = t.clients(0, 1);
     try c0.request(1, 0);
-    try expectEqual(c0.eviction_reason(), .release_too_high);
+    try expectEqual(c0.eviction_reason(), .client_release_too_high);
 }
 
 test "Cluster: eviction: session_too_low" {
