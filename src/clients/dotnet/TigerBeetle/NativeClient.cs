@@ -10,7 +10,7 @@ namespace TigerBeetle;
 
 internal sealed class NativeClient : IDisposable
 {
-    // Once the client handle is set, all interactions with it are sychronized using `lock(this)`
+    // Once the client handle is set, all interactions with it are synchronized using `lock(this)`
     // to prevent threads from accidentally using a deinitialized client handle. It's safe to
     // synchronize on the NativeClient object as it's private to Client and can't be arbitrarily
     // or externally locked by the library user.

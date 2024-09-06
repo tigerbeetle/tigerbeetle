@@ -1315,7 +1315,7 @@ const HeaderBodyOffsets = struct {
 
 /// Parse an untrusted, unverified, and potentially corrupt ELF file. This parsing happens before
 /// any checksums are verified, and so needs to deal with any ELF metadata being corrupt, while
-/// not panicing and returning errors.
+/// not panicking and returning errors.
 ///
 /// Anything that would normally assert should return an error instead - especially implicit things
 /// like bounds checking on slices.
