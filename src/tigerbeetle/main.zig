@@ -13,7 +13,6 @@ const tracer = vsr.tracer;
 
 const benchmark_driver = @import("benchmark_driver.zig");
 const cli = @import("cli.zig");
-const fatal = vsr.flags.fatal;
 const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
@@ -277,11 +276,11 @@ const Command = struct {
         // and it may have been converted to zero if a smaller value is passed in.
         if (grid_cache_size == 0) {
             if (comptime (grid_cache_size_min >= 1024 * 1024)) {
-                fatal("Grid cache must be greater than {}MiB. See --cache-grid", .{
+                vsr.fatal(.cli, "Grid cache must be greater than {}MiB. See --cache-grid", .{
                     @divExact(grid_cache_size_min, 1024 * 1024),
                 });
             } else {
-                fatal("Grid cache must be greater than {}KiB. See --cache-grid", .{
+                vsr.fatal(.cli, "Grid cache must be greater than {}KiB. See --cache-grid", .{
                     @divExact(grid_cache_size_min, 1024),
                 });
             }
@@ -391,7 +390,7 @@ const Command = struct {
             .grid_cache_blocks_count = args.cache_grid_blocks,
             .tracer_options = .{ .writer = if (trace_writer) |writer| writer.any() else null },
         }) catch |err| switch (err) {
-            error.NoAddress => fatal("all --addresses must be provided", .{}),
+            error.NoAddress => vsr.fatal(.cli, "all --addresses must be provided", .{}),
             else => |e| return e,
         };
 

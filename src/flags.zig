@@ -42,10 +42,14 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 /// Format and print an error message to stderr, then exit with an exit code of 1.
-pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
+fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
-    std.posix.exit(1);
+    // NB: this status must match vsr.FatalReason.cli, but it would be wrong for flags to depend on
+    // vsr. The right way would be to parametrize flags by this behavior, and let the caller inject
+    // the implementation of fatal function, but let's be pragmatic here and just match the behavior
+    // manually.
+    std.process.exit(1);
 }
 
 /// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:

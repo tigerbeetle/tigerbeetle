@@ -22,7 +22,6 @@ const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const flags = @import("../flags.zig");
-const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
 const changelog = @import("./changelog.zig");
@@ -254,7 +253,7 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer shell.popd();
 
     const dotnet_version = shell.exec_stdout("dotnet --version", .{}) catch {
-        fatal("can't find dotnet", .{});
+        return error.NoDotnet;
     };
     log.info("dotnet version {s}", .{dotnet_version});
 
@@ -335,7 +334,7 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer shell.popd();
 
     const java_version = shell.exec_stdout("java --version", .{}) catch {
-        fatal("can't find java", .{});
+        return error.NoJava;
     };
     log.info("java version {s}", .{java_version});
 
@@ -377,7 +376,7 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer shell.popd();
 
     const node_version = shell.exec_stdout("node --version", .{}) catch {
-        fatal("can't find nodejs", .{});
+        return error.NoNode;
     };
     log.info("node version {s}", .{node_version});
 
@@ -445,7 +444,7 @@ fn publish(
     if (languages.contains(.zig)) {
         _ = try shell.env_get("GITHUB_TOKEN");
         const gh_version = shell.exec_stdout("gh --version", .{}) catch {
-            fatal("can't find gh", .{});
+            return error.NoGh;
         };
         log.info("gh version {s}", .{gh_version});
 

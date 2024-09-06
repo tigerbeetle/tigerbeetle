@@ -638,11 +638,12 @@ pub const UpgradeRequest = extern struct {
     }
 };
 
+/// To ease investigation of accidents, assign a separate exist status for each fatal condition.
+/// This is a process-global set.
 const FatalReason = enum(u8) {
-    invalid_cli_arguments = 1,
+    cli = 1,
     no_space_left = 2,
 
-    /// Each fatal gets a distinct error code to simplify operations.
     fn exit_status(reason: FatalReason) u8 {
         return @intFromEnum(reason);
     }

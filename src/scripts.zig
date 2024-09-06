@@ -71,7 +71,7 @@ pub fn main() !void {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     defer switch (gpa_allocator.deinit()) {
         .ok => {},
-        .leak => fatal("memory leak", .{}),
+        .leak => @panic("memory leak"),
     };
 
     const gpa = gpa_allocator.allocator();
