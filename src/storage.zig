@@ -385,6 +385,13 @@ pub fn Storage(comptime IO: type) type {
                 error.InputOutput => @panic("latent sector error: no spare sectors to reallocate"),
                 // TODO: It seems like it might be possible for some filesystems to return ETIMEDOUT
                 // here. Consider handling this without panicking.
+                error.NoSpaceLeft => {
+                    vsr.fatal(
+                        .no_space_left,
+                        "write failed: no space left on device (offset={} size={})",
+                        .{ write.offset, write.buffer.len },
+                    );
+                },
                 else => {
                     log.err(
                         "impossible write: offset={} buffer.len={} error={s}",
