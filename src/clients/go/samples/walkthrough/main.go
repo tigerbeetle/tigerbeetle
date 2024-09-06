@@ -153,7 +153,7 @@ func main() {
 
 	// section:transfer-flags-post
 	transfer := Transfer{
-		ID:        ToUint128(2),
+		ID: ToUint128(2),
 		// Post the entire pending amount.
 		Amount:    AmountMax,
 		PendingID: ToUint128(1),

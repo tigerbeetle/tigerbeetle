@@ -1,5 +1,6 @@
 const std = @import("std");
 const vsr = @import("vsr");
+const assert = std.debug.assert;
 
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
@@ -350,6 +351,9 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
         }
     }
+    assert(buffer.pop() == '\n');
+    assert(std.mem.endsWith(u8, buffer.items, "\n"));
+    assert(!std.mem.endsWith(u8, buffer.items, "\n\n"));
 }
 
 pub fn main() !void {

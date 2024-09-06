@@ -557,4 +557,3 @@ func (o QueryFilter) QueryFilterFlags() QueryFilterFlags {
 	f.Reversed = ((o.Flags >> 0) & 0x1) == 1
 	return f
 }
-
