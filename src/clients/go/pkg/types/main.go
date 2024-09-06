@@ -86,12 +86,12 @@ func BigIntToUint128(value big.Int) Uint128 {
 	// big.Int bytes are big-endian so convert them to little-endian for Uint128 bytes.
 	bytes := value.Bytes()
 	swapEndian(bytes[:])
-	
-	// Only cast slice to bytes when theres enough.
+
+	// Only cast slice to bytes when there's enough.
 	if len(bytes) >= 16 {
 		return BytesToUint128(*(*[16]byte)(bytes))
 	}
-	
+
 	var zeroPadded [16]byte
 	copy(zeroPadded[:], bytes)
 	return BytesToUint128(zeroPadded)
@@ -109,12 +109,12 @@ var idMutex sync.Mutex
 
 // Generates a Universally Unique and Sortable Identifier based on https://github.com/ulid/spec.
 // Uint128 returned are guaranteed to be monotonically increasing when interpreted as little-endian.
-// `ID()` is safe to call from multiple goroutines with monotonicity being sequentially consistent. 
+// `ID()` is safe to call from multiple goroutines with monotonicity being sequentially consistent.
 func ID() Uint128 {
 	timestamp := time.Now().UnixMilli()
 
 	// Lock the mutex for global id variables.
-	// Then ensure lastTimestamp is monotonically increasing & lastRandom changes each millisecond 
+	// Then ensure lastTimestamp is monotonically increasing & lastRandom changes each millisecond
 	idMutex.Lock()
 	if timestamp <= idLastTimestamp {
 		timestamp = idLastTimestamp
@@ -151,7 +151,7 @@ func ID() Uint128 {
 	var id [16]byte
 	binary.LittleEndian.PutUint64(id[:8], randomLo)
 	binary.LittleEndian.PutUint16(id[8:], randomHi)
-	binary.LittleEndian.PutUint16(id[10:], (uint16)(timestamp)) // timestamp lo
-	binary.LittleEndian.PutUint32(id[12:], (uint32)(timestamp >> 16)) // timestamp hi
+	binary.LittleEndian.PutUint16(id[10:], (uint16)(timestamp))     // timestamp lo
+	binary.LittleEndian.PutUint32(id[12:], (uint32)(timestamp>>16)) // timestamp hi
 	return BytesToUint128(id)
 }

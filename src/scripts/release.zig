@@ -696,7 +696,7 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
 }
 
 // Docker is not required and not recommended for running TigerBeetle. A container is published
-// just for convenince of consumers expecting one!
+// just for convenience of consumers expecting one!
 fn publish_docker(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish docker");
     defer section.close();

@@ -422,7 +422,8 @@ pub fn ContextType(
             assert(packet.next == null); // (previously) inflight packet should not be pending.
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
-            // The submit() call may complete it inline so keep submitting until theres an inflight.
+            // The submit() call may complete it inline so keep submitting until there's
+            // an inflight.
             while (self.pending.pop()) |packet_next| {
                 self.submit(packet_next);
                 if (self.client.request_inflight != null) break;
@@ -438,7 +439,7 @@ pub fn ContextType(
 
                     // Demuxer expects []u8 but VSR callback provides []const u8.
                     // The bytes are known to come from a Message body that will be soon discarded
-                    // therefor it's safe to @constCast and potentially modify the data in-place.
+                    // therefore it's safe to @constCast and potentially modify the data in-place.
                     var demuxer = Client.DemuxerType(operation).init(@constCast(reply));
 
                     var it: ?*Packet = packet;

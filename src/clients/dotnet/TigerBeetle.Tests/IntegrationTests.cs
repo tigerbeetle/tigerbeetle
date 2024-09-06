@@ -1851,7 +1851,7 @@ public class IntegrationTests
 
     private static ulong GetTimestampLast()
     {
-        // Inserts a dummy transfer just to retrieve the lastest timestamp
+        // Inserts a dummy transfer just to retrieve the latest timestamp
         // recorded by the cluster.
         // Must be used only in "DoNotParallelize" tests.
         var dummy_account = GenerateAccounts()[0];

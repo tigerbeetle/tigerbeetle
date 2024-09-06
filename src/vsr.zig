@@ -243,7 +243,7 @@ pub const Command = enum(u8) {
     }
 };
 
-/// This type exists to avoid making the Header type dependant on the state
+/// This type exists to avoid making the Header type dependent on the state
 /// machine used, which would cause awkward circular type dependencies.
 pub const Operation = enum(u8) {
     // Looking to make backwards incompatible changes here? Make sure to check release.zig for
