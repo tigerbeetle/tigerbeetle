@@ -643,6 +643,7 @@ pub const UpgradeRequest = extern struct {
 const FatalReason = enum(u8) {
     cli = 1,
     no_space_left = 2,
+    manifest_node_pool_exhausted = 3,
 
     fn exit_status(reason: FatalReason) u8 {
         return @intFromEnum(reason);
