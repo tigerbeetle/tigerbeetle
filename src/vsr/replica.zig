@@ -7887,6 +7887,7 @@ pub fn ReplicaType(
                 .updating_checkpoint => |checkpoint| {
                     if (checkpoint.header.op == self.op_checkpoint()) {
                         self.sync_superblock_update_finish();
+                        assert(self.syncing == .idle);
                     }
                 },
                 else => {},
@@ -8868,6 +8869,8 @@ pub fn ReplicaType(
 
             assert(self.commit_min == self.superblock.working.vsr_state.checkpoint.header.op);
 
+            self.sync_dispatch(.idle);
+
             if (self.release.value <
                 self.superblock.working.vsr_state.checkpoint.release.value)
             {
@@ -8908,7 +8911,6 @@ pub fn ReplicaType(
             });
 
             self.grid.open(grid_open_callback);
-            self.sync_dispatch(.idle);
             assert(self.op <= self.op_prepare_max());
         }
 
