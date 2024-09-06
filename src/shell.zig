@@ -1,7 +1,7 @@
 //! Collection of utilities for scripting: an in-process sh+coreutils combo.
 //!
 //! Keep this as a single file, independent from the rest of the codebase, to make it easier to
-//! re-use across different processes (eg build.zig).
+//! reuse across different processes (eg build.zig).
 //!
 //! If possible, avoid shelling out to `sh` or other systems utils --- the whole purpose here is to
 //! avoid any extra dependencies.
