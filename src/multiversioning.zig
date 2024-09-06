@@ -1241,7 +1241,7 @@ pub const Multiversion = struct {
                     &lp_startup_info,
                     &lp_process_information,
                 ) catch return error.CreateProcessWFailed;
-                posix.exit(0);
+                std.process.exit(0);
             },
             else => @panic("unsupported platform"),
         }

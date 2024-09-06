@@ -93,8 +93,8 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
     // NB: help must be declared as *pub* const to be visible here.
     if (@hasDecl(Commands, "help")) {
         if (std.mem.eql(u8, first_arg, "-h") or std.mem.eql(u8, first_arg, "--help")) {
-            std.io.getStdOut().writeAll(Commands.help) catch std.posix.exit(1);
-            std.posix.exit(0);
+            std.io.getStdOut().writeAll(Commands.help) catch std.process.exit(1);
+            std.process.exit(0);
         }
     }
 
