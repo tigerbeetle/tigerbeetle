@@ -14,7 +14,6 @@ const stdx = @import("./stdx.zig");
 const root = @import("root");
 
 const BuildOptions = struct {
-    config_base: ConfigBase,
     config_log_level: std.log.Level,
     config_verify: bool,
     tracer_backend: TracerBackend,
@@ -74,8 +73,7 @@ pub const Config = struct {
     /// Intended solely for extra sanity-checks: all meaningful decisions should be driven by
     /// specific fields of the config.
     pub fn is_production(config: *const Config) bool {
-        _ = config;
-        return build_options.config_base == .production;
+        return config.cluster.journal_slot_count > ConfigCluster.journal_slot_count_min;
     }
 };
 
@@ -280,19 +278,13 @@ pub const configs = struct {
         },
     };
 
-    const default = if (@hasDecl(root, "tigerbeetle_config"))
-        root.tigerbeetle_config
-    else if (builtin.is_test)
-        test_min
-    else
-        default_production;
-
     pub const current = current: {
-        var base = switch (build_options.config_base) {
-            .default => default,
-            .production => default_production,
-            .test_min => test_min,
-        };
+        var base = if (@hasDecl(root, "tigerbeetle_config"))
+            root.tigerbeetle_config
+        else if (builtin.is_test)
+            test_min
+        else
+            default_production;
 
         if (build_options.release == null and build_options.release_client_min != null) {
             @compileError("must set release if setting release_client_min");

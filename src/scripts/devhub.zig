@@ -67,7 +67,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     // Only build the TigerBeetle binary to test build speed and build size. Throw it away once
     // done, and use a release build from `zig-out/dist/` to run the benchmark.
     var timer = try std.time.Timer.start();
-    try shell.zig("build -Drelease -Dconfig=production install", .{});
+    try shell.zig("build -Drelease install", .{});
     const build_time_ms = timer.lap() / std.time.ns_per_ms;
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
     try shell.project_root.deleteFile("tigerbeetle");
