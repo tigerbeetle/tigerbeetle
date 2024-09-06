@@ -424,8 +424,7 @@ const Command = struct {
         }
 
         if (constants.verify) {
-            log.warn("{}: started with constants.verify - expect reduced performance. " ++
-                "Recompile with -Dconfig=production if unexpected.", .{replica.replica});
+            log.info("{}: started with extra verification checks", .{replica.replica});
         }
 
         if (replica.aof != null) {

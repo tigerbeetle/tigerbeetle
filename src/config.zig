@@ -16,6 +16,7 @@ const root = @import("root");
 const BuildOptions = struct {
     config_base: ConfigBase,
     config_log_level: std.log.Level,
+    config_verify: bool,
     tracer_backend: TracerBackend,
     hash_log_mode: HashLogMode,
     git_commit: ?[40]u8,
@@ -211,7 +212,6 @@ const ConfigCluster = struct {
 
 pub const ConfigBase = enum {
     production,
-    development,
     test_min,
     default,
 };
@@ -237,26 +237,11 @@ pub const configs = struct {
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
             .cache_account_balances_size_default = 0,
-            .verify = false,
+            .verify = true,
         },
         .cluster = .{
             .clients_max = 64,
         },
-    };
-
-    /// A good default config for local development.
-    /// (For production, use default_production instead.)
-    /// The cluster-config is compatible with the default production config.
-    pub const default_development = Config{
-        .process = .{
-            .direct_io = true,
-            .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
-            .cache_transfers_size_default = 0,
-            .cache_transfers_pending_size_default = 0,
-            .cache_account_balances_size_default = 0,
-            .verify = true,
-        },
-        .cluster = default_production.cluster,
     };
 
     /// Minimal test configuration — small WAL, small grid block size, etc.
@@ -300,13 +285,12 @@ pub const configs = struct {
     else if (builtin.is_test)
         test_min
     else
-        default_development;
+        default_production;
 
     pub const current = current: {
         var base = switch (build_options.config_base) {
             .default => default,
             .production => default_production,
-            .development => default_development,
             .test_min => test_min,
         };
 
@@ -340,6 +324,7 @@ pub const configs = struct {
         base.process.release_client_min = release_client_min;
         base.process.git_commit = build_options.git_commit;
         base.process.aof_recovery = build_options.config_aof_recovery;
+        base.process.verify = build_options.config_verify;
 
         assert(base.process.release.value >= base.process.release_client_min.value);
 
