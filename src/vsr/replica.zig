@@ -4137,7 +4137,6 @@ pub fn ReplicaType(
                 self.op_checkpoint(),
                 self.op_checkpoint_next(),
             });
-
             if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
 
             // TODO(Compaction pacing) Move this to before the if guard once there is no IO
