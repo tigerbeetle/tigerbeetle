@@ -11,8 +11,8 @@ const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("TigerBeetle.sln"));
 
-    try shell.zig("build clients:dotnet -Drelease -Dconfig=production", .{});
-    try shell.zig("build -Drelease -Dconfig=production", .{});
+    try shell.zig("build clients:dotnet -Drelease", .{});
+    try shell.zig("build -Drelease", .{});
 
     try shell.exec("dotnet restore", .{});
     try shell.exec("dotnet format --no-restore --verify-no-changes", .{});

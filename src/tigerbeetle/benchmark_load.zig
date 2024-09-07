@@ -41,11 +41,11 @@ pub fn main(
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built with '-Drelease' for reasonable results.\n", .{});
     }
-    if (!vsr.constants.config.is_production()) {
-        try stderr.print(
-            \\Benchmark must be built with '-Dconfig=production' for reasonable results.
-            \\
-        , .{});
+    if (vsr.constants.config.process.direct_io) {
+        log.warn("direct io is disabled", .{});
+    }
+    if (vsr.constants.config.process.verify) {
+        log.warn("extra assertions are enabled", .{});
     }
 
     if (cli_args.account_count < 2) flags.fatal(
