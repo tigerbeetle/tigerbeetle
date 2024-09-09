@@ -97,9 +97,7 @@ const constants = @import("constants.zig");
 
 const trace_span_size_max = 1024;
 
-// TODO This could be changed to a union(enum) if variable-cardinality events are needed (for
-// example, an event per grid IOP). (`stack()` would need to be updated as well).
-pub const Event = enum {
+pub const Event = union(enum) {
     replica_commit,
 
     compact_blip_read,
@@ -108,11 +106,60 @@ pub const Event = enum {
     compact_manifest,
     compact_mutable,
 
-    const stack_count = std.meta.fields(Event).len;
+    pub fn format(
+        event: *const Event,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        try writer.writeAll(@tagName(event.*));
+        switch (event.*) {
+            inline else => |data| {
+                if (@TypeOf(data) != void) {
+                    try writer.print(":{}", .{struct_format(data, .dense)});
+                }
+            },
+        }
+    }
+
+    const EventTag = std.meta.Tag(Event);
+
+    const event_stack_cardinality = std.enums.EnumArray(EventTag, u32).init(.{
+        .replica_commit = 1,
+        .compact_blip_read = 1,
+        .compact_blip_merge = 1,
+        .compact_blip_write = 1,
+        .compact_manifest = 1,
+        .compact_mutable = 1,
+    });
+
+    const stack_count = count: {
+        var count: u32 = 0;
+        for (std.enums.values(EventTag)) |event_type| {
+            count += event_stack_cardinality.get(event_type);
+        }
+        break :count count;
+    };
+
+    const event_stack_base = array: {
+        var array = std.enums.EnumArray(EventTag, u32).initDefault(0, .{});
+        var next: u32 = 0;
+        for (std.enums.values(EventTag)) |event_type| {
+            array.set(event_type, next);
+            next += event_stack_cardinality.get(event_type);
+        }
+        break :array array;
+    };
 
     // Stack is a u32 since it must be losslessly encoded as a JSON integer.
     fn stack(event: *const Event) u32 {
-        return @intFromEnum(event.*);
+        const stack_base = event_stack_base.get(event.*);
+        const stack_offset: u32 = 0;
+        assert(stack_offset < event_stack_cardinality.get(event.*));
+        return stack_base + stack_offset;
     }
 };
 
@@ -157,11 +204,10 @@ pub const Tracer = struct {
         assert(!tracer.events_enabled[stack]);
         tracer.events_enabled[stack] = true;
 
-        log.debug("{}: {s}: start:{}", .{
-            tracer.replica_index,
-            @tagName(event),
-            struct_format(data, .dense),
-        });
+        log.debug(
+            "{}: {}: start:{}",
+            .{ tracer.replica_index, event, struct_format(data, .dense) },
+        );
 
         const writer = tracer.options.writer orelse return;
         const time_now = std.time.Instant.now() catch unreachable;
@@ -186,7 +232,7 @@ pub const Tracer = struct {
             .category = @tagName(event),
             .event = 'B',
             .timestamp = time_elapsed_us,
-            .name = @tagName(event),
+            .name = event,
             .data = struct_format(data, .sparse),
             .args = std.json.Formatter(@TypeOf(data)){ .value = data, .options = .{} },
         }) catch unreachable;
@@ -199,11 +245,7 @@ pub const Tracer = struct {
     pub fn stop(tracer: *Tracer, event: Event, data: anytype) void {
         comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
 
-        log.debug("{}: {s}: stop:{}", .{
-            tracer.replica_index,
-            @tagName(event),
-            struct_format(data, .dense),
-        });
+        log.debug("{}: {}: stop:{}", .{ tracer.replica_index, event, struct_format(data, .dense) });
 
         const stack = event.stack();
         assert(tracer.events_enabled[stack]);
