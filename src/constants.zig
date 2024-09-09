@@ -6,7 +6,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
-const tracer = @import("tracer.zig");
 const Config = @import("config.zig").Config;
 const stdx = @import("stdx.zig");
 
@@ -24,14 +23,7 @@ pub const semver = std.SemanticVersion{
 /// One of: .err, .warn, .info, .debug
 pub const log_level: std.log.Level = config.process.log_level;
 
-pub const log = if (tracer_backend == .tracy)
-    tracer.log_fn
-else
-    std.log.defaultLog;
-
-// Which backend to use for ./tracer.zig.
-// Default is `.none`.
-pub const tracer_backend = config.process.tracer_backend;
+pub const log = std.log.defaultLog;
 
 // Which mode to use for ./testing/hash_log.zig.
 pub const hash_log_mode = config.process.hash_log_mode;

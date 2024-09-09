@@ -106,6 +106,9 @@ pub const Event = union(enum) {
     compact_manifest,
     compact_mutable,
 
+    grid_read: struct { iop: usize },
+    grid_write: struct { iop: usize },
+
     pub fn format(
         event: *const Event,
         comptime fmt: []const u8,
@@ -134,6 +137,8 @@ pub const Event = union(enum) {
         .compact_blip_write = 1,
         .compact_manifest = 1,
         .compact_mutable = 1,
+        .grid_read = constants.grid_iops_read_max,
+        .grid_write = constants.grid_iops_write_max,
     });
 
     const stack_count = count: {
@@ -157,7 +162,11 @@ pub const Event = union(enum) {
     // Stack is a u32 since it must be losslessly encoded as a JSON integer.
     fn stack(event: *const Event) u32 {
         const stack_base = event_stack_base.get(event.*);
-        const stack_offset: u32 = 0;
+        const stack_offset: u32 = switch (event.*) {
+            .grid_read => |data| @intCast(data.iop),
+            .grid_write => |data| @intCast(data.iop),
+            else => 0,
+        };
         assert(stack_offset < event_stack_cardinality.get(event.*));
         return stack_base + stack_offset;
     }

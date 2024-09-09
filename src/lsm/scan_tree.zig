@@ -5,7 +5,6 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
 const log = std.log.scoped(.scan);
-const tracer = @import("../tracer.zig");
 
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;

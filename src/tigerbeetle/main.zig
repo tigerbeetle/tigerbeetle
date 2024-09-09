@@ -9,7 +9,6 @@ const log = std.log.scoped(.main);
 const vsr = @import("vsr");
 const constants = vsr.constants;
 const config = constants.config;
-const tracer = vsr.tracer;
 
 const benchmark_driver = @import("benchmark_driver.zig");
 const cli = @import("cli.zig");
@@ -42,9 +41,6 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-
-    try tracer.init(allocator);
-    defer tracer.deinit(allocator);
 
     var arg_iterator = try std.process.argsWithAllocator(allocator);
     defer arg_iterator.deinit();
@@ -236,16 +232,10 @@ const Command = struct {
 
     pub fn start(base_allocator: std.mem.Allocator, args: *const cli.Command.Start) !void {
         var counting_allocator = vsr.CountingAllocator.init(base_allocator);
-
-        var traced_allocator = if (constants.tracer_backend == .tracy)
-            tracer.TracyAllocator("tracy").init(counting_allocator.allocator())
-        else
-            &counting_allocator;
+        const allocator = counting_allocator.allocator();
 
         // TODO Panic if the data file's size is larger that args.storage_size_limit.
         // (Here or in Replica.open()?).
-
-        const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
         try command.init(allocator, args.path, .{

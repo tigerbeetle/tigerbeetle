@@ -31,7 +31,6 @@ const SyncTarget = vsr.SyncTarget;
 const ClientSessions = vsr.ClientSessions;
 
 const log = marks.wrap_log(stdx.log.scoped(.replica));
-const tracer = @import("../tracer.zig");
 
 pub const Status = enum {
     normal,
@@ -543,8 +542,6 @@ pub fn ReplicaType(
         commit_prepare: ?*Message.Prepare = null,
 
         trace: vsr.trace.Tracer,
-        tracer_slot_commit: ?tracer.SpanStart = null,
-        tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
         aof: ?*AOF,
 
@@ -1252,9 +1249,6 @@ pub fn ReplicaType(
         /// Free all memory and unref all messages held by the replica.
         /// This does not deinitialize the Storage or Time.
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            assert(self.tracer_slot_checkpoint == null);
-            assert(self.tracer_slot_commit == null);
-
             self.static_allocator.transition_from_static_to_deinit();
 
             self.trace.deinit(allocator);
@@ -3887,12 +3881,6 @@ pub fn ReplicaType(
                 @panic("Cannot commit prepare; batch limit too low.");
             }
 
-            tracer.start(
-                &self.tracer_slot_commit,
-                .{ .commit = .{ .op = prepare.header.op } },
-                @src(),
-            );
-
             if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
@@ -4001,11 +3989,6 @@ pub fn ReplicaType(
                     self.op_checkpoint(),
                     self.op_checkpoint_next(),
                 });
-                tracer.start(
-                    &self.tracer_slot_checkpoint,
-                    .checkpoint,
-                    @src(),
-                );
                 if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
 
                 // TODO(Compaction pacing) Move this out of the conditional once there is no IO
@@ -4173,10 +4156,6 @@ pub fn ReplicaType(
                 "{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})",
                 .{ self.replica, self.op, self.op_checkpoint() },
             );
-            tracer.end(
-                &self.tracer_slot_checkpoint,
-                .checkpoint,
-            );
 
             // Send prepare_oks that may have been wittheld by virtue of `op_prepare_ok_max`.
             self.send_prepare_oks_after_checkpoint();
@@ -4190,15 +4169,8 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
 
-            const op = self.commit_prepare.?.header.op;
-
             self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
-
-            tracer.end(
-                &self.tracer_slot_commit,
-                .{ .commit = .{ .op = op } },
-            );
 
             assert(self.release.value <=
                 self.superblock.working.vsr_state.checkpoint.release.value);

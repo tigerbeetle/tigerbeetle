@@ -4,7 +4,6 @@ const math = std.math;
 const mem = std.mem;
 
 const log = std.log.scoped(.state_machine);
-const tracer = @import("tracer.zig");
 
 const stdx = @import("./stdx.zig");
 const maybe = stdx.maybe;
@@ -481,8 +480,6 @@ pub fn StateMachineType(
         compact_callback: ?*const fn (*StateMachine) void = null,
         checkpoint_callback: ?*const fn (*StateMachine) void = null,
 
-        tracer_slot: ?tracer.SpanStart = null,
-
         pub fn init(
             self: *StateMachine,
             allocator: mem.Allocator,
@@ -523,17 +520,10 @@ pub fn StateMachineType(
         }
 
         pub fn deinit(self: *StateMachine, allocator: mem.Allocator) void {
-            assert(self.tracer_slot == null);
-
             allocator.free(self.scan_lookup_buffer);
             self.forest.deinit(allocator);
         }
 
-        // TODO Reset here and in LSM should clean up (i.e. end) tracer spans.
-        // tracer.end() requires an event be passed in. We will need an additional tracer.end
-        // function that doesn't require the explicit event be passed in. The Trace should store the
-        // event so that it knows what event should be ending during reset() (and deinit(), maybe).
-        // Then the original tracer.end() can assert that the two events match.
         pub fn reset(self: *StateMachine) void {
             self.forest.reset();
 
@@ -674,12 +664,6 @@ pub fn StateMachineType(
             assert(self.input_valid(operation, input));
             assert(input.len <= self.batch_size_limit);
 
-            tracer.start(
-                &self.tracer_slot,
-                .state_machine_prefetch,
-                @src(),
-            );
-
             self.prefetch_input = input;
             self.prefetch_callback = callback;
 
@@ -728,11 +712,6 @@ pub fn StateMachineType(
             const callback = self.prefetch_callback.?;
             self.prefetch_input = null;
             self.prefetch_callback = null;
-
-            tracer.end(
-                &self.tracer_slot,
-                .state_machine_prefetch,
-            );
 
             callback(self);
         }
@@ -1417,12 +1396,6 @@ pub fn StateMachineType(
             maybe(self.scan_lookup_result_count != null);
             defer assert(self.scan_lookup_result_count == null);
 
-            tracer.start(
-                &self.tracer_slot,
-                .state_machine_commit,
-                @src(),
-            );
-
             const result = switch (operation) {
                 .pulse => self.execute_expire_pending_transfers(timestamp),
                 .create_accounts => self.execute(
@@ -1447,11 +1420,6 @@ pub fn StateMachineType(
                 .query_transfers => self.execute_query_transfers(input, output),
             };
 
-            tracer.end(
-                &self.tracer_slot,
-                .state_machine_commit,
-            );
-
             return result;
         }
 
@@ -1463,12 +1431,6 @@ pub fn StateMachineType(
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 
-            tracer.start(
-                &self.tracer_slot,
-                .state_machine_compact,
-                @src(),
-            );
-
             self.compact_callback = callback;
             self.forest.compact(compact_finish, op);
         }
@@ -1477,11 +1439,6 @@ pub fn StateMachineType(
             const self: *StateMachine = @fieldParentPtr("forest", forest);
             const callback = self.compact_callback.?;
             self.compact_callback = null;
-
-            tracer.end(
-                &self.tracer_slot,
-                .state_machine_compact,
-            );
 
             callback(self);
         }
