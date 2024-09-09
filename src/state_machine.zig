@@ -1071,9 +1071,17 @@ pub fn StateMachineType(
             };
             assert(timestamp_range.min <= timestamp_range.max);
 
-            // This query may have 2 conditions:
-            // `WHERE debit_account_id = $account_id OR credit_account_id = $account_id`.
-            var scan_conditions: stdx.BoundedArray(*TransfersGroove.ScanBuilder.Scan, 2) = .{};
+            // This expression may have at most 5 scans, the `debit OR credit`
+            // counts as just one:
+            // ```
+            //   WHERE
+            //     (debit_account_id=? OR credit_account_id=?) AND
+            //     user_data_128=? AND
+            //     user_data_64=? AND
+            //     user_data_32=? AND
+            //     code=?
+            // ```
+            var scan_conditions: stdx.BoundedArray(*TransfersGroove.ScanBuilder.Scan, 5) = .{};
             const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
 
             // Adding the condition for `debit_account_id = $account_id`.
@@ -1100,10 +1108,37 @@ pub fn StateMachineType(
                 ));
             }
 
+            switch (scan_conditions.count()) {
+                1 => {},
+                2 => {
+                    // Creating an union `OR` with the `debit_account_id` and `credit_account_id`.
+                    const accounts_merge = scan_builder.merge_union(scan_conditions.const_slice());
+                    scan_conditions.clear();
+                    scan_conditions.append_assume_capacity(accounts_merge);
+                },
+                else => unreachable,
+            }
+
+            // Additional filters with an intersection `AND`.
+            inline for ([_]std.meta.FieldEnum(TransfersGroove.IndexTrees){
+                .user_data_128, .user_data_64, .user_data_32, .code,
+            }) |filter_field| {
+                const filter_value = @field(filter, @tagName(filter_field));
+                if (filter_value != 0) {
+                    scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                        filter_field,
+                        self.forest.scan_buffer_pool.acquire_assume_capacity(),
+                        snapshot_latest,
+                        filter_value,
+                        timestamp_range,
+                        direction,
+                    ));
+                }
+            }
+
             return switch (scan_conditions.count()) {
                 1 => scan_conditions.get(0),
-                // Creating an union `OR` with the conditions.
-                2 => scan_builder.merge_union(scan_conditions.const_slice()),
+                2...5 => scan_builder.merge_intersection(scan_conditions.const_slice()),
                 else => unreachable,
             };
         }
@@ -3288,6 +3323,10 @@ const TestCreateTransfer = struct {
 
 const TestAccountFilter = struct {
     account_id: u128,
+    user_data_128: ?u128 = null,
+    user_data_64: ?u64 = null,
+    user_data_32: ?u32 = null,
+    code: ?u16 = null,
     // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
     // created.
     timestamp_min_transfer_id: ?u128 = null,
@@ -3362,7 +3401,6 @@ fn check(test_table: []const u8) !void {
                     });
                 }
             },
-
             .tick => |ticks| {
                 assert(ticks.value != 0);
 
@@ -3380,7 +3418,6 @@ fn check(test_table: []const u8) !void {
                 else
                     TimestampRange.timestamp_max - interval_ns;
             },
-
             .account => |a| {
                 assert(operation == null or operation.? == .create_accounts);
                 operation = .create_accounts;
@@ -3490,6 +3527,10 @@ fn check(test_table: []const u8) !void {
 
                 const event = AccountFilter{
                     .account_id = f.account_id,
+                    .user_data_128 = f.user_data_128 orelse 0,
+                    .user_data_64 = f.user_data_64 orelse 0,
+                    .user_data_32 = f.user_data_32 orelse 0,
+                    .code = f.code orelse 0,
                     .timestamp_min = timestamp_min,
                     .timestamp_max = timestamp_max,
                     .limit = f.limit,
@@ -3524,6 +3565,10 @@ fn check(test_table: []const u8) !void {
 
                 const event = AccountFilter{
                     .account_id = f.account_id,
+                    .user_data_128 = f.user_data_128 orelse 0,
+                    .user_data_64 = f.user_data_64 orelse 0,
+                    .user_data_32 = f.user_data_32 orelse 0,
+                    .code = f.code orelse 0,
                     .timestamp_min = timestamp_min,
                     .timestamp_max = timestamp_max,
                     .limit = f.limit,
@@ -4692,58 +4737,109 @@ test "create_transfers: closing accounts" {
 
 test "get_account_transfers: single-phase" {
     try check(
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
-        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ _ _ _ _ _ ok
         \\ commit create_accounts
         \\
-        \\ transfer T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T1 A1 A2   10   _  U1000  U10  U1 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T2 A2 A1   11   _  U1001  U10  U2 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T3 A1 A2   12   _  U1000  U20  U2 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T4 A2 A1   13   _  U1001  U20  U1 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
-        \\ get_account_transfers A1 _ _ 10 DR CR  _ // Debits + credits, chronological.
+        // Debits + credits, chronological.
+        \\ get_account_transfers A1 _ _ _ _ _  _ 10 DR CR  _
         \\ get_account_transfers_result T1
         \\ get_account_transfers_result T2
         \\ get_account_transfers_result T3
         \\ get_account_transfers_result T4
         \\ commit get_account_transfers
         \\
-        \\ get_account_transfers A1  _  _  2 DR CR  _ // Debits + credits, limit=2.
+        // Debits + credits, limit=2.
+        \\ get_account_transfers A1 _ _ _ _  _  _  2 DR CR  _
         \\ get_account_transfers_result T1
         \\ get_account_transfers_result T2
         \\ commit get_account_transfers
         \\
-        \\ get_account_transfers A1 T3  _ 10 DR CR  _ // Debits + credits, timestamp_min>0.
+        // Debits + credits, timestamp_min>0.
+        \\ get_account_transfers A1 _ _ _ _  T3 _ 10 DR CR  _
         \\ get_account_transfers_result T3
         \\ get_account_transfers_result T4
         \\ commit get_account_transfers
         \\
-        \\ get_account_transfers A1  _ T2 10 DR CR  _ // Debits + credits, timestamp_max>0.
+        // Debits + credits, timestamp_max>0.
+        \\ get_account_transfers A1 _ _ _ _  _ T2 10 DR CR  _
         \\ get_account_transfers_result T1
         \\ get_account_transfers_result T2
         \\ commit get_account_transfers
         \\
-        \\ get_account_transfers A1 T2 T3 10 DR CR  _ // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
+        // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
+        \\ get_account_transfers A1 _ _ _ _ T2 T3 10 DR CR  _
         \\ get_account_transfers_result T2
         \\ get_account_transfers_result T3
         \\ commit get_account_transfers
         \\
-        \\ get_account_transfers A1  _  _ 10 DR CR REV // Debits + credits, reverse-chronological.
+        // Debits + credits, reverse-chronological.
+        \\ get_account_transfers A1 _ _ _ _  _  _ 10 DR CR REV
         \\ get_account_transfers_result T4
         \\ get_account_transfers_result T3
         \\ get_account_transfers_result T2
         \\ get_account_transfers_result T1
         \\ commit get_account_transfers
         \\
-        \\ get_account_transfers A1  _  _ 10 DR  _  _ // Debits only.
+        // Debits only.
+        \\ get_account_transfers A1 _ _ _ _  _  _ 10 DR  _  _
         \\ get_account_transfers_result T1
         \\ get_account_transfers_result T3
         \\ commit get_account_transfers
         \\
-        \\ get_account_transfers A1  _  _ 10  _ CR  _ // Credits only.
+        // Credits only.
+        \\ get_account_transfers A1 _ _ _ _  _  _ 10  _ CR  _
         \\ get_account_transfers_result T2
         \\ get_account_transfers_result T4
+        \\ commit get_account_transfers
+        \\
+        // Debits + credits + user_data_128, chronological.
+        \\ get_account_transfers A1 U1001 _ _ _ _  _ 10 DR CR  _
+        \\ get_account_transfers_result T2
+        \\ get_account_transfers_result T4
+        \\ commit get_account_transfers
+        \\
+        // Debits + credits + user_data_64, chronological.
+        \\ get_account_transfers A1 _ U10 _ _ _  _ 10 DR CR  _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T2
+        \\ commit get_account_transfers
+        \\
+        // Debits + credits + user_data_32, chronological.
+        \\ get_account_transfers A1 _ _ U1 _ _  _ 10 DR CR  _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T4
+        \\ commit get_account_transfers
+        \\
+        // Debits + credits + code, chronological.
+        \\ get_account_transfers A1 _ _ _ C1 _  _ 10 DR CR  _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T3
+        \\ commit get_account_transfers
+        \\
+        // Debits + credits + all filters, 0 < timestamp_min ≤ timestamp_max, chronological.
+        \\ get_account_transfers A1 U1000 U10 U1 C1 T1 T3 10 DR CR  _
+        \\ get_account_transfers_result T1
+        \\ commit get_account_transfers
+        \\
+        // Debits only + all filters, 0 < timestamp_min ≤ timestamp_max, chronological.
+        \\ get_account_transfers A1 U1000 U10 U1 C1 T1 T3 10 DR _  _
+        \\ get_account_transfers_result T1
+        \\ commit get_account_transfers
+        \\
+        // Credits only + all filters, 0 < timestamp_min ≤ timestamp_max, chronological.
+        \\ get_account_transfers A2 U1000 U10 U1 C1 T1 T3 10 _ CR  _
+        \\ get_account_transfers_result T1
+        \\ commit get_account_transfers
+        \\
+        // Not found.
+        \\ get_account_transfers A1 U1000 U20 U2 C2 _ _ 10 DR CR  _
         \\ commit get_account_transfers
     );
 }
@@ -4758,7 +4854,7 @@ test "get_account_transfers: two-phase" {
         \\ transfer T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
-        \\ get_account_transfers A1 _ _ 10 DR CR  _
+        \\ get_account_transfers A1 _ _ _ _ _ _ 10 DR CR  _
         \\ get_account_transfers_result T1
         \\ get_account_transfers_result T2
         \\ commit get_account_transfers
@@ -4775,19 +4871,24 @@ test "get_account_transfers: invalid filter" {
         \\ transfer T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
-        \\ get_account_transfers A3 _  _  10 DR CR _   // Invalid account.
-        \\ commit get_account_transfers                // Empty result.
+        // Invalid account.
+        \\ get_account_transfers A3 _ _ _ _  _  _  10 DR CR _
+        \\ commit get_account_transfers // Empty result.
         \\
-        \\ get_account_transfers A1 _  _  10 _  _  _   // Invalid filter flags.
-        \\ commit get_account_transfers                // Empty result.
+        // Invalid filter flags.
+        \\ get_account_transfers A1 _ _ _ _  _  _  10 _  _  _
+        \\ commit get_account_transfers // Empty result.
         \\
-        \\ get_account_transfers A1 T2 T1 10 DR CR _   // Invalid timestamp_min > timestamp_max.
-        \\ commit get_account_transfers                // Empty result.
+        // Invalid timestamp_min > timestamp_max.
+        \\ get_account_transfers A1 _ _ _ _  T2 T1 10 DR CR _
+        \\ commit get_account_transfers // Empty result.
         \\
-        \\ get_account_transfers A1 _   _  0 DR CR _   // Invalid limit.
-        \\ commit get_account_transfers                // Empty result.
+        // Invalid limit.
+        \\ get_account_transfers A1 _ _ _ _  _   _  0 DR CR _
+        \\ commit get_account_transfers // Empty result.
         \\
-        \\ get_account_transfers A1 _   _ 10 DR CR _   // Success.
+        // Success.
+        \\ get_account_transfers A1 _ _ _ C1 _   _ 10 DR CR _
         \\ get_account_transfers_result T1
         \\ get_account_transfers_result T2
         \\ commit get_account_transfers
@@ -4800,54 +4901,105 @@ test "get_account_balances: single-phase" {
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
         \\ commit create_accounts
         \\
-        \\ transfer T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T1 A1 A2   10   _  U1000  U10  U1 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T2 A2 A1   11   _  U1001  U10  U2 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T3 A1 A2   12   _  U1000  U20  U2 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T4 A2 A1   13   _  U1001  U20  U1 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
-        \\ get_account_balances A1 _ _ 10 DR CR  _ // Debits + credits, chronological.
+        // Debits + credits, chronological.
+        \\ get_account_balances A1 _ _ _ _  _  _ 10 DR CR  _
         \\ get_account_balances_result T1 0 10 0  0
         \\ get_account_balances_result T2 0 10 0 11
         \\ get_account_balances_result T3 0 22 0 11
         \\ get_account_balances_result T4 0 22 0 24
         \\ commit get_account_balances
         \\
-        \\ get_account_balances A1  _  _  2 DR CR  _ // Debits + credits, limit=2.
+        // Debits + credits, limit=2.
+        \\ get_account_balances A1 _ _ _ _  _  _ 2 DR CR  _
         \\ get_account_balances_result T1 0 10 0  0
         \\ get_account_balances_result T2 0 10 0 11
         \\ commit get_account_balances
         \\
-        \\ get_account_balances A1 T3  _ 10 DR CR  _ // Debits + credits, timestamp_min>0.
+        // Debits + credits, timestamp_min>0.
+        \\ get_account_balances A1 _ _ _ _  T3 _ 10 DR CR  _
         \\ get_account_balances_result T3 0 22 0 11
         \\ get_account_balances_result T4 0 22 0 24
         \\ commit get_account_balances
         \\
-        \\ get_account_balances A1  _ T2 10 DR CR  _ // Debits + credits, timestamp_max>0.
+        // Debits + credits, timestamp_max>0.
+        \\ get_account_balances A1 _ _ _ _  _ T2 10 DR CR  _
         \\ get_account_balances_result T1 0 10 0  0
         \\ get_account_balances_result T2 0 10 0 11
         \\ commit get_account_balances
         \\
-        \\ get_account_balances A1 T2 T3 10 DR CR  _ // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
+        // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
+        \\ get_account_balances A1 _ _ _ _ T2 T3 10 DR CR  _
         \\ get_account_balances_result T2 0 10 0 11
         \\ get_account_balances_result T3 0 22 0 11
         \\ commit get_account_balances
         \\
-        \\ get_account_balances A1  _  _ 10 DR CR REV // Debits + credits, reverse-chronological.
+        // Debits + credits, reverse-chronological.
+        \\ get_account_balances A1 _ _ _ _  _  _ 10 DR CR REV
         \\ get_account_balances_result T4 0 22 0 24
         \\ get_account_balances_result T3 0 22 0 11
         \\ get_account_balances_result T2 0 10 0 11
         \\ get_account_balances_result T1 0 10 0  0
         \\ commit get_account_balances
         \\
-        \\ get_account_balances A1  _  _ 10 DR  _  _ // Debits only.
+        // Debits only.
+        \\ get_account_balances A1 _ _ _ _  _  _ 10 DR  _  _
         \\ get_account_balances_result T1 0 10 0  0
         \\ get_account_balances_result T3 0 22 0 11
         \\ commit get_account_balances
         \\
-        \\ get_account_balances A1  _  _ 10  _ CR  _ // Credits only.
+        // Credits only.
+        \\ get_account_balances A1 _ _ _ _  _  _ 10  _ CR  _
         \\ get_account_balances_result T2 0 10 0 11
         \\ get_account_balances_result T4 0 22 0 24
+        \\ commit get_account_balances
+        \\
+        // Debits + credits + user_data_128, chronological.
+        \\ get_account_balances A1 U1001 _ _ _ _  _ 10 DR CR  _
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ get_account_balances_result T4 0 22 0 24
+        \\ commit get_account_balances
+        \\
+        // Debits + credits + user_data_64, chronological.
+        \\ get_account_balances A1 _ U10 _ _ _  _ 10 DR CR  _
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ commit get_account_balances
+        \\
+        // Debits + credits + user_data_32, chronological.
+        \\ get_account_balances A1 _ _ U1 _ _  _ 10 DR CR  _
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ get_account_balances_result T4 0 22 0 24
+        \\ commit get_account_balances
+        \\
+        // Debits + credits + code, chronological.
+        \\ get_account_balances A1 _ _ _ C1 _  _ 10 DR CR  _
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ get_account_balances_result T3 0 22 0 11
+        \\ commit get_account_balances
+        \\
+        // Debits + credits + all filters, 0 < timestamp_min ≤ timestamp_max, chronological.
+        \\ get_account_balances A1 U1000 U10 U1 C1 T1 T3 10 DR CR  _
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ commit get_account_balances
+        \\
+        // Debits only + all filters, 0 < timestamp_min ≤ timestamp_max, chronological.
+        \\ get_account_balances A1 U1000 U10 U1 C1 T1 T3 10 DR _  _
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ commit get_account_balances
+        \\
+        // Credits only + all filters, 0 < timestamp_min ≤ timestamp_max, chronological.
+        \\ get_account_balances A2 U1000 U10 U1 C1 T1 T3 10 _ CR  _
+        \\ get_account_balances_result T1 0  0 0  10
+        \\ commit get_account_balances
+        \\
+        // Not found.
+        \\ get_account_balances A1 U1000 U20 U2 C2 _ _ 10 DR CR  _
         \\ commit get_account_balances
     );
 }
@@ -4862,7 +5014,7 @@ test "get_account_balances: two-phase" {
         \\ transfer T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
-        \\ get_account_balances A1 _ _ 10 DR CR  _
+        \\ get_account_balances A1 _ _ _ _ _ _ 10 DR CR  _
         \\ get_account_balances_result T1 1 0 0 0
         \\ get_account_balances_result T2 0 1 0 0
         \\ commit get_account_balances
@@ -4879,22 +5031,28 @@ test "get_account_balances: invalid filter" {
         \\ transfer T2 A1 A2    1   _  _  _  _    0 L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
-        \\ get_account_balances A3 _  _  10 DR CR _   // Invalid account.
-        \\ commit get_account_balances                // Empty result.
+        // Invalid account.
+        \\ get_account_balances A3 _ _ _  _ _  _  10 DR CR _
+        \\ commit get_account_balances // Empty result.
         \\
-        \\ get_account_balances A2 _  _  10 DR CR _   // Account without flags.history.
-        \\ commit get_account_balances                // Empty result.
+        // Account without flags.history.
+        \\ get_account_balances A2 _ _ _  _ _  _  10 DR CR _
+        \\ commit get_account_balances // Empty result.
         \\
-        \\ get_account_balances A1 _  _  10 _  _  _   // Invalid filter flags.
-        \\ commit get_account_balances                // Empty result.
+        // Invalid filter flags.
+        \\ get_account_balances A1 _ _ _  _ _  _  10 _  _  _
+        \\ commit get_account_balances // Empty result.
         \\
-        \\ get_account_balances A1 T2 T1 10 DR CR _   // Invalid timestamp_min > timestamp_max.
-        \\ commit get_account_balances                // Empty result.
+        // Invalid timestamp_min > timestamp_max.
+        \\ get_account_balances A1 _ _ _  _ T2 T1 10 DR CR _
+        \\ commit get_account_balances // Empty result.
         \\
-        \\ get_account_balances A1 _   _  0 DR CR _   // Invalid limit.
-        \\ commit get_account_balances                // Empty result.
+        // Invalid limit.
+        \\ get_account_balances A1 _ _ _  _ _   _  0 DR CR _
+        \\ commit get_account_balances // Empty result.
         \\
-        \\ get_account_balances A1  _  _ 10 DR CR  _  // Success.
+        // Success.
+        \\ get_account_balances A1 _ _ _ C1 _  _ 10 DR CR  _
         \\ get_account_balances_result T1 0 2 0 0
         \\ get_account_balances_result T2 0 3 0 0
         \\ commit get_account_balances

@@ -577,6 +577,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const account_filter = &body[0];
             account_filter.* = tb.AccountFilter{
                 .account_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .code = 0,
                 .limit = 0,
                 .flags = .{
                     .credits = false,

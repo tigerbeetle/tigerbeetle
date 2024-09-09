@@ -385,6 +385,20 @@ pub const QueryFilterFlags = packed struct(u32) {
 pub const AccountFilter = extern struct {
     /// The account id.
     account_id: u128,
+    /// Filter by the `user_data_128` index.
+    /// Use zero for no filter.
+    user_data_128: u128,
+    /// Filter by the `user_data_64` index.
+    /// Use zero for no filter.
+    user_data_64: u64,
+    /// Filter by the `user_data_32` index.
+    /// Use zero for no filter.
+    user_data_32: u32,
+    /// Query by the `code` index.
+    /// Use zero for no filter.
+    code: u16,
+
+    reserved: [58]u8 = [_]u8{0} ** 58,
     /// The initial timestamp (inclusive).
     /// Use zero for no filter.
     timestamp_min: u64,
@@ -396,10 +410,9 @@ pub const AccountFilter = extern struct {
     limit: u32,
     /// Query flags.
     flags: AccountFilterFlags,
-    reserved: [24]u8 = [_]u8{0} ** 24,
 
     comptime {
-        assert(@sizeOf(AccountFilter) == 64);
+        assert(@sizeOf(AccountFilter) == 128);
         assert(stdx.no_padding(AccountFilter));
     }
 };
