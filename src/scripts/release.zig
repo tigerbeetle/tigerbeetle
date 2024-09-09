@@ -202,6 +202,10 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         "aarch64-macos", // Will build a universal binary.
     };
 
+    const sha_date = try shell.exec_stdout("git show --no-patch --no-notes --pretty=%cI {sha}", .{
+        .sha = info.sha,
+    });
+
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`.
     inline for (.{ true, false }) |debug| {
@@ -244,7 +248,8 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 assert(std.mem.indexOf(u8, output, build_mode) != null);
             }
 
-            try shell.exec("touch -d 1970-01-01T00:00:00Z {exe_name}", .{
+            try shell.exec("touch -d {sha_date} {exe_name}", .{
+                .sha_date = sha_date,
                 .exe_name = exe_name,
             });
             try shell.exec("zip -9 {zip_path} {exe_name}", .{
