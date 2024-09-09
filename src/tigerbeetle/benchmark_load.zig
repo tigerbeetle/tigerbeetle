@@ -48,19 +48,22 @@ pub fn main(
         log.warn("extra assertions are enabled", .{});
     }
 
-    if (cli_args.account_count < 2) flags.fatal(
+    if (cli_args.account_count < 2) vsr.fatal(
+        .cli,
         "--account-count: need at least two accounts, got {}",
         .{cli_args.account_count},
     );
 
     // The first account_count_hot accounts are "hot" -- they will be the debit side of
     // transfer_hot_percent of the transfers.
-    if (cli_args.account_count_hot > cli_args.account_count) flags.fatal(
+    if (cli_args.account_count_hot > cli_args.account_count) vsr.fatal(
+        .cli,
         "--account-count-hot: must be less-than-or-equal-to --account-count, got {}",
         .{cli_args.account_count_hot},
     );
 
-    if (cli_args.transfer_hot_percent > 100) flags.fatal(
+    if (cli_args.transfer_hot_percent > 100) vsr.fatal(
+        .cli,
         "--transfer-hot-percent: must be less-than-or-equal-to 100, got {}",
         .{cli_args.transfer_hot_percent},
     );

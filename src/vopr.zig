@@ -1131,7 +1131,7 @@ pub const Simulator = struct {
 /// Print an error message and then exit with an exit code.
 fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
     output.err(fmt_string, args);
-    std.posix.exit(@intFromEnum(failure));
+    std.process.exit(@intFromEnum(failure));
 }
 
 /// Returns true, `p` percent of the time, else false.

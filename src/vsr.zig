@@ -638,6 +638,35 @@ pub const UpgradeRequest = extern struct {
     }
 };
 
+/// To ease investigation of accidents, assign a separate exist status for each fatal condition.
+/// This is a process-global set.
+const FatalReason = enum(u8) {
+    cli = 1,
+    no_space_left = 2,
+    manifest_node_pool_exhausted = 3,
+
+    fn exit_status(reason: FatalReason) u8 {
+        return @intFromEnum(reason);
+    }
+};
+
+/// Terminates the process with non-zero exit code.
+///
+/// Use fatal when encountering an environmental error where stopping is the intended end response.
+/// For example, when running out of disk space, use `fatal` instead of threading error.NoSpaceLeft
+/// up the stack. Propagating fatal errors up the stack needlessly increases dimensionality (unusual
+/// defers might run), but doesn't improve experience --- the leaf of the call stack has the most
+/// context for printing error message.
+///
+/// Don't use fatal for situations which are necessarily bugs in some replica process (not
+/// necessary this process), use assert or panic instead.
+pub fn fatal(reason: FatalReason, comptime fmt: []const u8, args: anytype) noreturn {
+    log.err(fmt, args);
+    const status = reason.exit_status();
+    assert(status != 0);
+    std.process.exit(status);
+}
+
 pub const Timeout = struct {
     name: []const u8,
     id: u128,

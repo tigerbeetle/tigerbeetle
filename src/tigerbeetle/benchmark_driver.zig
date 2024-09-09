@@ -61,7 +61,7 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
         });
     } else {
         if (args.trace) |_| {
-            vsr.flags.fatal("--trace: incompatible with --addresses", .{});
+            vsr.fatal(.cli, "--trace: incompatible with --addresses", .{});
         }
     }
 

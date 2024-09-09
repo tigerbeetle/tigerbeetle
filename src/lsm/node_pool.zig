@@ -4,6 +4,8 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
+const vsr = @import("../vsr.zig");
+
 pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) type {
     return struct {
         const NodePool = @This();
@@ -60,7 +62,12 @@ pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) typ
         pub fn acquire(pool: *NodePool) Node {
             // TODO: To ensure this "unreachable" is never reached, the primary must reject
             // new requests when storage space is too low to fulfill them.
-            const node_index = pool.free.findFirstSet() orelse unreachable;
+            const node_index = pool.free.findFirstSet() orelse vsr.fatal(
+                .manifest_node_pool_exhausted,
+                "out of memory for manifest, " ++
+                    "restart the replica with larger '--memory-lsm-manifest' argument",
+                .{},
+            );
             assert(pool.free.isSet(node_index));
             pool.free.unset(node_index);
 

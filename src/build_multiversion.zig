@@ -7,7 +7,6 @@ const log = std.log;
 
 const multiversioning = @import("./multiversioning.zig");
 const flags = @import("flags.zig");
-const fatal = flags.fatal;
 const Shell = @import("shell.zig");
 
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
@@ -55,7 +54,7 @@ pub fn main() !void {
     var allocator: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer {
         if (allocator.deinit() != .ok) {
-            fatal("memory leaked", .{});
+            @panic("memory leaked", .{});
         }
     }
     const gpa = allocator.allocator();

@@ -28,8 +28,7 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 
 fn devhub_coverage(shell: *Shell) !void {
     const kcov_version = shell.exec_stdout("kcov --version", .{}) catch {
-        log.err("can't find kcov", .{});
-        std.process.exit(1);
+        return error.NoKcov;
     };
     log.info("kcov version {s}", .{kcov_version});
 
