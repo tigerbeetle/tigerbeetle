@@ -843,13 +843,13 @@ public struct CreateTransfersResult
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct AccountFilter
 {
-    public const int SIZE = 64;
+    public const int SIZE = 128;
 
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
     {
-        public const int SIZE = 24;
+        public const int SIZE = 58;
 
         private fixed byte raw[SIZE];
 
@@ -878,6 +878,16 @@ public struct AccountFilter
 
     private UInt128 accountId;
 
+    private UInt128 userData128;
+
+    private ulong userData64;
+
+    private uint userData32;
+
+    private ushort code;
+
+    private ReservedData reserved;
+
     private ulong timestampMin;
 
     private ulong timestampMax;
@@ -886,12 +896,35 @@ public struct AccountFilter
 
     private AccountFilterFlags flags;
 
-    private ReservedData reserved;
-
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/account-filter#account_id
     /// </summary>
     public UInt128 AccountId { get => accountId; set => accountId = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#user_data_128
+    /// </summary>
+    public UInt128 UserData128 { get => userData128; set => userData128 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#user_data_64
+    /// </summary>
+    public ulong UserData64 { get => userData64; set => userData64 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#user_data_32
+    /// </summary>
+    public uint UserData32 { get => userData32; set => userData32 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#code
+    /// </summary>
+    public ushort Code { get => code; set => code = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#reserved
+    /// </summary>
+    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/account-filter#timestamp_min
@@ -912,11 +945,6 @@ public struct AccountFilter
     /// https://docs.tigerbeetle.com/reference/account-filter#flags
     /// </summary>
     public AccountFilterFlags Flags { get => flags; set => flags = value; }
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account-filter#reserved
-    /// </summary>
-    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
 
 }
 

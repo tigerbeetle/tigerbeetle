@@ -576,6 +576,10 @@ reverse-chronological order.
 ```javascript
 let filter = {
   account_id: 2n,
+  user_data_128: 0n, // No filter by UserData.
+  user_data_64: 0n,
+  user_data_32: 0,
+  code: 0, // No filter by Code.
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten balances at most.
@@ -605,6 +609,10 @@ reverse-chronological order.
 ```javascript
 filter = {
   account_id: 2n,
+  user_data_128: 0n, // No filter by UserData.
+  user_data_64: 0n,
+  user_data_32: 0,
+  code: 0, // No filter by Code.
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten balances at most.

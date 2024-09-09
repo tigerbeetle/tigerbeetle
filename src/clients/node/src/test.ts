@@ -536,6 +536,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query all transfers for accountC:
   var filter: AccountFilter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -559,6 +563,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query only the debit transfers for accountC, descending:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -583,6 +591,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query only the credit transfers for accountC, descending:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -607,6 +619,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the first 5 transfers for accountC:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: transfers_created.length / 2,
@@ -631,6 +647,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the next 5 transfers for accountC, with pagination:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: timestamp + 1n,
     timestamp_max: 0n,
     limit: transfers_created.length / 2,
@@ -654,6 +674,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query again, no more transfers should be found:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: timestamp + 1n,
     timestamp_max: 0n,
     limit: transfers_created.length / 2,
@@ -668,6 +692,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the first 5 transfers for accountC ORDER BY DESC:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: transfers_created.length / 2,
@@ -692,6 +720,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the next 5 transfers for accountC, with pagination:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: timestamp - 1n,
     limit: transfers_created.length / 2,
@@ -715,6 +747,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query again, no more transfers should be found:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: timestamp - 1n,
     limit: transfers_created.length / 2,
@@ -729,6 +765,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid account:
   filter = {
     account_id: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -740,6 +780,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid timestamp min:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: (1n << 64n) - 1n, // ulong max value
     timestamp_max: 0n,
     limit: 8190,
@@ -751,6 +795,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid timestamp max:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: (1n << 64n) - 1n, // ulong max value
     limit: 8190,
@@ -762,6 +810,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid timestamp range:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: (1n << 64n) - 2n, // ulong max - 1
     timestamp_max: 1n,
     limit: 8190,
@@ -773,6 +825,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Zero limit:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 0,
@@ -784,6 +840,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Empty flags:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -795,6 +855,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid flags:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,

@@ -515,11 +515,15 @@ type TransferEventResult struct {
 
 type AccountFilter struct {
 	AccountID    Uint128
+	UserData128  Uint128
+	UserData64   uint64
+	UserData32   uint32
+	Code         uint16
+	Reserved     [58]uint8
 	TimestampMin uint64
 	TimestampMax uint64
 	Limit        uint32
 	Flags        uint32
-	Reserved     [24]uint8
 }
 
 func (o AccountFilter) AccountFilterFlags() AccountFilterFlags {
