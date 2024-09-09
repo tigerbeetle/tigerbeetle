@@ -471,6 +471,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 ) orelse {
                     // This transfer index can't be built; stop with what we have so far.
                     // Hopefully it will be unblocked before the next `create_transfers`.
+                    assert(false); // we should reach this point
                     transfers_count = i;
                     break;
                 };
