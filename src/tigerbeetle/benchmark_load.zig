@@ -41,7 +41,7 @@ pub fn main(
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built with '-Drelease' for reasonable results.\n", .{});
     }
-    if (vsr.constants.config.process.direct_io) {
+    if (!vsr.constants.config.process.direct_io) {
         log.warn("direct io is disabled", .{});
     }
     if (vsr.constants.config.process.verify) {
