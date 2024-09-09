@@ -54,7 +54,7 @@ pub fn main() !void {
     var allocator: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer {
         if (allocator.deinit() != .ok) {
-            @panic("memory leaked", .{});
+            @panic("memory leaked");
         }
     }
     const gpa = allocator.allocator();
