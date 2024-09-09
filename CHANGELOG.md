@@ -3,6 +3,113 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.1
+
+Released: 2024-09-09
+
+### Safety And Performance
+
+- [#2284](https://github.com/tigerbeetle/tigerbeetle/pull/2284)
+
+  Improve view change efficiency; new heuristic for lagging replicas to forfeit view change.
+
+  A lagging replicas first gives a more up-to-date replica a chance to become primary by forfeiting
+  view change. If the more up-to-date replica cannot step up as primary, the lagging replica
+  attempts to step up as primary.
+
+- [#2275](https://github.com/tigerbeetle/tigerbeetle/pull/2275),
+  [#2254](https://github.com/tigerbeetle/tigerbeetle/pull/2254),
+  [#2269](https://github.com/tigerbeetle/tigerbeetle/pull/2269),
+  [#2272](https://github.com/tigerbeetle/tigerbeetle/pull/2272)
+
+  Complete rollout of the new state sync protocol.
+
+  Remove in-code remnants of the old state sync protocol. Replicas now panic if they receive
+  messages belonging to the old protocol.
+
+
+### Internals
+
+- [#2283](https://github.com/tigerbeetle/tigerbeetle/pull/2283)
+
+  Improve log warnings for client eviction due to its version being too low/high.
+
+- [#2288](https://github.com/tigerbeetle/tigerbeetle/pull/2288)
+
+  Fix VOPR false positive wherein checkpoint was being updated twice in the upgrade path.
+
+- [#2286](https://github.com/tigerbeetle/tigerbeetle/pull/2286)
+
+  Fix typos found using [codespell](https://github.com/codespell-project/codespell).
+
+- [#2282](https://github.com/tigerbeetle/tigerbeetle/pull/2282)
+
+  Document example for debiting multiple accounts and crediting a single account wherein the total
+  amount to transfer to the credit account is known, but the balances of the individual debit
+  accounts are not known.
+
+- [#2281](https://github.com/tigerbeetle/tigerbeetle/pull/2281)
+
+  Document the behavior of `user_data_128/user_data_64/user_data_32` in the presence of pending
+  transfers.
+
+- [#2279](https://github.com/tigerbeetle/tigerbeetle/pull/2279)
+
+  Inline Dockerfile in the release code, removing tools/docker/Dockerfile.
+
+- [#2280](https://github.com/tigerbeetle/tigerbeetle/pull/2280),
+  [#2285](https://github.com/tigerbeetle/tigerbeetle/pull/2285)
+
+  Add [`kcov`](https://simonkagstrom.github.io/kcov/) code coverage to
+  [DevHub](https://tigerbeetle.github.io/tigerbeetle/).
+
+- [#2266](https://github.com/tigerbeetle/tigerbeetle/pull/2266),
+  [#2293](https://github.com/tigerbeetle/tigerbeetle/pull/2293)
+
+  Add support for tracing IO & CPU events. This allows for coarse-grained performance analysis,
+  for example collectively profiling IO and CPU performance (as opposed to IO or CPU in isolation).
+
+- [#2273](https://github.com/tigerbeetle/tigerbeetle/pull/2273)
+
+  Remove explicit header sector locks, using a common locking path for prepare and header sectors.
+
+- [#2258](https://github.com/tigerbeetle/tigerbeetle/pull/2258)
+
+  Change CliArgs -> CLIArgs in accordance with TigerStyle.
+
+- [#2263](https://github.com/tigerbeetle/tigerbeetle/pull/2263)
+
+  Vendor `llvm-objcopy` in the [dependencies](https://github.com/tigerbeetle/dependencies)
+  repository in accordance with our "no dependencies" policy. This ensures users don't have to
+  manually install LLVM.
+
+- [#2297](https://github.com/tigerbeetle/tigerbeetle/pull/2297)
+
+  Assign correct date to the release binary date; it was earlier set to the epoch ("Jan 1 1970").
+
+- [#2289](https://github.com/tigerbeetle/tigerbeetle/pull/2289)
+
+  Introduce fatal errors for crashing the replica process in the face of uncorrectable errors (for
+  example, insufficient memory/storage).
+
+- [#2287](https://github.com/tigerbeetle/tigerbeetle/pull/2287)
+
+  Add formatting check in the CI for the Go client.
+
+- [#2278](https://github.com/tigerbeetle/tigerbeetle/pull/2278),
+  [#2292](https://github.com/tigerbeetle/tigerbeetle/pull/2292)
+
+  Reduce dimensionality of configuration modes.
+
+  Removes the development configuration which was used to run the replica with asserts enabled,
+  enabling asserts for the production configuration instead. Additionally, removes the -Dconfig CLI
+  option, making production configuration the default.
+
+
+### TigerTracks 🎧
+
+- [Fire on the Mountain](https://open.spotify.com/track/4DpBfWl3q8e0gGB76lAaox?si=dc8e84acf3de464a)
+
 ## TigerBeetle 0.16.0
 
 Released: 2024-09-02
