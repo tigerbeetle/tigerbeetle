@@ -44,7 +44,7 @@ fn devhub_coverage(shell: *Shell) !void {
     try shell.exec("{kcov} ./zig-out/bin/test", .{ .kcov = kcov });
     try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_tree 92", .{ .kcov = kcov });
     try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_forest 92", .{ .kcov = kcov });
-    try shell.exec("{kcov} ./zig-out/bin/vopr 10420048283342334513", .{ .kcov = kcov });
+    try shell.exec("{kcov} ./zig-out/bin/vopr 92", .{ .kcov = kcov });
 
     var coverage_dir = try shell.cwd.openDir("./src/devhub/coverage", .{ .iterate = true });
     defer coverage_dir.close();
