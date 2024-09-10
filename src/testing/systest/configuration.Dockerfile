@@ -1,6 +1,6 @@
-ARG TAG
-
 FROM debian:stable-slim
+
+ARG TAG
 
 RUN mkdir -p /volumes/database
 RUN echo "TAG=${TAG}" > /.env
