@@ -271,6 +271,10 @@ pub const Parser = struct {
             .lookup_accounts, .lookup_transfers => .{ .id = .{ .id = 0 } },
             .get_account_transfers, .get_account_balances => .{ .account_filter = tb.AccountFilter{
                 .account_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
                 .limit = switch (operation) {
@@ -1181,6 +1185,10 @@ test "repl.zig: Parser account filter successfully" {
             .operation = .get_account_transfers,
             .want = tb.AccountFilter{
                 .account_id = 1,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
                 .limit = StateMachine.constants.batch_max.get_account_transfers,
@@ -1194,6 +1202,8 @@ test "repl.zig: Parser account filter successfully" {
         .{
             .in =
             \\get_account_balances account_id=1000
+            \\user_data_128=128 user_data_64=64 user_data_32=32
+            \\code=2
             \\flags=debits|reversed limit=10
             \\timestamp_min=1 timestamp_max=9999;
             \\
@@ -1201,6 +1211,10 @@ test "repl.zig: Parser account filter successfully" {
             .operation = .get_account_balances,
             .want = tb.AccountFilter{
                 .account_id = 1000,
+                .user_data_128 = 128,
+                .user_data_64 = 64,
+                .user_data_32 = 32,
+                .code = 2,
                 .timestamp_min = 1,
                 .timestamp_max = 9999,
                 .limit = 10,

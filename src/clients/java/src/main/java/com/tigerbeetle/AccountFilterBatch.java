@@ -12,14 +12,18 @@ final class AccountFilterBatch extends Batch {
 
 
     interface Struct {
-        int SIZE = 64;
+        int SIZE = 128;
 
         int AccountId = 0;
-        int TimestampMin = 16;
-        int TimestampMax = 24;
-        int Limit = 32;
-        int Flags = 36;
-        int Reserved = 40;
+        int UserData128 = 16;
+        int UserData64 = 32;
+        int UserData32 = 40;
+        int Code = 44;
+        int Reserved = 46;
+        int TimestampMin = 104;
+        int TimestampMax = 112;
+        int Limit = 120;
+        int Flags = 124;
     }
 
     static final AccountFilterBatch EMPTY = new AccountFilterBatch(0);
@@ -91,6 +95,126 @@ final class AccountFilterBatch extends Batch {
     }
 
     /**
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    public byte[] getUserData128() {
+        return getUInt128(at(Struct.UserData128));
+    }
+
+    /**
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value
+              is to be retrieved.
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    public long getUserData128(final UInt128 part) {
+        return getUInt128(at(Struct.UserData128), part);
+    }
+
+    /**
+     * @param userData128 an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalArgumentException if {@code userData128} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    public void setUserData128(final byte[] userData128) {
+        putUInt128(at(Struct.UserData128), userData128);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    public void setUserData128(final long leastSignificant, final long mostSignificant) {
+        putUInt128(at(Struct.UserData128), leastSignificant, mostSignificant);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    public void setUserData128(final long leastSignificant) {
+        putUInt128(at(Struct.UserData128), leastSignificant, 0);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    public long getUserData64() {
+        final var value = getUInt64(at(Struct.UserData64));
+        return value;
+    }
+
+    /**
+     * @param userData64
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    public void setUserData64(final long userData64) {
+        putUInt64(at(Struct.UserData64), userData64);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    public int getUserData32() {
+        final var value = getUInt32(at(Struct.UserData32));
+        return value;
+    }
+
+    /**
+     * @param userData32
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    public void setUserData32(final int userData32) {
+        putUInt32(at(Struct.UserData32), userData32);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    public int getCode() {
+        final var value = getUInt16(at(Struct.Code));
+        return value;
+    }
+
+    /**
+     * @param code
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    public void setCode(final int code) {
+        putUInt16(at(Struct.Code), code);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    byte[] getReserved() {
+        return getArray(at(Struct.Reserved), 58);
+    }
+
+    /**
+     * @param reserved
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    void setReserved(byte[] reserved) {
+        if (reserved == null)
+            reserved = new byte[58];
+        if (reserved.length != 58)
+            throw new IllegalArgumentException("Reserved must be 58 bytes long");
+        putArray(at(Struct.Reserved), reserved);
+    }
+
+    /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getTimestampMin() {
@@ -156,26 +280,6 @@ final class AccountFilterBatch extends Batch {
      */
     public void setFlags(final int flags) {
         putUInt32(at(Struct.Flags), flags);
-    }
-
-    /**
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     */
-    byte[] getReserved() {
-        return getArray(at(Struct.Reserved), 24);
-    }
-
-    /**
-     * @param reserved
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     */
-    void setReserved(byte[] reserved) {
-        if (reserved == null)
-            reserved = new byte[24];
-        if (reserved.length != 24)
-            throw new IllegalArgumentException("Reserved must be 24 bytes long");
-        putArray(at(Struct.Reserved), reserved);
     }
 
 }

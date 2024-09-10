@@ -181,11 +181,15 @@ typedef struct tb_create_transfers_result_t {
 
 typedef struct tb_account_filter_t {
     tb_uint128_t account_id;
+    tb_uint128_t user_data_128;
+    uint64_t user_data_64;
+    uint32_t user_data_32;
+    uint16_t code;
+    uint8_t reserved[58];
     uint64_t timestamp_min;
     uint64_t timestamp_max;
     uint32_t limit;
     uint32_t flags;
-    uint8_t reserved[24];
 } tb_account_filter_t;
 
 typedef enum TB_ACCOUNT_FILTER_FLAGS {

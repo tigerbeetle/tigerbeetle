@@ -153,6 +153,10 @@ using (var client = new Client(clusterID, addresses))
     var filter = new AccountFilter
     {
         AccountId = 2,
+        UserData128 = 0, // No filter by UserData.
+        UserData64 = 0,
+        UserData32 = 0,
+        Code = 0, // No filter by Code.
         TimestampMin = 0, // No filter by Timestamp.
         TimestampMax = 0, // No filter by Timestamp.
         Limit = 10, // Limit to ten transfers at most.
@@ -168,6 +172,10 @@ using (var client = new Client(clusterID, addresses))
     filter = new AccountFilter
     {
         AccountId = 2,
+        UserData128 = 0, // No filter by UserData.
+        UserData64 = 0,
+        UserData32 = 0,
+        Code = 0, // No filter by Code.
         TimestampMin = 0, // No filter by Timestamp.
         TimestampMax = 0, // No filter by Timestamp.
         Limit = 10, // Limit to ten balances at most.

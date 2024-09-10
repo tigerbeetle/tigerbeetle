@@ -187,6 +187,10 @@ func main() {
 	// section:get-account-transfers
 	filter := AccountFilter{
 		AccountID:    ToUint128(2),
+		UserData128:  ToUint128(0), // No filter by UserData.
+		UserData64:   0,
+		UserData32:   0,
+		Code:         0,  // No filter by Code.
 		TimestampMin: 0,  // No filter by Timestamp.
 		TimestampMax: 0,  // No filter by Timestamp.
 		Limit:        10, // Limit to ten transfers at most.
@@ -208,6 +212,10 @@ func main() {
 	// section:get-account-balances
 	filter = AccountFilter{
 		AccountID:    ToUint128(2),
+		UserData128:  ToUint128(0), // No filter by UserData.
+		UserData64:   0,
+		UserData32:   0,
+		Code:         0,  // No filter by Code.
 		TimestampMin: 0,  // No filter by Timestamp.
 		TimestampMax: 0,  // No filter by Timestamp.
 		Limit:        10, // Limit to ten balances at most.

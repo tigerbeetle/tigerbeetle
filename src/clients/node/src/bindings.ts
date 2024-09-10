@@ -780,6 +780,26 @@ export type AccountFilter = {
   account_id: bigint
 
   /**
+  * See [user_data_128](https://docs.tigerbeetle.com/reference/account-filter#user_data_128)
+  */
+  user_data_128: bigint
+
+  /**
+  * See [user_data_64](https://docs.tigerbeetle.com/reference/account-filter#user_data_64)
+  */
+  user_data_64: bigint
+
+  /**
+  * See [user_data_32](https://docs.tigerbeetle.com/reference/account-filter#user_data_32)
+  */
+  user_data_32: number
+
+  /**
+  * See [code](https://docs.tigerbeetle.com/reference/account-filter#code)
+  */
+  code: number
+
+  /**
   * See [timestamp_min](https://docs.tigerbeetle.com/reference/account-filter#timestamp_min)
   */
   timestamp_min: bigint

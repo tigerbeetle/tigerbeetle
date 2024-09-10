@@ -187,6 +187,10 @@ public final class Main {
             // section:get-account-transfers
             AccountFilter filter = new AccountFilter();
             filter.setAccountId(2);
+            filter.setUserData128(0); // No filter by UserData.
+            filter.setUserData64(0);
+            filter.setUserData32(0);
+            filter.setCode(0); // No filter by Code.
             filter.setTimestampMin(0); // No filter by Timestamp.
             filter.setTimestampMax(0); // No filter by Timestamp.
             filter.setLimit(10); // Limit to ten transfers at most.
@@ -200,6 +204,10 @@ public final class Main {
             // section:get-account-balances
             filter = new AccountFilter();
             filter.setAccountId(2);
+            filter.setUserData128(0); // No filter by UserData.
+            filter.setUserData64(0);
+            filter.setUserData32(0);
+            filter.setCode(0); // No filter by Code.
             filter.setTimestampMin(0); // No filter by Timestamp.
             filter.setTimestampMax(0); // No filter by Timestamp.
             filter.setLimit(10); // Limit to ten balances at most.
