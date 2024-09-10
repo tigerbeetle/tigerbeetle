@@ -1313,21 +1313,6 @@ pub fn GrooveType(
             }
         }
 
-        const TreeField = union(enum) {
-            ids,
-            objects,
-            index: []const u8,
-        };
-
-        /// Returns LSM tree type for the given index field name (or ObjectTree if null).
-        fn TreeFor(comptime tree_field: TreeField) type {
-            return switch (tree_field) {
-                .ids => IdTree,
-                .objects => ObjectTree,
-                .index => |field| @TypeOf(@field(@as(IndexTrees, undefined), field)),
-            };
-        }
-
         pub fn assert_between_bars(groove: *const Groove) void {
             if (has_id) groove.ids.assert_between_bars();
             groove.objects.assert_between_bars();
