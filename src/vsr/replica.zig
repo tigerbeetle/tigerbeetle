@@ -3896,8 +3896,8 @@ pub fn ReplicaType(
             if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
-                    prepare.header.release,
                     commit_op_prefetch_callback,
+                    prepare.header.release,
                     prepare.header.op,
                     prepare_operation,
                     prepare.body(),

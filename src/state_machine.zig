@@ -667,8 +667,8 @@ pub fn StateMachineType(
 
         pub fn prefetch(
             self: *StateMachine,
-            client_release: vsr.Release,
             callback: *const fn (*StateMachine) void,
+            client_release: vsr.Release,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
@@ -3184,8 +3184,8 @@ const TestContext = struct {
         context.busy = true;
         context.state_machine.prefetch_timestamp = timestamp;
         context.state_machine.prefetch(
-            vsr.Release.minimum,
             TestContext.callback,
+            vsr.Release.minimum,
             op,
             operation,
             input,
