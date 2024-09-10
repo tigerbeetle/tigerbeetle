@@ -229,7 +229,7 @@ pub fn main() !void {
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .replica_release_advance_probability = 0.0001,
         .replica_release_catchup_probability = 0.001,
-        .requests_max = constants.journal_slot_count * 3,
+        .requests_max = constants.journal_slot_count * 4,
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
         .request_idle_off_probability = 10 + random.uintLessThan(u8, 10),
