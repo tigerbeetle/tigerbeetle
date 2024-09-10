@@ -185,7 +185,6 @@ pub fn StateMachineType(
 
         pub fn prefetch(
             state_machine: *StateMachine,
-            client_release: vsr.Release,
             callback: *const fn (*StateMachine) void,
             client_release: vsr.Release,
             op: u64,
