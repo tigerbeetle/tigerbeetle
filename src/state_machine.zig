@@ -3240,6 +3240,7 @@ const TestContext = struct {
         context.busy = true;
         context.state_machine.prefetch_timestamp = timestamp;
         context.state_machine.prefetch(
+            vsr.Release.minimum,
             TestContext.callback,
             context.client_release,
             op,
