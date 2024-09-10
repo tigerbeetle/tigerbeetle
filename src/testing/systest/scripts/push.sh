@@ -5,11 +5,8 @@
 set -eu
 
 usage() {
-  cat <<-EOF
-  usage: ${0##*/} <tag>
-
-  Push the TigerBeetle Docker images to Antithesis' registry.
-  EOF
+  echo "usage: ${0##*/} <tag>"
+  echo "Push the TigerBeetle Docker images to Antithesis' registry."
 }
 
 if [ $# -ne 1 ] || [ "$1" = '-h' ]; then

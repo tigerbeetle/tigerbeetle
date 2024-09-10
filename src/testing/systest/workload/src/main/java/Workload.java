@@ -58,8 +58,12 @@ public class Workload {
     var commandsAll = List.of(WithOdds.of(1, createAccounts()), WithOdds.of(5, createTransfers()));
 
     // Here we select all commands that are currently enabled.
-    var commandsEnabled = commandsAll.stream().filter(x -> x.value().isPresent())
-        .map(x -> WithOdds.of(x.odds(), x.value().get())).toList();
+    var commandsEnabled = new ArrayList<WithOdds<Supplier<? extends Command<?>>>>();
+    for (var command : commandsAll) {
+      command.value().ifPresent(supplier -> {
+        commandsEnabled.add(WithOdds.of(command.odds(), supplier));
+      });
+    }
 
     // There should always be at least one enabled command.
     assert !commandsEnabled.isEmpty() : "no commands are enabled";

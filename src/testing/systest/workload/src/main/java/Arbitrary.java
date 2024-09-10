@@ -1,3 +1,4 @@
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.function.Supplier;
@@ -10,7 +11,8 @@ public class Arbitrary {
     return elements.get(random.nextInt(0, elements.size()));
   }
 
-  static <T> Supplier<T> odds(Random random, List<? extends WithOdds<? extends Supplier<T>>> arbs) {
+  static <T> Supplier<T> odds(Random random,
+      ArrayList<? extends WithOdds<? extends Supplier<? extends T>>> arbs) {
     final int oddsTotal = arbs.stream().mapToInt(a -> a.odds()).sum();
     return (() -> {
       var pick = random.nextInt(0, oddsTotal) + 1;
