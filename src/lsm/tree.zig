@@ -9,7 +9,6 @@ const maybe = stdx.maybe;
 const div_ceil = stdx.div_ceil;
 
 const log = std.log.scoped(.tree);
-const tracer = @import("../tracer.zig");
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
@@ -90,8 +89,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// (When recovering from a checkpoint, compaction_op starts at op_checkpoint).
         compaction_op: ?u64 = null,
 
-        tracer_slot: ?tracer.SpanStart = null,
-
         active_scope: ?struct {
             value_context: TableMemory.ValueContext,
             key_range: ?KeyRange,
@@ -161,8 +158,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            assert(tree.tracer_slot == null);
-
             for (&tree.compactions) |*compaction| compaction.deinit();
 
             tree.manifest.deinit(allocator);

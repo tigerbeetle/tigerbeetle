@@ -129,11 +129,6 @@ pub fn build(b: *std.Build) !void {
             "vopr-log",
             "Log only state transitions (short) or everything (full).",
         ) orelse .short,
-        .tracer_backend = b.option(
-            config.TracerBackend,
-            "tracer-backend",
-            "Which backend to use for tracing.",
-        ) orelse .none,
         .llvm_objcopy = b.option(
             []const u8,
             "llvm-objcopy",
@@ -154,14 +149,12 @@ pub fn build(b: *std.Build) !void {
     );
     vsr_options.addOption(bool, "config_verify", build_options.config_verify);
     vsr_options.addOption(std.log.Level, "config_log_level", build_options.config_log_level);
-    vsr_options.addOption(config.TracerBackend, "tracer_backend", build_options.tracer_backend);
     vsr_options.addOption(bool, "config_aof_recovery", build_options.config_aof_recovery);
     vsr_options.addOption(config.HashLogMode, "hash_log_mode", build_options.hash_log_mode);
 
     const vsr_module: *std.Build.Module = build_vsr_module(b, .{
         .vsr_options = vsr_options,
         .target = target,
-        .tracer_backend = build_options.tracer_backend,
     });
 
     const tb_client_header = blk: {
@@ -195,7 +188,6 @@ pub fn build(b: *std.Build) !void {
         .llvm_objcopy = build_options.llvm_objcopy,
         .target = target,
         .mode = mode,
-        .tracer_backend = build_options.tracer_backend,
         .emit_llvm_ir = build_options.emit_llvm_ir,
         .multiversion = build_options.multiversion,
     });
@@ -295,55 +287,11 @@ pub fn build(b: *std.Build) !void {
 fn build_vsr_module(b: *std.Build, options: struct {
     vsr_options: *std.Build.Step.Options,
     target: std.Build.ResolvedTarget,
-    tracer_backend: config.TracerBackend,
 }) *std.Build.Module {
     const vsr_module = b.addModule("vsr", .{
         .root_source_file = b.path("src/vsr.zig"),
     });
     vsr_module.addOptions("vsr_options", options.vsr_options);
-
-    switch (options.tracer_backend) {
-        .none => {},
-        .tracy => {
-            // Code here is based on
-            // https://github.com/ziglang/zig/blob/a660df4900520c505a0865707552dcc777f4b791/build.zig#L382
-
-            // On mingw, we need to opt into windows 7+ to get some features required by tracy.
-            const tracy_c_flags: []const []const u8 = if (options.target.result.isMinGW())
-                &[_][]const u8{
-                    "-DTRACY_ENABLE=1",
-                    "-DTRACY_FIBERS=1",
-                    "-fno-sanitize=undefined",
-                    "-D_WIN32_WINNT=0x601",
-                }
-            else
-                &[_][]const u8{
-                    "-DTRACY_ENABLE=1",
-                    "-DTRACY_FIBERS=1",
-                    "-fno-sanitize=undefined",
-                };
-
-            const tracy = b.addSystemCommand(&.{
-                "git",
-                "clone",
-                "--branch=v0.9.1",
-                "https://github.com/wolfpld/tracy.git",
-            }).addOutputDirectoryArg("tracy");
-
-            vsr_module.addCSourceFile(.{
-                .file = tracy.path(b, "./public/TracyClient.cpp"),
-                .flags = tracy_c_flags,
-            });
-            vsr_module.addIncludePath(tracy.path(b, "./public/tracy"));
-            vsr_module.link_libc = true;
-            vsr_module.link_libcpp = true;
-
-            if (options.target.result.os.tag == .windows) {
-                vsr_module.linkSystemLibrary("dbghelp", .{});
-                vsr_module.linkSystemLibrary("ws2_32", .{});
-            }
-        },
-    }
     return vsr_module;
 }
 
@@ -385,7 +333,6 @@ fn build_tigerbeetle(
         llvm_objcopy: ?[]const u8,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
-        tracer_backend: config.TracerBackend,
         multiversion: ?[]const u8,
         emit_llvm_ir: bool,
     },
@@ -399,7 +346,6 @@ fn build_tigerbeetle(
             .multiversion = version_past,
             .target = options.target,
             .mode = options.mode,
-            .tracer_backend = options.tracer_backend,
         });
     } else bin: {
         const tigerbeetle_exe = build_tigerbeetle_executable(b, .{
@@ -407,7 +353,6 @@ fn build_tigerbeetle(
             .vsr_options = options.vsr_options,
             .target = options.target,
             .mode = options.mode,
-            .tracer_backend = options.tracer_backend,
         });
         if (options.emit_llvm_ir) {
             steps.install.dependOn(&b.addInstallBinFile(
@@ -441,7 +386,6 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
     vsr_options: *std.Build.Step.Options,
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
-    tracer_backend: config.TracerBackend,
 }) *std.Build.Step.Compile {
     const tigerbeetle = b.addExecutable(.{
         .name = "tigerbeetle",
@@ -451,9 +395,7 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
     });
     tigerbeetle.root_module.addImport("vsr", options.vsr_module);
     tigerbeetle.root_module.addOptions("vsr_options", options.vsr_options);
-    if (options.mode == .ReleaseSafe) {
-        tigerbeetle.root_module.strip = options.tracer_backend == .none;
-    }
+    tigerbeetle.root_module.strip = options.mode == .ReleaseSafe;
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.root_module.omit_frame_pointer = false;
     return tigerbeetle;
@@ -466,7 +408,6 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     multiversion: []const u8,
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
-    tracer_backend: config.TracerBackend,
 }) std.Build.LazyPath {
     // build_multiversion a custom step that would take care of packing several releases into one
     const build_multiversion_exe = b.addExecutable(.{
@@ -498,7 +439,6 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
                     .vsr_options = options.vsr_options,
                     .target = resolve_target(b, arch ++ "-macos") catch unreachable,
                     .mode = options.mode,
-                    .tracer_backend = options.tracer_backend,
                 }).getEmittedBin(),
             );
         }
@@ -514,7 +454,6 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
                 .vsr_options = options.vsr_options,
                 .target = options.target,
                 .mode = options.mode,
-                .tracer_backend = options.tracer_backend,
             }).getEmittedBin(),
         );
     }

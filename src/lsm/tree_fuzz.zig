@@ -11,7 +11,6 @@ const binary_search = @import("binary_search.zig");
 const allocator = fuzz.allocator;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
-const tracer = @import("../tracer.zig");
 
 const Direction = @import("../direction.zig").Direction;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
@@ -869,9 +868,6 @@ fn generate_compact(
 }
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    try tracer.init(allocator);
-    defer tracer.deinit(allocator);
-
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 

@@ -16,7 +16,6 @@ const root = @import("root");
 const BuildOptions = struct {
     config_log_level: std.log.Level,
     config_verify: bool,
-    tracer_backend: TracerBackend,
     hash_log_mode: HashLogMode,
     git_commit: ?[40]u8,
     release: ?[]const u8,
@@ -87,7 +86,6 @@ pub const Config = struct {
 // TODO: Some of these could be runtime parameters (e.g. grid_scrubber_cycle_ms).
 const ConfigProcess = struct {
     log_level: std.log.Level = .info,
-    tracer_backend: TracerBackend = .none,
     hash_log_mode: HashLogMode = .none,
     verify: bool,
     release: vsr.Release = vsr.Release.minimum,
@@ -214,12 +212,6 @@ pub const ConfigBase = enum {
     default,
 };
 
-pub const TracerBackend = enum {
-    none,
-    // Sends data to https://github.com/wolfpld/tracy.
-    tracy,
-};
-
 pub const HashLogMode = enum {
     none,
     create,
@@ -310,7 +302,6 @@ pub const configs = struct {
 
         // TODO Use additional build options to overwrite other fields.
         base.process.log_level = build_options.config_log_level;
-        base.process.tracer_backend = build_options.tracer_backend;
         base.process.hash_log_mode = build_options.hash_log_mode;
         base.process.release = release;
         base.process.release_client_min = release_client_min;

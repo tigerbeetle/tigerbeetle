@@ -37,7 +37,6 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
 const log = std.log.scoped(.compaction);
-const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
 

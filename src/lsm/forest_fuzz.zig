@@ -9,7 +9,6 @@ const vsr = @import("../vsr.zig");
 const allocator = fuzz.allocator;
 
 const log = std.log.scoped(.lsm_forest_fuzz);
-const tracer = @import("../tracer.zig");
 const lsm = @import("tree.zig");
 const tb = @import("../tigerbeetle.zig");
 
@@ -1066,9 +1065,6 @@ fn generate_put_account(
 const io_latency_mean = 20;
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    try tracer.init(allocator);
-    defer tracer.deinit(allocator);
-
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
