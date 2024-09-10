@@ -1,17 +1,15 @@
 #!/bin/sh -eu
 
 usage() {
-  cat <<-EOF
-  usage: ${0##*/}
+  echo "usage: ${0##*/}"
+  echo ""
+  echo "Initialize and start a TigerBeetle replica."
 
-  Initialize and start a TigerBeetle replica.
-
-  Required environment variables:
-    CLUSTER
-    REPLICA
-    REPLICA_COUNT
-    ADDRESSES
-  EOF
+  echo "Required environment variables:"
+  echo "  CLUSTER"
+  echo "  REPLICA"
+  echo "  REPLICA_COUNT"
+  echo "  ADDRESSES"
 }
 
 if [ $# -ne 0 ] || [ -z "$CLUSTER" ] || [ -z "$REPLICA" ] || [ -z "$ADDRESSES" ] || [ -z "$REPLICA_COUNT" ]; then
