@@ -593,6 +593,7 @@ pub fn StateMachineType(
 
         pub fn input_valid(
             self: *const StateMachine,
+            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
@@ -602,14 +603,16 @@ pub fn StateMachineType(
                 .pulse => {
                     if (input.len != 0) return false;
                 },
-                inline .get_account_transfers,
-                .get_account_balances,
-                .query_accounts,
-                .query_transfers,
-                => |comptime_operation| {
-                    const event_size = @sizeOf(Event(comptime_operation));
+                .get_account_transfers, .get_account_balances => {
+                    const event_size: u32 = if (FormerAccountFilter.required(client_release))
+                        @sizeOf(FormerAccountFilter)
+                    else
+                        @sizeOf(AccountFilter);
 
                     if (input.len != event_size) return false;
+                },
+                .query_accounts, .query_transfers => {
+                    if (input.len != @sizeOf(QueryFilter)) return false;
                 },
                 inline else => |comptime_operation| {
                     const event_size = @sizeOf(Event(comptime_operation));
@@ -634,10 +637,11 @@ pub fn StateMachineType(
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
         pub fn prepare(
             self: *StateMachine,
+            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            assert(self.input_valid(operation, input));
+            assert(self.input_valid(client_release, operation, input));
             assert(input.len <= self.batch_size_limit);
 
             self.prepare_timestamp += switch (operation) {
@@ -663,6 +667,7 @@ pub fn StateMachineType(
 
         pub fn prefetch(
             self: *StateMachine,
+            client_release: vsr.Release,
             callback: *const fn (*StateMachine) void,
             op: u64,
             operation: Operation,
@@ -671,7 +676,7 @@ pub fn StateMachineType(
             _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
-            assert(self.input_valid(operation, input));
+            assert(self.input_valid(client_release, operation, input));
             assert(input.len <= self.batch_size_limit);
 
             tracer.start(
@@ -706,10 +711,10 @@ pub fn StateMachineType(
                     self.prefetch_lookup_transfers(mem.bytesAsSlice(u128, input));
                 },
                 .get_account_transfers => {
-                    self.prefetch_get_account_transfers(parse_filter_from_input(input));
+                    self.prefetch_get_account_transfers(account_filter_from_input(input));
                 },
                 .get_account_balances => {
-                    self.prefetch_get_account_balances(parse_filter_from_input(input));
+                    self.prefetch_get_account_balances(account_filter_from_input(input));
                 },
                 .query_accounts => {
                     self.prefetch_query_accounts(mem.bytesToValue(QueryFilter, input));
@@ -802,7 +807,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             self.prefetch_context = .null;
 
-            const transfers = mem.bytesAsSlice(Event(.create_transfers), self.prefetch_input.?);
+            const transfers: []const Transfer = mem.bytesAsSlice(Transfer, self.prefetch_input.?);
             for (transfers) |*t| {
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     if (self.forest.grooves.transfers.get(t.pending_id)) |p| {
@@ -961,7 +966,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
-            const filter = parse_filter_from_input(self.prefetch_input.?);
+            const filter = account_filter_from_input(self.prefetch_input.?);
             self.prefetch_get_account_balances_scan(filter);
         }
 
@@ -1025,17 +1030,55 @@ pub fn StateMachineType(
             self.prefetch_finish();
         }
 
-        // TODO(batiati): Using a zeroed filter in case of invalid input.
-        // Implement input validation on `prepare` for all operations.
-        fn parse_filter_from_input(input: []const u8) AccountFilter {
-            return if (input.len != @sizeOf(AccountFilter))
-                std.mem.zeroInit(AccountFilter, .{})
-            else
-                mem.bytesToValue(
-                    AccountFilter,
-                    input[0..@sizeOf(AccountFilter)],
-                );
+        fn account_filter_from_input(
+            input: []const u8,
+        ) AccountFilter {
+            if (input.len == @sizeOf(FormerAccountFilter)) {
+                const filter = mem.bytesAsValue(FormerAccountFilter, input);
+                return .{
+                    .account_id = filter.account_id,
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .code = 0,
+                    .timestamp_min = filter.timestamp_min,
+                    .timestamp_max = filter.timestamp_max,
+                    .limit = filter.limit,
+                    .flags = filter.flags,
+                };
+            }
+
+            assert(input.len == @sizeOf(AccountFilter));
+            return mem.bytesToValue(AccountFilter, input);
         }
+
+        const FormerAccountFilter = extern struct {
+            account_id: u128,
+            timestamp_min: u64,
+            timestamp_max: u64,
+            limit: u32,
+            flags: tb.AccountFilterFlags,
+            reserved: [24]u8 = [_]u8{0} ** 24,
+
+            fn required(client_release: vsr.Release) bool {
+                const release_min_inclusive =
+                    vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
+                const release_max_exclusive =
+                    vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 2 });
+
+                return client_release.value >= release_min_inclusive.value and
+                    client_release.value < release_max_exclusive.value;
+            }
+
+            comptime {
+                assert(@sizeOf(FormerAccountFilter) == 64);
+                assert(stdx.no_padding(FormerAccountFilter));
+
+                const release_max_transition =
+                    vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
+                assert(config.release.value < release_max_transition.value);
+            }
+        };
 
         fn get_scan_from_account_filter(
             self: *StateMachine,
@@ -1445,7 +1488,7 @@ pub fn StateMachineType(
         ) usize {
             _ = client;
             assert(op != 0);
-            assert(self.input_valid(operation, input));
+            assert(self.input_valid(client_release, operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
             assert(input.len <= self.batch_size_limit);
 
@@ -3141,6 +3184,7 @@ const TestContext = struct {
         context.busy = true;
         context.state_machine.prefetch_timestamp = timestamp;
         context.state_machine.prefetch(
+            vsr.Release.minimum,
             TestContext.callback,
             op,
             operation,
@@ -3661,7 +3705,11 @@ fn check(test_table: []const u8) !void {
 
                 context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
                 context.state_machine.prepare_timestamp += 1;
-                context.state_machine.prepare(commit_operation, request.items);
+                context.state_machine.prepare(
+                    vsr.Release.minimum,
+                    commit_operation,
+                    request.items,
+                );
 
                 if (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
                     const pulse_size = context.execute(
@@ -5457,6 +5505,7 @@ test "StateMachine: input_valid" {
 
     for (events) |event| {
         try std.testing.expect(context.state_machine.input_valid(
+            vsr.Release.minimum,
             event.operation,
             input[0..0],
         ) == (event.min == 0));
@@ -5468,15 +5517,18 @@ test "StateMachine: input_valid" {
         }
 
         try std.testing.expect(context.state_machine.input_valid(
+            vsr.Release.minimum,
             event.operation,
             input[0 .. 1 * event.size],
         ));
         try std.testing.expect(context.state_machine.input_valid(
+            vsr.Release.minimum,
             event.operation,
             input[0 .. event.max * event.size],
         ));
         if ((event.max + 1) * event.size < TestContext.message_body_size_max) {
             try std.testing.expect(!context.state_machine.input_valid(
+                vsr.Release.minimum,
                 event.operation,
                 input[0 .. (event.max + 1) * event.size],
             ));
@@ -5485,6 +5537,7 @@ test "StateMachine: input_valid" {
             // on an assert.
         }
         try std.testing.expect(!context.state_machine.input_valid(
+            vsr.Release.minimum,
             event.operation,
             input[0 .. 3 * (event.size / 2)],
         ));

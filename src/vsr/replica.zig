@@ -3896,6 +3896,7 @@ pub fn ReplicaType(
             if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
+                    prepare.header.release,
                     commit_op_prefetch_callback,
                     prepare.header.op,
                     prepare_operation,
@@ -5047,7 +5048,11 @@ pub fn ReplicaType(
                 return true;
             }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
-                if (!self.state_machine.input_valid(operation, message.body())) {
+                if (!self.state_machine.input_valid(
+                    message.header.release,
+                    operation,
+                    message.body(),
+                )) {
                     log.err(
                         "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
                         .{
@@ -5979,6 +5984,7 @@ pub fn ReplicaType(
                 },
                 else => {
                     self.state_machine.prepare(
+                        request.message.header.release,
                         request.message.header.operation.cast(StateMachine),
                         request.message.body(),
                     );

@@ -180,10 +180,12 @@ pub fn StateMachineType(
 
         pub fn input_valid(
             state_machine: *const StateMachine,
+            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
             _ = state_machine;
+            _ = client_release;
             _ = operation;
             _ = input;
             return true;
@@ -191,21 +193,25 @@ pub fn StateMachineType(
 
         pub fn prepare(
             state_machine: *StateMachine,
+            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
             _ = state_machine;
+            _ = client_release;
             _ = operation;
             _ = input;
         }
 
         pub fn prefetch(
             state_machine: *StateMachine,
+            client_release: vsr.Release,
             callback: *const fn (*StateMachine) void,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
+            _ = client_release;
             _ = operation;
             _ = input;
 
