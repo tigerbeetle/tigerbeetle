@@ -27,7 +27,7 @@ To test locally (run from repository root):
 
 # Run containers.
 cd src/testing/systest/config/
-docker compose up
+TAG=<tag> docker compose up
 ^C # shut it down when you're pleased
 ```
 
