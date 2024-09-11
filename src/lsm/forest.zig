@@ -223,13 +223,19 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             },
         } = null,
 
-        compaction_progress: enum { idle, trees_or_manifest, trees_and_manifest } = .idle,
+        compaction_progress: ?struct {
+            trees_done: bool,
+            manifest_log_done: bool,
+
+            fn all_done(compaction_progress: @This()) bool {
+                return compaction_progress.trees_done and compaction_progress.manifest_log_done;
+            }
+        } = null,
 
         grid: *Grid,
         grooves: Grooves,
         node_pool: NodePool,
         manifest_log: ManifestLog,
-        manifest_log_progress: enum { idle, compacting, done, skip } = .idle,
 
         compaction_pipeline: CompactionPipeline,
 
@@ -331,7 +337,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         pub fn open(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
 
             forest.progress = .{ .open = .{ .callback = callback } };
 
@@ -348,7 +354,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         ) void {
             const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
             assert(table.label.level < constants.lsm_levels);
             assert(table.label.event != .remove);
 
@@ -367,7 +373,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
             const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
             forest.verify_tables_recovered();
 
             inline for (std.meta.fields(Grooves)) |field| {
@@ -401,19 +407,25 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 last_beat,
             });
 
+            assert(forest.progress == null);
             forest.progress = .{ .compact = .{
                 .op = op,
                 .callback = callback,
             } };
 
+            // Run trees and manifest log compaction in parallel, join in compact_finish.
+            assert(forest.compaction_progress == null);
+            forest.compaction_progress = .{
+                .trees_done = false,
+                .manifest_log_done = false,
+            };
+
             // Compaction only starts > lsm_compaction_ops because nothing compacts in the first
             // bar.
             assert(op >= constants.lsm_compaction_ops or
                 forest.compaction_pipeline.compactions.count() == 0);
-            assert(forest.compaction_progress == .idle);
 
-            forest.compaction_progress = .trees_or_manifest;
-            forest.compaction_pipeline.beat(forest, op, compact_callback);
+            forest.compaction_pipeline.beat(forest, op, compact_trees_callback);
             if (forest.grid.superblock.working.vsr_state.op_compacted(op)) {
                 assert(forest.compaction_pipeline.compactions.count() == 0);
                 assert(forest.compaction_pipeline.bar_active.count() == 0);
@@ -425,40 +437,50 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // last beat.
             // The first bar has no manifest compaction.
             if ((last_beat or last_half_beat) and op > constants.lsm_compaction_ops) {
-                forest.manifest_log_progress = .compacting;
                 forest.manifest_log.compact(compact_manifest_log_callback, op);
-                forest.compaction_progress = .trees_and_manifest;
             } else {
-                assert(forest.manifest_log_progress == .idle);
+                forest.compaction_progress.?.manifest_log_done = true;
             }
         }
 
-        fn compact_callback(forest: *Forest) void {
+        fn compact_trees_callback(forest: *Forest) void {
             assert(forest.progress.? == .compact);
-            assert(forest.compaction_progress != .idle);
+            assert(forest.compaction_progress != null);
+            assert(!forest.compaction_progress.?.trees_done);
+            forest.compaction_progress.?.trees_done = true;
 
-            if (forest.compaction_progress == .trees_and_manifest) {
-                assert(forest.manifest_log_progress != .idle);
+            if (forest.compaction_progress.?.all_done()) {
+                forest.compact_finish();
             }
+        }
 
-            forest.compaction_progress = if (forest.compaction_progress == .trees_and_manifest)
-                .trees_or_manifest
-            else
-                .idle;
-            if (forest.compaction_progress != .idle) return;
+        fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
+
+            assert(forest.progress.? == .compact);
+            assert(forest.compaction_progress != null);
+            assert(!forest.compaction_progress.?.manifest_log_done);
+            forest.compaction_progress.?.manifest_log_done = true;
+
+            if (forest.compaction_progress.?.all_done()) {
+                forest.compact_finish();
+            }
+        }
+
+        fn compact_finish(forest: *Forest) void {
+            assert(forest.progress.? == .compact);
+            assert(forest.compaction_progress != null);
+            assert(forest.compaction_progress.?.trees_done);
+            assert(forest.compaction_progress.?.manifest_log_done);
 
             forest.verify_table_extents();
-
-            const progress = &forest.progress.?.compact;
 
             assert(forest.progress.? == .compact);
             const op = forest.progress.?.compact.op;
 
             const compaction_beat = op % constants.lsm_compaction_ops;
-            const last_half_beat = compaction_beat == @divExact(
-                constants.lsm_compaction_ops,
-                2,
-            ) - 1;
+            const last_half_beat = compaction_beat ==
+                @divExact(constants.lsm_compaction_ops, 2) - 1;
             const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
             // Apply the changes to the manifest. This will run at the target compaction beat
@@ -468,13 +490,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     if (compaction.level_b % 2 == 0 and last_half_beat) continue;
                     if (compaction.level_b % 2 != 0 and last_beat) continue;
 
-                    assert(forest.manifest_log_progress == .compacting or
-                        forest.manifest_log_progress == .done);
                     switch (tree_id_cast(compaction.tree_id)) {
                         inline else => |tree_id| {
                             forest.tree_for_id(tree_id).compactions[compaction.level_b]
                                 .bar_blocks_unassign(&forest.compaction_pipeline.block_pool);
 
+                            assert(forest.compaction_progress.?.manifest_log_done);
                             forest.tree_for_id(tree_id).compactions[compaction.level_b]
                                 .bar_apply_to_manifest();
                         },
@@ -514,37 +535,15 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
 
             // On the last beat of the bar, make sure that manifest log compaction is finished.
-            if (last_beat or last_half_beat) {
-                switch (forest.manifest_log_progress) {
-                    .idle => {},
-                    .compacting => unreachable,
-                    .done => {
-                        forest.manifest_log.compact_end();
-                        forest.manifest_log_progress = .idle;
-                    },
-                    .skip => {},
-                }
+            if ((last_beat or last_half_beat) and op > constants.lsm_compaction_ops) {
+                forest.manifest_log.compact_end();
             }
 
-            const callback = progress.callback;
+            const callback = forest.progress.?.compact.callback;
             forest.progress = null;
+            forest.compaction_progress = null;
 
             callback(forest);
-        }
-
-        fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
-            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
-            assert(forest.manifest_log_progress == .compacting);
-
-            forest.manifest_log_progress = .done;
-
-            if (forest.progress) |progress| {
-                assert(progress == .compact);
-
-                forest.compact_callback();
-            } else {
-                // The manifest log compaction completed between compaction beats.
-            }
         }
 
         fn GrooveFor(comptime groove_field_name: []const u8) type {
@@ -554,7 +553,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
             forest.grid.assert_only_repairing();
             forest.verify_table_extents();
 
@@ -570,7 +569,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
             const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .checkpoint);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
             forest.verify_table_extents();
             forest.verify_tables_recovered();
 
