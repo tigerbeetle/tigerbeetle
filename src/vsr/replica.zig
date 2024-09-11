@@ -1101,6 +1101,14 @@ pub fn ReplicaType(
             );
             errdefer self.grid_scrubber.deinit(allocator);
 
+            self.view_headers = vsr.Headers.ViewChangeArray.init(
+                self.superblock.working.vsr_headers().command,
+                self.superblock.working.vsr_headers().slice,
+            );
+            // SV headers made durable by potential primaries in a view change may not be verifiable
+            // due to missing headers; they are made durable *before* repair.
+            if (self.view_headers.command == .do_view_change) self.view_headers.verify();
+
             self.* = Self{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
@@ -1144,10 +1152,7 @@ pub fn ReplicaType(
                     .capacity = constants.pipeline_prepare_queue_max +
                         options.pipeline_requests_limit,
                 } },
-                .view_headers = vsr.Headers.ViewChangeArray.init_from_slice(
-                    self.superblock.working.vsr_headers().command,
-                    self.superblock.working.vsr_headers().slice,
-                ),
+                .view_headers = self.view_headers,
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
                     .id = replica_index,
@@ -2160,6 +2165,24 @@ pub fn ReplicaType(
                 // headers of any other replica with the same log_view so that the next primary can
                 // identify an unambiguous set of canonical headers.
                 self.log_view = self.view;
+
+                // Make view_headers and log_view durable before initiating repair. We don't use
+                // primary_update_view_headers because it assumes that the primary's
+                self.view_headers.command = .start_view;
+                self.view_headers.array.clear();
+
+                var op = self.op + 1;
+                while (op > 0 and
+                    self.view_headers.array.count() < constants.view_change_headers_suffix_max)
+                {
+                    op -= 1;
+                    if (self.journal.header_with_op(op)) |header| {
+                        self.view_headers.append(header);
+                    } else {
+                        break;
+                    }
+                }
+                self.view_durable_update();
 
                 assert(self.op == op_head);
                 assert(self.op >= self.commit_max);
@@ -7794,10 +7817,7 @@ pub fn ReplicaType(
                     self.view > self.view_durable() or
                     self.syncing == .updating_checkpoint,
             );
-            // The primary must only persist the SV headers after repairs are done.
-            // Otherwise headers could be nacked, truncated, then restored after a crash.
-            assert(self.log_view < self.view or self.replica != self.primary_index(self.view) or
-                self.status == .normal or self.status == .recovering);
+
             assert(self.view_headers.array.count() > 0);
             assert(self.view_headers.array.get(0).view <= self.log_view);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
@@ -8201,10 +8221,6 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
 
-            // SVs will be sent out after the view_durable update completes.
-            assert(self.view_durable_updating());
-            assert(self.log_view > self.log_view_durable());
-
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();
         }
@@ -8419,10 +8435,6 @@ pub fn ReplicaType(
                 assert(self.commit_min == self.commit_max);
                 assert(self.journal.dirty.count == 0);
                 assert(self.journal.faulty.count == 0);
-
-                // Now that the primary is repaired and in status=normal, it can update its
-                // view-change headers.
-                self.view_durable_update();
 
                 self.ping_timeout.start();
                 self.commit_message_timeout.start();
@@ -10048,13 +10060,15 @@ fn message_body_as_view_headers(message: *const Message) vsr.Headers.ViewChangeS
     assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
     assert(message.header.command == .do_view_change);
 
-    return vsr.Headers.ViewChangeSlice.init(
+    const headers = vsr.Headers.ViewChangeSlice.init(
         switch (message.header.command) {
             .do_view_change => .do_view_change,
             else => unreachable,
         },
         message_body_as_headers_unchecked(message),
     );
+    headers.verify();
+    return headers;
 }
 
 /// Asserts that the headers are in descending op order.
@@ -10118,8 +10132,7 @@ fn start_view_message_headers(message: *const Message.StartView) []const Header.
         message.body()[@sizeOf(vsr.CheckpointState)..],
     ));
     assert(headers.len > 0);
-    // To run verification.
-    _ = vsr.Headers.ViewChangeSlice.init(.start_view, headers);
+    vsr.Headers.ViewChangeSlice.verify(.{ .command = .start_view, .slice = headers });
     if (constants.verify) {
         for (headers) |header| assert(header.valid_checksum());
     }

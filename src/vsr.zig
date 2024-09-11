@@ -1279,7 +1279,6 @@ const ViewChangeHeadersSlice = struct {
             .command = command,
             .slice = slice,
         };
-        headers.verify();
         return headers;
     }
 
@@ -1422,6 +1421,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
     headers_array[3].set_checksum();
 
     const headers = Headers.ViewChangeSlice.init(.do_view_change, &headers_array);
+    headers.verify();
     try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(10, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(9, 12), .{ .min = 10, .max = 10 }));
@@ -1438,12 +1438,12 @@ const ViewChangeHeadersArray = struct {
     array: Headers.Array,
 
     pub fn root(cluster: u128) ViewChangeHeadersArray {
-        return ViewChangeHeadersArray.init_from_slice(.start_view, &.{
+        return ViewChangeHeadersArray.init(.start_view, &.{
             Header.Prepare.root(cluster),
         });
     }
 
-    pub fn init_from_slice(
+    pub fn init(
         command: ViewChangeCommand,
         slice: []const Header.Prepare,
     ) ViewChangeHeadersArray {
@@ -1451,16 +1451,6 @@ const ViewChangeHeadersArray = struct {
             .command = command,
             .array = Headers.Array.from_slice(slice) catch unreachable,
         };
-        headers.verify();
-        return headers;
-    }
-
-    fn init_from_array(command: ViewChangeCommand, array: Headers.Array) ViewChangeHeadersArray {
-        const headers = ViewChangeHeadersArray{
-            .command = command,
-            .array = array,
-        };
-        headers.verify();
         return headers;
     }
 

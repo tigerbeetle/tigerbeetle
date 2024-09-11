@@ -452,13 +452,17 @@ pub const SuperBlockHeader = extern struct {
     }
 
     pub fn vsr_headers(superblock: *const SuperBlockHeader) vsr.Headers.ViewChangeSlice {
-        return vsr.Headers.ViewChangeSlice.init(
+        const headers = vsr.Headers.ViewChangeSlice.init(
             if (superblock.vsr_state.log_view < superblock.vsr_state.view)
                 .do_view_change
             else
                 .start_view,
             superblock.vsr_headers_all[0..superblock.vsr_headers_count],
         );
+        // SV headers made durable by potential primaries in a view change may not be verifiable
+        // due to missing headers; they are made durable *before* repair.
+        if (headers.command == .do_view_change) headers.verify();
+        return headers;
     }
 
     pub fn manifest_references(superblock: *const SuperBlockHeader) ManifestReferences {
@@ -584,7 +588,7 @@ pub const data_file_size_min =
 ///               a        (a)      a         Repair any broken copies of `a`.
 ///
 /// checkpoint    seq      seq      seq
-/// (or sync)     a        a        a
+///               a        a        a
 ///               a        a+1
 ///               a        a+1      a+1
 ///               a+1      a+1      a+1       Read quorum; verify 3/4 are valid.
@@ -609,7 +613,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             read: Storage.Read = undefined,
             read_threshold: ?Quorums.Threshold = null,
             copy: ?u8 = null,
-            /// Used by format(), checkpoint(), view_change(), sync().
+            /// Used by format(), checkpoint(), view_change().
             vsr_state: ?SuperBlockHeader.VSRState = null,
             /// Used by format() and view_change().
             vsr_headers: ?vsr.Headers.ViewChangeArray = null,
@@ -927,7 +931,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.vsr_state.checkpoint.header.op <= update.headers.array.get(0).op,
             );
 
-            update.headers.verify();
+            // SV headers made durable by potential primaries in a view change may not be verifiable
+            // due to missing headers; they are made durable *before* repair.
+            if (update.headers.command == .do_view_change) update.headers.verify();
             assert(update.view >= update.log_view);
 
             var vsr_state = superblock.staging.vsr_state;
@@ -1356,7 +1362,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 },
                 .checkpoint,
                 .view_change,
-                .sync,
                 => {
                     assert(stdx.equal_bytes(
                         SuperBlockHeader.VSRState,
@@ -1397,7 +1402,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .format,
                 .checkpoint,
                 .view_change,
-                .sync,
                 => switch (constants.superblock_copies) {
                     4 => 3,
                     6 => 4,
@@ -1456,7 +1460,6 @@ pub const Caller = enum {
     open,
     checkpoint,
     view_change,
-    sync,
 
     /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
     /// other operations, only the following queue combinations are allowed:
@@ -1468,11 +1471,7 @@ pub const Caller = enum {
             .format = Set.init(.{}),
             .open = Set.init(.{}),
             .checkpoint = Set.init(.{ .view_change = true }),
-            .view_change = Set.init(.{
-                .checkpoint = true,
-                .sync = true,
-            }),
-            .sync = Set.init(.{ .view_change = true }),
+            .view_change = Set.init(.{ .checkpoint = true }),
         });
     };
 
@@ -1482,7 +1481,6 @@ pub const Caller = enum {
             .open => unreachable,
             .checkpoint => false,
             .view_change => true,
-            .sync => false,
         };
     }
 };
