@@ -12,16 +12,12 @@ const Shell = @import("../shell.zig");
 
 pub const CLIArgs = struct {
     tag: []const u8,
+    push: bool = false,
 };
 
 const Image = enum { config, workload, replica };
 
 pub fn main(shell: *Shell, cli_args: CLIArgs) !void {
-    // if (builtin.os.tag == .windows) {
-    //     return error.NotSupported;
-    // }
-    //
-
     assert(try shell.exec_status_ok("docker --version", .{}));
 
     // Docker tag to build and push
@@ -46,14 +42,17 @@ pub fn main(shell: *Shell, cli_args: CLIArgs) !void {
         try shell.exec("mvn clean package --batch-mode --quiet", .{});
     }
 
-    for (std.enums.values(Image)) |image| {
+    const images = comptime std.enums.values(Image);
+    inline for (images) |image| {
         try build_image(shell, image, tag);
-        try push_image(shell, image, tag);
+        if (cli_args.push) {
+            try push_image(shell, image, tag);
+        }
     }
 }
 
-fn build_image(shell: *Shell, image: Image, tag: []const u8) !void {
-    try shell.exec_options(.{ .echo = true, .stdin_slice = @field(dockerfiles, @tagName(.workload)) },
+fn build_image(shell: *Shell, comptime image: Image, tag: []const u8) !void {
+    try shell.exec_options(.{ .echo = true, .stdin_slice = @field(dockerfiles, @tagName(image)) },
         \\docker build 
         \\  --file - .
         \\  --build-arg TAG={tag}
@@ -84,7 +83,7 @@ const dockerfiles = .{
     \\
     \\FROM scratch
     \\
-    \\COPY src/testing/systest/config/docker-compose.yaml docker-compose.yaml
+    \\COPY src/testing/systest/docker-compose.yaml docker-compose.yaml
     \\COPY --from=0 /.env .env
     \\COPY --from=0 /volumes/database /volumes/database
     ,
@@ -109,8 +108,8 @@ const dockerfiles = .{
     \\WORKDIR /opt/tigerbeetle
     \\
     \\COPY zig-out/bin/tigerbeetle ./tigerbeetle
-    \\COPY src/testing/systest/scripts/run-tigerbeetle.sh ./run-tigerbeetle.sh
+    \\COPY src/testing/systest/scripts/run.sh ./run.sh
     \\
-    \\ENTRYPOINT ["./run-tigerbeetle.sh"]
+    \\ENTRYPOINT ["./run.sh"]
     ,
 };

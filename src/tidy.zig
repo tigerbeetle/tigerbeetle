@@ -519,10 +519,8 @@ test "tidy extensions" {
         .{"zig/download.sh"},                         .{"src/scripts/cfo_supervisor.sh"},
         .{"src/docs_website/scripts/build.sh"},       .{".github/ci/docs_check.sh"},
         .{".github/ci/test_aof.sh"},                  .{"tools/systemd/tigerbeetle-pre-start.sh"},
-        .{"tools/vscode/format_debug_server.sh"},     .{"src/testing/systest/replica.Dockerfile"},
-        .{"src/testing/systest/workload.Dockerfile"}, .{"src/testing/systest/configuration.Dockerfile"},
-        .{"src/testing/systest/scripts/build.sh"},    .{"src/testing/systest/scripts/push.sh"},
-        .{"src/testing/systest/scripts/run.sh"},      .{"src/testing/systest/config/docker-compose.yaml"},
+        .{"tools/vscode/format_debug_server.sh"},     .{"src/testing/systest/scripts/run.sh"},
+        .{"src/testing/systest/docker-compose.yaml"},
     });
 
     const allocator = std.testing.allocator;

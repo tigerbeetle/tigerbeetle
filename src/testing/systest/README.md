@@ -23,10 +23,10 @@ The system test, running in Antithesis, consists of 3 images:
 To test locally (run from repository root):
 
 ```bash
-./src/testing/systest/scripts/build.sh <tag>
+zig build scripts -- antithesis --tag=<tag>
 
 # Run containers.
-cd src/testing/systest/config/
+cd src/testing/systest/
 TAG=<tag> docker compose up
 ^C # shut it down when you're pleased
 ```
@@ -48,5 +48,5 @@ cat /some/path/to/tigerbeetle.key.json | docker login -u _json_key https://us-ce
 Push the containers to Antithesis:
 
 ```bash
-./src/testing/systest/scripts/push.sh <tag>
+zig build scripts -- antithesis --tag=<tag> --push
 ```
