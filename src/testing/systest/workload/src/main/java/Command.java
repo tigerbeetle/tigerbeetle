@@ -10,8 +10,8 @@ import com.tigerbeetle.TransferBatch;
 import com.tigerbeetle.UInt128;
 
 /**
- * A command (creation or query) that can be executed with a client.
- * Every such command has an associated result type.
+ * A command (creation or query) that can be executed with a client. Every such command has an
+ * associated result type.
  */
 interface Command<CommandResult extends Result> {
   CommandResult execute(Client client);
@@ -50,8 +50,6 @@ record CreateAccounts(ArrayList<NewAccount> accounts) implements Command<CreateA
     var createAccountFailedIndices = new BitSet(accounts.size());
     while (accountErrors.next()) {
       var index = accountErrors.getIndex();
-      var result = accountErrors.getResult();
-      System.err.printf("create_account with index %d failed: %s\n", index, result);
       createAccountFailedIndices.set(index);
     }
 
@@ -118,8 +116,6 @@ record CreateTransfers(ArrayList<NewTransfer> transfers) implements Command<Crea
     var transferFailedIndices = new BitSet(transfers.size());
     while (transferErrors.next()) {
       var index = transferErrors.getIndex();
-      var result = transferErrors.getResult();
-      System.err.printf("create_transfer with index %d failed: %s\n", index, result);
       transferFailedIndices.set(index);
     }
 
@@ -136,8 +132,6 @@ record CreateTransfers(ArrayList<NewTransfer> transfers) implements Command<Crea
       }
       i++;
     }
-    System.err.printf("create_transfer %d/%d succeeded\n", created.size(),
-        created.size() + failed.size());
 
     return new CreateTransfersResult(created, failed);
   }

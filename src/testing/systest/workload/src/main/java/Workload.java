@@ -30,24 +30,41 @@ public class Workload {
   }
 
   void run() {
-    while (true) {
-      var command = randomCommand();
-      switch (command) {
-        case CreateAccounts(var accounts) -> System.out.printf("Creating %d accounts\n",
-            accounts.size());
-        case CreateTransfers(var transfers) -> System.out.printf("Creating %d transfers\n",
-            transfers.size());
-        default -> {
-          assert false : "unknown command";
-        }
-      }
-      var result = command.execute(client);
-      result.reconcile(model);
+    long commandsFailedCount = 0;
+    long commandsSucceededCount = 0;
 
-      lookupAllAccounts().ifPresent(query -> {
-        var response = query.execute(client);
-        response.reconcile(model);
-      });
+    for (int n = 0; true; n++) {
+      var command = randomCommand();
+      try {
+        var result = command.execute(client);
+        result.reconcile(model);
+
+        switch (result) {
+          case CreateAccountsResult(var created, var failed) -> {
+            commandsSucceededCount += created.size();
+            commandsFailedCount += failed.size();
+          }
+          case CreateTransfersResult(var created, var failed) -> {
+            commandsSucceededCount += created.size();
+            commandsFailedCount += failed.size();
+          }
+          default -> {
+          }
+        }
+
+        if (n % 1000 == 0) {
+          System.out.println(
+              "%d succeeded, %d failed".formatted(commandsSucceededCount, commandsFailedCount));
+        }
+
+        lookupAllAccounts().ifPresent(query -> {
+          var response = query.execute(client);
+          response.reconcile(model);
+        });
+      } catch (AssertionError e) {
+        System.err.print("Assertion failed after executing command: %s".formatted(command));
+        throw e;
+      }
     }
   }
 
