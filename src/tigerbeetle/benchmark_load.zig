@@ -29,7 +29,7 @@ const tb = vsr.tigerbeetle;
 const StatsD = vsr.statsd.StatsD;
 const IdPermutation = vsr.testing.IdPermutation;
 const ZipfianGenerator = stdx.ZipfianGenerator;
-const ShuffledZipfian = stdx.ShuffledZipfian;
+const ZipfianShuffled = stdx.ZipfianShuffled;
 
 const cli = @import("./cli.zig");
 
@@ -136,7 +136,7 @@ pub fn main(
 
     const account_generator: Generator = switch (cli_args.account_distribution) {
         .zipfian => .{
-            .zipfian = ShuffledZipfian.init(cli_args.account_count, random),
+            .zipfian = ZipfianShuffled.init(cli_args.account_count, random),
         },
         .latest => .{
             .latest = ZipfianGenerator.init(cli_args.account_count),
@@ -232,7 +232,7 @@ pub fn main(
 }
 
 const Generator = union(enum) {
-    zipfian: ShuffledZipfian,
+    zipfian: ZipfianShuffled,
     latest: ZipfianGenerator,
     uniform,
 };
