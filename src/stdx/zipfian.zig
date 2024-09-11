@@ -86,7 +86,7 @@ pub const ZipfianGenerator = struct {
     ///
     /// `theta` is the "skew" and is usually specified to be greater than 0 and less than 1,
     /// with YCSB using 0.99, though values greater than 1 also seem to generate reasonable
-    /// distributions.
+    /// distributions. `theta = 1` isn't allowed since it does not behave reasonably. 
     pub fn init_theta(items: u64, theta: f64) ZipfianGenerator {
         assert(theta > 0.0);
         assert(theta != 1.0); // 1.0 does not behave reasonably.
