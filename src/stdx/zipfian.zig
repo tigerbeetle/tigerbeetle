@@ -121,7 +121,7 @@ pub const ZipfianGenerator = struct {
             return 1;
         }
 
-        return @as(u64, @intFromFloat(nf * math.pow(f64, eta * u - eta + 1.0, alpha)));
+        return @as(u64, @intFromFloat(nf * math.pow(f64, (eta * u) - eta + 1.0, alpha)));
     }
 
     /// Grow the size of the random set.
