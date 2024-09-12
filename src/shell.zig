@@ -247,6 +247,15 @@ pub fn file_exists(shell: *Shell, path: []const u8) bool {
     return stat.kind == .file;
 }
 
+pub fn file_make_executable(shell: *Shell, path: []const u8) !void {
+    if (builtin.os.tag != .windows) {
+        const fd = try shell.cwd.openFile(path, .{ .mode = .read_write });
+        defer fd.close();
+
+        try fd.chmod(0o777);
+    }
+}
+
 fn subdir_exists(dir: std.fs.Dir, path: []const u8) !bool {
     const stat = dir.statFile(path) catch |err| switch (err) {
         error.FileNotFound => return false,

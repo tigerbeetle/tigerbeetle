@@ -79,14 +79,9 @@ pub fn main() !void {
 
     const target = try Target.parse(cli_args.target);
 
-    if (builtin.os.tag != .windows) {
-        // When we fetch llvm-objcopy in build.zig, there isn't an easy way to mark it as
-        // executable, so do it here.
-        const fd = try shell.cwd.openFile(cli_args.llvm_objcopy, .{ .mode = .read_write });
-        defer fd.close();
-
-        try fd.chmod(0o777);
-    }
+    // When we fetch llvm-objcopy in build.zig, there isn't an easy way to mark it as
+    // executable, so do it here.
+    try shell.file_make_executable(cli_args.llvm_objcopy);
 
     switch (target) {
         .windows, .linux => try build_multiversion_single_arch(shell, .{
