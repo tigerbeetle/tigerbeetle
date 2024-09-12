@@ -88,7 +88,7 @@ fn build_image(
             const docker_compose_file = "docker-compose.yaml";
             _ = try shell.file_ensure_content(docker_compose_file, docker_compose_contents);
 
-            try shell.exec("mkdir -p volumes/database", .{});
+            try shell.cwd.makePath("./volumes/database");
 
             try shell.exec_options(.{
                 .echo = true,
