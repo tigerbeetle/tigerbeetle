@@ -7679,7 +7679,7 @@ pub fn ReplicaType(
             // Do not advertise a view/log_view before it is durable. We only need perform these
             // checks if we authored the message, not if we're simply forwarding a message along.
             // See view_durable()/log_view_durable().
-            if (message.header.replica == self.replica) {
+            if (replica != self.replica and message.header.replica == self.replica) {
                 if (message.header.view > self.view_durable() and
                     message.header.command != .request_start_view)
                 {
@@ -7724,6 +7724,18 @@ pub fn ReplicaType(
             }
 
             if (replica == self.replica) {
+                if (message.header.command == .do_view_change and
+                    self.view_durable() < self.view)
+                {
+                    log.debug("{}: send_message_to_replica: dropped {s} " ++
+                        "(view_durable={} message.view={})", .{
+                        self.replica,
+                        @tagName(message.header.command),
+                        self.view_durable(),
+                        message.header.view,
+                    });
+                    return;
+                }
                 assert(self.loopback_queue == null);
                 self.loopback_queue = message.ref();
             } else {
