@@ -83,22 +83,13 @@ fn build_image(
             , .{ image_dir, env_file });
 
             const env_file_contents = try shell.fmt("TAG={s}", .{tag});
-            _ = try shell.file_ensure_content(env_file, env_file_contents);
+            _ = try shell.file_ensure_content(env_file, env_file_contents, .{});
 
-            const docker_compose_file = "docker-compose.yaml";
-            _ = try shell.file_ensure_content(docker_compose_file, docker_compose_contents);
+            _ = try shell.file_ensure_content("docker-compose.yaml", docker_compose_contents, .{});
 
             try shell.cwd.makePath("./volumes/database");
 
-            try shell.exec_options(.{
-                .echo = true,
-                .stdin_slice = @field(dockerfiles, @tagName(image)),
-            },
-                \\docker build 
-                \\  --file - .
-                \\  --build-arg TAG={tag}
-                \\  --tag={image}:{tag}
-            , .{ .image = @tagName(image), .tag = tag });
+            try docker_build_cwd(shell, image, tag);
 
             shell.echo(
                 \\{ansi-red}
@@ -108,18 +99,41 @@ fn build_image(
                 \\{ansi-reset}
             , .{ image_dir, tag });
         },
-        else => {
-            try shell.exec_options(.{
-                .echo = true,
-                .stdin_slice = @field(dockerfiles, @tagName(image)),
-            },
-                \\docker build 
-                \\  --file - .
-                \\  --build-arg TAG={tag}
-                \\  --tag={image}:{tag}
-            , .{ .image = @tagName(image), .tag = tag });
+        .replica => {
+            const image_dir = try shell.create_tmp_dir();
+            defer shell.cwd.deleteTree(image_dir) catch {};
+
+            const bin_dir = try shell.cwd.openDir("zig-out/bin", .{});
+            try bin_dir.copyFile(
+                "tigerbeetle",
+                try shell.cwd.openDir(image_dir, .{}),
+                "tigerbeetle",
+                .{},
+            );
+
+            try shell.pushd(image_dir);
+            defer shell.popd();
+
+            // Create the entrypoint script with executable permissions.
+            _ = try shell.file_ensure_content("run.sh", replica_run_contents, .{ .mode = 0o777 });
+
+            try docker_build_cwd(shell, image, tag);
         },
+        .workload => try docker_build_cwd(shell, image, tag),
     }
+}
+
+fn docker_build_cwd(shell: *Shell, comptime image: Image, tag: []const u8) !void {
+    try shell.exec_options(.{
+        .echo = true,
+        .stdin_slice = @field(dockerfiles, @tagName(image)),
+    },
+        \\docker build 
+        \\  --platform=linux/amd64
+        \\  --file - .
+        \\  --build-arg TAG={tag}
+        \\  --tag={image}:{tag}
+    , .{ .image = @tagName(image), .tag = tag });
 }
 
 fn push_image(shell: *Shell, image: Image, tag: []const u8) !void {
@@ -166,10 +180,10 @@ const dockerfiles = .{
     \\FROM debian:stable-slim
     \\WORKDIR /opt/tigerbeetle
     \\
-    \\COPY zig-out/bin/tigerbeetle ./tigerbeetle
-    \\COPY src/testing/systest/scripts/run.sh ./run.sh
+    \\ADD tigerbeetle tigerbeetle
+    \\ADD run.sh run.sh
     \\
-    \\ENTRYPOINT ["./run.sh"]
+    \\ENTRYPOINT ["/opt/tigerbeetle/run.sh"]
     ,
 };
 
@@ -239,4 +253,43 @@ const docker_compose_contents =
     \\     ipam:
     \\       config:
     \\         - subnet: 10.20.20.0/24
+;
+
+const replica_run_contents =
+    \\#!/bin/sh -eu
+    \\
+    \\usage() {
+    \\  echo "usage: ${0##*/}"
+    \\  echo ""
+    \\  echo "Initialize and start a TigerBeetle replica."
+    \\
+    \\  echo "Required environment variables:"
+    \\  echo "  CLUSTER"
+    \\  echo "  REPLICA"
+    \\  echo "  REPLICA_COUNT"
+    \\  echo "  ADDRESSES"
+    \\}
+    \\
+    \\if [ $# -ne 0 ] \
+    \\    || [ -z "$CLUSTER" ] \
+    \\    || [ -z "$REPLICA" ] \
+    \\    || [ -z "$ADDRESSES" ] \
+    \\    || [ -z "$REPLICA_COUNT" ]; then
+    \\  usage >&2
+    \\  exit 1
+    \\fi
+    \\
+    \\datafile="/var/data/${CLUSTER}_${REPLICA}.antithesis.tigerbeetle"
+    \\
+    \\if [ ! -f "${datafile}" ]; then
+    \\  ./tigerbeetle format \
+    \\    --cluster="$CLUSTER" \
+    \\    --replica="$REPLICA" \
+    \\    --replica-count="$REPLICA_COUNT" \
+    \\    "${datafile}"
+    \\fi
+    \\
+    \\exec ./tigerbeetle start \
+    \\  --addresses="$ADDRESSES" \
+    \\  "${datafile}"
 ;

@@ -271,6 +271,7 @@ pub fn file_ensure_content(
     shell: *Shell,
     path: []const u8,
     content: []const u8,
+    create_flags: std.fs.File.CreateFlags,
 ) !enum { unchanged, updated } {
     const max_bytes = 1024 * 1024;
     const content_current = shell.cwd.readFileAlloc(shell.gpa, path, max_bytes) catch null;
@@ -280,12 +281,15 @@ pub fn file_ensure_content(
         return .unchanged;
     }
 
-    try shell.cwd.writeFile(.{ .sub_path = path, .data = content });
+    try shell.cwd.writeFile(.{ .sub_path = path, .data = content, .flags = create_flags });
     return .updated;
 }
 
 /// Creates a new temporary directory (in the project-level .zig-cache) and returns the
 /// absolute path.
+///
+/// It's the callers responsibility to delete the directory when done with it, e.g.
+/// with `defer shell.cwd.deleteTree(dir) catch {};`.
 pub fn create_tmp_dir(
     shell: *Shell,
 ) ![]const u8 {
