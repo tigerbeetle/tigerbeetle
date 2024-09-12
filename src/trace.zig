@@ -24,33 +24,33 @@
 //! Note that only one of each Event can be running at a time:
 //!
 //!     // good
-//!     tracer.start(.foo, .{});
-//!     tracer.stop(.foo, .{});
-//!     tracer.start(.bar, .{});
-//!     tracer.stop(.bar, .{});
+//!     trace.start(.foo, .{});
+//!     trace.stop(.foo, .{});
+//!     trace.start(.bar, .{});
+//!     trace.stop(.bar, .{});
 //!
 //!     // good
-//!     tracer.start(.foo, .{});
-//!     tracer.start(.bar, .{});
-//!     tracer.stop(.foo, .{});
-//!     tracer.stop(.bar, .{});
+//!     trace.start(.foo, .{});
+//!     trace.start(.bar, .{});
+//!     trace.stop(.foo, .{});
+//!     trace.stop(.bar, .{});
 //!
 //!     // bad
-//!     tracer.start(.foo, .{});
-//!     tracer.start(.foo, .{});
+//!     trace.start(.foo, .{});
+//!     trace.start(.foo, .{});
 //!
 //!     // bad
-//!     tracer.stop(.foo, .{});
-//!     tracer.start(.foo, .{});
+//!     trace.stop(.foo, .{});
+//!     trace.start(.foo, .{});
 //!
 //! If an event is is cancelled rather than properly stopped, use .reset():
 //! (Reset is safe to call regardless of whether the event is currently started.)
 //!
 //!     // good
-//!     tracer.start(.foo, .{});
-//!     tracer.reset(.foo);
-//!     tracer.start(.foo, .{});
-//!     tracer.stop(.foo, .{});
+//!     trace.start(.foo, .{});
+//!     trace.reset(.foo);
+//!     trace.start(.foo, .{});
+//!     trace.stop(.foo, .{});
 //!
 //! Notes:
 //! - When enabled, traces are written to stdout (as opposed to logs, which are written to stderr).
