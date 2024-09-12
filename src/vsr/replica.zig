@@ -770,9 +770,9 @@ pub fn ReplicaType(
                 }
             } else {
                 // Even if op_head_certain() returns false, a DVC always has a certain head op.
-                if ((self.log_view < self.view and self.op_checkpoint() <= self.op) or
-                    (self.log_view == self.view and self.op_head_certain()))
-                {
+                if (self.log_view == self.view and !self.op_head_certain()) {
+                    self.transition_to_recovering_head();
+                } else {
                     if (self.log_view == self.view) {
                         if (self.primary_index(self.view) == self.replica) {
                             self.transition_to_view_change_status(self.view + 1);
@@ -781,10 +781,9 @@ pub fn ReplicaType(
                         }
                     } else {
                         assert(self.view > self.log_view);
+                        assert(self.op >= self.op_checkpoint());
                         self.transition_to_view_change_status(self.view);
                     }
-                } else {
-                    self.transition_to_recovering_head();
                 }
             }
 
@@ -2167,7 +2166,7 @@ pub fn ReplicaType(
                 self.log_view = self.view;
 
                 // Make view_headers and log_view durable before initiating repair. We don't use
-                // primary_update_view_headers because it assumes that the primary's
+                // primary_update_view_headers as it assumes that the primary's log has no breaks.
                 self.view_headers.command = .start_view;
                 self.view_headers.array.clear();
 
