@@ -76,12 +76,6 @@ fn build_image(
             // TODO(owickstrom): remove the need for .env file by rendering docker-compose.yaml
             // with the correct tag?
             const env_file = ".env";
-            shell.echo(
-                \\{ansi-red}
-                \\ {s}/{s}
-                \\{ansi-reset}
-            , .{ image_dir, env_file });
-
             const env_file_contents = try shell.fmt("TAG={s}", .{tag});
             _ = try shell.file_ensure_content(env_file, env_file_contents, .{});
 
@@ -100,6 +94,9 @@ fn build_image(
                 \\To debug the docker compose config locally, run:
                 \\
                 \\    cd {s} && TAG={s} docker compose up
+                \\
+                \\This temporary directory is not automatically deleted. You may do so 
+                \\yourself if you don't need it.
                 \\{ansi-reset}
             , .{ image_dir, tag });
         },
