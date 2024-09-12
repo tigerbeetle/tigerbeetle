@@ -615,7 +615,7 @@ pub fn GrooveType(
                 // single scope is batch_value_count_limit (total – not per beat).
                 .scope_value_count_max = options.tree_options_object.batch_value_count_limit,
 
-                .name = @typeName(Object),
+                .name = comptime tree_name(Object),
             });
             errdefer groove.objects_cache.deinit(allocator);
 
@@ -626,7 +626,7 @@ pub fn GrooveType(
                 grid,
                 .{
                     .id = @field(groove_options.ids, "timestamp"),
-                    .name = @typeName(Object),
+                    .name = comptime tree_name(Object),
                 },
                 options.tree_options_object,
             );
@@ -638,7 +638,7 @@ pub fn GrooveType(
                 grid,
                 .{
                     .id = @field(groove_options.ids, "id"),
-                    .name = @typeName(Object) ++ ".id",
+                    .name = comptime tree_name(Object) ++ ".id",
                 },
                 options.tree_options_id,
             );
@@ -664,7 +664,7 @@ pub fn GrooveType(
                     grid,
                     .{
                         .id = @field(groove_options.ids, field.name),
-                        .name = @typeName(Object) ++ "." ++ field.name,
+                        .name = comptime tree_name(Object) ++ "." ++ field.name,
                     },
                     @field(options.tree_options_index, field.name),
                 );
@@ -1322,6 +1322,16 @@ pub fn GrooveType(
             }
         }
     };
+}
+
+// Returns the last segment of a type's fully-qualified name.
+fn tree_name(comptime Object: type) []const u8 {
+    const name_full = @typeName(Object);
+    if (std.mem.lastIndexOfScalar(u8, name_full, '.')) |offset| {
+        return name_full[offset + 1 ..];
+    } else {
+        return name_full;
+    }
 }
 
 test "Groove" {
