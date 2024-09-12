@@ -32,27 +32,11 @@ pub fn ScanLookupType(
         pub const Callback = *const fn (*ScanLookup, []const Object) void;
 
         const LookupWorker = struct {
+            index: u8,
             scan_lookup: *ScanLookup,
             lookup_context: Groove.ObjectTree.LookupContext = undefined,
             index_produced: ?usize = null,
         };
-
-        /// Since the workload is always sorted by timestamp,
-        /// adjacent objects are often going to be in the same table-value block.
-        /// The grid is aware when N lookups ask for the same grid block concurrently,
-        /// and queues up the reads internally such that they actually hit the storage once.
-        ///
-        /// To maximize IO utilization, we allow at least `Grid.read_iops_max` lookups to run,
-        /// up to an arbitrary constant based on the maximum number of objects per block.
-        /// Reasoning: the larger the block size is, higher is the probability of multiple
-        /// lookups hitting the same grid block:
-        const lookup_workers_max = @max(
-            stdx.div_ceil(
-                @divFloor(constants.block_size, @sizeOf(Object)),
-                Grid.read_iops_max,
-            ),
-            Grid.read_iops_max,
-        );
 
         groove: *Groove,
         scan: *Scan,
@@ -63,7 +47,7 @@ pub fn ScanLookupType(
         state: ScanLookupStatus,
         callback: ?Callback,
 
-        workers: [lookup_workers_max]LookupWorker = undefined,
+        workers: [Grid.read_iops_max]LookupWorker = undefined,
         /// The number of workers that are currently running in parallel.
         workers_pending: u32 = 0,
 
@@ -126,18 +110,32 @@ pub fn ScanLookupType(
             assert(self.state == .scan);
             assert(self.workers_pending == 0);
 
+            self.groove.grid.trace.start(
+                .lookup,
+                .{ .tree = self.groove.objects.config.name },
+            );
+
             self.state = .lookup;
 
-            for (&self.workers, 0..) |*worker, i| {
-                assert(self.workers_pending == i);
+            for (&self.workers, 0..) |*worker, index| {
+                assert(self.workers_pending == index);
 
-                worker.* = .{ .scan_lookup = self };
+                worker.* = .{
+                    .index = @intCast(index),
+                    .scan_lookup = self,
+                };
                 self.workers_pending += 1;
+
+                self.groove.grid.trace.start(
+                    .{ .lookup_worker = .{ .index = worker.index } },
+                    .{ .tree = self.groove.objects.config.name },
+                );
+
                 self.lookup_worker_next(worker);
 
                 // If the worker finished synchronously (e.g `workers_pending`
                 // decreased), we don't need to start new ones.
-                if (self.workers_pending == i) break;
+                if (self.workers_pending == index) break;
             }
 
             // The lookup may have been completed synchronously,
@@ -219,7 +217,7 @@ pub fn ScanLookupType(
             // The worker finished synchronously by reading from cache.
             switch (self.state) {
                 .idle, .lookup => unreachable,
-                .scan, .buffer_finished, .scan_finished => self.lookup_worker_finished(),
+                .scan, .buffer_finished, .scan_finished => self.lookup_worker_finished(worker),
             }
         }
 
@@ -242,18 +240,28 @@ pub fn ScanLookupType(
             switch (self.state) {
                 .idle => unreachable,
                 .lookup => self.lookup_worker_next(worker),
-                .scan, .scan_finished, .buffer_finished => self.lookup_worker_finished(),
+                .scan, .scan_finished, .buffer_finished => self.lookup_worker_finished(worker),
             }
         }
 
-        fn lookup_worker_finished(self: *ScanLookup) void {
+        fn lookup_worker_finished(self: *ScanLookup, worker: *const LookupWorker) void {
             // One worker may have been finished, but the overall state cannot be narrowed
             // until all workers have finished.
             assert(self.state != .idle);
             assert(self.workers_pending > 0);
 
+            self.groove.grid.trace.stop(
+                .{ .lookup_worker = .{ .index = worker.index } },
+                .{ .tree = self.groove.objects.config.name },
+            );
+
             self.workers_pending -= 1;
             if (self.workers_pending == 0) {
+                self.groove.grid.trace.stop(
+                    .lookup,
+                    .{ .tree = self.groove.objects.config.name },
+                );
+
                 switch (self.state) {
                     .idle, .lookup => unreachable,
                     // The scan's buffer was consumed and it needs to read again:

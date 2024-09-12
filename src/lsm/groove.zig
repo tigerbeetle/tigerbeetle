@@ -916,21 +916,35 @@ pub fn GrooveType(
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_pending == 0);
 
+                context.groove.grid.trace.start(
+                    .lookup,
+                    .{ .tree = context.groove.objects.config.name },
+                );
+
                 // Track an extra "worker" that will finish after the loop.
                 // This allows the callback to be called asynchronously on `next_tick`
                 // if all workers are finished synchronously.
                 context.workers_pending += 1;
 
-                for (&context.workers, 1..) |*worker, i| {
-                    assert(context.workers_pending == i);
+                for (&context.workers, 0..) |*worker, index| {
+                    assert(context.workers_pending == index + 1);
 
-                    worker.* = .{ .context = context };
+                    worker.* = .{
+                        .index = @intCast(index),
+                        .context = context,
+                    };
+
+                    context.groove.grid.trace.start(
+                        .{ .lookup_worker = .{ .index = worker.index } },
+                        .{ .tree = context.groove.objects.config.name },
+                    );
+
                     context.workers_pending += 1;
                     worker.lookup_start_next();
 
                     // If the worker finished synchronously (e.g `workers_pending` decreased),
                     // we don't need to start new ones.
-                    if (context.workers_pending == i) break;
+                    if (context.workers_pending == index + 1) break;
                 }
 
                 assert(context.workers_pending > 0);
@@ -963,6 +977,11 @@ pub fn GrooveType(
                 context.groove.prefetch_keys.clearRetainingCapacity();
                 assert(context.groove.prefetch_keys.count() == 0);
 
+                context.groove.grid.trace.stop(
+                    .lookup,
+                    .{ .tree = context.groove.objects.config.name },
+                );
+
                 context.callback(context);
             }
         };
@@ -994,6 +1013,7 @@ pub fn GrooveType(
                 }
             };
 
+            index: u8,
             context: *PrefetchContext,
             lookup: LookupContext = undefined,
             current: ?struct {
@@ -1004,6 +1024,11 @@ pub fn GrooveType(
             fn lookup_start_next(worker: *PrefetchWorker) void {
                 assert(worker.current == null);
                 const prefetch_entry = worker.context.key_iterator.next() orelse {
+                    worker.context.groove.grid.trace.stop(
+                        .{ .lookup_worker = .{ .index = worker.index } },
+                        .{ .tree = worker.context.groove.objects.config.name },
+                    );
+
                     worker.context.worker_finished();
                     return;
                 };

@@ -233,6 +233,11 @@ pub fn ScanTreeType(
         pub fn read(self: *ScanTree, context: Context, callback: Callback) void {
             assert(self.state == .idle or self.state == .needs_data);
 
+            self.tree.grid.trace.start(
+                .{ .scan_tree = .{ .index = self.buffer.index } },
+                .{ .tree = self.tree.config.name },
+            );
+
             const state_before = self.state;
             self.state = .{
                 .buffering = .{
@@ -401,6 +406,11 @@ pub fn ScanTreeType(
                     self.direction,
                 );
             }
+
+            self.tree.grid.trace.stop(
+                .{ .scan_tree = .{ .index = self.buffer.index } },
+                .{ .tree = self.tree.config.name },
+            );
 
             callback(context, self);
         }
@@ -607,6 +617,14 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
         pub fn fetch(self: *ScanTreeLevel) void {
             assert(self.scan.state == .buffering);
+
+            self.scan.tree.grid.trace.start(
+                .{ .scan_tree_level = .{
+                    .index = self.scan.buffer.index,
+                    .level = self.level_index,
+                } },
+                .{ .tree = self.scan.tree.config.name },
+            );
 
             switch (self.state) {
                 .loading_manifest => unreachable,
@@ -970,6 +988,14 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 self.move_next();
             }
 
+            self.scan.tree.grid.trace.stop(
+                .{ .scan_tree_level = .{
+                    .index = self.scan.buffer.index,
+                    .level = self.level_index,
+                } },
+                .{ .tree = self.scan.tree.config.name },
+            );
+
             switch (self.values) {
                 .fetching => self.fetch(),
                 .buffered, .finished => self.scan.levels_read_complete(),
@@ -987,6 +1013,14 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.values == .finished);
             assert(self.scan.state == .buffering);
             assert(self.scan.state.buffering.pending_count > 0);
+
+            self.scan.tree.grid.trace.stop(
+                .{ .scan_tree_level = .{
+                    .index = self.scan.buffer.index,
+                    .level = self.level_index,
+                } },
+                .{ .tree = self.scan.tree.config.name },
+            );
 
             self.scan.levels_read_complete();
         }
