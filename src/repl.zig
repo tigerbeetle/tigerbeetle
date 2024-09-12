@@ -233,17 +233,19 @@ pub const Parser = struct {
                                 inline for (@typeInfo(
                                     active_value_field.type,
                                 ).Struct.fields) |known_flag_field| {
-                                    if (std.mem.eql(
-                                        u8,
-                                        known_flag_field.name,
-                                        flag_to_validate_trimmed,
-                                    )) {
-                                        if (comptime !std.mem.eql(
+                                    if (known_flag_field.type == bool) {
+                                        if (std.mem.eql(
                                             u8,
                                             known_flag_field.name,
-                                            "padding",
+                                            flag_to_validate_trimmed,
                                         )) {
-                                            @field(validated_flags, known_flag_field.name) = true;
+                                            if (comptime !std.mem.eql(
+                                                u8,
+                                                known_flag_field.name,
+                                                "padding",
+                                            )) {
+                                                @field(validated_flags, known_flag_field.name) = true;
+                                            }
                                         }
                                     }
                                 }
@@ -796,14 +798,17 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     inline for (@typeInfo(object_field.type).Struct.fields) |flag_field| {
                         if (comptime !std.mem.eql(u8, flag_field.name, "padding")) {
-                            if (@field(@field(object, "flags"), flag_field.name)) {
-                                if (needs_comma) {
-                                    try repl.printer.print(",", .{});
-                                    needs_comma = false;
-                                }
+                            const value = @field(@field(object, "flags"), flag_field.name);
+                            if (@TypeOf(value) == bool) {
+                                if (value) {
+                                    if (needs_comma) {
+                                        try repl.printer.print(",", .{});
+                                        needs_comma = false;
+                                    }
 
-                                try repl.printer.print("\"{s}\"", .{flag_field.name});
-                                needs_comma = true;
+                                    try repl.printer.print("\"{s}\"", .{flag_field.name});
+                                    needs_comma = true;
+                                }
                             }
                         }
                     }

@@ -1913,7 +1913,7 @@ pub fn StateMachineType(
                 t.flags.imported or
                 global_constants.aof_recovery);
 
-            if (t.flags.padding != 0) return .reserved_flag;
+            if (t.flags.padding != 0 or t.flags.denied != .none) return .reserved_flag;
 
             if (t.id == 0) return .id_must_not_be_zero;
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
@@ -1960,6 +1960,21 @@ pub fn StateMachineType(
             assert(dr_account.id == t.debit_account_id);
             assert(cr_account.id == t.credit_account_id);
 
+            var t2 = t.*;
+            defer {
+                // Recording the denied transfer for history.
+                // TODO: Think of a more elegant way to do that...
+                if (t2.flags.denied != .none) {
+                    self.forest.grooves.transfers.insert(&t2);
+                    self.historical_balance(.{
+                        .transfer = &t2,
+                        .dr_account = dr_account,
+                        .cr_account = cr_account,
+                    });
+                    self.commit_timestamp = t2.timestamp;
+                }
+            }
+
             if (dr_account.ledger != cr_account.ledger) return .accounts_must_have_the_same_ledger;
             if (t.ledger != dr_account.ledger) {
                 return .transfer_must_have_the_same_ledger_as_accounts;
@@ -1997,8 +2012,14 @@ pub fn StateMachineType(
             assert(t.timestamp > dr_account.timestamp);
             assert(t.timestamp > cr_account.timestamp);
 
-            if (dr_account.flags.closed) return .debit_account_already_closed;
-            if (cr_account.flags.closed) return .credit_account_already_closed;
+            if (dr_account.flags.closed) {
+                t2.flags.denied = .debit_account_already_closed;
+                return .denied_debit_account_already_closed;
+            }
+            if (cr_account.flags.closed) {
+                t2.flags.denied = .credit_account_already_closed;
+                return .denied_credit_account_already_closed;
+            }
 
             const amount = amount: {
                 var amount = t.amount;
@@ -2015,7 +2036,10 @@ pub fn StateMachineType(
                     const dr_balance = dr_account.debits_posted + dr_account.debits_pending;
                     amount = @min(amount, dr_account.credits_posted -| dr_balance);
                     if (forbid_zero_amounts(client_release)) {
-                        if (amount == 0) return .exceeds_credits;
+                        if (amount == 0) {
+                            t2.flags.denied = .exceeds_credits;
+                            return .denied_exceeds_credits;
+                        }
                     }
                 }
 
@@ -2023,7 +2047,10 @@ pub fn StateMachineType(
                     const cr_balance = cr_account.credits_posted + cr_account.credits_pending;
                     amount = @min(amount, cr_account.debits_posted -| cr_balance);
                     if (forbid_zero_amounts(client_release)) {
-                        if (amount == 0) return .exceeds_debits;
+                        if (amount == 0) {
+                            t2.flags.denied = .exceeds_debits;
+                            return .denied_exceeds_debits;
+                        }
                     }
                 }
                 break :amount amount;
@@ -2077,13 +2104,18 @@ pub fn StateMachineType(
                 return .overflows_timeout;
             }
 
-            if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
-            if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
+            if (dr_account.debits_exceed_credits(amount)) {
+                t2.flags.denied = .exceeds_credits;
+                return .denied_exceeds_credits;
+            }
+            if (cr_account.credits_exceed_debits(amount)) {
+                t2.flags.denied = .exceeds_debits;
+                return .denied_exceeds_debits;
+            }
 
             // After this point, the transfer must succeed.
             defer assert(self.commit_timestamp == t.timestamp);
 
-            var t2 = t.*;
             t2.amount = amount;
             self.forest.grooves.transfers.insert(&t2);
 
@@ -2308,18 +2340,7 @@ pub fn StateMachineType(
                 break :expires_at expires_at;
             };
 
-            // The only movement allowed in a closed account is voiding a pending transfer.
-            if (dr_account.flags.closed and !t.flags.void_pending_transfer) {
-                return .debit_account_already_closed;
-            }
-            if (cr_account.flags.closed and !t.flags.void_pending_transfer) {
-                return .credit_account_already_closed;
-            }
-
-            // After this point, the transfer must succeed.
-            defer assert(self.commit_timestamp == t.timestamp);
-
-            const t2 = Transfer{
+            var t2 = Transfer{
                 .id = t.id,
                 .debit_account_id = p.debit_account_id,
                 .credit_account_id = p.credit_account_id,
@@ -2334,6 +2355,34 @@ pub fn StateMachineType(
                 .flags = t.flags,
                 .amount = amount,
             };
+
+            defer {
+                // Recording the denied transfer for history.
+                // TODO: Think of a more elegant way to do that...
+                if (t2.flags.denied != .none) {
+                    self.forest.grooves.transfers.insert(&t2);
+                    self.historical_balance(.{
+                        .transfer = &t2,
+                        .dr_account = dr_account,
+                        .cr_account = cr_account,
+                    });
+                    self.commit_timestamp = t2.timestamp;
+                }
+            }
+
+            // The only movement allowed in a closed account is voiding a pending transfer.
+            if (dr_account.flags.closed and !t.flags.void_pending_transfer) {
+                t2.flags.denied = .debit_account_already_closed;
+                return .denied_debit_account_already_closed;
+            }
+            if (cr_account.flags.closed and !t.flags.void_pending_transfer) {
+                t2.flags.denied = .credit_account_already_closed;
+                return .denied_credit_account_already_closed;
+            }
+
+            // After this point, the transfer must succeed.
+            defer assert(self.commit_timestamp == t.timestamp);
+
             self.forest.grooves.transfers.insert(&t2);
 
             if (expires_at) |timestamp| {

@@ -136,11 +136,27 @@ pub const TransferFlags = packed struct(u16) {
     closing_debit: bool = false,
     closing_credit: bool = false,
     imported: bool = false,
-    padding: u7 = 0,
+    padding: u4 = 0,
+    denied: TransferDenied = .none,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
         assert(@bitSizeOf(TransferFlags) == @sizeOf(TransferFlags) * 8);
+    }
+};
+
+pub const TransferDenied = enum(u3) {
+    none = 0,
+    exceeds_debits = 1,
+    exceeds_credits = 2,
+    debit_account_already_closed = 3,
+    credit_account_already_closed = 4,
+
+    comptime {
+        for (0..std.enums.values(TransferDenied).len) |index| {
+            const result: TransferDenied = @enumFromInt(index);
+            assert(@intFromEnum(result) == index);
+        }
     }
 };
 
@@ -283,8 +299,8 @@ pub const CreateTransferResult = enum(u32) {
     overflows_credits = 52,
     overflows_timeout = 53,
 
-    exceeds_credits = 54,
-    exceeds_debits = 55,
+    denied_exceeds_credits = 54,
+    denied_exceeds_debits = 55,
 
     // TODO(zig): This enum should be ordered by precedence, but it crashes
     // `EnumSet`, and `@setEvalBranchQuota()` isn't propagating correctly:
@@ -304,8 +320,9 @@ pub const CreateTransferResult = enum(u32) {
     imported_event_timeout_must_be_zero = 63,
 
     closing_transfer_must_be_pending = 64,
-    debit_account_already_closed = 65,
-    credit_account_already_closed = 66,
+
+    denied_debit_account_already_closed = 65,
+    denied_credit_account_already_closed = 66,
 
     comptime {
         for (0..std.enums.values(CreateTransferResult).len) |index| {
