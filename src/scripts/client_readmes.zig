@@ -59,7 +59,7 @@ pub fn test_freshness(
         ctx.buffer.clearRetainingCapacity();
         try readme_root(&ctx);
 
-        const update = try shell.file_ensure_content("README.md", ctx.buffer.items);
+        const update = try shell.file_ensure_content("README.md", ctx.buffer.items, .{});
         updated_any = updated_any or (update == .updated);
     }
 
@@ -69,7 +69,7 @@ pub fn test_freshness(
         try readme_sample(&ctx, sample);
 
         const sample_readme = try shell.fmt("samples/{s}/README.md", .{sample.directory});
-        const update = try shell.file_ensure_content(sample_readme, ctx.buffer.items);
+        const update = try shell.file_ensure_content(sample_readme, ctx.buffer.items, .{});
         updated_any = updated_any or (update == .updated);
     }
 

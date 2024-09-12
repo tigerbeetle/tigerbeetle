@@ -206,7 +206,8 @@ pub fn env_get(shell: *Shell, var_name: []const u8) ![]const u8 {
 /// to restore the previous directory back.
 pub fn pushd(shell: *Shell, path: []const u8) !void {
     assert(shell.cwd_stack_count < cwd_stack_max);
-    assert(path[0] == '.'); // allow only explicitly relative paths
+    // allow only explicitly relative paths or absolute paths
+    assert(path[0] == '.' or path[0] == '/');
 
     const cwd_new = try shell.cwd.openDir(path, .{});
 
@@ -270,6 +271,7 @@ pub fn file_ensure_content(
     shell: *Shell,
     path: []const u8,
     content: []const u8,
+    create_flags: std.fs.File.CreateFlags,
 ) !enum { unchanged, updated } {
     const max_bytes = 1024 * 1024;
     const content_current = shell.cwd.readFileAlloc(shell.gpa, path, max_bytes) catch null;
@@ -279,8 +281,26 @@ pub fn file_ensure_content(
         return .unchanged;
     }
 
-    try shell.cwd.writeFile(.{ .sub_path = path, .data = content });
+    try shell.cwd.writeFile(.{ .sub_path = path, .data = content, .flags = create_flags });
     return .updated;
+}
+
+/// Creates a new temporary directory (in the project-level .zig-cache) and returns the
+/// absolute path.
+///
+/// It's the callers responsibility to delete the directory when done with it, e.g.
+/// with `defer shell.cwd.deleteTree(dir) catch {};`.
+pub fn create_tmp_dir(
+    shell: *Shell,
+) ![]const u8 {
+    const root = try shell.project_root.realpathAlloc(shell.arena.allocator(), ".");
+    const tmp_absolute = try shell.fmt("{s}/.zig-cache/tmp/{}", .{
+        root,
+        std.crypto.random.int(u64),
+    });
+    assert(!try shell.dir_exists(tmp_absolute));
+    try shell.project_root.makePath(tmp_absolute);
+    return tmp_absolute;
 }
 
 const FindOptions = struct {
