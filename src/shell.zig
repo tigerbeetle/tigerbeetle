@@ -206,7 +206,8 @@ pub fn env_get(shell: *Shell, var_name: []const u8) ![]const u8 {
 /// to restore the previous directory back.
 pub fn pushd(shell: *Shell, path: []const u8) !void {
     assert(shell.cwd_stack_count < cwd_stack_max);
-    assert(path[0] == '.'); // allow only explicitly relative paths
+    // allow only explicitly relative paths or absolute paths
+    assert(path[0] == '.' or path[0] == '/');
 
     const cwd_new = try shell.cwd.openDir(path, .{});
 

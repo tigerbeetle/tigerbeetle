@@ -18,18 +18,19 @@ The system test, running in Antithesis, consists of 3 images:
 
 ## Usage
 
-### Local Test
-
-To test locally (run from repository root):
-
 ```bash
 zig build scripts -- antithesis --tag=<tag>
-
-# Run containers.
-cd src/testing/systest/
-TAG=<tag> docker compose up
-^C # shut it down when you're pleased
 ```
+
+### Local Test
+
+In the output of the above build script, there's something like the following:
+
+> To debug the docker compose config locally, run:
+> 
+>     cd /tmp/tmp.xxxxxxxxxx && TAG=<tag> docker compose up
+
+Run that command to locally start the systest using docker compose.
 
 Clean up afterwards:
 

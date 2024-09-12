@@ -1,4 +1,10 @@
 //! Deployment script for our systest (src/testing/systest).
+//!
+//! * Builds the Java client and the associated workload using Maven
+//! * Builds Docker images for the workload, replicas, and config
+//! * Optionally pushes the images to the Antithesis registry
+//!
+//! Currently there's no support for triggering tests with this script.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -17,7 +23,7 @@ pub const CLIArgs = struct {
 
 const Image = enum { config, workload, replica };
 
-pub fn main(shell: *Shell, cli_args: CLIArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(try shell.exec_status_ok("docker --version", .{}));
 
     // Docker tag to build and push
@@ -44,20 +50,75 @@ pub fn main(shell: *Shell, cli_args: CLIArgs) !void {
 
     const images = comptime std.enums.values(Image);
     inline for (images) |image| {
-        try build_image(shell, image, tag);
+        try build_image(shell, gpa, image, tag);
         if (cli_args.push) {
             try push_image(shell, image, tag);
         }
     }
 }
 
-fn build_image(shell: *Shell, comptime image: Image, tag: []const u8) !void {
-    try shell.exec_options(.{ .echo = true, .stdin_slice = @field(dockerfiles, @tagName(image)) },
-        \\docker build 
-        \\  --file - .
-        \\  --build-arg TAG={tag}
-        \\  --tag={image}:{tag}
-    , .{ .image = @tagName(image), .tag = tag });
+fn build_image(
+    shell: *Shell,
+    gpa: std.mem.Allocator,
+    comptime image: Image,
+    tag: []const u8,
+) !void {
+    switch (image) {
+        .config => {
+            const image_dir = try shell.exec_stdout("mktemp -d", .{});
+
+            try shell.pushd(image_dir);
+            defer shell.popd();
+
+            // TODO(owickstrom): remove the need for .env file by rendering docker-compose.yaml
+            // with the correct tag?
+            const env_file = try std.fs.path.join(gpa, &.{ image_dir, ".env" });
+            defer gpa.free(env_file);
+
+            const env_file_contents = try std.fmt.allocPrint(gpa, "TAG={s}", .{tag});
+            defer gpa.free(env_file_contents);
+
+            _ = try shell.file_ensure_content(env_file, env_file_contents);
+
+            const docker_compose_file = try std.fs.path.join(gpa, &.{
+                image_dir,
+                "docker-compose.yaml",
+            });
+            defer gpa.free(docker_compose_file);
+            _ = try shell.file_ensure_content(docker_compose_file, docker_compose_contents);
+
+            try shell.exec("mkdir -p volumes/database", .{});
+
+            try shell.exec_options(.{
+                .echo = true,
+                .stdin_slice = @field(dockerfiles, @tagName(image)),
+            },
+                \\docker build 
+                \\  --file - {dir}
+                \\  --build-arg TAG={tag}
+                \\  --tag={image}:{tag}
+            , .{ .image = @tagName(image), .tag = tag, .dir = image_dir });
+
+            shell.echo(
+                \\{ansi-red}
+                \\To debug the docker compose config locally, run:
+                \\
+                \\    cd {s} && TAG={s} docker compose up
+                \\{ansi-reset}
+            , .{ image_dir, tag });
+        },
+        else => {
+            try shell.exec_options(.{
+                .echo = true,
+                .stdin_slice = @field(dockerfiles, @tagName(image)),
+            },
+                \\docker build 
+                \\  --file - .
+                \\  --build-arg TAG={tag}
+                \\  --tag={image}:{tag}
+            , .{ .image = @tagName(image), .tag = tag });
+        },
+    }
 }
 
 fn push_image(shell: *Shell, image: Image, tag: []const u8) !void {
@@ -74,18 +135,11 @@ fn push_image(shell: *Shell, image: Image, tag: []const u8) !void {
 
 const dockerfiles = .{
     .config =
-    \\FROM debian:stable-slim
-    \\
-    \\ARG TAG
-    \\
-    \\RUN mkdir -p /volumes/database
-    \\RUN echo "TAG=${TAG}" > /.env
-    \\
     \\FROM scratch
     \\
-    \\COPY src/testing/systest/docker-compose.yaml docker-compose.yaml
-    \\COPY --from=0 /.env .env
-    \\COPY --from=0 /volumes/database /volumes/database
+    \\ADD docker-compose.yaml docker-compose.yaml
+    \\ADD .env .env
+    \\ADD volumes/database /volumes/database
     ,
     .workload =
     \\FROM debian:stable-slim
@@ -117,3 +171,71 @@ const dockerfiles = .{
     \\ENTRYPOINT ["./run.sh"]
     ,
 };
+
+const docker_compose_contents =
+    \\ version: "3.0"
+    \\ 
+    \\ services:
+    \\   replica0:
+    \\     container_name: replica0
+    \\     hostname: replica0
+    \\     image: "replica:${TAG}"
+    \\     environment:
+    \\       - CLUSTER=1
+    \\       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
+    \\       - REPLICA_COUNT=3
+    \\       - REPLICA=0
+    \\     volumes:
+    \\       - ./volumes/database:/var/data
+    \\     networks:
+    \\       antithesis-net:
+    \\         ipv4_address: 10.20.20.10
+    \\   replica1:
+    \\     container_name: replica1
+    \\     hostname: replica1
+    \\     image: "replica:${TAG}"
+    \\     environment:
+    \\       - CLUSTER=1
+    \\       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
+    \\       - REPLICA_COUNT=3
+    \\       - REPLICA=1
+    \\     volumes:
+    \\       - ./volumes/database:/var/data
+    \\     networks:
+    \\       antithesis-net:
+    \\         ipv4_address: 10.20.20.11
+    \\   replica2:
+    \\     container_name: replica2
+    \\     hostname: replica2
+    \\     image: "replica:${TAG}"
+    \\     environment:
+    \\       - CLUSTER=1
+    \\       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
+    \\       - REPLICA_COUNT=3
+    \\       - REPLICA=2
+    \\     volumes:
+    \\       - ./volumes/database:/var/data
+    \\     networks:
+    \\       antithesis-net:
+    \\         ipv4_address: 10.20.20.12
+    \\ 
+    \\   workload:
+    \\     container_name: workload
+    \\     hostname: workload
+    \\     image: "workload:${TAG}"
+    \\     environment:
+    \\       - CLUSTER=1
+    \\       - REPLICAS=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
+    \\     networks:
+    \\       antithesis-net:
+    \\         ipv4_address: 10.20.20.100
+    \\ 
+    \\ # The subnet provided here is an example
+    \\ # An alternate /24 can be used
+    \\ networks:
+    \\   antithesis-net:
+    \\     driver: bridge
+    \\     ipam:
+    \\       config:
+    \\         - subnet: 10.20.20.0/24
+;
