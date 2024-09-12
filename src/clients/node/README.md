@@ -644,9 +644,7 @@ var query_filter = {
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten balances at most.
-  flags: AccountFilterFlags.debits | // Include transfer from the debit side.
-    AccountFilterFlags.credits | // Include transfer from the credit side.
-    AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+  flags: QueryFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
 const query_accounts = await client.queryAccounts(query_filter);
 ```
@@ -671,9 +669,7 @@ query_filter = {
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten balances at most.
-  flags: AccountFilterFlags.debits | // Include transfer from the debit side.
-    AccountFilterFlags.credits | // Include transfer from the credit side.
-    AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+  flags: QueryFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
 const query_transfers = await client.queryTransfers(query_filter);
 ```
