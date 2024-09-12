@@ -284,6 +284,21 @@ pub fn file_ensure_content(
     return .updated;
 }
 
+/// Creates a new temporary directory (in the project-level .zig-cache) and returns the
+/// absolute path.
+pub fn create_tmp_dir(
+    shell: *Shell,
+) ![]const u8 {
+    const root = try shell.project_root.realpathAlloc(shell.arena.allocator(), ".");
+    const tmp_absolute = try shell.fmt("{s}/.zig-cache/tmp/{}", .{
+        root,
+        std.crypto.random.int(u64),
+    });
+    assert(!try shell.dir_exists(tmp_absolute));
+    try shell.project_root.makePath(tmp_absolute);
+    return tmp_absolute;
+}
+
 const FindOptions = struct {
     where: []const []const u8,
     extension: ?[]const u8 = null,

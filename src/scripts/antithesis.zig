@@ -65,21 +65,27 @@ fn build_image(
 ) !void {
     switch (image) {
         .config => {
-            const image_dir = try shell.exec_stdout("mktemp -d", .{});
+            // This is the temporary directory where we'll assemble the config docker image.
+            // By design it's not automatically deleted with a defer, because the caller of
+            // the script might want to debug the docker compose setup locally.
+            const image_dir = try shell.create_tmp_dir();
 
             try shell.pushd(image_dir);
             defer shell.popd();
 
             // TODO(owickstrom): remove the need for .env file by rendering docker-compose.yaml
             // with the correct tag?
-            const env_file = try shell.fmt("{s}/.env", .{image_dir});
+            const env_file = ".env";
+            shell.echo(
+                \\{ansi-red}
+                \\ {s}/{s}
+                \\{ansi-reset}
+            , .{ image_dir, env_file });
 
             const env_file_contents = try shell.fmt("TAG={s}", .{tag});
             _ = try shell.file_ensure_content(env_file, env_file_contents);
 
-            const docker_compose_file = try shell.fmt("{s}/docker-compose.yaml", .{
-                image_dir,
-            });
+            const docker_compose_file = "docker-compose.yaml";
             _ = try shell.file_ensure_content(docker_compose_file, docker_compose_contents);
 
             try shell.exec("mkdir -p volumes/database", .{});
@@ -89,10 +95,10 @@ fn build_image(
                 .stdin_slice = @field(dockerfiles, @tagName(image)),
             },
                 \\docker build 
-                \\  --file - {dir}
+                \\  --file - .
                 \\  --build-arg TAG={tag}
                 \\  --tag={image}:{tag}
-            , .{ .image = @tagName(image), .tag = tag, .dir = image_dir });
+            , .{ .image = @tagName(image), .tag = tag });
 
             shell.echo(
                 \\{ansi-red}
