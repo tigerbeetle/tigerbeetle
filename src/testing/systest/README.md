@@ -16,7 +16,7 @@ The system test, running in Antithesis, consists of 3 images:
 - [Antithesis documentation](https://antithesis.com/docs/index.html)
 - [instrumentation.h](https://drive.google.com/file/d/1D7FPHL54znblGol4vMw8uwMFpLkaOePX/view) - currently not used.
 
-# Usage
+## Usage
 
 ### Local Test
 
