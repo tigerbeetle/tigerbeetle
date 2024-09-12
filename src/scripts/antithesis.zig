@@ -85,7 +85,11 @@ fn build_image(
             const env_file_contents = try shell.fmt("TAG={s}", .{tag});
             _ = try shell.file_ensure_content(env_file, env_file_contents, .{});
 
-            _ = try shell.file_ensure_content("docker-compose.yaml", docker_compose_contents, .{});
+            _ = try shell.file_ensure_content(
+                "docker-compose.yaml",
+                docker_compose_contents,
+                .{},
+            );
 
             try shell.cwd.makePath("./volumes/database");
 
@@ -116,7 +120,11 @@ fn build_image(
 
             // Create the entrypoint script with executable permissions.
             const permissions = if (builtin.target.os.tag != .windows) 0o777 else 0;
-            _ = try shell.file_ensure_content("run.sh", replica_run_contents, .{ .mode = permissions });
+            _ = try shell.file_ensure_content(
+                "run.sh",
+                replica_run_contents,
+                .{ .mode = permissions },
+            );
 
             try docker_build_cwd(shell, image, tag);
         },
