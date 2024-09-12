@@ -2,7 +2,11 @@
 //!
 //! Example:
 //!
-//!     $ ./tigerbeetle start --experimental --trace ... > trace.json
+//!     $ ./tigerbeetle start --experimental --trace=trace.json
+//!
+//! or:
+//!
+//!     $ ./tigerbeetle benchmark --trace=trace.json
 //!
 //! The trace JSON output is compatible with:
 //! - https://ui.perfetto.dev/
