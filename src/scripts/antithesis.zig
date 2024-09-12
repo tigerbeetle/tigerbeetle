@@ -25,7 +25,7 @@ pub const CLIArgs = struct {
 
 const Image = enum { config, workload, replica };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
+pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(try shell.exec_status_ok("docker --version", .{}));
 
     assert(cli_args.tag.len > 0);
@@ -51,7 +51,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     const images = comptime std.enums.values(Image);
     inline for (images) |image| {
-        try build_image(shell, gpa, image, cli_args.tag);
+        try build_image(shell, image, cli_args.tag);
         if (cli_args.push) {
             try push_image(shell, image, cli_args.tag);
         }
@@ -60,7 +60,6 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
 fn build_image(
     shell: *Shell,
-    gpa: std.mem.Allocator,
     comptime image: Image,
     tag: []const u8,
 ) !void {
@@ -73,19 +72,14 @@ fn build_image(
 
             // TODO(owickstrom): remove the need for .env file by rendering docker-compose.yaml
             // with the correct tag?
-            const env_file = try std.fs.path.join(gpa, &.{ image_dir, ".env" });
-            defer gpa.free(env_file);
+            const env_file = try shell.fmt("{s}/.env", .{image_dir});
 
-            const env_file_contents = try std.fmt.allocPrint(gpa, "TAG={s}", .{tag});
-            defer gpa.free(env_file_contents);
-
+            const env_file_contents = try shell.fmt("TAG={s}", .{tag});
             _ = try shell.file_ensure_content(env_file, env_file_contents);
 
-            const docker_compose_file = try std.fs.path.join(gpa, &.{
+            const docker_compose_file = try shell.fmt("{s}/docker-compose.yaml", .{
                 image_dir,
-                "docker-compose.yaml",
             });
-            defer gpa.free(docker_compose_file);
             _ = try shell.file_ensure_content(docker_compose_file, docker_compose_contents);
 
             try shell.exec("mkdir -p volumes/database", .{});
