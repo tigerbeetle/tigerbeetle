@@ -2048,10 +2048,10 @@ pub fn ReplicaType(
 
             self.primary_receive_do_view_change(message);
 
-            // Wait until we have a quorum of messages (including ourself):
-            assert(self.do_view_change_from_all_replicas[self.replica] != null);
-            assert(self.do_view_change_from_all_replicas[self.replica].?.header.checkpoint_op <=
-                self.op_checkpoint());
+            // Wait until we have a quorum of messages:
+            if (self.do_view_change_from_all_replicas[self.replica]) |dvc| {
+                assert(dvc.header.checkpoint_op <= self.op_checkpoint());
+            }
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
 
             // Store in a var so that `.complete_valid` can capture a mutable pointer in switch.
@@ -7679,7 +7679,7 @@ pub fn ReplicaType(
             // Do not advertise a view/log_view before it is durable. We only need perform these
             // checks if we authored the message, not if we're simply forwarding a message along.
             // See view_durable()/log_view_durable().
-            if (replica != self.replica and message.header.replica == self.replica) {
+            if (message.header.replica == self.replica) {
                 if (message.header.view > self.view_durable() and
                     message.header.command != .request_start_view)
                 {
@@ -8037,7 +8037,7 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.commit_max <= self.op_prepare_max());
             assert(self.do_view_change_quorum);
-            assert(self.do_view_change_from_all_replicas[self.replica] != null);
+            maybe(self.do_view_change_from_all_replicas[self.replica] != null);
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
 
             const dvcs_all = DVCQuorum.dvcs_all(self.do_view_change_from_all_replicas);
@@ -8073,8 +8073,9 @@ pub fn ReplicaType(
             assert(header_head.op <= self.op_prepare_max());
             for (dvcs_all.const_slice()) |dvc| assert(header_head.op >= dvc.header.commit_min);
 
-            assert(self.commit_min >=
-                self.do_view_change_from_all_replicas[self.replica].?.header.commit_min);
+            if (self.do_view_change_from_all_replicas[self.replica]) |dvc| {
+                assert(self.commit_min >= dvc.header.commit_min);
+            }
 
             const commit_max = DVCQuorum.commit_max(self.do_view_change_from_all_replicas);
             maybe(self.commit_min > commit_max);
