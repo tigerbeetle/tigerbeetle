@@ -115,7 +115,8 @@ fn build_image(
             defer shell.popd();
 
             // Create the entrypoint script with executable permissions.
-            _ = try shell.file_ensure_content("run.sh", replica_run_contents, .{ .mode = 0o777 });
+            const permissions = if (builtin.target.os.tag != .windows) 0o777 else 0;
+            _ = try shell.file_ensure_content("run.sh", replica_run_contents, .{ .mode = permissions });
 
             try docker_build_cwd(shell, image, tag);
         },
