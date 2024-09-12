@@ -17,7 +17,9 @@ const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 
 pub const CLIArgs = struct {
+    // Docker tag to build (and possibly push)
     tag: []const u8,
+    // Whether to push the built tag to the Antithesis registry
     push: bool = false,
 };
 
@@ -26,9 +28,8 @@ const Image = enum { config, workload, replica };
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(try shell.exec_status_ok("docker --version", .{}));
 
-    // Docker tag to build and push
-    const tag = std.mem.trim(u8, cli_args.tag, &std.ascii.whitespace);
-    assert(tag.len > 0);
+    assert(cli_args.tag.len > 0);
+    assert(std.mem.indexOfAny(u8, cli_args.tag, &std.ascii.whitespace) == null);
 
     try shell.zig("build -Drelease", .{});
 
@@ -50,9 +51,9 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     const images = comptime std.enums.values(Image);
     inline for (images) |image| {
-        try build_image(shell, gpa, image, tag);
+        try build_image(shell, gpa, image, cli_args.tag);
         if (cli_args.push) {
-            try push_image(shell, image, tag);
+            try push_image(shell, image, cli_args.tag);
         }
     }
 }
