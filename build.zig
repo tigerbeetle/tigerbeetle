@@ -364,7 +364,7 @@ fn build_tigerbeetle(
             .vsr_module = options.vsr_module,
             .vsr_options = options.vsr_options,
             .llvm_objcopy = options.llvm_objcopy,
-            .tigerbeetle_past = download_release(b, version_past, options.target, options.mode),
+            .tigerbeetle_previous = download_release(b, version_past, options.target, options.mode),
             .target = options.target,
             .mode = options.mode,
         });
@@ -426,7 +426,7 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     vsr_module: *std.Build.Module,
     vsr_options: *std.Build.Step.Options,
     llvm_objcopy: ?[]const u8,
-    tigerbeetle_past: std.Build.LazyPath,
+    tigerbeetle_previous: std.Build.LazyPath,
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
 }) std.Build.LazyPath {
@@ -483,7 +483,7 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
         build_multiversion.addArg("--debug");
     }
 
-    build_multiversion.addPrefixedFileArg("--tigerbeetle-past=", options.tigerbeetle_past);
+    build_multiversion.addPrefixedFileArg("--tigerbeetle-past=", options.tigerbeetle_previous);
     build_multiversion.addArg(b.fmt(
         "--tmp={s}",
         .{b.cache_root.join(b.allocator, &.{"tmp"}) catch @panic("OOM")},
@@ -622,19 +622,19 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
         .config_aof_recovery = false,
         .hash_log_mode = .none,
     });
-    const tigerbeetle_past = download_release(b, "latest", options.target, options.mode);
+    const tigerbeetle_previous = download_release(b, "latest", options.target, options.mode);
     const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .llvm_objcopy = options.llvm_objcopy,
-        .tigerbeetle_past = tigerbeetle_past,
+        .tigerbeetle_previous = tigerbeetle_previous,
         .target = options.target,
         .mode = options.mode,
     });
 
     const integration_tests_options = b.addOptions();
     integration_tests_options.addOptionPath("tigerbeetle_exe", tigerbeetle);
-    integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_past);
+    integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_previous);
     const integration_tests = b.addTest(.{
         .root_source_file = b.path("src/integration_tests.zig"),
         .target = options.target,

@@ -32,7 +32,7 @@ jobs:
       # Docker restricts io_uring by default, running unconfined then.
       options: --security-opt seccomp=unconfined
     steps:
-      - run: apk add -U git -U github-cli
+      - run: apk add -U git github-cli
       # https://github.com/actions/checkout/issues/1169
       - run: git config --system --add safe.directory '*'
       - uses: actions/checkout@v4

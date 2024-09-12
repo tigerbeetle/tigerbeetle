@@ -288,8 +288,8 @@ test "in-place upgrade" {
     // Stats a cluster of three replicas using the previous release of TigerBeetle and then replaces
     // the binaries on disk with a new version.
     //
-    // Against this upgrading cluster, we are running a benchmark load and check that it finishes
-    // with zero status.
+    // Against this upgrading cluster, we are running a benchmark load and checking that it finishes
+    // with a zero status.
     //
     // To spice things up, replicas are periodically killed and restarted.
 
@@ -356,7 +356,7 @@ test "in-place upgrade" {
                 }
             }
 
-            // context.shell.cwd.deleteTree(context.tmp) catch {};
+            context.shell.cwd.deleteTree(context.tmp) catch {};
             context.shell.destroy();
             context.* = undefined;
         }
