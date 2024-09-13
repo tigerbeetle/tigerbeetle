@@ -706,14 +706,6 @@ pub fn ReplicaType(
                     }
                     break;
                 }
-            } else {
-                // This case can only occur if we loaded an SV for its hook header, then converted
-                // that SV to a DVC (dropping the hooks; see start_view_into_do_view_change()),
-                // but never finished the view change.
-                if (op_head == null) {
-                    assert(self.view > self.log_view);
-                    op_head = self.journal.op_maximum();
-                }
             }
             assert(op_head.? <= self.op_prepare_max());
 
