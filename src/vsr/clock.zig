@@ -1,3 +1,84 @@
+//! Cluster-wide synchronized clock, aggregating timing information from all replicas.
+//!
+//! Time plays a central role in TigerBeetle data model. Because it is so important, TigerBeetle
+//! defines its own time. In other words, we don't use time to drive consensus, we use consensus to
+//! drive time!
+//!
+//! Time is important for the domain of accounting (e.g., pending transfers can expire with time),
+//! but it can't be supplied by the client, as its clock can be unreliable. For this reason,
+//! TigerBeetle needs to expose a "time service" to the state machine logic.
+//!
+//! Additionally, TigerBeetle needs to assign some kind of a sequence number to every event in the
+//! system, to make it easy to say whether A happened before B or vice versa.
+//!
+//! Finally, to maintain indices, the LSM tree could benefit from a compact synthetic primary key.
+//!
+//! Time solves _all_ of these problems at once: each object in TigerBeetle gets tagged with a u64
+//! nanosecond-precision creation timestamp. These timestamps are unique across all objects (an
+//! Account and a Transfer can never have the same timestamp), consistent with linearization order
+//! of the events (earlier events get smaller timestamps), and closely match the real wall-clock
+//! time. Timestamps are used as internal synthetic primary keys instead of user-supplied random
+//! u128 ids because they are smaller and also expose temporal locality.
+//!
+//! Implementation:
+//!
+//! The ultimate source of timestamps is each replica's operating system. This time is backed by a
+//! replica-local drifty hardware clock which is periodically synchronized through NTP with high
+//! quality clocks elsewhere. Using system time directly as a source of TigerBeetle timestamps
+//! doesn't work:
+//!
+//! First, system time differs across replicas. To solve this problem, only the primary assigns
+//! timestamps. Specifically, when the primary converts a request to a prepare, it assigns its
+//! current time to the prepare. The state machine then assigns `prepare_timestamp + object_index`
+//! as the creation timestamp for each object in a batch.
+//!
+//! Second, system time is not monotonic: due to NTP it can easily go backwards. To solve this
+//! problem, the primary just takes the max between the current time and the previous timestamp
+//! used. Notably, this ends up preserving monotonicity across restarts --- it is when replaying
+//! past prepares from the WAL that a replica learns about the latest timestamp before restart.
+//!
+//! Third, replica's system time lacks high availability: if a primary is isolated from NTP servers
+//! its local clock can drift significantly. Another problematic scenario is an operator error
+//! which incorrectly adjusts primary's local clock to be far in the future, which, due to
+//! monotonicity requirement, could render the cluster completely unusable.
+//!
+//! To solve the last problem, the primary aggregates clock information from the entire cluster and
+//! calculates a timestamp value which is consistent with clocks on at least half of the replicas.
+//!
+//! Sketch of the algorithm:
+//!
+//! Assume you have six different clocks. Each clock shows a different time. Most are close, but
+//! there could be outliers. How do you estimate the "true" time?
+//!
+//! The key insight is to think in intervals, rather than points. If a clock shows time t and
+//! claims error margin Δ, it means the true time is in the [t-Δ;t+Δ] interval. If you have two
+//! clocks, you can intersect their intervals to narrow down the true time interval. If the
+//! intervals are disjoint, that means that at least one of the clocks is malfunctioning. This gives
+//! an algorithm for identifying cluster time --- collect clock measurements from all replicas
+//! together with the respective error margins and find an interval which is consistent with at
+//! least half of the clocks.
+//!
+//! The first problem with the above plan is that clocks' error margins are not known. To solve
+//! this, flip the problem around and find the smallest error margin that still allows for half of
+//! the clocks' intervals to intersect. If this minimal error margin still ends up too large,
+//! declare that the clocks are unsynchronized and wait for NTP to fix things up.
+//!
+//! The second problem with the plan is that a replica can only read its own clock. To learn other
+//! replica's clock, the following algorithm is used:
+//!
+//! - A sends a ping message to B, including A's current time.
+//! - B replies with a pong message, which includes a copy of the original ping timestamp, as well
+//!   as B's current time.
+//! - When A receives a pong, it uses the attached ping time to estimate the network delay and infer
+//!   the clock offset from that.
+//!
+//! Further reading:
+//!
+//! [Three Clocks are Better than One](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/)
+//!
+//! And watching:
+//!
+//! [Detecting Clock Sync Failure in Highly Available Systems](https://youtu.be/7R-Iz6sJG6Q?si=9sD2TpfD29AxUjOY)
 const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
