@@ -451,6 +451,29 @@ test "Cluster: network: partition flexible quorum" {
     try c.request(4, 4);
 }
 
+test "Cluster: network: primary no clock sync" {
+    // When primary can't accept requests because the clock is not synchronized, it must proactively
+    // abdicate (the rest of the cluster doesn't know that there are dropped requests).
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(3, 3);
+    const a0 = t.replica(.A0);
+    try expectEqual(a0.role(), .primary);
+    try expectEqual(a0.commit(), 3);
+
+    a0.drop(.R_, .incoming, .pong);
+    for (0..3) |_| t.run(); // Give enough time for the clocks to desync.
+
+    try expectEqual(a0.role(), .primary);
+    const mark = marks.check("send_commit: primary abdicating");
+    try c.request(5, 5);
+    try mark.expect_hit();
+    try expectEqual(a0.role(), .backup);
+    try expectEqual(t.replica(.R_).commit(), 5);
+}
+
 test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     // A backup that has fallen behind by two checkpoints can catch up, without using state sync.
     const t = try TestContext.init(.{ .replica_count = 3 });
