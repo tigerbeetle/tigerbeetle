@@ -44,7 +44,9 @@
 //!     trace.start(.foo, .{});
 //!
 //! If an event is is cancelled rather than properly stopped, use .reset():
-//! (Reset is safe to call regardless of whether the event is currently started.)
+//! - Reset is safe to call regardless of whether the event is currently started.
+//! - For events with multiple instances (e.g. IO reads and writes), .reset() will
+//!   cancel all running traces of the same event.
 //!
 //!     // good
 //!     trace.start(.foo, .{});
@@ -110,6 +112,12 @@ pub const Event = union(enum) {
     compact_manifest,
     compact_mutable,
 
+    lookup,
+    lookup_worker: struct { index: u8 },
+
+    scan_tree: struct { index: u8 },
+    scan_tree_level: struct { index: u8, level: u8 },
+
     grid_read: struct { iop: usize },
     grid_write: struct { iop: usize },
 
@@ -141,6 +149,10 @@ pub const Event = union(enum) {
         .compact_blip_write = 1,
         .compact_manifest = 1,
         .compact_mutable = 1,
+        .lookup = 1,
+        .lookup_worker = constants.grid_iops_read_max,
+        .scan_tree = constants.lsm_scans_max,
+        .scan_tree_level = constants.lsm_scans_max * @as(u32, constants.lsm_levels),
         .grid_read = constants.grid_iops_read_max,
         .grid_write = constants.grid_iops_write_max,
     });
@@ -165,14 +177,41 @@ pub const Event = union(enum) {
 
     // Stack is a u32 since it must be losslessly encoded as a JSON integer.
     fn stack(event: *const Event) u32 {
-        const stack_base = event_stack_base.get(event.*);
-        const stack_offset: u32 = switch (event.*) {
-            .grid_read => |data| @intCast(data.iop),
-            .grid_write => |data| @intCast(data.iop),
-            else => 0,
-        };
-        assert(stack_offset < event_stack_cardinality.get(event.*));
-        return stack_base + stack_offset;
+        switch (event.*) {
+            .lookup_worker => |data| {
+                assert(data.index < event_stack_cardinality.get(event.*));
+                const stack_base = event_stack_base.get(event.*);
+                return stack_base + data.index;
+            },
+            .scan_tree => |data| {
+                assert(data.index < constants.lsm_scans_max);
+                // This event has "nested" sub-events, so its offset is calculated
+                // with padding to accommodate `scan_tree_level` events in between.
+                const stack_base = event_stack_base.get(event.*);
+                const scan_tree_offset = (constants.lsm_levels + 1) * data.index;
+                return stack_base + scan_tree_offset;
+            },
+            .scan_tree_level => |data| {
+                assert(data.index < constants.lsm_scans_max);
+                assert(data.level < constants.lsm_levels);
+                // This is a "nested" event, so its offset is calculated
+                // relative to the parent `scan_tree`'s offset.
+                const stack_base = event_stack_base.get(.scan_tree);
+                const scan_tree_offset = (constants.lsm_levels + 1) * data.index;
+                const scan_tree_level_offset = data.level + 1;
+                return stack_base + scan_tree_offset + scan_tree_level_offset;
+            },
+            inline .grid_read, .grid_write => |data| {
+                assert(data.iop < event_stack_cardinality.get(event.*));
+                const stack_base = event_stack_base.get(event.*);
+                return stack_base + @as(u32, @intCast(data.iop));
+            },
+            inline else => |data, event_tag| {
+                comptime assert(@TypeOf(data) == void);
+                comptime assert(event_stack_cardinality.get(event_tag) == 1);
+                return comptime event_stack_base.get(event_tag);
+            },
+        }
     }
 };
 
@@ -264,21 +303,23 @@ pub const Tracer = struct {
         assert(tracer.events_enabled[stack]);
         tracer.events_enabled[stack] = false;
 
-        tracer.write_stop(event, data);
+        tracer.write_stop(stack, data);
     }
 
-    pub fn reset(tracer: *Tracer, event: Event) void {
-        const stack = event.stack();
-        defer tracer.events_enabled[stack] = false;
+    pub fn reset(tracer: *Tracer, event_tag: Event.EventTag) void {
+        const stack_base = Event.event_stack_base.get(event_tag);
+        const cardinality = Event.event_stack_cardinality.get(event_tag);
+        for (stack_base..stack_base + cardinality) |stack| {
+            if (tracer.events_enabled[stack]) {
+                log.debug("{}: {s}: reset", .{ tracer.replica_index, @tagName(event_tag) });
 
-        if (tracer.events_enabled[stack]) {
-            log.debug("{}: {s}: reset", .{ tracer.replica_index, @tagName(event) });
-
-            tracer.write_stop(event, .{});
+                tracer.events_enabled[stack] = false;
+                tracer.write_stop(@intCast(stack), .{});
+            }
         }
     }
 
-    fn write_stop(tracer: *Tracer, event: Event, data: anytype) void {
+    fn write_stop(tracer: *Tracer, stack: u32, data: anytype) void {
         comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
 
         const writer = tracer.options.writer orelse return;
@@ -297,7 +338,7 @@ pub const Tracer = struct {
                 "}},\n",
             .{
                 .process_id = tracer.replica_index,
-                .thread_id = event.stack(),
+                .thread_id = stack,
                 .event = 'E',
                 .timestamp = time_elapsed_us,
             },

@@ -198,7 +198,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree = undefined;
             env.lookup_value = null;
 
-            try env.scan_buffer.init(allocator);
+            try env.scan_buffer.init(allocator, .{ .index = 0 });
             defer env.scan_buffer.deinit(allocator);
 
             env.scan_results = try allocator.alloc(Value, scan_results_max);
