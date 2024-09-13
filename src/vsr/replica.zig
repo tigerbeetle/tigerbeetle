@@ -2235,16 +2235,10 @@ pub fn ReplicaType(
                 self.view = message.header.view;
                 maybe(self.view == self.log_view);
             } else {
-                if (self.view < message.header.view) {
-                    self.transition_to_view_change_status(message.header.view);
-                }
-
-                if (self.status == .normal) {
-                    assert(self.backup());
-                    assert(self.view == self.log_view);
-                }
+                // We handle view jump for replicas in other statuses separately, as it entails
+                // calling `transition_to_view_change_status` for some cases and an explicit
+                // transition to .view_change status for others.
             }
-            assert(self.view == message.header.view);
 
             const view_checkpoint = start_view_message_checkpoint(message);
             if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
@@ -2270,9 +2264,18 @@ pub fn ReplicaType(
                 // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
                 // there's evidence that the repair can't be completed.
                 (self.syncing == .idle and self.repair_stuck()) or
-                // Completing previously starting state sync.
+                // Completing previously started state sync.
                 self.syncing == .awaiting_checkpoint))
             {
+                if (self.view < message.header.view) {
+                    self.transition_to_view_change_status(message.header.view);
+                }
+                if (self.status == .normal) {
+                    assert(self.backup());
+                    assert(self.view == self.log_view);
+                }
+                assert(self.view == message.header.view);
+
                 // State sync: at this point, we know we want to replace our checkpoint
                 // with the one from this SV.
 
@@ -2327,6 +2330,24 @@ pub fn ReplicaType(
             }
 
             {
+                // Transition to view_change explicitly; transition_to_view_change_status would
+                // initate making the view durable, which is wasteful here. Replicas jumping views
+                // via on_start_view transition to normal status synchronously via
+                // transition_to_normal_from_view_change_status, which initiates making
+                // log_view & view_headers durable. Explicitly transitioning to view_change here
+                // ensures we make view, log_view, and view_headers durable in a single call to
+                // superblock.view_change, as opposed to two.
+                if (self.view < message.header.view) {
+                    self.status = .view_change;
+                    self.view = message.header.view;
+                    self.view_change_initialize_pipeline_and_timers();
+                }
+                if (self.status == .normal) {
+                    assert(self.backup());
+                    assert(self.view == self.log_view);
+                }
+
+                assert(self.view == message.header.view);
                 // Replace our log with the suffix from SV. Transition to sync above guarantees
                 // that there's at least one message that fits the effective checkpoint, but some
                 // messages might be beyond its prepare_max.
@@ -8511,6 +8532,41 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum == false);
         }
 
+        fn view_change_initialize_pipeline_and_timers(self: *Self) void {
+            assert(self.status == .view_change);
+
+            if (self.pipeline == .queue) {
+                var queue: PipelineQueue = self.pipeline.queue;
+                self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
+                queue.deinit(self.message_bus.pool);
+            }
+
+            self.ping_timeout.start();
+            self.commit_message_timeout.stop();
+            self.normal_heartbeat_timeout.stop();
+            self.start_view_change_window_timeout.stop();
+            self.start_view_change_message_timeout.start();
+            self.view_change_status_timeout.start();
+            self.do_view_change_message_timeout.start();
+            self.repair_timeout.stop();
+            self.repair_sync_timeout.stop();
+            self.prepare_timeout.stop();
+            self.primary_abdicate_timeout.stop();
+            self.pulse_timeout.stop();
+            self.grid_repair_message_timeout.start();
+            self.grid_scrub_timeout.start();
+            self.upgrade_timeout.stop();
+
+            if (self.primary_index(self.view) == self.replica) {
+                self.request_start_view_message_timeout.stop();
+            } else {
+                self.request_start_view_message_timeout.start();
+            }
+
+            self.heartbeat_timestamp = 0;
+            self.primary_abdicating = false;
+        }
+
         /// A replica i that notices the need for a view change advances its view, sets its status
         /// to view_change, and sends a ⟨do_view_change v, i⟩ message to all the other replicas,
         /// where v identifies the new view. A replica notices the need for a view change either
@@ -8567,46 +8623,17 @@ pub fn ReplicaType(
                 self.view_durable_update();
             }
 
-            if (self.pipeline == .queue) {
-                var queue: PipelineQueue = self.pipeline.queue;
-                self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
-                queue.deinit(self.message_bus.pool);
-            }
-
-            self.ping_timeout.start();
-            self.commit_message_timeout.stop();
-            self.normal_heartbeat_timeout.stop();
-            self.start_view_change_window_timeout.stop();
-            self.start_view_change_message_timeout.start();
-            self.view_change_status_timeout.start();
-            self.do_view_change_message_timeout.start();
-            self.repair_timeout.stop();
-            self.repair_sync_timeout.stop();
-            self.prepare_timeout.stop();
-            self.primary_abdicate_timeout.stop();
-            self.pulse_timeout.stop();
-            self.grid_repair_message_timeout.start();
-            self.grid_scrub_timeout.start();
-            self.upgrade_timeout.stop();
-
-            if (self.primary_index(self.view) == self.replica) {
-                self.request_start_view_message_timeout.stop();
-            } else {
-                self.request_start_view_message_timeout.start();
-            }
+            self.view_change_initialize_pipeline_and_timers();
 
             // Do not reset quorum counters only on entering a view, assuming that the view will be
             // followed only by a single subsequent view change to the next view, because multiple
             // successive view changes can fail, e.g. after a view change timeout.
             // We must therefore reset our counters here to avoid counting messages from an older
             // view, which would violate the quorum intersection property essential for correctness.
-            self.heartbeat_timestamp = 0;
-            self.primary_abdicating = false;
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
 
             assert(self.do_view_change_quorum == false);
-
             self.send_do_view_change();
         }
 
