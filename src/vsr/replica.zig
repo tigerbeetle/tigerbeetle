@@ -411,7 +411,8 @@ pub fn ReplicaType(
         /// Used when the primary believes that it is partitioned and needs to step down.
         /// In particular, guards against a deadlock in the case where small messages (e.g.
         /// heartbeats, pings/pongs) succeed, but large messages (e.g. prepares) fail.
-        /// (status=normal primary, pipeline has prepare with !ok_quorum_received)
+        /// (status=normal primary, pipeline has prepare with !ok_quorum_received) or
+        /// (status=normal primary, a request was dropped due to clock sync)
         primary_abdicating: bool = false,
 
         /// Unique start_view_change messages for the same view from ALL replicas (including
@@ -1520,6 +1521,10 @@ pub fn ReplicaType(
                 @intCast(message.header.timestamp)
             else
                 self.clock.realtime_synchronized() orelse {
+                    if (!self.primary_abdicate_timeout.ticking) {
+                        assert(!self.solo());
+                        self.primary_abdicate_timeout.start();
+                    }
                     log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
                     return;
                 };
@@ -2989,7 +2994,6 @@ pub fn ReplicaType(
         fn on_primary_abdicate_timeout(self: *Self) void {
             assert(self.status == .normal);
             assert(self.primary());
-            assert(self.primary_pipeline_pending() != null);
             self.primary_abdicate_timeout.reset();
             if (self.solo()) return;
 
@@ -6140,8 +6144,8 @@ pub fn ReplicaType(
                 assert(self.primary_abdicate_timeout.ticking);
             } else {
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.primary_abdicate_timeout.ticking);
                 self.prepare_timeout.start();
+                maybe(!self.primary_abdicate_timeout.ticking);
                 self.primary_abdicate_timeout.start();
             }
 
@@ -9534,8 +9538,6 @@ pub fn ReplicaType(
 
             if (self.primary_abdicating) {
                 assert(self.primary_abdicate_timeout.ticking);
-                assert(self.pipeline.queue.prepare_queue.count > 0);
-                assert(self.primary_pipeline_pending() != null);
 
                 log.mark.debug("{}: send_commit: primary abdicating (view={})", .{
                     self.replica,
