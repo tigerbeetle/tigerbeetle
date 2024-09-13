@@ -1024,7 +1024,7 @@ pub fn GridType(comptime Storage: type) type {
             if (result != .valid) {
                 const header =
                     mem.bytesAsValue(vsr.Header.Block, block.*[0..@sizeOf(vsr.Header)]);
-                log.err(
+                log.warn(
                     "{}: {s}: expected address={} checksum={}, found address={} checksum={}",
                     .{
                         grid.superblock.replica_index.?,

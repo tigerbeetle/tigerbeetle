@@ -1047,7 +1047,7 @@ pub const Multiversion = struct {
         // While these look like blocking IO operations, on a memfd they're memory manipulation.
         // TODO: Would panic'ing be a better option? On Linux, these should never fail. On other
         // platforms where target_fd might be backed by a file, they could...
-        errdefer log.err("target binary update failed - " ++
+        errdefer log.warn("target binary update failed - " ++
             "this replica might fail to automatically restart!", .{});
 
         const target_file = std.fs.File{ .handle = self.target_fd };
@@ -1063,7 +1063,7 @@ pub const Multiversion = struct {
     fn handle_error(self: *Multiversion, result: anyerror) void {
         assert(self.stage != .init);
 
-        log.err("binary does not contain valid multiversion data: {}", .{result});
+        log.warn("binary does not contain valid multiversion data: {}", .{result});
 
         self.stage = .{ .err = result };
     }
