@@ -5269,7 +5269,10 @@ pub fn ReplicaType(
                 } else if (entry.session < message.header.session) {
                     // This cannot be because of a partition since we check the client's view
                     // number.
-                    log.warn("{}: on_request: ignoring newer session (client bug)", .{self.replica});
+                    log.warn(
+                        "{}: on_request: ignoring newer session (client bug)",
+                        .{self.replica},
+                    );
                     return true;
                 }
 

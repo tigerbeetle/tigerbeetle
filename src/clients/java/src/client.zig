@@ -11,7 +11,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const jni = @import("jni.zig");
-const tb = @import("vsr").tb_client;
+const vsr = @import("vsr");
+const tb = vsr.tb_client;
 
 const log = std.log.scoped(.tb_client_jni);
 const assert = std.debug.assert;
@@ -22,6 +23,12 @@ const global_allocator = if (builtin.link_libc)
     std.heap.c_allocator
 else
     @compileError("tb_client must be built with libc");
+
+pub const std_options = .{
+    // Since this is running in application space, log only critical messages to reduce noise.
+    .log_level = std.log.Level.err,
+    .logFn = vsr.constants.log,
+};
 
 /// Context for a client instance.
 const Context = struct {

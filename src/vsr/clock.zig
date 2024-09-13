@@ -503,10 +503,13 @@ pub fn ClockType(comptime Time: type) type {
                         fmt.fmtDurationSigned(delta),
                     });
                 } else {
-                    log.warn("{}: system time is {} behind, clamping system time to cluster time", .{
-                        self.replica,
-                        fmt.fmtDurationSigned(delta),
-                    });
+                    log.warn(
+                        "{}: system time is {} behind, clamping system time to cluster time",
+                        .{
+                            self.replica,
+                            fmt.fmtDurationSigned(delta),
+                        },
+                    );
                 }
             } else {
                 const delta = system - upper;
