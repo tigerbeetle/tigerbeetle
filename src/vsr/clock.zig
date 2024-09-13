@@ -42,7 +42,7 @@
 //! which incorrectly adjusts primary's local clock to be far in the future, which, due to
 //! monotonicity requirement, could render the cluster completely unusable.
 //!
-//! To solve the last problem, primary aggregates clock information from the entire cluster and
+//! To solve the last problem, the primary aggregates clock information from the entire cluster and
 //! calculates a timestamp value which is consistent with clocks on at least half of the replicas.
 //!
 //! Sketch of the algorithm:
