@@ -317,6 +317,11 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 @field(forest.grooves, field.name).reset();
             }
 
+            forest.grid.trace.reset(.lookup);
+            forest.grid.trace.reset(.lookup_worker);
+            forest.grid.trace.reset(.scan_tree);
+            forest.grid.trace.reset(.scan_tree_level);
+
             forest.manifest_log.reset();
             forest.node_pool.reset();
             forest.scan_buffer_pool.reset();

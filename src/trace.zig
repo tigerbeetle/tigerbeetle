@@ -44,7 +44,9 @@
 //!     trace.start(.foo, .{});
 //!
 //! If an event is is cancelled rather than properly stopped, use .reset():
-//! (Reset is safe to call regardless of whether the event is currently started.)
+//! - Reset is safe to call regardless of whether the event is currently started.
+//! - For events with multiple instances (e.g. IO reads and writes), .reset() will
+//!   cancel all running traces of the same event.
 //!
 //!     // good
 //!     trace.start(.foo, .{});
@@ -301,21 +303,23 @@ pub const Tracer = struct {
         assert(tracer.events_enabled[stack]);
         tracer.events_enabled[stack] = false;
 
-        tracer.write_stop(event, data);
+        tracer.write_stop(stack, data);
     }
 
-    pub fn reset(tracer: *Tracer, event: Event) void {
-        const stack = event.stack();
-        defer tracer.events_enabled[stack] = false;
+    pub fn reset(tracer: *Tracer, event_tag: Event.EventTag) void {
+        const stack_base = Event.event_stack_base.get(event_tag);
+        const cardinality = Event.event_stack_cardinality.get(event_tag);
+        for (stack_base..stack_base + cardinality) |stack| {
+            if (tracer.events_enabled[stack]) {
+                log.debug("{}: {s}: reset", .{ tracer.replica_index, @tagName(event_tag) });
 
-        if (tracer.events_enabled[stack]) {
-            log.debug("{}: {s}: reset", .{ tracer.replica_index, @tagName(event) });
-
-            tracer.write_stop(event, .{});
+                tracer.events_enabled[stack] = false;
+                tracer.write_stop(@intCast(stack), .{});
+            }
         }
     }
 
-    fn write_stop(tracer: *Tracer, event: Event, data: anytype) void {
+    fn write_stop(tracer: *Tracer, stack: u32, data: anytype) void {
         comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
 
         const writer = tracer.options.writer orelse return;
@@ -334,7 +338,7 @@ pub const Tracer = struct {
                 "}},\n",
             .{
                 .process_id = tracer.replica_index,
-                .thread_id = event.stack(),
+                .thread_id = stack,
                 .event = 'E',
                 .timestamp = time_elapsed_us,
             },
