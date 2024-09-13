@@ -759,7 +759,7 @@ pub fn ReplicaType(
                         self.transition_to_view_change_status(self.view);
                     }
                 } else {
-                    self.transition_to_recovering_head();
+                    self.transition_to_recovering_head_from_recovering_status();
                 }
             }
 
@@ -8328,7 +8328,7 @@ pub fn ReplicaType(
             self.send_prepare_oks_after_view_change();
         }
 
-        fn transition_to_recovering_head(self: *Self) void {
+        fn transition_to_recovering_head_from_recovering_status(self: *Self) void {
             assert(!self.solo());
             assert(self.status == .recovering);
             assert(self.commit_stage == .idle);
@@ -8341,31 +8341,25 @@ pub fn ReplicaType(
 
             self.status = .recovering_head;
 
+            assert(!self.prepare_timeout.ticking);
+            assert(!self.primary_abdicate_timeout.ticking);
+            assert(!self.normal_heartbeat_timeout.ticking);
+            assert(!self.start_view_change_message_timeout.ticking);
+            assert(!self.start_view_change_window_timeout.ticking);
+            assert(!self.commit_message_timeout.ticking);
+            assert(!self.view_change_status_timeout.ticking);
+            assert(!self.do_view_change_message_timeout.ticking);
+            assert(!self.request_start_view_message_timeout.ticking);
+            assert(!self.repair_sync_timeout.ticking);
+            assert(!self.repair_timeout.ticking);
+            assert(!self.pulse_timeout.ticking);
+            assert(!self.upgrade_timeout.ticking);
+
             self.ping_timeout.start();
-            self.prepare_timeout.stop();
-            self.primary_abdicate_timeout.stop();
-            self.commit_message_timeout.stop();
-            self.normal_heartbeat_timeout.stop();
-            self.start_view_change_window_timeout.stop();
-            self.start_view_change_message_timeout.stop();
-            self.view_change_status_timeout.stop();
-            self.do_view_change_message_timeout.stop();
-            self.request_start_view_message_timeout.stop();
-            self.repair_timeout.stop();
-            self.repair_sync_timeout.stop();
-            self.upgrade_timeout.stop();
             self.grid_repair_message_timeout.start();
             self.grid_scrub_timeout.start();
-            self.pulse_timeout.stop();
 
-            if (self.pipeline == .queue) {
-                // Convert the pipeline queue into a cache.
-                var queue: PipelineQueue = self.pipeline.queue;
-                self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
-                queue.deinit(self.message_bus.pool);
-            }
-
-            log.warn("{}: transition_to_recovering_head: " ++
+            log.warn("{}: transition_to_recovering_head_from_recovering_status: " ++
                 "op_checkpoint={} commit_min={} op_head={} log_view={} view={}", .{
                 self.replica,
                 self.op_checkpoint(),
@@ -8388,7 +8382,22 @@ pub fn ReplicaType(
 
             self.status = .normal;
 
+            assert(!self.prepare_timeout.ticking);
+            assert(!self.primary_abdicate_timeout.ticking);
+            assert(!self.normal_heartbeat_timeout.ticking);
+            assert(!self.start_view_change_message_timeout.ticking);
+            assert(!self.start_view_change_window_timeout.ticking);
+            assert(!self.commit_message_timeout.ticking);
+            assert(!self.view_change_status_timeout.ticking);
+            assert(!self.do_view_change_message_timeout.ticking);
+            assert(!self.request_start_view_message_timeout.ticking);
+            assert(!self.repair_sync_timeout.ticking);
+            assert(!self.repair_timeout.ticking);
+            assert(!self.pulse_timeout.ticking);
+            assert(!self.upgrade_timeout.ticking);
+
             if (self.primary()) {
+                assert(self.solo());
                 log.debug(
                     "{}: transition_to_normal_from_recovering_status: view={} primary",
                     .{
@@ -8396,18 +8405,6 @@ pub fn ReplicaType(
                         self.view,
                     },
                 );
-
-                assert(self.solo());
-                assert(!self.prepare_timeout.ticking);
-                assert(!self.primary_abdicate_timeout.ticking);
-                assert(!self.normal_heartbeat_timeout.ticking);
-                assert(!self.start_view_change_window_timeout.ticking);
-                assert(!self.view_change_status_timeout.ticking);
-                assert(!self.do_view_change_message_timeout.ticking);
-                assert(!self.request_start_view_message_timeout.ticking);
-                assert(!self.repair_sync_timeout.ticking);
-                assert(!self.pulse_timeout.ticking);
-                assert(!self.upgrade_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.start_view_change_message_timeout.start();
@@ -8430,18 +8427,6 @@ pub fn ReplicaType(
                         self.view,
                     },
                 );
-
-                assert(!self.prepare_timeout.ticking);
-                assert(!self.primary_abdicate_timeout.ticking);
-                assert(!self.normal_heartbeat_timeout.ticking);
-                assert(!self.start_view_change_window_timeout.ticking);
-                assert(!self.commit_message_timeout.ticking);
-                assert(!self.view_change_status_timeout.ticking);
-                assert(!self.do_view_change_message_timeout.ticking);
-                assert(!self.request_start_view_message_timeout.ticking);
-                assert(!self.repair_sync_timeout.ticking);
-                assert(!self.pulse_timeout.ticking);
-                assert(!self.upgrade_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.normal_heartbeat_timeout.start();
