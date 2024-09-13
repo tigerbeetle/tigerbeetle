@@ -4751,7 +4751,6 @@ pub fn ReplicaType(
             self.primary_update_view_headers();
             assert(self.view_headers.command == .start_view);
             assert(self.view_headers.array.get(0).op == self.op);
-            self.view_headers.verify();
 
             const message = self.message_bus.get_message(.start_view);
             defer self.message_bus.unref(message);
@@ -4825,6 +4824,7 @@ pub fn ReplicaType(
                     self.view_headers.append(self.journal.header_with_op(op).?);
                 }
             }
+            self.view_headers.verify();
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -8311,7 +8311,6 @@ pub fn ReplicaType(
 
             self.view_headers.command = .start_view;
             self.primary_update_view_headers();
-            self.view_headers.verify();
 
             self.transition_to_normal_from_view_change_status(self.view);
 
