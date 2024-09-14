@@ -1339,7 +1339,7 @@ pub fn ReplicaType(
             }
 
             if (message.header.invalid()) |reason| {
-                log.err("{}: on_message: invalid (command={}, {s})", .{
+                log.warn("{}: on_message: invalid (command={}, {s})", .{
                     self.replica,
                     message.header.command,
                     reason,
@@ -1393,7 +1393,7 @@ pub fn ReplicaType(
             }
 
             if (self.loopback_queue) |loopback_message| {
-                log.err("{}: on_message: on_{s}() queued a {s} loopback message with no flush", .{
+                log.warn("{}: on_message: on_{s}() queued a {s} loopback message with no flush", .{
                     self.replica,
                     @tagName(message.header.command),
                     @tagName(loopback_message.header.command),
@@ -1525,7 +1525,7 @@ pub fn ReplicaType(
                         assert(!self.solo());
                         self.primary_abdicate_timeout.start();
                     }
-                    log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+                    log.warn("{}: on_request: dropping (clock not synchronized)", .{self.replica});
                     return;
                 };
 
@@ -4675,7 +4675,7 @@ pub fn ReplicaType(
 
                 assert(self.client_sessions.count() == constants.clients_max - 1);
 
-                log.err("{}: client_table_entry_create: clients={}/{} evicting client={}", .{
+                log.warn("{}: client_table_entry_create: clients={}/{} evicting client={}", .{
                     self.replica,
                     clients,
                     constants.clients_max,
@@ -5131,7 +5131,7 @@ pub fn ReplicaType(
             // - client memory corruption
             // - client/replica version mismatch
             if (!message.header.operation.valid(StateMachine)) {
-                log.err("{}: on_request: ignoring invalid operation (client={} operation={})", .{
+                log.warn("{}: on_request: ignoring invalid operation (client={} operation={})", .{
                     self.replica,
                     message.header.client,
                     @intFromEnum(message.header.operation),
@@ -5148,7 +5148,7 @@ pub fn ReplicaType(
                     operation,
                     message.body(),
                 )) {
-                    log.err(
+                    log.warn(
                         "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
                         .{
                             self.replica,
@@ -5269,13 +5269,16 @@ pub fn ReplicaType(
                 } else if (entry.session < message.header.session) {
                     // This cannot be because of a partition since we check the client's view
                     // number.
-                    log.err("{}: on_request: ignoring newer session (client bug)", .{self.replica});
+                    log.err(
+                        "{}: on_request: ignoring newer session (client bug)",
+                        .{self.replica},
+                    );
                     return true;
                 }
 
                 if (entry.header.release.value != message.header.release.value) {
                     // Clients must not change releases mid-session.
-                    log.warn(
+                    log.err(
                         "{}: on_request: ignoring request from unexpected release" ++
                             " expected={} found={} (client bug)",
                         .{ self.replica, entry.header.release, message.header.release },
@@ -5348,7 +5351,7 @@ pub fn ReplicaType(
                     // primary) if we are partitioned and don't yet know about a session. We solve
                     // this by having clients include the view number and rejecting messages from
                     // clients with newer views.
-                    log.err("{}: on_request: no session", .{self.replica});
+                    log.warn("{}: on_request: no session", .{self.replica});
                     self.send_eviction_message_to_client(message.header.client, .no_session);
                     return true;
                 }
@@ -5518,7 +5521,7 @@ pub fn ReplicaType(
                     else => unreachable,
                 }
 
-                log.err("{}: on_request: ignoring (client forked)", .{self.replica});
+                log.warn("{}: on_request: ignoring (client forked)", .{self.replica});
                 return true;
             }
 
@@ -7486,7 +7489,7 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
 
-            log.err("{}: sending eviction message to client={} reason={s}", .{
+            log.warn("{}: sending eviction message to client={} reason={s}", .{
                 self.replica,
                 client,
                 @tagName(reason),
@@ -7630,7 +7633,7 @@ pub fn ReplicaType(
             }
 
             if (message.header.invalid()) |reason| {
-                log.err("{}: send_message_to_replica: invalid ({s})", .{ self.replica, reason });
+                log.warn("{}: send_message_to_replica: invalid ({s})", .{ self.replica, reason });
                 @panic("send_message_to_replica: invalid message");
             }
 

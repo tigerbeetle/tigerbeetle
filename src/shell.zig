@@ -193,7 +193,7 @@ pub fn env_get_option(shell: *Shell, var_name: []const u8) ?[]const u8 {
 
 pub fn env_get(shell: *Shell, var_name: []const u8) ![]const u8 {
     errdefer {
-        log.err("environment variable '{s}' not defined", .{var_name});
+        log.warn("environment variable '{s}' not defined", .{var_name});
     }
 
     return try std.process.getEnvVarOwned(shell.arena.allocator(), var_name);
@@ -372,7 +372,7 @@ pub fn copy_path(
     dst_path: []const u8,
 ) !void {
     errdefer {
-        log.err("failed to copy {s} to {s}", .{ src_path, dst_path });
+        log.warn("failed to copy {s} to {s}", .{ src_path, dst_path });
     }
     if (std.fs.path.dirname(dst_path)) |dir| {
         try dst_dir.makePath(dir);

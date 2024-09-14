@@ -242,7 +242,7 @@ pub fn Storage(comptime IO: type) type {
                     const target = read.target();
                     if (target.len > constants.sector_size) {
                         // We tried to read more than a logical sector and failed.
-                        log.err("latent sector error: offset={}, subdividing read...", .{
+                        log.warn("latent sector error: offset={}, subdividing read...", .{
                             read.offset,
                         });
 
@@ -268,7 +268,7 @@ pub fn Storage(comptime IO: type) type {
                         return;
                     } else {
                         // We tried to read at (or less than) logical sector granularity and failed.
-                        log.err("latent sector error: offset={}, zeroing sector...", .{
+                        log.warn("latent sector error: offset={}, zeroing sector...", .{
                             read.offset,
                         });
 
