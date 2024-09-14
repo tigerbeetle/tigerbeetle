@@ -786,16 +786,14 @@ fn self_check_enabled(target: Target) bool {
 
 fn self_check(shell: *Shell, multiversion: []const u8, past_releases: []const []const u8) !void {
     assert(past_releases.len > 0);
-    try shell.exec_options(
-        .{ .echo = false },
+    try shell.exec(
         "{multiversion} multiversion {multiversion}",
         .{ .multiversion = multiversion },
     );
     for (past_releases) |past_release| {
         // 0.15.3 didn't have the multiversion subcommand since it was the epoch.
         if (std.mem.indexOf(u8, past_release, "0.15.3") != null) continue;
-        try shell.exec_options(
-            .{ .echo = false },
+        try shell.exec(
             "{past_release} multiversion {multiversion}",
             .{ .multiversion = multiversion, .past_release = past_release },
         );

@@ -26,12 +26,12 @@ pub const CLIArgs = struct {
 const Image = enum { config, workload, replica };
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
-    assert(try shell.exec_status_ok("docker --version", .{}));
+    try shell.exec("docker --version", .{});
 
     assert(cli_args.tag.len > 0);
     assert(std.mem.indexOfAny(u8, cli_args.tag, &std.ascii.whitespace) == null);
 
-    try shell.zig("build -Drelease", .{});
+    try shell.exec_zig("build -Drelease", .{});
 
     // Build Java client library
     {
@@ -95,7 +95,7 @@ fn build_image(
                 \\
                 \\    cd {s} && TAG={s} docker compose up
                 \\
-                \\This temporary directory is not automatically deleted. You may do so 
+                \\This temporary directory is not automatically deleted. You may do so
                 \\yourself if you don't need it.
                 \\{ansi-reset}
             , .{ image_dir, tag });
@@ -131,10 +131,9 @@ fn build_image(
 
 fn docker_build_cwd(shell: *Shell, comptime image: Image, tag: []const u8) !void {
     try shell.exec_options(.{
-        .echo = true,
         .stdin_slice = @field(dockerfiles, @tagName(image)),
     },
-        \\docker build 
+        \\docker build
         \\  --platform=linux/amd64
         \\  --file - .
         \\  --build-arg TAG={tag}
@@ -195,7 +194,7 @@ const dockerfiles = .{
 
 const docker_compose_contents =
     \\ version: "3.0"
-    \\ 
+    \\
     \\ services:
     \\   replica0:
     \\     container_name: replica0
@@ -239,7 +238,7 @@ const docker_compose_contents =
     \\     networks:
     \\       antithesis-net:
     \\         ipv4_address: 10.20.20.12
-    \\ 
+    \\
     \\   workload:
     \\     container_name: workload
     \\     hostname: workload
@@ -250,7 +249,7 @@ const docker_compose_contents =
     \\     networks:
     \\       antithesis-net:
     \\         ipv4_address: 10.20.20.100
-    \\ 
+    \\
     \\ # The subnet provided here is an example
     \\ # An alternate /24 can be used
     \\ networks:

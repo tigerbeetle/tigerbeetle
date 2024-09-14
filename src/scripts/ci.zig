@@ -136,7 +136,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     // );
 
     // const sha = try shell.exec_stdout("git rev-parse HEAD", .{});
-    // try shell.zig("build scripts -- release --build  --run-number={run_number} " ++
+    // try shell.exec_zig("build scripts -- release --build  --run-number={run_number} " ++
     //     "--sha={sha} --language=zig", .{
     //     .run_number = run_number,
     //     .sha = sha,

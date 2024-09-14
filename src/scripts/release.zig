@@ -210,7 +210,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     // `dist`.
     inline for (.{ true, false }) |debug| {
         inline for (targets) |target| {
-            try shell.zig(
+            try shell.exec_zig(
                 \\build
                 \\    -Dtarget={target}
                 \\    -Drelease={release}
@@ -272,7 +272,7 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     };
     log.info("dotnet version {s}", .{dotnet_version});
 
-    try shell.zig(
+    try shell.exec_zig(
         \\build clients:dotnet -Drelease -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
@@ -299,7 +299,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     try shell.pushd("./src/clients/go");
     defer shell.popd();
 
-    try shell.zig(
+    try shell.exec_zig(
         \\build clients:go -Drelease -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
@@ -353,7 +353,7 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     };
     log.info("java version {s}", .{java_version});
 
-    try shell.zig(
+    try shell.exec_zig(
         \\build clients:java -Drelease -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
@@ -395,7 +395,7 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     };
     log.info("node version {s}", .{node_version});
 
-    try shell.zig(
+    try shell.exec_zig(
         \\build clients:node -Drelease -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
@@ -750,7 +750,6 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         // PID 1 ensures that signals work as expected, so e.g. "docker stop" will not hang.
         try shell.exec_options(
             .{
-                .echo = true,
                 .stdin_slice =
                 \\FROM alpine:3.19
                 \\RUN apk add --no-cache tini

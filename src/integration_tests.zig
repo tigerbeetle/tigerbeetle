@@ -240,12 +240,11 @@ test "benchmark/inspect smoke" {
     const shell = try Shell.create(std.testing.allocator);
     defer shell.destroy();
 
-    const status_ok_benchmark = try shell.exec_status_ok(
+    try shell.exec(
         "{tigerbeetle} benchmark --transfer-count=10_000 --transfer-batch-size=10 --validate " ++
             "--file={file}",
         .{ .tigerbeetle = tigerbeetle, .file = data_file },
     );
-    try std.testing.expect(status_ok_benchmark);
 
     inline for (.{
         "{tigerbeetle} inspect superblock              {path}",
@@ -256,11 +255,10 @@ test "benchmark/inspect smoke" {
         "{tigerbeetle} inspect manifest                {path}",
         "{tigerbeetle} inspect tables --tree=transfers {path}",
     }) |command| {
-        const status_ok_inspect = try shell.exec_status_ok(
+        try shell.exec(
             command,
             .{ .tigerbeetle = tigerbeetle, .path = data_file },
         );
-        try std.testing.expect(status_ok_inspect);
     }
 }
 
@@ -368,7 +366,7 @@ test "in-place upgrade" {
                 try context.install_replica(context.replica_exe[replica_index], .past);
             }
             for (0..replica_count) |replica_index| {
-                try context.shell.exec_options(.{ .echo = false },
+                try context.shell.exec(
                     \\{tigerbeetle} format --cluster=0 --replica={replica} --replica-count=3
                     \\    {datafile}
                 , .{
