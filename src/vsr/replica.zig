@@ -1393,15 +1393,14 @@ pub fn ReplicaType(
             }
 
             if (self.loopback_queue) |loopback_message| {
-                log.warn("{}: on_message: on_{s}() queued a {s} loopback message with no flush", .{
+                log.err("{}: on_message: on_{s}() queued a {s} loopback message with no flush", .{
                     self.replica,
                     @tagName(message.header.command),
                     @tagName(loopback_message.header.command),
                 });
+                // Any message handlers that loopback must take responsibility for the flush.
+                @panic("loopback message with no flush");
             }
-
-            // Any message handlers that loopback must take responsibility for the flush.
-            assert(self.loopback_queue == null);
         }
 
         /// Pings are used by replicas to synchronise cluster time and to probe for network
