@@ -522,9 +522,9 @@ pub fn exec_stdout_options(
     try child.collectOutput(&stdout, &stderr, options.output_bytes_max);
     const term = try child.wait();
     errdefer {
-        log.warn("command failed", .{});
+        log.err("command failed", .{});
         echo_command(argv.slice());
-        log.warn("stdout:\n{s}\nstderr:\n{s}", .{ stdout.items, stderr.items });
+        log.err("stdout:\n{s}\nstderr:\n{s}", .{ stdout.items, stderr.items });
     }
 
     switch (term) {

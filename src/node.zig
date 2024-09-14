@@ -30,7 +30,7 @@ const constants = vsr.constants;
 pub const std_options = .{
     // Since this is running in application space, log only critical messages to reduce noise.
     .log_level = .err,
-    .logFn = vsr.constants.log,
+    .logFn = vsr.constants.log_nop,
 };
 
 // Cached value for JS (null).

@@ -5269,7 +5269,7 @@ pub fn ReplicaType(
                 } else if (entry.session < message.header.session) {
                     // This cannot be because of a partition since we check the client's view
                     // number.
-                    log.warn(
+                    log.err(
                         "{}: on_request: ignoring newer session (client bug)",
                         .{self.replica},
                     );
@@ -5278,7 +5278,7 @@ pub fn ReplicaType(
 
                 if (entry.header.release.value != message.header.release.value) {
                     // Clients must not change releases mid-session.
-                    log.warn(
+                    log.err(
                         "{}: on_request: ignoring request from unexpected release" ++
                             " expected={} found={} (client bug)",
                         .{ self.replica, entry.header.release, message.header.release },
@@ -5301,7 +5301,7 @@ pub fn ReplicaType(
                         self.on_request_repeat_reply(message, entry);
                         return true;
                     } else {
-                        log.warn("{}: on_request: request collision (client bug)", .{self.replica});
+                        log.err("{}: on_request: request collision (client bug)", .{self.replica});
                         return true;
                     }
                 } else if (entry.header.request + 1 == message.header.request) {
@@ -5311,7 +5311,7 @@ pub fn ReplicaType(
                         return false;
                     } else {
                         // The client may have only one request inflight at a time.
-                        log.warn("{}: on_request: ignoring new request (client bug)", .{
+                        log.err("{}: on_request: ignoring new request (client bug)", .{
                             self.replica,
                         });
                         return true;
@@ -5320,7 +5320,7 @@ pub fn ReplicaType(
                     // Caused by one of the following:
                     // - client bug, or
                     // - this primary is no longer the actual primary
-                    log.warn("{}: on_request: ignoring newer request (client|network bug)", .{
+                    log.err("{}: on_request: ignoring newer request (client|network bug)", .{
                         self.replica,
                     });
                     return true;

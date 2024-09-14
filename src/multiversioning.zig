@@ -1063,7 +1063,7 @@ pub const Multiversion = struct {
     fn handle_error(self: *Multiversion, result: anyerror) void {
         assert(self.stage != .init);
 
-        log.warn("binary does not contain valid multiversion data: {}", .{result});
+        log.err("binary does not contain valid multiversion data: {}", .{result});
 
         self.stage = .{ .err = result };
     }

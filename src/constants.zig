@@ -25,6 +25,21 @@ pub const log_level: std.log.Level = config.process.log_level;
 
 pub const log = std.log.defaultLog;
 
+/// A log function that discards all log entries.
+pub fn log_nop(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    _ = .{
+        message_level,
+        scope,
+        format,
+        args,
+    };
+}
+
 // Which mode to use for ./testing/hash_log.zig.
 pub const hash_log_mode = config.process.hash_log_mode;
 

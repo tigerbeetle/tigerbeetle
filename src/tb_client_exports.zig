@@ -8,7 +8,7 @@ const tb = vsr.tb_client;
 pub const std_options = .{
     // Since this is running in application space, log only critical messages to reduce noise.
     .log_level = std.log.Level.err,
-    .logFn = vsr.constants.log,
+    .logFn = vsr.constants.log_nop,
 };
 
 comptime {
