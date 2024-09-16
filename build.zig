@@ -82,6 +82,7 @@ pub fn build(b: *std.Build) !void {
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
         .vopr = b.step("vopr", "Run the VOPR"),
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
+        .systest_supervisor_build = b.step("systest:supervisor:build", "Build the systest supervisor"),
     };
 
     // Build options passed with `-D` flags.
@@ -242,6 +243,15 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .mode = mode,
     });
+
+    build_systest_supervisor(
+        b,
+        .{ .systest_supervisor_build = build_steps.systest_supervisor_build },
+        .{
+            .target = target,
+            .mode = mode,
+        },
+    );
 
     // zig build clients:$lang
     build_go_client(b, build_steps.clients_go, .{
@@ -806,6 +816,26 @@ fn build_scripts(
     scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     if (b.args) |args| scripts_run.addArgs(args);
     step_scripts.dependOn(&scripts_run.step);
+}
+
+fn build_systest_supervisor(
+    b: *std.Build,
+    steps: struct {
+        systest_supervisor_build: *std.Build.Step,
+    },
+    options: struct {
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const supervisor_exe = b.addExecutable(.{
+        .name = "systest_supervisor",
+        .root_source_file = b.path("src/testing/systest/supervisor/supervisor.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+    });
+    supervisor_exe.root_module.omit_frame_pointer = false;
+    steps.systest_supervisor_build.dependOn(&b.addInstallArtifact(supervisor_exe, .{}).step);
 }
 
 // Zig cross-targets, Dotnet RID (Runtime Identifier), CPU features.
