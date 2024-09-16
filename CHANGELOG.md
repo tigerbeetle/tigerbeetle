@@ -3,6 +3,89 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.2
+
+Released: 2024-09-16
+
+### Safety And Performance
+
+- [#2312](https://github.com/tigerbeetle/tigerbeetle/pull/2312)
+
+  Tighten up the VSR assertions so the transition to `.recovering_head` can only be called from the
+  `.recovering` status.
+
+- [#2311](https://github.com/tigerbeetle/tigerbeetle/pull/2311)
+
+  Make the primary abdicate if it is unable to process requests due to a broken clock.
+
+- [#2260](https://github.com/tigerbeetle/tigerbeetle/pull/2260)
+
+  Smoke integration test using the real multiversion binary.
+
+- [#2270](https://github.com/tigerbeetle/tigerbeetle/pull/2270)
+
+  Workload generator based on the Java client to be used in integration tests (i.e. Antithesis).
+
+### Features
+
+- [#2298](https://github.com/tigerbeetle/tigerbeetle/pull/2298),
+  [#2307](https://github.com/tigerbeetle/tigerbeetle/pull/2307),
+  [#2304](https://github.com/tigerbeetle/tigerbeetle/pull/2304),
+  [#2309](https://github.com/tigerbeetle/tigerbeetle/pull/2309),
+  [#2321](https://github.com/tigerbeetle/tigerbeetle/pull/2321)
+
+  Remove `Tracy` integration and dependencies.
+  Add JSON traces for events with multiple running instances, such as IO, lookups, and scans.
+
+- [#2300](https://github.com/tigerbeetle/tigerbeetle/pull/2300)
+
+  Add the ability to filter by `user_data_{128,64,32}` and `code` in `get_account_transfers`
+  and `get_account_balances`.
+
+### Internals
+
+- [#2314](https://github.com/tigerbeetle/tigerbeetle/pull/2314),
+  [#2315](https://github.com/tigerbeetle/tigerbeetle/pull/2315)
+
+  Mute the log on stderr when building client libraries.
+  Reduce the log's severity of some entries logged as `.err` to `.warn` for less noise when
+  running with `log_level = .err`.
+
+- [#2310](https://github.com/tigerbeetle/tigerbeetle/pull/2310)
+
+  Document and explain how time works in TigerBeetle ⏱️.
+
+- [#2291](https://github.com/tigerbeetle/tigerbeetle/pull/2291)
+
+  Refactor `Forest.compact` and remove some dead code.
+
+- [#2294](https://github.com/tigerbeetle/tigerbeetle/pull/2294)
+
+  Rewrite `commit_dispatch`, a chain of asynchronous stages calling each other, as a state machine
+  implementation that resembles linear control flow that is much easier to read.
+
+- [#2306](https://github.com/tigerbeetle/tigerbeetle/pull/2306)
+
+  Fix the Node.js example that was using an incorrect enum flag.
+  Thanks for the heads up @jorispz!
+
+- [#2319](https://github.com/tigerbeetle/tigerbeetle/pull/2319)
+
+  Update outdated scripts in `HACKING.md`.
+
+- [#2317](https://github.com/tigerbeetle/tigerbeetle/pull/2317)
+
+  Use git timestamps to build Docker images.
+  This is a requirement for being deterministic in CI.
+
+- [#2318](https://github.com/tigerbeetle/tigerbeetle/pull/2318)
+
+  Devhub link to pending code reviews.
+
+### TigerTracks 🎧
+
+- [What's On Your Mind](https://www.youtube.com/watch?v=Z5WRKnCRPHA)
+
 ## TigerBeetle 0.16.1
 
 Released: 2024-09-09
