@@ -931,6 +931,15 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 // The current `table_info` does not contain the key range,
                 // fetching the next `table_info`.
                 self.move_next();
+
+                self.scan.tree.grid.trace.stop(
+                    .{ .scan_tree_level = .{
+                        .index = self.scan.buffer.index,
+                        .level = self.level_index,
+                    } },
+                    .{ .tree = self.scan.tree.config.name },
+                );
+
                 self.fetch();
             }
         }
