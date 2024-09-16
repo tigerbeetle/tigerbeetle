@@ -584,7 +584,7 @@ pub const data_file_size_min =
 ///               a        (a)      a         Repair any broken copies of `a`.
 ///
 /// checkpoint    seq      seq      seq
-/// (or sync)     a        a        a
+///               a        a        a
 ///               a        a+1
 ///               a        a+1      a+1
 ///               a+1      a+1      a+1       Read quorum; verify 3/4 are valid.
@@ -609,7 +609,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             read: Storage.Read = undefined,
             read_threshold: ?Quorums.Threshold = null,
             copy: ?u8 = null,
-            /// Used by format(), checkpoint(), view_change(), sync().
+            /// Used by format(), checkpoint(), view_change().
             vsr_state: ?SuperBlockHeader.VSRState = null,
             /// Used by format() and view_change().
             vsr_headers: ?vsr.Headers.ViewChangeArray = null,
@@ -812,6 +812,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         const UpdateCheckpoint = struct {
             header: vsr.Header.Prepare,
+            log_view: u32,
+            view: u32,
+            view_change_headers: *const vsr.Headers.ViewChangeArray,
             commit_max: u64,
             sync_op_min: u64,
             sync_op_max: u64,
@@ -875,6 +878,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;
             vsr_state.sync_view = 0;
+            vsr_state.log_view = update.log_view;
+            vsr_state.view = update.view;
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
             context.* = .{
@@ -882,6 +887,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .callback = callback,
                 .caller = .checkpoint,
                 .vsr_state = vsr_state,
+                .vsr_headers = update.view_change_headers.*,
             };
             superblock.log_context(context);
             superblock.acquire(context);
@@ -1356,7 +1362,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 },
                 .checkpoint,
                 .view_change,
-                .sync,
                 => {
                     assert(stdx.equal_bytes(
                         SuperBlockHeader.VSRState,
@@ -1397,7 +1402,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .format,
                 .checkpoint,
                 .view_change,
-                .sync,
                 => switch (constants.superblock_copies) {
                     4 => 3,
                     6 => 4,
@@ -1456,7 +1460,6 @@ pub const Caller = enum {
     open,
     checkpoint,
     view_change,
-    sync,
 
     /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
     /// other operations, only the following queue combinations are allowed:
@@ -1468,11 +1471,7 @@ pub const Caller = enum {
             .format = Set.init(.{}),
             .open = Set.init(.{}),
             .checkpoint = Set.init(.{ .view_change = true }),
-            .view_change = Set.init(.{
-                .checkpoint = true,
-                .sync = true,
-            }),
-            .sync = Set.init(.{ .view_change = true }),
+            .view_change = Set.init(.{ .checkpoint = true }),
         });
     };
 
@@ -1480,9 +1479,8 @@ pub const Caller = enum {
         return switch (caller) {
             .format => true,
             .open => unreachable,
-            .checkpoint => false,
+            .checkpoint => true,
             .view_change => true,
-            .sync => false,
         };
     }
 };
