@@ -48,7 +48,7 @@ pub fn init(
         // rebuilds.
         _ = shell.project_root.statFile(tigerbeetle_exe) catch {
             log.info("building TigerBeetle", .{});
-            try shell.zig("build", .{});
+            try shell.exec_zig("build", .{});
 
             _ = try shell.project_root.statFile(tigerbeetle_exe);
         };
@@ -68,8 +68,7 @@ pub fn init(
     const data_file: []const u8 = try std.fs.path.join(gpa, &.{ tmp_dir_path, "0_0.tigerbeetle" });
     defer gpa.free(data_file);
 
-    try shell.exec_options(
-        .{ .echo = false },
+    try shell.exec(
         "{tigerbeetle} format --cluster=0 --replica=0 --replica-count=1 {data_file}",
         .{ .tigerbeetle = tigerbeetle, .data_file = data_file },
     );

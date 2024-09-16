@@ -117,7 +117,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     log.info("start {}", .{stdx.DateTimeUTC.now()});
     defer log.info("end {}", .{stdx.DateTimeUTC.now()});
 
-    assert(try shell.exec_status_ok("git --version", .{}));
+    try shell.exec("git --version", .{});
 
     // Read-write token for <https://github.com/tigerbeetle/devhubdb>.
     const devhub_token_option = shell.env_get_option("DEVHUBDB_PAT");
@@ -130,7 +130,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (gh_token_option == null) {
         log.err("'GH_TOKEN' environmental variable is not set, will not fetch pull requests", .{});
     } else {
-        assert(try shell.exec_status_ok("gh --version", .{}));
+        try shell.exec("gh --version", .{});
     }
 
     var seeds = std.ArrayList(SeedRecord).init(shell.arena.allocator());
@@ -217,10 +217,7 @@ fn run_fuzzers(
                         args.clearRetainingCapacity();
                         try args.appendSlice(&.{ "build", "-Drelease" });
                         try fuzzer.fill_args_build(&args);
-                        shell.exec_options(.{ .echo = false }, "{zig} {args}", .{
-                            .zig = shell.zig_exe.?,
-                            .args = args.items,
-                        }) catch {
+                        shell.exec_zig("{args}", .{ .args = args.items }) catch {
                             // Ignore the error, it'll get recorded by the run anyway.
                         };
                     }

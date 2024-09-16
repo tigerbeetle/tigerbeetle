@@ -32,9 +32,9 @@ fn devhub_coverage(shell: *Shell) !void {
     };
     log.info("kcov version {s}", .{kcov_version});
 
-    try shell.zig("build test:unit:build", .{});
-    try shell.zig("build vopr:build", .{});
-    try shell.zig("build fuzz:build", .{});
+    try shell.exec_zig("build test:unit:build", .{});
+    try shell.exec_zig("build vopr:build", .{});
+    try shell.exec_zig("build fuzz:build", .{});
 
     // Put results into src/devhub, as that folder is deployed as GitHub pages.
     try shell.project_root.deleteTree("./src/devhub/coverage");
@@ -66,7 +66,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     // Only build the TigerBeetle binary to test build speed and build size. Throw it away once
     // done, and use a release build from `zig-out/dist/` to run the benchmark.
     var timer = try std.time.Timer.start();
-    try shell.zig("build -Drelease install", .{});
+    try shell.exec_zig("build -Drelease install", .{});
     const build_time_ms = timer.lap() / std.time.ns_per_ms;
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
     try shell.project_root.deleteFile("tigerbeetle");
@@ -96,12 +96,12 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     };
 
     if (no_changelog_flag) {
-        try shell.zig(
+        try shell.exec_zig(
             \\build scripts -- release --build --no-changelog --sha={sha}
             \\    --language=zig
         , .{ .sha = cli_args.sha });
     } else {
-        try shell.zig(
+        try shell.exec_zig(
             \\build scripts -- release --build --sha={sha}
             \\    --language=zig
         , .{ .sha = cli_args.sha });

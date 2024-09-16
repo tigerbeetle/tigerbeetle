@@ -18,8 +18,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 
     // `go build`  won't compile the native library automatically, we need to do that ourselves.
-    try shell.zig("build clients:go -Drelease", .{});
-    try shell.zig("build -Drelease", .{});
+    try shell.exec_zig("build clients:go -Drelease", .{});
+    try shell.exec_zig("build -Drelease", .{});
 
     // Although we have compiled the TigerBeetle client library, we still need `cgo` to link it with
     // our resulting Go binary. Strictly speaking, `CC` is controlled by the users of TigerBeetle,
