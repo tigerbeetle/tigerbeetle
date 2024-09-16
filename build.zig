@@ -82,6 +82,7 @@ pub fn build(b: *std.Build) !void {
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
         .vopr = b.step("vopr", "Run the VOPR"),
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
+        .systest_supervisor = b.step("systest:supervisor", "Run the systest supervisor"),
         .systest_supervisor_build = b.step("systest:supervisor:build", "Build the systest supervisor"),
     };
 
@@ -246,7 +247,10 @@ pub fn build(b: *std.Build) !void {
 
     build_systest_supervisor(
         b,
-        .{ .systest_supervisor_build = build_steps.systest_supervisor_build },
+        .{
+            .systest_supervisor = build_steps.systest_supervisor,
+            .systest_supervisor_build = build_steps.systest_supervisor_build,
+        },
         .{
             .target = target,
             .mode = mode,
@@ -821,6 +825,7 @@ fn build_scripts(
 fn build_systest_supervisor(
     b: *std.Build,
     steps: struct {
+        systest_supervisor: *std.Build.Step,
         systest_supervisor_build: *std.Build.Step,
     },
     options: struct {
@@ -834,7 +839,18 @@ fn build_systest_supervisor(
         .target = options.target,
         .optimize = options.mode,
     });
-    supervisor_exe.root_module.omit_frame_pointer = false;
+    const lib_module = b.addModule("tigerbeetle", .{
+        .root_source_file = b.path("src/lib.zig"),
+    });
+    supervisor_exe.root_module.addImport(
+        "tigerbeetle",
+        lib_module,
+    );
+
+    const supervisor_run = b.addRunArtifact(supervisor_exe);
+    if (b.args) |args| supervisor_run.addArgs(args);
+
+    steps.systest_supervisor.dependOn(&supervisor_run.step);
     steps.systest_supervisor_build.dependOn(&b.addInstallArtifact(supervisor_exe, .{}).step);
 }
 
