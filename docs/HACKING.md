@@ -88,7 +88,7 @@ cd src/clients/lang
 lang_package_manager test
 ```
 
-See `client/$LANG/ci.zig` scripts for exact commands we use on CI to build clients.
+See `src/clients/$LANG/ci.zig` scripts for exact commands we use on CI to build clients.
 
 ### Testing Client Libraries
 
