@@ -1,4 +1,0 @@
-{
-    // This enables breakpoints in .zig files.
-    "debug.allowBreakpointsEverywhere": true
-}
