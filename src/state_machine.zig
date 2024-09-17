@@ -4545,6 +4545,31 @@ test "create_transfers: per-transfer balance invariant" {
         \\ lookup_account A3 0  0 0  0 _
         \\ commit lookup_accounts
     );
+
+    // Temporarily enforce `debits_must_not_exceed_credits` on account `A1`.
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   D<C _ _ _ _ _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ setup A1 0 0 0 40
+        \\
+        \\ transfer T1 A1 A2 41   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ linked_event_failed
+        \\ transfer T2 A3 A1 41   _  _  _  _    0 L1 C1 LNK PEN _   _   _ BCR _ _ _ _ _ exceeds_credits
+        \\ transfer T3 A3 A1  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ linked_event_failed
+        \\ commit create_transfers
+        \\
+        \\ transfer T1 A1 A2 40   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ ok
+        \\ transfer T2 A3 A1 40   _  _  _  _    0 L1 C1 LNK PEN _   _   _ BCR _ _ _ _ _ ok
+        \\ transfer T3 A3 A1  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 0 40 0 40 _
+        \\ lookup_account A2 0  0 0 40 _
+        \\ lookup_account A3 0  0 0  0 _
+        \\ commit lookup_accounts
+    );
 }
 
 test "imported events: imported batch" {
