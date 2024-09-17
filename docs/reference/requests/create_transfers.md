@@ -92,9 +92,11 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
-  - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✓ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
 - [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
@@ -103,22 +105,28 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✗ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✗ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✗ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✗ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
 - [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
-  - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✗ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✗ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✗ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✗ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
 - [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
-  - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✓ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
 - [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
@@ -127,22 +135,28 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✓ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
 - [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
-  - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✓ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
 - [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
-  - ✓ [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✓ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
 - [`flags.imported`](../transfer.md#flagsimported)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✓ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
@@ -151,6 +165,28 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
   - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✓ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
+- [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
+- [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits)
 
 ### `debit_account_id_must_not_be_zero`
 
@@ -539,11 +575,16 @@ replica, not the `0` value sent by the client.
 ### `exceeds_credits`
 
 The transfer was not created.
-
-The [debit account](../transfer.md#debit_account_id) has
-[`flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) set, but
 `debit_account.debits_pending + debit_account.debits_posted + transfer.amount` would exceed
 `debit_account.credits_posted`.
+
+Either:
+
+- The [debit account](../transfer.md#debit_account_id) has
+[`flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) set,
+or
+- The transfer has
+[`flags.debits_must_not_exceed_credits`](../transfer.md#flagsdebits_must_not_exceed_credits) set
 
 <details>
 <summary>Client release &lt; 0.16.0</summary>
@@ -557,11 +598,16 @@ If [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) is set, then
 ### `exceeds_debits`
 
 The transfer was not created.
-
-The [credit account](../transfer.md#credit_account_id) has
-[`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) set, but
 `credit_account.credits_pending + credit_account.credits_posted + transfer.amount` would exceed
 `credit_account.debits_posted`.
+
+Either:
+
+- The [credit account](../transfer.md#credit_account_id) has
+  [`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) set,
+or
+- The transfer has
+  [`flags.credits_must_not_exceed_debits`](../transfer.md#flagscredits_must_not_exceed_debits) set
 
 <details>
 <summary>Client release &lt; 0.16.0</summary>

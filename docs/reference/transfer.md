@@ -45,29 +45,31 @@ see the [Two-Phase Transfer guide](../coding/two-phase-transfers.md).
 
 Fields used by each mode of transfer:
 
-| Field                         | Single-Phase | Pending  | Post-Pending | Void-Pending |
-| ----------------------------- | ------------ | -------- | ------------ | ------------ |
-| `id`                          | required     | required | required     | required     |
-| `debit_account_id`            | required     | required | optional     | optional     |
-| `credit_account_id`           | required     | required | optional     | optional     |
-| `amount`                      | required     | required | required     | optional     |
-| `pending_id`                  | none         | none     | required     | required     |
-| `user_data_128`               | optional     | optional | optional     | optional     |
-| `user_data_64`                | optional     | optional | optional     | optional     |
-| `user_data_32`                | optional     | optional | optional     | optional     |
-| `timeout`                     | none         | optional¹| none         | none         |
-| `ledger`                      | required     | required | optional     | optional     |
-| `code`                        | required     | required | optional     | optional     |
-| `flags.linked`                | optional     | optional | optional     | optional     |
-| `flags.pending`               | false        | true     | false        | false        |
-| `flags.post_pending_transfer` | false        | false    | true         | false        |
-| `flags.void_pending_transfer` | false        | false    | false        | true         |
-| `flags.balancing_debit`       | optional     | optional | false        | false        |
-| `flags.balancing_credit`      | optional     | optional | false        | false        |
-| `flags.closing_debit`         | optional     | true     | false        | false        |
-| `flags.closing_credit`        | optional     | true     | false        | false        |
-| `flags.imported`              | optional     | optional | optional     | optional     |
-| `timestamp`                   | none²        | none²    | none²        | none²        |
+| Field                                  | Single-Phase | Pending  | Post-Pending | Void-Pending |
+| -------------------------------------- | ------------ | -------- | ------------ | ------------ |
+| `id`                                   | required     | required | required     | required     |
+| `debit_account_id`                     | required     | required | optional     | optional     |
+| `credit_account_id`                    | required     | required | optional     | optional     |
+| `amount`                               | required     | required | required     | optional     |
+| `pending_id`                           | none         | none     | required     | required     |
+| `user_data_128`                        | optional     | optional | optional     | optional     |
+| `user_data_64`                         | optional     | optional | optional     | optional     |
+| `user_data_32`                         | optional     | optional | optional     | optional     |
+| `timeout`                              | none         | optional¹| none         | none         |
+| `ledger`                               | required     | required | optional     | optional     |
+| `code`                                 | required     | required | optional     | optional     |
+| `flags.linked`                         | optional     | optional | optional     | optional     |
+| `flags.pending`                        | false        | true     | false        | false        |
+| `flags.post_pending_transfer`          | false        | false    | true         | false        |
+| `flags.void_pending_transfer`          | false        | false    | false        | true         |
+| `flags.balancing_debit`                | optional     | optional | false        | false        |
+| `flags.balancing_credit`               | optional     | optional | false        | false        |
+| `flags.closing_debit`                  | optional     | true     | false        | false        |
+| `flags.closing_credit`                 | optional     | true     | false        | false        |
+| `flags.imported`                       | optional     | optional | optional     | optional     |
+| `flags.debits_must_not_exceed_credits` | optional     | optional | false        | false        |
+| `flags.credits_must_not_exceed_debits` | optional     | optional | false        | false        |
+| `timestamp`                            | none²        | none²    | none²        | none²        |
 
 > _¹ None if `flags.imported` is set._<br/>
   _² Required if `flags.imported` is set._
@@ -518,6 +520,28 @@ necessary:
   [`timeout`](#timeout) for automatic expiration.
   In those cases, the [two-phase post or rollback](../coding/two-phase-transfers.md) must be
   done manually.
+
+#### `flags.debits_must_not_exceed_credits`
+
+When set, the transfer will be rejected if the [debit account](#debit_account_id)'s debits exceed
+credits.
+Specifically when `debit_account.debits_pending + debit_account.debits_posted + transfer.amount`
+would exceed `debit_account.credits_posted`.
+
+Marking a transfer with this flag has the same practical effect as applying
+[`Account.flags.debits_must_not_exceed_credits`](account.md#flagsdebits_must_not_exceed_credits)
+to the debit account but allows the application to enforce this policy at the transfer level.
+
+#### `flags.credits_must_not_exceed_debits`
+
+When set, the transfer will be rejected if the [credit account](#credit_account_id)'s credits exceed
+debits.
+Specifically when `credit_account.credits_pending + credit_account.credits_posted + transfer.amount`
+would exceed `credit_account.debits_posted`.
+
+Marking a transfer with this flag has the same practical effect as applying
+[`Account.flags.credits_must_not_exceed_debits`](account.md#flagscredits_must_not_exceed_debits)
+to the credit account but allows the application to enforce this policy at the transfer level.
 
 ### `timestamp`
 
