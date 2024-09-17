@@ -706,6 +706,13 @@ pub fn ReplicaType(
                     }
                     break;
                 }
+            } else {
+                // This case can occur if we loaded an SV for its hook header but never finished
+                // that SV to a DVC (dropping the hooks), but never finished the view change.
+                if (op_head == null) {
+                    assert(self.view > self.log_view);
+                    op_head = self.journal.op_maximum();
+                }
             }
             assert(op_head.? <= self.op_prepare_max());
 
