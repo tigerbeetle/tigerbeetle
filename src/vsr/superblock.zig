@@ -812,9 +812,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         const UpdateCheckpoint = struct {
             header: vsr.Header.Prepare,
-            log_view: u32,
-            view: u32,
-            view_change_headers: *const vsr.Headers.ViewChangeArray,
+            view_attributes: ?struct {
+                log_view: u32,
+                view: u32,
+                headers: *const vsr.Headers.ViewChangeArray,
+            },
             commit_max: u64,
             sync_op_min: u64,
             sync_op_max: u64,
@@ -878,8 +880,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;
             vsr_state.sync_view = 0;
-            vsr_state.log_view = update.log_view;
-            vsr_state.view = update.view;
+            if (update.view_attributes) |*view_attributes| {
+                vsr_state.log_view = view_attributes.log_view;
+                vsr_state.view = view_attributes.view;
+            }
+
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
             context.* = .{
@@ -887,7 +892,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .callback = callback,
                 .caller = .checkpoint,
                 .vsr_state = vsr_state,
-                .vsr_headers = update.view_change_headers.*,
+                .vsr_headers = if (update.view_attributes) |*view_attributes|
+                    view_attributes.headers.*
+                else
+                    vsr.Headers.ViewChangeArray.init(
+                        superblock.staging.vsr_headers().command,
+                        superblock.staging.vsr_headers().slice,
+                    ),
             };
             superblock.log_context(context);
             superblock.acquire(context);

@@ -4255,27 +4255,39 @@ pub fn ReplicaType(
             if (self.superblock.working.vsr_state.sync_op_max != 0 and sync_op_max == 0) {
                 log.info("{}: sync: done", .{self.replica});
             }
-            // Update view_headers to include ops from the future checkpoint. This ensures
-            // a replica never starts up with its head op less than self.op_checkpoint(). The
-            // only exception to this is a replica that arrived at a checkpoint via state sync.
-            if (self.view == self.log_view and self.view_headers.array.get(0).op < self.op) {
-                if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                    self.view_headers.command = .start_view;
+
+            // view_headers for solo do not include any ops that are not durable in their journal.
+            if (self.solo()) {
+                maybe(self.view_headers.array.get(0).op < self.op);
+            } else {
+                // Update view_headers for to include ops from the future checkpoint. This ensures
+                // a replica never starts up with its head op less than self.op_checkpoint(). The
+                // only exception to this is a replica that arrived at a checkpoint via state sync.
+                if (self.view == self.log_view and self.view_headers.array.get(0).op < self.op) {
+                    if (self.status == .view_change and
+                        self.primary_index(self.view) == self.replica)
+                    {
+                        self.view_headers.command = .start_view;
+                    } else {
+                        assert(self.view_headers.command == .start_view);
+                    }
+                    self.update_start_view_headers();
+                    assert(self.view_headers.array.get(0).op == self.op);
                 } else {
-                    assert(self.view_headers.command == .start_view);
+                    assert(self.view_headers.array.get(0).op >= self.op);
                 }
-                self.update_start_view_headers();
             }
-            assert(self.view_headers.array.get(0).op == self.op);
 
             self.superblock.checkpoint(
                 commit_checkpoint_superblock_callback,
                 &self.superblock_context,
                 .{
                     .header = self.journal.header_with_op(vsr_state_commit_min).?.*,
-                    .view_change_headers = &self.view_headers,
-                    .view = self.view,
-                    .log_view = self.log_view,
+                    .view_attributes = .{
+                        .headers = &self.view_headers,
+                        .view = self.view,
+                        .log_view = self.log_view,
+                    },
                     .commit_max = self.commit_max,
                     .sync_op_min = sync_op_min,
                     .sync_op_max = sync_op_max,

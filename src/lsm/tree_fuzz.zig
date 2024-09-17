@@ -436,6 +436,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     header.set_checksum();
                     break :header header;
                 },
+                .view_attributes = null,
                 .manifest_references = std.mem.zeroes(vsr.SuperBlockManifestReferences),
                 .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
                 .client_sessions_reference = .{
