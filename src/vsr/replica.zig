@@ -4258,20 +4258,15 @@ pub fn ReplicaType(
             // Update view_headers to include ops from the future checkpoint. This ensures
             // a replica never starts up with its head op less than self.op_checkpoint(). The
             // only exception to this is a replica that arrived at a checkpoint via state sync.
-            if (self.view == self.log_view) {
+            if (self.view == self.log_view and self.view_headers.array.get(0).op < self.op) {
                 if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
                     self.view_headers.command = .start_view;
                 } else {
                     assert(self.view_headers.command == .start_view);
                 }
                 self.update_start_view_headers();
-                assert(self.view_headers.array.get(0).op == self.op);
-            } else {
-                // View changed while .checkpoint_data was underway, view_headers would already
-                // contain ops from the future checkpoint.
-                assert(self.view_headers.command == .do_view_change);
             }
-            assert(self.view_headers.array.get(0).op >= self.op_checkpoint_next_trigger());
+            assert(self.view_headers.array.get(0).op == self.op);
 
             self.superblock.checkpoint(
                 commit_checkpoint_superblock_callback,
