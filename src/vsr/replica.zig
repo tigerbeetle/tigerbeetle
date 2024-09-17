@@ -4095,18 +4095,14 @@ pub fn ReplicaType(
 
             assert(op <= self.op);
             assert((op + 1) % constants.lsm_compaction_ops == 0);
-            log.debug("{}: commit_checkpoint_data: checkpoint start " ++
-                "(op={} current_checkpoint={} next_checkpoint={} view_durable={}..{} " ++
-                "log_view_durable={}..{})", .{
+            log.debug("{}: commit_checkpoint_data: checkpoint_data start " ++
+                "(op={} current_checkpoint={} next_checkpoint={})", .{
                 self.replica,
                 self.op,
                 self.op_checkpoint(),
                 self.op_checkpoint_next(),
-                self.view_durable(),
-                self.view,
-                self.log_view_durable(),
-                self.log_view,
             });
+
             if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
 
             // TODO(Compaction pacing) Move this to before the if guard once there is no IO
@@ -4256,28 +4252,43 @@ pub fn ReplicaType(
                 log.info("{}: sync: done", .{self.replica});
             }
 
-            // view_headers for solo do not include any ops that are not durable in their journal.
+            // view_headers for solo replicas do not include ops that are not durable in their
+            // journal.
             if (self.solo()) {
                 maybe(self.view_headers.array.get(0).op < self.op);
             } else {
-                // Update view_headers for to include ops from the future checkpoint. This ensures
-                // a replica never starts up with its head op less than self.op_checkpoint(). The
-                // only exception to this is a replica that arrived at a checkpoint via state sync.
-                if (self.view == self.log_view and self.view_headers.array.get(0).op < self.op) {
-                    if (self.status == .view_change and
-                        self.primary_index(self.view) == self.replica)
+                // Update view_headers to include at least one op from the future checkpoint. This
+                // ensures a replica never starts with its head op less than self.op_checkpoint().
+                // The only exception to this is a replica that arrived at a checkpoint via state
+                // sync.
+                if (self.view == self.log_view) {
+                    // Unconditionally convert potential primary's DVC headers -> SV headers; they
+                    // may contain truncated ops. For all other cases, update SV headers only
+                    // if they aren't already up to date.
+                    if ((self.status == .view_change and
+                        self.primary_index(self.view) == self.replica) or
+                        self.view_headers.array.get(0).op < self.op)
                     {
                         self.view_headers.command = .start_view;
-                    } else {
-                        assert(self.view_headers.command == .start_view);
+                        self.update_start_view_headers();
+                        assert(self.view_headers.array.get(0).op == self.op);
                     }
-                    self.update_start_view_headers();
-                    assert(self.view_headers.array.get(0).op == self.op);
-                } else {
-                    assert(self.view_headers.array.get(0).op >= self.op);
                 }
+                assert(self.view_headers.array.get(0).op >= self.op);
             }
 
+            log.debug("{}: commit_checkpoint_superblock: checkpoint_superblock start " ++
+                "(op={} current_checkpoint={} next_checkpoint={} view_durable={}..{} " ++
+                "log_view_durable={}..{})", .{
+                self.replica,
+                self.op,
+                self.op_checkpoint(),
+                self.op_checkpoint_next(),
+                self.view_durable(),
+                self.view,
+                self.log_view_durable(),
+                self.log_view,
+            });
             self.superblock.checkpoint(
                 commit_checkpoint_superblock_callback,
                 &self.superblock_context,
