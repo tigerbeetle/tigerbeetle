@@ -164,6 +164,7 @@ const Replica = struct {
         self: *Self,
     ) !void {
         assert(self.state == .running);
+        defer assert(self.state == .stopped);
 
         std.debug.print("replica {d}: stopping\n", .{self.options.index});
 
@@ -171,16 +172,19 @@ const Replica = struct {
         const stderr_thread = self.stderr_thread.?;
 
         // Terminate the process
-        if (builtin.os.tag == .windows) {
-            const exit_code = 1;
-            std.os.windows.TerminateProcess(child.id, exit_code) catch |err| {
-                std.debug.print("replica {d}: failed to kill process: {any}\n", .{ self.options.index, err });
-            };
-        } else {
-            std.posix.kill(child.id, std.posix.SIG.TERM) catch |err| {
-                std.debug.print("replica {d}: failed to kill process: {any}\n", .{ self.options.index, err });
-            };
-        }
+        _ = kill: {
+            if (builtin.os.tag == .windows) {
+                const exit_code = 1;
+                break :kill std.os.windows.TerminateProcess(child.id, exit_code);
+            } else {
+                break :kill std.posix.kill(child.id, std.posix.SIG.TERM);
+            }
+        } catch |err| {
+            std.debug.print(
+                "replica {d}: failed to kill process: {any}\n",
+                .{ self.options.index, err },
+            );
+        };
 
         // Stop the logging thread
         stderr_thread.join();
@@ -193,8 +197,6 @@ const Replica = struct {
         self.child = null;
         self.stderr_thread = null;
         self.state = .stopped;
-
-        assert(self.state == .stopped);
     }
 };
 
