@@ -241,9 +241,24 @@ test "replica: starts and stops" {
     });
     defer replica.deinit();
 
+    // start & stop
     try replica.start();
-    std.time.sleep(3 * std.time.ns_per_s);
+    std.time.sleep(1 * std.time.ns_per_s);
     try replica.stop();
+
+    // restart & stop
+    try replica.start();
+    std.time.sleep(1 * std.time.ns_per_s);
+    try replica.stop();
+}
+
+test "format_argv: space-separates slice as a prompt" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    const formatted = try format_argv(allocator, &.{ "foo", "bar", "baz" });
+
+    try std.testing.expectEqualStrings("$ foo bar baz", formatted);
 }
 
 test "comma-separates ports" {
