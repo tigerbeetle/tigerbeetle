@@ -48,21 +48,10 @@ StateDirectory=tigerbeetle
 StateDirectoryMode=700
 
 Type=exec
-ExecStartPre=/usr/local/bin/tigerbeetle-pre-start.sh
 ExecStart=/usr/local/bin/tigerbeetle start --cache-grid=${TIGERBEETLE_CACHE_GRID_SIZE} --addresses=${TIGERBEETLE_ADDRESSES} ${TIGERBEETLE_DATA_FILE}
 
 [Install]
 WantedBy=multi-user.target
-```
-
-#### **tigerbeetle-pre-start.sh**
-```bash
-#!/bin/sh
-set -eu
-
-if ! test -e "${TIGERBEETLE_DATA_FILE}"; then
-  /usr/local/bin/tigerbeetle format --cluster="${TIGERBEETLE_CLUSTER_ID}" --replica="${TIGERBEETLE_REPLICA_INDEX}" --replica-count="${TIGERBEETLE_REPLICA_COUNT}" "${TIGERBEETLE_DATA_FILE}"
-fi
 ```
 
 ## Adjusting
@@ -88,15 +77,30 @@ Here's how to do that:
 
 ### Pre-start script
 
-This service executes the `tigerbeetle-pre-start.sh` script before starting TigerBeetle.
+You can place the following script in `/usr/local/bin`.
 This script is responsible for ensuring that a replica data file exists.
 It will create a data file if it doesn't exist.
+
+#### **tigerbeetle-pre-start.sh**
+```bash
+#!/bin/sh
+set -eu
+
+if ! test -e "${TIGERBEETLE_DATA_FILE}"; then
+  /usr/local/bin/tigerbeetle format --cluster="${TIGERBEETLE_CLUSTER_ID}" --replica="${TIGERBEETLE_REPLICA_INDEX}" --replica-count="${TIGERBEETLE_REPLICA_COUNT}" "${TIGERBEETLE_DATA_FILE}"
+fi
+```
 
 The script assumes that `/bin/sh` exists and points to a POSIX-compliant shell, and the `test` utility is either built-in or in the script's search path.
 If this is not the case, adjust the script's shebang.
 
-The service assumes that this script is installed in `/usr/local/bin`.
-If this is not the case, adjust the `ExecStartPre` line in `tigerbeetle.service`.
+Add the following line to `tigerbeetle.service` before `ExecStart`.
+
+```
+ExecStartPre=/usr/local/bin/tigerbeetle-pre-start.sh
+```
+
+The service then executes the `tigerbeetle-pre-start.sh` script before starting TigerBeetle.
 
 ### TigerBeetle executable
 
