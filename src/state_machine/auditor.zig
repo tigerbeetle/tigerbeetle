@@ -327,10 +327,10 @@ pub const AccountingAuditor = struct {
             expired_count += 1;
             if (expired_count == self.options.batch_create_transfers_limit) break;
 
-            assert(!dr.debits_exceed_credits(0));
-            assert(!dr.credits_exceed_debits(0));
-            assert(!cr.debits_exceed_credits(0));
-            assert(!cr.credits_exceed_debits(0));
+            if (dr.debits_exceed_credits(0)) assert(!dr.flags.debits_must_not_exceed_credits);
+            if (dr.credits_exceed_debits(0)) assert(!dr.flags.credits_must_not_exceed_debits);
+            if (cr.debits_exceed_credits(0)) assert(!cr.flags.debits_must_not_exceed_credits);
+            if (cr.credits_exceed_debits(0)) assert(!cr.flags.credits_must_not_exceed_debits);
         }
     }
 
@@ -450,10 +450,10 @@ pub const AccountingAuditor = struct {
                     cr.credits_posted += amount;
                 }
 
-                assert(!dr.debits_exceed_credits(0));
-                assert(!dr.credits_exceed_debits(0));
-                assert(!cr.debits_exceed_credits(0));
-                assert(!cr.credits_exceed_debits(0));
+                if (dr.debits_exceed_credits(0)) assert(!dr.flags.debits_must_not_exceed_credits);
+                if (dr.credits_exceed_debits(0)) assert(!dr.flags.credits_must_not_exceed_debits);
+                if (cr.debits_exceed_credits(0)) assert(!cr.flags.debits_must_not_exceed_credits);
+                if (cr.credits_exceed_debits(0)) assert(!cr.flags.credits_must_not_exceed_debits);
             } else {
                 const dr_index = self.account_id_to_index(transfer.debit_account_id);
                 const cr_index = self.account_id_to_index(transfer.credit_account_id);
@@ -464,6 +464,13 @@ pub const AccountingAuditor = struct {
 
                 const dr = &self.accounts[dr_index];
                 const cr = &self.accounts[cr_index];
+
+                if (transfer.flags.debits_must_not_exceed_credits) {
+                    assert(!dr.debits_exceed_credits(transfer.amount));
+                }
+                if (transfer.flags.credits_must_not_exceed_debits) {
+                    assert(!cr.credits_exceed_debits(transfer.amount));
+                }
 
                 if (transfer.flags.pending) {
                     if (transfer.timeout > 0) {
@@ -489,10 +496,10 @@ pub const AccountingAuditor = struct {
                     cr.credits_posted += transfer.amount;
                 }
 
-                assert(!dr.debits_exceed_credits(0));
-                assert(!dr.credits_exceed_debits(0));
-                assert(!cr.debits_exceed_credits(0));
-                assert(!cr.credits_exceed_debits(0));
+                if (dr.debits_exceed_credits(0)) assert(!dr.flags.debits_must_not_exceed_credits);
+                if (dr.credits_exceed_debits(0)) assert(!dr.flags.credits_must_not_exceed_debits);
+                if (cr.debits_exceed_credits(0)) assert(!cr.flags.debits_must_not_exceed_credits);
+                if (cr.credits_exceed_debits(0)) assert(!cr.flags.credits_must_not_exceed_debits);
             }
         }
     }
@@ -522,8 +529,13 @@ pub const AccountingAuditor = struct {
                 // If this assertion fails, `lookup_accounts` didn't return an account when it
                 // should have.
                 assert(account_lookup != null);
-                assert(!account_lookup.?.debits_exceed_credits(0));
-                assert(!account_lookup.?.credits_exceed_debits(0));
+
+                if (account_lookup.?.debits_exceed_credits(0)) {
+                    assert(!account_lookup.?.flags.debits_must_not_exceed_credits);
+                }
+                if (account_lookup.?.credits_exceed_debits(0)) {
+                    assert(!account_lookup.?.flags.credits_must_not_exceed_debits);
+                }
 
                 const account_expect = &self.accounts[account_index];
                 if (!std.mem.eql(

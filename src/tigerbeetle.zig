@@ -29,13 +29,11 @@ pub const Account = extern struct {
     }
 
     pub fn debits_exceed_credits(self: *const Account, amount: u128) bool {
-        return (self.flags.debits_must_not_exceed_credits and
-            self.debits_pending + self.debits_posted + amount > self.credits_posted);
+        return self.debits_pending + self.debits_posted + amount > self.credits_posted;
     }
 
     pub fn credits_exceed_debits(self: *const Account, amount: u128) bool {
-        return (self.flags.credits_must_not_exceed_debits and
-            self.credits_pending + self.credits_posted + amount > self.debits_posted);
+        return self.credits_pending + self.credits_posted + amount > self.debits_posted;
     }
 };
 
@@ -136,7 +134,9 @@ pub const TransferFlags = packed struct(u16) {
     closing_debit: bool = false,
     closing_credit: bool = false,
     imported: bool = false,
-    padding: u7 = 0,
+    debits_must_not_exceed_credits: bool = false,
+    credits_must_not_exceed_debits: bool = false,
+    padding: u5 = 0,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
