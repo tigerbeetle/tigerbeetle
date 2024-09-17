@@ -4257,8 +4257,8 @@ pub fn ReplicaType(
                 } else {
                     assert(self.view_headers.command == .start_view);
                 }
-                self.update_start_view_headers_from(self.op_checkpoint_next_trigger());
-                assert(self.view_headers.array.get(0).op == self.op_checkpoint_next_trigger());
+                self.update_start_view_headers();
+                assert(self.view_headers.array.get(0).op == self.op);
             } else {
                 // View changed while .checkpoint_data was underway, view_headers would already
                 // contain ops from the future checkpoint.
@@ -4810,23 +4810,32 @@ pub fn ReplicaType(
             return message.ref();
         }
 
-        fn update_start_view_headers_from(self: *Self, start_op: u64) void {
+        fn update_start_view_headers(self: *Self) void {
             assert(self.view_headers.command == .start_view);
             self.view_headers.array.clear();
 
-            var op = start_op + 1;
+            const op_hash_chain_verified = if (self.status == .normal and self.primary())
+                self.op
+            else
+                self.commit_min;
+
+            var op = self.op + 1;
             while (op > 0 and
                 self.view_headers.array.count() < constants.view_change_headers_suffix_max)
             {
                 op -= 1;
-                self.view_headers.append(self.journal.header_with_op(op).?);
+                if (self.journal.header_with_op(op)) |header| {
+                    self.view_headers.append(header);
+                } else {
+                    self.view_headers.append_blank(op);
+                }
             }
             assert(self.view_headers.array.count() + 2 <= constants.view_change_headers_max);
 
             // Determine the consecutive extent of the log that we can help recover.
             // This may precede op_repair_min if we haven't had a view-change recently.
-            const range_min = (start_op + 1) -| constants.journal_slot_count;
-            const range = self.journal.find_latest_headers_break_between(range_min, start_op);
+            const range_min = (op_hash_chain_verified + 1) -| constants.journal_slot_count;
+            const range = self.journal.find_latest_headers_break_between(range_min, op_hash_chain_verified);
             const op_min = if (range) |r| r.op_max + 1 else range_min;
             assert(op_min <= op);
             assert(op_min <= self.op_repair_min());
@@ -4850,7 +4859,7 @@ pub fn ReplicaType(
             assert(self.replica == self.primary_index(self.view));
             assert(self.view == self.log_view);
             if (self.status == .recovering) assert(self.solo());
-            self.update_start_view_headers_from(self.op);
+            self.update_start_view_headers();
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
