@@ -4531,12 +4531,12 @@ test "create_transfers: per-transfer balance invariant" {
         \\ setup A2 0 40 0 0
         \\
         \\ transfer T1 A1 A2 41   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ linked_event_failed
-        \\ transfer T2 A2 A3 41   _  _  _  _    0 L1 C1 LNK PEN _   _ BDR   _ _ _ _ _ _ exceeds_debits
+        \\ transfer T2 A2 A3  1   _  _  _  _    0 L1 C1 LNK PEN _   _ BDR   _ _ _ _ _ _ exceeds_debits
         \\ transfer T3 A2 A3  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ linked_event_failed
         \\ commit create_transfers
         \\
         \\ transfer T1 A1 A2 40   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ ok
-        \\ transfer T2 A2 A3 40   _  _  _  _    0 L1 C1 LNK PEN _   _ BDR   _ _ _ _ _ _ ok
+        \\ transfer T2 A2 A3  1   _  _  _  _    0 L1 C1 LNK PEN _   _ BDR   _ _ _ _ _ _ ok
         \\ transfer T3 A2 A3  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ ok
         \\ commit create_transfers
         \\
@@ -4556,12 +4556,12 @@ test "create_transfers: per-transfer balance invariant" {
         \\ setup A1 0 0 0 40
         \\
         \\ transfer T1 A1 A2 41   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ linked_event_failed
-        \\ transfer T2 A3 A1 41   _  _  _  _    0 L1 C1 LNK PEN _   _   _ BCR _ _ _ _ _ exceeds_credits
+        \\ transfer T2 A3 A1  1   _  _  _  _    0 L1 C1 LNK PEN _   _   _ BCR _ _ _ _ _ exceeds_credits
         \\ transfer T3 A3 A1  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ linked_event_failed
         \\ commit create_transfers
         \\
         \\ transfer T1 A1 A2 40   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ ok
-        \\ transfer T2 A3 A1 40   _  _  _  _    0 L1 C1 LNK PEN _   _   _ BCR _ _ _ _ _ ok
+        \\ transfer T2 A3 A1  1   _  _  _  _    0 L1 C1 LNK PEN _   _   _ BCR _ _ _ _ _ ok
         \\ transfer T3 A3 A1  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ ok
         \\ commit create_transfers
         \\
