@@ -10267,7 +10267,10 @@ fn start_view_message_headers(message: *const Message.StartView) []const Header.
     assert(headers.len > 0);
     vsr.Headers.ViewChangeSlice.verify(.{ .command = .start_view, .slice = headers });
     if (constants.verify) {
-        for (headers) |header| assert(header.valid_checksum());
+        for (headers) |*header| {
+            assert(header.valid_checksum());
+            assert(vsr.Headers.dvc_header_type(header) == .valid);
+        }
     }
     return headers;
 }
