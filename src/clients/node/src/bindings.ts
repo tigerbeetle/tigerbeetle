@@ -92,6 +92,16 @@ export enum TransferFlags {
   * See [imported](https://docs.tigerbeetle.com/reference/transfer#flagsimported)
   */
   imported = (1 << 8),
+
+  /**
+  * See [debits_must_not_exceed_credits](https://docs.tigerbeetle.com/reference/transfer#flagsdebits_must_not_exceed_credits)
+  */
+  debits_must_not_exceed_credits = (1 << 9),
+
+  /**
+  * See [credits_must_not_exceed_debits](https://docs.tigerbeetle.com/reference/transfer#flagscredits_must_not_exceed_debits)
+  */
+  credits_must_not_exceed_debits = (1 << 10),
 }
 
 

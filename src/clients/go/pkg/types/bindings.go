@@ -51,15 +51,17 @@ func (f AccountFlags) ToUint16() uint16 {
 }
 
 type TransferFlags struct {
-	Linked              bool
-	Pending             bool
-	PostPendingTransfer bool
-	VoidPendingTransfer bool
-	BalancingDebit      bool
-	BalancingCredit     bool
-	ClosingDebit        bool
-	ClosingCredit       bool
-	Imported            bool
+	Linked                     bool
+	Pending                    bool
+	PostPendingTransfer        bool
+	VoidPendingTransfer        bool
+	BalancingDebit             bool
+	BalancingCredit            bool
+	ClosingDebit               bool
+	ClosingCredit              bool
+	Imported                   bool
+	DebitsMustNotExceedCredits bool
+	CreditsMustNotExceedDebits bool
 }
 
 func (f TransferFlags) ToUint16() uint16 {
@@ -99,6 +101,14 @@ func (f TransferFlags) ToUint16() uint16 {
 
 	if f.Imported {
 		ret |= (1 << 8)
+	}
+
+	if f.DebitsMustNotExceedCredits {
+		ret |= (1 << 9)
+	}
+
+	if f.CreditsMustNotExceedDebits {
+		ret |= (1 << 10)
 	}
 
 	return ret
@@ -196,6 +206,8 @@ func (o Transfer) TransferFlags() TransferFlags {
 	f.ClosingDebit = ((o.Flags >> 6) & 0x1) == 1
 	f.ClosingCredit = ((o.Flags >> 7) & 0x1) == 1
 	f.Imported = ((o.Flags >> 8) & 0x1) == 1
+	f.DebitsMustNotExceedCredits = ((o.Flags >> 9) & 0x1) == 1
+	f.CreditsMustNotExceedDebits = ((o.Flags >> 10) & 0x1) == 1
 	return f
 }
 

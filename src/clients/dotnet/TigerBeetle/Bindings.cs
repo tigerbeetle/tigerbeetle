@@ -95,6 +95,16 @@ public enum TransferFlags : ushort
     /// </summary>
     Imported = 1 << 8,
 
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsdebits_must_not_exceed_credits
+    /// </summary>
+    DebitsMustNotExceedCredits = 1 << 9,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagscredits_must_not_exceed_debits
+    /// </summary>
+    CreditsMustNotExceedDebits = 1 << 10,
+
 }
 
 [Flags]

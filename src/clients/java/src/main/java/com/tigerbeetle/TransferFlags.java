@@ -53,6 +53,16 @@ public interface TransferFlags {
      */
     int IMPORTED = (int) (1 << 8);
 
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagsdebits_must_not_exceed_credits">debits_must_not_exceed_credits</a>
+     */
+    int DEBITS_MUST_NOT_EXCEED_CREDITS = (int) (1 << 9);
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfer#flagscredits_must_not_exceed_debits">credits_must_not_exceed_debits</a>
+     */
+    int CREDITS_MUST_NOT_EXCEED_DEBITS = (int) (1 << 10);
+
     static boolean hasLinked(final int flags) {
         return (flags & LINKED) == LINKED;
     }
@@ -87,6 +97,14 @@ public interface TransferFlags {
 
     static boolean hasImported(final int flags) {
         return (flags & IMPORTED) == IMPORTED;
+    }
+
+    static boolean hasDebitsMustNotExceedCredits(final int flags) {
+        return (flags & DEBITS_MUST_NOT_EXCEED_CREDITS) == DEBITS_MUST_NOT_EXCEED_CREDITS;
+    }
+
+    static boolean hasCreditsMustNotExceedDebits(final int flags) {
+        return (flags & CREDITS_MUST_NOT_EXCEED_DEBITS) == CREDITS_MUST_NOT_EXCEED_DEBITS;
     }
 
 }
