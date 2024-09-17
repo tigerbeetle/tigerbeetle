@@ -4849,7 +4849,10 @@ pub fn ReplicaType(
             // Determine the consecutive extent of the log that we can help recover.
             // This may precede op_repair_min if we haven't had a view-change recently.
             const range_min = (op_hash_chain_verified + 1) -| constants.journal_slot_count;
-            const range = self.journal.find_latest_headers_break_between(range_min, op_hash_chain_verified);
+            const range = self.journal.find_latest_headers_break_between(
+                range_min,
+                op_hash_chain_verified,
+            );
             const op_min = if (range) |r| r.op_max + 1 else range_min;
             assert(op_min <= op);
             assert(op_min <= self.op_repair_min());
