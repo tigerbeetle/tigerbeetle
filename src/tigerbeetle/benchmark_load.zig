@@ -134,17 +134,27 @@ pub fn main(
         .reversed => .{ .inversion = {} },
     };
 
-    const account_generator: Generator = switch (cli_args.account_distribution) {
-        .zipfian => .{
-            .zipfian = ZipfianShuffled.init(cli_args.account_count, random),
-        },
-        .latest => .{
-            .latest = ZipfianGenerator.init(cli_args.account_count),
-        },
-        .uniform => .uniform,
-    };
+    const account_generator_debit = Generator.from_distribution(
+        cli_args.account_distribution_debit,
+        cli_args.account_count,
+        random,
+    );
+    const account_generator_credit = Generator.from_distribution(
+        cli_args.account_distribution_credit,
+        cli_args.account_count,
+        random,
+    );
+    const account_generator_query = Generator.from_distribution(
+        cli_args.account_distribution_query,
+        cli_args.account_count,
+        random,
+    );
 
-    log.info("Account distribution = {s}", .{@tagName(cli_args.account_distribution)});
+    log.info("Account distributions = debit: {s}; credit: {s}; query: {s}", .{
+        @tagName(cli_args.account_distribution_debit),
+        @tagName(cli_args.account_distribution_credit),
+        @tagName(cli_args.account_distribution_query),
+    });
 
     var benchmark = Benchmark{
         .io = &io,
@@ -152,7 +162,9 @@ pub fn main(
         .client = &client,
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
-        .account_generator = account_generator,
+        .account_generator_debit = account_generator_debit,
+        .account_generator_credit = account_generator_credit,
+        .account_generator_query = account_generator_query,
         .flag_history = cli_args.flag_history,
         .flag_imported = cli_args.flag_imported,
         .account_index = 0,
@@ -235,6 +247,22 @@ const Generator = union(enum) {
     zipfian: ZipfianShuffled,
     latest: ZipfianGenerator,
     uniform,
+
+    fn from_distribution(
+        distribution: cli.Command.Benchmark.Distribution,
+        count: u64,
+        random: std.Random,
+    ) Generator {
+        return switch (distribution) {
+            .zipfian => .{
+                .zipfian = ZipfianShuffled.init(count, random),
+            },
+            .latest => .{
+                .latest = ZipfianGenerator.init(count),
+            },
+            .uniform => .uniform,
+        };
+    }
 };
 
 const Benchmark = struct {
@@ -243,7 +271,9 @@ const Benchmark = struct {
     client: *Client,
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
-    account_generator: Generator,
+    account_generator_debit: Generator,
+    account_generator_credit: Generator,
+    account_generator_query: Generator,
     flag_history: bool,
     flag_imported: bool,
     account_index: usize,
@@ -338,9 +368,9 @@ const Benchmark = struct {
         b.create_accounts();
     }
 
-    fn gen_account_index(b: *Benchmark) u64 {
+    fn gen_account_index(b: *Benchmark, generator: *Generator) u64 {
         const random = b.rng.random();
-        switch (b.account_generator) {
+        switch (generator.*) {
             .zipfian => |gen| {
                 // zipfian set size must be same as account set size
                 assert(b.account_count == gen.gen.n);
@@ -367,8 +397,8 @@ const Benchmark = struct {
         var credit_account_index: u64 = 0;
         assert(b.account_count > 1);
         while (debit_account_index == credit_account_index) {
-            debit_account_index = b.gen_account_index();
-            credit_account_index = b.gen_account_index();
+            debit_account_index = b.gen_account_index(&b.account_generator_debit);
+            credit_account_index = b.gen_account_index(&b.account_generator_credit);
         }
 
         const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
@@ -512,7 +542,7 @@ const Benchmark = struct {
             return;
         }
 
-        b.account_index = b.gen_account_index();
+        b.account_index = b.gen_account_index(&b.account_generator_query);
         var filter = tb.AccountFilter{
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
             .user_data_128 = 0,

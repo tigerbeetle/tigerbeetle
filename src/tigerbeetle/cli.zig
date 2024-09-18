@@ -99,6 +99,9 @@ const CLIArgs = union(enum) {
         /// The probability distribution used to select accounts when making
         /// transfers or queries.
         account_distribution: Command.Benchmark.Distribution = .zipfian,
+        account_distribution_debit: Command.Benchmark.DistributionInherited = .inherit,
+        account_distribution_credit: Command.Benchmark.DistributionInherited = .inherit,
+        account_distribution_query: Command.Benchmark.DistributionInherited = .inherit,
         flag_history: bool = false,
         flag_imported: bool = false,
         account_batch_size: usize = @divExact(
@@ -431,13 +434,22 @@ pub const Command = union(enum) {
             uniform,
         };
 
+        pub const DistributionInherited = enum {
+            inherit,
+            zipfian,
+            latest,
+            uniform,
+        };
+
         cache_accounts: ?[]const u8,
         cache_transfers: ?[]const u8,
         cache_transfers_pending: ?[]const u8,
         cache_account_balances: ?[]const u8,
         cache_grid: ?[]const u8,
         account_count: usize,
-        account_distribution: Distribution,
+        account_distribution_debit: Distribution,
+        account_distribution_credit: Distribution,
+        account_distribution_query: Distribution,
         flag_history: bool,
         flag_imported: bool,
         account_batch_size: usize,
@@ -807,6 +819,18 @@ fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
     };
 }
 
+fn distribution_or_inherit(
+    distribution: Command.Benchmark.DistributionInherited,
+    default: Command.Benchmark.Distribution,
+) Command.Benchmark.Distribution {
+    return switch (distribution) {
+        Command.Benchmark.DistributionInherited.zipfian => Command.Benchmark.Distribution.zipfian,
+        Command.Benchmark.DistributionInherited.latest => Command.Benchmark.Distribution.latest,
+        Command.Benchmark.DistributionInherited.uniform => Command.Benchmark.Distribution.uniform,
+        Command.Benchmark.DistributionInherited.inherit => default,
+    };
+}
+
 fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
         parse_addresses(addresses)
@@ -824,7 +848,18 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .cache_account_balances = benchmark.cache_account_balances,
         .cache_grid = benchmark.cache_grid,
         .account_count = benchmark.account_count,
-        .account_distribution = benchmark.account_distribution,
+        .account_distribution_debit = distribution_or_inherit(
+            benchmark.account_distribution_debit,
+            benchmark.account_distribution,
+        ),
+        .account_distribution_credit = distribution_or_inherit(
+            benchmark.account_distribution_credit,
+            benchmark.account_distribution,
+        ),
+        .account_distribution_query = distribution_or_inherit(
+            benchmark.account_distribution_query,
+            benchmark.account_distribution,
+        ),
         .flag_history = benchmark.flag_history,
         .flag_imported = benchmark.flag_imported,
         .account_batch_size = benchmark.account_batch_size,
