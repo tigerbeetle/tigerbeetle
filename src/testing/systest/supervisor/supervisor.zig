@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const flags = @import("../../../flags.zig");
 const Shell = @import("../../../shell.zig");
 const LoggedProcess = @import("./process.zig").LoggedProcess;
+const log = @import("./log.zig");
 
 const assert = std.debug.assert;
 
@@ -69,16 +70,16 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
         for (0..target_tick_count) |tick| {
             const duration_ns = tick * tick_ns;
             if (@rem(duration_ns, std.time.ns_per_s) == 0) {
-                // std.debug.print("supervisor: waited for {d}\n", .{@divExact(duration_ns, std.time.ns_per_s)});
+                // log.info("supervisor: waited for {d}", .{@divExact(duration_ns, std.time.ns_per_s)});
             }
             if (workload.state() == .completed) {
-                std.debug.print("supervisor: workload completed by itself\n", .{});
+                log.info("supervisor: workload completed by itself", .{});
                 break :term try workload.wait();
             }
             std.time.sleep(tick_ns);
         }
 
-        std.debug.print("supervisor: terminating workload due to max duration\n", .{});
+        log.info("supervisor: terminating workload due to max duration", .{});
         break :term try workload.terminate();
     };
 
@@ -92,16 +93,16 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     switch (workload_result) {
         .Exited => |code| {
             if (code == 128 + std.posix.SIG.TERM) {
-                std.debug.print("supervisor: workload terminated as requested\n", .{});
+                log.info("supervisor: workload terminated as requested", .{});
             } else if (code == 0) {
-                std.debug.print("supervisor: workload exited successfully\n", .{});
+                log.info("supervisor: workload exited successfully", .{});
             } else {
-                std.debug.print("supervisor: workload exited unexpectedly with code {d}\n", .{code});
+                log.info("supervisor: workload exited unexpectedly with code {d}", .{code});
                 std.process.exit(1);
             }
         },
         else => {
-            std.debug.print("supervisor: unexpected workload result: {any}\n", .{workload_result});
+            log.info("supervisor: unexpected workload result: {any}", .{workload_result});
             unreachable;
         },
     }

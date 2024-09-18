@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const log = @import("./log.zig");
 
 const assert = std.debug.assert;
 
@@ -115,21 +116,21 @@ pub const LoggedProcess = struct {
         self.stderr_thread = try std.Thread.spawn(
             .{},
             struct {
-                fn log(stderr: std.fs.File, process: *Self) void {
+                fn log_stderr(stderr: std.fs.File, process: *Self) void {
                     while (true) {
                         var buf: [1024]u8 = undefined;
                         const line_opt = stderr.reader().readUntilDelimiterOrEof(&buf, '\n') catch |err| {
-                            std.debug.print("{s}: failed reading stderr: {any}\n", .{ process.name, err });
+                            log.info("{s}: failed reading stderr: {any}", .{ process.name, err });
                             break;
                         };
                         if (line_opt) |line| {
-                            std.debug.print("{s}: {s}\n", .{ process.name, line });
+                            log.info("{s}: {s}", .{ process.name, line });
                         } else {
                             break;
                         }
                     }
                 }
-            }.log,
+            }.log_stderr,
             .{ child.stderr.?, self },
         );
 
