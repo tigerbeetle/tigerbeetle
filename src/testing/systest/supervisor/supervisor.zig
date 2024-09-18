@@ -1,11 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const flags = @import("../../../flags.zig");
+const Shell = @import("../../../shell.zig");
+
 const assert = std.debug.assert;
-const tigerbeetle = @import("tigerbeetle");
 
 const replica_count = 3;
 
-const Args = struct {
+pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
     client_command: []const u8,
 };
@@ -15,39 +17,42 @@ const Replica = struct {
     process: *LoggedProcess,
 };
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer assert(gpa.deinit() == .ok);
+pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
+    const ports = [replica_count]u16{ 3000, 3001, 3002 };
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    var args = try std.process.argsWithAllocator(arena.allocator());
-
-    const cli_args = tigerbeetle.flags.parse(&args, Args);
-    const ports = .{ 3000, 3001, 3002 };
+    const tmp_dir = try shell.create_tmp_dir();
+    defer shell.cwd.deleteDir(tmp_dir) catch {};
 
     var replicas: [replica_count]Replica = undefined;
     for (0..replica_count) |i| {
-        const name = try std.fmt.allocPrint(arena.allocator(), "replica {d}", .{i});
-        const datafile = try std.fmt.allocPrint(
-            arena.allocator(),
-            "{s}/0_{d}.tigerbeetle",
-            .{ "/tmp/systest", i },
-        );
-        const addresses = try std.fmt.allocPrint(
-            arena.allocator(),
-            "--addresses={s}",
-            .{try comma_separate_ports(arena.allocator(), &ports)},
-        );
-        const argv = try arena.allocator().dupe([]const u8, &.{
-            cli_args.tigerbeetle_executable,
+        const name = try shell.fmt("replica {d}", .{i});
+        const datafile = try shell.fmt("{s}/0_{d}.tigerbeetle", .{ tmp_dir, i });
+
+        // Format datafile
+        try shell.exec(
+            \\{tigerbeetle} format 
+            \\  --cluster=1
+            \\  --replica={index}
+            \\  --replica-count={replica_count} 
+            \\  {datafile}
+        , .{
+            .tigerbeetle = args.tigerbeetle_executable,
+            .index = i,
+            .replica_count = replica_count,
+            .datafile = datafile,
+        });
+
+        // Start replica
+        const addresses = try shell.fmt("--addresses={s}", .{
+            try comma_separate_ports(shell.arena.allocator(), &ports),
+        });
+        const argv = try shell.arena.allocator().dupe([]const u8, &.{
+            args.tigerbeetle_executable,
             "start",
             addresses,
             datafile,
         });
-        var process = try LoggedProcess.init(arena.allocator(), name, argv);
+        var process = try LoggedProcess.init(allocator, name, argv);
         replicas[i] = .{ .name = name, .process = process };
         try process.start();
     }

@@ -82,8 +82,6 @@ pub fn build(b: *std.Build) !void {
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
         .vopr = b.step("vopr", "Run the VOPR"),
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
-        .systest_supervisor = b.step("systest:supervisor", "Run the systest supervisor"),
-        .systest_supervisor_build = b.step("systest:supervisor:build", "Build the systest supervisor"),
     };
 
     // Build options passed with `-D` flags.
@@ -244,18 +242,6 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .mode = mode,
     });
-
-    build_systest_supervisor(
-        b,
-        .{
-            .systest_supervisor = build_steps.systest_supervisor,
-            .systest_supervisor_build = build_steps.systest_supervisor_build,
-        },
-        .{
-            .target = target,
-            .mode = mode,
-        },
-    );
 
     // zig build clients:$lang
     build_go_client(b, build_steps.clients_go, .{
@@ -820,38 +806,6 @@ fn build_scripts(
     scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     if (b.args) |args| scripts_run.addArgs(args);
     step_scripts.dependOn(&scripts_run.step);
-}
-
-fn build_systest_supervisor(
-    b: *std.Build,
-    steps: struct {
-        systest_supervisor: *std.Build.Step,
-        systest_supervisor_build: *std.Build.Step,
-    },
-    options: struct {
-        target: std.Build.ResolvedTarget,
-        mode: std.builtin.OptimizeMode,
-    },
-) void {
-    const supervisor_exe = b.addExecutable(.{
-        .name = "systest_supervisor",
-        .root_source_file = b.path("src/testing/systest/supervisor/supervisor.zig"),
-        .target = options.target,
-        .optimize = options.mode,
-    });
-    const lib_module = b.addModule("tigerbeetle", .{
-        .root_source_file = b.path("src/lib.zig"),
-    });
-    supervisor_exe.root_module.addImport(
-        "tigerbeetle",
-        lib_module,
-    );
-
-    const supervisor_run = b.addRunArtifact(supervisor_exe);
-    if (b.args) |args| supervisor_run.addArgs(args);
-
-    steps.systest_supervisor.dependOn(&supervisor_run.step);
-    steps.systest_supervisor_build.dependOn(&b.addInstallArtifact(supervisor_exe, .{}).step);
 }
 
 // Zig cross-targets, Dotnet RID (Runtime Identifier), CPU features.
