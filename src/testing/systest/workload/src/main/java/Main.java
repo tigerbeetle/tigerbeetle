@@ -24,11 +24,9 @@ public final class Main {
       var workload = new Workload(random, client);
 
       // Try to gracefully stop on SIGTERM.
-      Runtime.getRuntime().addShutdownHook(new Thread() {
-        public void run() {
-          workload.stop();
-        }
-      });
+      Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        workload.stop();
+      }));
 
       System.err.println("starting workload");
       workload.run();

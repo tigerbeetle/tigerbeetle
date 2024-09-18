@@ -71,11 +71,13 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
                 // std.debug.print("supervisor: waited for {d}\n", .{@divExact(duration_ns, std.time.ns_per_s)});
             }
             if (workload.state == .completed) {
+                std.debug.print("supervisor: workload completed by itself\n", .{});
                 break :term try workload.wait();
             }
             std.time.sleep(tick_ns);
         }
 
+        std.debug.print("supervisor: terminating workload due to max duration\n", .{});
         break :term try workload.terminate();
     };
 
@@ -89,16 +91,18 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     switch (workload_result) {
         .Exited => |code| {
             if (code == 128 + std.posix.SIG.TERM) {
-                std.debug.print("workload terminated as requested\n", .{});
-            } else if (code >= 128) {
-                const signal = @mod(code, 128);
-                std.debug.print("workload terminated after signal {d}\n", .{signal});
+                std.debug.print("supervisor: workload terminated as requested\n", .{});
+            } else if (code == 0) {
+                std.debug.print("supervisor: workload exited successfully\n", .{});
             } else {
-                std.debug.print("workload exited unexpectedly with code {d}\n", .{code});
+                std.debug.print("supervisor: workload exited unexpectedly with code {d}\n", .{code});
                 std.process.exit(1);
             }
         },
-        else => {},
+        else => {
+            std.debug.print("supervisor: unexpected workload result: {any}\n", .{workload_result});
+            unreachable;
+        },
     }
 }
 
