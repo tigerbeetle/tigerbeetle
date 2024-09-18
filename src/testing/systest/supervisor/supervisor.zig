@@ -10,110 +10,100 @@ const Args = struct {
     client_command: []const u8,
 };
 
+const Replica = struct {
+    name: []const u8,
+    process: *LoggedProcess,
+};
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
+    defer assert(gpa.deinit() == .ok);
 
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var args = try std.process.argsWithAllocator(arena.allocator());
 
     const cli_args = tigerbeetle.flags.parse(&args, Args);
+    const ports = .{ 3000, 3001, 3002 };
 
-    var replicas: [replica_count]*Replica = undefined;
+    var replicas: [replica_count]Replica = undefined;
     for (0..replica_count) |i| {
-        replicas[i] = try Replica.init(allocator, .{
-            .tigerbeetle_executable = cli_args.tigerbeetle_executable,
-            .ports = &.{ 3000, 3001, 3002 },
-            .temp_dir = "/tmp/systest",
-            .index = @intCast(i),
+        const name = try std.fmt.allocPrint(arena.allocator(), "replica {d}", .{i});
+        const datafile = try std.fmt.allocPrint(
+            arena.allocator(),
+            "{s}/0_{d}.tigerbeetle",
+            .{ "/tmp/systest", i },
+        );
+        const addresses = try std.fmt.allocPrint(
+            arena.allocator(),
+            "--addresses={s}",
+            .{try comma_separate_ports(arena.allocator(), &ports)},
+        );
+        const argv = try arena.allocator().dupe([]const u8, &.{
+            cli_args.tigerbeetle_executable,
+            "start",
+            addresses,
+            datafile,
         });
-        try replicas[i].start();
+        var process = try LoggedProcess.init(arena.allocator(), name, argv);
+        replicas[i] = .{ .name = name, .process = process };
+        try process.start();
     }
 
-    std.time.sleep(10 * std.time.ns_per_s);
+    std.time.sleep(5 * std.time.ns_per_s);
 
-    for (0..replica_count) |i| {
-        try replicas[i].stop();
+    for (replicas) |replica| {
+        try replica.process.stop();
+        replica.process.deinit();
     }
-}
-
-fn start_client(
-    allocator: std.mem.Allocator,
-    options: struct { client_command: []const u8 },
-) !void {
-    const argv = std.ArrayList([]const u8).init();
-    for (std.mem.split(u8, options.client_command, " ")) |arg| {
-        argv.append(arg);
-    }
-
-    const cwd = try std.process.getCwdAlloc(allocator);
-    defer allocator.free(cwd);
-
-    var child = std.process.Child.init(argv, allocator);
-    child.cwd = cwd;
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
 }
 
 const State = enum { initial, running, stopped };
 
-const Replica = struct {
+const LoggedProcess = struct {
     const Self = @This();
-    const Options = struct {
-        tigerbeetle_executable: []const u8,
-        ports: []const u16,
-        temp_dir: []const u8,
-        index: u8,
-    };
 
+    // Passed in to init
     allocator: std.mem.Allocator,
-    arena: std.heap.ArenaAllocator,
-    options: Options,
-    cwd: []const u8,
+    name: []const u8,
     argv: []const []const u8,
 
+    // Allocated by init
+    arena: std.heap.ArenaAllocator,
+    cwd: []const u8,
+
+    // Lifecycle state
     child: ?std.process.Child = null,
     stderr_thread: ?std.Thread = null,
     state: State,
 
     fn init(
         allocator: std.mem.Allocator,
-        options: Options,
+        name: []const u8,
+        argv: []const []const u8,
     ) !*Self {
         var arena = std.heap.ArenaAllocator.init(allocator);
-        const cwd = try std.process.getCwdAlloc(arena.allocator());
 
-        const argv: []const []const u8 = &.{
-            options.tigerbeetle_executable,
-            "start",
-            try std.fmt.allocPrint(
-                arena.allocator(),
-                "--addresses={s}",
-                .{try comma_separate_ports(arena.allocator(), options.ports)},
-            ),
-            try std.fmt.allocPrint(
-                arena.allocator(),
-                "{s}/0_{d}.tigerbeetle",
-                .{ options.temp_dir, options.index },
-            ),
-        };
+        const cwd = try std.process.getCwdAlloc(arena.allocator());
 
         const replica = try allocator.create(Self);
         replica.* = .{
             .allocator = allocator,
             .arena = arena,
-            .options = options,
+            .name = name,
             .cwd = cwd,
-            .argv = try arena.allocator().dupe([]const u8, argv),
+            .argv = argv,
             .state = .initial,
         };
         return replica;
     }
 
     fn deinit(self: *Self) void {
+        const allocator = self.allocator;
         self.arena.deinit();
-        self.allocator.destroy(self);
+        allocator.destroy(self);
     }
 
     fn start(
@@ -129,11 +119,12 @@ const Replica = struct {
         child.stdout_behavior = .Ignore;
         child.stderr_behavior = .Pipe;
 
-        // std.debug.print(
-        //     "replica {d}: {s}\n",
-        //     .{ self.options.index, try format_argv(self.arena.allocator(), self.argv) },
-        // );
         try child.spawn();
+
+        std.debug.print(
+            "{s}: {s}\n",
+            .{ self.name, try format_argv(self.arena.allocator(), self.argv) },
+        );
 
         self.stderr_thread = try std.Thread.spawn(
             .{},
@@ -142,11 +133,11 @@ const Replica = struct {
                     while (true) {
                         var buf: [1024]u8 = undefined;
                         const line_opt = stderr.reader().readUntilDelimiterOrEof(&buf, '\n') catch |err| {
-                            std.debug.print("replica {d}: failed reading stderr: {any}\n", .{ replica.options.index, err });
+                            std.debug.print("{s}: failed reading stderr: {any}\n", .{ replica.name, err });
                             break;
                         };
                         if (line_opt) |line| {
-                            std.debug.print("replica {d}: {s}\n", .{ replica.options.index, line });
+                            std.debug.print("{s}: {s}\n", .{ replica.name, line });
                         } else {
                             break;
                         }
@@ -166,7 +157,7 @@ const Replica = struct {
         assert(self.state == .running);
         defer assert(self.state == .stopped);
 
-        std.debug.print("replica {d}: stopping\n", .{self.options.index});
+        std.debug.print("{s}: stopping\n", .{self.name});
 
         var child = self.child.?;
         const stderr_thread = self.stderr_thread.?;
@@ -181,8 +172,8 @@ const Replica = struct {
             }
         } catch |err| {
             std.debug.print(
-                "replica {d}: failed to kill process: {any}\n",
-                .{ self.options.index, err },
+                "{s}: failed to kill process: {any}\n",
+                .{ self.name, err },
             );
         };
 
@@ -192,7 +183,7 @@ const Replica = struct {
         // Await the terminated process
         _ = child.wait() catch unreachable;
 
-        std.debug.print("replica {d}: stopped\n", .{self.options.index});
+        std.debug.print("{s}: stopped\n", .{self.name});
 
         self.child = null;
         self.stderr_thread = null;
@@ -203,50 +194,55 @@ const Replica = struct {
 fn format_argv(allocator: std.mem.Allocator, argv: []const []const u8) ![]const u8 {
     assert(argv.len > 0);
 
-    var segments = std.ArrayList([]const u8).init(allocator);
-    defer segments.deinit();
+    var out = std.ArrayList(u8).init(allocator);
+    const writer = out.writer();
 
-    try segments.append("$");
+    try writer.writeAll("$");
     for (argv) |arg| {
-        try segments.append(" ");
-        try segments.append(arg);
+        try writer.writeByte(' ');
+        try writer.writeAll(arg);
     }
 
-    return try std.mem.concat(allocator, u8, segments.items);
+    return try out.toOwnedSlice();
 }
 
 fn comma_separate_ports(allocator: std.mem.Allocator, ports: []const u16) ![]const u8 {
     assert(ports.len > 0);
 
-    var segments = std.ArrayList([]const u8).init(allocator);
-    defer segments.deinit();
+    var out = std.ArrayList(u8).init(allocator);
+    const writer = out.writer();
 
-    try segments.append(try std.fmt.allocPrint(allocator, "{d}", .{ports[0]}));
+    try std.fmt.format(writer, "{d}", .{ports[0]});
     for (ports[1..]) |port| {
-        try segments.append(",");
-        try segments.append(try std.fmt.allocPrint(allocator, "{d}", .{port}));
+        try writer.writeByte(',');
+        try std.fmt.format(writer, "{d}", .{port});
     }
 
-    return try std.mem.concat(allocator, u8, segments.items);
+    return out.toOwnedSlice();
 }
 
-test "replica: starts and stops" {
+test "LoggedProcess: starts and stops" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer assert(gpa.deinit() == .ok);
 
-    var replica = try Replica.init(allocator, .{
-        .tigerbeetle_executable = "./tigerbeetle",
-        .ports = &.{3000},
-        .temp_dir = "/tmp/systest-unit",
-        .index = 0,
-    });
+    const argv: []const []const u8 = &.{
+        "./tigerbeetle",
+        "start",
+        "--addresses=3000",
+        "/tmp/systest-unit/0_0.tigerbeetle",
+    };
+
+    const name = "test replica";
+    var replica = try LoggedProcess.init(allocator, name, argv);
     defer replica.deinit();
 
     // start & stop
     try replica.start();
     std.time.sleep(1 * std.time.ns_per_s);
     try replica.stop();
+
+    std.time.sleep(1 * std.time.ns_per_s);
 
     // restart & stop
     try replica.start();
@@ -255,19 +251,15 @@ test "replica: starts and stops" {
 }
 
 test "format_argv: space-separates slice as a prompt" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    const formatted = try format_argv(allocator, &.{ "foo", "bar", "baz" });
+    const formatted = try format_argv(std.testing.allocator, &.{ "foo", "bar", "baz" });
+    defer std.testing.allocator.free(formatted);
 
     try std.testing.expectEqualStrings("$ foo bar baz", formatted);
 }
 
 test "comma-separates ports" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const formatted = try comma_separate_ports(std.testing.allocator, &.{ 3000, 3001, 3002 });
+    defer std.testing.allocator.free(formatted);
 
-    const ports = try comma_separate_ports(allocator, &.{ 3000, 3001, 3002 });
-
-    try std.testing.expectEqualStrings("3000,3001,3002", ports);
+    try std.testing.expectEqualStrings("3000,3001,3002", formatted);
 }
