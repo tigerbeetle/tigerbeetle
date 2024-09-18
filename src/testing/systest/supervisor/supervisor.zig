@@ -60,10 +60,9 @@ pub fn main() !void {
     }
 }
 
-const State = enum { initial, running, stopped };
-
 const LoggedProcess = struct {
     const Self = @This();
+    const State = enum { initial, running, stopped };
 
     // Passed in to init
     allocator: std.mem.Allocator,
@@ -163,6 +162,9 @@ const LoggedProcess = struct {
         const stderr_thread = self.stderr_thread.?;
 
         // Terminate the process
+        //
+        // Uses the same method as `src/testing/tmp_tigerbeetle.zig`.
+        // See: https://github.com/ziglang/zig/issues/16820
         _ = kill: {
             if (builtin.os.tag == .windows) {
                 const exit_code = 1;
@@ -227,26 +229,25 @@ test "LoggedProcess: starts and stops" {
     defer assert(gpa.deinit() == .ok);
 
     const argv: []const []const u8 = &.{
-        "./tigerbeetle",
-        "start",
-        "--addresses=3000",
-        "/tmp/systest-unit/0_0.tigerbeetle",
+        "awk",
+        \\ BEGIN { for (i = 0; i < 10; i++) { print i > "/dev/fd/2"; } }
+        ,
     };
 
-    const name = "test replica";
+    const name = "test program";
     var replica = try LoggedProcess.init(allocator, name, argv);
     defer replica.deinit();
 
     // start & stop
     try replica.start();
-    std.time.sleep(1 * std.time.ns_per_s);
+    std.time.sleep(10 * std.time.ns_per_ms);
     try replica.stop();
 
-    std.time.sleep(1 * std.time.ns_per_s);
+    std.time.sleep(10 * std.time.ns_per_ms);
 
     // restart & stop
     try replica.start();
-    std.time.sleep(1 * std.time.ns_per_s);
+    std.time.sleep(10 * std.time.ns_per_ms);
     try replica.stop();
 }
 
