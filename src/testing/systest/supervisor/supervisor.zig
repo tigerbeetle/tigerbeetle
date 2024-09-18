@@ -8,7 +8,7 @@ const assert = std.debug.assert;
 const replica_count = 3;
 const replica_ports = [replica_count]u16{ 3000, 3001, 3002 };
 
-const run_time_ns = 1 * std.time.ns_per_min;
+const run_time_ns = 30 * std.time.ns_per_s;
 const tick_ns = 50 * std.time.ns_per_ms;
 const target_tick_count = @divFloor(run_time_ns, tick_ns);
 
@@ -61,34 +61,50 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
 
     // Start workload
-
     const workload = try start_workload(shell, allocator);
 
-    for (0..target_tick_count) |tick| {
-        const duration_ns = tick * tick_ns;
-        if (@rem(duration_ns, std.time.ns_per_s) == 0) {
-            // std.debug.print("supervisor: waited for {d}\n", .{@divExact(duration_ns, std.time.ns_per_s)});
+    // Let it finish by itself, or kill it after `target_tick_count` ticks.
+    const workload_result = term: {
+        for (0..target_tick_count) |tick| {
+            const duration_ns = tick * tick_ns;
+            if (@rem(duration_ns, std.time.ns_per_s) == 0) {
+                // std.debug.print("supervisor: waited for {d}\n", .{@divExact(duration_ns, std.time.ns_per_s)});
+            }
+            if (workload.state == .completed) {
+                break :term try workload.wait();
+            }
+            std.time.sleep(tick_ns);
         }
-        std.time.sleep(tick_ns);
-    }
 
-    const workload_result = try workload.stop();
+        break :term try workload.terminate();
+    };
+
     workload.deinit();
 
     for (replicas) |replica| {
-        _ = try replica.process.stop();
+        _ = try replica.process.terminate();
         replica.process.deinit();
     }
 
     switch (workload_result) {
-        .Exited => |code| std.debug.print("workload exited with code {d}\n", .{code}),
+        .Exited => |code| {
+            if (code == 128 + std.posix.SIG.TERM) {
+                std.debug.print("workload terminated as requested\n", .{});
+            } else if (code >= 128) {
+                const signal = @mod(code, 128);
+                std.debug.print("workload terminated after signal {d}\n", .{signal});
+            } else {
+                std.debug.print("workload exited unexpectedly with code {d}\n", .{code});
+                std.process.exit(1);
+            }
+        },
         else => {},
     }
 }
 
 const LoggedProcess = struct {
     const Self = @This();
-    const State = enum { initial, running, stopped };
+    const State = enum { initial, running, terminated, completed };
     const Options = struct { env: ?*const std.process.EnvMap = null };
 
     // Passed in to init
@@ -103,8 +119,9 @@ const LoggedProcess = struct {
 
     // Lifecycle state
     child: ?std.process.Child = null,
+    stdin_thread: ?std.Thread = null,
     stderr_thread: ?std.Thread = null,
-    state: State,
+    state: State, // TODO: atomic
 
     fn init(
         allocator: std.mem.Allocator,
@@ -145,7 +162,7 @@ const LoggedProcess = struct {
 
         child.cwd = self.cwd;
         child.env_map = self.options.env;
-        child.stdin_behavior = .Ignore;
+        child.stdin_behavior = .Pipe;
         child.stdout_behavior = .Ignore;
         child.stderr_behavior = .Pipe;
 
@@ -156,6 +173,39 @@ const LoggedProcess = struct {
             .{ self.name, try format_argv(self.arena.allocator(), self.argv) },
         );
 
+        // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
+        // on writing to child's stdin to detect if a child is dead in a non-blocking
+        // manner. Checks once a second second in a separate thread.
+        _ = try std.posix.fcntl(
+            child.stdin.?.handle,
+            std.posix.F.SETFL,
+            @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
+        );
+        self.stdin_thread = try std.Thread.spawn(
+            .{},
+            struct {
+                fn poll_broken_pipe(stdin: std.fs.File, process: *Self) void {
+                    while (true) {
+                        std.time.sleep(1 * std.time.ns_per_s);
+                        _ = stdin.write(&.{1}) catch |err| {
+                            switch (err) {
+                                error.WouldBlock => {}, // still running
+                                error.BrokenPipe,
+                                error.NotOpenForWriting,
+                                => {
+                                    process.state = .completed;
+                                    break;
+                                },
+                                else => @panic(@errorName(err)),
+                            }
+                        };
+                    }
+                }
+            }.poll_broken_pipe,
+            .{ child.stdin.?, self },
+        );
+
+        // The child process' stderr is echoed to stderr with a name prefix
         self.stderr_thread = try std.Thread.spawn(
             .{},
             struct {
@@ -181,15 +231,16 @@ const LoggedProcess = struct {
         self.state = .running;
     }
 
-    fn stop(
+    fn terminate(
         self: *Self,
     ) !std.process.Child.Term {
         assert(self.state == .running);
-        defer assert(self.state == .stopped);
+        defer assert(self.state == .terminated);
 
-        std.debug.print("{s}: stopping\n", .{self.name});
+        std.debug.print("{s}: terminating\n", .{self.name});
 
         var child = self.child.?;
+        const stdin_thread = self.stdin_thread.?;
         const stderr_thread = self.stderr_thread.?;
 
         // Terminate the process
@@ -210,17 +261,46 @@ const LoggedProcess = struct {
             );
         };
 
-        // Stop the logging thread
+        // Await threads
+        stdin_thread.join();
         stderr_thread.join();
 
         // Await the terminated process
         const term = child.wait() catch unreachable;
 
-        std.debug.print("{s}: stopped\n", .{self.name});
+        std.debug.print("{s}: terminated\n", .{self.name});
 
         self.child = null;
         self.stderr_thread = null;
-        self.state = .stopped;
+        self.state = .terminated;
+
+        return term;
+    }
+
+    fn wait(
+        self: *Self,
+    ) !std.process.Child.Term {
+        assert(self.state == .running or self.state == .completed);
+        defer assert(self.state == .completed);
+
+        std.debug.print("{s}: awaiting\n", .{self.name});
+
+        var child = self.child.?;
+        const stdin_thread = self.stdin_thread.?;
+        const stderr_thread = self.stderr_thread.?;
+
+        // Wait until the process runs to completion
+        const term = child.wait();
+
+        // Await threads
+        stdin_thread.join();
+        stderr_thread.join();
+
+        std.debug.print("{s}: awaited\n", .{self.name});
+
+        self.child = null;
+        self.stderr_thread = null;
+        self.state = .completed;
 
         return term;
     }
@@ -296,14 +376,14 @@ test "LoggedProcess: starts and stops" {
     // start & stop
     try replica.start();
     std.time.sleep(10 * std.time.ns_per_ms);
-    _ = try replica.stop();
+    _ = try replica.terminate();
 
     std.time.sleep(10 * std.time.ns_per_ms);
 
     // restart & stop
     try replica.start();
     std.time.sleep(10 * std.time.ns_per_ms);
-    _ = try replica.stop();
+    _ = try replica.terminate();
 }
 
 test "format_argv: space-separates slice as a prompt" {

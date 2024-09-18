@@ -21,8 +21,17 @@ public final class Main {
     byte[] clusterID = UInt128.asBytes(Long.parseLong(env.getOrDefault("CLUSTER", "1")));
 
     try (var client = new Client(clusterID, replicaAddresses)) {
+      var workload = new Workload(random, client);
+
+      // Try to gracefully stop on SIGTERM.
+      Runtime.getRuntime().addShutdownHook(new Thread() {
+        public void run() {
+          workload.stop();
+        }
+      });
+
       System.err.println("starting workload");
-      new Workload(random, client).run();
+      workload.run();
     }
   }
 }

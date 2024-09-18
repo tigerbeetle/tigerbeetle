@@ -3,6 +3,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import com.tigerbeetle.AccountFlags;
 import com.tigerbeetle.Client;
@@ -19,6 +20,7 @@ import com.tigerbeetle.TransferFlags;
 public class Workload {
   static int ACCOUNTS_COUNT_MAX = 100;
   static int BATCH_SIZE_MAX = 100;
+  static AtomicBoolean TERMINATED = new AtomicBoolean(false);
 
   Model model = new Model();
   Random random;
@@ -29,11 +31,15 @@ public class Workload {
     this.client = client;
   }
 
+  void stop() {
+    TERMINATED.set(true);
+  }
+
   void run() {
     long commandsFailedCount = 0;
     long commandsSucceededCount = 0;
 
-    for (int n = 0; true; n++) {
+    for (int n = 0; !TERMINATED.get(); n++) {
       var command = randomCommand();
       try {
         var result = command.execute(client);
@@ -66,6 +72,9 @@ public class Workload {
         throw e;
       }
     }
+
+    System.err.print("Finished with %d succeeded, %d failed".formatted(commandsSucceededCount,
+        commandsFailedCount));
   }
 
   Command<?> randomCommand() {
