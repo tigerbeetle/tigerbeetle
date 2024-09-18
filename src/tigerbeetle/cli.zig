@@ -98,7 +98,7 @@ const CLIArgs = union(enum) {
         account_count: usize = 10_000,
         /// The probability distribution used to select accounts when making
         /// transfers or queries.
-        account_distribution: Command.Benchmark.Distribution = .zipfian,
+        account_distribution: Command.Benchmark.Distribution = .uniform,
         account_distribution_debit: Command.Benchmark.DistributionInherited = .inherit,
         account_distribution_credit: Command.Benchmark.DistributionInherited = .inherit,
         account_distribution_query: Command.Benchmark.DistributionInherited = .inherit,
