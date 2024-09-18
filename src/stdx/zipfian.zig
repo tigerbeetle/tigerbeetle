@@ -105,11 +105,13 @@ pub const ZipfianGenerator = struct {
         // Math voodoo, copied from the paper,
         // which doesn't explain it, but claims it is from Knuth volume 3.
 
-        const nf: f64 = @floatFromInt(self.n);
-
         // NB: These depend only on zetan and could be cached for a minor speedup.
         const alpha = 1.0 / (1.0 - self.theta);
-        const eta = (1.0 - math.pow(f64, 2.0 / nf, 1.0 - self.theta)) /
+        const eta = (1.0 - math.pow(
+            f64,
+            2.0 / @as(f64, @floatFromInt(self.n)),
+            1.0 - self.theta,
+        )) /
             (1.0 - zeta(2.0, self.theta) / self.zetan);
 
         const u = rng.float(f64);
@@ -123,7 +125,10 @@ pub const ZipfianGenerator = struct {
             return 1;
         }
 
-        return @as(u64, @intFromFloat(nf * math.pow(f64, (eta * u) - eta + 1.0, alpha)));
+        return @as(u64, @intFromFloat(
+            @as(f64, @floatFromInt(self.n)) *
+                math.pow(f64, (eta * u) - eta + 1.0, alpha),
+        ));
     }
 
     /// Grow the size of the random set.
@@ -140,7 +145,6 @@ pub const ZipfianGenerator = struct {
     /// The probability that an index will be chosen.
     fn probability(self: *const ZipfianGenerator, item: u64) f64 {
         assert(item < self.n);
-        const itemf: f64 = @floatFromInt(item);
 
         // Reference: https://en.wikipedia.org/wiki/Zipf's_law#Formal_definition
         //
@@ -150,7 +154,11 @@ pub const ZipfianGenerator = struct {
         //
         // zetan is the generalized harmonic number of order "s" (theta) for `n`.
         // We add 1 to `k` because our items are 0-based but the math is 1-based.
-        return (1.0 / self.zetan) * (1.0 / math.pow(f64, itemf + 1, self.theta));
+        return (1.0 / self.zetan) * (1.0 / math.pow(
+            f64,
+            @as(f64, @floatFromInt(item)) + 1,
+            self.theta,
+        ));
     }
 
     /// Returns the numbef of items at which the cumulative distribution function (CDF - the
@@ -180,8 +188,7 @@ fn zeta(n: u64, theta: f64) f64 {
     var i: u64 = 1;
     var zeta_sum: f64 = 0.0;
     while (i <= n) : (i += 1) {
-        const ifl: f64 = @floatFromInt(i);
-        zeta_sum += math.pow(f64, 1.0 / ifl, theta);
+        zeta_sum += math.pow(f64, 1.0 / @as(f64, @floatFromInt(i)), theta);
     }
     return zeta_sum;
 }
@@ -197,8 +204,7 @@ fn zeta_incremental(
     var i = n_previous + 1;
     var zeta_sum = zetan_previous;
     while (i <= n_new) : (i += 1) {
-        const ifl: f64 = @floatFromInt(i);
-        zeta_sum += math.pow(f64, 1.0 / ifl, theta);
+        zeta_sum += math.pow(f64, 1.0 / @as(f64, @floatFromInt(i)), theta);
     }
     return zeta_sum;
 }
