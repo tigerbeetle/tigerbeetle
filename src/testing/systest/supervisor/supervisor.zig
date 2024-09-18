@@ -6,10 +6,14 @@ const Shell = @import("../../../shell.zig");
 const assert = std.debug.assert;
 
 const replica_count = 3;
+const replica_ports = [replica_count]u16{ 3000, 3001, 3002 };
+
+const run_time_ns = 1 * std.time.ns_per_min;
+const tick_ns = 50 * std.time.ns_per_ms;
+const target_tick_count = @divFloor(run_time_ns, tick_ns);
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
-    client_command: []const u8,
 };
 
 const Replica = struct {
@@ -18,15 +22,13 @@ const Replica = struct {
 };
 
 pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
-    const ports = [replica_count]u16{ 3000, 3001, 3002 };
-
     const tmp_dir = try shell.create_tmp_dir();
     defer shell.cwd.deleteDir(tmp_dir) catch {};
 
     var replicas: [replica_count]Replica = undefined;
     for (0..replica_count) |i| {
         const name = try shell.fmt("replica {d}", .{i});
-        const datafile = try shell.fmt("{s}/0_{d}.tigerbeetle", .{ tmp_dir, i });
+        const datafile = try shell.fmt("{s}/1_{d}.tigerbeetle", .{ tmp_dir, i });
 
         // Format datafile
         try shell.exec(
@@ -44,7 +46,7 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         // Start replica
         const addresses = try shell.fmt("--addresses={s}", .{
-            try comma_separate_ports(shell.arena.allocator(), &ports),
+            try comma_separate_ports(shell.arena.allocator(), &replica_ports),
         });
         const argv = try shell.arena.allocator().dupe([]const u8, &.{
             args.tigerbeetle_executable,
@@ -52,27 +54,48 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
             addresses,
             datafile,
         });
-        var process = try LoggedProcess.init(allocator, name, argv);
+
+        var process = try LoggedProcess.init(allocator, name, argv, .{});
         replicas[i] = .{ .name = name, .process = process };
         try process.start();
     }
 
-    std.time.sleep(5 * std.time.ns_per_s);
+    // Start workload
+
+    const workload = try start_workload(shell, allocator);
+
+    for (0..target_tick_count) |tick| {
+        const duration_ns = tick * tick_ns;
+        if (@rem(duration_ns, std.time.ns_per_s) == 0) {
+            // std.debug.print("supervisor: waited for {d}\n", .{@divExact(duration_ns, std.time.ns_per_s)});
+        }
+        std.time.sleep(tick_ns);
+    }
+
+    const workload_result = try workload.stop();
+    workload.deinit();
 
     for (replicas) |replica| {
-        try replica.process.stop();
+        _ = try replica.process.stop();
         replica.process.deinit();
+    }
+
+    switch (workload_result) {
+        .Exited => |code| std.debug.print("workload exited with code {d}\n", .{code}),
+        else => {},
     }
 }
 
 const LoggedProcess = struct {
     const Self = @This();
     const State = enum { initial, running, stopped };
+    const Options = struct { env: ?*const std.process.EnvMap = null };
 
     // Passed in to init
     allocator: std.mem.Allocator,
     name: []const u8,
     argv: []const []const u8,
+    options: Options,
 
     // Allocated by init
     arena: std.heap.ArenaAllocator,
@@ -87,21 +110,23 @@ const LoggedProcess = struct {
         allocator: std.mem.Allocator,
         name: []const u8,
         argv: []const []const u8,
+        options: Options,
     ) !*Self {
         var arena = std.heap.ArenaAllocator.init(allocator);
 
         const cwd = try std.process.getCwdAlloc(arena.allocator());
 
-        const replica = try allocator.create(Self);
-        replica.* = .{
+        const process = try allocator.create(Self);
+        process.* = .{
             .allocator = allocator,
             .arena = arena,
             .name = name,
             .cwd = cwd,
             .argv = argv,
+            .options = options,
             .state = .initial,
         };
-        return replica;
+        return process;
     }
 
     fn deinit(self: *Self) void {
@@ -119,6 +144,7 @@ const LoggedProcess = struct {
         var child = std.process.Child.init(self.argv, self.allocator);
 
         child.cwd = self.cwd;
+        child.env_map = self.options.env;
         child.stdin_behavior = .Ignore;
         child.stdout_behavior = .Ignore;
         child.stderr_behavior = .Pipe;
@@ -133,15 +159,15 @@ const LoggedProcess = struct {
         self.stderr_thread = try std.Thread.spawn(
             .{},
             struct {
-                fn log(stderr: std.fs.File, replica: *Self) void {
+                fn log(stderr: std.fs.File, process: *Self) void {
                     while (true) {
                         var buf: [1024]u8 = undefined;
                         const line_opt = stderr.reader().readUntilDelimiterOrEof(&buf, '\n') catch |err| {
-                            std.debug.print("{s}: failed reading stderr: {any}\n", .{ replica.name, err });
+                            std.debug.print("{s}: failed reading stderr: {any}\n", .{ process.name, err });
                             break;
                         };
                         if (line_opt) |line| {
-                            std.debug.print("{s}: {s}\n", .{ replica.name, line });
+                            std.debug.print("{s}: {s}\n", .{ process.name, line });
                         } else {
                             break;
                         }
@@ -157,7 +183,7 @@ const LoggedProcess = struct {
 
     fn stop(
         self: *Self,
-    ) !void {
+    ) !std.process.Child.Term {
         assert(self.state == .running);
         defer assert(self.state == .stopped);
 
@@ -188,15 +214,39 @@ const LoggedProcess = struct {
         stderr_thread.join();
 
         // Await the terminated process
-        _ = child.wait() catch unreachable;
+        const term = child.wait() catch unreachable;
 
         std.debug.print("{s}: stopped\n", .{self.name});
 
         self.child = null;
         self.stderr_thread = null;
         self.state = .stopped;
+
+        return term;
     }
 };
+
+fn start_workload(shell: *Shell, allocator: std.mem.Allocator) !*LoggedProcess {
+    const name = "workload";
+    const client_jar = "src/clients/java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar";
+    const workload_jar = "src/testing/systest/workload/target/workload-0.0.1-SNAPSHOT.jar";
+
+    const class_path = try shell.fmt("{s}:{s}", .{ client_jar, workload_jar });
+    const argv = try shell.arena.allocator().dupe([]const u8, &.{
+        "java",
+        "-ea",
+        "-cp",
+        class_path,
+        "Main",
+    });
+
+    var env = try std.process.getEnvMap(shell.arena.allocator());
+    try env.put("REPLICAS", try comma_separate_ports(shell.arena.allocator(), &replica_ports));
+
+    var process = try LoggedProcess.init(allocator, name, argv, .{ .env = &env });
+    try process.start();
+    return process;
+}
 
 fn format_argv(allocator: std.mem.Allocator, argv: []const []const u8) ![]const u8 {
     assert(argv.len > 0);
@@ -240,20 +290,20 @@ test "LoggedProcess: starts and stops" {
     };
 
     const name = "test program";
-    var replica = try LoggedProcess.init(allocator, name, argv);
+    var replica = try LoggedProcess.init(allocator, name, argv, .{});
     defer replica.deinit();
 
     // start & stop
     try replica.start();
     std.time.sleep(10 * std.time.ns_per_ms);
-    try replica.stop();
+    _ = try replica.stop();
 
     std.time.sleep(10 * std.time.ns_per_ms);
 
     // restart & stop
     try replica.start();
     std.time.sleep(10 * std.time.ns_per_ms);
-    try replica.stop();
+    _ = try replica.stop();
 }
 
 test "format_argv: space-separates slice as a prompt" {
