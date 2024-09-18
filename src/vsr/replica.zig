@@ -708,7 +708,7 @@ pub fn ReplicaType(
                 }
             } else {
                 // This case can occur if we loaded an SV for its hook header but never finished
-                // that SV to a DVC (dropping the hooks), but never finished the view change.
+                // that SV to a DVC (dropping the hooks), and never finished the view change.
                 if (op_head == null) {
                     assert(self.view > self.log_view);
                     op_head = self.journal.op_maximum();
@@ -744,21 +744,21 @@ pub fn ReplicaType(
                     self.transition_to_normal_from_recovering_status();
                 }
             } else {
-                // Even if op_head_certain() returns false, a DVC always has a certain head op.
-                if (self.log_view == self.view and !self.op_head_certain()) {
-                    self.transition_to_recovering_head_from_recovering_status();
-                } else {
-                    if (self.log_view == self.view) {
+                if (self.log_view == self.view) {
+                    if (self.op_head_certain()) {
                         if (self.primary_index(self.view) == self.replica) {
                             self.transition_to_view_change_status(self.view + 1);
                         } else {
                             self.transition_to_normal_from_recovering_status();
                         }
                     } else {
-                        assert(self.view > self.log_view);
-                        assert(self.op >= self.op_checkpoint());
-                        self.transition_to_view_change_status(self.view);
+                        self.transition_to_recovering_head_from_recovering_status();
                     }
+                } else {
+                    // Even if op_head_certain() returns false, a DVC always has a certain head op.
+                    assert(self.view > self.log_view);
+                    assert(self.op >= self.op_checkpoint());
+                    self.transition_to_view_change_status(self.view);
                 }
             }
 
@@ -4257,23 +4257,28 @@ pub fn ReplicaType(
             // The only exception to this is a replica that arrived at a checkpoint via state
             // sync.
             if (self.view == self.log_view) {
-                // Unconditionally convert potential primary's DVC headers -> SV headers; they
-                // may contain truncated ops. For all other cases, update SV headers only
-                // if they aren't already up to date.
+                // Unconditionally convert potential primary's DVC headers → SV headers; the DVC
+                // headers may contain truncated ops which should not be made durable. For all other
+                // cases, update SV headers only if they aren't already up to date.
                 if ((self.status == .view_change and
                     self.primary_index(self.view) == self.replica) or
-                    self.view_headers.array.get(0).op < self.op)
+                    self.view_headers.array.get(0).op < self.op_checkpoint_next_trigger())
                 {
                     self.view_headers.command = .start_view;
                     self.update_start_view_headers();
-                    assert(self.view_headers.array.get(0).op == self.op);
                 }
+                assert(self.view_headers.command == .start_view);
+                assert(self.view_headers.array.get(0).op >= self.op_checkpoint_next_trigger());
+            } else {
+                // Replica moved to a future view before checkpoint completed; no need to update its
+                // headers, it would've stored its head op in its DVC headers while moving to
+                // view_change.
+                assert(self.view_headers.command == .do_view_change);
+                assert(self.view_headers.array.get(0).op >= self.op);
             }
 
-            assert(self.view_headers.array.get(0).op >= self.op);
-
             log.debug("{}: commit_checkpoint_superblock: checkpoint_superblock start " ++
-                "(op={} current_checkpoint={} next_checkpoint={} view_durable={}..{} " ++
+                "(op={} checkpoint={}..{} view_durable={}..{} " ++
                 "log_view_durable={}..{})", .{
                 self.replica,
                 self.op,
@@ -4838,33 +4843,35 @@ pub fn ReplicaType(
         }
 
         fn update_start_view_headers(self: *Self) void {
+            assert(self.status != .recovering_head);
+            assert(self.view == self.log_view);
             assert(self.view_headers.command == .start_view);
+
             self.view_headers.array.clear();
 
-            const op_hash_chain_verified = if (self.status == .normal and self.primary())
+            // Primaries/potential primaries are guaranteed to have no gaps between commit_min and
+            // self.op in their journal, while backups are not (they may have not received some
+            // prepares yet).
+            const op_head_no_gaps = if (self.primary_index(self.view) == self.replica)
                 self.op
             else
                 self.commit_min;
 
-            var op = self.op + 1;
+            var op = op_head_no_gaps + 1;
             while (op > 0 and
                 self.view_headers.array.count() < constants.view_change_headers_suffix_max)
             {
                 op -= 1;
-                if (self.journal.header_with_op(op)) |header| {
-                    self.view_headers.append(header);
-                } else {
-                    self.view_headers.append_blank(op);
-                }
+                self.view_headers.append(self.journal.header_with_op(op).?);
             }
             assert(self.view_headers.array.count() + 2 <= constants.view_change_headers_max);
 
             // Determine the consecutive extent of the log that we can help recover.
             // This may precede op_repair_min if we haven't had a view-change recently.
-            const range_min = (op_hash_chain_verified + 1) -| constants.journal_slot_count;
+            const range_min = (op_head_no_gaps + 1) -| constants.journal_slot_count;
             const range = self.journal.find_latest_headers_break_between(
                 range_min,
-                op_hash_chain_verified,
+                op_head_no_gaps,
             );
             const op_min = if (range) |r| r.op_max + 1 else range_min;
             assert(op_min <= op);
@@ -8037,6 +8044,7 @@ pub fn ReplicaType(
         }
 
         fn primary_send_start_view_after_view_change(self: *Self) void {
+            assert(self.status == .normal);
             assert(self.primary());
             // Only replies to `request_start_view` need a nonce,
             // to guarantee freshness of the message.
@@ -8393,7 +8401,6 @@ pub fn ReplicaType(
             // and log_view may already be durable if checkpoint was advanced during repair.
             if (self.log_view > self.log_view_durable()) {
                 assert(self.view_durable_updating());
-                assert(self.log_view > self.log_view_durable());
             } else {
                 assert(self.log_view == self.log_view_durable());
                 self.primary_send_start_view_after_view_change();
