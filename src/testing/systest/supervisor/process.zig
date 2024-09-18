@@ -5,7 +5,8 @@ const assert = std.debug.assert;
 
 pub const LoggedProcess = struct {
     const Self = @This();
-    const State = enum { initial, running, terminated, completed };
+    const State = enum(u8) { initial, running, terminated, completed };
+    const AtomicState = std.atomic.Value(State);
     const Options = struct { env: ?*const std.process.EnvMap = null };
 
     // Passed in to init
@@ -22,7 +23,11 @@ pub const LoggedProcess = struct {
     child: ?std.process.Child = null,
     stdin_thread: ?std.Thread = null,
     stderr_thread: ?std.Thread = null,
-    state: State, // TODO: atomic
+    current_state: AtomicState,
+
+    pub fn state(self: *Self) State {
+        return self.current_state.load(.seq_cst);
+    }
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -42,7 +47,7 @@ pub const LoggedProcess = struct {
             .cwd = cwd,
             .argv = argv,
             .options = options,
-            .state = .initial,
+            .current_state = AtomicState.init(.initial),
         };
         return process;
     }
@@ -56,8 +61,8 @@ pub const LoggedProcess = struct {
     pub fn start(
         self: *Self,
     ) !void {
-        assert(self.state != .running);
-        defer assert(self.state == .running);
+        assert(self.state() != .running);
+        defer assert(self.state() == .running);
 
         var child = std.process.Child.init(self.argv, self.allocator);
 
@@ -94,7 +99,7 @@ pub const LoggedProcess = struct {
                                 error.BrokenPipe,
                                 error.NotOpenForWriting,
                                 => {
-                                    process.state = .completed;
+                                    process.current_state.store(.completed, .seq_cst);
                                     break;
                                 },
                                 else => @panic(@errorName(err)),
@@ -129,14 +134,14 @@ pub const LoggedProcess = struct {
         );
 
         self.child = child;
-        self.state = .running;
+        self.current_state.store(.running, .seq_cst);
     }
 
     pub fn terminate(
         self: *Self,
     ) !std.process.Child.Term {
-        assert(self.state == .running);
-        defer assert(self.state == .terminated);
+        assert(self.state() == .running);
+        defer assert(self.state() == .terminated);
 
         var child = self.child.?;
         const stdin_thread = self.stdin_thread.?;
@@ -169,7 +174,7 @@ pub const LoggedProcess = struct {
 
         self.child = null;
         self.stderr_thread = null;
-        self.state = .terminated;
+        self.current_state.store(.terminated, .seq_cst);
 
         return term;
     }
@@ -177,8 +182,8 @@ pub const LoggedProcess = struct {
     pub fn wait(
         self: *Self,
     ) !std.process.Child.Term {
-        assert(self.state == .running or self.state == .completed);
-        defer assert(self.state == .completed);
+        assert(self.state() == .running or self.state() == .completed);
+        defer assert(self.state() == .completed);
 
         var child = self.child.?;
         const stdin_thread = self.stdin_thread.?;
@@ -193,7 +198,7 @@ pub const LoggedProcess = struct {
 
         self.child = null;
         self.stderr_thread = null;
-        self.state = .completed;
+        self.current_state.store(.completed, .seq_cst);
 
         return term;
     }

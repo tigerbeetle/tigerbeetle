@@ -71,7 +71,7 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
             if (@rem(duration_ns, std.time.ns_per_s) == 0) {
                 // std.debug.print("supervisor: waited for {d}\n", .{@divExact(duration_ns, std.time.ns_per_s)});
             }
-            if (workload.state == .completed) {
+            if (workload.state() == .completed) {
                 std.debug.print("supervisor: workload completed by itself\n", .{});
                 break :term try workload.wait();
             }
