@@ -4252,30 +4252,25 @@ pub fn ReplicaType(
                 log.info("{}: sync: done", .{self.replica});
             }
 
-            // view_headers for solo replicas do not include ops that are not durable in their
-            // journal.
-            if (self.solo()) {
-                maybe(self.view_headers.array.get(0).op < self.op);
-            } else {
-                // Update view_headers to include at least one op from the future checkpoint. This
-                // ensures a replica never starts with its head op less than self.op_checkpoint().
-                // The only exception to this is a replica that arrived at a checkpoint via state
-                // sync.
-                if (self.view == self.log_view) {
-                    // Unconditionally convert potential primary's DVC headers -> SV headers; they
-                    // may contain truncated ops. For all other cases, update SV headers only
-                    // if they aren't already up to date.
-                    if ((self.status == .view_change and
-                        self.primary_index(self.view) == self.replica) or
-                        self.view_headers.array.get(0).op < self.op)
-                    {
-                        self.view_headers.command = .start_view;
-                        self.update_start_view_headers();
-                        assert(self.view_headers.array.get(0).op == self.op);
-                    }
+            // Update view_headers to include at least one op from the future checkpoint. This
+            // ensures a replica never starts with its head op less than self.op_checkpoint().
+            // The only exception to this is a replica that arrived at a checkpoint via state
+            // sync.
+            if (self.view == self.log_view) {
+                // Unconditionally convert potential primary's DVC headers -> SV headers; they
+                // may contain truncated ops. For all other cases, update SV headers only
+                // if they aren't already up to date.
+                if ((self.status == .view_change and
+                    self.primary_index(self.view) == self.replica) or
+                    self.view_headers.array.get(0).op < self.op)
+                {
+                    self.view_headers.command = .start_view;
+                    self.update_start_view_headers();
+                    assert(self.view_headers.array.get(0).op == self.op);
                 }
-                assert(self.view_headers.array.get(0).op >= self.op);
             }
+
+            assert(self.view_headers.array.get(0).op >= self.op);
 
             log.debug("{}: commit_checkpoint_superblock: checkpoint_superblock start " ++
                 "(op={} current_checkpoint={} next_checkpoint={} view_durable={}..{} " ++
@@ -4294,10 +4289,17 @@ pub fn ReplicaType(
                 &self.superblock_context,
                 .{
                     .header = self.journal.header_with_op(vsr_state_commit_min).?.*,
-                    .view_attributes = .{
-                        .headers = &self.view_headers,
-                        .view = self.view,
-                        .log_view = self.log_view,
+                    .view_attributes = view_attributes: {
+                        // view_headers for solo replicas do not include ops that are not durable in
+                        // their journal.
+                        break :view_attributes if (self.solo())
+                            null
+                        else
+                            .{
+                                .headers = &self.view_headers,
+                                .view = self.view,
+                                .log_view = self.log_view,
+                            };
                     },
                     .commit_max = self.commit_max,
                     .sync_op_min = sync_op_min,
