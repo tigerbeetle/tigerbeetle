@@ -516,6 +516,11 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     forest.compaction_pipeline.block_pool_raw.len);
             }
 
+            // Groove sync compaction - must be done after all async work for the beat completes???
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).compact(op);
+            }
+
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
             // of pacing.
             if (last_beat) {
@@ -535,11 +540,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 // reset our pipeline state.
                 assert(forest.compaction_pipeline.bar_active.count() == 0);
                 forest.compaction_pipeline.compactions.clear();
-            }
-
-            // Groove sync compaction - must be done after all async work for the beat completes???
-            inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).compact(op);
             }
 
             // On the last beat of the bar, make sure that manifest log compaction is finished.

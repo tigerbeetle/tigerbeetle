@@ -3,6 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
+const constants = @import("../constants.zig");
 const binary_search = @import("binary_search.zig");
 
 pub fn TableMemoryType(comptime Table: type) type {
@@ -19,7 +20,9 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         const Mutability = union(enum) {
-            mutable,
+            mutable: struct {
+                suffix_offset: u32 = 0,
+            },
             immutable: struct {
                 /// An empty table has nothing to flush
                 flushed: bool = true,
@@ -46,7 +49,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             table.* = .{
                 .value_context = .{},
                 .mutability = switch (mutability) {
-                    .mutable => .mutable,
+                    .mutable => .{ .mutable = .{} },
                     .immutable => .{ .immutable = .{} },
                 },
                 .name = name,
@@ -65,7 +68,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn reset(table: *TableMemory) void {
             const mutability: Mutability = switch (table.mutability) {
                 .immutable => .{ .immutable = .{} },
-                .mutable => .mutable,
+                .mutable => .{ .mutable = .{} },
             };
 
             table.* = .{
@@ -139,21 +142,53 @@ pub fn TableMemoryType(comptime Table: type) type {
             table.* = .{
                 .values = table.values,
                 .value_context = .{},
-                .mutability = .mutable,
+                .mutability = .{ .mutable = .{} },
                 .name = table.name,
             };
         }
 
         pub fn sort(table: *TableMemory) void {
+            assert(table.mutability == .mutable);
+
             if (!table.value_context.sorted) {
-                std.mem.sort(
-                    Value,
-                    table.values_used(),
-                    {},
-                    sort_values_by_key_in_ascending_order,
-                );
+                table.sort_suffix_from_offset(0);
                 table.value_context.sorted = true;
             }
+        }
+
+        pub fn sort_suffix(table: *TableMemory) void {
+            assert(table.mutability == .mutable);
+            assert(table.mutability.mutable.suffix_offset <= table.count());
+
+            table.sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
+
+            assert(table.mutability.mutable.suffix_offset == table.count());
+        }
+
+        fn sort_suffix_from_offset(table: *TableMemory, offset: u32) void {
+            assert(table.mutability == .mutable);
+            assert(offset == table.mutability.mutable.suffix_offset or offset == 0);
+            assert(offset <= table.count());
+
+            std.mem.sort(
+                Value,
+                table.values_used()[offset..],
+                {},
+                sort_values_by_key_in_ascending_order,
+            );
+
+            if (constants.verify) {
+                if (offset < table.count()) {
+                    for (
+                        table.values[offset .. table.count() - 1],
+                        table.values[offset + 1 .. table.count()],
+                    ) |*value, *value_next| {
+                        assert(key_from_value(value) <= key_from_value(value_next));
+                    }
+                }
+            }
+
+            table.mutability = .{ .mutable = .{ .suffix_offset = table.count() } };
         }
 
         fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {

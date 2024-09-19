@@ -502,6 +502,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             maybe(tree.key_range == null);
         }
 
+        pub fn compact(tree: *Tree) void {
+            assert(tree.table_mutable.mutability == .mutable);
+
+            // Spreads sort+deduplication work between beats, to avoid a latency spike at the end of
+            // each bar (or immediately prior to scans).
+            tree.table_mutable.sort_suffix();
+        }
+
         /// Called after the last beat of a full compaction bar, by the compaction instance.
         pub fn swap_mutable_and_immutable(tree: *Tree, snapshot_min: u64) void {
             assert(tree.table_mutable.mutability == .mutable);
