@@ -1,12 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const log = @import("./log.zig");
+const log = std.log.default;
 
 const assert = std.debug.assert;
 
 pub const LoggedProcess = struct {
     const Self = @This();
-    const State = enum(u8) { initial, running, terminated, completed };
+    pub const State = enum(u8) { initial, running, terminated, completed };
     const AtomicState = std.atomic.Value(State);
     const Options = struct { env: ?*const std.process.EnvMap = null };
 

@@ -3,29 +3,27 @@ const builtin = @import("builtin");
 const flags = @import("../../../flags.zig");
 const Shell = @import("../../../shell.zig");
 const LoggedProcess = @import("./process.zig").LoggedProcess;
-const log = @import("./log.zig");
+const Replica = @import("./replica.zig");
+const Nemesis = @import("./nemesis.zig");
+const log = std.log.default;
 
 const assert = std.debug.assert;
 
 const replica_count = 3;
 const replica_ports = [replica_count]u16{ 3000, 3001, 3002 };
 
-const run_time_ns = 30 * std.time.ns_per_s;
-const tick_ns = 50 * std.time.ns_per_ms;
-const target_tick_count = @divFloor(run_time_ns, tick_ns);
-
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
-};
-
-const Replica = struct {
-    name: []const u8,
-    process: *LoggedProcess,
+    test_duration_minutes: u16 = 10,
 };
 
 pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     const tmp_dir = try shell.create_tmp_dir();
     defer shell.cwd.deleteDir(tmp_dir) catch {};
+
+    log.info("supervisor: starting test with target runtime of {d}m", .{args.test_duration_minutes});
+    const test_duration_ns = @as(u64, @intCast(args.test_duration_minutes)) * std.time.ns_per_min;
+    const time_start = std.time.nanoTimestamp();
 
     var replicas: [replica_count]Replica = undefined;
     for (0..replica_count) |i| {
@@ -58,25 +56,27 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
         });
 
         var process = try LoggedProcess.init(allocator, name, argv, .{});
-        replicas[i] = .{ .name = name, .process = process };
+        replicas[i] = .{ .name = name, .port = replica_ports[i], .process = process };
         try process.start();
     }
 
     // Start workload
     const workload = try start_workload(shell, allocator);
 
-    // Let it finish by itself, or kill it after `target_tick_count` ticks.
+    // Start nemesis (fault injector)
+    var prng = std.rand.DefaultPrng.init(0);
+    const nemesis = try Nemesis.init(allocator, prng.random(), &replicas);
+    defer nemesis.deinit();
+
+    // Let the workload finish by itself, or kill it after we've run for the required duration.
+    // Note that the nemesis is blocking in this loop.
     const workload_result = term: {
-        for (0..target_tick_count) |tick| {
-            const duration_ns = tick * tick_ns;
-            if (@rem(duration_ns, std.time.ns_per_s) == 0) {
-                // log.info("supervisor: waited for {d}", .{@divExact(duration_ns, std.time.ns_per_s)});
-            }
+        while (std.time.nanoTimestamp() - time_start < test_duration_ns) {
+            try nemesis.wreak_havoc();
             if (workload.state() == .completed) {
                 log.info("supervisor: workload completed by itself", .{});
                 break :term try workload.wait();
             }
-            std.time.sleep(tick_ns);
         }
 
         log.info("supervisor: terminating workload due to max duration", .{});
