@@ -1581,18 +1581,14 @@ pub fn CompactionType(
 
             var source = bar.table_info_a.immutable;
             assert(source.len > 0);
+            assert(target.len > 0);
 
             // TODO Don't copy this, just use directly.
             const count = @min(target.len, source.len);
+            assert(count > 0);
+
             stdx.copy_disjoint(.exact, Value, target[0..count], source[0..count]);
-
-            bar.table_info_a.immutable =
-                bar.table_info_a.immutable[count..];
-
-            if (count == 0) {
-                assert(Table.usage == .secondary_index);
-                return 0;
-            }
+            bar.table_info_a.immutable = bar.table_info_a.immutable[count..];
 
             if (constants.verify) {
                 // The immutable table's keys must be strictly increasing.
@@ -1604,8 +1600,6 @@ pub fn CompactionType(
                     assert(key_from_value(value_next) > key_from_value(value));
                 }
             }
-
-            assert(count > 0);
             return count;
         }
 
