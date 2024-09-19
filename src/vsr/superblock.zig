@@ -881,6 +881,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.sync_op_max = update.sync_op_max;
             vsr_state.sync_view = 0;
             if (update.view_attributes) |*view_attributes| {
+                assert(view_attributes.log_view <= view_attributes.view);
+                view_attributes.headers.verify();
                 vsr_state.log_view = view_attributes.log_view;
                 vsr_state.view = view_attributes.view;
             }

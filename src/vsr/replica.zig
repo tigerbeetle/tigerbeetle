@@ -4849,9 +4849,14 @@ pub fn ReplicaType(
 
             self.view_headers.array.clear();
 
-            // Primaries/potential primaries are guaranteed to have no gaps between commit_min and
-            // self.op in their journal, while backups are not (they may have not received some
-            // prepares yet).
+            // All replicas are guaranteed to have no gaps in their headers between op_checkpoint
+            // and commit_min. Between commit_min and self.op:
+            // * The primary is guaranteed to have no gaps.
+            // * A potential primary in .view_change status is guaranteed to have no gaps, since we
+            //   only start committing *after* we have the hash chain intact up to self.op
+            //   (see `repair`).
+            // * Backups are not guaranteed to have no gaps, they may have not received some
+            //   prepares yet.
             const op_head_no_gaps = if (self.primary_index(self.view) == self.replica)
                 self.op
             else
