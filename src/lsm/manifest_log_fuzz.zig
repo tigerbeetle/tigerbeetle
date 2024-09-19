@@ -490,7 +490,7 @@ const Environment = struct {
                     header.set_checksum();
                     break :header header;
                 },
-
+                .view_attributes = null,
                 .manifest_references = env.manifest_log.checkpoint_references(),
                 .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
                 .client_sessions_reference = .{

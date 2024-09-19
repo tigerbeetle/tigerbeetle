@@ -1099,7 +1099,7 @@ pub const Simulator = struct {
 
         if (replica.status == .recovering_head) {
             // Even with faults disabled, a replica may wind up in status=recovering_head.
-            assert(fault or replica.op < replica.op_checkpoint() or header_prepare_view_mismatch);
+            assert(fault or header_prepare_view_mismatch);
         }
 
         replica_storage.faulty = true;

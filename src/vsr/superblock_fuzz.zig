@@ -440,6 +440,7 @@ const Environment = struct {
                 .newest_address = 0,
                 .block_count = 0,
             },
+            .view_attributes = null,
             .free_set_reference = .{
                 .last_block_checksum = 0,
                 .last_block_address = 0,

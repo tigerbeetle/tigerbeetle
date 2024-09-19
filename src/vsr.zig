@@ -1438,27 +1438,18 @@ const ViewChangeHeadersArray = struct {
     array: Headers.Array,
 
     pub fn root(cluster: u128) ViewChangeHeadersArray {
-        return ViewChangeHeadersArray.init_from_slice(.start_view, &.{
+        return ViewChangeHeadersArray.init(.start_view, &.{
             Header.Prepare.root(cluster),
         });
     }
 
-    pub fn init_from_slice(
+    pub fn init(
         command: ViewChangeCommand,
         slice: []const Header.Prepare,
     ) ViewChangeHeadersArray {
         const headers = ViewChangeHeadersArray{
             .command = command,
             .array = Headers.Array.from_slice(slice) catch unreachable,
-        };
-        headers.verify();
-        return headers;
-    }
-
-    fn init_from_array(command: ViewChangeCommand, array: Headers.Array) ViewChangeHeadersArray {
-        const headers = ViewChangeHeadersArray{
-            .command = command,
-            .array = array,
         };
         headers.verify();
         return headers;
