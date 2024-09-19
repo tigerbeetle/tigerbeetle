@@ -32,7 +32,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const flags = @import("../../../flags.zig");
 const Shell = @import("../../../shell.zig");
-const LoggedProcess = @import("./process.zig").LoggedProcess;
+const LoggedProcess = @import("./logged_process.zig");
 const Replica = @import("./replica.zig");
 const Nemesis = @import("./nemesis.zig");
 const log = std.log.default;
@@ -100,10 +100,6 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     var prng = std.rand.DefaultPrng.init(0);
     const nemesis = try Nemesis.init(shell, allocator, prng.random(), &replicas);
     defer nemesis.deinit();
-
-    if (true) {
-        @panic("uh oh");
-    }
 
     // Let the workload finish by itself, or kill it after we've run for the required duration.
     // Note that the nemesis is blocking in this loop.
@@ -186,7 +182,7 @@ fn comma_separate_ports(allocator: std.mem.Allocator, ports: []const u16) ![]con
     return out.toOwnedSlice();
 }
 
-test "comma-separates ports" {
+test comma_separate_ports {
     const formatted = try comma_separate_ports(std.testing.allocator, &.{ 3000, 3001, 3002 });
     defer std.testing.allocator.free(formatted);
 

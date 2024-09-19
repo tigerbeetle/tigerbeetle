@@ -1,7 +1,7 @@
 const std = @import("std");
 const Shell = @import("../../../shell.zig");
 const Replica = @import("./replica.zig");
-const LoggedProcess = @import("./process.zig").LoggedProcess;
+const LoggedProcess = @import("./logged_process.zig");
 
 const assert = std.debug.assert;
 const log = std.log.default;
