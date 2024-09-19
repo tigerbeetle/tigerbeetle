@@ -1,3 +1,33 @@
+//! The systest supervisor is a script that runs:
+//!
+//! * a set of TigerBeetle replicas, forming a cluster
+//! * a workload that runs commands and queries against the cluster, verifying its correctness
+//!   (whatever that means is up to the workload)
+//! * a nemesis, which injects various kinds of _faults_.
+//!
+//! Right now the replicas and workload run as child processes, while the nemesis wreaks havoc
+//! in the main loop. After some (configurable) amount of time, the supervisor terminates the
+//! workload and replicas, unless the workload exits on its own.
+//!
+//! If the workload exits successfully, or is actively terminated, the whole systest exits
+//! successfully.
+//!
+//! To launch a test, run this command from the repository root:
+//!
+//!     $ unshare --user  -f --pid zig build scripts -- systest --tigerbeetle-executable=./tigerbeetle
+//!
+//! To capture its logs, for instance to run grep afterwards, redirect stderr to a file.
+//!
+//!     $ unshare --user  -f --pid zig build scripts -- systest --tigerbeetle-executable=./tigerbeetle 2> /tmp/systest.log
+//!
+//! TODO:
+//!
+//! * build tigerbeetle at start of script
+//! * full partitioning
+//! * better workload(s)
+//! * filesystem fault injection?
+//! * cluster membership changes?
+
 const std = @import("std");
 const builtin = @import("builtin");
 const flags = @import("../../../flags.zig");
@@ -20,10 +50,6 @@ pub const CLIArgs = struct {
 pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     const tmp_dir = try shell.create_tmp_dir();
     defer shell.cwd.deleteDir(tmp_dir) catch {};
-
-    // Force sudo password prompt at the beginning.
-    try std.io.getStdOut().writeAll("The nemesis requires sudo privileges.\n");
-    assert(std.mem.eql(u8, try shell.exec_stdout("sudo echo ok", .{}), "ok"));
 
     log.info("supervisor: starting test with target runtime of {d}m", .{args.test_duration_minutes});
     const test_duration_ns = @as(u64, @intCast(args.test_duration_minutes)) * std.time.ns_per_min;
@@ -74,6 +100,10 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     var prng = std.rand.DefaultPrng.init(0);
     const nemesis = try Nemesis.init(shell, allocator, prng.random(), &replicas);
     defer nemesis.deinit();
+
+    if (true) {
+        @panic("uh oh");
+    }
 
     // Let the workload finish by itself, or kill it after we've run for the required duration.
     // Note that the nemesis is blocking in this loop.

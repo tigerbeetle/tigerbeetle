@@ -178,7 +178,7 @@ fn netem_sync(self: *Self) !bool {
 
     self.shell.exec_options(
         .{ .echo = false },
-        "sudo tc qdisc replace dev lo root netem {args}",
+        "tc qdisc replace dev lo root netem {args}",
         .{ .args = all_args.items },
     ) catch return false;
 
@@ -188,7 +188,7 @@ fn netem_sync(self: *Self) !bool {
 fn network_netem_delete_all(self: *Self) !void {
     try self.shell.exec_options(
         .{ .echo = false },
-        "sudo tc qdisc del dev lo root",
+        "tc qdisc del dev lo root",
         .{},
     );
 }
