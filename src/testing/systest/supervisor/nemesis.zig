@@ -65,13 +65,21 @@ pub fn wreak_havoc(self: *Self) !bool {
         .terminate_replica => return try self.terminate_replica(),
         .restart_replica => return try self.restart_replica(),
         .network_delay_add => {
+            const delay_ms = self.random.intRangeAtMost(u16, 50, 1000);
             return try self.netem_rules_add(.delay, &.{
-                "50ms",
+                try self.shell.fmt("{d}ms", .{delay_ms}),
+                try self.shell.fmt("{d}ms", .{@divFloor(delay_ms, 10)}),
+                "distribution",
+                "normal",
             });
         },
         .network_deplay_remove => return try self.netem_rules_delete(.delay),
         .network_loss_add => {
-            return try self.netem_rules_add(.loss, &.{ "20%", "75%" });
+            const loss_pct = self.random.intRangeAtMost(u16, 20, 100);
+            return try self.netem_rules_add(.loss, &.{
+                try self.shell.fmt("{d}%", .{loss_pct}),
+                "75%",
+            });
         },
         .network_loss_remove => return try self.netem_rules_delete(.loss),
         .sleep => {
