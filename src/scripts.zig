@@ -22,7 +22,7 @@ const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const changelog = @import("./scripts/changelog.zig");
 const antithesis = @import("./scripts/antithesis.zig");
-const supervisor = @import("./testing/systest/supervisor/supervisor.zig");
+const systest = @import("./testing/systest/supervisor/systest.zig");
 
 const CLIArgs = union(enum) {
     cfo: cfo.CLIArgs,
@@ -31,7 +31,7 @@ const CLIArgs = union(enum) {
     devhub: devhub.CLIArgs,
     changelog: void,
     antithesis: antithesis.CLIArgs,
-    systest: supervisor.CLIArgs,
+    systest: systest.CLIArgs,
 
     pub const help =
         \\Usage:
@@ -92,6 +92,6 @@ pub fn main() !void {
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
         .changelog => try changelog.main(shell, gpa),
         .antithesis => |args_antithesis| try antithesis.main(shell, gpa, args_antithesis),
-        .systest => |args_systest| try supervisor.main(shell, gpa, args_systest),
+        .systest => |args_systest| try systest.main(shell, gpa, args_systest),
     }
 }
