@@ -21,6 +21,10 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     const tmp_dir = try shell.create_tmp_dir();
     defer shell.cwd.deleteDir(tmp_dir) catch {};
 
+    // Force sudo password prompt at the beginning.
+    try std.io.getStdOut().writeAll("The nemesis requires sudo privileges.\n");
+    assert(std.mem.eql(u8, try shell.exec_stdout("sudo echo ok", .{}), "ok"));
+
     log.info("supervisor: starting test with target runtime of {d}m", .{args.test_duration_minutes});
     const test_duration_ns = @as(u64, @intCast(args.test_duration_minutes)) * std.time.ns_per_min;
     const time_start = std.time.nanoTimestamp();
@@ -56,23 +60,30 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
         });
 
         var process = try LoggedProcess.init(allocator, name, argv, .{});
+        errdefer process.deinit();
+
         replicas[i] = .{ .name = name, .port = replica_ports[i], .process = process };
         try process.start();
     }
 
     // Start workload
     const workload = try start_workload(shell, allocator);
+    errdefer workload.deinit();
 
     // Start nemesis (fault injector)
     var prng = std.rand.DefaultPrng.init(0);
-    const nemesis = try Nemesis.init(allocator, prng.random(), &replicas);
+    const nemesis = try Nemesis.init(shell, allocator, prng.random(), &replicas);
     defer nemesis.deinit();
 
     // Let the workload finish by itself, or kill it after we've run for the required duration.
     // Note that the nemesis is blocking in this loop.
     const workload_result = term: {
         while (std.time.nanoTimestamp() - time_start < test_duration_ns) {
-            try nemesis.wreak_havoc();
+            // Try to do something funky in the nemesis, and if it fails, wait for a while
+            // before trying again.
+            if (!try nemesis.wreak_havoc()) {
+                std.time.sleep(100 * std.time.ns_per_ms);
+            }
             if (workload.state() == .completed) {
                 log.info("supervisor: workload completed by itself", .{});
                 break :term try workload.wait();
