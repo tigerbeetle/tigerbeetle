@@ -111,6 +111,7 @@ pub const Event = union(enum) {
     compact_blip_write,
     compact_manifest,
     compact_mutable,
+    compact_mutable_suffix,
 
     lookup,
     lookup_worker: struct { index: u8 },
@@ -149,6 +150,7 @@ pub const Event = union(enum) {
         .compact_blip_write = 1,
         .compact_manifest = 1,
         .compact_mutable = 1,
+        .compact_mutable_suffix = 1,
         .lookup = 1,
         .lookup_worker = constants.grid_iops_read_max,
         .scan_tree = constants.lsm_scans_max,

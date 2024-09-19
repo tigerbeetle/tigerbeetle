@@ -505,6 +505,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn compact(tree: *Tree) void {
             assert(tree.table_mutable.mutability == .mutable);
 
+            tree.grid.trace.start(.compact_mutable_suffix, .{ .tree = tree.config.name });
+            defer tree.grid.trace.stop(.compact_mutable_suffix, .{ .tree = tree.config.name });
+
             // Spreads sort+deduplication work between beats, to avoid a latency spike at the end of
             // each bar (or immediately prior to scans).
             tree.table_mutable.sort_suffix();
