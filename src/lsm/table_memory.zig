@@ -35,7 +35,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn init(
             table: *TableMemory,
             allocator: mem.Allocator,
-            mutability: Mutability,
+            mutability: std.meta.Tag(Mutability),
             name: []const u8,
             options: struct {
                 value_count_limit: u32,
@@ -45,7 +45,10 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .value_context = .{},
-                .mutability = mutability,
+                .mutability = switch (mutability) {
+                    .mutable => .mutable,
+                    .immutable => .{ .immutable = .{} },
+                },
                 .name = name,
 
                 .values = undefined,

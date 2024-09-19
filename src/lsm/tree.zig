@@ -137,12 +137,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             });
             errdefer tree.table_mutable.deinit(allocator);
 
-            try tree.table_immutable.init(
-                allocator,
-                .{ .immutable = .{} },
-                config.name,
-                .{ .value_count_limit = value_count_limit },
-            );
+            try tree.table_immutable.init(allocator, .immutable, config.name, .{
+                .value_count_limit = value_count_limit,
+            });
             errdefer tree.table_immutable.deinit(allocator);
 
             try tree.manifest.init(allocator, node_pool, config);
