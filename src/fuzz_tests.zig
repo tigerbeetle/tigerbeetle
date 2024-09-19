@@ -27,7 +27,6 @@ const Fuzzers = .{
     .lsm_cache_map = @import("./lsm/cache_map_fuzz.zig"),
     .lsm_forest = @import("./lsm/forest_fuzz.zig"),
     .lsm_manifest_log = @import("./lsm/manifest_log_fuzz.zig"),
-    // TODO: This one currently doesn't compile.
     .lsm_manifest_level = @import("./lsm/manifest_level_fuzz.zig"),
     .lsm_segmented_array = @import("./lsm/segmented_array_fuzz.zig"),
     .lsm_tree = @import("./lsm/tree_fuzz.zig"),
