@@ -14,11 +14,15 @@
 //!
 //! To launch a test, run this command from the repository root:
 //!
-//!     $ unshare --user  -f --pid zig build scripts -- systest --tigerbeetle-executable=./tigerbeetle
+//!     $ unshare -nfr zig build scripts -- systest --tigerbeetle-executable=./tigerbeetle
 //!
 //! To capture its logs, for instance to run grep afterwards, redirect stderr to a file.
 //!
-//!     $ unshare --user  -f --pid zig build scripts -- systest --tigerbeetle-executable=./tigerbeetle 2> /tmp/systest.log
+//!     $ unshare -nfr zig build scripts -- systest --tigerbeetle-executable=./tigerbeetle \
+//!         2> /tmp/systest.log
+//!
+//! If you have permissions troubles with Ubuntu, see:
+//! https://github.com/YoYoGames/GameMaker-Bugs/issues/6015#issuecomment-2135552784
 //!
 //! TODO:
 //!
@@ -50,6 +54,18 @@ pub const CLIArgs = struct {
 pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     const tmp_dir = try shell.create_tmp_dir();
     defer shell.cwd.deleteDir(tmp_dir) catch {};
+
+    // Check that we are running as root
+    if (!std.mem.eql(u8, try shell.exec_stdout("id --user", .{}), "0")) {
+        log.err(
+            \\This script needs to run as root, or even better, in a separate namespace using:
+            \\   unshare -nfr
+        , .{});
+        std.process.exit(1);
+    }
+
+    // Ensure loopback can be used
+    try shell.exec("ip link set up dev lo", .{});
 
     log.info("supervisor: starting test with target runtime of {d}m", .{args.test_duration_minutes});
     const test_duration_ns = @as(u64, @intCast(args.test_duration_minutes)) * std.time.ns_per_min;
@@ -96,7 +112,7 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     const workload = try start_workload(shell, allocator);
     errdefer workload.deinit();
 
-    // Start nemesis (fault injector)
+    // Set up nemesis (fault injector)
     var prng = std.rand.DefaultPrng.init(0);
     const nemesis = try Nemesis.init(shell, allocator, prng.random(), &replicas);
     defer nemesis.deinit();
