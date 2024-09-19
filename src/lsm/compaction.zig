@@ -1573,8 +1573,7 @@ pub fn CompactionType(
             return beat.source_b_len_after_set;
         }
 
-        /// Copies values to `target` from our immutable table input. In the process, merge values
-        /// with identical keys (last one wins) and collapse tombstones for secondary indexes.
+        /// Copies values to `target` from our immutable table input.
         /// Return the number of values written to the target and updates immutable table slice to
         /// the non-processed remainder.
         fn fill_immutable_values(compaction: *Compaction, target: []Value) usize {
@@ -1583,78 +1582,31 @@ pub fn CompactionType(
             var source = bar.table_info_a.immutable;
             assert(source.len > 0);
 
-            if (constants.verify) {
-                // The input may have duplicate keys (last one wins), but keys must be
-                // non-decreasing.
-                // A source length of 1 is always non-decreasing.
-                for (source[0 .. source.len - 1], source[1..source.len]) |*value, *value_next| {
-                    assert(key_from_value(value) <= key_from_value(value_next));
-                }
-            }
+            // TODO Don't copy this, just use directly.
+            const count = @min(target.len, source.len);
+            stdx.copy_disjoint(.exact, Value, target[0..count], source[0..count]);
 
-            var source_index: usize = 0;
-            var target_index: usize = 0;
-            while (target_index < target.len and source_index < source.len) {
-                target[target_index] = source[source_index];
-
-                // If we're at the end of the source, there is no next value, so the next value
-                // can't be equal.
-                const value_next_equal = source_index + 1 < source.len and
-                    key_from_value(&source[source_index]) ==
-                    key_from_value(&source[source_index + 1]);
-
-                if (value_next_equal) {
-                    if (Table.usage == .secondary_index) {
-                        // Secondary index optimization --- cancel out put and remove.
-                        // NB: while this prevents redundant tombstones from getting to disk, we
-                        // still spend some extra CPU work to sort the entries in memory. Ideally,
-                        // we annihilate tombstones immediately, before sorting, but that's tricky
-                        // to do with scopes.
-                        assert(tombstone(&source[source_index]) !=
-                            tombstone(&source[source_index + 1]));
-                        source_index += 2;
-                        target_index += 0;
-                    } else {
-                        // The last value in a run of duplicates needs to be the one that ends up in
-                        // target.
-                        source_index += 1;
-                        target_index += 0;
-                    }
-                } else {
-                    source_index += 1;
-                    target_index += 1;
-                }
-            }
-
-            // At this point, source_index and target_index are actually counts.
-            // source_index will always be incremented after the final iteration as part of the
-            // continue expression.
-            // target_index will always be incremented, since either source_index runs out first
-            // so value_next_equal is false, or a new value is hit, which will increment it.
-            const source_count = source_index;
-            const target_count = target_index;
-            assert(target_count <= source_count);
             bar.table_info_a.immutable =
-                bar.table_info_a.immutable[source_count..];
+                bar.table_info_a.immutable[count..];
 
-            if (target_count == 0) {
+            if (count == 0) {
                 assert(Table.usage == .secondary_index);
                 return 0;
             }
 
             if (constants.verify) {
-                // Our output must be strictly increasing.
-                // An output length of 1 is always strictly increasing.
+                // The immutable table's keys must be strictly increasing.
+                // (A table with a single value is always strictly increasing.)
                 for (
-                    target[0 .. target_count - 1],
-                    target[1..target_count],
+                    target[0 .. count - 1],
+                    target[1 .. count],
                 ) |*value, *value_next| {
                     assert(key_from_value(value_next) > key_from_value(value));
                 }
             }
 
-            assert(target_count > 0);
-            return target_count;
+            assert(count > 0);
+            return count;
         }
 
         fn check_and_finish_blocks(compaction: *Compaction, force_flush: bool) enum {
