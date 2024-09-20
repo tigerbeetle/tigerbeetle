@@ -60,9 +60,12 @@ test "tidy" {
                 return error.LineTooLong;
             }
 
+            var tree = try std.zig.Ast.parse(allocator, source_file.text, .zig);
+            defer tree.deinit(allocator);
+
             function_line_count_longest = @max(
                 function_line_count_longest,
-                (try tidy_long_functions(source_file)).function_line_count_longest,
+                (try tidy_long_functions(source_file, &tree)).function_line_count_longest,
             );
 
             try dead_detector.visit(source_file);
@@ -194,11 +197,10 @@ const function_line_count_max = 355; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,
+    tree: *const std.zig.Ast,
 ) !struct {
     function_line_count_longest: usize,
 } {
-    const allocator = std.testing.allocator;
-
     if (std.mem.endsWith(u8, file.path, "client_readmes.zig")) {
         // This file is essentially a template to generate a markdown file, so it
         // intentionally has giant functions.
@@ -243,9 +245,6 @@ fn tidy_long_functions(
     };
 
     var function_stack = stdx.BoundedArray(Function, 32).from_slice(&.{}) catch unreachable;
-
-    var tree = try std.zig.Ast.parse(allocator, file.text, .zig);
-    defer tree.deinit(allocator);
 
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
