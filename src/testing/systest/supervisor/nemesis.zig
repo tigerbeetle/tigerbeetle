@@ -35,6 +35,10 @@ pub fn init(
 }
 
 pub fn deinit(self: *Self) void {
+    var it = self.netem_rules.valueIterator();
+    while (it.next()) |args| {
+        self.allocator.free(args.*);
+    }
     self.network_netem_delete_all() catch {};
     self.netem_rules.deinit();
     const allocator = self.allocator;
