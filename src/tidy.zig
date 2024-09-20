@@ -24,6 +24,11 @@ test "tidy" {
     var dead_files_detector = DeadFilesDetector.init(allocator);
     defer dead_files_detector.deinit();
 
+    var dead_declarations: std.StringHashMapUnmanaged(u32) = .{};
+    defer dead_declarations.deinit(allocator);
+
+    try dead_declarations.ensureTotalCapacity(allocator, identifiers_per_file_max);
+
     var function_line_count_longest: usize = 0;
 
     // NB: all checks are intentionally implemented in a streaming fashion, such that we only need
@@ -63,6 +68,10 @@ test "tidy" {
             var tree = try std.zig.Ast.parse(allocator, source_file.text, .zig);
             defer tree.deinit(allocator);
 
+            if (tidy_dead_declarations(&tree, &dead_declarations)) |name| {
+                std.debug.print("{s}: error: '{s}' is dead code\n", .{ source_file.path, name });
+            }
+
             function_line_count_longest = @max(
                 function_line_count_longest,
                 (try tidy_long_functions(source_file, &tree)).function_line_count_longest,
@@ -77,6 +86,7 @@ test "tidy" {
                     "{s} error: invalid markdown headings, {}\n",
                     .{ source_file.path, err },
                 );
+                return err;
             };
         }
     }
@@ -189,6 +199,90 @@ fn tidy_control_characters(file: SourceFile) ?u8 {
     if (mem.indexOfScalar(u8, file.text, '\t') != null) {
         return '\t';
     }
+    return null;
+}
+
+const identifiers_per_file_max = 100_000;
+/// Detects unused constants and functions.
+///
+/// This is a one-side heuristics: there might be false negatives, but no false positives.
+///
+/// Current algorithm:
+/// - Two passes.
+/// - Pass 1: count how many times each identifier is mentioned in the file.
+/// - Pass 2: warn about any unique identifier which is a non-public declaration.
+///
+/// At the moment, this is implemented using only the lexer, without looking at the AST, as that
+/// seemed simpler.
+fn tidy_dead_declarations(
+    tree: *const std.zig.Ast,
+    used: *std.StringHashMapUnmanaged(u32),
+) ?[]const u8 {
+    assert(used.count() == 0);
+    defer used.clearRetainingCapacity();
+
+    var identifier_start: ?std.zig.Ast.ByteOffset = 0;
+    inline for (.{ .fill, .check }) |phase| {
+        next_token: for (
+            tree.tokens.items(.tag),
+            tree.tokens.items(.start),
+            0..,
+        ) |tag, start, index| {
+            const identifier_start_previous = identifier_start;
+            identifier_start = switch (tag) {
+                .identifier => start,
+                else => null,
+            };
+
+            const start_previous = identifier_start_previous orelse continue :next_token;
+            const token_text = std.mem.trim(
+                u8,
+                tree.source[start_previous..start],
+                &std.ascii.whitespace,
+            );
+
+            switch (phase) {
+                .fill => {
+                    const gop = used.getOrPutAssumeCapacity(token_text);
+                    if (!gop.found_existing) gop.value_ptr.* = 0;
+                    gop.value_ptr.* += 1;
+                    if (used.count() >= identifiers_per_file_max) @panic("file to large");
+                    continue :next_token;
+                },
+                .check => {
+                    const usages = used.get(token_text).?;
+                    assert(usages >= 1);
+                    if (usages > 1) continue :next_token;
+                },
+                else => comptime unreachable,
+            }
+
+            assert(phase == .check and used.get(token_text).? == 1);
+            var declaration_keyword = false;
+            for (0..3) |context_offset| {
+                if (index - context_offset < 2) break;
+                const context_tag = tree.tokens.get(index - context_offset - 2).tag;
+                if (!declaration_keyword) {
+                    switch (context_tag) {
+                        .keyword_fn, .keyword_const => declaration_keyword = true,
+                        // Not a declaration.
+                        else => continue :next_token,
+                    }
+                } else {
+                    switch (context_tag) {
+                        .keyword_inline => {},
+                        // Public declaration can be used in a different file.
+                        .keyword_pub, .keyword_export => continue :next_token,
+                        // []const u8 or *const u8, not a declaration.
+                        .r_bracket, .asterisk => continue :next_token,
+                        // Non public declarations, never used.
+                        else => return token_text,
+                    }
+                }
+            }
+        }
+    }
+
     return null;
 }
 
