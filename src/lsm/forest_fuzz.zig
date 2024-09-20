@@ -412,7 +412,11 @@ const Environment = struct {
     }
 
     fn get_account(env: *Environment, id: u128) ?*const Account {
-        return env.forest.grooves.accounts.get(id);
+        return switch (env.forest.grooves.accounts.get(id)) {
+            .found => |a| a,
+            .not_found => null,
+            .orphaned_id => unreachable,
+        };
     }
 
     fn exists(env: *Environment, timestamp: u64) bool {

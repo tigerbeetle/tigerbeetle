@@ -163,12 +163,17 @@ pub fn GrooveType(
     /// - derived: { .field = *const fn (*const Object) ?DerivedType }:
     ///     An anonymous struct which contain fields that don't exist on the Object
     ///     but can be derived from an Object instance using the field's corresponding function.
+    ///
+    /// - orphaned_ids: bool:
+    ///     Whether Groove should store objectless `id`s to prevent their reuse.
+    ///     Should be `true` only if the object contains an `id` field.
     comptime groove_options: anytype,
 ) type {
     @setEvalBranchQuota(64_000);
 
     const has_id = @hasField(Object, "id");
-    if (has_id) assert(std.meta.fieldInfo(Object, .id).type == u128);
+    comptime if (has_id) assert(std.meta.fieldInfo(Object, .id).type == u128);
+    comptime if (groove_options.orphaned_ids) assert(has_id);
 
     assert(@hasField(Object, "timestamp"));
     assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
@@ -726,8 +731,22 @@ pub fn GrooveType(
             };
         }
 
-        pub fn get(groove: *const Groove, key: PrimaryKey) ?*const Object {
-            return groove.objects_cache.get(key);
+        pub fn get(groove: *const Groove, key: PrimaryKey) union(enum) {
+            found: *const Object,
+            orphaned_id,
+            not_found,
+        } {
+            if (groove.objects_cache.get(key)) |object| {
+                if (object.timestamp == 0) {
+                    assert(has_id);
+                    assert(groove_options.orphaned_ids);
+                    return .orphaned_id;
+                }
+
+                return .{ .found = object };
+            }
+
+            return .not_found;
         }
 
         /// Returns whether an object with this timestamp exists or not.
@@ -1071,7 +1090,20 @@ pub fn GrooveType(
                 assert(worker.current.?.destination == .objects_cache);
 
                 if (result) |id_tree_value| {
-                    if (!id_tree_value.tombstone()) {
+                    if (groove_options.orphaned_ids and
+                        id_tree_value.timestamp == 0)
+                    {
+                        comptime assert(has_id);
+
+                        // Zeroed timestamp indicates the object is not present,
+                        // and this id cannot be used anymore.
+                        worker.context.groove.objects_cache.upsert(
+                            &std.mem.zeroInit(Object, .{
+                                .id = id_tree_value.id,
+                            }),
+                        );
+                    } else if (!id_tree_value.tombstone()) {
+                        assert(id_tree_value.timestamp != 0);
                         worker.lookup_by_timestamp(id_tree_value.timestamp);
                         return;
                     }
@@ -1262,6 +1294,7 @@ pub fn GrooveType(
             assert(object.timestamp >= TimestampRange.timestamp_min);
             assert(object.timestamp <= TimestampRange.timestamp_max);
 
+            // TODO: should update the timestamp and id range, see `key_range_update`.
             groove.objects.remove(object);
             if (has_id) {
                 groove.ids.remove(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
@@ -1278,6 +1311,33 @@ pub fn GrooveType(
                     });
                 }
             }
+        }
+
+        /// Insert an id associated with no object.
+        /// It's up to the caller to ensure it doesn't already exist.
+        pub fn insert_orphaned_id(groove: *Groove, id: u128) void {
+            comptime assert(groove_options.orphaned_ids);
+            comptime assert(has_id);
+
+            assert(id != 0);
+            assert(id != std.math.maxInt(u128));
+            assert(!groove.objects_cache.has(id));
+
+            groove.objects_cache.upsert(&std.mem.zeroInit(Object, .{ .id = id }));
+            groove.ids.put(&.{ .id = id, .timestamp = 0 });
+            groove.ids.key_range_update(id);
+        }
+
+        pub fn remove_orphaned_id(groove: *Groove, id: u128) void {
+            comptime assert(groove_options.orphaned_ids);
+            comptime assert(has_id);
+
+            // TODO: Nothing currently calls or tests this method. The forest fuzzer should be
+            // extended to cover it.
+            assert(false);
+
+            _ = groove;
+            _ = id;
         }
 
         pub fn scope_open(groove: *Groove) void {
@@ -1389,6 +1449,7 @@ test "Groove" {
             .ignored = [_][]const u8{ "user_data_128", "user_data_64", "user_data_32", "flags" },
             .optional = &[_][]const u8{},
             .derived = .{},
+            .orphaned_ids = true,
         },
     );
 

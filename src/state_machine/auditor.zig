@@ -16,7 +16,8 @@ const StateMachine =
     @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
-pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult);
+// TODO(zig): See `Ordered` comments.
+pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult.Ordered);
 
 /// Batch sizes apply to both `create` and `lookup` operations.
 /// (More ids would fit in the `lookup` request, but then the response wouldn't fit.)
@@ -404,7 +405,7 @@ pub const AccountingAuditor = struct {
             const transfer_timestamp = timestamp - transfers.len + i + 1;
 
             const result_actual = results_iterator.take(i) orelse .ok;
-            if (!results_expect[i].contains(result_actual)) {
+            if (!results_expect[i].contains(result_actual.to_ordered())) {
                 log.err("on_create_transfers: transfer={} expect={} result={}", .{
                     transfer.*,
                     results_expect[i],

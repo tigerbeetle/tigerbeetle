@@ -220,6 +220,7 @@ pub fn StateMachineType(
                         }
                     }.closed,
                 },
+                .orphaned_ids = false,
             },
         );
 
@@ -260,6 +261,7 @@ pub fn StateMachineType(
                         }
                     }.closing,
                 },
+                .orphaned_ids = true,
             },
         );
 
@@ -272,6 +274,7 @@ pub fn StateMachineType(
                 .ignored = &[_][]const u8{"padding"},
                 .optional = &[_][]const u8{"status"},
                 .derived = .{},
+                .orphaned_ids = false,
             },
         );
 
@@ -308,6 +311,7 @@ pub fn StateMachineType(
                 },
                 .optional = &[_][]const u8{},
                 .derived = .{},
+                .orphaned_ids = false,
             },
         );
 
@@ -789,7 +793,7 @@ pub fn StateMachineType(
             const transfers: []const Transfer = mem.bytesAsSlice(Transfer, self.prefetch_input.?);
             for (transfers) |*t| {
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                    if (self.forest.grooves.transfers.get(t.pending_id)) |p| {
+                    if (self.get_transfer(t.pending_id)) |p| {
                         // This prefetch isn't run yet, but enqueue it here as well to save an extra
                         // iteration over transfers.
                         self.forest.grooves.transfers_pending.prefetch_enqueue(p.timestamp);
@@ -953,7 +957,7 @@ pub fn StateMachineType(
             assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
-            if (self.forest.grooves.accounts.get(filter.account_id)) |account| {
+            if (self.get_account(filter.account_id)) |account| {
                 if (account.flags.history) {
                     if (self.get_scan_from_account_filter(filter)) |scan| {
                         assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
@@ -1663,6 +1667,8 @@ pub fn StateMachineType(
                     }
                     results[count] = .{ .index = @intCast(index), .result = result };
                     count += 1;
+
+                    self.transient_failure(operation, event.id, result);
                 }
                 if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
                     if (!chain_broken) {
@@ -1681,6 +1687,51 @@ pub fn StateMachineType(
             return @sizeOf(Result(operation)) * count;
         }
 
+        fn transient_failure(
+            self: *StateMachine,
+            comptime operation: Operation,
+            id: u128,
+            result: anytype,
+        ) void {
+            switch (operation) {
+                .create_accounts => {
+                    comptime assert(@TypeOf(result) == CreateAccountResult);
+
+                    // The `create_accounts` error codes do not depend on transient system status.
+                    return;
+                },
+                .create_transfers => {
+                    comptime assert(@TypeOf(result) == CreateTransferResult);
+
+                    // List of `create_transfers` results that depend on system status
+                    // rather than request data.
+                    //
+                    // Transfers that fail with these codes cannot reuse the same `id`,
+                    // ensuring strong idempotency guarantees. Once a transfer fails with a transient
+                    // error, it must be retried with a different `id`.
+                    const persist = switch (result) {
+                        .debit_account_not_found,
+                        .credit_account_not_found,
+
+                        .pending_transfer_not_found,
+
+                        .exceeds_credits,
+                        .exceeds_debits,
+
+                        .debit_account_already_closed,
+                        .credit_account_already_closed,
+                        => true,
+                        else => false,
+                    };
+
+                    if (persist) {
+                        self.forest.grooves.transfers.insert_orphaned_id(id);
+                    }
+                },
+                else => comptime unreachable,
+            }
+        }
+
         // Accounts that do not fit in the response are omitted.
         fn execute_lookup_accounts(
             self: *StateMachine,
@@ -1692,7 +1743,7 @@ pub fn StateMachineType(
             const results = mem.bytesAsSlice(Account, output[0..output_len]);
             var results_count: usize = 0;
             for (batch) |id| {
-                if (self.forest.grooves.accounts.get(id)) |account| {
+                if (self.get_account(id)) |account| {
                     results[results_count] = account.*;
                     results_count += 1;
                 }
@@ -1855,6 +1906,12 @@ pub fn StateMachineType(
             if (a.id == 0) return .id_must_not_be_zero;
             if (a.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
+            switch (self.forest.grooves.accounts.get(a.id)) {
+                .found => |e| return create_account_exists(a, e),
+                .orphaned_id => unreachable,
+                .not_found => {},
+            }
+
             if (a.flags.debits_must_not_exceed_credits and a.flags.credits_must_not_exceed_debits) {
                 return .flags_are_mutually_exclusive;
             }
@@ -1865,10 +1922,6 @@ pub fn StateMachineType(
             if (a.credits_posted != 0) return .credits_posted_must_be_zero;
             if (a.ledger == 0) return .ledger_must_not_be_zero;
             if (a.code == 0) return .code_must_not_be_zero;
-
-            if (self.forest.grooves.accounts.get(a.id)) |e| {
-                return create_account_exists(a, e);
-            }
 
             if (a.flags.imported) {
                 // Allows past timestamp, but validates whether it regressed from the last
@@ -1918,6 +1971,12 @@ pub fn StateMachineType(
             if (t.id == 0) return .id_must_not_be_zero;
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
+            switch (self.forest.grooves.transfers.get(t.id)) {
+                .found => |e| return self.create_transfer_exists(t, client_release, e),
+                .orphaned_id => return .id_already_failed,
+                .not_found => {},
+            }
+
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                 return self.post_or_void_pending_transfer(client_release, t);
             }
@@ -1953,9 +2012,9 @@ pub fn StateMachineType(
             // 2. standing for debit record and credit record, or
             // 3. relating to debtor and creditor.
             // We use them to distinguish between `cr` (credit account), and `c` (commit).
-            const dr_account = self.forest.grooves.accounts.get(t.debit_account_id) orelse
+            const dr_account = self.get_account(t.debit_account_id) orelse
                 return .debit_account_not_found;
-            const cr_account = self.forest.grooves.accounts.get(t.credit_account_id) orelse
+            const cr_account = self.get_account(t.credit_account_id) orelse
                 return .credit_account_not_found;
             assert(dr_account.id == t.debit_account_id);
             assert(cr_account.id == t.credit_account_id);
@@ -1964,10 +2023,6 @@ pub fn StateMachineType(
             if (t.ledger != dr_account.ledger) {
                 return .transfer_must_have_the_same_ledger_as_accounts;
             }
-
-            // If the transfer already exists, then it must not influence the overflow or limit
-            // checks.
-            if (self.get_transfer(t.id)) |e| return create_transfer_exists(t, client_release, e);
 
             if (t.flags.imported) {
                 // Allows past timestamp, but validates whether it regressed from the last
@@ -2140,54 +2195,75 @@ pub fn StateMachineType(
         }
 
         fn create_transfer_exists(
+            self: *const StateMachine,
             t: *const Transfer,
             client_release: vsr.Release,
             e: *const Transfer,
         ) CreateTransferResult {
             assert(t.id == e.id);
-            // The flags change the behavior of the remaining comparisons, so compare the flags
-            // first.
+            // The flags change the behavior of the remaining comparisons,
+            // so compare the flags first.
             if (@as(u16, @bitCast(t.flags)) != @as(u16, @bitCast(e.flags))) {
                 return .exists_with_different_flags;
             }
-            // We know that the flags are the same.
-            assert(t.pending_id == 0 and e.pending_id == 0);
 
-            if (t.debit_account_id != e.debit_account_id) {
-                return .exists_with_different_debit_account_id;
-            }
-            if (t.credit_account_id != e.credit_account_id) {
-                return .exists_with_different_credit_account_id;
-            }
-            // If the accounts are the same, the ledger must be the same.
-            assert(t.ledger == e.ledger);
-
-            // In transfers with `flags.balancing_debit = true` or `flags.balancing_credit = true`,
-            // the field `amount` means the _upper limit_ (or zero for `maxInt`) that can be moved
-            // in order to balance debits and credits.
-            // The actual amount moved depends on the account's balance at the time the transfer
-            // was executed.
-            //
-            // This is a special case in the idempotency check:
-            // When _resubmitting_ the same balancing transfer, the amount will likely be different
-            // from what was previously committed, but as long as it is within the range of possible
-            // values it should fail with `exists` rather than `exists_with_different_amount`.
-            if (t.flags.balancing_debit or t.flags.balancing_credit) {
-                if (forbid_zero_amounts(client_release)) {
-                    if (t.amount > 0 and t.amount < e.amount) return .exists_with_different_amount;
-                } else {
-                    if (t.amount < e.amount) return .exists_with_different_amount;
-                }
-            } else {
-                if (t.amount != e.amount) return .exists_with_different_amount;
-            }
-
-            if (t.user_data_128 != e.user_data_128) return .exists_with_different_user_data_128;
-            if (t.user_data_64 != e.user_data_64) return .exists_with_different_user_data_64;
-            if (t.user_data_32 != e.user_data_32) return .exists_with_different_user_data_32;
+            if (t.pending_id != e.pending_id) return .exists_with_different_pending_id;
             if (t.timeout != e.timeout) return .exists_with_different_timeout;
-            if (t.code != e.code) return .exists_with_different_code;
-            return .exists;
+
+            if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
+                // Since both `t` and `e` have the same `pending_id`,
+                // it must be a valid transfer.
+                const p = self.get_transfer(t.pending_id).?;
+                return post_or_void_pending_transfer_exists(client_release, t, e, p);
+            } else {
+                if (t.debit_account_id != e.debit_account_id) {
+                    return .exists_with_different_debit_account_id;
+                }
+                if (t.credit_account_id != e.credit_account_id) {
+                    return .exists_with_different_credit_account_id;
+                }
+
+                // In transfers with `flags.balancing_debit` or `flags.balancing_credit` set,
+                // the field `amount` means the _upper limit_ (or zero for `maxInt`) that can be
+                // moved in order to balance debits and credits.
+                // The actual amount moved depends on the account's balance at the time the
+                // transfer was executed.
+                //
+                // This is a special case in the idempotency check:
+                // When _resubmitting_ the same balancing transfer, the amount will likely be
+                // different from what was previously committed, but as long as it is within the
+                // range of possible values it should fail with `exists` rather than
+                // `exists_with_different_amount`.
+                if (t.flags.balancing_debit or t.flags.balancing_credit) {
+                    if (forbid_zero_amounts(client_release)) {
+                        if (t.amount > 0 and t.amount < e.amount) {
+                            return .exists_with_different_amount;
+                        }
+                    } else {
+                        if (t.amount < e.amount) return .exists_with_different_amount;
+                    }
+                } else {
+                    if (t.amount != e.amount) return .exists_with_different_amount;
+                }
+
+                if (t.user_data_128 != e.user_data_128) {
+                    return .exists_with_different_user_data_128;
+                }
+                if (t.user_data_64 != e.user_data_64) {
+                    return .exists_with_different_user_data_64;
+                }
+                if (t.user_data_32 != e.user_data_32) {
+                    return .exists_with_different_user_data_32;
+                }
+                if (t.ledger != e.ledger) {
+                    return .exists_with_different_ledger;
+                }
+                if (t.code != e.code) {
+                    return .exists_with_different_code;
+                }
+
+                return .exists;
+            }
         }
 
         fn post_or_void_pending_transfer(
@@ -2196,6 +2272,8 @@ pub fn StateMachineType(
             t: *const Transfer,
         ) CreateTransferResult {
             assert(t.id != 0);
+            assert(t.id != std.math.maxInt(u128));
+            assert(self.forest.grooves.transfers.get(t.id) == .not_found);
             assert(t.flags.padding == 0);
             assert(t.timestamp > self.commit_timestamp or t.flags.imported);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
@@ -2219,8 +2297,8 @@ pub fn StateMachineType(
             assert(p.timestamp < t.timestamp);
             if (!p.flags.pending) return .pending_transfer_not_pending;
 
-            const dr_account = self.forest.grooves.accounts.get(p.debit_account_id).?;
-            const cr_account = self.forest.grooves.accounts.get(p.credit_account_id).?;
+            const dr_account = self.get_account(p.debit_account_id).?;
+            const cr_account = self.get_account(p.credit_account_id).?;
             assert(dr_account.id == p.debit_account_id);
             assert(cr_account.id == p.credit_account_id);
             assert(p.timestamp > dr_account.timestamp);
@@ -2257,10 +2335,6 @@ pub fn StateMachineType(
 
             if (t.flags.void_pending_transfer and amount < p.amount) {
                 return .pending_transfer_has_different_amount;
-            }
-
-            if (self.get_transfer(t.id)) |e| {
-                return post_or_void_pending_transfer_exists(client_release, t, e, p);
             }
 
             if (t.flags.imported) {
@@ -2420,10 +2494,13 @@ pub fn StateMachineType(
             assert(p.flags.pending);
             assert(t.pending_id == p.id);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
+            assert(@as(u16, @bitCast(t.flags)) == @as(u16, @bitCast(e.flags)));
 
-            // Do not assume that `e` is necessarily a posting or voiding transfer.
-            if (@as(u16, @bitCast(t.flags)) != @as(u16, @bitCast(e.flags))) {
-                return .exists_with_different_flags;
+            if (t.debit_account_id != 0 and t.debit_account_id != e.debit_account_id) {
+                return .exists_with_different_debit_account_id;
+            }
+            if (t.credit_account_id != 0 and t.credit_account_id != e.credit_account_id) {
+                return .exists_with_different_credit_account_id;
             }
 
             if (forbid_zero_amounts(client_release) or
@@ -2444,9 +2521,6 @@ pub fn StateMachineType(
                 }
             }
 
-            // If `e` posted or voided a different pending transfer, then the accounts will differ.
-            if (t.pending_id != e.pending_id) return .exists_with_different_pending_id;
-
             assert(e.flags.post_pending_transfer or e.flags.void_pending_transfer);
             assert(e.debit_account_id == p.debit_account_id);
             assert(e.credit_account_id == p.credit_account_id);
@@ -2458,29 +2532,44 @@ pub fn StateMachineType(
 
             assert(t.flags.post_pending_transfer == e.flags.post_pending_transfer);
             assert(t.flags.void_pending_transfer == e.flags.void_pending_transfer);
-            assert(t.debit_account_id == 0 or t.debit_account_id == e.debit_account_id);
-            assert(t.credit_account_id == 0 or t.credit_account_id == e.credit_account_id);
             assert(t.timeout == 0);
-            assert(t.ledger == 0 or t.ledger == e.ledger);
-            assert(t.code == 0 or t.code == e.code);
             assert(t.timestamp > e.timestamp);
 
             if (t.user_data_128 == 0) {
-                if (e.user_data_128 != p.user_data_128) return .exists_with_different_user_data_128;
+                if (e.user_data_128 != p.user_data_128) {
+                    return .exists_with_different_user_data_128;
+                }
             } else {
-                if (t.user_data_128 != e.user_data_128) return .exists_with_different_user_data_128;
+                if (t.user_data_128 != e.user_data_128) {
+                    return .exists_with_different_user_data_128;
+                }
             }
 
             if (t.user_data_64 == 0) {
-                if (e.user_data_64 != p.user_data_64) return .exists_with_different_user_data_64;
+                if (e.user_data_64 != p.user_data_64) {
+                    return .exists_with_different_user_data_64;
+                }
             } else {
-                if (t.user_data_64 != e.user_data_64) return .exists_with_different_user_data_64;
+                if (t.user_data_64 != e.user_data_64) {
+                    return .exists_with_different_user_data_64;
+                }
             }
 
             if (t.user_data_32 == 0) {
-                if (e.user_data_32 != p.user_data_32) return .exists_with_different_user_data_32;
+                if (e.user_data_32 != p.user_data_32) {
+                    return .exists_with_different_user_data_32;
+                }
             } else {
-                if (t.user_data_32 != e.user_data_32) return .exists_with_different_user_data_32;
+                if (t.user_data_32 != e.user_data_32) {
+                    return .exists_with_different_user_data_32;
+                }
+            }
+
+            if (t.ledger != 0 and t.ledger != e.ledger) {
+                return .exists_with_different_ledger;
+            }
+            if (t.code != 0 and t.code != e.code) {
+                return .exists_with_different_code;
             }
 
             return .exists;
@@ -2524,7 +2613,18 @@ pub fn StateMachineType(
         }
 
         fn get_transfer(self: *const StateMachine, id: u128) ?*const Transfer {
-            return self.forest.grooves.transfers.get(id);
+            return switch (self.forest.grooves.transfers.get(id)) {
+                .found => |t| t,
+                .not_found, .orphaned_id => null,
+            };
+        }
+
+        fn get_account(self: *const StateMachine, id: u128) ?*const Account {
+            return switch (self.forest.grooves.accounts.get(id)) {
+                .found => |a| a,
+                .not_found => null,
+                .orphaned_id => unreachable,
+            };
         }
 
         /// Returns whether a pending transfer, if it exists, has already been
@@ -2533,7 +2633,11 @@ pub fn StateMachineType(
             self: *const StateMachine,
             pending_timestamp: u64,
         ) ?*const TransferPending {
-            return self.forest.grooves.transfers_pending.get(pending_timestamp);
+            return switch (self.forest.grooves.transfers_pending.get(pending_timestamp)) {
+                .found => |a| a,
+                .not_found => null,
+                .orphaned_id => unreachable,
+            };
         }
 
         fn transfer_update_pending_status(
@@ -2561,7 +2665,6 @@ pub fn StateMachineType(
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0;
 
-            const grooves = &self.forest.grooves;
             const transfers: []const Transfer = std.mem.bytesAsSlice(
                 Transfer,
                 self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? * @sizeOf(Transfer)],
@@ -2576,12 +2679,12 @@ pub fn StateMachineType(
                 const expires_at = expired.timestamp + expired.timeout_ns();
                 assert(expires_at <= timestamp);
 
-                const dr_account = grooves.accounts.get(
+                const dr_account = self.get_account(
                     expired.debit_account_id,
                 ).?;
                 assert(dr_account.debits_pending >= expired.amount);
 
-                const cr_account = grooves.accounts.get(
+                const cr_account = self.get_account(
                     expired.credit_account_id,
                 ).?;
                 assert(cr_account.credits_pending >= expired.amount);
@@ -2608,14 +2711,20 @@ pub fn StateMachineType(
                     dr_account_new.flags.closed != dr_account.flags.closed;
                 assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
                 if (dr_updated) {
-                    grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                    self.forest.grooves.accounts.update(.{
+                        .old = dr_account,
+                        .new = &dr_account_new,
+                    });
                 }
 
                 const cr_updated = expired.amount > 0 or
                     cr_account_new.flags.closed != cr_account.flags.closed;
                 assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
                 if (cr_updated) {
-                    grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+                    self.forest.grooves.accounts.update(.{
+                        .old = cr_account,
+                        .new = &cr_account_new,
+                    });
                 }
 
                 const transfer_pending = self.get_transfer_pending(expired.timestamp).?;
@@ -2624,7 +2733,7 @@ pub fn StateMachineType(
                 self.transfer_update_pending_status(transfer_pending, .expired);
 
                 // Removing the `expires_at` index.
-                grooves.transfers.indexes.expires_at.remove(&.{
+                self.forest.grooves.transfers.indexes.expires_at.remove(&.{
                     .timestamp = expired.timestamp,
                     .field = expires_at,
                 });
@@ -3385,7 +3494,7 @@ fn check(test_table: []const u8) !void {
             .setup => |b| {
                 assert(operation == null);
 
-                const account = context.state_machine.forest.grooves.accounts.get(b.account).?;
+                const account = context.state_machine.get_account(b.account).?;
                 var account_new = account.*;
 
                 account_new.debits_pending = b.debits_pending;
@@ -3721,13 +3830,6 @@ test "create_accounts" {
         \\ account A0  1  1  1  1  _  _  _ _ L0 C0 _ D<C C<D _ _ _ 1 _ reserved_flag
         \\ account A0  1  1  1  1  _  _  _ _ L0 C0 _ D<C C<D _ _ _ _ _ id_must_not_be_zero
         \\ account -0  1  1  1  1  _  _  _ _ L0 C0 _ D<C C<D _ _ _ _ _ id_must_not_be_int_max
-        \\ account A1  1  1  1  1 U1 U1 U1 _ L0 C0 _ D<C C<D _ _ _ _ _ flags_are_mutually_exclusive
-        \\ account A1  1  1  1  1 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ debits_pending_must_be_zero
-        \\ account A1  0  1  1  1 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ debits_posted_must_be_zero
-        \\ account A1  0  0  1  1 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ credits_pending_must_be_zero
-        \\ account A1  0  0  0  1 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ credits_posted_must_be_zero
-        \\ account A1  0  0  0  0 U1 U1 U1 _ L0 C0 _ D<C   _ _ _ _ _ _ ledger_must_not_be_zero
-        \\ account A1  0  0  0  0 U1 U1 U1 _ L9 C0 _ D<C   _ _ _ _ _ _ code_must_not_be_zero
         \\ account A1  0  0  0  0 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ exists_with_different_flags
         \\ account A1  0  0  0  0 U1 U1 U1 _ L9 C9 _   _ C<D _ _ _ _ _ exists_with_different_flags
         \\ account A1  0  0  0  0 U1 U1 U1 _ L9 C9 _   _   _ _ _ _ _ _ exists_with_different_user_data_128
@@ -3736,6 +3838,13 @@ test "create_accounts" {
         \\ account A1  0  0  0  0 U2 U2 U2 _ L9 C9 _   _   _ _ _ _ _ _ exists_with_different_ledger
         \\ account A1  0  0  0  0 U2 U2 U2 _ L3 C9 _   _   _ _ _ _ _ _ exists_with_different_code
         \\ account A1  0  0  0  0 U2 U2 U2 _ L3 C4 _   _   _ _ _ _ _ _ exists
+        \\ account A2  1  1  1  1 U1 U1 U1 _ L0 C0 _ D<C C<D _ _ _ _ _ flags_are_mutually_exclusive
+        \\ account A2  1  1  1  1 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ debits_pending_must_be_zero
+        \\ account A2  0  1  1  1 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ debits_posted_must_be_zero
+        \\ account A2  0  0  1  1 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ credits_pending_must_be_zero
+        \\ account A2  0  0  0  1 U1 U1 U1 _ L9 C9 _ D<C   _ _ _ _ _ _ credits_posted_must_be_zero
+        \\ account A2  0  0  0  0 U1 U1 U1 _ L0 C0 _ D<C   _ _ _ _ _ _ ledger_must_not_be_zero
+        \\ account A2  0  0  0  0 U1 U1 U1 _ L9 C0 _ D<C   _ _ _ _ _ _ code_must_not_be_zero
         \\ commit create_accounts
         \\
         \\ lookup_account -0 _
@@ -3899,46 +4008,57 @@ test "create_transfers/lookup_transfers" {
         \\ transfer   T1 A8 A9    9   _  _  _  _    _ L0 C0   _   _   _   _   _   _ _  _   CCR _ _ closing_transfer_must_be_pending
         \\ transfer   T1 A8 A9    9   _  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ ledger_must_not_be_zero
         \\ transfer   T1 A8 A9    9   _  _  _  _    _ L9 C0   _ PEN   _   _   _   _ _  _   _   _ _ code_must_not_be_zero
+        // `debit_account_not_found` is a transient failure, T1 cannot be reused:
         \\ transfer   T1 A8 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_not_found
-        \\ transfer   T1 A1 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_not_found
-        \\ transfer   T1 A1 A2    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ accounts_must_have_the_same_ledger
-        \\ transfer   T1 A1 A3    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ transfer_must_have_the_same_ledger_as_accounts
-        \\ transfer   T1 A1 A3  -99   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_pending  // amount = max - A1.debits_pending + 1
-        \\ transfer   T1 A1 A3 -109   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_pending // amount = max - A3.credits_pending + 1
-        \\ transfer   T1 A1 A3 -199   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_posted   // amount = max - A1.debits_posted + 1
-        \\ transfer   T1 A1 A3 -209   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_posted  // amount = max - A3.credits_posted + 1
-        \\ transfer   T1 A1 A3 -299   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits          // amount = max - A1.debits_pending - A1.debits_posted + 1
-        \\ transfer   T1 A1 A3 -319   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits         // amount = max - A3.credits_pending - A3.credits_posted + 1
-        \\ transfer   T1 A4 A5  199   _  _  _  _  999 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_timeout
-        \\ transfer   T1 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits           // amount = A4.credits_posted - A4.debits_pending - A4.debits_posted + 1
-        \\ transfer   T1 A4 A5   91   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_debits            // amount = A5.debits_posted - A5.credits_pending - A5.credits_posted + 1
-        \\ transfer   T1 A1 A3  123   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ ok
+        \\ transfer   T1 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed
+        // `credit_account_not_found` is a transient failure, T2 cannot be reused:
+        \\ transfer   T2 A1 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_not_found
+        \\ transfer   T2 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed
+        \\
+        \\ transfer   T3 A1 A2    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ accounts_must_have_the_same_ledger
+        \\ transfer   T3 A1 A3    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ transfer_must_have_the_same_ledger_as_accounts
+        \\ transfer   T3 A1 A3  -99   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_pending  // amount = max - A1.debits_pending + 1
+        \\ transfer   T3 A1 A3 -109   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_pending // amount = max - A3.credits_pending + 1
+        \\ transfer   T3 A1 A3 -199   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_posted   // amount = max - A1.debits_posted + 1
+        \\ transfer   T3 A1 A3 -209   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_posted  // amount = max - A3.credits_posted + 1
+        \\ transfer   T3 A1 A3 -299   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits          // amount = max - A1.debits_pending - A1.debits_posted + 1
+        \\ transfer   T3 A1 A3 -319   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits         // amount = max - A3.credits_pending - A3.credits_posted + 1
+        \\ transfer   T3 A4 A5  199   _  _  _  _  999 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_timeout
+        // `exceeds_credits` is a transient failure, T3 cannot be reused:
+        \\ transfer   T3 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits           // amount = A4.credits_posted - A4.debits_pending - A4.debits_posted + 1
+        \\ transfer   T3 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed
+        // `exceeds_debits` is a transient failure, T4 cannot be reused:
+        \\ transfer   T4 A4 A5   91   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_debits            // amount = A5.debits_posted - A5.credits_pending - A5.credits_posted + 1
+        \\ transfer   T4 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed
+        \\
+        \\ transfer   T5 A1 A3  123   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ ok
 
-        // Ensure that idempotence is only checked after validation.
-        \\ transfer   T1 A1 A3  123   _  _  _  _    1 L2 C1   _ PEN   _   _   _   _ _  _ _ _ _ transfer_must_have_the_same_ledger_as_accounts
-        \\ transfer   T1 A1 A3   -0   _ U1 U1 U1    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ exists_with_different_flags
-        \\ transfer   T1 A3 A1   -0   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_debit_account_id
-        \\ transfer   T1 A1 A4   -0   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_credit_account_id
-        \\ transfer   T1 A1 A3   -0   _ U1 U1 U1    1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_amount
-        \\ transfer   T1 A1 A3  123   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_128
-        \\ transfer   T1 A1 A3  123   _  _ U1 U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_64
-        \\ transfer   T1 A1 A3  123   _  _  _ U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_32
-        \\ transfer   T1 A1 A3  123   _  _  _  _    2 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_timeout
-        \\ transfer   T1 A1 A3  123   _  _  _  _    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_code
-        \\ transfer   T1 A1 A3  123   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists
-        \\ transfer   T2 A3 A1    7   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
-        \\ transfer   T3 A1 A3    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
-        \\ transfer   T4 A1 A3    0   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+        // Ensure that idempotence is checked first:
+        \\ transfer   T5 A1 A3  123   _  _  _  _    1 L2 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_ledger
+        \\ transfer   T5 A1 A3   -0   _ U1 U1 U1    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ exists_with_different_flags
+        \\ transfer   T5 A3 A1   -0   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_debit_account_id
+        \\ transfer   T5 A1 A4   -0   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_credit_account_id
+        \\ transfer   T5 A1 A3   -0   _ U1 U1 U1    1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_amount
+        \\ transfer   T5 A1 A3  123   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_128
+        \\ transfer   T5 A1 A3  123   _  _ U1 U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_64
+        \\ transfer   T5 A1 A3  123   _  _  _ U1    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_32
+        \\ transfer   T5 A1 A3  123   _  _  _  _    2 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_timeout
+        \\ transfer   T5 A1 A3  123   _  _  _  _    1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_code
+        \\ transfer   T5 A1 A3  123   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists
+        \\
+        \\ transfer   T6 A3 A1    7   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+        \\ transfer   T7 A1 A3    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+        \\ transfer   T8 A1 A3    0   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 223 203   0   7  _
         \\ lookup_account A3   0   7 233 213  _
         \\ commit lookup_accounts
         \\
-        \\ lookup_transfer T1 exists true
-        \\ lookup_transfer T2 exists true
-        \\ lookup_transfer T3 exists true
-        \\ lookup_transfer T4 exists true
+        \\ lookup_transfer T5 exists true
+        \\ lookup_transfer T6 exists true
+        \\ lookup_transfer T7 exists true
+        \\ lookup_transfer T8 exists true
         \\ lookup_transfer -0 exists false
         \\ commit lookup_transfers
     );
@@ -3973,29 +4093,6 @@ test "create/lookup 2-phase transfers" {
         \\ transfer   T0 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI   _   _  _ _ _ _ 1 timestamp_must_be_zero
         \\ transfer   T0 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI   _   _  _ _ _ _ _ id_must_not_be_zero
         \\ transfer   -0 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI   _   _  _ _ _ _ _ id_must_not_be_int_max
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI   _   _  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI BDR   _  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI BDR BCR  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI   _ BCR  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN   _ VOI   _   _  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _   _ VOI BDR   _  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _   _ VOI BDR BCR  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _   _ VOI   _ BCR  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _ POS   _ BDR   _  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _ POS   _ BDR BCR  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _ POS   _   _ BCR  _ _ _ _ _ flags_are_mutually_exclusive
-        \\ transfer T101 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_id_must_not_be_zero
-        \\ transfer T101 A8 A9   16  -0 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_id_must_not_be_int_max
-        \\ transfer T101 A8 A9   16 101 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_id_must_be_different
-        \\ transfer T101 A8 A9   16 102 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ timeout_reserved_for_pending_transfer
-        \\ transfer T101 A8 A9   16 102 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_not_found
-        \\ transfer T101 A8 A9   16  T1 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_not_pending
-        \\ transfer T101 A8 A9   16  T3 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_debit_account_id
-        \\ transfer T101 A1 A9   16  T3 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_credit_account_id
-        \\ transfer T101 A1 A2   16  T3 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_ledger
-        \\ transfer T101 A1 A2   16  T3 U2 U2 U2    _ L1 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_code
-        \\ transfer T101 A1 A2   16  T3 U2 U2 U2    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T101 A1 A2   14  T3 U2 U2 U2    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_amount
         \\ transfer T101 A1 A2   15  T3 U2 U2 U2    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists_with_different_flags
         \\ transfer T101 A1 A2   14  T2 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount
         \\ transfer T101 A1 A2    _  T2 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount
@@ -4004,10 +4101,36 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T101 A1 A2   13  T2 U1 U2 U2    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_user_data_64
         \\ transfer T101 A1 A2   13  T2 U1 U1 U2    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_user_data_32
         \\ transfer T101 A1 A2   13  T2 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists
-        \\ transfer T102 A1 A2   13  T2 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ pending_transfer_already_posted
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI   _   _  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI BDR   _  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI BDR BCR  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN POS VOI   _ BCR  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _ PEN   _ VOI   _   _  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _   _ VOI BDR   _  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _   _ VOI BDR BCR  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _   _ VOI   _ BCR  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _ POS   _ BDR   _  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _ POS   _ BDR BCR  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _ POS   _   _ BCR  _ _ _ _ _ flags_are_mutually_exclusive
+        \\ transfer T102 A8 A9   16  T0 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_id_must_not_be_zero
+        \\ transfer T102 A8 A9   16  -0 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_id_must_not_be_int_max
+        \\ transfer T102 A8 A9   16 102 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_id_must_be_different
+        \\ transfer T102 A8 A9   16 103 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ timeout_reserved_for_pending_transfer
+        // `pending_transfer_not_found` is a transient failure, T102 cannot be reused:
+        \\ transfer T102 A8 A9   16 103 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_not_found
+        \\ transfer T102 A1 A2   13   _ U1 U1 U1    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ id_already_failed
+        \\
+        \\ transfer T103 A8 A9   16  T1 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_not_pending
+        \\ transfer T103 A8 A9   16  T3 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_debit_account_id
+        \\ transfer T103 A1 A9   16  T3 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_credit_account_id
+        \\ transfer T103 A1 A2   16  T3 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_ledger
+        \\ transfer T103 A1 A2   16  T3 U2 U2 U2    _ L1 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_code
+        \\ transfer T103 A1 A2   16  T3 U2 U2 U2    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
+        \\ transfer T103 A1 A2   14  T3 U2 U2 U2    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_has_different_amount
+        \\ transfer T103 A1 A2   13  T2 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ pending_transfer_already_posted
         \\ transfer T103 A1 A2   15  T3 U1 U1 U1    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ ok
-        \\ transfer T102 A1 A2   13  T3 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ pending_transfer_already_voided
-        \\ transfer T102 A1 A2   15  T4 U1 U1 U1    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_expired
+        \\ transfer T104 A1 A2   13  T3 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ pending_transfer_already_voided
+        \\ transfer T104 A1 A2   15  T4 U1 U1 U1    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_expired
 
         // Transfers posted/voided with optional fields must not raise `exists_with_different_*`.
         // But transfers posted with posted.amount≠pending.amount may return
@@ -4016,20 +4139,21 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T101 A0 A0   14  T2 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount
         \\ transfer T101 A0 A0   12  T2 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < e.amount
         \\
+        \\ transfer T105 A0 A0    8  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount // t.amount > p.amount
         \\ transfer T105 A0 A0   -0  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ ok
         \\ transfer T105 A0 A0    7  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists
         \\ transfer T105 A0 A0    7  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists // ledger/code = 0
-        \\ transfer T105 A0 A0    8  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount // t.amount > p.amount
-        \\ transfer T105 A0 A0    0  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < e.amount
+        \\ transfer T105 A0 A0   -0  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists // amount = max
+        \\ transfer T105 A0 A0    8  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > p.amount
+        \\ transfer T105 A0 A0    6  T5 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < e.amount
         \\ transfer T105 A0 A0    0  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount
-        \\ transfer T105 A0 A0    6  T5 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount
         \\
         \\ transfer T106 A0 A0   -1  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
         \\ transfer T106 A0 A0   -0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ ok
         \\ transfer T106 A0 A0   -0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists
         \\ transfer T106 A0 A0    1  T6 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists
-        \\ transfer T106 A0 A0    2  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount
+        \\ transfer T106 A0 A0    2  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > p.amount
+        \\ transfer T106 A0 A0    0  T6 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < p.amount
         \\
         \\ transfer T107 A0 A0    0  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ ok
         \\ transfer T107 A0 A0    0  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists
@@ -4535,9 +4659,16 @@ test "create_transfers: per-transfer balance invariant" {
         \\ transfer T3 A2 A3  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ linked_event_failed
         \\ commit create_transfers
         \\
-        \\ transfer T1 A1 A2 40   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ ok
-        \\ transfer T2 A2 A3  1   _  _  _  _    0 L1 C1 LNK PEN _   _ BDR   _ _ _ _ _ _ ok
-        \\ transfer T3 A2 A3  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ ok
+        // Ids failed in a linked chain can be reused, buy
+        // `exceeds_debits` is a transient failure, T2 cannot be reused:
+        \\ transfer T1 A1 A2  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
+        \\ transfer T2 A2 A3  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ id_already_failed
+        \\ transfer T3 A2 A3  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ transfer T4 A1 A2 40   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ ok
+        \\ transfer T5 A2 A3  1   _  _  _  _    0 L1 C1 LNK PEN _   _ BDR   _ _ _ _ _ _ ok
+        \\ transfer T6 A2 A3  0  T5  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 40 0  0 _
@@ -4560,9 +4691,16 @@ test "create_transfers: per-transfer balance invariant" {
         \\ transfer T3 A3 A1  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ linked_event_failed
         \\ commit create_transfers
         \\
-        \\ transfer T1 A1 A2 40   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ ok
-        \\ transfer T2 A3 A1  1   _  _  _  _    0 L1 C1 LNK PEN _   _   _ BCR _ _ _ _ _ ok
-        \\ transfer T3 A3 A1  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ ok
+        // Ids failed in a linked chain can be reused, but
+        // `exceeds_credits` is a transient failure, T2 cannot be reused:
+        \\ transfer T1 A1 A2  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
+        \\ transfer T2 A3 A1  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ id_already_failed
+        \\ transfer T3 A3 A1  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ transfer T4 A1 A2 40   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ ok
+        \\ transfer T5 A3 A1  1   _  _  _  _    0 L1 C1 LNK PEN _   _   _ BCR _ _ _ _ _ ok
+        \\ transfer T6 A3 A1  0  T5  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 40 0 40 _
@@ -4725,22 +4863,28 @@ test "create_transfers: closing accounts" {
         \\ commit create_accounts
         \\
         // Closing the debit account.
-        \\ transfer   T1 A1 A2   15   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ ok
-        \\ transfer   T2 A1 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR _   _ _ closing_transfer_must_be_pending
-        \\ transfer   T2 A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ ok
-        \\ transfer   T2 A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ exists
-        \\ transfer   T3 A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
-        \\ transfer   T3 A2 A1    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
+        \\ transfer   T1  A1 A2   15   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ ok
+        \\ transfer   T2  A1 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR _   _ _ closing_transfer_must_be_pending
+        \\ transfer   T2  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ ok
+        \\ transfer   T2  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ exists
+        // `debit_account_already_closed` is a transient failure, T3 cannot be reused:
+        \\ transfer   T3  A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
+        \\ transfer   T3  A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ id_already_failed
+        // `credit_account_already_closed` is a transient failure, T4 cannot be reused:
+        \\ transfer   T4  A2 A1    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
+        \\ transfer   T4  A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ id_already_failed
         \\ commit create_transfers
         \\
         \\ lookup_account A1  0 15  0   0  CLSD
         \\ lookup_account A2  0  0  0  15  _
         \\ commit lookup_accounts
+        // `debit_account_already_closed` is a transient failure, T5 cannot be reused:
+        \\ transfer   T5  A1 A2    0   T2 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ debit_account_already_closed
+        \\ transfer   T5  A1 A2    0   T2 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ id_already_failed
         \\
-        \\ transfer   T3 A1 A2    0   T2 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ debit_account_already_closed
-        \\ transfer   T3 A1 A2    0   T2 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ ok // Re-opening the account.
-        \\ transfer   T3 A1 A2    0   T2 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ exists
-        \\ transfer   T4 A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ ok
+        \\ transfer   T6  A1 A2    0   T2 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ ok // Re-opening the account.
+        \\ transfer   T6  A1 A2    0   T2 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ exists
+        \\ transfer   T7  A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1  0 20  0   0  _
@@ -4749,12 +4893,16 @@ test "create_transfers: closing accounts" {
         \\
         // Closing the credit account with a timeout.
         // Pending transfer can be voided, but not posted in a closed account.
-        \\ transfer   T5 A1 A2   10   _  _   _  _    1 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
-        \\ transfer   T6 A1 A2   10   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
-        \\ transfer   T7 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ ok
-        \\ transfer   T7 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ exists
-        \\ transfer   T8 A1 A2   10   T6 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ credit_account_already_closed
-        \\ transfer   T8 A1 A2   10   T6 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ ok
+        \\ transfer   T8  A1 A2   10   _  _   _  _    1 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
+        \\ transfer   T9  A1 A2   10   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
+        \\ transfer   T10 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ ok
+        \\ transfer   T10 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ exists
+        // `credit_account_already_closed` is a transient failure, T11 cannot be reused:
+        \\ transfer   T11 A1 A2   10   T9 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ credit_account_already_closed
+        \\ transfer   T11 A1 A2   10   T9 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ id_already_failed
+        \\
+        \\ transfer   T12 A1 A2   10   T9 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ ok
+        \\ transfer   T12 A1 A2   10   T9 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ exists
         \\ commit create_transfers
         \\
         \\ lookup_account A1 10 20  0   0  _
@@ -4774,11 +4922,15 @@ test "create_transfers: closing accounts" {
         \\ commit lookup_accounts
         \\
         // Closing both accounts.
-        \\ transfer   T9  A1 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ closing_transfer_must_be_pending
-        \\ transfer   T9  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR CCR _ _ ok
-        \\ transfer   T9  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR CCR _ _ exists
-        \\ transfer   T10 A1 A3    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
-        \\ transfer   T10 A3 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
+        \\ transfer   T13  A1 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ closing_transfer_must_be_pending
+        \\ transfer   T13  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR CCR _ _ ok
+        \\ transfer   T13  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR CCR _ _ exists
+        // `debit_account_already_closed` is a transient failure, T14 cannot be reused:
+        \\ transfer   T14  A1 A3    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
+        \\ transfer   T14  A1 A3    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ id_already_failed
+        // `credit_account_already_closed` is a transient failure, T15 cannot be reused:
+        \\ transfer   T15  A3 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
+        \\ transfer   T15  A3 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ id_already_failed
         \\ commit create_transfers
         \\
         \\ lookup_account A1  0 20  0   0  CLSD
@@ -4786,8 +4938,12 @@ test "create_transfers: closing accounts" {
         \\ commit lookup_accounts
         \\
         // Cannot close an already closed account.
-        \\ transfer   T10 A1 A3    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  CDR _   _ _ debit_account_already_closed
-        \\ transfer   T10 A3 A2    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  _   CCR _ _ credit_account_already_closed
+        // `debit_account_already_closed` is a transient failure, T16 cannot be reused:
+        \\ transfer   T16 A1 A3    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  CDR _   _ _ debit_account_already_closed
+        \\ transfer   T16 A1 A3    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  CDR _   _ _ id_already_failed
+        // `credit_account_already_closed` is a transient failure, T17 cannot be reused:
+        \\ transfer   T17 A3 A2    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  _   CCR _ _ credit_account_already_closed
+        \\ transfer   T17 A3 A2    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  _   CCR _ _ id_already_failed
         \\ commit create_transfers
     );
 }
