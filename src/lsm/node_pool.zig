@@ -65,7 +65,7 @@ pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) typ
             const node_index = pool.free.findFirstSet() orelse vsr.fatal(
                 .manifest_node_pool_exhausted,
                 "out of memory for manifest, " ++
-                    "restart the replica with larger '--memory-lsm-manifest' argument",
+                    "restart the replica increasing '--memory-lsm-manifest'",
                 .{},
             );
             assert(pool.free.isSet(node_index));

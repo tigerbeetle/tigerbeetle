@@ -1270,6 +1270,20 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     });
                 }
 
+                if (superblock.working.vsr_state.checkpoint.storage_size >
+                    superblock.storage_size_limit)
+                {
+                    vsr.fatal(
+                        .storage_size_exceeds_limit,
+                        "data file too large size={} > limit={}, " ++
+                            "restart the replica increasing '--storage_size_limit'",
+                        .{
+                            superblock.working.vsr_state.checkpoint.storage_size,
+                            superblock.storage_size_limit,
+                        },
+                    );
+                }
+
                 if (context.caller == .open) {
                     if (context.repairs) |_| {
                         // We just verified that the repair completed.
