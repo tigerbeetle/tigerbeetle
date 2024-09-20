@@ -87,7 +87,7 @@ test "tidy" {
         std.debug.print("error: `function_line_count_max` must be updated to {d}\n", .{
             function_line_count_longest,
         });
-        return error.LineCountOudated;
+        return error.LineCountOutdated;
     }
 }
 
