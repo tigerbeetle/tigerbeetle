@@ -61,8 +61,8 @@ pub fn deinit(self: *Self) void {
 pub fn start(
     self: *Self,
 ) !void {
-    assert(self.state() != .running);
-    defer assert(self.state() == .running);
+    self.expect_state_in(.{ .initial, .terminated, .completed });
+    defer self.expect_state_in(.{.running});
 
     var child = std.process.Child.init(self.argv, self.allocator);
 
@@ -140,8 +140,8 @@ pub fn start(
 pub fn terminate(
     self: *Self,
 ) !std.process.Child.Term {
-    assert(self.state() == .running);
-    defer assert(self.state() == .terminated);
+    self.expect_state_in(.{.running});
+    defer self.expect_state_in(.{.terminated});
 
     var child = self.child.?;
     const stdin_thread = self.stdin_thread.?;
@@ -182,8 +182,8 @@ pub fn terminate(
 pub fn wait(
     self: *Self,
 ) !std.process.Child.Term {
-    assert(self.state() == .running or self.state() == .completed);
-    defer assert(self.state() == .completed);
+    self.expect_state_in(.{ .running, .completed });
+    defer self.expect_state_in(.{.completed});
 
     var child = self.child.?;
     const stdin_thread = self.stdin_thread.?;
@@ -201,6 +201,21 @@ pub fn wait(
     self.current_state.store(.completed, .seq_cst);
 
     return term;
+}
+
+fn expect_state_in(self: *Self, comptime valid_states: anytype) void {
+    const actual_state = self.state();
+
+    inline for (valid_states) |valid| {
+        if (actual_state == valid) return;
+    }
+
+    log.err("{s}: expected state in {any} but actual state is {s}", .{
+        self.name,
+        valid_states,
+        @tagName(actual_state),
+    });
+    unreachable;
 }
 
 fn format_argv(allocator: std.mem.Allocator, argv: []const []const u8) ![]const u8 {

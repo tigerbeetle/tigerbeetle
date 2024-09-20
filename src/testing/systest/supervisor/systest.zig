@@ -139,7 +139,11 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     workload.deinit();
 
     for (replicas) |replica| {
-        _ = try replica.process.terminate();
+        // The nemesis might have terminated the replica and never restarted it,
+        // so we need to check its state.
+        if (replica.process.state() == .running) {
+            _ = try replica.process.terminate();
+        }
         replica.process.deinit();
     }
 
