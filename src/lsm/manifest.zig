@@ -165,9 +165,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const Level =
             ManifestLevelType(NodePool, Key, TreeTableInfo, table_count_max);
 
-        const Grid = GridType(Storage);
-        const Callback = *const fn (*Manifest) void;
-
         const CompactionTableRange = struct {
             table_a: TableInfoReference,
             range_b: CompactionRange,

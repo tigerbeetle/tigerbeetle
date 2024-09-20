@@ -195,17 +195,3 @@ fn shuffled_index(comptime n: usize, rand: std.rand.Random) [n]usize {
     rand.shuffle(usize, indices[0..]);
     return indices;
 }
-
-fn timeval_to_ns(tv: std.os.timeval) u64 {
-    const ns_per_us = std.time.ns_per_s / std.time.us_per_s;
-    return @as(u64, @intCast(tv.tv_sec)) * std.time.ns_per_s +
-        @as(u64, @intCast(tv.tv_usec)) * ns_per_us;
-}
-
-fn readPerfFd(fd: std.posix.fd_t) !usize {
-    var result: usize = 0;
-    const n = try std.posix.read(fd, std.mem.asBytes(&result));
-    assert(n == @sizeOf(usize));
-
-    return result;
-}

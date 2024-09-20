@@ -3,7 +3,6 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const constants = @import("../constants.zig");
 const binary_search = @import("binary_search.zig");
 
 pub fn TableMemoryType(comptime Table: type) type {
@@ -185,10 +184,6 @@ const TestTable = struct {
 
     inline fn key_from_value(v: *const Value) u32 {
         return v.key;
-    }
-
-    inline fn tombstone_from_key(a: Key) Value {
-        return Value{ .key = a, .value = 0, .tombstone = true };
     }
 };
 

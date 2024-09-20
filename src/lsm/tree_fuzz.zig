@@ -7,7 +7,6 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
-const binary_search = @import("binary_search.zig");
 const allocator = fuzz.allocator;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
@@ -17,8 +16,6 @@ const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
-const StateMachine =
-    @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const GridType = @import("../vsr/grid.zig").GridType;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
@@ -33,7 +30,6 @@ const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
-const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
 const SortedSegmentedArray = @import("./segmented_array.zig").SortedSegmentedArray;
 
 const CompactionHelperType = @import("compaction.zig").CompactionHelperType;
@@ -414,11 +410,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {
             const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
             env.change_state(.manifest_log_compact, .fuzzing);
-        }
-
-        fn tree_compact_callback(tree: *Tree) void {
-            const env: *Environment = @fieldParentPtr("tree", tree);
-            env.change_state(.tree_compact, .fuzzing);
         }
 
         pub fn checkpoint(env: *Environment, op: u64) void {

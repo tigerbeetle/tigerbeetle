@@ -31,7 +31,6 @@ const Forest = StateMachine.Forest;
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const FreeSet = vsr.FreeSet;
-const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
 
 const FuzzOpAction = union(enum) {
     compact: struct {

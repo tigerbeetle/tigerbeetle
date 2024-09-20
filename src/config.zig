@@ -9,7 +9,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
-const stdx = @import("./stdx.zig");
 
 const root = @import("root");
 

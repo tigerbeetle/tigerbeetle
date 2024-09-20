@@ -3,7 +3,6 @@
 //! - derived configuration values,
 
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
 const Config = @import("config.zig").Config;

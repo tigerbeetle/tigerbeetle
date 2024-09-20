@@ -1229,30 +1229,6 @@ const FailStep = struct {
     }
 };
 
-// Patch the target to use the right CPU. This is a somewhat hacky way to do this, but the core idea
-// here is to keep this file as the source of truth for what we need from the CPU.
-fn set_cpu_features(
-    target_requested: *std.Build.ResolvedTarget,
-    targets_supported: []const CrossTarget,
-) void {
-    const target_supported = for (targets_supported) |target_supported| {
-        if (target_requested.result.cpu.arch == target_supported.cpu_arch) {
-            break target_supported;
-        }
-    } else @panic("error: unsupported target");
-
-    // CPU model detection from: https://github.com/ziglang/zig/blob/0.13.0/lib/std/zig/system.zig#L320
-    target_requested.result.cpu.model = switch (target_supported.cpu_model) {
-        .native => @panic("pre-defined supported target assumed runtime-detected cpu model"),
-        .baseline,
-        .determined_by_cpu_arch,
-        => std.Target.Cpu.baseline(target_supported.cpu_arch.?).model,
-        .explicit => |model| model,
-    };
-    target_requested.result.cpu.features.addFeatureSet(target_supported.cpu_features_add);
-    target_requested.result.cpu.features.removeFeatureSet(target_supported.cpu_features_sub);
-}
-
 /// Set the JVM DLL directory on Windows.
 fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     comptime std.debug.assert(builtin.os.tag == .windows);

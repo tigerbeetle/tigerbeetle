@@ -582,13 +582,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             return message.ref();
         }
 
-        fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
-            const message = self.create_message_from_header(header);
-            defer self.message_bus.unref(message);
-
-            self.send_message_to_replica(replica, message);
-        }
-
         fn send_header_to_replicas(self: *Self, header: Header) void {
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);

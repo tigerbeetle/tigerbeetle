@@ -15,7 +15,6 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock);
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../testing/storage.zig").Storage;
 const StorageFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;

@@ -3,13 +3,11 @@
 //!
 //! The Auditor expects replies in ascending commit order.
 const std = @import("std");
-const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_auditor);
 
 const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
-const vsr = @import("../vsr.zig");
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 
 const PriorityQueue = std.PriorityQueue;

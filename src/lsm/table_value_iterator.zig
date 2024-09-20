@@ -3,10 +3,8 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const constants = @import("../constants.zig");
 const schema = @import("schema.zig");
 
-const stdx = @import("../stdx.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const Direction = @import("../direction.zig").Direction;

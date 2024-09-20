@@ -12,7 +12,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const stdx = @import("stdx.zig");
 const flags = @import("flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("shell.zig");

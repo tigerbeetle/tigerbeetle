@@ -205,7 +205,7 @@ fn tidy_control_characters(file: SourceFile) ?u8 {
 const identifiers_per_file_max = 100_000;
 /// Detects unused constants and functions.
 ///
-/// This is a one-side heuristics: there might be false negatives, but no false positives.
+/// This is a one-side heuristic: there might be false negatives, but no false positives.
 ///
 /// Current algorithm:
 /// - Two passes.
@@ -257,7 +257,8 @@ fn tidy_dead_declarations(
                 else => comptime unreachable,
             }
 
-            assert(phase == .check and used.get(token_text).? == 1);
+            assert(phase == .check);
+            assert(used.get(token_text).? == 1);
             var declaration_keyword = false;
             for (0..3) |context_offset| {
                 if (index - context_offset < 2) break;

@@ -29,8 +29,6 @@ pub fn ewah(comptime Word: type) type {
     const word_bits = @bitSizeOf(Word);
 
     return struct {
-        const Self = @This();
-
         const marker_uniform_word_count_max = (1 << ((word_bits / 2) - 1)) - 1;
         const marker_literal_word_count_max = (1 << (word_bits / 2)) - 1;
 

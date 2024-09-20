@@ -4,7 +4,6 @@ const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const os = std.os;
 const posix = std.posix;
-const native_endian = @import("builtin").target.cpu.arch.endian();
 const constants = @import("constants.zig");
 const IO = @import("io.zig").IO;
 const Timeout = @import("./vsr.zig").Timeout;
