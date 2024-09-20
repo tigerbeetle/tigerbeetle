@@ -1707,8 +1707,9 @@ pub fn StateMachineType(
                     // rather than request data.
                     //
                     // Transfers that fail with these codes cannot reuse the same `id`,
-                    // ensuring strong idempotency guarantees. Once a transfer fails with a transient
-                    // error, it must be retried with a different `id`.
+                    // ensuring strong idempotency guarantees.
+                    // Once a transfer fails with a transient error, it must be retried
+                    // with a different `id`.
                     const persist = switch (result) {
                         .debit_account_not_found,
                         .credit_account_not_found,
