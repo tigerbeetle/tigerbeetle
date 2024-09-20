@@ -20,8 +20,6 @@ const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
-const flags = @import("../flags.zig");
 const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
 const changelog = @import("./changelog.zig");

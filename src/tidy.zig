@@ -21,8 +21,13 @@ test "tidy" {
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
-    var dead_detector = DeadDetector.init(allocator);
-    defer dead_detector.deinit();
+    var dead_files_detector = DeadFilesDetector.init(allocator);
+    defer dead_files_detector.deinit();
+
+    var dead_declarations: std.StringHashMapUnmanaged(u32) = .{};
+    defer dead_declarations.deinit(allocator);
+
+    try dead_declarations.ensureTotalCapacity(allocator, identifiers_per_file_max);
 
     var function_line_count_longest: usize = 0;
 
@@ -60,12 +65,19 @@ test "tidy" {
                 return error.LineTooLong;
             }
 
+            var tree = try std.zig.Ast.parse(allocator, source_file.text, .zig);
+            defer tree.deinit(allocator);
+
+            if (tidy_dead_declarations(&tree, &dead_declarations)) |name| {
+                std.debug.print("{s}: error: '{s}' is dead code\n", .{ source_file.path, name });
+            }
+
             function_line_count_longest = @max(
                 function_line_count_longest,
-                (try tidy_long_functions(source_file)).function_line_count_longest,
+                (try tidy_long_functions(source_file, &tree)).function_line_count_longest,
             );
 
-            try dead_detector.visit(source_file);
+            try dead_files_detector.visit(source_file);
         }
 
         if (mem.endsWith(u8, source_file.path, ".md")) {
@@ -74,17 +86,18 @@ test "tidy" {
                     "{s} error: invalid markdown headings, {}\n",
                     .{ source_file.path, err },
                 );
+                return err;
             };
         }
     }
 
-    try dead_detector.finish();
+    try dead_files_detector.finish();
 
     if (function_line_count_longest < function_line_count_max) {
         std.debug.print("error: `function_line_count_max` must be updated to {d}\n", .{
             function_line_count_longest,
         });
-        return error.LineCountOudated;
+        return error.LineCountOutdated;
     }
 }
 
@@ -189,16 +202,100 @@ fn tidy_control_characters(file: SourceFile) ?u8 {
     return null;
 }
 
+const identifiers_per_file_max = 100_000;
+/// Detects unused constants and functions.
+///
+/// This is a one-side heuristic: there might be false negatives, but no false positives.
+///
+/// Current algorithm:
+/// - Two passes.
+/// - Pass 1: count how many times each identifier is mentioned in the file.
+/// - Pass 2: warn about any unique identifier which is a non-public declaration.
+///
+/// At the moment, this is implemented using only the lexer, without looking at the AST, as that
+/// seemed simpler.
+fn tidy_dead_declarations(
+    tree: *const std.zig.Ast,
+    used: *std.StringHashMapUnmanaged(u32),
+) ?[]const u8 {
+    assert(used.count() == 0);
+    defer used.clearRetainingCapacity();
+
+    var identifier_start: ?std.zig.Ast.ByteOffset = 0;
+    inline for (.{ .fill, .check }) |phase| {
+        next_token: for (
+            tree.tokens.items(.tag),
+            tree.tokens.items(.start),
+            0..,
+        ) |tag, start, index| {
+            const identifier_start_previous = identifier_start;
+            identifier_start = switch (tag) {
+                .identifier => start,
+                else => null,
+            };
+
+            const start_previous = identifier_start_previous orelse continue :next_token;
+            const token_text = std.mem.trim(
+                u8,
+                tree.source[start_previous..start],
+                &std.ascii.whitespace,
+            );
+
+            switch (phase) {
+                .fill => {
+                    const gop = used.getOrPutAssumeCapacity(token_text);
+                    if (!gop.found_existing) gop.value_ptr.* = 0;
+                    gop.value_ptr.* += 1;
+                    if (used.count() >= identifiers_per_file_max) @panic("file to large");
+                    continue :next_token;
+                },
+                .check => {
+                    const usages = used.get(token_text).?;
+                    assert(usages >= 1);
+                    if (usages > 1) continue :next_token;
+                },
+                else => comptime unreachable,
+            }
+
+            assert(phase == .check);
+            assert(used.get(token_text).? == 1);
+            var declaration_keyword = false;
+            for (0..3) |context_offset| {
+                if (index - context_offset < 2) break;
+                const context_tag = tree.tokens.get(index - context_offset - 2).tag;
+                if (!declaration_keyword) {
+                    switch (context_tag) {
+                        .keyword_fn, .keyword_const => declaration_keyword = true,
+                        // Not a declaration.
+                        else => continue :next_token,
+                    }
+                } else {
+                    switch (context_tag) {
+                        .keyword_inline => {},
+                        // Public declaration can be used in a different file.
+                        .keyword_pub, .keyword_export => continue :next_token,
+                        // []const u8 or *const u8, not a declaration.
+                        .r_bracket, .asterisk => continue :next_token,
+                        // Non public declarations, never used.
+                        else => return token_text,
+                    }
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
 const function_line_count_max = 355; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,
+    tree: *const std.zig.Ast,
 ) !struct {
     function_line_count_longest: usize,
 } {
-    const allocator = std.testing.allocator;
-
     if (std.mem.endsWith(u8, file.path, "client_readmes.zig")) {
         // This file is essentially a template to generate a markdown file, so it
         // intentionally has giant functions.
@@ -243,9 +340,6 @@ fn tidy_long_functions(
     };
 
     var function_stack = stdx.BoundedArray(Function, 32).from_slice(&.{}) catch unreachable;
-
-    var tree = try std.zig.Ast.parse(allocator, file.text, .zig);
-    defer tree.deinit(allocator);
 
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
@@ -341,25 +435,26 @@ fn tidy_markdown_title(text: []const u8) !void {
 // Zig's lazy compilation model makes it too easy to forget to include a file into the build --- if
 // nothing imports a file, compiler just doesn't see it and can't flag it as unused.
 //
-// DeadDetector implements heuristic detection of unused files, by "grepping" for import statements
-// and flagging file which are never imported. This gives false negatives for unreachable cycles of
-// files, as well as for identically-named files, but it should be good enough in practice.
-const DeadDetector = struct {
+// DeadFilesDetector implements heuristic detection of unused files, by "grepping" for import
+// statements and flagging file which are never imported. This gives false negatives for unreachable
+// cycles of files, as well as for identically-named files, but it should be good enough in
+// practice.
+const DeadFilesDetector = struct {
     const FileName = [64]u8;
     const FileState = struct { import_count: u32, definition_count: u32 };
     const FileMap = std.AutoArrayHashMap(FileName, FileState);
 
     files: FileMap,
 
-    fn init(allocator: std.mem.Allocator) DeadDetector {
+    fn init(allocator: std.mem.Allocator) DeadFilesDetector {
         return .{ .files = FileMap.init(allocator) };
     }
 
-    fn deinit(detector: *DeadDetector) void {
+    fn deinit(detector: *DeadFilesDetector) void {
         detector.files.deinit();
     }
 
-    fn visit(detector: *DeadDetector, file: SourceFile) !void {
+    fn visit(detector: *DeadFilesDetector, file: SourceFile) !void {
         (try detector.file_state(file.path)).definition_count += 1;
 
         var text: []const u8 = file.text;
@@ -375,7 +470,7 @@ const DeadDetector = struct {
         }
     }
 
-    fn finish(detector: *DeadDetector) !void {
+    fn finish(detector: *DeadFilesDetector) !void {
         defer detector.files.clearRetainingCapacity();
 
         for (detector.files.keys(), detector.files.values()) |name, state| {
@@ -387,7 +482,7 @@ const DeadDetector = struct {
         }
     }
 
-    fn file_state(detector: *DeadDetector, path: []const u8) !*FileState {
+    fn file_state(detector: *DeadFilesDetector, path: []const u8) !*FileState {
         const gop = try detector.files.getOrPut(path_to_name(path));
         if (!gop.found_existing) gop.value_ptr.* = .{ .import_count = 0, .definition_count = 0 };
         return gop.value_ptr;

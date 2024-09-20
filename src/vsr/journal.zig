@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;

@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 const vsr = @import("../vsr.zig");
-const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
 pub const Stage = union(enum) {

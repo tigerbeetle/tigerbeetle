@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 const Docs = @import("../docs_types.zig").Docs;
 

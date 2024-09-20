@@ -1,6 +1,5 @@
 //! An LSM tree.
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
@@ -12,7 +11,6 @@ const log = std.log.scoped(.tree);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
 
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;

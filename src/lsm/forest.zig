@@ -7,7 +7,6 @@ const log = std.log.scoped(.forest);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const vsr = @import("../vsr.zig");
 
 const schema = @import("schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
@@ -187,7 +186,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         const CompactionPipeline = CompactionPipelineType(Forest, Grid);
 
         const Callback = *const fn (*Forest) void;
-        const GroovesBitSet = std.StaticBitSet(std.meta.fields(Grooves).len);
 
         pub const Storage = _Storage;
         pub const groove_config = groove_cfg;
@@ -549,11 +547,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             forest.compaction_progress = null;
 
             callback(forest);
-        }
-
-        fn GrooveFor(comptime groove_field_name: []const u8) type {
-            const groove_field = @field(std.meta.FieldEnum(Grooves), groove_field_name);
-            return std.meta.FieldType(Grooves, groove_field);
         }
 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {

@@ -239,8 +239,6 @@ fn TestContext(comptime streams_max: u32) type {
     return struct {
         const ZigZagMergeIterator = @This();
 
-        const log = false;
-
         // Using `u128` simplifies the fuzzer, avoiding undesirable matches
         // and duplicate elements when generating random values.
         const Key = u128;

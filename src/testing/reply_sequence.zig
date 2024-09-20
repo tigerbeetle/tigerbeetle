@@ -4,7 +4,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
-const vsr = @import("../vsr.zig");
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const IdPermutation = @import("id.zig").IdPermutation;

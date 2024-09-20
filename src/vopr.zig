@@ -5,7 +5,6 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const mem = std.mem;
 
-const tb = @import("tigerbeetle.zig");
 const constants = @import("constants.zig");
 const flags = @import("./flags.zig");
 const schema = @import("lsm/schema.zig");

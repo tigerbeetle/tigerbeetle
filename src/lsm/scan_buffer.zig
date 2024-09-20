@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
 const constants = @import("../constants.zig");
-const lsm = @import("tree.zig");
 
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;

@@ -23,7 +23,6 @@ const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 const ManifestLogOptions = @import("manifest_log.zig").Options;
 const fuzz = @import("../testing/fuzz.zig");
 const schema = @import("./schema.zig");
-const tree = @import("./tree.zig");
 const compaction_tables_input_max = @import("./compaction.zig").compaction_tables_input_max;
 const TableInfo = schema.ManifestNode.TableInfo;
 
@@ -36,12 +35,6 @@ const manifest_log_options = ManifestLogOptions{
     // that pacing is correct.
     .forest_table_count_max = schema.ManifestNode.entry_count_max * 100,
 };
-
-const pace = @import("manifest_log.zig").Pace.init(.{
-    .tree_count = manifest_log_options.forest_tree_count(),
-    .tables_max = manifest_log_options.forest_table_count_max,
-    .half_bar_compact_blocks_extra = constants.lsm_manifest_compact_blocks_extra,
-});
 
 pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
@@ -639,12 +632,6 @@ const ManifestLogModel = struct {
     fn deinit(model: *ManifestLogModel) void {
         model.tables.deinit();
         model.appends.deinit();
-    }
-
-    fn current(model: ManifestLogModel, table_address: u64) ?TableInfo {
-        assert(model.appends.items.len == 0);
-
-        return model.tables.get(table_address);
     }
 
     fn append(model: *ManifestLogModel, table: *const TableInfo) !void {

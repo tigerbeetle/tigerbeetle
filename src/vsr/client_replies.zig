@@ -34,9 +34,6 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Slot = @import("client_sessions.zig").ReplySlot;
 const ClientSessions = @import("client_sessions.zig").ClientSessions;
 
-const client_replies_iops_max =
-    constants.client_replies_iops_read_max + constants.client_replies_iops_write_max;
-
 fn slot_offset(slot: Slot) usize {
     return slot.index * constants.message_size_max;
 }

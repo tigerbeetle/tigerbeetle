@@ -711,25 +711,6 @@ const Benchmark = struct {
     }
 };
 
-fn print_deciles(
-    stdout: anytype,
-    label: []const u8,
-    latencies: []const u64,
-) void {
-    var decile: usize = 0;
-    while (decile <= 10) : (decile += 1) {
-        const index = @divTrunc(latencies.len * decile, 10) -| 1;
-        stdout.print("{s} latency p{}0 = {} ms\n", .{
-            label,
-            decile,
-            @divTrunc(
-                latencies[index],
-                std.time.ns_per_ms,
-            ),
-        }) catch unreachable;
-    }
-}
-
 fn print_percentiles_histogram(
     stdout: anytype,
     label: []const u8,

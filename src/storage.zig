@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const os = std.os;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;

@@ -11,7 +11,6 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Process = @import("../testing/cluster/message_bus.zig").Process;
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const parse_table = @import("../testing/table.zig").parse;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
@@ -29,7 +28,8 @@ const checkpoint_2_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_2)
 const checkpoint_3_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_3).?;
 const checkpoint_1_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_1).?;
 const checkpoint_2_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_2).?;
-const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_3).?;
+// No test is using this yet:
+// const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_3).?;
 const checkpoint_1_prepare_ok_max = checkpoint_1_trigger + constants.pipeline_prepare_queue_max;
 const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_prepare_queue_max;
 

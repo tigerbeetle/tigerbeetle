@@ -510,11 +510,6 @@ pub fn GrooveType(
         const Grid = GridType(Storage);
         const ManifestLog = ManifestLogType(Storage);
 
-        const Callback = *const fn (*Groove) void;
-
-        const trees_total: usize = 1 + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
-        const TreesBitSet = std.StaticBitSet(trees_total);
-
         const PrefetchKey = union(enum) {
             id: PrimaryKey,
             timestamp: u64,

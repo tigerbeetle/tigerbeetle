@@ -12,7 +12,6 @@
 //! The cluster address is then passed onto `benchmark_load.zig`, which deals with both offering
 //! the load and measuring response latencies and throughput. The load runs in-process.
 
-const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const ChildProcess = std.process.Child;

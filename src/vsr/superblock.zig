@@ -1401,37 +1401,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(offset + size <= superblock_zone_size);
         }
 
-        /// We use flexible quorums for even quorums with write quorum > read quorum, for example:
-        /// * When writing, we must verify that at least 3/4 copies were written.
-        /// * At startup, we must verify that at least 2/4 copies were read.
-        ///
-        /// This ensures that our read and write quorums will intersect.
-        /// Using flexible quorums in this way increases resiliency of the superblock.
-        fn threshold_for_caller(caller: Caller) u8 {
-            // Working these threshold out by formula is easy to get wrong, so enumerate them:
-            // The rule is that the write quorum plus the read quorum must be exactly copies + 1.
-
-            return switch (caller) {
-                .format,
-                .checkpoint,
-                .view_change,
-                => switch (constants.superblock_copies) {
-                    4 => 3,
-                    6 => 4,
-                    8 => 5,
-                    else => unreachable,
-                },
-                // The open quorum must allow for at least two copy faults, because our view change
-                // updates an existing set of copies in place, temporarily impairing one copy.
-                .open => switch (constants.superblock_copies) {
-                    4 => 2,
-                    6 => 3,
-                    8 => 4,
-                    else => unreachable,
-                },
-            };
-        }
-
         fn log_context(superblock: *const SuperBlock, context: *const Context) void {
             log.debug("{[replica]?}: {[caller]s}: " ++
                 "commit_min={[commit_min_old]}..{[commit_min_new]} " ++

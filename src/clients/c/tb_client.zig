@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 // When referenced from unit_test.zig, there is no vsr import module. So use relative path instead.
 pub const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../vsr.zig");

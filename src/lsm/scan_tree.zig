@@ -9,7 +9,6 @@ const log = std.log.scoped(.scan);
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
-const lsm = @import("tree.zig");
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");

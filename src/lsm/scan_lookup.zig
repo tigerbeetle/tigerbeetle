@@ -3,8 +3,6 @@ const assert = std.debug.assert;
 
 const Allocator = std.mem.Allocator;
 
-const stdx = @import("../stdx.zig");
-const constants = @import("../constants.zig");
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const GridType = @import("../vsr/grid.zig").GridType;
