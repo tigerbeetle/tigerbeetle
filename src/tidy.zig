@@ -21,8 +21,8 @@ test "tidy" {
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
-    var dead_detector = DeadDetector.init(allocator);
-    defer dead_detector.deinit();
+    var dead_files_detector = DeadFilesDetector.init(allocator);
+    defer dead_files_detector.deinit();
 
     var function_line_count_longest: usize = 0;
 
@@ -68,7 +68,7 @@ test "tidy" {
                 (try tidy_long_functions(source_file, &tree)).function_line_count_longest,
             );
 
-            try dead_detector.visit(source_file);
+            try dead_files_detector.visit(source_file);
         }
 
         if (mem.endsWith(u8, source_file.path, ".md")) {
@@ -81,7 +81,7 @@ test "tidy" {
         }
     }
 
-    try dead_detector.finish();
+    try dead_files_detector.finish();
 
     if (function_line_count_longest < function_line_count_max) {
         std.debug.print("error: `function_line_count_max` must be updated to {d}\n", .{
@@ -340,25 +340,26 @@ fn tidy_markdown_title(text: []const u8) !void {
 // Zig's lazy compilation model makes it too easy to forget to include a file into the build --- if
 // nothing imports a file, compiler just doesn't see it and can't flag it as unused.
 //
-// DeadDetector implements heuristic detection of unused files, by "grepping" for import statements
-// and flagging file which are never imported. This gives false negatives for unreachable cycles of
-// files, as well as for identically-named files, but it should be good enough in practice.
-const DeadDetector = struct {
+// DeadFilesDetector implements heuristic detection of unused files, by "grepping" for import
+// statements and flagging file which are never imported. This gives false negatives for unreachable
+// cycles of files, as well as for identically-named files, but it should be good enough in
+// practice.
+const DeadFilesDetector = struct {
     const FileName = [64]u8;
     const FileState = struct { import_count: u32, definition_count: u32 };
     const FileMap = std.AutoArrayHashMap(FileName, FileState);
 
     files: FileMap,
 
-    fn init(allocator: std.mem.Allocator) DeadDetector {
+    fn init(allocator: std.mem.Allocator) DeadFilesDetector {
         return .{ .files = FileMap.init(allocator) };
     }
 
-    fn deinit(detector: *DeadDetector) void {
+    fn deinit(detector: *DeadFilesDetector) void {
         detector.files.deinit();
     }
 
-    fn visit(detector: *DeadDetector, file: SourceFile) !void {
+    fn visit(detector: *DeadFilesDetector, file: SourceFile) !void {
         (try detector.file_state(file.path)).definition_count += 1;
 
         var text: []const u8 = file.text;
@@ -374,7 +375,7 @@ const DeadDetector = struct {
         }
     }
 
-    fn finish(detector: *DeadDetector) !void {
+    fn finish(detector: *DeadFilesDetector) !void {
         defer detector.files.clearRetainingCapacity();
 
         for (detector.files.keys(), detector.files.values()) |name, state| {
@@ -386,7 +387,7 @@ const DeadDetector = struct {
         }
     }
 
-    fn file_state(detector: *DeadDetector, path: []const u8) !*FileState {
+    fn file_state(detector: *DeadFilesDetector, path: []const u8) !*FileState {
         const gop = try detector.files.getOrPut(path_to_name(path));
         if (!gop.found_existing) gop.value_ptr.* = .{ .import_count = 0, .definition_count = 0 };
         return gop.value_ptr;
