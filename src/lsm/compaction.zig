@@ -1399,9 +1399,9 @@ pub fn CompactionType(
                         bar.source_a_values_consumed_for_fill = 0;
                     }
                     return .exhausted;
+                } else {
+                    return .filled;
                 }
-
-                return .filled;
             } else {
                 const blocks = &beat.blocks.?;
                 defer beat.source_a_len_after_set = beat.source_a_values.?.len;
