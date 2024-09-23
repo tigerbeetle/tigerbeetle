@@ -68,14 +68,14 @@ const SourceLocation = std.builtin.SourceLocation;
 
 const stdx = @import("../stdx.zig");
 
-comptime {
-    assert(builtin.is_test);
-}
-
 // Set to `true` to update all snapshots.
 const update_all: bool = false;
 
 pub const Snap = struct {
+    comptime {
+        assert(builtin.is_test);
+    }
+
     location: SourceLocation,
     text: []const u8,
     update_this: bool = false,
