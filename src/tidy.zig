@@ -600,17 +600,15 @@ test "tidy extensions" {
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
-        .{".editorconfig"},                       .{".gitignore"},
-        .{".nojekyll"},                           .{"CNAME"},
-        .{"Dockerfile"},                          .{"exclude-pmd.properties"},
-        .{"favicon.ico"},                         .{"favicon.png"},
-        .{"LICENSE"},                             .{"module-info.test"},
-        .{"index.html"},                          .{"logo.svg"},
-        .{"logo-white.svg"},                      .{"logo-with-text-white.svg"},
-        .{"zig/download.sh"},                     .{"src/scripts/cfo_supervisor.sh"},
-        .{"src/docs_website/scripts/build.sh"},   .{".github/ci/docs_check.sh"},
-        .{".github/ci/test_aof.sh"},              .{"tools/systemd/tigerbeetle-pre-start.sh"},
-        .{"tools/vscode/format_debug_server.sh"},
+        .{".editorconfig"},                 .{".gitignore"},
+        .{".nojekyll"},                     .{"CNAME"},
+        .{"exclude-pmd.properties"},        .{"favicon.ico"},
+        .{"favicon.png"},                   .{"LICENSE"},
+        .{"module-info.test"},              .{"index.html"},
+        .{"logo.svg"},                      .{"logo-white.svg"},
+        .{"logo-with-text-white.svg"},      .{"zig/download.sh"},
+        .{"src/scripts/cfo_supervisor.sh"}, .{"src/docs_website/scripts/build.sh"},
+        .{".github/ci/docs_check.sh"},      .{".github/ci/test_aof.sh"},
     });
 
     const allocator = std.testing.allocator;
@@ -618,6 +616,21 @@ test "tidy extensions" {
     defer shell.destroy();
 
     const paths = try list_file_paths(shell);
+
+    for (exceptions.keys()) |exception| {
+        for (paths) |path| {
+            const basename = std.fs.path.basename(path);
+            if (std.mem.eql(u8, exception, basename) or std.mem.eql(u8, exception, path)) {
+                break;
+            }
+        } else {
+            std.debug.panic("exception (or basename) doesn't exist: {s} ({s})", .{
+                exception,
+                std.fs.path.basename(exception),
+            });
+        }
+    }
+
     var bad_extension = false;
     for (paths) |path| {
         if (path.len == 0) continue;
