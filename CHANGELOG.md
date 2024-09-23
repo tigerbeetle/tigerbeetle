@@ -51,7 +51,6 @@ Released: 2024-09-23
 
 - [Prelude in G Major](https://open.spotify.com/track/70FROKEHubzMxSstCgaZZl?si=5bb7f8c6decc46aa)
 
-
 ## TigerBeetle 0.16.2
 
 Released: 2024-09-16
