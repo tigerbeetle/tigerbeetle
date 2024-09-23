@@ -239,11 +239,6 @@ pub const CreateTransferResult = enum(u32) {
 
     id_already_failed = 68,
 
-    imported_event_timestamp_must_not_regress = 60,
-    imported_event_timestamp_must_postdate_debit_account = 61,
-    imported_event_timestamp_must_postdate_credit_account = 62,
-    imported_event_timeout_must_be_zero = 63,
-
     flags_are_mutually_exclusive = 7,
 
     debit_account_id_must_not_be_zero = 8,
@@ -286,6 +281,14 @@ pub const CreateTransferResult = enum(u32) {
 
     pending_transfer_expired = 35,
 
+    imported_event_timestamp_must_not_regress = 60,
+    imported_event_timestamp_must_postdate_debit_account = 61,
+    imported_event_timestamp_must_postdate_credit_account = 62,
+    imported_event_timeout_must_be_zero = 63,
+
+    debit_account_already_closed = 65,
+    credit_account_already_closed = 66,
+
     overflows_debits_pending = 47,
     overflows_credits_pending = 48,
     overflows_debits_posted = 49,
@@ -296,9 +299,6 @@ pub const CreateTransferResult = enum(u32) {
 
     exceeds_credits = 54,
     exceeds_debits = 55,
-
-    debit_account_already_closed = 65,
-    credit_account_already_closed = 66,
 
     // Update this comment when adding a new value:
     // Last item: id_already_failed = 68.

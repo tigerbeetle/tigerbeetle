@@ -2326,23 +2326,6 @@ pub fn StateMachineType(
                 return .pending_transfer_has_different_amount;
             }
 
-            if (t.flags.imported) {
-                // Allows past timestamp, but validates whether it regressed from the last
-                // inserted transfer.
-                // This validation must be called _after_ the idempotency checks so the user
-                // can still handle `exists` results when importing.
-                if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
-                    if (t.timestamp <= key_range.key_max) {
-                        return .imported_event_timestamp_must_not_regress;
-                    }
-                }
-                if (self.forest.grooves.accounts.exists(t.timestamp)) {
-                    return .imported_event_timestamp_must_not_regress;
-                }
-            }
-            assert(t.timestamp > dr_account.timestamp);
-            assert(t.timestamp > cr_account.timestamp);
-
             const transfer_pending = self.get_transfer_pending(p.timestamp).?;
             assert(p.timestamp == transfer_pending.timestamp);
             switch (transfer_pending.status) {
@@ -2370,6 +2353,23 @@ pub fn StateMachineType(
 
                 break :expires_at expires_at;
             };
+
+            if (t.flags.imported) {
+                // Allows past timestamp, but validates whether it regressed from the last
+                // inserted transfer.
+                // This validation must be called _after_ the idempotency checks so the user
+                // can still handle `exists` results when importing.
+                if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
+                    if (t.timestamp <= key_range.key_max) {
+                        return .imported_event_timestamp_must_not_regress;
+                    }
+                }
+                if (self.forest.grooves.accounts.exists(t.timestamp)) {
+                    return .imported_event_timestamp_must_not_regress;
+                }
+            }
+            assert(t.timestamp > dr_account.timestamp);
+            assert(t.timestamp > cr_account.timestamp);
 
             // The only movement allowed in a closed account is voiding a pending transfer.
             if (dr_account.flags.closed and !t.flags.void_pending_transfer) {
