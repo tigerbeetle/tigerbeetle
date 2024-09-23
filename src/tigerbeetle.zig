@@ -400,8 +400,8 @@ pub const CreateTransferResult = enum(u32) {
         assert(set.count() == set.capacity());
     }
 
-    /// TODO(zig): This enum is be ordered by precedence, but it crashes
-    // `EnumSet`, and `@setEvalBranchQuota()` isn't propagating correctly:
+    // TODO(zig): This enum is ordered by precedence, but it crashes `EnumSet`,
+    // and `@setEvalBranchQuota()` isn't propagating correctly:
     // https://godbolt.org/z/6a45bx6xs
     // error: evaluation exceeded 1000 backwards branches
     // note: use @setEvalBranchQuota() to raise the branch limit from 1000.

@@ -4667,7 +4667,7 @@ test "create_transfers: per-transfer balance invariant" {
         \\ transfer T3 A2 A3  0  T2  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ linked_event_failed
         \\ commit create_transfers
         \\
-        // Ids failed in a linked chain can be reused, buy
+        // Ids failed in a linked chain can be reused, but
         // `exceeds_debits` is a transient failure, T2 cannot be reused:
         \\ transfer T1 A1 A2  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
         \\ transfer T2 A2 A3  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ id_already_failed
