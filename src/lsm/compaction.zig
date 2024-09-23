@@ -1287,7 +1287,7 @@ pub fn CompactionType(
                 const source_values_merge_count_b = compaction.update_position_b();
                 const source_values_merge_count = source_values_merge_count_a +
                     source_values_merge_count_b;
-                std.log.debug("blip_merge({s}): source_values_merge_count_a={} " ++
+                log.debug("blip_merge({s}): source_values_merge_count_a={} " ++
                     "source_values_merge_count_b={}", .{
                     compaction.tree_config.name,
                     source_values_merge_count_a,
@@ -1979,7 +1979,7 @@ pub fn CompactionType(
                     },
                 }
             }
-            std.log.debug("bar_apply_to_manifest({s}): manifest_removed_value_count={} " ++
+            log.debug("bar_apply_to_manifest({s}): manifest_removed_value_count={} " ++
                 "manifest_added_value_count={} source_values_read_count={} " ++
                 "target_values_merge_count={}", .{
                 compaction.tree_config.name,
