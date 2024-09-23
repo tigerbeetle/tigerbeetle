@@ -1384,11 +1384,9 @@ pub fn CompactionType(
                         bar.table_info_a.immutable = bar.table_info_a.immutable[filled..];
 
                         updated_fill_count = true;
-                        log.debug("set_source_a({s}): refilled immutable block. {} values out, " ++
-                            "{} values consumed", .{
+                        log.debug("set_source_a({s}): refilled immutable values (filled={})", .{
                             compaction.tree_config.name,
                             filled,
-                            bar.source_a_values_consumed_for_fill,
                         });
                     }
                 }
