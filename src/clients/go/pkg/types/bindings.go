@@ -318,10 +318,6 @@ const (
 	TransferExistsWithDifferentCode                         CreateTransferResult = 45
 	TransferExists                                          CreateTransferResult = 46
 	TransferIDAlreadyFailed                                 CreateTransferResult = 68
-	TransferImportedEventTimestampMustNotRegress            CreateTransferResult = 60
-	TransferImportedEventTimestampMustPostdateDebitAccount  CreateTransferResult = 61
-	TransferImportedEventTimestampMustPostdateCreditAccount CreateTransferResult = 62
-	TransferImportedEventTimeoutMustBeZero                  CreateTransferResult = 63
 	TransferFlagsAreMutuallyExclusive                       CreateTransferResult = 7
 	TransferDebitAccountIDMustNotBeZero                     CreateTransferResult = 8
 	TransferDebitAccountIDMustNotBeIntMax                   CreateTransferResult = 9
@@ -352,6 +348,12 @@ const (
 	TransferPendingTransferAlreadyPosted                    CreateTransferResult = 33
 	TransferPendingTransferAlreadyVoided                    CreateTransferResult = 34
 	TransferPendingTransferExpired                          CreateTransferResult = 35
+	TransferImportedEventTimestampMustNotRegress            CreateTransferResult = 60
+	TransferImportedEventTimestampMustPostdateDebitAccount  CreateTransferResult = 61
+	TransferImportedEventTimestampMustPostdateCreditAccount CreateTransferResult = 62
+	TransferImportedEventTimeoutMustBeZero                  CreateTransferResult = 63
+	TransferDebitAccountAlreadyClosed                       CreateTransferResult = 65
+	TransferCreditAccountAlreadyClosed                      CreateTransferResult = 66
 	TransferOverflowsDebitsPending                          CreateTransferResult = 47
 	TransferOverflowsCreditsPending                         CreateTransferResult = 48
 	TransferOverflowsDebitsPosted                           CreateTransferResult = 49
@@ -361,8 +363,6 @@ const (
 	TransferOverflowsTimeout                                CreateTransferResult = 53
 	TransferExceedsCredits                                  CreateTransferResult = 54
 	TransferExceedsDebits                                   CreateTransferResult = 55
-	TransferDebitAccountAlreadyClosed                       CreateTransferResult = 65
-	TransferCreditAccountAlreadyClosed                      CreateTransferResult = 66
 )
 
 func (i CreateTransferResult) String() string {
@@ -415,14 +415,6 @@ func (i CreateTransferResult) String() string {
 		return "TransferExists"
 	case TransferIDAlreadyFailed:
 		return "TransferIDAlreadyFailed"
-	case TransferImportedEventTimestampMustNotRegress:
-		return "TransferImportedEventTimestampMustNotRegress"
-	case TransferImportedEventTimestampMustPostdateDebitAccount:
-		return "TransferImportedEventTimestampMustPostdateDebitAccount"
-	case TransferImportedEventTimestampMustPostdateCreditAccount:
-		return "TransferImportedEventTimestampMustPostdateCreditAccount"
-	case TransferImportedEventTimeoutMustBeZero:
-		return "TransferImportedEventTimeoutMustBeZero"
 	case TransferFlagsAreMutuallyExclusive:
 		return "TransferFlagsAreMutuallyExclusive"
 	case TransferDebitAccountIDMustNotBeZero:
@@ -483,6 +475,18 @@ func (i CreateTransferResult) String() string {
 		return "TransferPendingTransferAlreadyVoided"
 	case TransferPendingTransferExpired:
 		return "TransferPendingTransferExpired"
+	case TransferImportedEventTimestampMustNotRegress:
+		return "TransferImportedEventTimestampMustNotRegress"
+	case TransferImportedEventTimestampMustPostdateDebitAccount:
+		return "TransferImportedEventTimestampMustPostdateDebitAccount"
+	case TransferImportedEventTimestampMustPostdateCreditAccount:
+		return "TransferImportedEventTimestampMustPostdateCreditAccount"
+	case TransferImportedEventTimeoutMustBeZero:
+		return "TransferImportedEventTimeoutMustBeZero"
+	case TransferDebitAccountAlreadyClosed:
+		return "TransferDebitAccountAlreadyClosed"
+	case TransferCreditAccountAlreadyClosed:
+		return "TransferCreditAccountAlreadyClosed"
 	case TransferOverflowsDebitsPending:
 		return "TransferOverflowsDebitsPending"
 	case TransferOverflowsCreditsPending:
@@ -501,10 +505,6 @@ func (i CreateTransferResult) String() string {
 		return "TransferExceedsCredits"
 	case TransferExceedsDebits:
 		return "TransferExceedsDebits"
-	case TransferDebitAccountAlreadyClosed:
-		return "TransferDebitAccountAlreadyClosed"
-	case TransferCreditAccountAlreadyClosed:
-		return "TransferCreditAccountAlreadyClosed"
 	}
 	return "CreateTransferResult(" + strconv.FormatInt(int64(i+1), 10) + ")"
 }

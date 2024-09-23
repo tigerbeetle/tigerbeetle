@@ -592,26 +592,6 @@ public enum CreateTransferResult : uint
     IdAlreadyFailed = 68,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress
-    /// </summary>
-    ImportedEventTimestampMustNotRegress = 60,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account
-    /// </summary>
-    ImportedEventTimestampMustPostdateDebitAccount = 61,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account
-    /// </summary>
-    ImportedEventTimestampMustPostdateCreditAccount = 62,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero
-    /// </summary>
-    ImportedEventTimeoutMustBeZero = 63,
-
-    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#flags_are_mutually_exclusive
     /// </summary>
     FlagsAreMutuallyExclusive = 7,
@@ -762,6 +742,36 @@ public enum CreateTransferResult : uint
     PendingTransferExpired = 35,
 
     /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress
+    /// </summary>
+    ImportedEventTimestampMustNotRegress = 60,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account
+    /// </summary>
+    ImportedEventTimestampMustPostdateDebitAccount = 61,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account
+    /// </summary>
+    ImportedEventTimestampMustPostdateCreditAccount = 62,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero
+    /// </summary>
+    ImportedEventTimeoutMustBeZero = 63,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed
+    /// </summary>
+    DebitAccountAlreadyClosed = 65,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed
+    /// </summary>
+    CreditAccountAlreadyClosed = 66,
+
+    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_debits_pending
     /// </summary>
     OverflowsDebitsPending = 47,
@@ -805,16 +815,6 @@ public enum CreateTransferResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits
     /// </summary>
     ExceedsDebits = 55,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed
-    /// </summary>
-    DebitAccountAlreadyClosed = 65,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed
-    /// </summary>
-    CreditAccountAlreadyClosed = 66,
 
 }
 

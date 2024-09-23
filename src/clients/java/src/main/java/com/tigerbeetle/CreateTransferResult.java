@@ -128,26 +128,6 @@ public enum CreateTransferResult {
     IdAlreadyFailed((int) 68),
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress">imported_event_timestamp_must_not_regress</a>
-     */
-    ImportedEventTimestampMustNotRegress((int) 60),
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account">imported_event_timestamp_must_postdate_debit_account</a>
-     */
-    ImportedEventTimestampMustPostdateDebitAccount((int) 61),
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account">imported_event_timestamp_must_postdate_credit_account</a>
-     */
-    ImportedEventTimestampMustPostdateCreditAccount((int) 62),
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero">imported_event_timeout_must_be_zero</a>
-     */
-    ImportedEventTimeoutMustBeZero((int) 63),
-
-    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#flags_are_mutually_exclusive">flags_are_mutually_exclusive</a>
      */
     FlagsAreMutuallyExclusive((int) 7),
@@ -298,6 +278,36 @@ public enum CreateTransferResult {
     PendingTransferExpired((int) 35),
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress">imported_event_timestamp_must_not_regress</a>
+     */
+    ImportedEventTimestampMustNotRegress((int) 60),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account">imported_event_timestamp_must_postdate_debit_account</a>
+     */
+    ImportedEventTimestampMustPostdateDebitAccount((int) 61),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account">imported_event_timestamp_must_postdate_credit_account</a>
+     */
+    ImportedEventTimestampMustPostdateCreditAccount((int) 62),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero">imported_event_timeout_must_be_zero</a>
+     */
+    ImportedEventTimeoutMustBeZero((int) 63),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed">debit_account_already_closed</a>
+     */
+    DebitAccountAlreadyClosed((int) 65),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed">credit_account_already_closed</a>
+     */
+    CreditAccountAlreadyClosed((int) 66),
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_debits_pending">overflows_debits_pending</a>
      */
     OverflowsDebitsPending((int) 47),
@@ -340,17 +350,7 @@ public enum CreateTransferResult {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits">exceeds_debits</a>
      */
-    ExceedsDebits((int) 55),
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed">debit_account_already_closed</a>
-     */
-    DebitAccountAlreadyClosed((int) 65),
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed">credit_account_already_closed</a>
-     */
-    CreditAccountAlreadyClosed((int) 66);
+    ExceedsDebits((int) 55);
 
     public final int value;
 
