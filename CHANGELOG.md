@@ -3,6 +3,55 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.3
+
+Released: 2024-09-23
+
+### Safety And Performance
+
+- [#2313](https://github.com/tigerbeetle/tigerbeetle/pull/2313)
+
+  Improve cluster availability by more aggressive recovery for crashes that happen while a replica
+  is checkpointing.
+
+- [#2328](https://github.com/tigerbeetle/tigerbeetle/pull/2328)
+
+  Add a more efficient recipe for balance-conditional transfers. A balance-conditional transfer
+  is a transfer that succeeds only if the source account has more than a threshold amount of funds
+  in it.
+
+### Features
+
+- [#2327](https://github.com/tigerbeetle/tigerbeetle/pull/2327)
+
+  Add a new recipe for enforcing `debits_must_not_exceed_credits` on some subset of transfers (this
+  is a special case of a balance-conditional transfer, with the threshold value being equal to
+  transferred amount).
+
+### Internals
+
+- [#2330](https://github.com/tigerbeetle/tigerbeetle/pull/2330)
+
+  Add `triaged` issue label to prevent newly opened issues from slipping through the cracks.
+
+- [#2332](https://github.com/tigerbeetle/tigerbeetle/pull/2332)
+
+  Add CI check for dead code.
+
+- [#2323](https://github.com/tigerbeetle/tigerbeetle/pull/2323)
+
+  Cleanup the source tree by removing top-level `tools` directory.
+
+- [#2316](https://github.com/tigerbeetle/tigerbeetle/pull/2316)
+
+  Make sure that process-spawning API used for build-time "scripting" consistently reports
+  errors when the subprocess fails or hangs.
+
+### TigerTracks 🎧
+
+- [Prelude in G Major](https://open.spotify.com/track/70FROKEHubzMxSstCgaZZl?si=5bb7f8c6decc46aa)
+
+
 ## TigerBeetle 0.16.2
 
 Released: 2024-09-16
