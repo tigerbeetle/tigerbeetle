@@ -94,7 +94,7 @@ See details for account fields in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account).
 
 ```javascript
-let account = {
+const account = {
   id: 137n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -110,7 +110,7 @@ let account = {
   timestamp: 0n,
 };
 
-let accountErrors = await client.createAccounts([account]);
+const accountErrors = await client.createAccounts([account]);
 ```
 
 ### Account Flags
@@ -133,7 +133,7 @@ For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```javascript
-let account0 = {
+const account0 = {
   id: 100n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -148,7 +148,7 @@ let account0 = {
   timestamp: 0n,
   flags: 0,
 };
-let account1 = {
+const account1 = {
   id: 101n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -181,7 +181,7 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```javascript
-let account2 = {
+const account2 = {
   id: 102n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -196,7 +196,7 @@ let account2 = {
   timestamp: 0n,
   flags: 0,
 };
-let account3 = {
+const account3 = {
   id: 103n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -211,7 +211,7 @@ let account3 = {
   timestamp: 0n,
   flags: 0,
 };
-let account4 = {
+const account4 = {
   id: 104n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -288,7 +288,7 @@ See details for transfer fields in the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfer).
 
 ```javascript
-let transfers = [{
+const transfers = [{
   id: 1n,
   debit_account_id: 102n,
   credit_account_id: 103n,
@@ -303,7 +303,7 @@ let transfers = [{
   flags: 0,
   timestamp: 0n,
 }];
-let transferErrors = await client.createTransfers(transfers);
+const transferErrors = await client.createTransfers(transfers);
 ```
 
 ### Response and Errors
@@ -394,7 +394,7 @@ bitwise-or:
 For example, to link `transfer0` and `transfer1`:
 
 ```javascript
-let transfer0 = {
+const transfer0 = {
   id: 2n,
   debit_account_id: 102n,
   credit_account_id: 103n,
@@ -409,7 +409,7 @@ let transfer0 = {
   flags: 0,
   timestamp: 0n,
 };
-let transfer1 = {
+const transfer1 = {
   id: 3n,
   debit_account_id: 102n,
   credit_account_id: 103n,
@@ -446,7 +446,7 @@ appropriate accounts and apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```javascript
-let transfer2 = {
+const transfer2 = {
   id: 4n,
   debit_account_id: 102n,
   credit_account_id: 103n,
@@ -463,7 +463,7 @@ let transfer2 = {
 };
 transferErrors = await client.createTransfers([transfer2]);
 
-let transfer3 = {
+const transfer3 = {
   id: 5n,
   debit_account_id: 102n,
   credit_account_id: 103n,
@@ -491,7 +491,7 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```javascript
-let transfer4 = {
+const transfer4 = {
   id: 4n,
   debit_account_id: 102n,
   credit_account_id: 103n,
@@ -508,7 +508,7 @@ let transfer4 = {
 };
 transferErrors = await client.createTransfers([transfer4]);
 
-let transfer5 = {
+const transfer5 = {
   id: 7n,
   debit_account_id: 102n,
   credit_account_id: 103n,
@@ -574,7 +574,7 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```javascript
-let filter = {
+const filter = {
   account_id: 2n,
   user_data_128: 0n, // No filter by UserData.
   user_data_64: 0n,
@@ -635,7 +635,7 @@ The accounts in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```javascript
-var query_filter = {
+const query_filter = {
   user_data_128: 1000n, // Filter by UserData.
   user_data_64: 100n,
   user_data_32: 10,
@@ -660,7 +660,7 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```javascript
-query_filter = {
+const query_filter = {
   user_data_128: 1000n, // Filter by UserData.
   user_data_64: 100n,
   user_data_32: 10,
