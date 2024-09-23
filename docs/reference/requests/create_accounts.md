@@ -83,6 +83,49 @@ The account was not created. [`Account.id`](../account.md#id) is zero, which is 
 The account was not created. [`Account.id`](../account.md#id) is `2^128 - 1`, which is a reserved
 value.
 
+### `exists_with_different_flags`
+
+An account with the same `id` already exists, but with different [`flags`](../account.md#flags).
+
+### `exists_with_different_user_data_128`
+
+An account with the same `id` already exists, but with different
+[`user_data_128`](../account.md#user_data_128).
+
+### `exists_with_different_user_data_64`
+
+An account with the same `id` already exists, but with different
+[`user_data_64`](../account.md#user_data_64).
+
+### `exists_with_different_user_data_32`
+
+An account with the same `id` already exists, but with different
+[`user_data_32`](../account.md#user_data_32).
+
+### `exists_with_different_ledger`
+
+An account with the same `id` already exists, but with different [`ledger`](../account.md#ledger).
+
+### `exists_with_different_code`
+
+An account with the same `id` already exists, but with different [`code`](../account.md#code).
+
+### `exists`
+
+An account with the same `id` already exists.
+
+With the possible exception of the following fields, the existing account is identical to the
+account in the request:
+
+- `timestamp`
+- `debits_pending`
+- `debits_posted`
+- `credits_pending`
+- `credits_posted`
+
+To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
+many applications should handle `exists` exactly as [`ok`](#ok).
+
 ### `flags_are_mutually_exclusive`
 
 The account was not created. An account cannot be created with the specified combination of
@@ -128,49 +171,6 @@ The account was not created. [`Account.ledger`](../account.md#ledger) is zero, b
 ### `code_must_not_be_zero`
 
 The account was not created. [`Account.code`](../account.md#code) is zero, but must be nonzero.
-
-### `exists_with_different_flags`
-
-An account with the same `id` already exists, but with different [`flags`](../account.md#flags).
-
-### `exists_with_different_user_data_128`
-
-An account with the same `id` already exists, but with different
-[`user_data_128`](../account.md#user_data_128).
-
-### `exists_with_different_user_data_64`
-
-An account with the same `id` already exists, but with different
-[`user_data_64`](../account.md#user_data_64).
-
-### `exists_with_different_user_data_32`
-
-An account with the same `id` already exists, but with different
-[`user_data_32`](../account.md#user_data_32).
-
-### `exists_with_different_ledger`
-
-An account with the same `id` already exists, but with different [`ledger`](../account.md#ledger).
-
-### `exists_with_different_code`
-
-An account with the same `id` already exists, but with different [`code`](../account.md#code).
-
-### `exists`
-
-An account with the same `id` already exists.
-
-With the possible exception of the following fields, the existing account is identical to the
-account in the request:
-
-- `timestamp`
-- `debits_pending`
-- `debits_posted`
-- `credits_pending`
-- `credits_posted`
-
-To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
-many applications should handle `exists` exactly as [`ok`](#ok).
 
 ### `imported_event_timestamp_must_not_regress`
 
