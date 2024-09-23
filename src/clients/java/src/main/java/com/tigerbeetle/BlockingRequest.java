@@ -115,13 +115,8 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
         synchronized (this) {
 
             if (isDone()) {
-
-                this.result = null;
-                this.exception = new AssertionError(this.exception,
-                        "This request has already been completed");
-
+                throw new IllegalStateException("This request has already been completed");
             } else {
-
                 this.result = result;
                 this.exception = null;
             }
@@ -135,8 +130,14 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
     protected void setException(final Throwable exception) {
 
         synchronized (this) {
-            this.result = null;
-            this.exception = exception;
+
+            if (isDone()) {
+                throw new IllegalStateException("This request has already been completed");
+            } else {
+                this.result = null;
+                this.exception = exception;
+            }
+
             notify();
         }
 
