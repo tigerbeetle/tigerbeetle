@@ -337,7 +337,6 @@ pub fn CompactionType(
             /// * It uses an iterator interface, as opposed to raw blocks like the rest.
             /// * It is responsible for keeping track of its own position, across beats.
             /// * It encompasses all possible values, so we don't need to worry about reading more.
-            source_a_immutable_block: ?*Helpers.CompactionBlock = null,
             source_a_immutable_values: ?[]const Value = null,
             source_a_values_consumed_for_fill: usize = 0,
             source_a_position: Position = .{},
@@ -722,7 +721,6 @@ pub fn CompactionType(
             compaction: *Compaction,
             beats_max: u64,
             target_index_blocks: Helpers.BlockFIFO,
-            source_a_immutable_block: *Helpers.CompactionBlock,
         ) void {
             // Limited to half bars for now.
             assert(beats_max <= @divExact(constants.lsm_compaction_ops, 2));
@@ -739,12 +737,6 @@ pub fn CompactionType(
             bar.beats_max = beats_max;
             bar.target_index_blocks = target_index_blocks;
             assert(target_index_blocks.count > 0);
-
-            // TODO: Actually, assert this is only non-null when level_b == 0, otherwise it should
-            // be null!
-            assert(source_a_immutable_block.stage == .free);
-            source_a_immutable_block.stage = .standalone;
-            bar.source_a_immutable_block = source_a_immutable_block;
 
             log.debug("bar_setup_budget({s}): bar.compaction_tables_value_count={}", .{
                 compaction.tree_config.name,
@@ -1370,7 +1362,6 @@ pub fn CompactionType(
 
             if (bar.table_info_a == .immutable) {
                 // Immutable table can never .need_read, since all its values come from memory.
-                assert(bar.source_a_immutable_block != null);
                 stdx.maybe(bar.source_a_immutable_values == null);
                 assert(compaction.level_b == 0);
 
@@ -1853,15 +1844,9 @@ pub fn CompactionType(
 
             if (bar.move_table) {
                 assert(bar.target_index_blocks == null);
-                assert(bar.source_a_immutable_block == null);
             } else {
                 bar.target_index_blocks.?.deinit(block_pool);
                 bar.target_index_blocks = null;
-
-                assert(bar.source_a_immutable_block.?.stage == .standalone);
-                bar.source_a_immutable_block.?.stage = .free;
-                block_pool.push(bar.source_a_immutable_block.?);
-                bar.source_a_immutable_block = null;
             }
         }
 
@@ -1885,7 +1870,6 @@ pub fn CompactionType(
 
             // Assert blocks have been released back to the pipeline.
             assert(bar.target_index_blocks == null);
-            assert(bar.source_a_immutable_block == null);
 
             // Assert our input has been fully exhausted.
             assert(bar.source_values_read_count > 0);
