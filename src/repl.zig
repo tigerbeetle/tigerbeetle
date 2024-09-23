@@ -14,31 +14,12 @@ const MessagePool = vsr.message_pool.MessagePool;
 
 const tb = vsr.tigerbeetle;
 
-// Printer is separate from logging since messages from the REPL
-// aren't logs but actual messages for the user. The fields are made
-// optional so that printing on failure can be disabled in tests that
-// test for failure.
-pub const Printer = struct {
-    stdout: ?std.fs.File.Writer,
-    stderr: ?std.fs.File.Writer,
-
-    fn print(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
-        if (printer.stdout) |stdout| {
-            try stdout.print(format, arguments);
-        }
-    }
-
-    fn print_error(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
-        if (printer.stderr) |stderr| {
-            try stderr.print(format, arguments);
-        }
-    }
-};
+const Terminal = @import("terminal.zig").Terminal;
 
 pub const Parser = struct {
     input: []const u8,
     offset: usize = 0,
-    printer: Printer,
+    terminal: *const Terminal,
 
     pub const Error = error{
         BadKeyValuePair,
@@ -98,17 +79,17 @@ pub const Parser = struct {
             } else unreachable;
         };
 
-        try parser.printer.print_error("Fail near line {}, column {}:\n\n{s}\n", .{
+        try parser.terminal.print_error("Fail near line {}, column {}:\n\n{s}\n", .{
             target.position_line,
             target.position_column,
             target.line,
         });
         var column = target.position_column;
         while (column > 0) {
-            try parser.printer.print_error(" ", .{});
+            try parser.terminal.print_error(" ", .{});
             column -= 1;
         }
-        try parser.printer.print_error("^ Near here.\n\n", .{});
+        try parser.terminal.print_error("^ Near here.\n\n", .{});
     }
 
     fn eat_whitespace(parser: *Parser) void {
@@ -163,7 +144,7 @@ pub const Parser = struct {
                 var copy = Parser{
                     .input = parser.input,
                     .offset = parser.offset,
-                    .printer = parser.printer,
+                    .terminal = parser.terminal,
                 };
                 copy.eat_whitespace();
                 if (copy.offset < parser.input.len and parser.input[copy.offset] == '|') {
@@ -340,7 +321,7 @@ pub const Parser = struct {
 
             if (id_result.len == 0) {
                 try parser.print_current_position();
-                try parser.printer.print_error(
+                try parser.terminal.print_error(
                     "Expected key starting key-value pair. e.g. `id=1`\n",
                     .{},
                 );
@@ -350,7 +331,7 @@ pub const Parser = struct {
             // Grab =.
             parser.parse_syntax_char('=') catch {
                 try parser.print_current_position();
-                try parser.printer.print_error(
+                try parser.terminal.print_error(
                     "Expected equal sign after key '{s}' in key-value" ++
                         " pair. e.g. `id=1`.\n",
                     .{id_result},
@@ -363,7 +344,7 @@ pub const Parser = struct {
 
             if (value_result.len == 0) {
                 try parser.print_current_position();
-                try parser.printer.print_error(
+                try parser.terminal.print_error(
                     "Expected value after equal sign in key-value pair. e.g. `id=1`.\n",
                     .{},
                 );
@@ -373,7 +354,7 @@ pub const Parser = struct {
             // Match key to a field in the struct.
             match_arg(&object, id_result, value_result) catch {
                 try parser.print_current_position();
-                try parser.printer.print_error(
+                try parser.terminal.print_error(
                     "'{s}'='{s}' is not a valid pair for {s}.\n",
                     .{ id_result, value_result, @tagName(object) },
                 );
@@ -408,9 +389,9 @@ pub const Parser = struct {
     pub fn parse_statement(
         arena: *std.heap.ArenaAllocator,
         input: []const u8,
-        printer: Printer,
+        terminal: *const Terminal,
     ) (error{OutOfMemory} || std.fs.File.WriteError || Error)!Statement {
-        var parser = Parser{ .input = input, .printer = printer };
+        var parser = Parser{ .input = input, .terminal = terminal };
         parser.eat_whitespace();
         const after_whitespace = parser.offset;
         const operation_identifier = parser.parse_identifier();
@@ -429,7 +410,7 @@ pub const Parser = struct {
             // token.
             parser.offset = after_whitespace;
             try parser.print_current_position();
-            try parser.printer.print_error(
+            try parser.terminal.print_error(
                 "Operation must be " ++
                     comptime operations: {
                     var names: []const u8 = "";
@@ -468,22 +449,23 @@ pub fn ReplType(comptime MessageBus: type) type {
         debug_logs: bool,
 
         client: *Client,
-        printer: Printer,
+        terminal: *Terminal,
+        history: std.ArrayList([]const u8),
 
         const Repl = @This();
 
         fn fail(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (!repl.interactive) {
-                try repl.printer.print_error(format, arguments);
-                std.posix.exit(1);
+                try repl.terminal.print_error(format, arguments);
+                std.process.exit(1);
             }
 
-            try repl.printer.print(format, arguments);
+            try repl.terminal.print(format, arguments);
         }
 
         fn debug(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (repl.debug_logs) {
-                try repl.printer.print("[Debug] " ++ format, arguments);
+                try repl.terminal.print("[Debug] " ++ format, arguments);
             }
         }
 
@@ -519,22 +501,184 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
         }
 
+        const prompt = "> ";
         const single_repl_input_max = 10 * 4 * 1024;
+
+        fn read_until_newline_or_eof_alloc(
+            repl: *Repl,
+            allocator: std.mem.Allocator,
+        ) !?[]u8 {
+            try repl.terminal.prompt_mode_set();
+            defer repl.terminal.prompt_mode_unset() catch {};
+
+            var terminal_screen = try repl.terminal.get_screen(allocator);
+
+            var buffer = std.ArrayList(u8).init(allocator);
+            var buffer_index: usize = 0;
+            var history_index = repl.history.items.len;
+            // Cache the buffer the user is typing into before navigating through history.
+            var buffer_outside_history = std.ArrayList(u8).init(allocator);
+
+            while (buffer.items.len < single_repl_input_max) {
+                const user_input = try repl.terminal.read_user_input() orelse return null;
+                switch (user_input) {
+                    .ctrlc => {
+                        // Erase everything below the current cursor's position in case Ctrl-C was
+                        // pressed somewhere inside the buffer.
+                        try repl.terminal.print("^C\x1b[J\n", .{});
+                        return &.{};
+                    },
+                    .newline => {
+                        try repl.terminal.print("\n", .{});
+                        return try buffer.toOwnedSlice();
+                    },
+                    .printable => |character| {
+                        const is_append = buffer_index == buffer.items.len;
+                        if (is_append) {
+                            terminal_screen.update_cursor_position(1);
+                            try repl.terminal.print("{c}", .{character});
+                            // Some terminals may not automatically move/scroll us down to the next
+                            // row after appending a character at the last column. This can cause us
+                            // to incorrectly report the cursor's position, so we force the terminal
+                            // to do so by moving the cursor forward and backward one space.
+                            if (terminal_screen.cursor_column == terminal_screen.columns) {
+                                try repl.terminal.print("\x20\x1b[{};{}H", .{
+                                    terminal_screen.cursor_row,
+                                    terminal_screen.cursor_column,
+                                });
+                            }
+                        } else {
+                            // If we're inserting mid-buffer, we need to redraw everything that
+                            // comes after as well. We'll track as if the cursor moved to the end of
+                            // the buffer after redrawing, and move it back to one position after
+                            // the newly inserted character.
+                            const buffer_redraw_len: isize = @intCast(
+                                buffer.items.len - buffer_index,
+                            );
+                            // It's crucial to update in two steps because the terminal may have
+                            // scrolled down as part of the text redraw.
+                            terminal_screen.update_cursor_position(buffer_redraw_len);
+                            terminal_screen.update_cursor_position(1 - buffer_redraw_len);
+                            try repl.terminal.print("{c}{s}\x1b[{};{}H", .{
+                                character,
+                                buffer.items[buffer_index..],
+                                terminal_screen.cursor_row,
+                                terminal_screen.cursor_column,
+                            });
+                        }
+
+                        try buffer.insert(buffer_index, character);
+                        buffer_index += 1;
+                    },
+                    .backspace => if (buffer_index > 0) {
+                        terminal_screen.update_cursor_position(-1);
+                        try repl.terminal.print("\x1b[{};{}H{s}\x20\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                            // If we're deleting mid-buffer, we need to redraw everything that
+                            // comes after as well.
+                            if (buffer_index < buffer.items.len)
+                                buffer.items[buffer_index..]
+                            else
+                                "",
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        buffer_index -= 1;
+                        _ = buffer.orderedRemove(buffer_index);
+                    },
+                    .left => if (buffer_index > 0) {
+                        terminal_screen.update_cursor_position(-1);
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        buffer_index -= 1;
+                    },
+                    .right => if (buffer_index < buffer.items.len) {
+                        terminal_screen.update_cursor_position(1);
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        buffer_index += 1;
+                    },
+                    .up => if (history_index > 0) {
+                        const history_index_next = history_index - 1;
+                        const buffer_next = repl.history.items[history_index_next];
+
+                        // Move to the beginning of the current buffer.
+                        terminal_screen.update_cursor_position(
+                            -@as(isize, @intCast(buffer_index)),
+                        );
+                        const row_current_buffer_start = terminal_screen.cursor_row;
+
+                        // Move to the end of the new buffer.
+                        terminal_screen.update_cursor_position(
+                            @as(isize, @intCast(buffer_next.len)),
+                        );
+
+                        try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}\x20\x1b[{};{}H", .{
+                            row_current_buffer_start,
+                            prompt,
+                            buffer_next,
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+
+                        if (history_index == repl.history.items.len) {
+                            buffer_outside_history.clearRetainingCapacity();
+                            try buffer_outside_history.appendSlice(buffer.items);
+                        }
+                        history_index = history_index_next;
+
+                        buffer.clearRetainingCapacity();
+                        try buffer.appendSlice(buffer_next);
+                        buffer_index = buffer.items.len;
+                    },
+                    .down => if (history_index < repl.history.items.len) {
+                        const history_index_next = history_index + 1;
+                        const buffer_next = if (history_index_next == repl.history.items.len)
+                            buffer_outside_history.items
+                        else
+                            repl.history.items[history_index_next];
+                        history_index = history_index_next;
+
+                        // Move to the beginning of the current buffer.
+                        terminal_screen.update_cursor_position(
+                            -@as(isize, @intCast(buffer_index)),
+                        );
+                        const row_current_buffer_start = terminal_screen.cursor_row;
+
+                        // Move to the end of the new buffer.
+                        terminal_screen.update_cursor_position(
+                            @as(isize, @intCast(buffer_next.len)),
+                        );
+
+                        try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}\x20\x1b[{};{}H", .{
+                            row_current_buffer_start,
+                            prompt,
+                            buffer_next,
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+
+                        buffer.clearRetainingCapacity();
+                        try buffer.appendSlice(buffer_next);
+                        buffer_index = buffer.items.len;
+                    },
+                    .unhandled => {},
+                }
+            }
+            return error.StreamTooLong;
+        }
+
         fn do_repl(
             repl: *Repl,
             arena: *std.heap.ArenaAllocator,
         ) !void {
-            try repl.printer.print("> ", .{});
-
-            const stdin = std.io.getStdIn();
-            var stdin_buffered_reader = std.io.bufferedReader(stdin.reader());
-            var stdin_stream = stdin_buffered_reader.reader();
-
-            const input = stdin_stream.readUntilDelimiterOrEofAlloc(
-                arena.allocator(),
-                ';',
-                single_repl_input_max,
-            ) catch |err| {
+            try repl.terminal.print(prompt, .{});
+            const input = repl.read_until_newline_or_eof_alloc(arena.allocator()) catch |err| {
                 repl.event_loop_done = true;
                 return err;
             } orelse {
@@ -544,10 +688,23 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             };
 
+            if (input.len > 0) {
+                if (repl.history.items.len == 0 or
+                    !std.mem.eql(u8, repl.history.getLast(), input))
+                {
+                    const history_item_next = try repl.history.allocator.alloc(u8, input.len);
+                    @memcpy(history_item_next, input);
+                    repl.history.append(history_item_next) catch |err| {
+                        repl.event_loop_done = true;
+                        return err;
+                    };
+                }
+            }
+
             const statement = Parser.parse_statement(
                 arena,
                 input,
-                repl.printer,
+                repl.terminal,
             ) catch |err| {
                 switch (err) {
                     // These are parsing errors, so the REPL should
@@ -589,7 +746,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_help(repl: *Repl) !void {
-            try repl.printer.print("TigerBeetle CLI Client {}\n" ++
+            try repl.terminal.print("TigerBeetle CLI Client {}\n" ++
                 \\  Hit enter after a semicolon to run a command.
                 \\
                 \\Examples:
@@ -620,11 +777,12 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .request_done = true,
                 .event_loop_done = false,
                 .interactive = statements.len == 0,
-                .printer = .{
-                    .stderr = std.io.getStdErr().writer(),
-                    .stdout = std.io.getStdOut().writer(),
-                },
+                .terminal = undefined,
+                .history = std.ArrayList([]const u8).init(allocator),
             };
+
+            var terminal = try Terminal.init(allocator, repl.interactive);
+            repl.terminal = &terminal;
 
             try repl.debug("Connecting to '{any}'.\n", .{addresses});
 
@@ -665,7 +823,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     const statement = Parser.parse_statement(
                         &execution_arena,
                         statement_string,
-                        repl.printer,
+                        repl.terminal,
                     ) catch |err| {
                         switch (err) {
                             // These are parsing errors and since this
@@ -681,7 +839,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             // TODO: This will be more convenient to express
                             // once https://github.com/ziglang/zig/issues/2473 is
                             // in.
-                            => std.posix.exit(1),
+                            => std.process.exit(1),
 
                             // An unexpected error for which we do
                             // want the stacktrace.
@@ -778,7 +936,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 @TypeOf(object.*) == tb.Transfer or
                 @TypeOf(object.*) == tb.AccountBalance);
 
-            try repl.printer.print("{{\n", .{});
+            try repl.terminal.print("{{\n", .{});
             inline for (@typeInfo(@TypeOf(object.*)).Struct.fields, 0..) |object_field, i| {
                 if (comptime std.mem.eql(u8, object_field.name, "reserved")) {
                     continue;
@@ -786,36 +944,36 @@ pub fn ReplType(comptime MessageBus: type) type {
                 }
 
                 if (i > 0) {
-                    try repl.printer.print(",\n", .{});
+                    try repl.terminal.print(",\n", .{});
                 }
 
                 if (comptime std.mem.eql(u8, object_field.name, "flags")) {
-                    try repl.printer.print("  \"" ++ object_field.name ++ "\": [", .{});
+                    try repl.terminal.print("  \"" ++ object_field.name ++ "\": [", .{});
                     var needs_comma = false;
 
                     inline for (@typeInfo(object_field.type).Struct.fields) |flag_field| {
                         if (comptime !std.mem.eql(u8, flag_field.name, "padding")) {
                             if (@field(@field(object, "flags"), flag_field.name)) {
                                 if (needs_comma) {
-                                    try repl.printer.print(",", .{});
+                                    try repl.terminal.print(",", .{});
                                     needs_comma = false;
                                 }
 
-                                try repl.printer.print("\"{s}\"", .{flag_field.name});
+                                try repl.terminal.print("\"{s}\"", .{flag_field.name});
                                 needs_comma = true;
                             }
                         }
                     }
 
-                    try repl.printer.print("]", .{});
+                    try repl.terminal.print("]", .{});
                 } else {
-                    try repl.printer.print(
+                    try repl.terminal.print(
                         "  \"{s}\": \"{}\"",
                         .{ object_field.name, @field(object, object_field.name) },
                     );
                 }
             }
-            try repl.printer.print("\n}}\n", .{});
+            try repl.terminal.print("\n}}\n", .{});
         }
 
         fn client_request_callback_error(
@@ -844,7 +1002,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (create_account_results.len > 0) {
                         for (create_account_results) |*reason| {
-                            try repl.printer.print(
+                            try repl.terminal.print(
                                 "Failed to create account ({}): {any}.\n",
                                 .{ reason.index, reason.result },
                             );
@@ -873,7 +1031,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (create_transfer_results.len > 0) {
                         for (create_transfer_results) |*reason| {
-                            try repl.printer.print(
+                            try repl.terminal.print(
                                 "Failed to create transfer ({}): {any}.\n",
                                 .{ reason.index, reason.result },
                             );
@@ -929,7 +1087,9 @@ pub fn ReplType(comptime MessageBus: type) type {
     };
 }
 
-const null_printer = Printer{
+const null_terminal = Terminal{
+    .mode_start = null,
+    .stdin = undefined,
     .stderr = null,
     .stdout = null,
 };
@@ -1021,7 +1181,7 @@ test "repl.zig: Parser single transfer successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1078,7 +1238,7 @@ test "repl.zig: Parser multiple transfers successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1165,7 +1325,7 @@ test "repl.zig: Parser single account successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -1233,7 +1393,7 @@ test "repl.zig: Parser account filter successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, t.operation);
@@ -1297,7 +1457,7 @@ test "repl.zig: Parser query filter successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, t.operation);
@@ -1354,7 +1514,7 @@ test "repl.zig: Parser multiple accounts successfully" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -1481,7 +1641,7 @@ test "repl.zig: Parser odd but correct formatting" {
         const statement = try Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1547,7 +1707,7 @@ test "repl.zig: Handle parsing errors" {
         const result = Parser.parse_statement(
             &arena,
             t.in,
-            null_printer,
+            &null_terminal,
         );
         try std.testing.expectError(t.err, result);
     }
