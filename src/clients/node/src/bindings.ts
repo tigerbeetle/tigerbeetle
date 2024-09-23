@@ -483,6 +483,16 @@ export enum CreateTransferError {
   exists_with_different_flags = 36,
 
   /**
+  * See [exists_with_different_pending_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id)
+  */
+  exists_with_different_pending_id = 40,
+
+  /**
+  * See [exists_with_different_timeout](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout)
+  */
+  exists_with_different_timeout = 44,
+
+  /**
   * See [exists_with_different_debit_account_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_debit_account_id)
   */
   exists_with_different_debit_account_id = 37,
@@ -498,11 +508,6 @@ export enum CreateTransferError {
   exists_with_different_amount = 39,
 
   /**
-  * See [exists_with_different_pending_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id)
-  */
-  exists_with_different_pending_id = 40,
-
-  /**
   * See [exists_with_different_user_data_128](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_128)
   */
   exists_with_different_user_data_128 = 41,
@@ -516,11 +521,6 @@ export enum CreateTransferError {
   * See [exists_with_different_user_data_32](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_32)
   */
   exists_with_different_user_data_32 = 43,
-
-  /**
-  * See [exists_with_different_timeout](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout)
-  */
-  exists_with_different_timeout = 44,
 
   /**
   * See [exists_with_different_ledger](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_ledger)

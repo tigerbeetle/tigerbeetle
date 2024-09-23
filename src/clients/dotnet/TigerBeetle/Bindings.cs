@@ -532,6 +532,16 @@ public enum CreateTransferResult : uint
     ExistsWithDifferentFlags = 36,
 
     /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id
+    /// </summary>
+    ExistsWithDifferentPendingId = 40,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout
+    /// </summary>
+    ExistsWithDifferentTimeout = 44,
+
+    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_debit_account_id
     /// </summary>
     ExistsWithDifferentDebitAccountId = 37,
@@ -547,11 +557,6 @@ public enum CreateTransferResult : uint
     ExistsWithDifferentAmount = 39,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id
-    /// </summary>
-    ExistsWithDifferentPendingId = 40,
-
-    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_128
     /// </summary>
     ExistsWithDifferentUserData128 = 41,
@@ -565,11 +570,6 @@ public enum CreateTransferResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_32
     /// </summary>
     ExistsWithDifferentUserData32 = 43,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout
-    /// </summary>
-    ExistsWithDifferentTimeout = 44,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_ledger

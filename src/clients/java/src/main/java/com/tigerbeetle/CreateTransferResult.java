@@ -68,6 +68,16 @@ public enum CreateTransferResult {
     ExistsWithDifferentFlags((int) 36),
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id">exists_with_different_pending_id</a>
+     */
+    ExistsWithDifferentPendingId((int) 40),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout">exists_with_different_timeout</a>
+     */
+    ExistsWithDifferentTimeout((int) 44),
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_debit_account_id">exists_with_different_debit_account_id</a>
      */
     ExistsWithDifferentDebitAccountId((int) 37),
@@ -83,11 +93,6 @@ public enum CreateTransferResult {
     ExistsWithDifferentAmount((int) 39),
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id">exists_with_different_pending_id</a>
-     */
-    ExistsWithDifferentPendingId((int) 40),
-
-    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_128">exists_with_different_user_data_128</a>
      */
     ExistsWithDifferentUserData128((int) 41),
@@ -101,11 +106,6 @@ public enum CreateTransferResult {
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_32">exists_with_different_user_data_32</a>
      */
     ExistsWithDifferentUserData32((int) 43),
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout">exists_with_different_timeout</a>
-     */
-    ExistsWithDifferentTimeout((int) 44),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_ledger">exists_with_different_ledger</a>

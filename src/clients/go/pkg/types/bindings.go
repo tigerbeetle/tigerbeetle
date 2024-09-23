@@ -306,14 +306,14 @@ const (
 	TransferIDMustNotBeZero                                 CreateTransferResult = 5
 	TransferIDMustNotBeIntMax                               CreateTransferResult = 6
 	TransferExistsWithDifferentFlags                        CreateTransferResult = 36
+	TransferExistsWithDifferentPendingID                    CreateTransferResult = 40
+	TransferExistsWithDifferentTimeout                      CreateTransferResult = 44
 	TransferExistsWithDifferentDebitAccountID               CreateTransferResult = 37
 	TransferExistsWithDifferentCreditAccountID              CreateTransferResult = 38
 	TransferExistsWithDifferentAmount                       CreateTransferResult = 39
-	TransferExistsWithDifferentPendingID                    CreateTransferResult = 40
 	TransferExistsWithDifferentUserData128                  CreateTransferResult = 41
 	TransferExistsWithDifferentUserData64                   CreateTransferResult = 42
 	TransferExistsWithDifferentUserData32                   CreateTransferResult = 43
-	TransferExistsWithDifferentTimeout                      CreateTransferResult = 44
 	TransferExistsWithDifferentLedger                       CreateTransferResult = 67
 	TransferExistsWithDifferentCode                         CreateTransferResult = 45
 	TransferExists                                          CreateTransferResult = 46
@@ -391,22 +391,22 @@ func (i CreateTransferResult) String() string {
 		return "TransferIDMustNotBeIntMax"
 	case TransferExistsWithDifferentFlags:
 		return "TransferExistsWithDifferentFlags"
+	case TransferExistsWithDifferentPendingID:
+		return "TransferExistsWithDifferentPendingID"
+	case TransferExistsWithDifferentTimeout:
+		return "TransferExistsWithDifferentTimeout"
 	case TransferExistsWithDifferentDebitAccountID:
 		return "TransferExistsWithDifferentDebitAccountID"
 	case TransferExistsWithDifferentCreditAccountID:
 		return "TransferExistsWithDifferentCreditAccountID"
 	case TransferExistsWithDifferentAmount:
 		return "TransferExistsWithDifferentAmount"
-	case TransferExistsWithDifferentPendingID:
-		return "TransferExistsWithDifferentPendingID"
 	case TransferExistsWithDifferentUserData128:
 		return "TransferExistsWithDifferentUserData128"
 	case TransferExistsWithDifferentUserData64:
 		return "TransferExistsWithDifferentUserData64"
 	case TransferExistsWithDifferentUserData32:
 		return "TransferExistsWithDifferentUserData32"
-	case TransferExistsWithDifferentTimeout:
-		return "TransferExistsWithDifferentTimeout"
 	case TransferExistsWithDifferentLedger:
 		return "TransferExistsWithDifferentLedger"
 	case TransferExistsWithDifferentCode:
