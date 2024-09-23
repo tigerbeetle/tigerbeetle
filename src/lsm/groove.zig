@@ -812,6 +812,10 @@ pub fn GrooveType(
             // Use `prefetch_enqueue` if the object is already keyed by timestamp.
             comptime assert(has_id);
 
+            const timestamp_valid = timestamp >= TimestampRange.timestamp_min and
+                timestamp <= TimestampRange.timestamp_max;
+            if (!timestamp_valid) return;
+
             // No need to check again if the key is already present or enqueued for prefetching.
             if (groove.timestamps.has(timestamp) or
                 groove.prefetch_keys.contains(.{ .timestamp = timestamp })) return;
