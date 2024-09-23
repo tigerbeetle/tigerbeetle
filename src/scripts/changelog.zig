@@ -9,6 +9,8 @@ const ReleaseTriple = @import("../multiversioning.zig").ReleaseTriple;
 
 const log = std.log;
 
+const changelog_bytes_max = 10 * 1024 * 1024;
+
 pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     _ = gpa;
 
@@ -28,11 +30,10 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.project_root.writeFile(.{ .sub_path = "./.zig-cache/merges.txt", .data = merges });
     log.info("merged PRs: ./.zig-cache/merges.txt", .{});
 
-    const max_bytes = 10 * 1024 * 1024;
     const changelog_current = try shell.project_root.readFileAlloc(
         shell.arena.allocator(),
         "./CHANGELOG.md",
-        max_bytes,
+        changelog_bytes_max,
     );
 
     var changelog_new = std.ArrayList(u8).init(shell.arena.allocator());
@@ -289,4 +290,18 @@ test ChangelogIterator {
     });
 
     try std.testing.expectEqual(it.next_changelog(), null);
+}
+
+test "current changelog" {
+    const allocator = std.testing.allocator;
+
+    const changelog_text = try std.fs.cwd().readFileAlloc(
+        allocator,
+        "./CHANGELOG.md",
+        changelog_bytes_max,
+    );
+    defer allocator.free(changelog_text);
+
+    var it = ChangelogIterator.init(changelog_text);
+    while (it.next_changelog()) |_| {}
 }

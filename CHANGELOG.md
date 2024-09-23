@@ -441,7 +441,7 @@ Released: 2024-08-19
 
 ## TigerBeetle 0.15.5
 
-Released 2024-08-12
+Released: 2024-08-12
 
 Highlight of this release is fully rolled-out support for multiversion binaries. This means that,
 from now on, the upgrade procedure is going to be as simple as dropping the new version of
