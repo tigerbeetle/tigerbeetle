@@ -1320,7 +1320,7 @@ pub fn CompactionType(
                 source_exhausted_beat = beat.source_values_processed >= beat.value_count_per_beat;
 
                 log.debug("blip_merge({s}): beat.source_values_processed={} " ++
-                    "beat.value_count_per_beat={}. (source_exhausted_bar={}, " ++
+                    "beat.value_count_per_beat={} (source_exhausted_bar={}, " ++
                     "source_exhausted_beat={})", .{
                     compaction.tree_config.name,
                     beat.source_values_processed,
@@ -1381,15 +1381,18 @@ pub fn CompactionType(
                     bar.source_a_immutable_values.?.len == 0)
                 {
                     if (bar.table_info_a.immutable.len > 0) {
-                        const values = Table.data_block_values(
-                            bar.source_a_immutable_block.?.block,
+                        // Only consume one block at a time so that `blip_merge` never goes over its
+                        // target by more than 1 value block.
+                        const filled = @min(
+                            Table.data.value_count_max,
+                            bar.table_info_a.immutable.len,
                         );
-                        const immutable_remaining_before_fill = bar.table_info_a.immutable.len;
-                        const filled = compaction.fill_immutable_values(values);
-                        bar.source_a_values_consumed_for_fill =
-                            immutable_remaining_before_fill - bar.table_info_a.immutable.len;
+
+                        bar.source_a_values_consumed_for_fill = filled;
+                        bar.source_a_immutable_values = bar.table_info_a.immutable[0..filled];
+                        bar.table_info_a.immutable = bar.table_info_a.immutable[filled..];
+
                         updated_fill_count = true;
-                        bar.source_a_immutable_values = values[0..filled];
                         log.debug("set_source_a({s}): refilled immutable block. {} values out, " ++
                             "{} values consumed", .{
                             compaction.tree_config.name,
@@ -1571,36 +1574,6 @@ pub fn CompactionType(
                 }
             }
             return beat.source_b_len_after_set;
-        }
-
-        /// Copies values to `target` from our immutable table input.
-        /// Return the number of values written to the target and updates immutable table slice to
-        /// the non-processed remainder.
-        fn fill_immutable_values(compaction: *Compaction, target: []Value) usize {
-            const bar = &compaction.bar.?;
-
-            var source = bar.table_info_a.immutable;
-            assert(source.len > 0);
-            assert(target.len > 0);
-
-            // TODO Don't copy this, just use directly.
-            const count = @min(target.len, source.len);
-            assert(count > 0);
-
-            stdx.copy_disjoint(.exact, Value, target[0..count], source[0..count]);
-            bar.table_info_a.immutable = bar.table_info_a.immutable[count..];
-
-            if (constants.verify) {
-                // The immutable table's keys must be strictly increasing.
-                // (A table with a single value is always strictly increasing.)
-                for (
-                    target[0 .. count - 1],
-                    target[1 .. count],
-                ) |*value, *value_next| {
-                    assert(key_from_value(value_next) > key_from_value(value));
-                }
-            }
-            return count;
         }
 
         fn check_and_finish_blocks(compaction: *Compaction, force_flush: bool) enum {
