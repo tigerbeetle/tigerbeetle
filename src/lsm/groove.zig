@@ -839,10 +839,25 @@ pub fn GrooveType(
                 .negative => {},
                 .positive => |id_tree_value| {
                     if (IdTreeValue.tombstone(id_tree_value)) return;
-                    groove.prefetch_from_memory_by_timestamp(
-                        id_tree_value.timestamp,
-                        .objects_cache,
-                    );
+
+                    if (groove_options.orphaned_ids and
+                        id_tree_value.timestamp == 0)
+                    {
+                        comptime assert(has_id);
+
+                        // Zeroed timestamp indicates the object is not present,
+                        // and this id cannot be used anymore.
+                        groove.objects_cache.upsert(
+                            &std.mem.zeroInit(Object, .{
+                                .id = id_tree_value.id,
+                            }),
+                        );
+                    } else {
+                        groove.prefetch_from_memory_by_timestamp(
+                            id_tree_value.timestamp,
+                            .objects_cache,
+                        );
+                    }
                 },
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
@@ -863,6 +878,9 @@ pub fn GrooveType(
             timestamp: u64,
             destination: PrefetchDestination,
         ) void {
+            assert(timestamp >= TimestampRange.timestamp_min);
+            assert(timestamp <= TimestampRange.timestamp_max);
+
             switch (groove.objects.lookup_from_levels_cache(
                 groove.prefetch_snapshot.?,
                 timestamp,
@@ -1103,7 +1121,6 @@ pub fn GrooveType(
                             }),
                         );
                     } else if (!id_tree_value.tombstone()) {
-                        assert(id_tree_value.timestamp != 0);
                         worker.lookup_by_timestamp(id_tree_value.timestamp);
                         return;
                     }
@@ -1114,6 +1131,8 @@ pub fn GrooveType(
             }
 
             fn lookup_by_timestamp(worker: *PrefetchWorker, timestamp: u64) void {
+                assert(timestamp >= TimestampRange.timestamp_min);
+                assert(timestamp <= TimestampRange.timestamp_max);
                 assert(worker.current != null);
 
                 switch (worker.context.groove.objects.lookup_from_levels_cache(
@@ -1322,6 +1341,10 @@ pub fn GrooveType(
             assert(id != 0);
             assert(id != std.math.maxInt(u128));
             assert(!groove.objects_cache.has(id));
+
+            // We should not insert an orphaned `id` inside a scope.
+            assert(!groove.objects_cache.scope_is_active);
+            assert(groove.ids.active_scope == null);
 
             groove.objects_cache.upsert(&std.mem.zeroInit(Object, .{ .id = id }));
             groove.ids.put(&.{ .id = id, .timestamp = 0 });

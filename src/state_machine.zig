@@ -1693,39 +1693,22 @@ pub fn StateMachineType(
             id: u128,
             result: anytype,
         ) void {
+            assert(result != .ok);
+
             switch (operation) {
                 .create_accounts => {
                     comptime assert(@TypeOf(result) == CreateAccountResult);
-
                     // The `create_accounts` error codes do not depend on transient system status.
                     return;
                 },
                 .create_transfers => {
                     comptime assert(@TypeOf(result) == CreateTransferResult);
 
-                    // List of `create_transfers` results that depend on system status
-                    // rather than request data.
-                    //
-                    // Transfers that fail with these codes cannot reuse the same `id`,
+                    // Transfers that fail with transient codes cannot reuse the same `id`,
                     // ensuring strong idempotency guarantees.
                     // Once a transfer fails with a transient error, it must be retried
                     // with a different `id`.
-                    const persist = switch (result) {
-                        .debit_account_not_found,
-                        .credit_account_not_found,
-
-                        .pending_transfer_not_found,
-
-                        .exceeds_credits,
-                        .exceeds_debits,
-
-                        .debit_account_already_closed,
-                        .credit_account_already_closed,
-                        => true,
-                        else => false,
-                    };
-
-                    if (persist) {
+                    if (result.transient()) {
                         self.forest.grooves.transfers.insert_orphaned_id(id);
                     }
                 },
@@ -1974,7 +1957,9 @@ pub fn StateMachineType(
 
             switch (self.forest.grooves.transfers.get(t.id)) {
                 .found => |e| return self.create_transfer_exists(t, client_release, e),
-                .orphaned_id => return .id_already_failed,
+                .orphaned_id => if (!retry_transient_failure(client_release)) {
+                    return .id_already_failed;
+                },
                 .not_found => {},
             }
 
@@ -2257,7 +2242,10 @@ pub fn StateMachineType(
                     return .exists_with_different_user_data_32;
                 }
                 if (t.ledger != e.ledger) {
-                    return .exists_with_different_ledger;
+                    return if (retry_transient_failure(client_release))
+                        .transfer_must_have_the_same_ledger_as_accounts
+                    else
+                        .exists_with_different_ledger;
                 }
                 if (t.code != e.code) {
                     return .exists_with_different_code;
@@ -2492,10 +2480,18 @@ pub fn StateMachineType(
         ) CreateTransferResult {
             assert(t.id == e.id);
             assert(t.id != p.id);
-            assert(p.flags.pending);
-            assert(t.pending_id == p.id);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
             assert(@as(u16, @bitCast(t.flags)) == @as(u16, @bitCast(e.flags)));
+            assert(t.pending_id == e.pending_id);
+            assert(t.pending_id == p.id);
+            assert(p.flags.pending);
+            assert(t.timeout == e.timeout);
+            assert(t.timeout == 0);
+            assert(e.debit_account_id == p.debit_account_id);
+            assert(e.credit_account_id == p.credit_account_id);
+            assert(e.ledger == p.ledger);
+            assert(e.code == p.code);
+            assert(e.timestamp > p.timestamp);
 
             if (t.debit_account_id != 0 and t.debit_account_id != e.debit_account_id) {
                 return .exists_with_different_debit_account_id;
@@ -2521,20 +2517,6 @@ pub fn StateMachineType(
                     if (t.amount != e.amount) return .exists_with_different_amount;
                 }
             }
-
-            assert(e.flags.post_pending_transfer or e.flags.void_pending_transfer);
-            assert(e.debit_account_id == p.debit_account_id);
-            assert(e.credit_account_id == p.credit_account_id);
-            assert(e.pending_id == p.id);
-            assert(e.timeout == 0);
-            assert(e.ledger == p.ledger);
-            assert(e.code == p.code);
-            assert(e.timestamp > p.timestamp);
-
-            assert(t.flags.post_pending_transfer == e.flags.post_pending_transfer);
-            assert(t.flags.void_pending_transfer == e.flags.void_pending_transfer);
-            assert(t.timeout == 0);
-            assert(t.timestamp > e.timestamp);
 
             if (t.user_data_128 == 0) {
                 if (e.user_data_128 != p.user_data_128) {
@@ -2567,7 +2549,10 @@ pub fn StateMachineType(
             }
 
             if (t.ledger != 0 and t.ledger != e.ledger) {
-                return .exists_with_different_ledger;
+                return if (retry_transient_failure(client_release))
+                    .transfer_must_have_the_same_ledger_as_accounts
+                else
+                    .exists_with_different_ledger;
             }
             if (t.code != 0 and t.code != e.code) {
                 return .exists_with_different_code;
@@ -2952,6 +2937,28 @@ pub fn StateMachineType(
                 vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
             const release_max_exclusive =
                 vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 0 });
+            const release_max_transition =
+                comptime vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
+
+            comptime assert(config.release.value < release_max_transition.value);
+
+            return client_release.value >= release_min_inclusive.value and
+                client_release.value < release_max_exclusive.value;
+        }
+
+        // TODO(client_release_min): When client_release_min is bumped, remove this function and the
+        // legacy code it gates.
+        //
+        // Specifically, when retry_transient_failure() is true:
+        // - Transfers that fail due to transient errors can be retried
+        //   with the same ID without returning `id_already_failed`.
+        // - The `exists_with_different_ledger` error code does not apply
+        //   to `create_transfers`.
+        fn retry_transient_failure(client_release: vsr.Release) bool {
+            const release_min_inclusive =
+                vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
+            const release_max_exclusive =
+                vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 4 });
             const release_max_transition =
                 comptime vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
 
