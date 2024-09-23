@@ -931,7 +931,11 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .get_account => FuzzOpAction{ .get_account = random_id(random, u128) },
             .exists_account => FuzzOpAction{
                 // Not all ops generate accounts, so the timestamp may or may not be found.
-                .exists_account = random.intRangeAtMost(u64, 0, fuzz_op_index),
+                .exists_account = random.intRangeAtMost(
+                    u64,
+                    TimestampRange.timestamp_min,
+                    fuzz_op_index,
+                ),
             },
             .scan_account => blk: {
                 @setEvalBranchQuota(10_000);

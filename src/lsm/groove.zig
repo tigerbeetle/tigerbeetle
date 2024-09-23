@@ -755,6 +755,8 @@ pub fn GrooveType(
             // Only applicable to objects with an `id` field.
             // Use `get` if the object is already keyed by timestamp.
             comptime assert(has_id);
+            assert(timestamp >= TimestampRange.timestamp_min);
+            assert(timestamp <= TimestampRange.timestamp_max);
 
             return groove.timestamps.get(timestamp) == .found;
         }
@@ -812,6 +814,8 @@ pub fn GrooveType(
             // Use `prefetch_enqueue` if the object is already keyed by timestamp.
             comptime assert(has_id);
 
+            // Instead of asserting, we allow and ignore invalid timestamps (most likely zero),
+            // so the prefetch step does not need to verify the data's validity.
             const timestamp_valid = timestamp >= TimestampRange.timestamp_min and
                 timestamp <= TimestampRange.timestamp_max;
             if (!timestamp_valid) return;
