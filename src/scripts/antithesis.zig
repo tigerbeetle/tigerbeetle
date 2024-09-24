@@ -20,6 +20,12 @@ pub const CLIArgs = struct {
     tag: []const u8,
     // Whether to push the built tag to the Antithesis registry
     push: bool = false,
+    // Whether to trigger a new test (requires --push)
+    trigger_test: bool = false,
+    // API user
+    antithesis_user: ?[]const u8 = null,
+    // API password
+    antithesis_password: ?[]const u8 = null,
 };
 
 const Image = enum { config, workload, replica };
@@ -29,6 +35,12 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     assert(cli_args.tag.len > 0);
     assert(std.mem.indexOfAny(u8, cli_args.tag, &std.ascii.whitespace) == null);
+
+    if (cli_args.trigger_test) {
+        assert(cli_args.push);
+        assert(cli_args.antithesis_user != null and cli_args.antithesis_user.?.len > 0);
+        assert(cli_args.antithesis_password != null and cli_args.antithesis_password.?.len > 0);
+    }
 
     try shell.exec_zig("build -Drelease", .{});
 
@@ -54,6 +66,15 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
         if (cli_args.push) {
             try push_image(shell, image, cli_args.tag);
         }
+    }
+
+    if (cli_args.trigger_test) {
+        try trigger_test(
+            shell,
+            cli_args.tag,
+            cli_args.antithesis_user.?,
+            cli_args.antithesis_password.?,
+        );
     }
 }
 
@@ -157,6 +178,73 @@ fn push_image(shell: *Shell, image: Image, tag: []const u8) !void {
         "docker push {url_prefix}/{image}:{tag}",
         .{ .image = @tagName(image), .tag = tag, .url_prefix = url_prefix },
     );
+}
+
+fn trigger_test(
+    shell: *Shell,
+    tag: []const u8,
+    antithesis_user: []const u8,
+    antithesis_password: []const u8,
+) !void {
+    const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
+
+    var body_buf: [4 * 1024]u8 = undefined;
+    var body_stream = std.io.fixedBufferStream(&body_buf);
+
+    try std.json.stringify(
+        .{
+            .params = .{
+                .@"custom.duration" = "0.5",
+                .@"antithesis.images" = try shell.fmt("workload:{s};replica:{s}", .{ tag, tag }),
+                .@"antithesis.config_image" = try shell.fmt("config:{s}", .{tag}),
+                .@"antithesis.description" = commit,
+                .@"antithesis.report.recipients" = "oskar@tigerbeetle.com",
+            },
+        },
+        .{},
+        body_stream.writer(),
+    );
+
+    var client = std.http.Client{ .allocator = shell.gpa };
+    defer client.deinit();
+
+    const user_pass = try shell.fmt("{s}:{s}", .{ antithesis_user, antithesis_password });
+    const b64 = std.base64.url_safe.Encoder;
+
+    var auth_buf: [1024]u8 = undefined;
+    if (b64.calcSize(user_pass.len) > auth_buf.len) {
+        return error.PasswordMaxLengthExceeded;
+    }
+    const auth = b64.encode(&auth_buf, user_pass);
+
+    var response = std.ArrayList(u8).init(shell.gpa);
+    defer response.deinit();
+
+    const result = try client.fetch(.{
+        .method = .POST,
+        .location = .{
+            .url = "https://tigerbeetle.antithesis.com/api/v1/launch_experiment/tigerbeetle",
+        },
+        .headers = .{
+            .authorization = .{
+                .override = try shell.fmt("Basic {s}", .{auth}),
+            },
+        },
+        .extra_headers = &.{
+            .{ .name = "accept", .value = "application/json" },
+            .{ .name = "content-type", .value = "application/json" },
+        },
+        .payload = body_buf[0..body_stream.pos],
+        .response_storage = .{ .dynamic = &response },
+    });
+
+    if (result.status != std.http.Status.ok) {
+        std.log.default.err(
+            "Trigger test failed (code {}): {s}\n",
+            .{ result.status, response.items },
+        );
+        return error.BadStatus;
+    }
 }
 
 const dockerfiles = .{
