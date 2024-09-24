@@ -92,7 +92,7 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
     protected void setResult(final TResponse result) {
         final var completed = future.complete(result);
         if (!completed) {
-            throw new IllegalStateException("CompletableFuture already completed");
+            throw new IllegalStateException("Request has already been completed");
         }
     }
 
@@ -100,7 +100,7 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
     protected void setException(final Throwable exception) {
         final var completed = future.completeExceptionally(exception);
         if (!completed) {
-            throw new IllegalStateException("CompletableFuture already completed");
+            throw new IllegalStateException("Request has already been completed");
         }
     }
 }
