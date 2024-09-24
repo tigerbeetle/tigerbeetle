@@ -583,6 +583,15 @@ pub const Simulator = struct {
         simulator.tick_crash();
     }
 
+    /// Executes the following:
+    /// * Pick a quorum of replicas to be fully available (the core)
+    /// * Restart any core replicas that are down at the moment
+    /// * Heal all network partitions between core replicas
+    /// * Disable storage faults on the core replicas
+    /// * For all failures involving non-core replicas, make those failures permanent.
+    ///
+    /// See https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness for broader
+    /// context.
     pub fn transition_to_liveness_mode(simulator: *Simulator) void {
         simulator.core = random_core(
             simulator.random,
@@ -597,6 +606,7 @@ pub const Simulator = struct {
             if (simulator.cluster.replica_health[replica_index] == .down) {
                 simulator.restart_replica(@intCast(replica_index), fault);
             }
+            simulator.cluster.storages[replica_index].transition_to_liveness_mode();
         }
 
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
