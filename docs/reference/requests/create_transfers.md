@@ -381,7 +381,7 @@ The transfer was not created. [`Transfer.code`](../transfer.md#code) is zero, bu
 The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
 refer to an existing `Account`.
 
-This is a [`transient error`](#id_already_failed).
+This is a [transient error](#id_already_failed).
 The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
 upon retry, even if the underlying issue is resolved.
 To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
@@ -391,7 +391,7 @@ To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be sub
 The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
 refer to an existing `Account`.
 
-This is a [`transient error`](#id_already_failed).
+This is a [transient error](#id_already_failed).
 The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
 upon retry, even if the underlying issue is resolved.
 To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
@@ -418,7 +418,7 @@ The transfer was not created. The accounts referred to by
 The transfer was not created. The transfer referenced by
 [`Transfer.pending_id`](../transfer.md#pending_id) does not exist.
 
-This is a [`transient error`](#id_already_failed).
+This is a [transient error](#id_already_failed).
 The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
 upon retry, even if the underlying issue is resolved.
 To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
@@ -543,7 +543,7 @@ done manually.
 The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
 refer to an `Account` whose [`Account.flags.closed`](../account.md#flagsclosed) is not already set.
 
-This is a [`transient error`](#id_already_failed).
+This is a [transient error](#id_already_failed).
 The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
 upon retry, even if the underlying issue is resolved.
 To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
@@ -553,7 +553,7 @@ To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be sub
 The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
 refer to an `Account` whose [`Account.flags.closed`](../account.md#flagsclosed) is not already set.
 
-This is a [`transient error`](#id_already_failed).
+This is a [transient error](#id_already_failed).
 The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
 upon retry, even if the underlying issue is resolved.
 To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
@@ -609,7 +609,7 @@ The [debit account](../transfer.md#debit_account_id) has
 `debit_account.debits_pending + debit_account.debits_posted + transfer.amount` would exceed
 `debit_account.credits_posted`.
 
-This is a [`transient error`](#id_already_failed).
+This is a [transient error](#id_already_failed).
 The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
 upon retry, even if the underlying issue is resolved.
 To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
@@ -632,7 +632,7 @@ The [credit account](../transfer.md#credit_account_id) has
 `credit_account.credits_pending + credit_account.credits_posted + transfer.amount` would exceed
 `credit_account.debits_posted`.
 
-This is a [`transient error`](#id_already_failed).
+This is a [transient error](#id_already_failed).
 The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
 upon retry, even if the underlying issue is resolved.
 To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
