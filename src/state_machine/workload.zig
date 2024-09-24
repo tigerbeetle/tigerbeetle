@@ -210,7 +210,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         transfers_pending_in_flight: usize = 0,
 
         /// Ids that failed with transient codes.
-        transient_failures: std.AutoArrayHashMap(u128, void),
+        transient_failures: std.AutoArrayHashMapUnmanaged(u128, void),
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -270,10 +270,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 account.flags.history = chance(random, options.account_history_probability);
             }
 
-            // TODO(batiati): Determine the maximum number of failed IDs that can
-            // be enqueued before sending a `create_transfers` request.
-            // Replace this with an "unmanaged" list with a predefined capacity.
-            var transient_failures = std.AutoArrayHashMap(u128, void).init(allocator);
+            var transient_failures: std.AutoArrayHashMapUnmanaged(u128, void) = .{};
+            try transient_failures.ensureTotalCapacity(
+                allocator,
+                options.transfer_transient_failures_max,
+            );
             errdefer transient_failures.deinit();
 
             return .{
@@ -289,7 +290,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         pub fn deinit(self: *Workload, allocator: std.mem.Allocator) void {
             self.auditor.deinit(allocator);
             self.transfers_delivered_recently.deinit();
-            self.transient_failures.deinit();
+            self.transient_failures.deinit(allocator);
         }
 
         pub fn done(self: *const Workload) bool {
@@ -1014,15 +1015,20 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 return;
             }
 
-            // Enqueue the `id`s of all transient failures to be retried in the next request.
+            // Enqueue the `id`s of transient failures to be retried in the next request.
             for (results_sparse) |item| {
                 assert(item.result != .ok);
                 assert(item.result != .id_already_failed);
-                if (item.result.transient()) {
-                    self.transient_failures.putNoClobber(
-                        transfers[item.index].id,
-                        {},
-                    ) catch unreachable;
+
+                if (self.transient_failures.count() <
+                    self.options.transfer_transient_failures_max)
+                {
+                    if (item.result.transient()) {
+                        self.transient_failures.putAssumeCapacityNoClobber(
+                            transfers[item.index].id,
+                            {},
+                        );
+                    }
                 }
             }
 
@@ -1465,6 +1471,9 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         transfers_batch_size_min: usize,
         transfers_batch_size_span: usize, // inclusive
 
+        /// Maximum number of failed transfer IDs to retry in the next request.
+        transfer_transient_failures_max: usize,
+
         pub fn generate(random: std.rand.Random, options: struct {
             batch_size_limit: u32,
             client_count: usize,
@@ -1536,6 +1545,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                     usize,
                     batch_create_transfers_limit,
                 ),
+                .transfer_transient_failures_max = 128,
             };
         }
     };

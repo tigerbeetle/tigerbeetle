@@ -444,7 +444,10 @@ pub fn ScanType(
                         if (index == .id) {
                             // When iterating over `IdTree` it can return a timestamp zero, which
                             // indicates an orphaned id.
-                            if (Groove.config.orphaned_ids and value.timestamp == 0) continue;
+                            if (value.timestamp == 0) {
+                                assert(Groove.config.orphaned_ids);
+                                continue;
+                            }
                         }
 
                         assert(value.timestamp >= TimestampRange.timestamp_min);

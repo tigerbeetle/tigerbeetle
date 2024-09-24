@@ -848,10 +848,8 @@ pub fn GrooveType(
                 .positive => |id_tree_value| {
                     if (IdTreeValue.tombstone(id_tree_value)) return;
 
-                    if (groove_options.orphaned_ids and
-                        id_tree_value.timestamp == 0)
-                    {
-                        comptime assert(has_id);
+                    if (id_tree_value.timestamp == 0) {
+                        assert(groove_options.orphaned_ids);
 
                         // Zeroed timestamp indicates the object is not present,
                         // and this id cannot be used anymore.
