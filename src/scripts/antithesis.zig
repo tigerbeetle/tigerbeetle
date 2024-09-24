@@ -207,10 +207,11 @@ fn trigger_test(
     const user_pass = try shell.fmt("{s}:{s}", .{ antithesis_user, antithesis_password });
     const b64 = std.base64.url_safe.Encoder;
 
-    const auth = try shell.gpa.alloc(u8, b64.calcSize(user_pass.len));
-    defer shell.gpa.free(auth);
-
-    _ = b64.encode(auth, user_pass);
+    var auth_buf: [1024]u8 = undefined;
+    if (b64.calcSize(user_pass.len) > auth_buf.len) {
+        return error.PasswordMaxLengthExceeded;
+    }
+    const auth = b64.encode(&auth_buf, user_pass);
 
     var response = std.ArrayList(u8).init(shell.gpa);
     defer response.deinit();
@@ -234,11 +235,11 @@ fn trigger_test(
     });
 
     if (result.status != std.http.Status.ok) {
-        std.debug.print(
+        std.log.default.err(
             "Trigger test failed (code {}): {s}\n",
             .{ result.status, response.items },
         );
-        unreachable;
+        return error.BadStatus;
     }
 }
 
