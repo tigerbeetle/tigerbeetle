@@ -934,7 +934,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 .exists_account = random.intRangeAtMost(
                     u64,
                     TimestampRange.timestamp_min,
-                    fuzz_op_index,
+                    fuzz_op_index + 1,
                 ),
             },
             .scan_account => blk: {
