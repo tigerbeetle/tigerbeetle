@@ -221,7 +221,7 @@ public class BlockingRequestTest {
         request.waitForResult();
     }
 
-    @Test(expected = AssertionError.class)
+    @Test(expected = IllegalStateException.class)
     public void testEndRequestTwice() {
         var client = getDummyClient();
 
@@ -237,19 +237,24 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+
+        // First completion is OK, registering the exception.
+        try {
+            request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+        } catch (Throwable any) {
+            // No exception is expected in the first call.
+            assert false;
+        }
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(1, result.getLength());
 
-        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
-
-        assertTrue(request.isDone());
-
-        request.waitForResult();
-        assert false;
+        // Can't end the request twice.
+        // NOTE: Normally this is caught by `Request.endRequest`, halting the VM immediately.
+        // But we can't test that in a good way, so we use `setException` here and catch the
+        // IllegalStateException.
+        request.setException(new RequestException(PacketStatus.TooMuchData.value));
     }
 
     @Test

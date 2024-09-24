@@ -177,10 +177,18 @@ abstract class Request<TResponse extends Batch> {
             exception = any;
         }
 
-        if (exception == null) {
-            setResult((TResponse) result);
-        } else {
-            setException(exception);
+        try {
+            if (exception == null) {
+                setResult((TResponse) result);
+            } else {
+                setException(exception);
+            }
+        } catch (Throwable any) {
+            System.err.println("Completion of request failed!\n"
+                    + "This is a bug in TigerBeetle. Please report it at https://github.com/tigerbeetle/tigerbeetle.\n"
+                    + "Cause: " + any.toString());
+            any.printStackTrace();
+            Runtime.getRuntime().halt(1);
         }
     }
 

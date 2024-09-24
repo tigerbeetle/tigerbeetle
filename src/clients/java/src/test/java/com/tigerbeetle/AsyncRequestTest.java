@@ -526,6 +526,27 @@ public class AsyncRequestTest {
         }
     }
 
+    @Test(expected = IllegalStateException.class)
+    public void testFailedFutureCompletedTwice() {
+        var client = getDummyClient();
+        var batch = new IdBatch(1);
+        batch.add();
+
+        var request = AsyncRequest.lookupTransfers(client, batch);
+        var status = PacketStatus.TooMuchData.value;
+
+        try {
+            // First completion is OK, registering the exception in the CompletableFuture.
+            request.setException(new RequestException(status));
+        } catch (Throwable any) {
+            // No exception is expected in the first call.
+            assert false;
+        }
+        // Second time throws an exception, because it can only be completed once.
+        request.setException(new RequestException(status));
+
+    }
+
     private static NativeClient getDummyClient() {
         return NativeClient.initEcho(UInt128.asBytes(0), "3000");
     }
