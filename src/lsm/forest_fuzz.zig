@@ -413,9 +413,9 @@ const Environment = struct {
 
     fn get_account(env: *Environment, id: u128) ?*const Account {
         return switch (env.forest.grooves.accounts.get(id)) {
-            .found => |a| a,
+            .found_object => |a| a,
+            .found_orphaned_id => unreachable,
             .not_found => null,
-            .orphaned_id => unreachable,
         };
     }
 

@@ -1891,8 +1891,8 @@ pub fn StateMachineType(
             if (a.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.accounts.get(a.id)) {
-                .found => |e| return create_account_exists(a, e),
-                .orphaned_id => unreachable,
+                .found_object => |e| return create_account_exists(a, e),
+                .found_orphaned_id => unreachable,
                 .not_found => {},
             }
 
@@ -1956,8 +1956,8 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.transfers.get(t.id)) {
-                .found => |e| return self.create_transfer_exists(t, client_release, e),
-                .orphaned_id => if (!retry_transient_failure(client_release)) {
+                .found_object => |e| return self.create_transfer_exists(t, client_release, e),
+                .found_orphaned_id => if (!retry_transient_failure(client_release)) {
                     return .id_already_failed;
                 },
                 .not_found => {},
@@ -2600,16 +2600,16 @@ pub fn StateMachineType(
 
         fn get_transfer(self: *const StateMachine, id: u128) ?*const Transfer {
             return switch (self.forest.grooves.transfers.get(id)) {
-                .found => |t| t,
-                .not_found, .orphaned_id => null,
+                .found_object => |t| t,
+                .found_orphaned_id, .not_found => null,
             };
         }
 
         fn get_account(self: *const StateMachine, id: u128) ?*const Account {
             return switch (self.forest.grooves.accounts.get(id)) {
-                .found => |a| a,
+                .found_object => |a| a,
+                .found_orphaned_id => unreachable,
                 .not_found => null,
-                .orphaned_id => unreachable,
             };
         }
 
@@ -2620,9 +2620,9 @@ pub fn StateMachineType(
             pending_timestamp: u64,
         ) ?*const TransferPending {
             return switch (self.forest.grooves.transfers_pending.get(pending_timestamp)) {
-                .found => |a| a,
+                .found_object => |a| a,
+                .found_orphaned_id => unreachable,
                 .not_found => null,
-                .orphaned_id => unreachable,
             };
         }
 

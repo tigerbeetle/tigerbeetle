@@ -732,18 +732,18 @@ pub fn GrooveType(
         }
 
         pub fn get(groove: *const Groove, key: PrimaryKey) union(enum) {
-            found: *const Object,
-            orphaned_id,
+            found_object: *const Object,
+            found_orphaned_id,
             not_found,
         } {
             if (groove.objects_cache.get(key)) |object| {
                 if (object.timestamp == 0) {
                     assert(has_id);
                     assert(groove_options.orphaned_ids);
-                    return .orphaned_id;
+                    return .found_orphaned_id;
                 }
 
-                return .{ .found = object };
+                return .{ .found_object = object };
             }
 
             return .not_found;
