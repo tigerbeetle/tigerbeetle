@@ -1069,10 +1069,12 @@ fn build_node_client(
 
         const lib = b.addSharedLibrary(.{
             .name = "tb_nodeclient",
-            .root_source_file = b.path("src/node.zig"),
+            .root_source_file = b.path("src/clients/node/node.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
+        lib.root_module.addImport("vsr", options.vsr_module);
+        lib.root_module.addOptions("vsr_options", options.vsr_options);
         lib.linkLibC();
 
         lib.step.dependOn(&npm_install.step);
