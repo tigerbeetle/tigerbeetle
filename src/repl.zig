@@ -656,67 +656,73 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
             repl.event_loop_done = false;
 
-            if (statements.len > 0) {
-                var statements_iterator = std.mem.split(u8, statements, ";");
-                while (statements_iterator.next()) |statement_string| {
-                    // Release allocation after every execution.
-                    var execution_arena = std.heap.ArenaAllocator.init(allocator);
-                    defer execution_arena.deinit();
-                    const statement = Parser.parse_statement(
-                        &execution_arena,
-                        statement_string,
-                        repl.printer,
-                    ) catch |err| {
-                        switch (err) {
-                            // These are parsing errors and since this
-                            // is not an interactive command, we should
-                            // exit immediately. Parsing error info
-                            // has already been emitted to stderr.
-                            Parser.Error.BadIdentifier,
-                            Parser.Error.BadOperation,
-                            Parser.Error.BadValue,
-                            Parser.Error.BadKeyValuePair,
-                            Parser.Error.MissingEqualBetweenKeyValuePair,
-                            Parser.Error.NoSyntaxMatch,
-                            // TODO: This will be more convenient to express
-                            // once https://github.com/ziglang/zig/issues/2473 is
-                            // in.
-                            => std.posix.exit(1),
-
-                            // An unexpected error for which we do
-                            // want the stacktrace.
-                            error.AccessDenied,
-                            error.BrokenPipe,
-                            error.ConnectionResetByPeer,
-                            error.DeviceBusy,
-                            error.DiskQuota,
-                            error.FileTooBig,
-                            error.InputOutput,
-                            error.InvalidArgument,
-                            error.LockViolation,
-                            error.NoSpaceLeft,
-                            error.NotOpenForWriting,
-                            error.OperationAborted,
-                            error.OutOfMemory,
-                            error.SystemResources,
-                            error.Unexpected,
-                            error.WouldBlock,
-                            => return err,
-                        }
-                    };
-                    try repl.do_statement(statement);
-                }
-            } else {
+            if (repl.interactive) {
                 try repl.display_help();
             }
 
+            var statements_iterator = if (statements.len > 0)
+                std.mem.split(u8, statements, ";")
+            else
+                null;
+
             while (!repl.event_loop_done) {
-                if (repl.request_done and repl.interactive) {
+                if (repl.request_done) {
                     // Release allocation after every execution.
                     var execution_arena = std.heap.ArenaAllocator.init(allocator);
                     defer execution_arena.deinit();
-                    try repl.do_repl(&execution_arena);
+
+                    if (repl.interactive) {
+                        try repl.do_repl(&execution_arena);
+                    } else blk: {
+                        const statement_string = statements_iterator.?.next() orelse break :blk;
+
+                        const statement = Parser.parse_statement(
+                            &execution_arena,
+                            statement_string,
+                            repl.printer,
+                        ) catch |err| {
+                            switch (err) {
+                                // These are parsing errors and since this
+                                // is not an interactive command, we should
+                                // exit immediately. Parsing error info
+                                // has already been emitted to stderr.
+                                Parser.Error.BadIdentifier,
+                                Parser.Error.BadOperation,
+                                Parser.Error.BadValue,
+                                Parser.Error.BadKeyValuePair,
+                                Parser.Error.MissingEqualBetweenKeyValuePair,
+                                Parser.Error.NoSyntaxMatch,
+                                // TODO: This will be more convenient to express
+                                // once https://github.com/ziglang/zig/issues/2473 is
+                                // in.
+                                => std.posix.exit(1),
+
+                                // An unexpected error for which we do
+                                // want the stacktrace.
+                                error.AccessDenied,
+                                error.BrokenPipe,
+                                error.ConnectionResetByPeer,
+                                error.DeviceBusy,
+                                error.DiskQuota,
+                                error.FileTooBig,
+                                error.InputOutput,
+                                error.InvalidArgument,
+                                error.LockViolation,
+                                error.NoSpaceLeft,
+                                error.NotOpenForWriting,
+                                error.OperationAborted,
+                                error.OutOfMemory,
+                                error.SystemResources,
+                                error.Unexpected,
+                                error.WouldBlock,
+                                => return err,
+                            }
+                        };
+
+                        try repl.do_statement(statement);
+                    }
                 }
+
                 repl.client.tick();
                 try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
             }
