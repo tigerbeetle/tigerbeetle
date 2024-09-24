@@ -23,9 +23,9 @@ pub const CLIArgs = struct {
     // Whether to trigger a new test (requires --push)
     trigger_test: bool = false,
     // API user
-    antithesis_user: []const u8 = "",
+    antithesis_user: ?[]const u8 = null,
     // API password
-    antithesis_password: []const u8 = "",
+    antithesis_password: ?[]const u8 = null,
 };
 
 const Image = enum { config, workload, replica };
@@ -38,8 +38,8 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     if (cli_args.trigger_test) {
         assert(cli_args.push);
-        assert(cli_args.antithesis_user.len > 0);
-        assert(cli_args.antithesis_password.len > 0);
+        assert(cli_args.antithesis_user != null and cli_args.antithesis_user.?.len > 0);
+        assert(cli_args.antithesis_password != null and cli_args.antithesis_password.?.len > 0);
     }
 
     try shell.exec_zig("build -Drelease", .{});
@@ -72,8 +72,8 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
         try trigger_test(
             shell,
             cli_args.tag,
-            cli_args.antithesis_user,
-            cli_args.antithesis_password,
+            cli_args.antithesis_user.?,
+            cli_args.antithesis_password.?,
         );
     }
 }
