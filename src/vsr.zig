@@ -35,6 +35,7 @@ pub const lsm = .{
     .composite_key = @import("lsm/composite_key.zig"),
 };
 pub const testing = .{
+    .snaptest = @import("testing/snaptest.zig"),
     .cluster = @import("testing/cluster.zig"),
     .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
