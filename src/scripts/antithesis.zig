@@ -188,18 +188,22 @@ fn trigger_test(
 ) !void {
     const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
 
-    var body = std.ArrayList(u8).init(shell.gpa);
-    defer body.deinit();
+    var body_buf: [4 * 1024]u8 = undefined;
+    var body_stream = std.io.fixedBufferStream(&body_buf);
 
-    try std.json.stringify(.{
-        .params = .{
-            .@"custom.duration" = "0.5",
-            .@"antithesis.images" = try shell.fmt("workload:{s};replica:{s}", .{ tag, tag }),
-            .@"antithesis.config_image" = try shell.fmt("config:{s}", .{tag}),
-            .@"antithesis.description" = commit,
-            .@"antithesis.report.recipients" = "oskar@tigerbeetle.com",
+    try std.json.stringify(
+        .{
+            .params = .{
+                .@"custom.duration" = "0.5",
+                .@"antithesis.images" = try shell.fmt("workload:{s};replica:{s}", .{ tag, tag }),
+                .@"antithesis.config_image" = try shell.fmt("config:{s}", .{tag}),
+                .@"antithesis.description" = commit,
+                .@"antithesis.report.recipients" = "oskar@tigerbeetle.com",
+            },
         },
-    }, .{}, body.writer());
+        .{},
+        body_stream.writer(),
+    );
 
     var client = std.http.Client{ .allocator = shell.gpa };
     defer client.deinit();
@@ -230,7 +234,7 @@ fn trigger_test(
             .{ .name = "accept", .value = "application/json" },
             .{ .name = "content-type", .value = "application/json" },
         },
-        .payload = body.items,
+        .payload = body_buf[0..body_stream.pos],
         .response_storage = .{ .dynamic = &response },
     });
 
