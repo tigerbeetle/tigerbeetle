@@ -240,10 +240,10 @@ public class BlockingRequestTest {
 
         // First completion is OK, registering the exception.
         try {
-          request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+            request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
         } catch (Throwable any) {
-          // No exception is expected in the first call.
-          assert false;
+            // No exception is expected in the first call.
+            assert false;
         }
 
         assertTrue(request.isDone());
