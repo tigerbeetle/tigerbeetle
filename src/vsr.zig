@@ -637,7 +637,7 @@ pub const UpgradeRequest = extern struct {
     }
 };
 
-/// To ease investigation of accidents, assign a separate exist status for each fatal condition.
+/// To ease investigation of accidents, assign a separate exit status for each fatal condition.
 /// This is a process-global set.
 const FatalReason = enum(u8) {
     cli = 1,
