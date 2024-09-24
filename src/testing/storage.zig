@@ -715,6 +715,12 @@ pub const Storage = struct {
             assert(data_block_header.block_type == .data);
         }
     }
+
+    pub fn transition_to_liveness_mode(storage: *Storage) void {
+        storage.options.read_fault_probability = 0;
+        storage.options.write_fault_probability = 0;
+        storage.options.crash_fault_probability = 0;
+    }
 };
 
 pub const Area = union(enum) {

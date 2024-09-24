@@ -597,6 +597,7 @@ pub const Simulator = struct {
             if (simulator.cluster.replica_health[replica_index] == .down) {
                 simulator.restart_replica(@intCast(replica_index), fault);
             }
+            simulator.cluster.storages[replica_index].transition_to_liveness_mode();
         }
 
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
