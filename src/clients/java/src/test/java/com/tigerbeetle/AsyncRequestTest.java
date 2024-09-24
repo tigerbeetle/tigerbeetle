@@ -535,8 +535,13 @@ public class AsyncRequestTest {
         var request = AsyncRequest.lookupTransfers(client, batch);
         var status = PacketStatus.TooMuchData.value;
 
-        // First completion is OK, registering the exception in the CompletableFuture.
-        request.setException(new RequestException(status));
+        try {
+          // First completion is OK, registering the exception in the CompletableFuture.
+          request.setException(new RequestException(status));
+        } catch (Throwable any) {
+          // No exception is expected in the first call.
+          assert false;
+        }
         // Second time throws an exception, because it can only be completed once.
         request.setException(new RequestException(status));
 

@@ -237,7 +237,14 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+
+        // First completion is OK, registering the exception.
+        try {
+          request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+        } catch (Throwable any) {
+          // No exception is expected in the first call.
+          assert false;
+        }
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
