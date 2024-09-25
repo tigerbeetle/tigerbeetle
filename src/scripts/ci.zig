@@ -195,6 +195,10 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 }
 
 fn run_systest(shell: *Shell, _: std.mem.Allocator) !void {
+    if (builtin.os.tag != .linux) {
+        log.info("skipping systest on unsupported OS: {s}", .{@tagName(builtin.os.tag)});
+        return;
+    }
     var section = try shell.open_section("systest");
     defer section.close();
 
