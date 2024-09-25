@@ -46,6 +46,8 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     // Build Java client library
     {
+        try shell.exec_zig("build clients:java -Drelease", .{});
+
         try shell.pushd("./src/clients/java");
         defer shell.popd();
 
