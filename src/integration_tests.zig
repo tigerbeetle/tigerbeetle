@@ -498,7 +498,7 @@ test "systest smoke" {
     log.info("Running 1m systest...", .{});
     try shell.exec(
         \\ unshare -nfr ./zig/zig build scripts --
-        \\   systest --tigerbeetle-executable=./tigerbeetle --test-duration-minutes=1
-    , .{});
+        \\   systest --tigerbeetle-executable={tigerbeetle} --test-duration-minutes=1
+    , .{ .tigerbeetle = tigerbeetle });
     log.info("Systest passed", .{});
 }
