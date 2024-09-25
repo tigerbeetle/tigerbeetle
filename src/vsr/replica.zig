@@ -5845,8 +5845,7 @@ pub fn ReplicaType(
         fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
 
-            // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt or
-            // if the replica restarts after state sync updates superblock.
+            // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt.
             if (self.op < self.op_checkpoint()) {
                 log.warn("{}: op_head_certain: op < op_checkpoint op={} op_checkpoint={}", .{
                     self.replica,
@@ -5936,7 +5935,7 @@ pub fn ReplicaType(
         /// Receiving and storing an op higher than `op_prepare_max()` is forbidden;
         /// doing so would overwrite a message (or the slot of a message) that has not yet been
         /// committed and checkpointed.
-        fn op_prepare_max(self: *const Self) u64 {
+        pub fn op_prepare_max(self: *const Self) u64 {
             return vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
