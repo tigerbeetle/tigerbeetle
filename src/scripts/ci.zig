@@ -199,6 +199,7 @@ fn run_systest(shell: *Shell, _: std.mem.Allocator) !void {
     defer section.close();
 
     try shell.exec_zig("build -Drelease", .{});
+    log.info("Running 1m systest...", .{});
     try shell.exec(
         \\ unshare -nfr ./zig/zig build scripts --
         \\   systest --tigerbeetle-executable=./tigerbeetle --test-duration-minutes=1
