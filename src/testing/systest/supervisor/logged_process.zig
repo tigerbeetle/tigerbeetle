@@ -118,7 +118,10 @@ pub fn start(
             fn log_stderr(stderr: std.fs.File, process: *Self) void {
                 while (true) {
                     var buf: [1024]u8 = undefined;
-                    const line_opt = stderr.reader().readUntilDelimiterOrEof(&buf, '\n') catch |err| {
+                    const line_opt = stderr.reader().readUntilDelimiterOrEof(
+                        &buf,
+                        '\n',
+                    ) catch |err| {
                         log.info("{s}: failed reading stderr: {any}", .{ process.name, err });
                         break;
                     };

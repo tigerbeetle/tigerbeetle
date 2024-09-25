@@ -33,8 +33,6 @@
 //! * cluster membership changes?
 
 const std = @import("std");
-const builtin = @import("builtin");
-const flags = @import("../../../flags.zig");
 const Shell = @import("../../../shell.zig");
 const LoggedProcess = @import("./logged_process.zig");
 const Replica = @import("./replica.zig");
@@ -67,7 +65,10 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     // Ensure loopback can be used
     try shell.exec("ip link set up dev lo", .{});
 
-    log.info("supervisor: starting test with target runtime of {d}m", .{args.test_duration_minutes});
+    log.info(
+        "supervisor: starting test with target runtime of {d}m",
+        .{args.test_duration_minutes},
+    );
     const test_duration_ns = @as(u64, @intCast(args.test_duration_minutes)) * std.time.ns_per_min;
     const time_start = std.time.nanoTimestamp();
 
