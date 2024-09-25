@@ -641,6 +641,7 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
+    integration_tests.root_module.addOptions("vsr_options", vsr_options);
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
     const run_integration_tests = b.addRunArtifact(integration_tests);
     run_integration_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
