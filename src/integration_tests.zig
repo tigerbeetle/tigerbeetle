@@ -18,6 +18,8 @@ const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
 const tigerbeetle: []const u8 = @import("test_options").tigerbeetle_exe;
 const tigerbeetle_past: []const u8 = @import("test_options").tigerbeetle_exe_past;
+const vsr_release: ?[]const u8 = @import("vsr_options").release;
+const vsr_release_client_min: ?[]const u8 = @import("vsr_options").release_client_min;
 
 test "repl integration" {
     const Context = struct {
@@ -496,4 +498,55 @@ test "in-place upgrade" {
     defer context.deinit();
 
     try context.run();
+}
+
+test "systest smoke" {
+    if (builtin.os.tag != .linux) {
+        log.info("skipping systest on unsupported OS: {s}", .{@tagName(builtin.os.tag)});
+        return;
+    }
+
+    assert(vsr_release != null);
+    assert(vsr_release_client_min != null);
+
+    const shell = try Shell.create(std.testing.allocator);
+    defer shell.destroy();
+
+    // Build Java client library. Versions need to match the passed-in multiversion tigerbeetle
+    // executable.
+    {
+        try shell.exec_zig(
+            \\ build clients:java 
+            \\ -Drelease 
+            \\ -Dconfig-release={config_release}
+            \\ -Dconfig-release-client-min={config_release_client_min}
+        , .{
+            .config_release = vsr_release.?,
+            .config_release_client_min = vsr_release_client_min.?,
+        });
+
+        try shell.pushd("./src/clients/java");
+        defer shell.popd();
+
+        try shell.exec("mvn clean install --batch-mode --quiet -Dmaven.test.skip", .{});
+    }
+
+    // Build workload
+    {
+        try shell.pushd("./src/testing/systest/workload");
+        defer shell.popd();
+
+        try shell.exec("mvn clean install --batch-mode --quiet", .{});
+    }
+
+    log.info("running 1m systest...", .{});
+    try shell.exec(
+        \\ unshare -nfr 
+        \\   ./zig/zig build scripts -- systest 
+        \\      --test-duration-minutes=1 
+        \\      --tigerbeetle-executable={tigerbeetle} 
+    , .{
+        .tigerbeetle = tigerbeetle,
+    });
+    log.info("systest passed", .{});
 }
