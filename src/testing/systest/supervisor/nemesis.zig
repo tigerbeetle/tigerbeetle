@@ -180,8 +180,7 @@ fn netem_sync(self: *Self) !bool {
     const args_joined = try join_args(self.shell.arena.allocator(), all_args.items);
     log.info("nemesis: syncing netem {s}", .{args_joined});
 
-    self.shell.exec_options(
-        .{ .echo = false },
+    self.shell.exec(
         "tc qdisc replace dev lo root netem {args}",
         .{ .args = all_args.items },
     ) catch return false;
@@ -190,11 +189,7 @@ fn netem_sync(self: *Self) !bool {
 }
 
 fn network_netem_delete_all(self: *Self) !void {
-    try self.shell.exec_options(
-        .{ .echo = false },
-        "tc qdisc del dev lo root",
-        .{},
-    );
+    try self.shell.exec("tc qdisc del dev lo root", .{});
 }
 
 /// Draw an enum value from `E` based on the relative `weights`. Fields in the weights struct must
