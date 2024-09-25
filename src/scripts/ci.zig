@@ -34,6 +34,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     } else {
         try generate_readmes(shell, gpa, cli_args.language);
         try run_tests(shell, gpa, cli_args.language);
+        try run_systest(shell, gpa);
     }
 }
 
@@ -191,4 +192,15 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     , .{ .version = tag });
     assert(std.mem.indexOf(u8, docker_version, tag) != null);
     assert(std.mem.indexOf(u8, docker_version, "ReleaseSafe") != null);
+}
+
+fn run_systest(shell: *Shell, _: std.mem.Allocator) !void {
+    var section = try shell.open_section("systest");
+    defer section.close();
+
+    try shell.exec_zig("build -Drelease", .{});
+    try shell.exec(
+        \\ unshare -nfr ./zig/zig build scripts --
+        \\   systest --tigerbeetle-executable=./tigerbeetle --test-duration-minutes=1
+    , .{});
 }
