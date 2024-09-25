@@ -1,6 +1,7 @@
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.List;
 import java.util.stream.Collectors;
 import com.tigerbeetle.AccountBatch;
 import com.tigerbeetle.Client;
@@ -209,7 +210,7 @@ record LookupAccountsResult(ArrayList<QueriedAccount> accountsFound) implements 
         .formatted(diff);
   }
 
-  BigInteger debitsCreditsDifference(ArrayList<QueriedAccount> accounts) {
+  BigInteger debitsCreditsDifference(List<QueriedAccount> accounts) {
     var debits = BigInteger.ZERO;
     var credits = BigInteger.ZERO;
     for (var account : accounts) {
