@@ -289,7 +289,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 grooves_initialized += 1;
             }
 
-            try forest.compaction_pipeline.init(allocator, grid, options.compaction_block_count);
+            try forest.compaction_pipeline.init(
+                allocator,
+                grid,
+                forest,
+                options.compaction_block_count,
+            );
             errdefer forest.compaction_pipeline.deinit(allocator);
 
             try forest.scan_buffer_pool.init(allocator);
@@ -428,7 +433,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(op >= constants.lsm_compaction_ops or
                 forest.compaction_pipeline.compactions.count() == 0);
 
-            forest.compaction_pipeline.beat(forest, op, compact_trees_callback);
+            forest.compaction_pipeline.beat(op, compact_trees_callback);
             if (forest.grid.superblock.working.vsr_state.op_compacted(op)) {
                 assert(forest.compaction_pipeline.compactions.count() == 0);
                 assert(forest.compaction_pipeline.bar_active.count() == 0);
@@ -818,6 +823,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         const CompactionBitset = std.StaticBitSet(compaction_count);
 
         grid: *Grid,
+        forest: *Forest,
 
         block_pool: CompactionBlockFIFO,
 
@@ -847,13 +853,13 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         next_tick: Grid.NextTick = undefined,
 
-        forest: ?*Forest = null,
         callback: ?*const fn (*Forest) void = null,
 
         pub fn init(
             self: *CompactionPipeline,
             allocator: mem.Allocator,
             grid: *Grid,
+            forest: *Forest,
             block_count: u32,
         ) !void {
             log.debug("block_count={}", .{block_count});
@@ -861,6 +867,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
             self.* = .{
                 .grid = grid,
+                .forest = forest,
 
                 .block_pool = undefined,
                 .block_pool_raw = undefined,
@@ -905,6 +912,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
             self.* = .{
                 .grid = self.grid,
+                .forest = self.forest,
                 .block_pool = block_pool,
                 .block_pool_raw = self.block_pool_raw,
             };
@@ -960,16 +968,12 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         pub fn beat(
             self: *CompactionPipeline,
-            forest: *Forest,
             op: u64,
             callback: Forest.Callback,
         ) void {
             const compaction_beat = op % constants.lsm_compaction_ops;
             const first_beat = compaction_beat == 0;
             const half_beat = compaction_beat == @divExact(constants.lsm_compaction_ops, 2);
-
-            if (self.forest == null) self.forest = forest;
-            assert(self.forest == forest);
 
             self.slot_filled_count = 0;
             self.slot_running_count = 0;
@@ -981,7 +985,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             // causing the storage state of the replica to diverge from the cluster.
             // See also: compaction_op_min().
             if ((first_beat or half_beat) and
-                !forest.grid.superblock.working.vsr_state.op_compacted(op))
+                !self.forest.grid.superblock.working.vsr_state.op_compacted(op))
             {
                 if (first_beat) {
                     assert(self.compactions.count() == 0);
@@ -991,7 +995,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 // time-of-death for writes. This helps internal SSD GC.
                 for (0..constants.lsm_levels) |level_b| {
                     inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
-                        var tree = Forest.tree_for_id(forest, tree_id);
+                        var tree = Forest.tree_for_id(self.forest, tree_id);
                         assert(tree.compactions.len == constants.lsm_levels);
 
                         var compaction = &tree.compactions[level_b];
@@ -1112,18 +1116,17 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             assert(self.slot_running_count == 0);
             for (self.slots) |slot| assert(slot == null);
 
-            assert(self.callback != null and self.forest != null);
+            assert(self.callback != null);
 
             // Forfeit any remaining grid reservations.
             self.beat_grid_forfeit_all();
             assert(self.beat_reserved.count() == 0);
 
             const callback = self.callback.?;
-            const forest = self.forest.?;
 
             self.callback = null;
 
-            callback(forest);
+            callback(self.forest);
         }
 
         // TODO: It would be great to get rid of *anyopaque here. Batiati's scan approach
@@ -1385,7 +1388,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             comptime tree_id: Forest.TreeID,
             level_b: u8,
         ) *Forest.TreeForIdType(tree_id).Compaction {
-            return &self.forest.?.tree_for_id(tree_id).compactions[level_b];
+            return &self.forest.tree_for_id(tree_id).compactions[level_b];
         }
     };
 }
