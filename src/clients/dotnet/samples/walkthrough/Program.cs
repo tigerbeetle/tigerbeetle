@@ -138,7 +138,7 @@ using (var client = new Client(clusterID, addresses))
     transfers = new Transfer[] { new Transfer {
         Id = 2,
         PendingId = 1,
-        Flags = TransferFlags.PostPendingTransfer,
+        Flags = TransferFlags.VoidPendingTransfer,
     }};
 
     createTransfersError = client.CreateTransfers(transfers);
