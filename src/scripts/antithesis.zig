@@ -217,8 +217,8 @@ fn trigger_test(
     }
     const auth = b64.encode(&auth_buf, user_pass);
 
-    var response = std.ArrayList(u8).init(shell.gpa);
-    defer response.deinit();
+    var response_buf: [4 * 1024]u8 = undefined;
+    var response = std.ArrayListUnmanaged(u8).initBuffer(&response_buf);
 
     const result = try client.fetch(.{
         .method = .POST,
@@ -235,7 +235,8 @@ fn trigger_test(
             .{ .name = "content-type", .value = "application/json" },
         },
         .payload = body_buf[0..body_stream.pos],
-        .response_storage = .{ .dynamic = &response },
+        .response_storage = .{ .static = &response },
+        .max_append_size = response_buf.len,
     });
 
     if (result.status != std.http.Status.ok) {
