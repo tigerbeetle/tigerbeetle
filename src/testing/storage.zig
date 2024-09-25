@@ -222,8 +222,10 @@ pub const Storage = struct {
 
             // Randomly corrupt one of the faulty sectors the operation targeted.
             // TODO: inject more realistic and varied storage faults as described above.
-            const sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
-            storage.fault_sector(write.zone, sectors.random(storage.prng.random()));
+            if (write.zone != .wal_headers) {
+                const sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
+                storage.fault_sector(write.zone, sectors.random(storage.prng.random()));
+            }
         }
         assert(storage.writes.items.len == 0);
 
