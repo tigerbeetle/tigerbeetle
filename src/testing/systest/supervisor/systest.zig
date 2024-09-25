@@ -33,6 +33,7 @@
 //! * cluster membership changes?
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Shell = @import("../../../shell.zig");
 const LoggedProcess = @import("./logged_process.zig");
 const Replica = @import("./replica.zig");
@@ -50,6 +51,11 @@ pub const CLIArgs = struct {
 };
 
 pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
+    if (builtin.os.tag == .windows) {
+        log.err("systest is not supported for Windows", .{});
+        return error.NotSupported;
+    }
+
     const tmp_dir = try shell.create_tmp_dir();
     defer shell.cwd.deleteDir(tmp_dir) catch {};
 
