@@ -484,3 +484,21 @@ test "in-place upgrade" {
 
     try context.run();
 }
+
+test "systest smoke" {
+    if (builtin.os.tag != .linux) {
+        log.info("skipping systest on unsupported OS: {s}", .{@tagName(builtin.os.tag)});
+        return;
+    }
+
+    const shell = try Shell.create(std.testing.allocator);
+    defer shell.destroy();
+
+    try shell.exec_zig("build -Drelease", .{});
+    log.info("Running 1m systest...", .{});
+    try shell.exec(
+        \\ unshare -nfr ./zig/zig build scripts --
+        \\   systest --tigerbeetle-executable=./tigerbeetle --test-duration-minutes=1
+    , .{});
+    log.info("Systest passed", .{});
+}
