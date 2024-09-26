@@ -16,7 +16,8 @@ const StateMachine =
     @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
-pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult);
+// TODO(zig): See `Ordered` comments.
+pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult.Ordered);
 
 /// Batch sizes apply to both `create` and `lookup` operations.
 /// (More ids would fit in the `lookup` request, but then the response wouldn't fit.)
@@ -62,8 +63,6 @@ const PendingExpiryQueue = PriorityQueue(PendingExpiry, void, struct {
 }.compare);
 
 pub const AccountingAuditor = struct {
-    const Self = @This();
-
     pub const AccountState = struct {
         /// Set to true when `create_accounts` returns `.ok` for an account.
         created: bool = false,
@@ -190,7 +189,11 @@ pub const AccountingAuditor = struct {
     /// per client. Keyed by client index.
     creates_delivered: []usize,
 
-    pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Self {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        random: std.rand.Random,
+        options: Options,
+    ) !AccountingAuditor {
         assert(options.accounts_max >= 2);
         assert(options.client_count > 0);
 
@@ -240,7 +243,7 @@ pub const AccountingAuditor = struct {
         errdefer allocator.free(creates_delivered);
         @memset(creates_delivered, 0);
 
-        return Self{
+        return .{
             .random = random,
             .options = options,
             .accounts = accounts,
@@ -254,7 +257,7 @@ pub const AccountingAuditor = struct {
         };
     }
 
-    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *AccountingAuditor, allocator: std.mem.Allocator) void {
         allocator.free(self.accounts);
         allocator.free(self.accounts_state);
         self.pending_transfers.deinit(allocator);
@@ -264,7 +267,7 @@ pub const AccountingAuditor = struct {
         allocator.free(self.creates_delivered);
     }
 
-    pub fn done(self: *const Self) bool {
+    pub fn done(self: *const AccountingAuditor) bool {
         if (self.in_flight.count() != 0) return false;
 
         for (self.creates_sent, 0..) |sent, client_index| {
@@ -275,7 +278,10 @@ pub const AccountingAuditor = struct {
         return true;
     }
 
-    pub fn expect_create_accounts(self: *Self, client_index: usize) []CreateAccountResultSet {
+    pub fn expect_create_accounts(
+        self: *AccountingAuditor,
+        client_index: usize,
+    ) []CreateAccountResultSet {
         const result = self.in_flight.getOrPutAssumeCapacity(.{
             .client_index = client_index,
             .client_request = self.creates_sent[client_index],
@@ -287,7 +293,10 @@ pub const AccountingAuditor = struct {
         return result.value_ptr.*.create_accounts[0..];
     }
 
-    pub fn expect_create_transfers(self: *Self, client_index: usize) []CreateTransferResultSet {
+    pub fn expect_create_transfers(
+        self: *AccountingAuditor,
+        client_index: usize,
+    ) []CreateTransferResultSet {
         const result = self.in_flight.getOrPutAssumeCapacity(.{
             .client_index = client_index,
             .client_request = self.creates_sent[client_index],
@@ -300,7 +309,7 @@ pub const AccountingAuditor = struct {
     }
 
     /// Expire pending transfers that have not been posted or voided.
-    pub fn expire_pending_transfers(self: *Self, timestamp: u64) void {
+    pub fn expire_pending_transfers(self: *AccountingAuditor, timestamp: u64) void {
         assert(self.timestamp < timestamp);
         defer self.timestamp = timestamp;
 
@@ -333,7 +342,7 @@ pub const AccountingAuditor = struct {
     }
 
     pub fn on_create_accounts(
-        self: *Self,
+        self: *AccountingAuditor,
         client_index: usize,
         timestamp: u64,
         accounts: []const tb.Account,
@@ -386,7 +395,7 @@ pub const AccountingAuditor = struct {
     }
 
     pub fn on_create_transfers(
-        self: *Self,
+        self: *AccountingAuditor,
         client_index: usize,
         timestamp: u64,
         transfers: []const tb.Transfer,
@@ -404,7 +413,7 @@ pub const AccountingAuditor = struct {
             const transfer_timestamp = timestamp - transfers.len + i + 1;
 
             const result_actual = results_iterator.take(i) orelse .ok;
-            if (!results_expect[i].contains(result_actual)) {
+            if (!results_expect[i].contains(result_actual.to_ordered())) {
                 log.err("on_create_transfers: transfer={} expect={} result={}", .{
                     transfer.*,
                     results_expect[i],
@@ -496,7 +505,7 @@ pub const AccountingAuditor = struct {
     }
 
     pub fn on_lookup_accounts(
-        self: *Self,
+        self: *AccountingAuditor,
         client_index: usize,
         timestamp: u64,
         ids: []const u128,
@@ -547,7 +556,7 @@ pub const AccountingAuditor = struct {
     /// Most `lookup_transfers` validation is handled by Workload.
     /// (Workload has more context around transfers, so it can be much stricter.)
     pub fn on_lookup_transfers(
-        self: *Self,
+        self: *AccountingAuditor,
         client_index: usize,
         timestamp: u64,
         ids: []const u128,
@@ -570,7 +579,7 @@ pub const AccountingAuditor = struct {
     /// Returns a random account matching the given criteria.
     /// Returns null when no account matches the given criteria.
     pub fn pick_account(
-        self: *const Self,
+        self: *const AccountingAuditor,
         match: struct {
             /// Whether the account is known to be created
             /// (we have received an `ok` for the respective `create_accounts`).
@@ -611,27 +620,27 @@ pub const AccountingAuditor = struct {
         return null;
     }
 
-    pub fn account_id_to_index(self: *const Self, id: u128) usize {
+    pub fn account_id_to_index(self: *const AccountingAuditor, id: u128) usize {
         // -1 because id=0 is not valid, so index=0→id=1.
         return @as(usize, @intCast(self.options.account_id_permutation.decode(id))) - 1;
     }
 
-    pub fn account_index_to_id(self: *const Self, index: usize) u128 {
+    pub fn account_index_to_id(self: *const AccountingAuditor, index: usize) u128 {
         // +1 so that index=0 is encoded as a valid id.
         return self.options.account_id_permutation.encode(index + 1);
     }
 
-    pub fn get_account(self: *const Self, id: u128) ?*const tb.Account {
+    pub fn get_account(self: *const AccountingAuditor, id: u128) ?*const tb.Account {
         const index = self.account_id_to_index(id);
         return if (index < self.accounts.len) &self.accounts[index] else null;
     }
 
-    pub fn get_account_state(self: *const Self, id: u128) ?*const AccountState {
+    pub fn get_account_state(self: *const AccountingAuditor, id: u128) ?*const AccountState {
         const index = self.account_id_to_index(id);
         return if (index < self.accounts_state.len) &self.accounts_state[index] else null;
     }
 
-    fn take_in_flight(self: *Self, client_index: usize) InFlight {
+    fn take_in_flight(self: *AccountingAuditor, client_index: usize) InFlight {
         const key = .{
             .client_index = client_index,
             .client_request = self.creates_delivered[client_index],
@@ -648,15 +657,15 @@ pub fn IteratorForCreate(comptime Result: type) type {
     assert(Result == tb.CreateAccountsResult or Result == tb.CreateTransfersResult);
 
     return struct {
-        const Self = @This();
+        const Iterator = @This();
 
         results: []const Result,
 
-        pub fn init(results: []const Result) Self {
+        pub fn init(results: []const Result) Iterator {
             return .{ .results = results };
         }
 
-        pub fn take(self: *Self, event_index: usize) ?std.meta.fieldInfo(Result, .result).type {
+        pub fn take(self: *Iterator, event_index: usize) ?std.meta.fieldInfo(Result, .result).type {
             if (self.results.len > 0 and self.results[0].index == event_index) {
                 defer self.results = self.results[1..];
                 return self.results[0].result;
@@ -671,15 +680,15 @@ pub fn IteratorForLookup(comptime Result: type) type {
     assert(Result == tb.Account or Result == tb.Transfer);
 
     return struct {
-        const Self = @This();
+        const Iterator = @This();
 
         results: []const Result,
 
-        pub fn init(results: []const Result) Self {
+        pub fn init(results: []const Result) Iterator {
             return .{ .results = results };
         }
 
-        pub fn take(self: *Self, id: u128) ?*const Result {
+        pub fn take(self: *Iterator, id: u128) ?*const Result {
             if (self.results.len > 0 and self.results[0].id == id) {
                 defer self.results = self.results[1..];
                 return &self.results[0];

@@ -181,7 +181,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     };
 
     return struct {
-        const Self = @This();
+        const Workload = @This();
 
         pub const Options = OptionsType(AccountingStateMachine, Action);
 
@@ -209,7 +209,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         /// Track the number of pending transfers that have been sent but not committed.
         transfers_pending_in_flight: usize = 0,
 
-        pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Self {
+        /// Ids that failed with transient codes.
+        transient_failures: std.AutoArrayHashMapUnmanaged(u128, void),
+
+        pub fn init(
+            allocator: std.mem.Allocator,
+            random: std.rand.Random,
+            options: Options,
+        ) !Workload {
             assert(options.create_account_invalid_probability <= 100);
             assert(options.create_transfer_invalid_probability <= 100);
             assert(options.create_transfer_limit_probability <= 100);
@@ -263,28 +270,37 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 account.flags.history = chance(random, options.account_history_probability);
             }
 
-            return Self{
+            var transient_failures: std.AutoArrayHashMapUnmanaged(u128, void) = .{};
+            try transient_failures.ensureTotalCapacity(
+                allocator,
+                options.transfer_transient_failures_max,
+            );
+            errdefer transient_failures.deinit();
+
+            return .{
                 .random = random,
                 .auditor = auditor,
                 .options = options,
                 .transfer_plan_seed = random.int(u64),
                 .transfers_delivered_recently = transfers_delivered_recently,
+                .transient_failures = transient_failures,
             };
         }
 
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *Workload, allocator: std.mem.Allocator) void {
             self.auditor.deinit(allocator);
             self.transfers_delivered_recently.deinit();
+            self.transient_failures.deinit(allocator);
         }
 
-        pub fn done(self: *const Self) bool {
+        pub fn done(self: *const Workload) bool {
             if (self.transfers_delivered_recently.len != 0) return false;
             return self.auditor.done();
         }
 
         /// A client may build multiple requests to queue up while another is in-flight.
         pub fn build_request(
-            self: *Self,
+            self: *Workload,
             client_index: usize,
             body: []align(@alignOf(vsr.Header)) u8,
         ) struct {
@@ -345,7 +361,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         /// `on_reply` is called for replies in commit order.
         pub fn on_reply(
-            self: *Self,
+            self: *Workload,
             client_index: usize,
             operation: AccountingStateMachine.Operation,
             timestamp: u64,
@@ -414,7 +430,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         /// `on_pulse` is called for pulse operations in commit order.
         pub fn on_pulse(
-            self: *Self,
+            self: *Workload,
             operation: AccountingStateMachine.Operation,
             timestamp: u64,
         ) void {
@@ -424,7 +440,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             self.auditor.expire_pending_transfers(timestamp);
         }
 
-        fn build_create_accounts(self: *Self, client_index: usize, accounts: []tb.Account) usize {
+        fn build_create_accounts(
+            self: *Workload,
+            client_index: usize,
+            accounts: []tb.Account,
+        ) usize {
             const results = self.auditor.expect_create_accounts(client_index);
             for (accounts, 0..) |*account, i| {
                 const account_index =
@@ -439,6 +459,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                 if (chance(self.random, self.options.create_account_invalid_probability)) {
                     account.ledger = 0;
+                    // The result depends on whether the id already exists:
+                    results[i].insert(.exists_with_different_ledger);
                     results[i].insert(.ledger_must_not_be_zero);
                 } else {
                     if (!self.auditor.accounts_state[account_index].created) {
@@ -453,11 +475,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn build_create_transfers(
-            self: *Self,
+            self: *Workload,
             client_index: usize,
             transfers: []tb.Transfer,
         ) usize {
             const results = self.auditor.expect_create_transfers(client_index);
+            assert(results.len >= transfers.len);
             var transfers_count: usize = transfers.len;
             var i: usize = 0;
             while (i < transfers_count) {
@@ -513,18 +536,63 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 i += 1;
                 self.transfers_sent += 1;
             }
+            assert(transfers_count == i);
+            assert(transfers_count <= transfers.len);
+
+            self.build_retry_transfers(transfers[0..transfers_count], results);
 
             // Checksum transfers only after the whole batch is ready.
             // The opportunistic linking backtracks to modify transfers.
             for (transfers[0..transfers_count]) |*transfer| {
                 transfer.user_data_128 = vsr.checksum(std.mem.asBytes(transfer));
             }
-            assert(transfers_count == i);
-            assert(transfers_count <= transfers.len);
+
             return transfers_count;
         }
 
-        fn build_lookup_accounts(self: *Self, lookup_ids: []u128) usize {
+        fn build_retry_transfers(
+            self: *Workload,
+            transfers: []tb.Transfer,
+            results: []accounting_auditor.CreateTransferResultSet,
+        ) void {
+            assert(results.len >= transfers.len);
+            if (self.transient_failures.count() == 0) return;
+
+            // Neither the first nor the last id can regress to preserve the
+            // `transfers_delivered_recently` and `transfers_delivered_past` logic.
+            // So we must insert retries in the middle of the batch.
+            if (transfers.len <= 1) return;
+            for (1..transfers.len - 1) |i| {
+                if (self.transient_failures.count() == 0) break;
+                // To support random `lookup_transfers`, we replace the transfer with a retry,
+                // without altering the outcome for this specific `transfer_index`.
+                const transfer_index = self.transfer_id_to_index(transfers[i].id);
+                const transfer_plan = self.transfer_index_to_plan(transfer_index);
+                const can_retry = !transfer_plan.valid and
+                    !transfers[i].flags.linked and
+                    !transfers[i - 1].flags.linked;
+                if (can_retry and
+                    chance(
+                    self.random,
+                    self.options.create_transfer_retry_probability,
+                )) {
+                    const index = self.random.intRangeAtMost(
+                        usize,
+                        0,
+                        self.transient_failures.count() - 1,
+                    );
+                    const id_failed = self.transient_failures.keys()[index];
+                    self.transient_failures.swapRemoveAt(index);
+
+                    transfers[i] = std.mem.zeroInit(tb.Transfer, .{ .id = id_failed });
+                    results[i] = accounting_auditor.CreateTransferResultSet.initOne(
+                        .id_already_failed,
+                    );
+                }
+            }
+        }
+
+        fn build_lookup_accounts(self: *Workload, lookup_ids: []u128) usize {
             for (lookup_ids) |*id| {
                 if (chance(self.random, self.options.lookup_account_invalid_probability)) {
                     // Pick an account with valid index (rather than "random.int(u128)") because the
@@ -539,7 +607,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return lookup_ids.len;
         }
 
-        fn build_lookup_transfers(self: *const Self, lookup_ids: []u128) usize {
+        fn build_lookup_transfers(self: *const Workload, lookup_ids: []u128) usize {
             const delivered = self.transfers_delivered_past;
             const lookup_window = sample_distribution(self.random, self.options.lookup_transfer);
             const lookup_window_start = switch (lookup_window) {
@@ -572,7 +640,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return lookup_ids.len;
         }
 
-        fn build_get_account_filter(self: *const Self, body: []tb.AccountFilter) usize {
+        fn build_get_account_filter(self: *const Workload, body: []tb.AccountFilter) usize {
             assert(body.len == 1);
             const account_filter = &body[0];
             account_filter.* = tb.AccountFilter{
@@ -658,7 +726,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn build_query_filter(
-            self: *const Self,
+            self: *const Workload,
             comptime action: Action,
             body: []tb.QueryFilter,
         ) usize {
@@ -740,7 +808,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         /// Returns `null` if the transfer plan cannot be fulfilled (because there aren't enough
         /// accounts created).
         fn build_transfer(
-            self: *const Self,
+            self: *const Workload,
             transfer_id: u128,
             transfer_plan: TransferPlan,
             transfer: *tb.Transfer,
@@ -874,7 +942,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn batch(
-            self: *const Self,
+            self: *const Workload,
             comptime T: type,
             action: Action,
             body: []align(@alignOf(vsr.Header)) u8,
@@ -903,12 +971,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return std.mem.bytesAsSlice(T, body)[0..batch_size];
         }
 
-        fn transfer_id_to_index(self: *const Self, id: u128) usize {
+        fn transfer_id_to_index(self: *const Workload, id: u128) usize {
             // -1 because id=0 is not valid, so index=0→id=1.
             return @as(usize, @intCast(self.options.transfer_id_permutation.decode(id))) - 1;
         }
 
-        fn transfer_index_to_id(self: *const Self, index: usize) u128 {
+        fn transfer_index_to_id(self: *const Workload, index: usize) u128 {
             // +1 so that index=0 is encoded as a valid id.
             return self.options.transfer_id_permutation.encode(index + 1);
         }
@@ -916,7 +984,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         /// To support `lookup_transfers`, the `TransferPlan` is deterministic based on:
         /// * `Workload.transfer_plan_seed`, and
         /// * the transfer `index`.
-        fn transfer_index_to_plan(self: *const Self, index: usize) TransferPlan {
+        fn transfer_index_to_plan(self: *const Workload, index: usize) TransferPlan {
             var prng = std.rand.DefaultPrng.init(self.transfer_plan_seed ^ @as(u64, index));
             const random = prng.random();
             const method: TransferPlan.Method = blk: {
@@ -939,7 +1007,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn on_create_transfers(
-            self: *Self,
+            self: *Workload,
             client_index: usize,
             timestamp: u64,
             transfers: []const tb.Transfer,
@@ -947,6 +1015,22 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             self.auditor.on_create_transfers(client_index, timestamp, transfers, results_sparse);
             if (transfers.len == 0) return;
+
+            // Enqueue the `id`s of transient failures to be retried in the next request.
+            for (results_sparse) |item| {
+                assert(item.result != .ok);
+
+                if (self.transient_failures.count() <
+                    self.options.transfer_transient_failures_max)
+                {
+                    if (item.result.transient()) {
+                        self.transient_failures.putAssumeCapacityNoClobber(
+                            transfers[item.index].id,
+                            {},
+                        );
+                    }
+                }
+            }
 
             const transfer_index_min = self.transfer_id_to_index(transfers[0].id);
             const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
@@ -973,7 +1057,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn on_lookup_transfers(
-            self: *Self,
+            self: *Workload,
             client_index: usize,
             timestamp: u64,
             ids: []const u128,
@@ -1025,7 +1109,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn on_get_account_transfers(
-            self: *Self,
+            self: *Workload,
             client_index: usize,
             timestamp: u64,
             body: []const tb.AccountFilter,
@@ -1128,7 +1212,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn on_get_account_balances(
-            self: *Self,
+            self: *Workload,
             client_index: usize,
             timestamp: u64,
             body: []const tb.AccountFilter,
@@ -1236,7 +1320,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn on_query(
-            self: *Self,
+            self: *Workload,
             comptime Object: type,
             client_index: usize,
             timestamp: u64,
@@ -1354,6 +1438,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         create_transfer_pending_probability: u8, // ≤ 100
         create_transfer_post_probability: u8, // ≤ 100
         create_transfer_void_probability: u8, // ≤ 100
+        create_transfer_retry_probability: u8, // ≤ 100
         lookup_account_invalid_probability: u8, // ≤ 100
 
         account_filter_invalid_account_probability: u8, // ≤ 100
@@ -1386,6 +1471,9 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         accounts_batch_size_span: usize, // inclusive
         transfers_batch_size_min: usize,
         transfers_batch_size_span: usize, // inclusive
+
+        /// Maximum number of failed transfer IDs to retry in the next request.
+        transfer_transient_failures_max: usize,
 
         pub fn generate(random: std.rand.Random, options: struct {
             batch_size_limit: u32,
@@ -1428,6 +1516,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 .create_transfer_pending_probability = 1 + random.uintLessThan(u8, 100),
                 .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
                 .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
+                .create_transfer_retry_probability = 1 + random.uintLessThan(u8, 10),
                 .lookup_account_invalid_probability = 1,
 
                 .account_filter_invalid_account_probability = 1 + random.uintLessThan(u8, 20),
@@ -1458,6 +1547,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                     usize,
                     batch_create_transfers_limit,
                 ),
+                .transfer_transient_failures_max = 128,
             };
         }
     };

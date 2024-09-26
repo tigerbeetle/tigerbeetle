@@ -197,6 +197,7 @@ const ThingsGroove = GrooveType(
         .ignored = &[_][]const u8{"checksum"},
         .optional = &[_][]const u8{},
         .derived = .{},
+        .orphaned_ids = false,
     },
 );
 

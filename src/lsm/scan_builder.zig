@@ -432,7 +432,7 @@ pub fn ScanType(
                 .merge_intersection,
                 .merge_difference,
                 => |*scan_merge| return try scan_merge.next(),
-                inline else => |*scan_tree| {
+                inline else => |*scan_tree, index| {
                     while (try scan_tree.next()) |value| {
                         const ScanTree = @TypeOf(scan_tree.*);
                         if (ScanTree.Tree.Table.tombstone(&value)) {
@@ -441,6 +441,17 @@ pub fn ScanType(
                             continue;
                         }
 
+                        if (index == .id) {
+                            // When iterating over `IdTree` it can return a timestamp zero, which
+                            // indicates an orphaned id.
+                            if (value.timestamp == 0) {
+                                assert(Groove.config.orphaned_ids);
+                                continue;
+                            }
+                        }
+
+                        assert(value.timestamp >= TimestampRange.timestamp_min);
+                        assert(value.timestamp <= TimestampRange.timestamp_max);
                         return value.timestamp;
                     }
                     return null;

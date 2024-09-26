@@ -90,6 +90,7 @@ pub fn StateMachineType(
                 .ignored = &[_][]const u8{},
                 .optional = &[_][]const u8{},
                 .derived = .{},
+                .orphaned_ids = false,
             },
         );
 
@@ -249,8 +250,7 @@ pub fn StateMachineType(
 
             switch (operation) {
                 .echo => {
-                    const thing = state_machine.forest.grooves.things.get(op);
-                    assert(thing == null);
+                    assert(state_machine.forest.grooves.things.get(op) == .not_found);
 
                     var value = vsr.ChecksumStream.init();
                     value.add(std.mem.asBytes(&client));

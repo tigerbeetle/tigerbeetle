@@ -412,7 +412,11 @@ const Environment = struct {
     }
 
     fn get_account(env: *Environment, id: u128) ?*const Account {
-        return env.forest.grooves.accounts.get(id);
+        return switch (env.forest.grooves.accounts.get(id)) {
+            .found_object => |a| a,
+            .found_orphaned_id => unreachable,
+            .not_found => null,
+        };
     }
 
     fn exists(env: *Environment, timestamp: u64) bool {
@@ -927,7 +931,11 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .get_account => FuzzOpAction{ .get_account = random_id(random, u128) },
             .exists_account => FuzzOpAction{
                 // Not all ops generate accounts, so the timestamp may or may not be found.
-                .exists_account = random.intRangeAtMost(u64, 0, fuzz_op_index),
+                .exists_account = random.intRangeAtMost(
+                    u64,
+                    TimestampRange.timestamp_min,
+                    fuzz_op_index + 1,
+                ),
             },
             .scan_account => blk: {
                 @setEvalBranchQuota(10_000);
