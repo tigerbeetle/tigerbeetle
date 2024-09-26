@@ -722,6 +722,10 @@ pub fn ReplicaType(
                 self.op -| constants.pipeline_prepare_queue_max,
             );
 
+            // Guaranteed since our durable view_headers always contain an op from the current
+            // checkpoint (see `commit_checkpoint_superblock`).
+            assert(self.op >= self.op_checkpoint());
+
             const header_head = self.journal.header_with_op(self.op).?;
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
@@ -757,7 +761,6 @@ pub fn ReplicaType(
                 } else {
                     // Even if op_head_certain() returns false, a DVC always has a certain head op.
                     assert(self.view > self.log_view);
-                    assert(self.op >= self.op_checkpoint());
                     self.transition_to_view_change_status(self.view);
                 }
             }
@@ -5844,28 +5847,14 @@ pub fn ReplicaType(
         ///              (`replica.op_checkpoint` == `replica.op`).
         fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
+            assert(self.op >= self.op_checkpoint());
+            assert(self.op <= self.op_prepare_max());
 
-            // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt.
-            if (self.op < self.op_checkpoint()) {
-                log.warn("{}: op_head_certain: op < op_checkpoint op={} op_checkpoint={}", .{
-                    self.replica,
-                    self.op,
-                    self.op_checkpoint(),
-                });
-                return false;
-            }
+            // Head is guaranteed to be certain; replica couldn't have prepared past prepare_max.
+            if (self.op == self.op_prepare_max()) return true;
 
             const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint());
             const slot_op_head = self.journal.slot_with_op(self.op).?;
-            if (slot_op_head.index == slot_op_checkpoint.index) {
-                if (self.journal.faulty.count > 0) {
-                    log.warn("{}: op_head_certain: faulty slots count={}", .{
-                        self.replica,
-                        self.journal.faulty.count,
-                    });
-                    return false;
-                }
-            }
 
             // For the op-head to be faulty, this must be a header that was restored from the
             // superblock VSR headers atop a corrupt slot. We can't trust the head: that corrupt
@@ -5890,13 +5879,13 @@ pub fn ReplicaType(
             }
 
             const slot_known_range = vsr.SlotRange{
-                .head = slot_op_checkpoint,
-                .tail = slot_op_head,
+                .head = self.journal.slot_for_op(self.op + 1),
+                .tail = self.journal.slot_for_op(self.op_prepare_max()),
             };
 
             var iterator = self.journal.faulty.bits.iterator(.{ .kind = .set });
             while (iterator.next()) |slot| {
-                if (!slot_known_range.contains(.{ .index = slot })) {
+                if (slot_known_range.contains(.{ .index = slot })) {
                     log.warn("{}: op_head_certain: faulty slot={}", .{ self.replica, slot });
                     return false;
                 }
