@@ -60,7 +60,7 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
     defer shell.cwd.deleteDir(tmp_dir) catch {};
 
     // Check that we are running as root
-    if (!std.mem.eql(u8, try shell.exec_stdout("id --user", .{}), "0")) {
+    if (!std.mem.eql(u8, try shell.exec_stdout("id -u", .{}), "0")) {
         log.err(
             \\This script needs to run as root, or even better, in a separate namespace using:
             \\   unshare -nfr
