@@ -21,6 +21,7 @@ public final class Main {
     byte[] clusterID = UInt128.asBytes(Long.parseLong(env.getOrDefault("CLUSTER", "1")));
 
     try (var client = new Client(clusterID, replicaAddresses)) {
+      System.err.println("starting workload");
       new Workload(random, client).run();
     }
   }

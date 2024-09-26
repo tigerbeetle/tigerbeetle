@@ -53,7 +53,7 @@ public class Workload {
         }
 
         if (n % 1000 == 0) {
-          System.out.println(
+          System.err.println(
               "%d succeeded, %d failed".formatted(commandsSucceededCount, commandsFailedCount));
         }
 
