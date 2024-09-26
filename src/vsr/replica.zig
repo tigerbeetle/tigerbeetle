@@ -714,6 +714,10 @@ pub fn ReplicaType(
                     op_head = self.journal.op_maximum();
                 }
             }
+
+            // Guaranteed since our durable view_headers always contain an op from the current
+            // checkpoint (see `commit_checkpoint_superblock`).
+            assert(op_head.? >= self.op_checkpoint());
             assert(op_head.? <= self.op_prepare_max());
 
             self.op = op_head.?;
@@ -721,10 +725,6 @@ pub fn ReplicaType(
                 self.commit_max,
                 self.op -| constants.pipeline_prepare_queue_max,
             );
-
-            // Guaranteed since our durable view_headers always contain an op from the current
-            // checkpoint (see `commit_checkpoint_superblock`).
-            assert(self.op >= self.op_checkpoint());
 
             const header_head = self.journal.header_with_op(self.op).?;
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
@@ -5853,7 +5853,7 @@ pub fn ReplicaType(
             // Head is guaranteed to be certain; replica couldn't have prepared past prepare_max.
             if (self.op == self.op_prepare_max()) return true;
 
-            const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint());
+            const slot_prepare_max = self.journal.slot_for_op(self.op_prepare_max());
             const slot_op_head = self.journal.slot_with_op(self.op).?;
 
             // For the op-head to be faulty, this must be a header that was restored from the
@@ -5870,10 +5870,10 @@ pub fn ReplicaType(
             // If faulty, this slot may hold either:
             // - op=op_checkpoint, or
             // - op=op_prepare_max
-            if (self.journal.faulty.bit(slot_op_checkpoint)) {
+            if (self.journal.faulty.bit(slot_prepare_max)) {
                 log.warn("{}: op_head_certain: faulty checkpoint slot={}", .{
                     self.replica,
-                    slot_op_checkpoint,
+                    slot_prepare_max,
                 });
                 return false;
             }
@@ -5882,11 +5882,16 @@ pub fn ReplicaType(
                 .head = self.journal.slot_for_op(self.op + 1),
                 .tail = self.journal.slot_for_op(self.op_prepare_max()),
             };
+            // Checked separately as SlotRange.contains doesn't handle empty ranges.
+            const range_empty = slot_known_range.head.index ==
+                slot_known_range.tail.index;
 
             var iterator = self.journal.faulty.bits.iterator(.{ .kind = .set });
-            while (iterator.next()) |slot| {
-                if (slot_known_range.contains(.{ .index = slot })) {
-                    log.warn("{}: op_head_certain: faulty slot={}", .{ self.replica, slot });
+            while (iterator.next()) |index| {
+                if ((range_empty and index == slot_prepare_max.index) or
+                    (!range_empty and slot_known_range.contains(.{ .index = index })))
+                {
+                    log.warn("{}: op_head_certain: faulty slot={}", .{ self.replica, index });
                     return false;
                 }
             }
