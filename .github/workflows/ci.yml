@@ -32,7 +32,7 @@ jobs:
       # Docker restricts io_uring by default, running unconfined then.
       options: --security-opt seccomp=unconfined
     steps:
-      - run: apk add -U git github-cli
+      - run: apk add -U git github-cli openjdk21
       # https://github.com/actions/checkout/issues/1169
       - run: git config --system --add safe.directory '*'
       - uses: actions/checkout@v4
@@ -48,6 +48,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2147483647
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
       - run: ./zig/download.sh
       - run: ./zig/zig build test
       - run: ./zig/zig build clients:c:sample -Drelease
