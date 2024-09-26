@@ -1296,7 +1296,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.headers.len == cases.len);
 
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
-            for (journal.torn_prepares(&cases)) |torn_slot| {
+            for (journal.torn_prepares(&cases).const_slice()) |torn_slot| {
                 assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
                 cases[torn_slot.index] = &case_cut_torn;
                 log.warn("{}: recover_slots: torn prepare in slot={}", .{
@@ -1367,12 +1367,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///   - the prepare is corrupt
         /// * faults may exist outside of (op_max, op_prepare_max]. They have no bearing on the
         ///   certainty of op_max as they lie between (op_checkpoint, op_max].
-        fn torn_prepares(journal: *const Journal, cases: []const *const Case) []Slot {
+        fn torn_prepares(
+            journal: *const Journal,
+            cases: []const *const Case,
+        ) stdx.BoundedArray(Slot, constants.journal_iops_write_max) {
             const replica: *const Replica = @alignCast(@fieldParentPtr("journal", journal));
-
-            // There can't be more than journal_iops_write_max torn slots, as that is the maximum
-            // number of prepare writes that could be concurrently underway.
-            var torn_slots: [constants.journal_iops_write_max]Slot = undefined;
 
             assert(journal.status == .recovering);
             assert(journal.dirty.count == slot_count);
@@ -1384,10 +1383,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             );
 
             // Nothing to truncate - head op is not certain as it must be >= op_checkpoint.
-            if (op_max < replica.op_checkpoint()) return torn_slots[0..0];
+            if (op_max < replica.op_checkpoint()) return .{};
 
             // Nothing to truncate - replica could not have prepared anything beyond prepare_max.
-            if (op_max == replica.op_prepare_max()) return torn_slots[0..0];
+            if (op_max == replica.op_prepare_max()) return .{};
 
             const op_checkpoint = replica.op_checkpoint();
             const op_prepare_max = replica.op_prepare_max();
@@ -1412,7 +1411,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     }
                 },
             };
-            var torn_slot_count: u8 = 0;
+
+            // We only consider journal_iops_write_max torn slots, as that is the maximum number of
+            // prepare writes that could be concurrently underway. If we find more (due to
+            // corruptions), we err on the side of caution and don't truncate any prepares.
+            var torn_slots: stdx.BoundedArray(Slot, constants.journal_iops_write_max) = .{};
 
             // We now search for torn prepares between op_max and op_prepare_max. A torn prepare
             // manifests as a prepare with an *invalid checksum* and a *valid* header from any
@@ -1433,15 +1436,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (case.decision(replica.solo()) == .vsr) {
                     const slot = Slot{ .index = index };
 
-                    // We only need to check the slot for op_prepare_max. Checked separately as
-                    // SlotRange.contains doesn't handle empty ranges.
-                    if (op_max == op_prepare_max - 1 and index != op_prepare_max_slot.index) {
+                    // Checked separately as SlotRange.contains doesn't handle empty ranges.
+                    const range_empty = op_max_to_op_prepare_max.head.index ==
+                        op_max_to_op_prepare_max.tail.index;
+                    if (range_empty) {
                         assert(op_max_to_op_prepare_max.head.index == op_prepare_max_slot.index);
                         assert(op_max_to_op_prepare_max.tail.index == op_prepare_max_slot.index);
-                        continue;
+                        if (index != op_prepare_max_slot.index) continue;
                     }
 
-                    if ((op_max == op_prepare_max - 1 and index == op_prepare_max_slot.index) or
+                    if ((range_empty and index == op_prepare_max_slot.index) or
                         op_max_to_op_prepare_max.contains(slot))
                     {
                         const header_prepare_untrusted = &journal.headers[index];
@@ -1460,7 +1464,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         // Head op is uncertain if we encounter one of the below faults:
 
                         // 1. Corrupt redundant header or a misdirected read to a redundant header.
-                        if (header_redundant_ok == null) return torn_slots[0..0];
+                        if (header_redundant_ok == null) return .{};
 
                         // 2. Redundant header is set to .reserved. Could happen if:
                         //    i. Slot was found corrupt on a previous startup, which set the header
@@ -1468,28 +1472,37 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         //    ii. Replica crashes *before* the corrupt slot was repaired, but
                         //       *after* the reserved header was written to disk with a write to
                         //       a nearby header (there are multiple headers in a single sector)
-                        if (header_redundant_ok.?.operation == .reserved) return torn_slots[0..0];
+                        if (header_redundant_ok.?.operation == .reserved) return .{};
 
                         // 3. Misdirected read for a prepare header.
                         if (header_prepare_untrusted.valid_checksum()) {
                             // This is a faulty slot and header is valid, prepare must be corrupt.
                             assert(header_prepare_ok == null);
-                            return torn_slots[0..0];
+                            return .{};
                         }
 
                         // Header is valid and from a previous wrap.
                         assert(header_redundant_ok != null);
                         assert(header_redundant_ok.?.op < op_max);
+                        assert(header_redundant_ok.?.op <= op_checkpoint);
 
                         assert(!header_prepare_untrusted.valid_checksum());
                         assert(!journal.prepare_inhabited[index]);
 
-                        torn_slots[torn_slot_count] = slot;
-                        torn_slot_count += 1;
+                        if (torn_slots.count() < constants.journal_iops_write_max) {
+                            torn_slots.append_assume_capacity(slot);
+                        } else {
+                            log.warn("{}: torn_prepares: not truncating, found >{} " ++
+                                "torn prepares!", .{
+                                journal.replica,
+                                constants.journal_iops_write_max,
+                            });
+                            return .{};
+                        }
                     }
                 }
             }
-            return torn_slots[0..torn_slot_count];
+            return torn_slots;
         }
 
         fn recover_slot(journal: *Journal, slot: Slot, case: *const Case) void {
