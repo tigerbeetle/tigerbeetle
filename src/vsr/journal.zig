@@ -1295,13 +1295,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
             assert(journal.headers.len == cases.len);
 
+            const torn_prepares_ = journal.torn_prepares(&cases);
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
-            for (journal.torn_prepares(&cases).const_slice()) |torn_slot| {
-                assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
-                cases[torn_slot.index] = &case_cut_torn;
+            for (torn_prepares_.const_slice()) |torn_prepare| {
+                assert(cases[torn_prepare.index].decision(replica.solo()) == .vsr);
+                cases[torn_prepare.index] = &case_cut_torn;
                 log.warn("{}: recover_slots: torn prepare in slot={}", .{
                     journal.replica,
-                    torn_slot.index,
+                    torn_prepare.index,
                 });
             }
 
@@ -1357,7 +1358,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         /// Returns the slots that are safe to truncate.
         ///
-        /// Truncate all prepares that were torn while being appended to the log before a crash.
+        /// The goal of this function is to identify all prepares that were torn while being
+        /// appended to the log before a crash. These torn prepares must be truncated to ensure
+        /// that the replica doesn't start up in recovering_head.
+        ///
+        /// Conditions for torn prepares to be truncated:
         /// * op_max, computed as the max of the prepare headers and redundant headers must be
         ///   certain.
         /// * for certainty of op_max, there must be no faults between (op_max, op_prepare_max]
@@ -1439,21 +1444,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // Checked separately as SlotRange.contains doesn't handle empty ranges.
                     const range_empty = op_max_to_op_prepare_max.head.index ==
                         op_max_to_op_prepare_max.tail.index;
-                    if (range_empty) {
-                        assert(op_max_to_op_prepare_max.head.index == op_prepare_max_slot.index);
-                        assert(op_max_to_op_prepare_max.tail.index == op_prepare_max_slot.index);
-                        if (index != op_prepare_max_slot.index) continue;
-                    }
 
                     if ((range_empty and index == op_prepare_max_slot.index) or
-                        op_max_to_op_prepare_max.contains(slot))
+                        (!range_empty and op_max_to_op_prepare_max.contains(slot)))
                     {
                         const header_prepare_untrusted = &journal.headers[index];
-                        const header_prepare_ok = header_ok(
-                            replica.cluster,
-                            slot,
-                            header_prepare_untrusted,
-                        );
                         const header_redundant_ok = header_ok(
                             replica.cluster,
                             slot,
@@ -1474,12 +1469,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         //       a nearby header (there are multiple headers in a single sector)
                         if (header_redundant_ok.?.operation == .reserved) return .{};
 
-                        // 3. Misdirected read for a prepare header.
-                        if (header_prepare_untrusted.valid_checksum()) {
-                            // This is a faulty slot and header is valid, prepare must be corrupt.
-                            assert(header_prepare_ok == null);
-                            return .{};
-                        }
+                        // 3. Prepare must be invalid for the slot to be eligible for truncation. A
+                        //    valid prepare could be faulty due to a misdirected read/write.
+                        if (header_prepare_untrusted.valid_checksum()) return .{};
 
                         // Header is valid and from a previous wrap.
                         assert(header_redundant_ok != null);
