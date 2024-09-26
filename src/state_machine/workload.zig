@@ -568,7 +568,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 // without altering the outcome for this specific `transfer_index`.
                 const transfer_index = self.transfer_id_to_index(transfers[i].id);
                 const transfer_plan = self.transfer_index_to_plan(transfer_index);
-                if (!transfer_plan.valid and
+                const can_retry = !transfer_plan.valid and
+                    !transfers[i].flags.linked and
+                    !transfers[i - 1].flags.linked;
+                if (can_retry and
                     chance(
                     self.random,
                     self.options.create_transfer_retry_probability,
@@ -1513,7 +1516,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 .create_transfer_pending_probability = 1 + random.uintLessThan(u8, 100),
                 .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
                 .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
-                .create_transfer_retry_probability = 1 + random.uintLessThan(u8, 50),
+                .create_transfer_retry_probability = 1 + random.uintLessThan(u8, 10),
                 .lookup_account_invalid_probability = 1,
 
                 .account_filter_invalid_account_probability = 1 + random.uintLessThan(u8, 20),
