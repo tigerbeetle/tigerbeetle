@@ -480,13 +480,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             transfers: []tb.Transfer,
         ) usize {
             const results = self.auditor.expect_create_transfers(client_index);
-
-            const failed_ids_count = self.build_create_transfers_failed_ids(
-                transfers,
-                results,
-            );
-            if (failed_ids_count > 0) return failed_ids_count;
-
+            assert(results.len >= transfers.len);
             var transfers_count: usize = transfers.len;
             var i: usize = 0;
             while (i < transfers_count) {
@@ -542,43 +536,57 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 i += 1;
                 self.transfers_sent += 1;
             }
+            assert(transfers_count == i);
+            assert(transfers_count <= transfers.len);
+
+            self.build_retry_transfers(transfers[0..transfers_count], results);
 
             // Checksum transfers only after the whole batch is ready.
             // The opportunistic linking backtracks to modify transfers.
             for (transfers[0..transfers_count]) |*transfer| {
                 transfer.user_data_128 = vsr.checksum(std.mem.asBytes(transfer));
             }
-            assert(transfers_count == i);
-            assert(transfers_count <= transfers.len);
+
             return transfers_count;
         }
 
-        fn build_create_transfers_failed_ids(
+        fn build_retry_transfers(
             self: *Workload,
             transfers: []tb.Transfer,
             results: []accounting_auditor.CreateTransferResultSet,
-        ) usize {
-            var transfers_count: usize = transfers.len;
-            var i: usize = 0;
+        ) void {
+            assert(results.len >= transfers.len);
+            if (self.transient_failures.count() == 0) return;
 
-            while (i < transfers_count) {
-                const id_failed = (self.transient_failures.popOrNull() orelse break).key;
+            // Neither the first nor the last id can regress to preserve the
+            // `transfers_delivered_recently` and `transfers_delivered_past` logic.
+            // So we must insert retries in the middle of the batch.
+            if (transfers.len <= 1) return;
+            for (1..transfers.len - 1) |i| {
+                if (self.transient_failures.count() == 0) break;
+                // To support random `lookup_transfers`, we replace the transfer with a retry,
+                // without altering the outcome for this specific `transfer_index`.
+                const transfer_index = self.transfer_id_to_index(transfers[i].id);
+                const transfer_plan = self.transfer_index_to_plan(transfer_index);
+                if (!transfer_plan.valid and
+                    chance(
+                    self.random,
+                    self.options.create_transfer_retry_probability,
+                )) {
+                    const index = self.random.intRangeAtMost(
+                        usize,
+                        0,
+                        self.transient_failures.count() - 1,
+                    );
+                    const id_failed = self.transient_failures.keys()[index];
+                    self.transient_failures.swapRemoveAt(index);
 
-                // We don't need to retry the exact same transfer. Instead, we want to confirm
-                // whether the idempotency check takes precedence over all other cases by sending
-                // a zeroed transfer with only the failed `id`.
-                transfers[i] = std.mem.zeroInit(tb.Transfer, .{ .id = id_failed });
-                results[i] = accounting_auditor.CreateTransferResultSet.initOne(.id_already_failed);
-
-                i += 1;
-                self.transfers_sent += 1;
+                    transfers[i] = std.mem.zeroInit(tb.Transfer, .{ .id = id_failed });
+                    results[i] = accounting_auditor.CreateTransferResultSet.initOne(
+                        .id_already_failed,
+                    );
+                }
             }
-
-            assert(i <= transfers_count);
-            transfers_count = i;
-            assert(transfers_count <= transfers.len);
-
-            return transfers_count;
         }
 
         fn build_lookup_accounts(self: *Workload, lookup_ids: []u128) usize {
@@ -1005,20 +1013,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             self.auditor.on_create_transfers(client_index, timestamp, transfers, results_sparse);
             if (transfers.len == 0) return;
 
-            // We don't expect batches containing both retries and new transfers.
-            // The ID cannot regress to preserve the `transfers_delivered_recently`
-            // and `transfers_delivered_past` logic.
-            if (results_sparse.len > 0 and
-                results_sparse[0].result == .id_already_failed)
-            {
-                for (results_sparse) |item| assert(item.result == .id_already_failed);
-                return;
-            }
-
             // Enqueue the `id`s of transient failures to be retried in the next request.
             for (results_sparse) |item| {
                 assert(item.result != .ok);
-                assert(item.result != .id_already_failed);
 
                 if (self.transient_failures.count() <
                     self.options.transfer_transient_failures_max)
@@ -1438,6 +1435,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         create_transfer_pending_probability: u8, // ≤ 100
         create_transfer_post_probability: u8, // ≤ 100
         create_transfer_void_probability: u8, // ≤ 100
+        create_transfer_retry_probability: u8, // ≤ 100
         lookup_account_invalid_probability: u8, // ≤ 100
 
         account_filter_invalid_account_probability: u8, // ≤ 100
@@ -1515,6 +1513,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 .create_transfer_pending_probability = 1 + random.uintLessThan(u8, 100),
                 .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
                 .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
+                .create_transfer_retry_probability = 1 + random.uintLessThan(u8, 50),
                 .lookup_account_invalid_probability = 1,
 
                 .account_filter_invalid_account_probability = 1 + random.uintLessThan(u8, 20),
