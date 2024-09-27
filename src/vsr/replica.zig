@@ -759,7 +759,8 @@ pub fn ReplicaType(
                         self.transition_to_recovering_head_from_recovering_status();
                     }
                 } else {
-                    // Even if op_head_certain() returns false, a DVC always has a certain head op.
+                    // Don't call op_head_certain() here, as we didn't use the journal to infer our
+                    // head op. We used only vsr_headers, and a DVC always has a certain head op.
                     assert(self.view > self.log_view);
                     self.transition_to_view_change_status(self.view);
                 }
@@ -5871,7 +5872,7 @@ pub fn ReplicaType(
             // - op=op_checkpoint, or
             // - op=op_prepare_max
             if (self.journal.faulty.bit(slot_prepare_max)) {
-                log.warn("{}: op_head_certain: faulty checkpoint slot={}", .{
+                log.warn("{}: op_head_certain: faulty prepare_max slot={}", .{
                     self.replica,
                     slot_prepare_max,
                 });
