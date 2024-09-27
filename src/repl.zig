@@ -158,7 +158,7 @@ pub const Parser = struct {
 
         while (parser.offset < parser.input.len) {
             const c = parser.input[parser.offset];
-            if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '|')) {
+            if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '|' or c == '-')) {
                 // Allows flag fields to have whitespace before a '|'.
                 var copy = Parser{
                     .input = parser.input,
@@ -201,18 +201,16 @@ pub const Parser = struct {
 
                 inline for (@typeInfo(ActiveValue).Struct.fields) |active_value_field| {
                     if (std.mem.eql(u8, active_value_field.name, key_to_validate)) {
-                        // Handle everything but flags, skip reserved and timestamp.
+                        // Handle everything but flags, and skip reserved.
                         if (comptime (!std.mem.eql(u8, active_value_field.name, "flags") and
-                            !std.mem.eql(u8, active_value_field.name, "reserved") and
-                            !std.mem.eql(u8, active_value_field.name, "timestamp")))
+                            !std.mem.eql(u8, active_value_field.name, "reserved")))
                         {
                             @field(
                                 @field(out.*, object_syntax_tree_field.name),
                                 active_value_field.name,
-                            ) = try std.fmt.parseInt(
+                            ) = try parse_int(
                                 active_value_field.type,
                                 value_to_validate,
-                                10,
                             );
                         }
 
@@ -256,6 +254,27 @@ pub const Parser = struct {
                 }
             }
         }
+    }
+
+    fn parse_int(comptime T: type, input: []const u8) !T {
+        const info = @typeInfo(T);
+        comptime assert(info == .Int);
+
+        // When base is zero the string prefix is examined to detect the true base:
+        // "0b", "0o" or "0x", otherwise base=10 is assumed.
+        const base_unknown = 0;
+
+        assert(input.len > 0);
+        const input_negative = input[0] == '-';
+
+        if (info.Int.signedness == .unsigned and input_negative) {
+            // Negative input means `maxInt - input`.
+            // Useful for representing sentinels such as `AMOUNT_MAX`, as `-0`.
+            const max = std.math.maxInt(T);
+            return max - try std.fmt.parseUnsigned(T, input[1..], base_unknown);
+        }
+
+        return try std.fmt.parseUnsigned(T, input, base_unknown);
     }
 
     fn parse_arguments(
@@ -964,6 +983,24 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
+            .in = "create_transfers timestamp=1",
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 0,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 1,
+            },
+        },
+        .{
             .in =
             \\create_transfers id=32 amount=65 ledger=12 code=9999 pending_id=7
             \\ credit_account_id=2121 debit_account_id=77 user_data_128=2
@@ -1015,6 +1052,106 @@ test "repl.zig: Parser single transfer successfully" {
                     .pending = true,
                     .linked = true,
                 },
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers amount=-0
+            ,
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = std.math.maxInt(u128),
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers amount=-1
+            ,
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = std.math.maxInt(u128) - 1,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers amount=0xbee71e
+            ,
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 0xbee71e,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers amount=1_000_000
+            ,
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 1_000_000,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers id=0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6
+            ,
+            .want = tb.Transfer{
+                .id = 0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 0,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
                 .timestamp = 0,
             },
         },
