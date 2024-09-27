@@ -52,7 +52,29 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "21"
+
       - run: ./zig/download.sh
+
+      # TODO: remove this section, just for testing what's timing out
+      - run: |
+        ./zig/zig build -Drelease
+        ./zig/zig build clients:java \
+            -Drelease \
+            -Dconfig-release=0.16.9 \
+            -Dconfig-release-client-min=0.15.3
+
+
+        pushd ./src/testing/systest/workload"
+        mvn clean install --batch-mode --quiet -Dmaven.test.skip
+        popd 
+
+        pushd ./src/testing/systest/workload"
+        mvn clean install --batch-mode --quiet
+        popd 
+
+        unshare -nfr ./zig/zig build scripts -- systest --test-duration-minutes=1 --tigerbeetle-executable=./tigerbeetle
+      # end debug section
+
       - run: ./zig/zig build test
       - run: ./zig/zig build clients:c:sample -Drelease
       - run: ./zig/zig build fuzz -- smoke
