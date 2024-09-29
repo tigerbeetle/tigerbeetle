@@ -362,6 +362,8 @@ pub fn main() !void {
             stdx.unimplemented("repair requires reachable primary");
         } else if (simulator.core_missing_quorum()) {
             output.warn("no liveness, core replicas cannot view-change", .{});
+        } else if (simulator.core_missing_header()) |header| {
+            output.warn("no liveness, op={} is not available in core", .{header.op});
         } else if (simulator.core_missing_prepare()) |header| {
             output.warn("no liveness, op={} is not available in core", .{header.op});
         } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
@@ -666,6 +668,50 @@ pub const Simulator = struct {
 
         const quorums = vsr.quorums(simulator.options.cluster.replica_count);
         return quorums.view_change > core_replicas - core_recovering_head;
+    }
+
+    // Returns a header which can't be repaired by the core due to storage faults.
+    //
+    // When generating a FaultAtlas, we don't try to protect core from excessive errors. Instead,
+    // if the core gets stuck, we verify that this is indeed due to storage faults.
+    pub fn core_missing_header(simulator: *const Simulator) ?vsr.Header.Prepare {
+        assert(simulator.core.count() > 0);
+
+        // Don't check for missing uncommitted ops (since the StateChecker does not record them).
+        // There may be uncommitted ops due to pulses/upgrades sent during liveness mode.
+        const commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
+        var missing_op: ?u64 = null;
+        for (simulator.cluster.replicas) |replica| {
+            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
+                assert(simulator.cluster.replica_health[replica.replica] == .up);
+                if (replica.op > replica.commit_min) {
+                    if (replica.journal.find_latest_headers_break_between(
+                        replica.commit_min,
+                        @min(replica.op, commit_max),
+                    )) |range| {
+                        // Find largest missing header as we repair headers from high -> low ops.
+                        if (missing_op == null or missing_op.? < range.op_max) {
+                            missing_op = range.op_max;
+                        }
+                    }
+                }
+            }
+        }
+        if (missing_op == null) return null;
+
+        const missing_header = simulator.cluster.state_checker.header_with_op(missing_op.?);
+
+        for (simulator.cluster.replicas) |replica| {
+            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
+                if (replica.journal.has_clean(&missing_header)) {
+                    // Prepare *was* found on an active core replica, so the header isn't
+                    // actually missing.
+                    return null;
+                }
+            }
+        }
+
+        return missing_header;
     }
 
     // Returns a header for a prepare which can't be repaired by the core due to storage faults.
