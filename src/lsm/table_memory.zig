@@ -128,8 +128,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.value_context.count <= table.values.len);
             defer assert(table.value_context.sorted);
 
-            // Sort all the values. In future, this will be done incrementally, and use
-            // k_way_merge, but for now the performance regression was too bad.
             table.sort();
 
             // If we have no values, then we can consider ourselves flushed right away.
@@ -189,7 +187,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             var source_index: u32 = offset;
             var target_index: u32 = offset;
             while (source_index < source_count) {
-                table.values[target_index] = table.values[source_index];
+                const value = table.values[source_index];
+                table.values[target_index] = value;
 
                 // If we're at the end of the source, there is no next value, so the next value
                 // can't be equal.
