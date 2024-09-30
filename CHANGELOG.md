@@ -3,6 +3,49 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.4
+
+Released: 2024-09-30
+
+This release introduces "transient errors": error codes for `create_transfers` which depend on the
+state of the database (e.g. `exceeds_credits`). Going forward, a transfer that fails with a
+transient error will not succeed if retried.
+
+See the [API tracking issue](https://github.com/tigerbeetle/tigerbeetle/issues/2231#issuecomment-2377879726)
+and the [documentation](https://docs.tigerbeetle.com/reference/requests/create_transfers)
+for more details.
+
+### Safety And Performance
+
+- [#2345](https://github.com/tigerbeetle/tigerbeetle/pull/2345)
+
+  Reduce chance of `recovering_head` status by recovering from torn writes in the WAL.
+  This improves the availability of the cluster, as `recovering_head` replicas cannot participate in
+  consensus until after they repair.
+
+### Features
+
+- [#2335](https://github.com/tigerbeetle/tigerbeetle/pull/2335)
+
+  Ensure idempotence for `create_transfers`' "transient errors" with new result code
+  `id_already_failed`. In particular, this guards against surprising behavior when the client is
+  running in a [stateless API service](https://docs.tigerbeetle.com/coding/system-architecture/).
+
+### Internals
+
+- [#2334](https://github.com/tigerbeetle/tigerbeetle/pull/2334),
+  [#2362](https://github.com/tigerbeetle/tigerbeetle/pull/2362)
+
+  Fix VOPR false positives.
+
+- [#2115](https://github.com/tigerbeetle/tigerbeetle/pull/2115)
+
+  Fix multiple commands for non-interactive REPL.
+
+### TigerTracks 🎧
+
+- [Lookin' Out My Back Door](https://www.youtube.com/watch?v=Aae_RHRptRg)
+
 ## TigerBeetle 0.16.3
 
 Released: 2024-09-23
