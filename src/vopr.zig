@@ -670,6 +670,9 @@ pub const Simulator = struct {
 
     // Returns a header for a prepare which can't be repaired by the core due to storage faults.
     //
+    // If a replica cannot make progress on committing, then it may be stuck while repairing either
+    // missing headers *or* prepares (see `repair` in replica.zig). This function checks for both.
+    //
     // When generating a FaultAtlas, we don't try to protect core from excessive errors. Instead,
     // if the core gets stuck, we verify that this is indeed due to storage faults.
     pub fn core_missing_prepare(simulator: *const Simulator) ?vsr.Header.Prepare {
@@ -679,16 +682,31 @@ pub const Simulator = struct {
         // There may be uncommitted ops due to pulses/upgrades sent during liveness mode.
         const commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
 
-        var missing_op: ?u64 = null;
+        var missing_header_op: ?u64 = null;
+        var missing_prepare_op: ?u64 = null;
+
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
                 if (replica.op > replica.commit_min) {
-                    for (replica.commit_min + 1..@min(replica.op, commit_max) + 1) |op| {
-                        const header = simulator.cluster.state_checker.header_with_op(op);
-                        if (!replica.journal.has_clean(&header)) {
-                            if (missing_op == null or missing_op.? > op) {
-                                missing_op = op;
+                    // Check if replica was stuck while repairing headers. Find largest missing
+                    // header as we repair headers from high -> low ops.
+                    if (replica.journal.find_latest_headers_break_between(
+                        replica.commit_min,
+                        @min(replica.op, commit_max),
+                    )) |range| {
+                        if (missing_header_op == null or missing_header_op.? < range.op_max) {
+                            missing_header_op = range.op_max;
+                        }
+                    } else {
+                        // Check if replica was stuck while repairing prepares. Find smallest
+                        // missing prepare as we repair prepares from low -> high ops.
+                        for (replica.commit_min + 1..@min(replica.op, commit_max) + 1) |op| {
+                            const header = simulator.cluster.state_checker.header_with_op(op);
+                            if (!replica.journal.has_clean(&header)) {
+                                if (missing_prepare_op == null or missing_prepare_op.? > op) {
+                                    missing_prepare_op = op;
+                                }
                             }
                         }
                     }
@@ -696,9 +714,10 @@ pub const Simulator = struct {
             }
         }
 
-        if (missing_op == null) return null;
+        if (missing_header_op == null and missing_prepare_op == null) return null;
 
-        const missing_header = simulator.cluster.state_checker.header_with_op(missing_op.?);
+        const missing_op = if (missing_header_op) |op| op else missing_prepare_op.?;
+        const missing_header = simulator.cluster.state_checker.header_with_op(missing_op);
 
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
