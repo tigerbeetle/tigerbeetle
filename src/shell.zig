@@ -402,6 +402,7 @@ pub fn exec_options(
     shell: *Shell,
     options: struct {
         stdin_slice: ?[]const u8 = null,
+        timeout_ns: u64 = 10 * std.time.ns_per_min,
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -411,6 +412,7 @@ pub fn exec_options(
 
     return exec_inner(shell, argv.slice(), .{
         .stdin_slice = options.stdin_slice,
+        .timeout_ns = options.timeout_ns,
     });
 }
 
