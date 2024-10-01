@@ -56,6 +56,20 @@ pub fn main(
         .{cli_args.account_count},
     );
 
+    // The first account_count_hot accounts are "hot" -- they will be the debit side of
+    // transfer_hot_percent of the transfers.
+    if (cli_args.account_count_hot > cli_args.account_count) vsr.fatal(
+        .cli,
+        "--account-count-hot: must be less-than-or-equal-to --account-count, got {}",
+        .{cli_args.account_count_hot},
+    );
+
+    if (cli_args.transfer_hot_percent > 100) vsr.fatal(
+        .cli,
+        "--transfer-hot-percent: must be less-than-or-equal-to 100, got {}",
+        .{cli_args.transfer_hot_percent},
+    );
+
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u128 = 0;
 
@@ -134,26 +148,20 @@ pub fn main(
         .reversed => .{ .inversion = {} },
     };
 
-    const account_generator_debit = Generator.from_distribution(
-        cli_args.account_distribution_debit,
-        cli_args.account_count,
+    assert(cli_args.account_count >= cli_args.account_count_hot);
+    const account_generator = Generator.from_distribution(
+        cli_args.account_distribution,
+        cli_args.account_count - cli_args.account_count_hot,
         random,
     );
-    const account_generator_credit = Generator.from_distribution(
-        cli_args.account_distribution_credit,
-        cli_args.account_count,
-        random,
-    );
-    const account_generator_query = Generator.from_distribution(
-        cli_args.account_distribution_query,
-        cli_args.account_count,
+    const account_generator_hot = Generator.from_distribution(
+        cli_args.account_distribution,
+        cli_args.account_count_hot,
         random,
     );
 
-    log.info("Account distributions = debit: {s}; credit: {s}; query: {s}", .{
-        @tagName(cli_args.account_distribution_debit),
-        @tagName(cli_args.account_distribution_credit),
-        @tagName(cli_args.account_distribution_query),
+    log.info("Account distribution: {s}", .{
+        @tagName(cli_args.account_distribution),
     });
 
     var benchmark = Benchmark{
@@ -162,9 +170,9 @@ pub fn main(
         .client = &client,
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
-        .account_generator_debit = account_generator_debit,
-        .account_generator_credit = account_generator_credit,
-        .account_generator_query = account_generator_query,
+        .account_count_hot = cli_args.account_count_hot,
+        .account_generator = account_generator,
+        .account_generator_hot = account_generator_hot,
         .flag_history = cli_args.flag_history,
         .flag_imported = cli_args.flag_imported,
         .account_index = 0,
@@ -178,6 +186,7 @@ pub fn main(
         .batch_transfers = batch_transfers,
         .batch_start_ns = 0,
         .transfer_count = cli_args.transfer_count,
+        .transfer_hot_percent = cli_args.transfer_hot_percent,
         .transfer_pending = cli_args.transfer_pending,
         .transfer_batch_size = cli_args.transfer_batch_size,
         .transfer_batch_delay_us = cli_args.transfer_batch_delay_us,
@@ -271,9 +280,9 @@ const Benchmark = struct {
     client: *Client,
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
-    account_generator_debit: Generator,
-    account_generator_credit: Generator,
-    account_generator_query: Generator,
+    account_count_hot: usize,
+    account_generator: Generator,
+    account_generator_hot: Generator,
     flag_history: bool,
     flag_imported: bool,
     account_index: usize,
@@ -288,6 +297,7 @@ const Benchmark = struct {
     batch_start_ns: usize,
     transfers_sent: usize,
     transfer_count: usize,
+    transfer_hot_percent: usize,
     transfer_pending: bool,
     transfer_batch_size: usize,
     transfer_batch_delay_us: usize,
@@ -393,13 +403,25 @@ const Benchmark = struct {
     fn create_transfer(b: *Benchmark) tb.Transfer {
         const random = b.rng.random();
 
-        var debit_account_index: u64 = 0;
-        var credit_account_index: u64 = 0;
-        assert(b.account_count > 1);
-        while (debit_account_index == credit_account_index) {
-            debit_account_index = b.gen_account_index(&b.account_generator_debit);
-            credit_account_index = b.gen_account_index(&b.account_generator_credit);
-        }
+        // The set of accounts is divided into two different "worlds" by
+        // `account_count_hot`. Sometimes the debit account will be selected
+        // from the first `account_count_hot` accounts; otherwise both
+        // debit and credit will be selected from an account >= `account_count_hot`.
+
+        const debit_account_hot = b.account_count_hot > 0 and
+            random.uintLessThan(u64, 100) < b.transfer_hot_percent;
+
+        const debit_account_index = if (debit_account_hot)
+            b.gen_account_index(&b.account_generator_hot)
+        else
+            b.gen_account_index(&b.account_generator) + b.account_count_hot;
+        const credit_account_index = index: {
+            var index = b.gen_account_index(&b.account_generator) + b.account_count_hot;
+            if (index == debit_account_index) {
+                index = (index + 1) % b.account_count + b.account_count_hot;
+            }
+            break :index index;
+        };
 
         const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
         const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
@@ -542,7 +564,7 @@ const Benchmark = struct {
             return;
         }
 
-        b.account_index = b.gen_account_index(&b.account_generator_query);
+        b.account_index = b.gen_account_index(&b.account_generator);
         var filter = tb.AccountFilter{
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
             .user_data_128 = 0,
