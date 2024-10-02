@@ -2,6 +2,8 @@ import java.security.SecureRandom;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.Executors;
 import com.tigerbeetle.Client;
 import com.tigerbeetle.UInt128;
 
@@ -17,12 +19,34 @@ public final class Main {
           "REPLICAS must list at least one address (comma-separated)");
     }
 
+    int workloadCount = Integer.parseUnsignedInt(env.getOrDefault("WORKLOAD_COUNT", "5"));
+    if (replicaAddresses.length == 0) {
+      throw new IllegalArgumentException(
+          "REPLICAS must list at least one address (comma-separated)");
+    }
+
     Random random = new SecureRandom();
     byte[] clusterID = UInt128.asBytes(Long.parseLong(env.getOrDefault("CLUSTER", "1")));
 
     try (var client = new Client(clusterID, replicaAddresses)) {
-      System.err.println("starting workload");
-      new Workload(random, client).run();
+      System.err.println("starting %d workload(s)".formatted(workloadCount));
+
+      var executor = Executors.newFixedThreadPool(workloadCount);
+      var completionService = new ExecutorCompletionService<Void>(executor);
+
+      for (int i = 0; i < workloadCount; i++) {
+        final var ledger = i + 1;
+        completionService.submit(new Workload(random, client, ledger));
+      }
+
+      try {
+        for (int i = 0; i < workloadCount; i++) {
+          var result = completionService.take();
+          result.get();
+        }
+      } finally {
+        executor.shutdownNow();
+      }
     }
   }
 }
