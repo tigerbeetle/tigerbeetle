@@ -580,7 +580,6 @@ pub const Multiversion = struct {
     source_buffer: []align(8) u8,
     source_fd: ?posix.fd_t = null,
     source_offset: ?u64 = null,
-    source_size: ?u64 = null,
 
     target_fd: posix.fd_t,
     target_path: [:0]const u8,
@@ -763,7 +762,7 @@ pub const Multiversion = struct {
         assert(self.stage == .init);
         assert(!self.timeout.ticking);
 
-        self.binary_statx();
+        self.binary_open();
 
         assert(self.stage != .init);
 
@@ -805,6 +804,9 @@ pub const Multiversion = struct {
     fn on_timeout(self: *Multiversion) void {
         self.timeout.reset();
 
+        assert(builtin.target.os.tag == .linux);
+        if (comptime builtin.target.os.tag != .linux) return; // Prevent codegen.
+
         switch (self.stage) {
             .source_stat,
             .source_open,
@@ -814,13 +816,6 @@ pub const Multiversion = struct {
 
             .init, .ready, .err => {},
         }
-        self.binary_statx();
-    }
-
-    fn binary_statx(self: *Multiversion) void {
-        assert(self.stage == .init or self.stage == .ready or self.stage == .err);
-        assert(builtin.target.os.tag == .linux);
-        if (comptime builtin.target.os.tag != .linux) return; // Prevent codegen.
 
         self.stage = .source_stat;
         self.io.statx(
@@ -850,19 +845,16 @@ pub const Multiversion = struct {
         // Zero the atime, so we can compare the rest of the struct directly.
         self.timeout_statx.atime = std.mem.zeroes(os.linux.statx_timestamp);
 
-        if (self.timeout_statx_previous == .none or
-            self.timeout_statx_previous == .err or
+        if (self.timeout_statx_previous == .err or
             (self.timeout_statx_previous == .previous and !stdx.equal_bytes(
             os.linux.Statx,
             &self.timeout_statx_previous.previous,
             &self.timeout_statx,
         ))) {
-            if (self.timeout_statx_previous != .none) {
-                log.info("binary change detected: {s}", .{self.exe_path});
-            }
+            log.info("binary change detected: {s}", .{self.exe_path});
 
             self.stage = .init;
-            self.binary_open(self.timeout_statx.size);
+            self.binary_open();
         } else {
             self.stage = .init;
         }
@@ -870,14 +862,12 @@ pub const Multiversion = struct {
         self.timeout_statx_previous = .{ .previous = self.timeout_statx };
     }
 
-    fn binary_open(self: *Multiversion, size: u64) void {
+    fn binary_open(self: *Multiversion) void {
         assert(self.stage == .init);
         assert(self.source_offset == null);
-        assert(self.source_size == null);
 
         self.stage = .source_open;
         self.source_offset = 0;
-        self.source_size = size;
 
         switch (builtin.os.tag) {
             .linux => self.io.openat(
@@ -907,11 +897,9 @@ pub const Multiversion = struct {
         assert(self.stage == .source_open);
         assert(self.source_fd == null);
         assert(self.source_offset.? == 0);
-        assert(self.source_size.? > 0);
 
         const fd = result catch |e| {
             self.source_offset = null;
-            self.source_size = null;
             return self.handle_error(e);
         };
 
@@ -924,8 +912,7 @@ pub const Multiversion = struct {
         assert(self.stage == .source_read);
         assert(self.source_fd != null);
         assert(self.source_offset != null);
-        assert(self.source_size != null);
-        assert(self.source_offset.? < self.source_size.?);
+        assert(self.source_offset.? < self.source_buffer.len);
 
         self.io.read(
             *Multiversion,
@@ -946,19 +933,15 @@ pub const Multiversion = struct {
         assert(self.stage == .source_read);
         assert(self.source_fd != null);
         assert(self.source_offset != null);
-        assert(self.source_size != null);
-        assert(self.source_offset.? < self.source_size.?);
 
         defer {
             if (self.stage != .source_read) {
                 assert(self.stage == .err or self.stage == .ready);
                 assert(self.source_fd != null);
                 assert(self.source_offset != null);
-                assert(self.source_size != null);
 
                 posix.close(self.source_fd.?);
                 self.source_offset = null;
-                self.source_size = null;
                 self.source_fd = null;
             }
         }
@@ -969,22 +952,14 @@ pub const Multiversion = struct {
         // This could be a truncated file, but it'll get rejected when we verify the checksum.
         maybe(self.source_offset.? == self.source_buffer.len);
 
-        // The file is smaller than we expected.
-        // It was likely modified in the time since our statx().
-        if (bytes_read == 0) return self.handle_error(error.FileModifiedDuringRead);
+        if (bytes_read == 0) {
+            const source_buffer = self.source_buffer[0..self.source_offset.?];
 
-        switch (std.math.order(self.source_offset.?, self.source_size.?)) {
-            .lt => self.binary_read(),
-            // The file is bigger than we expected.
-            // It was likely modified in the time since our statx().
-            .gt => self.handle_error(error.FileModifiedDuringRead),
-            .eq => {
-                const source_buffer = self.source_buffer[0..self.source_size.?];
-
-                self.stage = .target_update;
-                self.target_update(source_buffer) catch |e| return self.handle_error(e);
-                assert(self.stage == .ready);
-            },
+            self.stage = .target_update;
+            self.target_update(source_buffer) catch |e| return self.handle_error(e);
+            assert(self.stage == .ready);
+        } else {
+            self.binary_read();
         }
     }
 
