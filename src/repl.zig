@@ -1681,6 +1681,14 @@ test "repl.zig: Handle parsing errors" {
             .in = "create_transfers id=abcd",
             .err = error.BadKeyValuePair,
         },
+        .{
+            .in = "create_transfers amount=0y1234",
+            .err = error.BadKeyValuePair,
+        },
+        .{
+            .in = "create_transfers amount=--0",
+            .err = error.BadKeyValuePair,
+        },
     };
 
     for (tests) |t| {
