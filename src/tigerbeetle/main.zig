@@ -524,7 +524,7 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
         if (release_bundled.value == release.value) break;
     } else {
         log.err("{}: release_execute: release {} is not available;" ++
-            "upgrade (or downgrade) the binary", .{
+            " upgrade (or downgrade) the binary", .{
             replica.replica,
             release,
         });
