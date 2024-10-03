@@ -497,37 +497,27 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
 
 // Downloads a pre-build llvm-objcopy from <https://github.com/tigerbeetle/dependencies>.
 fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
-    const llvm_objcopy_artifact: struct { name: []const u8, checksum: u256 } =
-        switch (b.graph.host.result.os.tag) {
-        .linux => .{
-            .name = "llvm-objcopy-x86_64-linux",
-            .checksum = 0x3e2fe8f359c63eb62069e322f9bc079b2876301510afb15f70d117b30a2eea36,
-        },
-        .windows => .{
-            .name = "llvm-objcopy-x86_64-windows.exe",
-            .checksum = 0x890ea11a8197032a398c8ba168db2f2713e925a070ac3a622ee327c8099c1c3f,
-        },
-        .macos => .{
-            .name = "llvm-objcopy-aarch64-macos",
-            .checksum = 0x5202a686b82c8f613b264619188fc788fcd3c22cfa5c3da568ddb27f1fb4cb29,
-        },
+    return switch (b.graph.host.result.os.tag) {
+        .linux => fetch(b, .{
+            .url = "https://github.com/tigerbeetle/dependencies/releases/download/18.1.8/" ++
+                "llvm-objcopy-x86_64-linux.zip",
+            .file_name = "llvm-objcopy",
+            .hash = "12203104f50e31efee26b1467d0d918bf4ac6cda7bee93d865d01e0913f33504b03a",
+        }),
+        .windows => fetch(b, .{
+            .url = "https://github.com/tigerbeetle/dependencies/releases/download/18.1.8/" ++
+                "llvm-objcopy-x86_64-windows.zip",
+            .file_name = "llvm-objcopy.exe",
+            .hash = "122069747460977a1eb52110eb2abc8b992af57242ef724316d3071c7ec7f61e41bc",
+        }),
+        .macos => fetch(b, .{
+            .url = "https://github.com/tigerbeetle/dependencies/releases/download/18.1.8/" ++
+                "llvm-objcopy-aarch64-macos.zip",
+            .file_name = "llvm-objcopy",
+            .hash = "12202b751a54e74823261a9a014497b137a62a8d80f6b09a7b0515a3e34a617313fa",
+        }),
         else => @panic("unsupported host"),
     };
-
-    const llvm_objcopy_unverified = b.addSystemCommand(&.{
-        "gh",        "release",
-        "download",  "18.1.8",
-        "--repo",    "tigerbeetle/dependencies",
-        "--pattern", llvm_objcopy_artifact.name,
-
-        "--output",
-    }).addOutputFileArg(llvm_objcopy_artifact.name);
-
-    return VerifyChecksum.create(
-        b,
-        llvm_objcopy_unverified,
-        llvm_objcopy_artifact.checksum,
-    ).target;
 }
 
 fn build_aof(
@@ -1477,12 +1467,11 @@ fn download_release(
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
 ) std.Build.LazyPath {
-    const os = switch (target.result.os.tag) {
-        .windows => "windows",
-        .linux => "linux",
-        .macos => "macos",
-        else => @panic("unsupported OS"),
-    };
+    const release_slug = if (std.mem.eql(u8, version_or_latest, "latest"))
+        "latest/download"
+    else
+        b.fmt("download/{s}", .{version_or_latest});
+
     const arch = if (target.result.os.tag == .macos)
         "universal"
     else switch (target.result.cpu.arch) {
@@ -1490,86 +1479,84 @@ fn download_release(
         .aarch64 => "aarch64",
         else => @panic("unsupported CPU"),
     };
+
+    const os = switch (target.result.os.tag) {
+        .windows => "windows",
+        .linux => "linux",
+        .macos => "macos",
+        else => @panic("unsupported OS"),
+    };
+
     const debug = switch (mode) {
         .ReleaseSafe => "",
         .Debug => "-debug",
         else => @panic("unsupported mode"),
     };
 
-    const release_archive = if (std.mem.eql(u8, version_or_latest, "latest"))
-        b.addSystemCommand(&.{
-            "gh",
-            "release",
-            "download",
-            "--pattern",
-            b.fmt("tigerbeetle-{s}-{s}{s}.zip", .{ arch, os, debug }),
-            "--output",
-            "-",
-        })
-    else
-        b.addSystemCommand(&.{
-            "gh",        "release",
-            "download",  version_or_latest,
-            "--pattern", b.fmt("tigerbeetle-{s}-{s}{s}.zip", .{ arch, os, debug }),
-            "--output",  "-",
-        });
-    release_archive.max_stdio_size = 512 * 1024 * 1024;
+    const url = b.fmt(
+        "https://github.com/tigerbeetle/tigerbeetle" ++
+            "/releases/{s}/tigerbeetle-{s}-{s}{s}.zip",
+        .{ release_slug, arch, os, debug },
+    );
 
-    const unzip = b.addSystemCommand(&.{ "unzip", "-p" });
-    unzip.addFileArg(release_archive.captureStdOut());
-    unzip.max_stdio_size = 512 * 1024 * 1024;
-    return unzip.captureStdOut();
+    return fetch(b, .{
+        .url = url,
+        .file_name = if (target.result.os.tag == .windows) "tigerbeetle.exe" else "tigerbeetle",
+        .hash = null,
+    });
 }
 
-const VerifyChecksum = struct {
-    step: std.Build.Step,
-    source: std.Build.LazyPath,
-    target: std.Build.LazyPath,
-    checksum: u256,
-    generated_file: std.Build.GeneratedFile,
-
-    fn create(b: *std.Build, source: std.Build.LazyPath, checksum: u256) *VerifyChecksum {
-        const result = b.allocator.create(VerifyChecksum) catch @panic("OOM");
-        result.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = "verify checksum",
-                .owner = b,
-                .makeFn = make,
-            }),
-            .source = source,
-            .target = .{ .generated = .{ .file = &result.generated_file } },
-            .generated_file = .{ .step = &result.step },
-            .checksum = checksum,
-        };
-        result.source.addStepDependencies(&result.step);
-
-        return result;
+// Use 'zig fetch' to download and unpack the specified URL, optionally verifying the checksum.
+fn fetch(b: *std.Build, options: struct {
+    url: []const u8,
+    file_name: []const u8,
+    hash: ?[]const u8,
+}) std.Build.LazyPath {
+    const copy_from_cache = b.addRunArtifact(b.addExecutable(.{
+        .name = "copy-from-cache",
+        .root_source_file = b.addWriteFiles().add("main.zig",
+            \\const std = @import("std");
+            \\const assert = std.debug.assert;
+            \\
+            \\pub fn main() !void {
+            \\    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            \\    const allocator = arena.allocator();
+            \\    const args = try std.process.argsAlloc(allocator);
+            \\    assert(args.len == 5 or args.len == 6);
+            \\
+            \\    const hash_and_newline = try std.fs.cwd().readFileAlloc(allocator, args[2], 128);
+            \\    assert(hash_and_newline[hash_and_newline.len - 1] == '\n');
+            \\    const hash = hash_and_newline[0 .. hash_and_newline.len - 1];
+            \\    if (args.len == 6 and !std.mem.eql(u8, args[5], hash)) {
+            \\        std.debug.panic(
+            \\            \\bad hash
+            \\            \\specified:  {s}
+            \\            \\downloaded: {s}
+            \\            \\
+            \\        , .{ args[5], hash });
+            \\    }
+            \\
+            \\    const source_path = try std.fs.path.join(allocator, &.{ args[1], hash, args[3] });
+            \\    try std.fs.cwd().copyFile(
+            \\        source_path,
+            \\        std.fs.cwd(),
+            \\        args[4],
+            \\        .{},
+            \\    );
+            \\}
+        ),
+        .target = b.graph.host,
+    }));
+    copy_from_cache.addArg(
+        b.graph.global_cache_root.join(b.allocator, &.{"p"}) catch @panic("OOM"),
+    );
+    copy_from_cache.addFileArg(
+        b.addSystemCommand(&.{ b.graph.zig_exe, "fetch", options.url }).captureStdOut(),
+    );
+    copy_from_cache.addArg(options.file_name);
+    const result = copy_from_cache.addOutputFileArg(options.file_name);
+    if (options.hash) |hash| {
+        copy_from_cache.addArg(hash);
     }
-
-    fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
-        _ = prog_node;
-        const b = step.owner;
-        const verify_checksum: *VerifyChecksum = @alignCast(@fieldParentPtr("step", step));
-        const source_path = verify_checksum.source.getPath2(b, step);
-        const contents = try std.fs.cwd().readFileAlloc(
-            b.allocator,
-            source_path,
-            32 * 1024 * 1024,
-        );
-        defer b.allocator.free(contents);
-
-        var hash_bytes: [32]u8 = undefined;
-        std.crypto.hash.sha2.Sha256.hash(contents, &hash_bytes, .{});
-        const hash = std.mem.readInt(u256, &hash_bytes, .big);
-        if (hash != verify_checksum.checksum) {
-            std.log.err("checksum mismatch, specified '{x}', got '{x}'", .{
-                verify_checksum.checksum,
-                hash,
-            });
-            return error.ChecksumMismatch;
-        }
-        step.result_cached = true;
-        verify_checksum.generated_file.path = source_path;
-    }
-};
+    return result;
+}
