@@ -213,16 +213,16 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Dtarget={target}
                 \\    -Drelease={release}
                 \\    -Dgit-commit={commit}
-                \\    -Dconfig-release={release_triple}
+                \\    -Dconfig-release=0.16.4
                 \\    -Dconfig-release-client-min={release_triple_client_min}
-                \\    -Dmultiversion={release_triple_multiversion}
+                \\    -Dmultiversion=0.16.3
             , .{
                 .target = target,
                 .release = if (debug) "false" else "true",
                 .commit = info.sha,
-                .release_triple = info.release_triple,
+                // .release_triple = info.release_triple,
                 .release_triple_client_min = info.release_triple_client_min,
-                .release_triple_multiversion = info.release_triple_multiversion,
+                // .release_triple_multiversion = info.release_triple_multiversion,
             });
 
             const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
@@ -271,10 +271,10 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     log.info("dotnet version {s}", .{dotnet_version});
 
     try shell.exec_zig(
-        \\build clients:dotnet -Drelease -Dconfig-release={release_triple}
+        \\build clients:dotnet -Drelease -Dconfig-release=0.16.4
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
-        .release_triple = info.release_triple,
+        // .release_triple = info.release_triple,
         .release_triple_client_min = info.release_triple_client_min,
     });
     try shell.exec(
@@ -298,7 +298,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer shell.popd();
 
     try shell.exec_zig(
-        \\build clients:go -Drelease -Dconfig-release={release_triple}
+        \\build clients:go -Drelease -Dconfig-release=0.16.4
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,
@@ -352,10 +352,10 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     log.info("java version {s}", .{java_version});
 
     try shell.exec_zig(
-        \\build clients:java -Drelease -Dconfig-release={release_triple}
+        \\build clients:java -Drelease -Dconfig-release=0.16.4
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
-        .release_triple = info.release_triple,
+        // .release_triple = info.release_triple,
         .release_triple_client_min = info.release_triple_client_min,
     });
 
@@ -394,10 +394,10 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     log.info("node version {s}", .{node_version});
 
     try shell.exec_zig(
-        \\build clients:node -Drelease -Dconfig-release={release_triple}
+        \\build clients:node -Drelease -Dconfig-release=0.16.4
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
-        .release_triple = info.release_triple,
+        // .release_triple = info.release_triple,
         .release_triple_client_min = info.release_triple_client_min,
     });
 
