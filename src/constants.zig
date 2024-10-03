@@ -112,18 +112,18 @@ pub const vsr_releases_max = config.cluster.vsr_releases_max;
 /// The maximum cumulative size of a final TigerBeetle output binary - including potential past
 /// releases and metadata.
 pub fn multiversion_binary_platform_size_max(options: struct { macos: bool, debug: bool }) u64 {
-    // {Linux, Windows} get the base value. macOS gets 2x since it has universal binaries. All cases
-    // get a further 2x in debug.
+    // {Linux, Windows} get the base value. macOS gets 2x since it has universal binaries.
+    // All cases get a further 8x in debug.
     var size_max = config.process.multiversion_binary_platform_size_max;
     if (options.macos) size_max *= 2;
-    if (options.debug) size_max *= 2;
+    if (options.debug) size_max *= 8;
 
     return size_max;
 }
 
 /// The maximum size, like above, but for any platform.
 pub const multiversion_binary_size_max =
-    config.process.multiversion_binary_platform_size_max * 2 * 2;
+    config.process.multiversion_binary_platform_size_max * 2 * 8;
 comptime {
     assert(multiversion_binary_platform_size_max(.{
         .macos = true,
