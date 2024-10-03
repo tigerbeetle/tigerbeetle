@@ -2,6 +2,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const os = std.os;
 const posix = std.posix;
 const constants = @import("constants.zig");
@@ -578,6 +579,7 @@ pub const Multiversion = struct {
 
     source_buffer: []align(8) u8,
     source_fd: ?posix.fd_t = null,
+    source_offset: ?u64 = null,
 
     target_fd: posix.fd_t,
     target_path: [:0]const u8,
@@ -814,6 +816,7 @@ pub const Multiversion = struct {
 
             .init, .ready, .err => {},
         }
+
         self.stage = .source_stat;
         self.io.statx(
             *Multiversion,
@@ -861,7 +864,10 @@ pub const Multiversion = struct {
 
     fn binary_open(self: *Multiversion) void {
         assert(self.stage == .init);
+        assert(self.source_offset == null);
+
         self.stage = .source_open;
+        self.source_offset = 0;
 
         switch (builtin.os.tag) {
             .linux => self.io.openat(
@@ -890,18 +896,32 @@ pub const Multiversion = struct {
     ) void {
         assert(self.stage == .source_open);
         assert(self.source_fd == null);
-        const fd = result catch |e| return self.handle_error(e);
+        assert(self.source_offset.? == 0);
+
+        const fd = result catch |e| {
+            self.source_offset = null;
+            return self.handle_error(e);
+        };
 
         self.stage = .source_read;
         self.source_fd = fd;
+        self.binary_read();
+    }
+
+    fn binary_read(self: *Multiversion) void {
+        assert(self.stage == .source_read);
+        assert(self.source_fd != null);
+        assert(self.source_offset != null);
+        assert(self.source_offset.? < self.source_buffer.len);
+
         self.io.read(
             *Multiversion,
             self,
             binary_read_callback,
             &self.completion,
             self.source_fd.?,
-            self.source_buffer,
-            0,
+            self.source_buffer[self.source_offset.?..],
+            self.source_offset.?,
         );
     }
 
@@ -911,16 +931,36 @@ pub const Multiversion = struct {
         result: IO.ReadError!usize,
     ) void {
         assert(self.stage == .source_read);
+        assert(self.source_fd != null);
+        assert(self.source_offset != null);
 
-        posix.close(self.source_fd.?);
-        self.source_fd = null;
+        defer {
+            if (self.stage != .source_read) {
+                assert(self.stage == .err or self.stage == .ready);
+                assert(self.source_fd != null);
+                assert(self.source_offset != null);
+
+                posix.close(self.source_fd.?);
+                self.source_offset = null;
+                self.source_fd = null;
+            }
+        }
 
         const bytes_read = result catch |e| return self.handle_error(e);
-        const source_buffer = self.source_buffer[0..bytes_read];
+        self.source_offset.? += bytes_read;
+        assert(self.source_offset.? <= self.source_buffer.len);
+        // This could be a truncated file, but it'll get rejected when we verify the checksum.
+        maybe(self.source_offset.? == self.source_buffer.len);
 
-        self.stage = .target_update;
-        self.target_update(source_buffer) catch |e| return self.handle_error(e);
-        assert(self.stage == .ready);
+        if (bytes_read == 0) {
+            const source_buffer = self.source_buffer[0..self.source_offset.?];
+
+            self.stage = .target_update;
+            self.target_update(source_buffer) catch |e| return self.handle_error(e);
+            assert(self.stage == .ready);
+        } else {
+            self.binary_read();
+        }
     }
 
     fn target_update(self: *Multiversion, source_buffer: []align(8) u8) !void {

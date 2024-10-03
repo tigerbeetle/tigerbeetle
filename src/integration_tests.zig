@@ -283,8 +283,8 @@ test "help/version smoke" {
 test "in-place upgrade" {
     // Smoke test that in-place upgrades work.
     //
-    // Stats a cluster of three replicas using the previous release of TigerBeetle and then replaces
-    // the binaries on disk with a new version.
+    // Starts a cluster of three replicas using the previous release of TigerBeetle and then
+    // replaces the binaries on disk with a new version.
     //
     // Against this upgrading cluster, we are running a benchmark load and checking that it finishes
     // with a zero status.
