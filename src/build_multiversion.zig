@@ -191,6 +191,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
         .current_git_commit = try git_sha_to_binary(&vsr_options.git_commit.?),
     };
     header.checksum_header = header.calculate_header_checksum();
+    try header.verify();
 
     try shell.cwd.writeFile(.{
         .sub_path = sections.header,
@@ -343,6 +344,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
             .current_git_commit = try git_sha_to_binary(&vsr_options.git_commit.?),
         };
         header.checksum_header = header.calculate_header_checksum();
+        try header.verify();
 
         try shell.cwd.writeFile(.{
             .sub_path = header_name,
