@@ -301,7 +301,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         \\build clients:go -Drelease -Dconfig-release=0.16.4
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
-        .release_triple = info.release_triple,
+        // .release_triple = info.release_triple,
         .release_triple_client_min = info.release_triple_client_min,
     });
 
