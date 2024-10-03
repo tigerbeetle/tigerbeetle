@@ -19,25 +19,24 @@ import com.tigerbeetle.TransferFlags;
  */
 public class Workload implements Callable<Void> {
   static int ACCOUNTS_COUNT_MAX = 100;
-  static int BATCH_SIZE_MAX = 100;
+  static int BATCH_SIZE_MAX = 1000;
 
   final Model model;
   final Random random;
   final Client client;
   final int ledger;
+  final Statistics statistics;
 
-  public Workload(Random random, Client client, int ledger) {
+  public Workload(Random random, Client client, int ledger, Statistics statistics) {
     this.random = random;
     this.client = client;
     this.model = new Model(ledger);
     this.ledger = ledger;
+    this.statistics = statistics;
   }
 
   @Override
   public Void call() {
-    long commandsFailedCount = 0;
-    long commandsSucceededCount = 0;
-
     for (int n = 0; true; n++) {
       var command = randomCommand();
       try {
@@ -46,27 +45,18 @@ public class Workload implements Callable<Void> {
 
         switch (result) {
           case CreateAccountsResult(var created, var failed) -> {
-            commandsSucceededCount += created.size();
-            commandsFailedCount += failed.size();
+            statistics.addRequests(created.size(), failed.size());
           }
           case CreateTransfersResult(var created, var failed) -> {
-            commandsSucceededCount += created.size();
-            commandsFailedCount += failed.size();
+            statistics.addRequests(created.size(), failed.size());
           }
           default -> {
           }
         }
 
-        if (n % 1000 == 0) {
-          System.err.println(
-              "ledger %d: %d succeeded, %d failed".formatted(
-                ledger, 
-                commandsSucceededCount, 
-                commandsFailedCount));
-        }
-
         lookupAllAccounts().ifPresent(query -> {
-          var response = query.execute(client);
+          var response = (LookupAccountsResult) query.execute(client);
+          statistics.addRequests(response.accountsFound().size(), 0);
           response.reconcile(model);
         });
       } catch (AssertionError e) {

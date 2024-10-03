@@ -1,4 +1,6 @@
 import java.security.SecureRandom;
+import java.text.NumberFormat;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
@@ -33,10 +35,14 @@ public final class Main {
 
       var executor = Executors.newFixedThreadPool(workloadCount);
       var completionService = new ExecutorCompletionService<Void>(executor);
+      var statistics = new Statistics(System.currentTimeMillis());
+      var logger = new Thread(() -> logStatistics(statistics));
+      logger.setDaemon(true);
+      logger.start();
 
       for (int i = 0; i < workloadCount; i++) {
         final var ledger = i + 1;
-        completionService.submit(new Workload(random, client, ledger));
+        completionService.submit(new Workload(random, client, ledger, statistics));
       }
 
       try {
@@ -46,6 +52,29 @@ public final class Main {
         }
       } finally {
         executor.shutdownNow();
+      }
+    }
+  }
+
+
+  static void logStatistics(Statistics statistics) {
+    while (true) {
+      try {
+        Thread.sleep(Duration.ofSeconds(10));
+
+        var requestsSuccessful = statistics.successful();
+        var requestsFailed = statistics.failed();
+        var requestsTotal = requestsSuccessful + requestsFailed;
+        var requestsPerSecond = statistics.requestsPerSecond();
+        var requestSuccessRate = (double) requestsSuccessful / requestsTotal;
+
+        System.err.println(
+            "%d requests in total, %s successful, throughput of %d req/s".formatted(
+              requestsTotal,
+              NumberFormat.getPercentInstance().format(requestSuccessRate),
+              requestsPerSecond));
+      } catch (InterruptedException e) {
+        break;
       }
     }
   }
