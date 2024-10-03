@@ -104,6 +104,13 @@ pub fn main() !void {
             .output = cli_args.output,
         }),
     }
+
+    const stat = try shell.cwd.statFile(cli_args.output);
+    assert(stat.size <= multiversion_binary_size_max);
+    assert(stat.size <= multiversioning.multiversion_binary_platform_size_max(.{
+        .macos = target == .macos,
+        .debug = cli_args.debug,
+    }));
 }
 
 fn build_multiversion_single_arch(shell: *Shell, options: struct {
@@ -191,6 +198,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
         .current_git_commit = try git_sha_to_binary(&vsr_options.git_commit.?),
     };
     header.checksum_header = header.calculate_header_checksum();
+    try header.verify();
 
     try shell.cwd.writeFile(.{
         .sub_path = sections.header,
@@ -343,6 +351,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
             .current_git_commit = try git_sha_to_binary(&vsr_options.git_commit.?),
         };
         header.checksum_header = header.calculate_header_checksum();
+        try header.verify();
 
         try shell.cwd.writeFile(.{
             .sub_path = header_name,
@@ -517,9 +526,9 @@ fn build_multiversion_body(shell: *Shell, options: struct {
         (try shell.cwd.statFile(old_current_release_output_name)).size,
     );
 
-    // You can have as many releases as you want, as long as it's 6 or less.
+    // You can have as many releases as you want, as long as it's 5 or less.
     // This is made up of:
-    // * up to 4 releases from the old past pack (extracted from the release downloaded),
+    // * up to 3 releases from the old past pack (extracted from the release downloaded),
     // * 1 old current release (extracted from the release downloaded),
     // * 1 current release (that was just built).
     // This will be improved soon:
@@ -528,7 +537,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     // No size limits are explicitly checked here; they're validated later by using the
     // `multiversion` subcommand to test the final built binary against all past binaries that are
     // included.
-    const past_count = @min(4, header.past.count);
+    const past_count: u32 = @min(3, header.past.count);
 
     const past_starting_index = header.past.count - past_count;
 
