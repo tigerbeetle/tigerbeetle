@@ -1294,13 +1294,6 @@ const ViewChangeHeadersSlice = struct {
         // A SV never includes gaps or faulty headers.
         assert(Headers.dvc_header_type(head) == .valid);
 
-        if (headers.command == .start_view) {
-            assert(headers.slice.len >= @min(
-                constants.view_change_headers_suffix_max,
-                head.op + 1, // +1 to include the head itself.
-            ));
-        }
-
         var child = head;
         for (headers.slice[1..], 0..) |*header, i| {
             const index = i + 1;
@@ -1319,7 +1312,14 @@ const ViewChangeHeadersSlice = struct {
 
             switch (Headers.dvc_header_type(header)) {
                 .blank => {
-                    assert(headers.command == .do_view_change);
+                    // We can't verify that SV headers contain no gaps headers here:
+                    // superblock.checkpoint could make .do_view_change headers durable instead of
+                    // .start_view headers when view == log_view (see `commit_checkpoint_superblock`
+                    // in `replica.zig`). When these headers are loaded from the superblock on
+                    // startup, they are considered to be .start_view headers (see `vsr_headers` in
+                    // `superblock.zig`).
+                    maybe(headers.command == .do_view_change);
+                    maybe(headers.command == .start_view);
                     continue; // Don't update "child".
                 },
                 .valid => {

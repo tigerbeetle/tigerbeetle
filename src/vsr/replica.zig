@@ -4256,30 +4256,24 @@ pub fn ReplicaType(
                 log.info("{}: sync: done", .{self.replica});
             }
 
-            // Update view_headers to include at least one op from the future checkpoint. This
-            // ensures a replica never starts with its head op less than self.op_checkpoint().
-            // The only exception to this is a replica that arrived at a checkpoint via state
-            // sync.
-            if (self.view == self.log_view) {
-                // Unconditionally convert potential primary's DVC headers → SV headers; the DVC
-                // headers may contain truncated ops which should not be made durable. For all other
-                // cases, update SV headers only if they aren't already up to date.
-                if ((self.status == .view_change and
-                    self.primary_index(self.view) == self.replica) or
-                    self.view_headers.array.get(0).op < self.op_checkpoint_next_trigger())
-                {
-                    self.view_headers.command = .start_view;
+            if (self.status == .view_change and self.view == self.log_view) {
+                // Unconditionally update a potential primary's DVC headers; current headers may
+                // contain truncated ops that must not be made durable. We can't update SV
+                // headers for a potential primary because we could arrive here while the potential
+                // primary is still repairing (and thus may still have gaps in its journal).
+                assert(self.do_view_change_quorum);
+                assert(self.view_headers.command == .do_view_change);
+                self.update_do_view_change_headers();
+            } else {
+                // Update view_headers to include at least one op from the future checkpoint. This
+                // ensures a replica never starts with its head op less than self.op_checkpoint().
+                if (self.view_headers.array.get(0).op < self.op_checkpoint_next_trigger()) {
+                    assert(self.status == .normal);
                     self.update_start_view_headers();
                 }
-                assert(self.view_headers.command == .start_view);
-                assert(self.view_headers.array.get(0).op >= self.op_checkpoint_next_trigger());
-            } else {
-                // Replica moved to a future view before checkpoint completed; no need to update its
-                // headers, it would've stored its head op in its DVC headers while moving to
-                // view_change.
-                assert(self.view_headers.command == .do_view_change);
-                assert(self.view_headers.array.get(0).op >= self.op);
             }
+
+            assert(self.view_headers.array.get(0).op >= self.op_checkpoint_next_trigger());
 
             log.debug("{}: commit_checkpoint_superblock: checkpoint_superblock start " ++
                 "(op={} checkpoint={}..{} view_durable={}..{} " ++
@@ -4897,6 +4891,10 @@ pub fn ReplicaType(
                     self.view_headers.append(self.journal.header_with_op(op).?);
                 }
             }
+            assert(self.view_headers.array.count() >= @min(
+                constants.view_change_headers_suffix_max,
+                self.view_headers.array.get(0).op + 1, // +1 to include the head itself.
+            ));
             self.view_headers.verify();
         }
 
@@ -8712,7 +8710,7 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.log_view == self.view) or
                 (self.status == .view_change and self.log_view == self.view))
             {
-                self.view_change_update_view_headers();
+                self.update_do_view_change_headers();
             }
 
             self.view_headers.verify();
@@ -8772,7 +8770,7 @@ pub fn ReplicaType(
             self.send_do_view_change();
         }
 
-        fn view_change_update_view_headers(self: *Self) void {
+        fn update_do_view_change_headers(self: *Self) void {
             // Either:
             // - Transition from normal status.
             // - Recovering from normal status.
