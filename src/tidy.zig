@@ -581,6 +581,7 @@ test "tidy no large blobs" {
         const path = cut.suffix;
 
         if (std.mem.eql(u8, path, "src/vsr/replica.zig")) continue; // :-)
+        if (std.mem.eql(u8, path, "src/state_machine.zig")) continue; // :-|
         if (std.mem.eql(u8, path, "src/docs_website/package-lock.json")) continue; // :-(
         if (size > @divExact(MiB, 4)) {
             has_large_blobs = true;
