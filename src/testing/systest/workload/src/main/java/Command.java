@@ -79,6 +79,7 @@ record CreateAccountsResult(ArrayList<NewAccount> created, ArrayList<NewAccount>
   public void reconcile(Model model) {
     for (var newAccount : created) {
       assert !model.accounts.containsKey(newAccount.id());
+      assert newAccount.ledger() == model.ledger;
 
       var account = new CreatedAccount(newAccount.id(), newAccount.ledger(), newAccount.code(),
           newAccount.flags());
@@ -188,11 +189,19 @@ record QueriedAccount(long id, int ledger, int code, int flags, BigInteger debit
 record LookupAccountsResult(ArrayList<QueriedAccount> accountsFound) implements Result {
   @Override
   public void reconcile(Model model) {
-    // NOTE: These checks assume all known accounts were queried.
+    // NOTE: These checks assume all known accounts in the ledger were queried.
 
     // All created accounts are found, and no others.
     assert model.accounts.keySet().equals(accountsFound.stream().map(a -> a.id())
         .collect(Collectors.toSet())) : "all created accounts were not found by query";
+
+    // All accounts found are in the correct ledger.
+    for (var account : accountsFound) {
+      assert account.ledger() == model.ledger 
+        : "found account with another ledger than the model ({} != {})".formatted(
+            account.ledger(), 
+            model.ledger);
+    }
 
     // Total credits and total debits must be equal over all accounts.
     var diff = this.debitsCreditsDifference(accountsFound);

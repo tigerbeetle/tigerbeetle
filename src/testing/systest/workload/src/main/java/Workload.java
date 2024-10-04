@@ -3,6 +3,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import com.tigerbeetle.AccountFlags;
 import com.tigerbeetle.Client;
@@ -16,23 +17,26 @@ import com.tigerbeetle.TransferFlags;
  *
  * After every operation, all accounts are queried, and basic invariants are checked.
  */
-public class Workload {
+public class Workload implements Callable<Void> {
   static int ACCOUNTS_COUNT_MAX = 100;
-  static int BATCH_SIZE_MAX = 100;
+  static int BATCH_SIZE_MAX = 1000;
 
-  Model model = new Model();
-  Random random;
-  Client client;
+  final Model model;
+  final Random random;
+  final Client client;
+  final int ledger;
+  final Statistics statistics;
 
-  public Workload(Random random, Client client) {
+  public Workload(Random random, Client client, int ledger, Statistics statistics) {
     this.random = random;
     this.client = client;
+    this.model = new Model(ledger);
+    this.ledger = ledger;
+    this.statistics = statistics;
   }
 
-  void run() {
-    long commandsFailedCount = 0;
-    long commandsSucceededCount = 0;
-
+  @Override
+  public Void call() {
     for (int n = 0; true; n++) {
       var command = randomCommand();
       try {
@@ -41,28 +45,24 @@ public class Workload {
 
         switch (result) {
           case CreateAccountsResult(var created, var failed) -> {
-            commandsSucceededCount += created.size();
-            commandsFailedCount += failed.size();
+            statistics.addRequests(created.size(), failed.size());
           }
           case CreateTransfersResult(var created, var failed) -> {
-            commandsSucceededCount += created.size();
-            commandsFailedCount += failed.size();
+            statistics.addRequests(created.size(), failed.size());
           }
           default -> {
           }
         }
 
-        if (n % 1000 == 0) {
-          System.err.println(
-              "%d succeeded, %d failed".formatted(commandsSucceededCount, commandsFailedCount));
-        }
-
         lookupAllAccounts().ifPresent(query -> {
-          var response = query.execute(client);
+          var response = (LookupAccountsResult) query.execute(client);
+          statistics.addRequests(response.accountsFound().size(), 0);
           response.reconcile(model);
         });
       } catch (AssertionError e) {
-        System.err.print("Assertion failed after executing command: %s".formatted(command));
+        System.err.println("ledger %d: Assertion failed after executing command: %s".formatted(
+              ledger, 
+              command));
         throw e;
       }
     }
@@ -100,7 +100,6 @@ public class Workload {
 
         for (int i = 0; i < newAccountsCount; i++) {
           var id = random.nextLong(0, Long.MAX_VALUE);
-          var ledger = random.nextInt(1, 10);
           var code = random.nextInt(1, 100);
           var flags = Arbitrary.element(random,
               List.of(AccountFlags.NONE, AccountFlags.LINKED,
@@ -119,11 +118,10 @@ public class Workload {
   }
 
   Optional<Supplier<? extends Command<?>>> createTransfers() {
-    // We can only try to transfer within ledgers with at least two accounts.
-    var enabledLedgers = model.accountsPerLedger().entrySet().stream()
-        .filter(accounts -> accounts.getValue().size() > 2).toList();
+    var accounts = model.allAccounts();
 
-    if (enabledLedgers.isEmpty()) {
+    // We can only transfer when there are at least two accounts.
+    if (accounts.size() < 2) {
       return Optional.empty();
     }
 
@@ -132,13 +130,7 @@ public class Workload {
       var newTransfers = new ArrayList<NewTransfer>(transfersCount);
 
       for (int i = 0; i < transfersCount; i++) {
-        // For every transfer we pick a random (enabled) ledger.
-        var ledger = Arbitrary.element(random, enabledLedgers);
-        var accounts = ledger.getValue();
-
-
         var id = random.nextLong(0, Long.MAX_VALUE);
-        var ledger2 = ledger.getKey();
         var code = random.nextInt(1, 100);
         var amount = BigInteger.valueOf(random.nextLong(0, Long.MAX_VALUE));
         var flags = Arbitrary.element(random,
@@ -147,14 +139,14 @@ public class Workload {
                 TransferFlags.BALANCING_DEBIT, TransferFlags.BALANCING_CREDIT,
                 TransferFlags.CLOSING_DEBIT, TransferFlags.CLOSING_CREDIT));
 
-        int debitAccountIndex = random.nextInt(0, ledger.getValue().size());
+        int debitAccountIndex = random.nextInt(0, accounts.size());
         int creditAccountIndex = random.ints(0, accounts.size())
             .filter((index) -> index != debitAccountIndex).findFirst().orElseThrow();
         var debitAccountId = accounts.get(debitAccountIndex).id();
         var creditAccountId = accounts.get(creditAccountIndex).id();
 
         newTransfers.add(
-            new NewTransfer(id, debitAccountId, creditAccountId, ledger2, code, amount, flags));
+            new NewTransfer(id, debitAccountId, creditAccountId, ledger, code, amount, flags));
       }
 
       return new CreateTransfers(newTransfers);
