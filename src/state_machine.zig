@@ -598,8 +598,8 @@ pub fn StateMachineType(
                     if (input.len != 0) return false;
                 },
                 .get_account_transfers, .get_account_balances => {
-                    const event_size: u32 = if (FormerAccountFilter.required(client_release))
-                        @sizeOf(FormerAccountFilter)
+                    const event_size: u32 = if (AccountFilterFormer.required(client_release))
+                        @sizeOf(AccountFilterFormer)
                     else
                         @sizeOf(AccountFilter);
 
@@ -1016,8 +1016,8 @@ pub fn StateMachineType(
         fn account_filter_from_input(
             input: []const u8,
         ) AccountFilter {
-            if (input.len == @sizeOf(FormerAccountFilter)) {
-                const filter = mem.bytesAsValue(FormerAccountFilter, input);
+            if (input.len == @sizeOf(AccountFilterFormer)) {
+                const filter = mem.bytesAsValue(AccountFilterFormer, input);
                 return .{
                     .account_id = filter.account_id,
                     .user_data_128 = 0,
@@ -1035,7 +1035,7 @@ pub fn StateMachineType(
             return mem.bytesToValue(AccountFilter, input);
         }
 
-        const FormerAccountFilter = extern struct {
+        const AccountFilterFormer = extern struct {
             account_id: u128,
             timestamp_min: u64,
             timestamp_max: u64,
@@ -1054,8 +1054,8 @@ pub fn StateMachineType(
             }
 
             comptime {
-                assert(@sizeOf(FormerAccountFilter) == 64);
-                assert(stdx.no_padding(FormerAccountFilter));
+                assert(@sizeOf(AccountFilterFormer) == 64);
+                assert(stdx.no_padding(AccountFilterFormer));
 
                 const release_max_transition =
                     vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
@@ -1790,10 +1790,7 @@ pub fn StateMachineType(
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const filter: AccountFilter = mem.bytesToValue(
-                AccountFilter,
-                input[0..@sizeOf(AccountFilter)],
-            );
+            const filter = account_filter_from_input(input);
 
             const scan_results: []const AccountBalancesGrooveValue = mem.bytesAsSlice(
                 AccountBalancesGrooveValue,
@@ -3182,7 +3179,8 @@ const TestContext = struct {
     superblock: SuperBlock,
     grid: Grid,
     state_machine: StateMachine,
-    busy: bool = false,
+    busy: bool,
+    client_release: vsr.Release,
 
     fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
         ctx.storage = try Storage.init(
@@ -3229,6 +3227,9 @@ const TestContext = struct {
             .cache_entries_account_balances = 0,
         });
         errdefer ctx.state_machine.deinit(allocator);
+
+        ctx.busy = false;
+        ctx.client_release = vsr.Release.minimum;
     }
 
     fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
@@ -3259,7 +3260,7 @@ const TestContext = struct {
         context.state_machine.prefetch_timestamp = timestamp;
         context.state_machine.prefetch(
             TestContext.callback,
-            vsr.Release.minimum,
+            context.client_release,
             op,
             operation,
             input,
@@ -3268,7 +3269,7 @@ const TestContext = struct {
 
         return context.state_machine.commit(
             0,
-            vsr.Release.minimum,
+            context.client_release,
             1,
             timestamp,
             operation,
@@ -3286,6 +3287,13 @@ const TestAction = union(enum) {
         debits_posted: u128,
         credits_pending: u128,
         credits_posted: u128,
+    },
+
+    // Opposite order to vsr.ReleaseTriple!
+    setup_client_release: struct {
+        major: u16,
+        minor: u8,
+        patch: u8,
     },
 
     tick: struct {
@@ -3317,6 +3325,7 @@ const TestAction = union(enum) {
     },
 
     get_account_balances: TestGetAccountBalances,
+    get_account_balances_former: TestGetAccountBalancesFormer,
     get_account_balances_result: struct {
         transfer_id: u128,
         debits_pending: u128,
@@ -3326,6 +3335,7 @@ const TestAction = union(enum) {
     },
 
     get_account_transfers: TestGetAccountTransfers,
+    get_account_transfers_former: TestGetAccountTransfersFormer,
     get_account_transfers_result: u128,
 
     query_accounts: TestQueryAccounts,
@@ -3455,6 +3465,18 @@ const TestAccountFilter = struct {
     flags_reversed: ?enum { REV } = null,
 };
 
+const TestAccountFilterFormer = struct {
+    account_id: u128,
+    // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
+    // created.
+    timestamp_min_transfer_id: ?u128 = null,
+    timestamp_max_transfer_id: ?u128 = null,
+    limit: u32,
+    flags_debits: ?enum { DR } = null,
+    flags_credits: ?enum { CR } = null,
+    flags_reversed: ?enum { REV } = null,
+};
+
 const TestQueryFilter = struct {
     user_data_128: u128,
     user_data_64: u64,
@@ -3470,6 +3492,8 @@ const TestQueryFilter = struct {
 // Operations that share the same input.
 const TestGetAccountBalances = TestAccountFilter;
 const TestGetAccountTransfers = TestAccountFilter;
+const TestGetAccountBalancesFormer = TestAccountFilterFormer;
+const TestGetAccountTransfersFormer = TestAccountFilterFormer;
 const TestQueryAccounts = TestQueryFilter;
 const TestQueryTransfers = TestQueryFilter;
 
@@ -3518,6 +3542,19 @@ fn check(test_table: []const u8) !void {
                         .new = &account_new,
                     });
                 }
+            },
+            .setup_client_release => |r| {
+                assert(operation == null);
+                assert(context.client_release.value == vsr.Release.minimum.value);
+
+                // ReleaseTriple defines things in the opposite order. Swap the fields by name so
+                // that the check in code can look in-order to a human.
+                const release_triple = vsr.ReleaseTriple{
+                    .major = r.major,
+                    .minor = r.minor,
+                    .patch = r.patch,
+                };
+                context.client_release = vsr.Release.from(release_triple);
             },
             .tick => |ticks| {
                 assert(ticks.value != 0);
@@ -3660,6 +3697,28 @@ fn check(test_table: []const u8) !void {
                 };
                 try request.appendSlice(std.mem.asBytes(&event));
             },
+            .get_account_balances_former => |f| {
+                assert(operation == null or operation.? == .get_account_balances);
+                operation = .get_account_balances;
+
+                const timestamp_min =
+                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_max =
+                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+
+                const event = TestContext.StateMachine.AccountFilterFormer{
+                    .account_id = f.account_id,
+                    .timestamp_min = timestamp_min,
+                    .timestamp_max = timestamp_max,
+                    .limit = f.limit,
+                    .flags = .{
+                        .debits = f.flags_debits != null,
+                        .credits = f.flags_credits != null,
+                        .reversed = f.flags_reversed != null,
+                    },
+                };
+                try request.appendSlice(std.mem.asBytes(&event));
+            },
             .get_account_balances_result => |r| {
                 assert(operation.? == .get_account_balances);
 
@@ -3687,6 +3746,28 @@ fn check(test_table: []const u8) !void {
                     .user_data_64 = f.user_data_64 orelse 0,
                     .user_data_32 = f.user_data_32 orelse 0,
                     .code = f.code orelse 0,
+                    .timestamp_min = timestamp_min,
+                    .timestamp_max = timestamp_max,
+                    .limit = f.limit,
+                    .flags = .{
+                        .debits = f.flags_debits != null,
+                        .credits = f.flags_credits != null,
+                        .reversed = f.flags_reversed != null,
+                    },
+                };
+                try request.appendSlice(std.mem.asBytes(&event));
+            },
+            .get_account_transfers_former => |f| {
+                assert(operation == null or operation.? == .get_account_transfers);
+                operation = .get_account_transfers;
+
+                const timestamp_min =
+                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_max =
+                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+
+                const event = TestContext.StateMachine.AccountFilterFormer{
+                    .account_id = f.account_id,
                     .timestamp_min = timestamp_min,
                     .timestamp_max = timestamp_max,
                     .limit = f.limit,
@@ -3780,7 +3861,7 @@ fn check(test_table: []const u8) !void {
                 context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
                 context.state_machine.prepare_timestamp += 1;
                 context.state_machine.prepare(
-                    vsr.Release.minimum,
+                    context.client_release,
                     commit_operation,
                     request.items,
                 );
@@ -5280,6 +5361,38 @@ test "get_account_balances: invalid filter" {
     );
 }
 
+test "get_account_transfers_former / get_account_balances_former" {
+    try check(
+        \\ setup_client_release 0 15 3
+        \\
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2   10   _  U1000  U10  U1 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T2 A2 A1   11   _  U1001  U10  U2 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T3 A1 A2   12   _  U1000  U20  U2 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T4 A2 A1   13   _  U1001  U20  U1 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
+        \\ commit create_transfers
+
+        // Debits + credits, chronological.
+        \\ get_account_transfers_former A1 _  _ 10 DR CR  _
+        \\ get_account_transfers_result T1
+        \\ get_account_transfers_result T2
+        \\ get_account_transfers_result T3
+        \\ get_account_transfers_result T4
+        \\ commit get_account_transfers
+
+        // Debits + credits, chronological.
+        \\ get_account_balances_former A1 _  _ 10 DR CR  _
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ get_account_balances_result T3 0 22 0 11
+        \\ get_account_balances_result T4 0 22 0 24
+        \\ commit get_account_balances
+    );
+}
+
 test "query_accounts" {
     try check(
         \\ account A1  0  0  0  0 U1000 U10 U1 _ L1 C1 _   _   _ _ _ _ _ _ ok
@@ -5678,7 +5791,7 @@ test "StateMachine: input_valid" {
 
     for (events) |event| {
         try std.testing.expect(context.state_machine.input_valid(
-            vsr.Release.minimum,
+            context.client_release,
             event.operation,
             input[0..0],
         ) == (event.min == 0));
@@ -5690,18 +5803,18 @@ test "StateMachine: input_valid" {
         }
 
         try std.testing.expect(context.state_machine.input_valid(
-            vsr.Release.minimum,
+            context.client_release,
             event.operation,
             input[0 .. 1 * event.size],
         ));
         try std.testing.expect(context.state_machine.input_valid(
-            vsr.Release.minimum,
+            context.client_release,
             event.operation,
             input[0 .. event.max * event.size],
         ));
         if ((event.max + 1) * event.size < TestContext.message_body_size_max) {
             try std.testing.expect(!context.state_machine.input_valid(
-                vsr.Release.minimum,
+                context.client_release,
                 event.operation,
                 input[0 .. (event.max + 1) * event.size],
             ));
@@ -5710,7 +5823,7 @@ test "StateMachine: input_valid" {
             // on an assert.
         }
         try std.testing.expect(!context.state_machine.input_valid(
-            vsr.Release.minimum,
+            context.client_release,
             event.operation,
             input[0 .. 3 * (event.size / 2)],
         ));
