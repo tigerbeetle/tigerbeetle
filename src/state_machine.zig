@@ -1668,7 +1668,7 @@ pub fn StateMachineType(
                     results[count] = .{ .index = @intCast(index), .result = result };
                     count += 1;
 
-                    self.transient_failure(operation, event.id, result);
+                    self.transient_error(operation, event.id, result);
                 }
                 if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
                     if (!chain_broken) {
@@ -1687,7 +1687,7 @@ pub fn StateMachineType(
             return @sizeOf(Result(operation)) * count;
         }
 
-        fn transient_failure(
+        fn transient_error(
             self: *StateMachine,
             comptime operation: Operation,
             id: u128,
@@ -1954,7 +1954,7 @@ pub fn StateMachineType(
 
             switch (self.forest.grooves.transfers.get(t.id)) {
                 .found_object => |e| return self.create_transfer_exists(client_release, t, e),
-                .found_orphaned_id => if (!retry_transient_failure(client_release)) {
+                .found_orphaned_id => if (!retry_transient_error(client_release)) {
                     return .id_already_failed;
                 },
                 .not_found => {},
@@ -2239,7 +2239,7 @@ pub fn StateMachineType(
                     return .exists_with_different_user_data_32;
                 }
                 if (t.ledger != e.ledger) {
-                    return if (retry_transient_failure(client_release))
+                    return if (retry_transient_error(client_release))
                         .transfer_must_have_the_same_ledger_as_accounts
                     else
                         .exists_with_different_ledger;
@@ -2546,7 +2546,7 @@ pub fn StateMachineType(
             }
 
             if (t.ledger != 0 and t.ledger != e.ledger) {
-                return if (retry_transient_failure(client_release))
+                return if (retry_transient_error(client_release))
                     .transfer_must_have_the_same_ledger_as_accounts
                 else
                     .exists_with_different_ledger;
@@ -2946,12 +2946,12 @@ pub fn StateMachineType(
         // TODO(client_release_min): When client_release_min is bumped, remove this function and the
         // legacy code it gates.
         //
-        // Specifically, when retry_transient_failure() is true:
+        // Specifically, when retry_transient_error() is true:
         // - Transfers that fail due to transient errors can be retried
         //   with the same ID without returning `id_already_failed`.
         // - The `exists_with_different_ledger` error code does not apply
         //   to `create_transfers`.
-        fn retry_transient_failure(client_release: vsr.Release) bool {
+        fn retry_transient_error(client_release: vsr.Release) bool {
             const release_min_inclusive =
                 vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
             const release_max_exclusive =
@@ -4097,10 +4097,10 @@ test "create_transfers/lookup_transfers" {
         \\ transfer   T1 A8 A9    9   _  _  _  _    _ L0 C0   _   _   _   _   _   _ _  _   CCR _ _ closing_transfer_must_be_pending
         \\ transfer   T1 A8 A9    9   _  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ ledger_must_not_be_zero
         \\ transfer   T1 A8 A9    9   _  _  _  _    _ L9 C0   _ PEN   _   _   _   _ _  _   _   _ _ code_must_not_be_zero
-        // `debit_account_not_found` is a transient failure, T1 cannot be reused:
+        // `debit_account_not_found` is a transient error, T1 cannot be reused:
         \\ transfer   T1 A8 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_not_found
         \\ transfer   T1 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed
-        // `credit_account_not_found` is a transient failure, T2 cannot be reused:
+        // `credit_account_not_found` is a transient error, T2 cannot be reused:
         \\ transfer   T2 A1 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_not_found
         \\ transfer   T2 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed
         \\
@@ -4113,10 +4113,10 @@ test "create_transfers/lookup_transfers" {
         \\ transfer   T3 A1 A3 -299   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits          // amount = max - A1.debits_pending - A1.debits_posted + 1
         \\ transfer   T3 A1 A3 -319   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits         // amount = max - A3.credits_pending - A3.credits_posted + 1
         \\ transfer   T3 A4 A5  199   _  _  _  _  999 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_timeout
-        // `exceeds_credits` is a transient failure, T3 cannot be reused:
+        // `exceeds_credits` is a transient error, T3 cannot be reused:
         \\ transfer   T3 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits           // amount = A4.credits_posted - A4.debits_pending - A4.debits_posted + 1
         \\ transfer   T3 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed
-        // `exceeds_debits` is a transient failure, T4 cannot be reused:
+        // `exceeds_debits` is a transient error, T4 cannot be reused:
         \\ transfer   T4 A4 A5   91   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_debits            // amount = A5.debits_posted - A5.credits_pending - A5.credits_posted + 1
         \\ transfer   T4 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed
         \\
@@ -4213,7 +4213,7 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T102 A8 A9   16  -0 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_id_must_not_be_int_max
         \\ transfer T102 A8 A9   16 102 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_id_must_be_different
         \\ transfer T102 A8 A9   16 103 U2 U2 U2   50 L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ timeout_reserved_for_pending_transfer
-        // `pending_transfer_not_found` is a transient failure, T102 cannot be reused:
+        // `pending_transfer_not_found` is a transient error, T102 cannot be reused:
         \\ transfer T102 A8 A9   16 103 U2 U2 U2    _ L6 C7   _   _   _ VOI   _   _  _ _ _ _ _ pending_transfer_not_found
         \\ transfer T102 A1 A2   13   _ U1 U1 U1    _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ id_already_failed
         \\
@@ -4757,7 +4757,7 @@ test "create_transfers: per-transfer balance invariant" {
         \\ commit create_transfers
         \\
         // Ids failed in a linked chain can be reused, but
-        // `exceeds_debits` is a transient failure, T2 cannot be reused:
+        // `exceeds_debits` is a transient error, T2 cannot be reused:
         \\ transfer T1 A1 A2  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
         \\ transfer T2 A2 A3  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ id_already_failed
         \\ transfer T3 A2 A3  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
@@ -4789,7 +4789,7 @@ test "create_transfers: per-transfer balance invariant" {
         \\ commit create_transfers
         \\
         // Ids failed in a linked chain can be reused, but
-        // `exceeds_credits` is a transient failure, T2 cannot be reused:
+        // `exceeds_credits` is a transient error, T2 cannot be reused:
         \\ transfer T1 A1 A2  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
         \\ transfer T2 A3 A1  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ id_already_failed
         \\ transfer T3 A3 A1  0   _  _  _  _    0 L1 C1   _   _ _   _   _   _ _ _ _ _ _ ok
@@ -4964,10 +4964,10 @@ test "create_transfers: closing accounts" {
         \\ transfer   T2  A1 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR _   _ _ closing_transfer_must_be_pending
         \\ transfer   T2  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ ok
         \\ transfer   T2  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR _   _ _ exists
-        // `debit_account_already_closed` is a transient failure, T3 cannot be reused:
+        // `debit_account_already_closed` is a transient error, T3 cannot be reused:
         \\ transfer   T3  A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
         \\ transfer   T3  A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ id_already_failed
-        // `credit_account_already_closed` is a transient failure, T4 cannot be reused:
+        // `credit_account_already_closed` is a transient error, T4 cannot be reused:
         \\ transfer   T4  A2 A1    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ transfer   T4  A1 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ id_already_failed
         \\ commit create_transfers
@@ -4975,7 +4975,7 @@ test "create_transfers: closing accounts" {
         \\ lookup_account A1  0 15  0   0  CLSD
         \\ lookup_account A2  0  0  0  15  _
         \\ commit lookup_accounts
-        // `debit_account_already_closed` is a transient failure, T5 cannot be reused:
+        // `debit_account_already_closed` is a transient error, T5 cannot be reused:
         \\ transfer   T5  A1 A2    0   T2 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ debit_account_already_closed
         \\ transfer   T5  A1 A2    0   T2 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ id_already_failed
         \\
@@ -4994,7 +4994,7 @@ test "create_transfers: closing accounts" {
         \\ transfer   T9  A1 A2   10   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  _   _   _ _ ok
         \\ transfer   T10 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ ok
         \\ transfer   T10 A1 A2    0   _  _   _  _    2 L1 C1   _   PEN _   _   _   _  _  _   CCR _ _ exists
-        // `credit_account_already_closed` is a transient failure, T11 cannot be reused:
+        // `credit_account_already_closed` is a transient error, T11 cannot be reused:
         \\ transfer   T11 A1 A2   10   T9 _   _  _    _ L1 C1   _   _   POS _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ transfer   T11 A1 A2   10   T9 _   _  _    _ L1 C1   _   _   _   VOI _   _  _  _   _   _ _ id_already_failed
         \\
@@ -5022,10 +5022,10 @@ test "create_transfers: closing accounts" {
         \\ transfer   T13  A1 A2    0   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  CDR CCR _ _ closing_transfer_must_be_pending
         \\ transfer   T13  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR CCR _ _ ok
         \\ transfer   T13  A1 A2    0   _  _   _  _    0 L1 C1   _   PEN _   _   _   _  _  CDR CCR _ _ exists
-        // `debit_account_already_closed` is a transient failure, T14 cannot be reused:
+        // `debit_account_already_closed` is a transient error, T14 cannot be reused:
         \\ transfer   T14  A1 A3    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ debit_account_already_closed
         \\ transfer   T14  A1 A3    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ id_already_failed
-        // `credit_account_already_closed` is a transient failure, T15 cannot be reused:
+        // `credit_account_already_closed` is a transient error, T15 cannot be reused:
         \\ transfer   T15  A3 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ credit_account_already_closed
         \\ transfer   T15  A3 A2    5   _  _   _  _    _ L1 C1   _   _   _   _   _   _  _  _   _   _ _ id_already_failed
         \\ commit create_transfers
@@ -5035,10 +5035,10 @@ test "create_transfers: closing accounts" {
         \\ commit lookup_accounts
         \\
         // Cannot close an already closed account.
-        // `debit_account_already_closed` is a transient failure, T16 cannot be reused:
+        // `debit_account_already_closed` is a transient error, T16 cannot be reused:
         \\ transfer   T16 A1 A3    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  CDR _   _ _ debit_account_already_closed
         \\ transfer   T16 A1 A3    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  CDR _   _ _ id_already_failed
-        // `credit_account_already_closed` is a transient failure, T17 cannot be reused:
+        // `credit_account_already_closed` is a transient error, T17 cannot be reused:
         \\ transfer   T17 A3 A2    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  _   CCR _ _ credit_account_already_closed
         \\ transfer   T17 A3 A2    0   _  _   _  _    0 L1 C1   _   PEN   _   _   _   _  _  _   CCR _ _ id_already_failed
         \\ commit create_transfers
