@@ -1214,8 +1214,12 @@ pub fn GrooveType(
         pub fn insert(groove: *Groove, object: *const Object) void {
             assert(object.timestamp >= TimestampRange.timestamp_min);
             assert(object.timestamp <= TimestampRange.timestamp_max);
-            if (constants.verify) {
-                assert(!groove.objects_cache.has(@field(object, primary_field)));
+
+            // Old clients may retry the same transient error many times.
+            // TODO: When client_release_min is bumped, replace this code with
+            // `assert(!groove.objects_cache.has(@field(object, primary_field)));`
+            if (groove.objects_cache.get(@field(object, primary_field))) |existing| {
+                assert(existing.timestamp == 0);
             }
 
             groove.objects_cache.upsert(object);
