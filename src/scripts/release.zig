@@ -208,6 +208,8 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     // `dist`.
     inline for (.{ true, false }) |debug| {
         inline for (targets) |target| {
+            // TODO: When changing this back from being hardcoded, make sure to reenable the assert
+            // in publish_docker.
             try shell.exec_zig(
                 \\build
                 \\    -Dtarget={target}
@@ -555,6 +557,10 @@ fn publish(
     }
 
     if (languages.contains(.docker)) try publish_docker(shell, info);
+
+    // TODO: Fail here on to not publish clients. Remove for the next release!
+    assert(false);
+
     if (languages.contains(.dotnet)) try publish_dotnet(shell, info);
     if (languages.contains(.go)) try publish_go(shell, info);
     if (languages.contains(.java)) try publish_java(shell, info);
@@ -784,7 +790,9 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         });
         const mode = if (debug) "Debug" else "ReleaseSafe";
         assert(std.mem.indexOf(u8, version_verbose, mode) != null);
-        assert(std.mem.indexOf(u8, version_verbose, info.release_triple) != null);
+
+        // TODO: Disabled while hardcoded release version.
+        // assert(std.mem.indexOf(u8, version_verbose, info.release_triple) != null);
     }
 }
 
