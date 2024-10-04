@@ -3,6 +3,26 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.6
+
+Released: 2024-10-04
+
+Note: this is an extra release to correct a potential issue in the upgrade path for `0.16.4`.
+Specifically, the combination of `tigerbeetle 0.16.2` and newer, and any client before `0.16.2` can
+lead to an assertion failure and a server crash. No data is lost, but the server becomes 
+unavailable.
+
+It is recommended to upgrade to `0.16.6`, but this is only _required_ if you are running older
+clients. To upgrade, replace the binary on disk, and manually restart the replica.
+
+Note that although the release is tagged at `0.16.6`, the binary advertises itself as `0.16.4`.
+
+### Safety And Performance
+
+- [#2377](https://github.com/tigerbeetle/tigerbeetle/pull/2377)
+
+  Correctly parse AccountFilter from pre `0.16.2` clients.
+
 ## TigerBeetle 0.16.5
 
 Released: 2024-10-03
