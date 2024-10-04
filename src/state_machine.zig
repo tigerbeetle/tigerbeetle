@@ -1953,7 +1953,7 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.transfers.get(t.id)) {
-                .found_object => |e| return self.create_transfer_exists(t, client_release, e),
+                .found_object => |e| return self.create_transfer_exists(client_release, t, e),
                 .found_orphaned_id => if (!retry_transient_failure(client_release)) {
                     return .id_already_failed;
                 },
@@ -2179,8 +2179,8 @@ pub fn StateMachineType(
 
         fn create_transfer_exists(
             self: *const StateMachine,
-            t: *const Transfer,
             client_release: vsr.Release,
+            t: *const Transfer,
             e: *const Transfer,
         ) CreateTransferResult {
             assert(t.id == e.id);
