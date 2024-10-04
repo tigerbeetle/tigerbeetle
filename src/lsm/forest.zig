@@ -516,6 +516,11 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     forest.compaction_pipeline.block_pool_raw.len);
             }
 
+            // Groove sync compaction - must be done after all async work for the beat completes.
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).compact(op);
+            }
+
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
             // of pacing.
             if (last_beat) {
@@ -535,11 +540,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 // reset our pipeline state.
                 assert(forest.compaction_pipeline.bar_active.count() == 0);
                 forest.compaction_pipeline.compactions.clear();
-            }
-
-            // Groove sync compaction - must be done after all async work for the beat completes???
-            inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).compact(op);
             }
 
             // On the last beat of the bar, make sure that manifest log compaction is finished.
@@ -767,7 +767,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         /// be shared between compactions, so these are all multiplied by the number
         /// of concurrent compactions.
         /// TODO: This is currently the case for fixed half-bar scheduling.
-        const block_count_bar_single: u64 = 3;
+        const block_count_bar_single: u64 = 2;
 
         const block_count_bar_concurrent: u64 = blk: {
             var block_count: u64 = 0;
@@ -1040,11 +1040,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                         block_pool_count_start - self.block_pool.count == block_count_bar_single,
                     );
 
-                    const immutable_table_a_block = self.block_pool.pop().?;
-                    const target_index_blocks = CompactionHelper.BlockFIFO.init(
-                        &self.block_pool,
-                        2,
-                    );
+                    const target_index_blocks =
+                        CompactionHelper.BlockFIFO.init(&self.block_pool, 2);
 
                     // A compaction is marked as live at the start of a bar, unless it's
                     // move_table...
@@ -1062,7 +1059,6 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                             self.tree_compaction(tree_id, compaction.level_b).bar_setup_budget(
                                 @divExact(constants.lsm_compaction_ops, 2),
                                 target_index_blocks,
-                                immutable_table_a_block,
                             );
                         },
                     }

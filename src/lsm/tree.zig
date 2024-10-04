@@ -137,12 +137,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             });
             errdefer tree.table_mutable.deinit(allocator);
 
-            try tree.table_immutable.init(
-                allocator,
-                .{ .immutable = .{} },
-                config.name,
-                .{ .value_count_limit = value_count_limit },
-            );
+            try tree.table_immutable.init(allocator, .immutable, config.name, .{
+                .value_count_limit = value_count_limit,
+            });
             errdefer tree.table_immutable.deinit(allocator);
 
             try tree.manifest.init(allocator, node_pool, config);
@@ -503,6 +500,17 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(tree.compaction_op.? == 0 or
                 (tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
             maybe(tree.key_range == null);
+        }
+
+        pub fn compact(tree: *Tree) void {
+            assert(tree.table_mutable.mutability == .mutable);
+
+            tree.grid.trace.start(.compact_mutable_suffix, .{ .tree = tree.config.name });
+            defer tree.grid.trace.stop(.compact_mutable_suffix, .{ .tree = tree.config.name });
+
+            // Spreads sort+deduplication work between beats, to avoid a latency spike at the end of
+            // each bar (or immediately prior to scans).
+            tree.table_mutable.sort_suffix();
         }
 
         /// Called after the last beat of a full compaction bar, by the compaction instance.

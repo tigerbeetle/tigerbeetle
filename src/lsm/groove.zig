@@ -1403,6 +1403,13 @@ pub fn GrooveType(
         }
 
         pub fn compact(groove: *Groove, op: u64) void {
+            if (has_id) groove.ids.compact();
+            groove.objects.compact();
+
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                @field(groove.indexes, field.name).compact();
+            }
+
             // Compact the objects_cache on the last beat of the bar, just like the trees do to
             // their mutable tables.
             const compaction_beat = op % constants.lsm_compaction_ops;

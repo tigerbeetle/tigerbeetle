@@ -335,7 +335,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 if (compaction.bar != null and compaction.bar.?.move_table) {
                     continue;
                 }
-                const source_a_immutable_block = env.block_pool.pop().?;
                 const target_index_blocks = CompactionHelper.BlockFIFO.init(&env.block_pool, 2);
 
                 const beat_blocks = .{
@@ -348,7 +347,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     .target_value_blocks = CompactionHelper.BlockFIFO.init(&env.block_pool, 2),
                 };
 
-                compaction.bar_setup_budget(1, target_index_blocks, source_a_immutable_block);
+                compaction.bar_setup_budget(1, target_index_blocks);
                 compaction.beat_grid_reserve();
                 compaction.beat_blocks_assign(beat_blocks);
 
