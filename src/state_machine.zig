@@ -4140,8 +4140,16 @@ test "create_transfers/lookup_transfers" {
         \\ transfer   T8 A1 A3    0   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
         \\ commit create_transfers
         \\
-        \\ lookup_account A1 223 203   0   7  _
-        \\ lookup_account A3   0   7 233 213  _
+        // Ensure compatibility with clients < 0.16.4
+        \\ setup_client_release 0 16 3
+        \\ transfer   T9 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits
+        \\ transfer   T9 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits
+        \\ transfer   T9 A1 A3    1   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ ok
+        \\ transfer   T9 A1 A3    1   _  _  _  _    _ L2 C1   _ _     _   _   _   _ _  _   _   _ _ transfer_must_have_the_same_ledger_as_accounts
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 223 204   0   7  _
+        \\ lookup_account A3   0   7 233 214  _
         \\ commit lookup_accounts
         \\
         \\ lookup_transfer T5 exists true
