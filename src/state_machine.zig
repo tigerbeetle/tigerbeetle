@@ -4257,9 +4257,34 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T107 A0 A0    1  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > e.amount
         \\ commit create_transfers
 
+        // Ensure compatibility with client < 0.16.0
+        \\ setup_client_release 0 15 3
+        \\
+        \\ transfer T20  A1 A2    0   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ amount_must_not_be_zero
+        \\ transfer T20  A1 A2    7   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ ok
+        \\ transfer T21  A1 A2    2   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ ok
+        \\
+        \\ transfer T201 A0 A0   -0 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
+        \\ transfer T201 A0 A0   -1 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
+        \\ transfer T201 A0 A0    0 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ ok
+        \\ transfer T201 A0 A0    7 T20 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists
+        \\ transfer T201 A0 A0    7 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists // ledger/code = 0
+        \\ transfer T201 A0 A0    0 T20 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists // amount = 0
+        \\ transfer T201 A0 A0    8 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > p.amount
+        \\ transfer T201 A0 A0    6 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < e.amount
+        \\
+        \\ transfer T202 A0 A0   -0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
+        \\ transfer T202 A0 A0   -1 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
+        \\ transfer T202 A0 A0    0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ ok
+        \\ transfer T202 A0 A0    0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists
+        \\ transfer T202 A0 A0    1 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < p.amount
+        \\ transfer T202 A0 A0    2 T21 U0 U0 U0    _ L0 C0   _   _   _ VOI   _   _  _ _ _ _ _ exists
+        \\ transfer T202 A0 A0    3 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > p.amount
+        \\ commit create_transfers
+
         // Check balances after resolving.
-        \\ lookup_account A1  0 36  0  0  _
-        \\ lookup_account A2  0  0  0 36  _
+        \\ lookup_account A1  0 43  0  0  _
+        \\ lookup_account A2  0  0  0 43  _
         \\ commit lookup_accounts
 
         // The posted transfer amounts are set to the actual amount posted (which may be less than
@@ -4268,6 +4293,9 @@ test "create/lookup 2-phase transfers" {
         \\ lookup_transfer T105 amount 7
         \\ lookup_transfer T106 amount 1
         \\ lookup_transfer T107 amount 0
+        \\
+        \\ lookup_transfer T201 amount 7
+        \\ lookup_transfer T202 amount 2
         \\ commit lookup_transfers
     );
 }
@@ -4602,6 +4630,36 @@ test "create_transfers: balancing_debit | balancing_credit (amount=maxInt, balan
         \\
         \\ transfer   T1 A1 A2   -0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ _ _ _ ok
         \\ transfer   T2 A3 A4   -0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ _ _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 0 -1  0 -1 _
+        \\ lookup_account A2 0  0  0 -1 _
+        \\ lookup_account A3 0 -1  0  0 _
+        \\ lookup_account A4 0 -1  0 -1 _
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 amount -1
+        \\ lookup_transfer T2 amount -1
+        \\ commit lookup_transfers
+    );
+}
+
+test "create_transfers: balancing_debit | balancing_credit (amount=0, balance≈maxInt)" {
+    // Ensure compatibility with clients < 0.16.0
+    try check(
+        \\ setup_client_release 0 15 3
+        \\
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ setup A1 0  0 0 -1
+        \\ setup A4 0 -1 0  0
+        \\
+        \\ transfer   T1 A1 A2   0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ _ _ _ ok
+        \\ transfer   T2 A3 A4   0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 -1  0 -1 _
