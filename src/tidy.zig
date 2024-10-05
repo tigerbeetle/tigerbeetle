@@ -134,6 +134,12 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "FIX" ++ "ME comments must be addressed before getting to main";
     }
 
+    if (std.mem.indexOf(u8, source, "dbg(") != null) {
+        if (std.mem.indexOf(u8, source, "fn dbg(") == null) {
+            return "dbg" ++ "() must be removed before getting to main";
+        }
+    }
+
     return null;
 }
 
