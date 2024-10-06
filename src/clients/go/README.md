@@ -115,33 +115,23 @@ See details for account fields in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account).
 
 ```go
-accountsRes, err := client.CreateAccounts([]Account{
+accountErrors, err := client.CreateAccounts([]Account{
 	{
-		ID:             ToUint128(137),
-		DebitsPending:  ToUint128(0),
-		DebitsPosted:   ToUint128(0),
-		CreditsPending: ToUint128(0),
-		CreditsPosted:  ToUint128(0),
-		UserData128:    ToUint128(0),
-		UserData64:     0,
-		UserData32:     0,
-		Reserved:       0,
-		Ledger:         1,
-		Code:           718,
-		Flags:          0,
-		Timestamp:      0,
+		ID:          ID(), // TigerBeetle time-based ID.
+		UserData128: ToUint128(0),
+		UserData64:  0,
+		UserData32:  0,
+		Ledger:      1,
+		Code:        718,
+		Flags:       0,
+		Timestamp:   0,
 	},
 })
-if err != nil {
-	log.Printf("Error creating accounts: %s", err)
-	return
-}
-
-for _, err := range accountsRes {
-	log.Printf("Error creating account %d: %s", err.Index, err.Result)
-	return
-}
+// Error handling omitted.
 ```
+
+See details for the recommended ID scheme in
+[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
 
 The `Uint128` fields like `ID`, `UserData128`, `Amount` and
 account balances have a few helper functions to make it easier
@@ -169,15 +159,26 @@ For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```go
-account0 := Account{ /* ... account values ... */ }
-account1 := Account{ /* ... account values ... */ }
-account0.Flags = AccountFlags{Linked: true}.ToUint16()
+account0 := Account{
+	ID:     ToUint128(100),
+	Ledger: 1,
+	Code:   718,
+	Flags: AccountFlags{
+		DebitsMustNotExceedCredits: true,
+		Linked:                     true,
+	}.ToUint16(),
+}
+account1 := Account{
+	ID:     ToUint128(101),
+	Ledger: 1,
+	Code:   718,
+	Flags: AccountFlags{
+		History: true,
+	}.ToUint16(),
+}
 
 accountErrors, err := client.CreateAccounts([]Account{account0, account1})
-if err != nil {
-	log.Printf("Error creating accounts: %s", err)
-	return
-}
+// Error handling omitted.
 ```
 
 ### Response and Errors
@@ -193,18 +194,38 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```go
-account2 := Account{ /* ... account values ... */ }
-account3 := Account{ /* ... account values ... */ }
-account4 := Account{ /* ... account values ... */ }
+account0 := Account{
+	ID:     ToUint128(102),
+	Ledger: 1,
+	Code:   718,
+	Flags:  0,
+}
+account1 := Account{
+	ID:     ToUint128(103),
+	Ledger: 1,
+	Code:   718,
+	Flags:  0,
+}
+account2 := Account{
+	ID:     ToUint128(104),
+	Ledger: 1,
+	Code:   718,
+	Flags:  0,
+}
 
-accountErrors, err = client.CreateAccounts([]Account{account2, account3, account4})
+accountErrors, err := client.CreateAccounts([]Account{account0, account1, account2})
 if err != nil {
 	log.Printf("Error creating accounts: %s", err)
 	return
 }
+
 for _, err := range accountErrors {
-	log.Printf("Error creating account %d: %s", err.Index, err.Result)
-	return
+	switch err.Index {
+	case uint32(AccountExists):
+		log.Printf("Batch account at %d already exists.", err.Index)
+	default:
+		log.Printf("Batch account at %d failed to create: %s", err.Index, err.Result)
+	}
 }
 ```
 
@@ -225,12 +246,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```go
-accounts, err := client.LookupAccounts([]Uint128{ToUint128(137), ToUint128(138)})
-if err != nil {
-	log.Printf("Could not fetch accounts: %s", err)
-	return
-}
-log.Println(accounts)
+accounts, err := client.LookupAccounts([]Uint128{ToUint128(100), ToUint128(101)})
 ```
 
 ## Create Transfers
@@ -242,27 +258,22 @@ reference](https://docs.tigerbeetle.com/reference/transfer).
 
 ```go
 transfers := []Transfer{{
-	ID:              ToUint128(1),
-	DebitAccountID:  ToUint128(1),
-	CreditAccountID: ToUint128(2),
+	ID:              ID(), // TigerBeetle time-based ID.
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
 	Amount:          ToUint128(10),
-	PendingID:       ToUint128(0),
-	UserData128:     ToUint128(2),
-	UserData64:      0,
-	UserData32:      0,
-	Timeout:         0,
 	Ledger:          1,
 	Code:            1,
 	Flags:           0,
 	Timestamp:       0,
 }}
 
-transfersRes, err := client.CreateTransfers(transfers)
-if err != nil {
-	log.Printf("Error creating transfer batch: %s", err)
-	return
-}
+transferErrors, err := client.CreateTransfers(transfers)
+// Error handling omitted.
 ```
+
+See details for the recommended ID scheme in
+[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
 
 ### Response and Errors
 
@@ -276,9 +287,45 @@ See all error conditions in the [create_transfers
 reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```go
-for _, err := range transfersRes {
-	log.Printf("Batch transfer at %d failed to create: %s", err.Index, err.Result)
+transfers := []Transfer{{
+	ID:              ToUint128(1),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	Amount:          ToUint128(10),
+	Ledger:          1,
+	Code:            1,
+	Flags:           0,
+}, {
+	ID:              ToUint128(2),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	Amount:          ToUint128(10),
+	Ledger:          1,
+	Code:            1,
+	Flags:           0,
+}, {
+	ID:              ToUint128(3),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	Amount:          ToUint128(10),
+	Ledger:          1,
+	Code:            1,
+	Flags:           0,
+}}
+
+transferErrors, err := client.CreateTransfers(transfers)
+if err != nil {
+	log.Printf("Error creating transfers: %s", err)
 	return
+}
+
+for _, err := range transferErrors {
+	switch err.Index {
+	case uint32(TransferExists):
+		log.Printf("Batch transfer at %d already exists.", err.Index)
+	default:
+		log.Printf("Batch transfer at %d failed to create: %s", err.Index, err.Result)
+	}
 }
 ```
 
@@ -290,9 +337,10 @@ you. So, for example, you *can* insert 1 million transfers
 one at a time like so:
 
 ```go
-for i := 0; i < len(transfers); i++ {
-	transfersRes, err = client.CreateTransfers([]Transfer{transfers[i]})
-	// Error handling omitted.
+batch := []Transfer{}
+for i := 0; i < len(batch); i++ {
+	transferErrors, err := client.CreateTransfers([]Transfer{batch[i]})
+	_, _ = transferErrors, err // Error handling omitted.
 }
 ```
 
@@ -303,14 +351,15 @@ The maximum batch size is set in the TigerBeetle server. The default
 is 8190.
 
 ```go
+batch := []Transfer{}
 BATCH_SIZE := 8190
-for i := 0; i < len(transfers); i += BATCH_SIZE {
-	batch := BATCH_SIZE
-	if i+BATCH_SIZE > len(transfers) {
-		batch = len(transfers) - i
+for i := 0; i < len(batch); i += BATCH_SIZE {
+	size := BATCH_SIZE
+	if i+BATCH_SIZE > len(batch) {
+		size = len(batch) - i
 	}
-	transfersRes, err = client.CreateTransfers(transfers[i : i+batch])
-	// Error handling omitted.
+	transferErrors, err := client.CreateTransfers(batch[i : i+size])
+	_, _ = transferErrors, err // Error handling omitted.
 }
 ```
 
@@ -340,10 +389,26 @@ few examples:
 For example, to link `transfer0` and `transfer1`:
 
 ```go
-transfer0 := Transfer{ /* ... account values ... */ }
-transfer1 := Transfer{ /* ... account values ... */ }
-transfer0.Flags = TransferFlags{Linked: true}.ToUint16()
-transfersRes, err = client.CreateTransfers([]Transfer{transfer0, transfer1})
+transfer0 := Transfer{
+	ID:              ToUint128(4),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	Amount:          ToUint128(10),
+	Ledger:          1,
+	Code:            1,
+	Flags:           TransferFlags{Linked: true}.ToUint16(),
+}
+transfer1 := Transfer{
+	ID:              ToUint128(5),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	Amount:          ToUint128(10),
+	Ledger:          1,
+	Code:            1,
+	Flags:           0,
+}
+
+transferErrors, err := client.CreateTransfers([]Transfer{transfer0, transfer1})
 // Error handling omitted.
 ```
 
@@ -364,15 +429,28 @@ appropriate accounts and apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```go
-transfer := Transfer{
-	ID: ToUint128(2),
+transfer0 := Transfer{
+	ID:              ToUint128(6),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	Amount:          ToUint128(10),
+	Ledger:          1,
+	Code:            1,
+	Flags:           0,
+}
+
+transferErrors, err := client.CreateTransfers([]Transfer{transfer0})
+// Error handling omitted.
+
+transfer1 := Transfer{
+	ID: ToUint128(7),
 	// Post the entire pending amount.
 	Amount:    AmountMax,
-	PendingID: ToUint128(1),
+	PendingID: ToUint128(6),
 	Flags:     TransferFlags{PostPendingTransfer: true}.ToUint16(),
-	Timestamp: 0,
 }
-transfersRes, err = client.CreateTransfers([]Transfer{transfer})
+
+transferErrors, err = client.CreateTransfers([]Transfer{transfer1})
 // Error handling omitted.
 ```
 
@@ -385,13 +463,29 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```go
-transfer = Transfer{
-	ID:        ToUint128(2),
-	PendingID: ToUint128(1),
-	Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),
-	Timestamp: 0,
+transfer0 := Transfer{
+	ID:              ToUint128(8),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	Amount:          ToUint128(10),
+	Timeout:         0,
+	Ledger:          1,
+	Code:            1,
+	Flags:           0,
 }
-transfersRes, err = client.CreateTransfers([]Transfer{transfer})
+
+transferErrors, err := client.CreateTransfers([]Transfer{transfer0})
+// Error handling omitted.
+
+transfer1 := Transfer{
+	ID: ToUint128(9),
+	// Post the entire pending amount.
+	Amount:    ToUint128(0),
+	PendingID: ToUint128(8),
+	Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),
+}
+
+transferErrors, err = client.CreateTransfers([]Transfer{transfer1})
 // Error handling omitted.
 ```
 
@@ -410,12 +504,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```go
-transfers, err = client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
-if err != nil {
-	log.Printf("Could not fetch transfers: %s", err)
-	return
-}
-log.Println(transfers)
+transfers, err := client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
 ```
 
 ## Get Account Transfers
@@ -446,12 +535,7 @@ filter := AccountFilter{
 	}.ToUint32(),
 }
 
-transfers, err = client.GetAccountTransfers(filter)
-if err != nil {
-	log.Printf("Could not fetch transfers: %s", err)
-	return
-}
-log.Println(transfers)
+transfers, err := client.GetAccountTransfers(filter)
 ```
 
 ## Get Account Balances
@@ -470,7 +554,7 @@ The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```go
-filter = AccountFilter{
+filter := AccountFilter{
 	AccountID:    ToUint128(2),
 	UserData128:  ToUint128(0), // No filter by UserData.
 	UserData64:   0,
@@ -487,11 +571,6 @@ filter = AccountFilter{
 }
 
 account_balances, err := client.GetAccountBalances(filter)
-if err != nil {
-	log.Printf("Could not fetch the history: %s", err)
-	return
-}
-log.Println(account_balances)
 ```
 
 ## Query Accounts
@@ -505,7 +584,7 @@ The accounts in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```go
-query_filter := QueryFilter{
+filter := QueryFilter{
 	UserData128:  ToUint128(1000), // Filter by UserData
 	UserData64:   100,
 	UserData32:   10,
@@ -519,12 +598,7 @@ query_filter := QueryFilter{
 	}.ToUint32(),
 }
 
-query_accounts, err := client.QueryAccounts(query_filter)
-if err != nil {
-	log.Printf("Could not query accounts: %s", err)
-	return
-}
-log.Println(query_accounts)
+accounts, err := client.QueryAccounts(filter)
 ```
 
 ## Query Transfers
@@ -538,7 +612,7 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```go
-query_filter = QueryFilter{
+filter := QueryFilter{
 	UserData128:  ToUint128(1000), // Filter by UserData.
 	UserData64:   100,
 	UserData32:   10,
@@ -552,12 +626,7 @@ query_filter = QueryFilter{
 	}.ToUint32(),
 }
 
-query_transfers, err := client.QueryTransfers(query_filter)
-if err != nil {
-	log.Printf("Could not query transfers: %s", err)
-	return
-}
-log.Println(query_transfers)
+transfers, err := client.QueryTransfers(filter)
 ```
 
 ## Linked Events
@@ -603,7 +672,8 @@ batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */})
 batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */, Flags: linkedFlag})
 batch = append(batch, Transfer{ID: ToUint128(4) /* ... rest of transfer ... */})
 
-transfersRes, err = client.CreateTransfers(batch)
+transferErrors, err := client.CreateTransfers(batch)
+// Error handling omitted.
 ```
 
 ## Imported Events
@@ -620,6 +690,11 @@ This approach gives the application a chance to correct failed imported events, 
 the batch again with the same user-defined timestamps.
 
 ```go
+// External source of time.
+var historicalTimestamp uint64 = 0
+historicalAccounts := []Account{ /* Loaded from an external source. */ }
+historicalTransfers := []Transfer{ /* Loaded from an external source. */ }
+
 // First, load and import all accounts with their timestamps from the historical source.
 accountsBatch := []Account{}
 for index, account := range historicalAccounts {
@@ -637,7 +712,9 @@ for index, account := range historicalAccounts {
 
 	accountsBatch = append(accountsBatch, account)
 }
-accountsRes, err = client.CreateAccounts(accountsBatch)
+
+accountErrors, err := client.CreateAccounts(accountsBatch)
+// Error handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.
 transfersBatch := []Transfer{}
@@ -656,7 +733,8 @@ for index, transfer := range historicalTransfers {
 
 	transfersBatch = append(transfersBatch, transfer)
 }
-transfersRes, err = client.CreateTransfers(transfersBatch)
+
+transferErrors, err := client.CreateTransfers(transfersBatch)
 // Error handling omitted..
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.

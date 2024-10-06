@@ -83,8 +83,6 @@ mvn install
 Now, create `src/main/java/Main.java` and copy this into it:
 
 ```java
-package com.tigerbeetle.samples;
-
 import com.tigerbeetle.*;
 
 public final class Main {
@@ -153,16 +151,21 @@ reference](https://docs.tigerbeetle.com/reference/account).
 ```java
 AccountBatch accounts = new AccountBatch(1);
 accounts.add();
-accounts.setId(137);
-accounts.setUserData128(UInt128.asBytes(java.util.UUID.randomUUID()));
-accounts.setUserData64(1234567890);
-accounts.setUserData32(42);
+accounts.setId(UInt128.id()); // TigerBeetle time-based ID.
+accounts.setUserData128(0, 0);
+accounts.setUserData64(0);
+accounts.setUserData32(0);
 accounts.setLedger(1);
 accounts.setCode(718);
-accounts.setFlags(0);
+accounts.setFlags(AccountFlags.NONE);
+accounts.setTimestamp(0);
 
 CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
+// Error handling omitted.
 ```
+
+See details for the recommended ID scheme in
+[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
 
 The 128-bit fields like `id` and `user_data_128` have a few
 overrides to make it easier to integrate. You can either
@@ -194,18 +197,22 @@ For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```java
-accounts = new AccountBatch(3);
+AccountBatch accounts = new AccountBatch(2);
 
-// First account
 accounts.add();
-// Code to fill out fields for first account
+accounts.setId(100);
+accounts.setLedger(1);
+accounts.setCode(718);
 accounts.setFlags(AccountFlags.LINKED | AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
 
-// Second account
 accounts.add();
-// Code to fill out fields for second account
+accounts.setId(101);
+accounts.setLedger(1);
+accounts.setCode(718);
+accounts.setFlags(AccountFlags.HISTORY);
 
-accountErrors = client.createAccounts(accounts);
+CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
+// Error handling omitted.
 ```
 
 ### Response and Errors
@@ -221,15 +228,36 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```java
+AccountBatch accounts = new AccountBatch(3);
+
+accounts.add();
+accounts.setId(102);
+accounts.setLedger(1);
+accounts.setCode(718);
+accounts.setFlags(AccountFlags.NONE);
+
+accounts.add();
+accounts.setId(103);
+accounts.setLedger(1);
+accounts.setCode(718);
+accounts.setFlags(AccountFlags.NONE);
+
+accounts.add();
+accounts.setId(104);
+accounts.setLedger(1);
+accounts.setCode(718);
+accounts.setFlags(AccountFlags.NONE);
+
+CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
 while (accountErrors.next()) {
     switch (accountErrors.getResult()) {
         case Exists:
-            System.err.printf("Account at %d already exists.\n",
+            System.err.printf("Batch account at %d already exists.\n",
                     accountErrors.getIndex());
             break;
 
         default:
-            System.err.printf("Error creating account at %d: %s\n",
+            System.err.printf("Batch account at %d failed to create %s.\n",
                     accountErrors.getIndex(), accountErrors.getResult());
             break;
     }
@@ -249,9 +277,10 @@ distinguish accounts.
 
 ```java
 IdBatch ids = new IdBatch(2);
-ids.add(137);
-ids.add(138);
-accounts = client.lookupAccounts(ids);
+ids.add(100);
+ids.add(101);
+
+AccountBatch accounts = client.lookupAccounts(ids);
 ```
 
 ## Create Transfers
@@ -263,21 +292,27 @@ reference](https://docs.tigerbeetle.com/reference/transfer).
 
 ```java
 TransferBatch transfers = new TransferBatch(1);
+
 transfers.add();
-transfers.setId(1);
-transfers.setDebitAccountId(1);
-transfers.setCreditAccountId(2);
+transfers.setId(UInt128.id());
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
 transfers.setAmount(10);
-transfers.setUserData128(UInt128.asBytes(java.util.UUID.randomUUID()));
-transfers.setUserData64(1234567890);
-transfers.setUserData32(42);
+transfers.setUserData128(0, 0);
+transfers.setUserData64(0);
+transfers.setUserData32(0);
 transfers.setTimeout(0);
 transfers.setLedger(1);
 transfers.setCode(1);
-transfers.setFlags(0);
+transfers.setFlags(TransferFlags.NONE);
+transfers.setTimeout(0);
 
 CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
+// Error handling omitted.
 ```
+
+See details for the recommended ID scheme in
+[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
 
 ### Response and Errors
 
@@ -291,15 +326,42 @@ See all error conditions in the [create_transfers
 reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```java
+TransferBatch transfers = new TransferBatch(3);
+
+transfers.add();
+transfers.setId(1);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
+
+transfers.add();
+transfers.setId(2);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
+
+transfers.add();
+transfers.setId(3);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
+
+CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
 while (transferErrors.next()) {
     switch (transferErrors.getResult()) {
         case ExceedsCredits:
-            System.err.printf("Transfer at %d exceeds credits.\n",
+            System.err.printf("Batch transfer at %d already exists.\n",
                     transferErrors.getIndex());
             break;
 
         default:
-            System.err.printf("Error creating transfer at %d: %s\n",
+            System.err.printf("Batch transfer at %d failed to create: %s\n",
                     transferErrors.getIndex(), transferErrors.getResult());
             break;
     }
@@ -314,19 +376,19 @@ you. So, for example, you *can* insert 1 million transfers
 one at a time like so:
 
 ```java
-var transferIds = new long[] {100, 101, 102};
-var debitIds = new long[] {1, 2, 3};
-var creditIds = new long[] {4, 5, 6};
-var amounts = new long[] {1000, 29, 11};
-for (int i = 0; i < transferIds.length; i++) {
+ResultSet dataSource = null; /* Loaded from an external source. */;
+while(dataSource.next()) {
     TransferBatch batch = new TransferBatch(1);
-    batch.add();
-    batch.setId(transferIds[i]);
-    batch.setDebitAccountId(debitIds[i]);
-    batch.setCreditAccountId(creditIds[i]);
-    batch.setAmount(amounts[i]);
 
-    CreateTransferResultBatch errors = client.createTransfers(batch);
+    batch.add();
+    batch.setId(dataSource.getBytes("id"));
+    batch.setDebitAccountId(dataSource.getBytes("debit_account_id"));
+    batch.setCreditAccountId(dataSource.getBytes("credit_account_id"));
+    batch.setAmount(dataSource.getBigDecimal("amount").toBigInteger());
+    batch.setLedger(dataSource.getInt("ledger"));
+    batch.setCode(dataSource.getInt("code"));
+
+    CreateTransferResultBatch transferErrors = client.createTransfers(batch);
     // Error handling omitted.
 }
 ```
@@ -338,21 +400,34 @@ The maximum batch size is set in the TigerBeetle server. The default
 is 8190.
 
 ```java
+ResultSet dataSource = null; /* Loaded from an external source. */;
+
 var BATCH_SIZE = 8190;
-for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
-    TransferBatch batch = new TransferBatch(BATCH_SIZE);
+TransferBatch batch = new TransferBatch(BATCH_SIZE);
+while(dataSource.next()) {
+    batch.add();
+    batch.setId(dataSource.getBytes("id"));
+    batch.setDebitAccountId(dataSource.getBytes("debit_account_id"));
+    batch.setCreditAccountId(dataSource.getBytes("credit_account_id"));
+    batch.setAmount(dataSource.getBigDecimal("amount").toBigInteger());
+    batch.setLedger(dataSource.getInt("ledger"));
+    batch.setCode(dataSource.getInt("code"));
 
-    for (int j = 0; j < BATCH_SIZE && i + j < transferIds.length; j++) {
-        batch.add();
-        batch.setId(transferIds[i + j]);
-        batch.setDebitAccountId(debitIds[i + j]);
-        batch.setCreditAccountId(creditIds[i + j]);
-        batch.setAmount(amounts[i + j]);
+    if (batch.getLength() == BATCH_SIZE) {
+        CreateTransferResultBatch transferErrors = client.createTransfers(batch);
+        // Error handling omitted.
+
+        // Reset the batch for the next iteration.
+        batch.beforeFirst();
     }
+}
 
-    CreateTransferResultBatch errors = client.createTransfers(batch);
+if (batch.getLength() > 0) {
+    // Send the remaining items.
+    CreateTransferResultBatch transferErrors = client.createTransfers(batch);
     // Error handling omitted.
 }
+
 ```
 
 ### Queues and Workers
@@ -381,17 +456,29 @@ To toggle behavior for an account, combine enum values stored in the
 For example, to link `transfer0` and `transfer1`:
 
 ```java
-transfers = new TransferBatch(2);
+TransferBatch transfers = new TransferBatch(2);
 
 // First transfer
 transfers.add();
-// Code to fill out fields for first transfer
+transfers.setId(4);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
 transfers.setFlags(TransferFlags.LINKED);
 
-// Second transfer
 transfers.add();
-// Code to fill out fields for second transfer
-transferErrors = client.createTransfers(transfers);
+transfers.setId(5);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
+transfers.setFlags(TransferFlags.NONE);
+
+CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
+// Error handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -411,15 +498,30 @@ appropriate accounts and apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```java
+TransferBatch transfers = new TransferBatch(1);
+
+transfers.add();
+transfers.setId(6);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
+transfers.setFlags(TransferFlags.PENDING);
+
+CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
+// Error handling omitted.
+
 transfers = new TransferBatch(1);
 
-// First transfer
 transfers.add();
-// Code to fill out fields for first transfer
-transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
-// Post the entire pending amount.
+transfers.setId(7);
 transfers.setAmount(TransferBatch.AMOUNT_MAX);
+transfers.setPendingId(6);
+transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
+
 transferErrors = client.createTransfers(transfers);
+// Error handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -431,13 +533,30 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```java
+TransferBatch transfers = new TransferBatch(1);
+
+transfers.add();
+transfers.setId(8);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setAmount(10);
+transfers.setLedger(1);
+transfers.setCode(1);
+transfers.setFlags(TransferFlags.PENDING);
+
+CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
+// Error handling omitted.
+
 transfers = new TransferBatch(1);
 
-// First transfer
 transfers.add();
-// Code to fill out fields for first transfer
+transfers.setId(9);
+transfers.setAmount(0);
+transfers.setPendingId(8);
 transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
+
 transferErrors = client.createTransfers(transfers);
+// Error handling omitted.
 ```
 
 ## Transfer Lookup
@@ -455,11 +574,11 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```java
-ids = new IdBatch(2);
+IdBatch ids = new IdBatch(2);
 ids.add(1);
 ids.add(2);
 
-transfers = client.lookupTransfers(ids);
+TransferBatch transfers = client.lookupTransfers(ids);
 ```
 
 ## Get Account Transfers
@@ -487,7 +606,7 @@ filter.setDebits(true); // Include transfer from the debit side.
 filter.setCredits(true); // Include transfer from the credit side.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 
-transfers = client.getAccountTransfers(filter);
+TransferBatch transfers = client.getAccountTransfers(filter);
 ```
 
 ## Get Account Balances
@@ -506,7 +625,7 @@ The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```java
-filter = new AccountFilter();
+AccountFilter filter = new AccountFilter();
 filter.setAccountId(2);
 filter.setUserData128(0); // No filter by UserData.
 filter.setUserData64(0);
@@ -533,18 +652,18 @@ The accounts in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```java
-var query_filter = new QueryFilter();
-query_filter.setUserData128(1000); // Filter by UserData.
-query_filter.setUserData64(100);
-query_filter.setUserData32(10);
-query_filter.setCode(1); // Filter by Code.
-query_filter.setLedger(0); // No filter by Ledger.
-query_filter.setTimestampMin(0); // No filter by Timestamp.
-query_filter.setTimestampMax(0); // No filter by Timestamp.
-query_filter.setLimit(10); // Limit to ten balances at most.
-query_filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+QueryFilter filter = new QueryFilter();
+filter.setUserData128(1000); // Filter by UserData.
+filter.setUserData64(100);
+filter.setUserData32(10);
+filter.setCode(1); // Filter by Code.
+filter.setLedger(0); // No filter by Ledger.
+filter.setTimestampMin(0); // No filter by Timestamp.
+filter.setTimestampMax(0); // No filter by Timestamp.
+filter.setLimit(10); // Limit to ten balances at most.
+filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 
-AccountBatch query_accounts = client.queryAccounts(query_filter);
+AccountBatch accounts = client.queryAccounts(filter);
 ```
 
 ## Query Transfers
@@ -558,18 +677,18 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```java
-query_filter = new QueryFilter();
-query_filter.setUserData128(1000); // Filter by UserData.
-query_filter.setUserData64(100);
-query_filter.setUserData32(10);
-query_filter.setCode(1); // Filter by Code.
-query_filter.setLedger(0); // No filter by Ledger.
-query_filter.setTimestampMin(0); // No filter by Timestamp.
-query_filter.setTimestampMax(0); // No filter by Timestamp.
-query_filter.setLimit(10); // Limit to ten balances at most.
-query_filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+QueryFilter filter = new QueryFilter();
+filter.setUserData128(1000); // Filter by UserData.
+filter.setUserData64(100);
+filter.setUserData32(10);
+filter.setCode(1); // Filter by Code.
+filter.setLedger(0); // No filter by Ledger.
+filter.setTimestampMin(0); // No filter by Timestamp.
+filter.setTimestampMax(0); // No filter by Timestamp.
+filter.setLimit(10); // Limit to ten balances at most.
+filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 
-TransferBatch query_transfers = client.queryTransfers(query_filter);
+TransferBatch transfers = client.queryTransfers(filter);
 ```
 
 ## Linked Events
@@ -591,51 +710,61 @@ break the chain will have a unique error result. Other events in the
 chain will have their error result set to `linked_event_failed`.
 
 ```java
-transfers = new TransferBatch(10);
+TransferBatch transfers = new TransferBatch(10);
 
 // An individual transfer (successful):
 transfers.add();
 transfers.setId(1);
+// ... rest of transfer ...
+transfers.setFlags(TransferFlags.NONE);
 
 // A chain of 4 transfers (the last transfer in the chain closes the chain with
 // linked=false):
 transfers.add();
 transfers.setId(2); // Commit/rollback.
+// ... rest of transfer ...
 transfers.setFlags(TransferFlags.LINKED);
-
 transfers.add();
 transfers.setId(3); // Commit/rollback.
+// ... rest of transfer ...
 transfers.setFlags(TransferFlags.LINKED);
-
 transfers.add();
 transfers.setId(2); // Fail with exists
+// ... rest of transfer ...
 transfers.setFlags(TransferFlags.LINKED);
-
 transfers.add();
 transfers.setId(4); // Fail without committing
+// ... rest of transfer ...
+transfers.setFlags(TransferFlags.NONE);
 
 // An individual transfer (successful):
 // This should not see any effect from the failed chain above.
 transfers.add();
 transfers.setId(2);
+// ... rest of transfer ...
+transfers.setFlags(TransferFlags.NONE);
 
 // A chain of 2 transfers (the first transfer fails the chain):
 transfers.add();
 transfers.setId(2);
+// ... rest of transfer ...
 transfers.setFlags(TransferFlags.LINKED);
-
 transfers.add();
 transfers.setId(3);
-
+// ... rest of transfer ...
+transfers.setFlags(TransferFlags.NONE);
 // A chain of 2 transfers (successful):
 transfers.add();
 transfers.setId(3);
+// ... rest of transfer ...
 transfers.setFlags(TransferFlags.LINKED);
-
 transfers.add();
 transfers.setId(4);
+// ... rest of transfer ...
+transfers.setFlags(TransferFlags.NONE);
 
-transferErrors = client.createTransfers(transfers);
+CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
+// Error handling omitted.
 ```
 
 ## Imported Events
@@ -652,53 +781,84 @@ This approach gives the application a chance to correct failed imported events, 
 the batch again with the same user-defined timestamps.
 
 ```java
-// First, load and import all accounts with their timestamps from the historical source.
-accounts = new AccountBatch(historicalAccounts.length);
-for(int index = 0; index < historicalAccounts.length; index += 1) {
-    accounts.add();
+// External source of time
+long historicalTimestamp = 0L;
+ResultSet historicalAccounts = null; // Loaded from an external source;
+ResultSet historicalTransfers = null ; // Loaded from an external source.
 
+var BATCH_SIZE = 8190;
+
+// First, load and import all accounts with their timestamps from the historical source.
+AccountBatch accounts = new AccountBatch(BATCH_SIZE);
+while (historicalAccounts.next()) {
     // Set a unique and strictly increasing timestamp.
     historicalTimestamp += 1;
+
+    accounts.add();
+    accounts.setId(historicalAccounts.getBytes("id"));
+    accounts.setLedger(historicalAccounts.getInt("ledger"));
+    accounts.setCode(historicalAccounts.getInt("code"));
     accounts.setTimestamp(historicalTimestamp);
+
     // Set the account as `imported`.
     // To ensure atomicity, the entire batch (except the last event in the chain)
     // must be `linked`.
-    if (index < historicalAccounts.length - 1) {
+    if (accounts.getLength() < BATCH_SIZE) {
         accounts.setFlags(AccountFlags.IMPORTED | AccountFlags.LINKED);
     } else {
         accounts.setFlags(AccountFlags.IMPORTED);
-    }
 
-    // Populate the rest of the account:
-    // accounts.setId(historicalAccounts[index].Id);
-    // accounts.setCode(historicalAccounts[index].Code);
+        CreateAccountResultBatch accountsErrors = client.createAccounts(accounts);
+        // Error handling omitted.
+
+        // Reset the batch for the next iteration.
+        accounts.beforeFirst();
+    }
 }
-accountErrors = client.createAccounts(accounts);
-// Error handling omitted.
+
+if (accounts.getLength() > 0) {
+    // Send the remaining items.
+    CreateAccountResultBatch accountsErrors = client.createAccounts(accounts);
+    // Error handling omitted.
+}
 
 // Then, load and import all transfers with their timestamps from the historical source.
-transfers = new TransferBatch(historicalTransfers.length);
-for(int index = 0; index < historicalTransfers.length; index += 1) {
-    transfers.add();
-
+TransferBatch transfers = new TransferBatch(BATCH_SIZE);
+while (historicalTransfers.next()) {
     // Set a unique and strictly increasing timestamp.
     historicalTimestamp += 1;
+
+    transfers.add();
+    transfers.setId(historicalTransfers.getBytes("id"));
+    transfers.setDebitAccountId(historicalTransfers.getBytes("debit_account_id"));
+    transfers.setCreditAccountId(historicalTransfers.getBytes("credit_account_id"));
+    transfers.setAmount(historicalTransfers.getBigDecimal("amount").toBigInteger());
+    transfers.setLedger(historicalTransfers.getInt("ledger"));
+    transfers.setCode(historicalTransfers.getInt("code"));
     transfers.setTimestamp(historicalTimestamp);
-    // Set the account as `imported`.
+
+    // Set the transfer as `imported`.
     // To ensure atomicity, the entire batch (except the last event in the chain)
     // must be `linked`.
-    if (index < historicalTransfers.length - 1) {
+    if (transfers.getLength() < BATCH_SIZE) {
         transfers.setFlags(TransferFlags.IMPORTED | TransferFlags.LINKED);
     } else {
         transfers.setFlags(TransferFlags.IMPORTED);
-    }
 
-    // Populate the rest of the transfer:
-    // transfers.setId(historicalTransfers[index].Id);
-    // transfers.setCode(historicalTransfers[index].Code);
+        CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
+        // Error handling omitted.
+
+        // Reset the batch for the next iteration.
+        transfers.beforeFirst();
+    }
 }
-transferErrors = client.createTransfers(transfers);
-// Error handling omitted.
+
+if (transfers.getLength() > 0) {
+    // Send the remaining items.
+    CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
+    // Error handling omitted.
+}
+
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.
 ```
