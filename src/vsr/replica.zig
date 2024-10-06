@@ -7463,7 +7463,9 @@ pub fn ReplicaType(
                 }
 
                 // Case 2: We have a _different_ prepare — safe to nack even if it is faulty.
-                if (journal_header != null and journal_header.?.checksum != header.checksum) {
+                if (journal_header != null and vsr.Headers.dvc_header_type(header) == .valid and
+                    journal_header.?.checksum != header.checksum)
+                {
                     nacks.set(i);
                 }
 
