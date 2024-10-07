@@ -522,6 +522,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             try model.init(table_usage);
             defer model.deinit();
 
+            var value_count: u64 = 0;
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
                 assert(env.state == .fuzzing);
                 log.debug("Running fuzz_ops[{}/{}] == {}", .{
@@ -537,13 +538,31 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                         @as(f64, @floatFromInt(model_size)),
                 });
 
+                // If the fuzzer manages to fill up the whole tree (unlikely, but possible), it
+                // continues to only issue read operations.
+                const tree_full = tree_full: {
+                    const last_level = &env.tree.manifest.levels[constants.lsm_levels - 1];
+                    const last_level_tables_max =
+                        std.math.pow(u32, constants.lsm_growth_factor, constants.lsm_levels);
+                    if (last_level.table_count_visible == last_level_tables_max) {
+                        // Sanity-check that this doesn't happen after too few ops.
+                        assert(value_count >= last_level_tables_max);
+                        break :tree_full true;
+                    } else {
+                        break :tree_full false;
+                    }
+                };
+
                 // Apply fuzz_op to the tree and the model.
                 switch (fuzz_op) {
                     .compact => |c| {
+                        if (tree_full) continue;
                         env.compact(c.op);
                         if (c.checkpoint) env.checkpoint(c.op);
                     },
                     .put => |value| {
+                        if (tree_full) continue;
+                        value_count += 2;
                         if (table_usage == .secondary_index) {
                             // Secondary index requires that the key implies the value (typically
                             // key ≡ value), and that there are no updates.
@@ -563,6 +582,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                         }
                     },
                     .remove => |value| {
+                        if (tree_full) continue;
+                        value_count += 1;
                         if (table_usage == .secondary_index and !model.contains(&value)) {
                             // Not allowed to remove non-present keys
                         } else {
