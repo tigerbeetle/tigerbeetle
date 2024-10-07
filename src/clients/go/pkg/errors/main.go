@@ -38,10 +38,6 @@ type ErrInvalidOperation struct{}
 
 func (s ErrInvalidOperation) Error() string { return "internal operation provided was invalid." }
 
-type ErrEmptyBatch struct{}
-
-func (s ErrEmptyBatch) Error() string { return "Empty batch." }
-
 type ErrMaximumBatchSizeExceeded struct{}
 
 func (s ErrMaximumBatchSizeExceeded) Error() string { return "Maximum batch size exceeded." }

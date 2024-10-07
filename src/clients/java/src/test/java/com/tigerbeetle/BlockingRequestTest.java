@@ -66,7 +66,6 @@ public class BlockingRequestTest {
         assert false;
     }
 
-    @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroCapacityBatch() {
         var client = getDummyClient();
         var batch = new AccountBatch(0);
@@ -75,7 +74,6 @@ public class BlockingRequestTest {
         assert false;
     }
 
-    @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroItemsBatch() {
         var client = getDummyClient();
         var batch = new AccountBatch(1);

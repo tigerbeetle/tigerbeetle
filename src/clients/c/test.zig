@@ -337,14 +337,8 @@ test "c_client tb_packet_status" {
         c.TB_PACKET_INVALID_OPERATION,
     );
 
-    // Messages length 0 or not a multiple of the event size
+    // Messages not a multiple of the event size
     // should return "invalid_data_size":
-    try assert_result(
-        tb_client,
-        c.TB_OPERATION_CREATE_ACCOUNTS,
-        0,
-        c.TB_PACKET_INVALID_DATA_SIZE,
-    );
     try assert_result(
         tb_client,
         c.TB_OPERATION_CREATE_TRANSFERS,
@@ -362,5 +356,25 @@ test "c_client tb_packet_status" {
         c.TB_OPERATION_LOOKUP_ACCOUNTS,
         @sizeOf(u128) * 2.5,
         c.TB_PACKET_INVALID_DATA_SIZE,
+    );
+
+    // Messages with zero length or multiple of the event size are valid.
+    try assert_result(
+        tb_client,
+        c.TB_OPERATION_CREATE_ACCOUNTS,
+        0,
+        c.TB_PACKET_OK,
+    );
+    try assert_result(
+        tb_client,
+        c.TB_OPERATION_CREATE_ACCOUNTS,
+        @sizeOf(c.tb_account_t),
+        c.TB_PACKET_OK,
+    );
+    try assert_result(
+        tb_client,
+        c.TB_OPERATION_CREATE_ACCOUNTS,
+        @sizeOf(c.tb_account_t) * 2,
+        c.TB_PACKET_OK,
     );
 }

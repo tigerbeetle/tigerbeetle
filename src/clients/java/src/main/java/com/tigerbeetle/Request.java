@@ -73,9 +73,6 @@ abstract class Request<TResponse extends Batch> {
         this.sendBuffer = batch.getBuffer();
         this.sendBufferLen = batch.getBufferLen();
         this.replyBuffer = null;
-
-        if (this.sendBufferLen == 0 || this.requestLen == 0)
-            throw new IllegalArgumentException("Empty batch");
     }
 
     public void beginRequest() {

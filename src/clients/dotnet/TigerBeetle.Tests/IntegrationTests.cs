@@ -964,6 +964,69 @@ public class IntegrationTests
         }
     }
 
+    [TestMethod]
+    public void CreateZeroLengthAccounts()
+    {
+        var accounts = Array.Empty<Account>();
+        var results = client.CreateAccounts(accounts);
+        Assert.IsTrue(results.Length == 0);
+    }
+
+    [TestMethod]
+    public async Task CreateZeroLengthAccountsAsync()
+    {
+        var accounts = Array.Empty<Account>();
+        var results = await client.CreateAccountsAsync(accounts);
+        Assert.IsTrue(results.Length == 0);
+    }
+
+    [TestMethod]
+    public void CreateZeroLengthTransfers()
+    {
+        var transfers = Array.Empty<Transfer>();
+        var results = client.CreateTransfers(transfers);
+        Assert.IsTrue(results.Length == 0);
+    }
+
+    [TestMethod]
+    public async Task CreateZeroLengthTransfersAsync()
+    {
+        var transfers = Array.Empty<Transfer>();
+        var results = await client.CreateTransfersAsync(transfers);
+        Assert.IsTrue(results.Length == 0);
+    }
+
+    [TestMethod]
+    public void LookupZeroLengthAccounts()
+    {
+        var ids = Array.Empty<UInt128>();
+        var accounts = client.LookupAccounts(ids);
+        Assert.IsTrue(accounts.Length == 0);
+    }
+
+    [TestMethod]
+    public async Task LookupZeroLengthAccountsAsync()
+    {
+        var ids = Array.Empty<UInt128>();
+        var accounts = await client.LookupAccountsAsync(ids);
+        Assert.IsTrue(accounts.Length == 0);
+    }
+
+    [TestMethod]
+    public void LookupZeroLengthTransfers()
+    {
+        var ids = Array.Empty<UInt128>();
+        var transfers = client.LookupTransfers(ids);
+        Assert.IsTrue(transfers.Length == 0);
+    }
+
+    [TestMethod]
+    public async Task LookupZeroLengthTransfersAsync()
+    {
+        var ids = Array.Empty<UInt128>();
+        var transfers = await client.LookupTransfersAsync(ids);
+        Assert.IsTrue(transfers.Length == 0);
+    }
 
     [TestMethod]
     public void TestGetAccountTransfers()
