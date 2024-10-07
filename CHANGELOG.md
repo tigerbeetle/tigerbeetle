@@ -3,6 +3,96 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.8
+
+Released: 2024-10-07
+
+### Safety And Performance
+
+- [#2381](https://github.com/tigerbeetle/tigerbeetle/pull/2381),
+  [#2378](https://github.com/tigerbeetle/tigerbeetle/pull/2378),
+  [#2374](https://github.com/tigerbeetle/tigerbeetle/pull/2374),
+  [#2377](https://github.com/tigerbeetle/tigerbeetle/pull/2377)
+
+  **Part of the extra releases** to correct availability issues in the upgrade path for `0.16.4`
+  when interacting with clients from previous versions.
+
+  Please refer to the release notes for more details:
+  [`0.16.5`](https://github.com/tigerbeetle/tigerbeetle/releases/tag/0.16.5),
+  [`0.16.6`](https://github.com/tigerbeetle/tigerbeetle/releases/tag/0.16.6), and
+  [`0.16.7`](https://github.com/tigerbeetle/tigerbeetle/releases/tag/0.16.7)
+
+- [#2359](https://github.com/tigerbeetle/tigerbeetle/pull/2359)
+
+  Significantly reduced P100 latency by incrementally spreading the mutable table's sort during
+  compaction. This leverages the optimization of sort algorithms for processing sequences of
+  already sorted sub-arrays.
+
+- [#2367](https://github.com/tigerbeetle/tigerbeetle/pull/2367)
+
+  Improve the workload generator to support concurrent tests with different ledgers.
+
+- [#2382](https://github.com/tigerbeetle/tigerbeetle/pull/2382),
+  [#2363](https://github.com/tigerbeetle/tigerbeetle/pull/2363)
+
+  Fix VOPR seeds.
+  For more awesome details about the backstory and solutions to these issues,
+  please refer to the PR.
+
+### Features
+
+- [#2358](https://github.com/tigerbeetle/tigerbeetle/pull/2358)
+
+  Update the REPL to support representing the maximum integer value as `-0`,
+  serving as the `AMOUNT_MAX` sentinel.
+  Additionally, other negative values such as `-1` can be used to represent `maxInt - 1`.
+
+  Also, include support for hexadecimal numbers for more convenient inputting of GUID/UUID
+  literals (e.g. `0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6`).
+
+  Allow the `timestamp` field to be set, enabling the REPL to be used for `imported` events.
+
+### Internals
+
+- [#2376](https://github.com/tigerbeetle/tigerbeetle/pull/2376)
+
+  Use `zig fetch` as a replacement for downloading files, removing dependence on external tools.
+
+- [#2383](https://github.com/tigerbeetle/tigerbeetle/pull/2383)
+
+  Port of Rust's [`dbg!`](https://doc.rust-lang.org/std/macro.dbg.html) macro to Zig,
+  and the corresponding CI validation to prevent code using it from being merged into `main`! 😎
+
+- [#2370](https://github.com/tigerbeetle/tigerbeetle/pull/2370),
+  [#2373](https://github.com/tigerbeetle/tigerbeetle/pull/2373)
+
+  Verify the release versions included in the multiversion binary pack at build time (not only
+  during runtime) and improve the `tigerbeetle version --verbose` command's `multiversion` output.
+
+- [#2369](https://github.com/tigerbeetle/tigerbeetle/pull/2369)
+
+  Fix a multiversioning issue where the binary size exceeded the read buffer, failing to parse the
+  executable header.
+
+- [#2380](https://github.com/tigerbeetle/tigerbeetle/pull/2380)
+
+  Consistently use `transient_error` instead of `transient_failure` and cleanup the StateMachine
+  code.
+
+- [#2379](https://github.com/tigerbeetle/tigerbeetle/pull/2379)
+
+  Add missing links to the operations `query_accounts` and `query_transfers` in the documentation
+  and include the declaration for `QueryFilter` and `QueryFilterFlags` in the `tb_client.h` header.
+
+- [#2333](https://github.com/tigerbeetle/tigerbeetle/pull/2333)
+
+  Clearer error message when the replica crashes due to a data file being too large, instructing
+  the operator to increase the memory allocated for the manifest log.
+
+### TigerTracks 🎧
+
+- [Creep](https://www.youtube.com/watch?v=XFkzRNyygfk)
+
 ## TigerBeetle 0.16.4
 
 Released: 2024-09-30
