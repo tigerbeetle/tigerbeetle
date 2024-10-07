@@ -379,18 +379,31 @@ test "in-place upgrade" {
             const tigerbeetle_load = try context.shell.fmt("{s}/tigerbeetle-load", .{context.tmp});
             try context.install_replica(tigerbeetle_load, .past);
 
-            var load = try context.shell.spawn(.{},
-                \\{tigerbeetle} benchmark
-                \\    --print-batch-timings
-                \\    --transfer-count=2_000_000
-                \\    --addresses={addresses}
-            , .{
-                .tigerbeetle = tigerbeetle_load,
-                .addresses = addresses,
-            });
-            defer {
-                _ = load.kill() catch {};
-            }
+            // Run workload in a separate thread, to collect it's stdout and stderr, and to
+            // forcefully terminate it after 10 minutes.
+            var workload_exit_ok: bool = false;
+            var workload_thread = try std.Thread.spawn(.{}, struct {
+                fn thread_main(workload_exit_ok_ptr: *bool, tigerbeetle_path: []const u8) !void {
+                    const shell = try Shell.create(std.testing.allocator);
+                    defer shell.destroy();
+
+                    try shell.exec_options(.{
+                        .timeout_ns = 10 * std.time.ns_per_min,
+                    },
+                        \\{tigerbeetle} benchmark
+                        \\    --print-batch-timings
+                        \\    --transfer-count=2_000_000
+                        \\    --addresses={addresses}
+                    , .{
+                        .tigerbeetle = tigerbeetle_path,
+                        .addresses = addresses,
+                    });
+                    workload_exit_ok_ptr.* = true;
+                }
+            }.thread_main, .{ &workload_exit_ok, tigerbeetle_load });
+            // Sadly, killing workload process is not easy, so, in case of an error, we'll wait
+            // for full timeout.
+            errdefer workload_thread.join();
 
             for (0..replica_count) |replica_index| {
                 try context.spawn_replica(replica_index);
@@ -431,8 +444,8 @@ test "in-place upgrade" {
                 }
             }
 
-            const term = try load.wait();
-            assert(term.Exited == 0);
+            workload_thread.join();
+            assert(workload_exit_ok);
         }
 
         fn install_replica(
