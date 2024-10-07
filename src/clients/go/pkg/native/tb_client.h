@@ -209,6 +209,23 @@ typedef struct tb_account_balance_t {
     uint8_t reserved[56];
 } tb_account_balance_t;
 
+typedef struct tb_query_filter_t {
+    tb_uint128_t user_data_128;
+    uint64_t user_data_64;
+    uint32_t user_data_32;
+    uint32_t ledger;
+    uint16_t code;
+    uint8_t reserved[6];
+    uint64_t timestamp_min;
+    uint64_t timestamp_max;
+    uint32_t limit;
+    uint32_t flags;
+} tb_query_filter_t;
+
+typedef enum TB_QUERY_FILTER_FLAGS {
+    TB_QUERY_FILTER_REVERSED = 1 << 0,
+} TB_QUERY_FILTER_FLAGS;
+
 typedef enum TB_OPERATION {
     TB_OPERATION_PULSE = 128,
     TB_OPERATION_CREATE_ACCOUNTS = 129,
@@ -254,7 +271,7 @@ typedef enum TB_STATUS {
     TB_STATUS_NETWORK_SUBSYSTEM = 6,
 } TB_STATUS;
 
-// Initialize a new TigerBeetle client which connects to the addresses provided and 
+// Initialize a new TigerBeetle client which connects to the addresses provided and
 // completes submitted packets by invoking the callback with the given context.
 TB_STATUS tb_client_init(
     tb_client_t* out_client,
@@ -275,7 +292,7 @@ TB_STATUS tb_client_init_echo(
     void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
 );
 
-// Retrieve the callback context initially passed into `tb_client_init` or 
+// Retrieve the callback context initially passed into `tb_client_init` or
 // `tb_client_init_echo`.
 uintptr_t tb_client_completion_context(
     tb_client_t client
