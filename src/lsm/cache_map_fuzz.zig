@@ -291,15 +291,15 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
 
     const fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
         // Always do puts, and always more puts than removes.
-        .upsert = constants.lsm_batch_multiple * 2,
+        .upsert = constants.lsm_compaction_ops * 2,
         // Maybe do some removes.
-        .remove = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .remove = if (random.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some gets.
-        .get = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .get = if (random.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some extra compacts.
         .compact = if (random.boolean()) 0 else 2,
         // Maybe use scopes.
-        .scope = if (random.boolean()) 0 else @divExact(constants.lsm_batch_multiple, 4),
+        .scope = if (random.boolean()) 0 else @divExact(constants.lsm_compaction_ops, 4),
     };
     log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 

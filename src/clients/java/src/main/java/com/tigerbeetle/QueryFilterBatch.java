@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 
 final class QueryFilterBatch extends Batch {
 
+
     interface Struct {
         int SIZE = 64;
 

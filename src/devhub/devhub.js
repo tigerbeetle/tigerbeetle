@@ -97,9 +97,9 @@ async function mainSeeds() {
     let include = undefined;
     if (query_all) {
       include = true;
-    } else if (query_fuzzer) {
-      include = record.fuzzer == query_fuzzer &&
-        record.commit_sha == query_commit;
+    } else if (query_fuzzer || query_commit) {
+      include = (!query_fuzzer || record.fuzzer == query_fuzzer) &&
+        (!query_commit || record.commit_sha == query_commit);
     } else if (
       pullRequestNumber(record) &&
       !openPullRequests.has(pullRequestNumber(record))

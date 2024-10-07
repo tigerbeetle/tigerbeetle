@@ -88,7 +88,9 @@ pub fn StateMachineType(
                     .value = 1,
                 },
                 .ignored = &[_][]const u8{},
+                .optional = &[_][]const u8{},
                 .derived = .{},
+                .orphaned_ids = false,
             },
         );
 
@@ -108,10 +110,21 @@ pub fn StateMachineType(
         prefetch_context: ThingGroove.PrefetchContext = undefined,
         callback: ?*const fn (state_machine: *StateMachine) void = null,
 
-        pub fn init(allocator: std.mem.Allocator, grid: *Grid, options: Options) !StateMachine {
+        pub fn init(
+            self: *StateMachine,
+            allocator: std.mem.Allocator,
+            grid: *Grid,
+            options: Options,
+        ) !void {
+            self.* = .{
+                .options = options,
+                .forest = undefined,
+            };
+
             const things_cache_entries_max =
                 ThingGroove.ObjectsCache.Cache.value_count_max_multiple;
-            var forest = try Forest.init(
+
+            try self.forest.init(
                 allocator,
                 grid,
                 .{
@@ -129,12 +142,7 @@ pub fn StateMachineType(
                     },
                 },
             );
-            errdefer forest.deinit(allocator);
-
-            return StateMachine{
-                .options = options,
-                .forest = forest,
-            };
+            errdefer self.forest.deinit(allocator);
         }
 
         pub fn deinit(state_machine: *StateMachine, allocator: std.mem.Allocator) void {
@@ -173,10 +181,12 @@ pub fn StateMachineType(
 
         pub fn input_valid(
             state_machine: *const StateMachine,
+            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
             _ = state_machine;
+            _ = client_release;
             _ = operation;
             _ = input;
             return true;
@@ -184,10 +194,12 @@ pub fn StateMachineType(
 
         pub fn prepare(
             state_machine: *StateMachine,
+            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
             _ = state_machine;
+            _ = client_release;
             _ = operation;
             _ = input;
         }
@@ -195,10 +207,12 @@ pub fn StateMachineType(
         pub fn prefetch(
             state_machine: *StateMachine,
             callback: *const fn (*StateMachine) void,
+            client_release: vsr.Release,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
+            _ = client_release;
             _ = operation;
             _ = input;
 
@@ -225,24 +239,31 @@ pub fn StateMachineType(
         pub fn commit(
             state_machine: *StateMachine,
             client: u128,
+            client_release: vsr.Release,
             op: u64,
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            _ = client;
             assert(op != 0);
 
             switch (operation) {
                 .echo => {
-                    const thing = state_machine.forest.grooves.things.get(op);
-                    assert(thing == null);
+                    assert(state_machine.forest.grooves.things.get(op) == .not_found);
+
+                    var value = vsr.ChecksumStream.init();
+                    value.add(std.mem.asBytes(&client));
+                    value.add(std.mem.asBytes(&op));
+                    value.add(std.mem.asBytes(&timestamp));
+                    value.add(std.mem.asBytes(&operation));
+                    value.add(std.mem.asBytes(&client_release));
+                    value.add(input);
 
                     state_machine.forest.grooves.things.insert(&.{
                         .timestamp = timestamp,
                         .id = op,
-                        .value = @as(u64, @truncate(vsr.checksum(input))),
+                        .value = @as(u64, @truncate(value.checksum())),
                     });
 
                     stdx.copy_disjoint(.inexact, u8, output, input);

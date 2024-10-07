@@ -18,7 +18,6 @@ const type_mappings = .{
 
     .{ tb_client.tb_operation_t, "TB_OPERATION" },
     .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
-    .{ tb_client.tb_packet_acquire_status_t, "TB_PACKET_ACQUIRE_STATUS" },
     .{ tb_client.tb_packet_t, "tb_packet_t" },
     .{ tb_client.tb_client_t, "tb_client_t" },
     .{ tb_client.tb_sync_submit_result_t, "tb_sync_submit_result_t" },
@@ -199,36 +198,36 @@ pub fn main() !void {
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     // Zig 0.9.1 has `decl.data.Fn.arg_names` but it's currently/incorrectly a zero-sized slice.
     try buffer.writer().print(
+        \\// Initialize a new TigerBeetle client which connects to the addresses provided and
+        \\// completes submitted packets by invoking the callback with the given context.
         \\TB_STATUS tb_client_init(
         \\    tb_client_t* out_client,
         \\    tb_uint128_t cluster_id,
         \\    const char* address_ptr,
         \\    uint32_t address_len,
-        \\    uint32_t packets_count,
         \\    uintptr_t on_completion_ctx,
-        \\    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
+        \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
         \\);
         \\
+        \\// Initialize a new TigerBeetle client which echos back any data submitted.
         \\TB_STATUS tb_client_init_echo(
         \\    tb_client_t* out_client,
         \\    tb_uint128_t cluster_id,
         \\    const char* address_ptr,
         \\    uint32_t address_len,
-        \\    uint32_t packets_count,
         \\    uintptr_t on_completion_ctx,
-        \\    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
+        \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
         \\);
         \\
-        \\TB_PACKET_ACQUIRE_STATUS tb_client_acquire_packet(
-        \\    tb_client_t client,
-        \\    tb_packet_t** out_packet
+        \\// Retrieve the callback context initially passed into `tb_client_init` or
+        \\// `tb_client_init_echo`.
+        \\uintptr_t tb_client_completion_context(
+        \\    tb_client_t client
         \\);
         \\
-        \\void tb_client_release_packet(
-        \\    tb_client_t client,
-        \\    tb_packet_t* packet
-        \\);
-        \\
+        \\// Submit a packet with its operation, data, and data_size fields set.
+        \\// Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
+        \\// packet on the `tb_client` thread (separate from caller's thread).
         \\void tb_client_submit(
         \\    tb_client_t client,
         \\    tb_packet_t* packet
@@ -239,6 +238,9 @@ pub fn main() !void {
         \\    tb_packet_t* packet
         \\);
         \\
+        \\// Closes the client, causing any previously submitted packets to be completed with
+        \\// `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
+        \\// It is undefined behavior to use any functions on the client once deinit is called.
         \\void tb_client_deinit(
         \\    tb_client_t client
         \\);

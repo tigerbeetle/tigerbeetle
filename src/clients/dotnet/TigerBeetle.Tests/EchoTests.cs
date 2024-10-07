@@ -20,7 +20,7 @@ public class EchoTests
     public void Accounts()
     {
         var rnd = new Random(1);
-        using var client = new EchoClient(0, new[] { "3000" }, 32);
+        using var client = new EchoClient(0, new[] { "3000" });
 
         var batch = GetRandom<Account>(rnd);
         var reply = client.Echo(batch);
@@ -31,7 +31,7 @@ public class EchoTests
     public async Task AccountsAsync()
     {
         var rnd = new Random(2);
-        using var client = new EchoClient(0, new[] { "3000" }, 32);
+        using var client = new EchoClient(0, new[] { "3000" });
 
         var batch = GetRandom<Account>(rnd);
         var reply = await client.EchoAsync(batch);
@@ -42,7 +42,7 @@ public class EchoTests
     public void Transfers()
     {
         var rnd = new Random(3);
-        using var client = new EchoClient(0, new[] { "3000" }, 32);
+        using var client = new EchoClient(0, new[] { "3000" });
 
         var batch = GetRandom<Transfer>(rnd);
         var reply = client.Echo(batch);
@@ -53,7 +53,7 @@ public class EchoTests
     public async Task TransfersAsync()
     {
         var rnd = new Random(4);
-        using var client = new EchoClient(0, new[] { "3000" }, 32);
+        using var client = new EchoClient(0, new[] { "3000" });
 
         var batch = GetRandom<Transfer>(rnd);
         var reply = await client.EchoAsync(batch);
@@ -65,7 +65,7 @@ public class EchoTests
     {
         const int MAX_CONCURRENCY = 64;
         var rnd = new Random(5);
-        using var client = new EchoClient(0, new[] { "3000" }, MAX_CONCURRENCY);
+        using var client = new EchoClient(0, new[] { "3000" });
 
         const int MAX_REPETITIONS = 5;
         for (int repetition = 0; repetition < MAX_REPETITIONS; repetition++)
@@ -92,7 +92,7 @@ public class EchoTests
     {
         const int MAX_CONCURRENCY = 64;
         var rnd = new Random(6);
-        using var client = new EchoClient(0, new[] { "3000" }, MAX_CONCURRENCY);
+        using var client = new EchoClient(0, new[] { "3000" });
 
         const int MAX_REPETITIONS = 5;
         for (int repetition = 0; repetition < MAX_REPETITIONS; repetition++)

@@ -46,19 +46,19 @@ We will refer to two amounts:
 
 ### If the Source Account Has a Credit Balance
 
-| Transfer | Debit Account | Credit Account | Amount    | Flags                                                          |
-| -------- | ------------- | -------------- | --------- | -------------------------------------------------------------- |
-| 1        | Source        | Control        | Threshold | [`flags.linked`](../../reference/transfer.md#flagslinked) |
-| 2        | Control       | Source         | Threshold | [`flags.linked`](../../reference/transfer.md#flagslinked) |
-| 3        | Source        | Destination    | Transfer  | N/A                                                            |
+| Transfer | Debit Account | Credit Account | Amount    | Pending Id | Flags                                                          |
+| -------- | ------------- | -------------- | --------- | ---------- | -------------------------------------------------------------- |
+| 1        | Source        | Control        | Threshold |          - | [`flags.linked`](../../reference/transfer.md#flagslinked), [`pending`](../../reference/transfer.md#flagspending) |
+| 2        | -             | -              | -         |          1 | [`flags.linked`](../../reference/transfer.md#flagslinked), [`void_pending_transfer`](../../reference/transfer.md#flagsvoid_pending_transfer) |
+| 3        | Source        | Destination    | Transfer  |          - | N/A                                                            |
 
 ### If the Source Account Has a Debit Balance
 
-| Transfer | Debit Account | Credit Account | Amount    | Flags                                                          |
-| -------- | ------------- | -------------- | --------- | -------------------------------------------------------------- |
-| 1        | Control       | Source         | Threshold | [`flags.linked`](../../reference/transfer.md#flagslinked) |
-| 2        | Source        | Control        | Threshold | [`flags.linked`](../../reference/transfer.md#flagslinked) |
-| 3        | Destination   | Source         | Transfer  | N/A                                                            |
+| Transfer | Debit Account | Credit Account | Amount    | Pending Id | Flags                                                          |
+| -------- | ------------- | -------------- | --------- | ---------- | -------------------------------------------------------------- |
+| 1        | Control       | Source         | Threshold |          - | [`flags.linked`](../../reference/transfer.md#flagslinked), [`pending`](../../reference/transfer.md#flagspending) |
+| 2        | -             | -              | -         |          1 | [`flags.linked`](../../reference/transfer.md#flagslinked), [`void_pending_transfer`](../../reference/transfer.md#flagsvoid_pending_transfer) |
+| 3        | Destination   | Source         | Transfer  |          - | N/A                                                            |
 
 ### Understanding the Mechanism
 
@@ -70,9 +70,9 @@ flag would ensure that the first transfer fails. If the first transfer fails, th
 transfers would also fail.
 
 If the first transfer succeeds, it means that the source account did have the threshold balance. In
-this case, the second transfer will atomically transfer the threshold amount back to the source
-account from the control account. Then, the third transfer would execute the desired transfer to the
-ultimate destination account.
+this case, the second transfer cancels the first transfer (returning the threshold amount to the
+source account). Then, the third transfer would execute the desired transfer to the ultimate
+destination account.
 
 Note that in the tables above, we do the balance check on the source account. The balance check
 could also be applied to the destination account instead.

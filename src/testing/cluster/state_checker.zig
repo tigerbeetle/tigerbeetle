@@ -97,17 +97,18 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         /// Returns whether the replica's state changed since the last check_state().
         pub fn check_state(state_checker: *Self, replica_index: u8) !void {
             const replica = &state_checker.replicas[replica_index];
-            if (replica.syncing.target()) |sync_target| {
+            if (replica.syncing == .updating_checkpoint) {
                 // Allow a syncing replica to fast-forward its commit.
                 //
                 // But "fast-forwarding" may actually move commit_min slightly backwards:
                 // 1. Suppose op X is a checkpoint trigger.
                 // 2. We are committing op X-1 but are stuck due to a block that does not exist in
                 //    the cluster anymore.
-                // 3. When we sync, `commit_min` "backtracks", to `X - lsm_batch_multiple`.
+                // 3. When we sync, `commit_min` "backtracks", to `X - lsm_compaction_ops`.
                 const commit_min_source = state_checker.commit_mins[replica_index];
-                const commit_min_target = sync_target.checkpoint_op;
-                assert(commit_min_source <= commit_min_target + constants.lsm_batch_multiple);
+                const commit_min_target =
+                    replica.syncing.updating_checkpoint.header.op;
+                assert(commit_min_source <= commit_min_target + constants.lsm_compaction_ops);
                 state_checker.commit_mins[replica_index] = commit_min_target;
                 return;
             }
@@ -198,8 +199,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     // `checksum_body` will not match; the leader's StateMachine updated the
                     // timestamps in the prepare body's accounts/transfers.
                 } else {
-                    // The cluster is running with one or more raw MessageBus "clients", so there
-                    // may be requests not found in `Cluster.clients`.
+                    // Either:
+                    // - The cluster is running with one or more raw MessageBus "clients", so there
+                    //   may be requests not found in `Cluster.clients`.
+                    // - The test includes one or more client evictions.
                 }
             }
 

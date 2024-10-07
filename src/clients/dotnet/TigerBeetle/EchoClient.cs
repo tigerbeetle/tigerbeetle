@@ -8,9 +8,9 @@ internal sealed class EchoClient : IDisposable
 {
     private readonly NativeClient nativeClient;
 
-    public EchoClient(UInt128 clusterID, string[] addresses, int concurrencyMax)
+    public EchoClient(UInt128 clusterID, string[] addresses)
     {
-        this.nativeClient = NativeClient.InitEcho(clusterID, addresses, concurrencyMax);
+        this.nativeClient = NativeClient.InitEcho(clusterID, addresses);
     }
 
     public Account[] Echo(ReadOnlySpan<Account> batch)

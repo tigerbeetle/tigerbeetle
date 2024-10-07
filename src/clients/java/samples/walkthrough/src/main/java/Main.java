@@ -118,7 +118,7 @@ public final class Main {
                 batch.setAmount(amounts[i]);
 
                 CreateTransferResultBatch errors = client.createTransfers(batch);
-                // error handling omitted
+                // Error handling omitted.
             }
             // endsection:no-batch
 
@@ -136,7 +136,7 @@ public final class Main {
                 }
 
                 CreateTransferResultBatch errors = client.createTransfers(batch);
-                // error handling omitted
+                // Error handling omitted.
             }
             // endsection:batch
 
@@ -161,6 +161,8 @@ public final class Main {
             transfers.add();
             // Code to fill out fields for first transfer
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
+            // Post the entire pending amount.
+            transfers.setAmount(TransferBatch.AMOUNT_MAX);
             transferErrors = client.createTransfers(transfers);
             // endsection:transfer-flags-post
 
@@ -185,6 +187,10 @@ public final class Main {
             // section:get-account-transfers
             AccountFilter filter = new AccountFilter();
             filter.setAccountId(2);
+            filter.setUserData128(0); // No filter by UserData.
+            filter.setUserData64(0);
+            filter.setUserData32(0);
+            filter.setCode(0); // No filter by Code.
             filter.setTimestampMin(0); // No filter by Timestamp.
             filter.setTimestampMax(0); // No filter by Timestamp.
             filter.setLimit(10); // Limit to ten transfers at most.
@@ -198,6 +204,10 @@ public final class Main {
             // section:get-account-balances
             filter = new AccountFilter();
             filter.setAccountId(2);
+            filter.setUserData128(0); // No filter by UserData.
+            filter.setUserData64(0);
+            filter.setUserData32(0);
+            filter.setCode(0); // No filter by Code.
             filter.setTimestampMin(0); // No filter by Timestamp.
             filter.setTimestampMax(0); // No filter by Timestamp.
             filter.setLimit(10); // Limit to ten balances at most.
@@ -285,6 +295,63 @@ public final class Main {
 
             transferErrors = client.createTransfers(transfers);
             // endsection:linked-events
+
+            // External source of time
+            long historicalTimestamp = 0L;
+            Object[] historicalAccounts = new Object[1];
+            Object[] historicalTransfers = new Object[1];
+
+            // section:imported-events
+            // First, load and import all accounts with their timestamps from the historical source.
+            accounts = new AccountBatch(historicalAccounts.length);
+            for(int index = 0; index < historicalAccounts.length; index += 1) {
+                accounts.add();
+
+                // Set a unique and strictly increasing timestamp.
+                historicalTimestamp += 1;
+                accounts.setTimestamp(historicalTimestamp);
+                // Set the account as `imported`.
+                // To ensure atomicity, the entire batch (except the last event in the chain)
+                // must be `linked`.
+                if (index < historicalAccounts.length - 1) {
+                    accounts.setFlags(AccountFlags.IMPORTED | AccountFlags.LINKED);
+                } else {
+                    accounts.setFlags(AccountFlags.IMPORTED);
+                }
+
+                // Populate the rest of the account:
+                // accounts.setId(historicalAccounts[index].Id);
+                // accounts.setCode(historicalAccounts[index].Code);
+            }
+            accountErrors = client.createAccounts(accounts);
+            // Error handling omitted.
+
+            // Then, load and import all transfers with their timestamps from the historical source.
+            transfers = new TransferBatch(historicalTransfers.length);
+            for(int index = 0; index < historicalTransfers.length; index += 1) {
+                transfers.add();
+
+                // Set a unique and strictly increasing timestamp.
+                historicalTimestamp += 1;
+                transfers.setTimestamp(historicalTimestamp);
+                // Set the account as `imported`.
+                // To ensure atomicity, the entire batch (except the last event in the chain)
+                // must be `linked`.
+                if (index < historicalTransfers.length - 1) {
+                    transfers.setFlags(TransferFlags.IMPORTED | TransferFlags.LINKED);
+                } else {
+                    transfers.setFlags(TransferFlags.IMPORTED);
+                }
+
+                // Populate the rest of the transfer:
+                // transfers.setId(historicalTransfers[index].Id);
+                // transfers.setCode(historicalTransfers[index].Code);
+            }
+            transferErrors = client.createTransfers(transfers);
+            // Error handling omitted.
+            // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+            // with the same historical timestamps without regressing the cluster timestamp.
+            // endsection:imported-events
         }
         // section:imports
     }

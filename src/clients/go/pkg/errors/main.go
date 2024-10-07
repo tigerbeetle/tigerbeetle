@@ -34,12 +34,6 @@ type ErrClientClosed struct{}
 
 func (s ErrClientClosed) Error() string { return "Client was closed." }
 
-type ErrConcurrencyExceeded struct{}
-
-func (s ErrConcurrencyExceeded) Error() string {
-	return "The maximum configured concurrency for the client has been exceeded."
-}
-
 type ErrInvalidOperation struct{}
 
 func (s ErrInvalidOperation) Error() string { return "internal operation provided was invalid." }

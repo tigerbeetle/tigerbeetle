@@ -69,7 +69,7 @@ public class ExceptionTests
         {
             var exception = new RequestException(status);
             var unknownMessage = "Unknown error status " + status;
-            if (status == PacketStatus.Ok)
+            if (status == PacketStatus.Ok || status == PacketStatus.ClientShutdown)
             {
                 Assert.AreEqual(unknownMessage, exception.Message);
             }

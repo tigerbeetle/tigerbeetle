@@ -5,15 +5,6 @@ const tb_client = @import("tb_client.zig");
 const tb = tb_client.vsr.tigerbeetle;
 const c = @cImport(@cInclude("tb_client.h"));
 
-fn to_lowercase(comptime input: []const u8) []const u8 {
-    comptime var lowercase: [input.len]u8 = undefined;
-    inline for (input, 0..) |char, i| {
-        const is_uppercase = (char >= 'A') and (char <= 'Z');
-        lowercase[i] = char + (@as(u8, @intFromBool(is_uppercase)) * 32);
-    }
-    return &lowercase;
-}
-
 fn to_uppercase(comptime input: []const u8) []const u8 {
     comptime var uppercase: [input.len]u8 = undefined;
     inline for (input, 0..) |char, i| {
@@ -55,7 +46,6 @@ test "valid tb_client.h" {
         .{ tb_client.tb_packet_t, "tb_packet_t" },
         .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
         .{ tb_client.tb_operation_t, "TB_OPERATION" },
-        .{ tb_client.tb_packet_acquire_status_t, "TB_PACKET_ACQUIRE_STATUS" },
     }) |c_export| {
         const ty: type = c_export[0];
         const c_type_name = @as([]const u8, c_export[1]);

@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const vsr = @import("vsr.zig");
@@ -159,7 +158,7 @@ pub const Parser = struct {
 
         while (parser.offset < parser.input.len) {
             const c = parser.input[parser.offset];
-            if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '|')) {
+            if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '|' or c == '-')) {
                 // Allows flag fields to have whitespace before a '|'.
                 var copy = Parser{
                     .input = parser.input,
@@ -202,18 +201,16 @@ pub const Parser = struct {
 
                 inline for (@typeInfo(ActiveValue).Struct.fields) |active_value_field| {
                     if (std.mem.eql(u8, active_value_field.name, key_to_validate)) {
-                        // Handle everything but flags, skip reserved and timestamp.
+                        // Handle everything but flags, and skip reserved.
                         if (comptime (!std.mem.eql(u8, active_value_field.name, "flags") and
-                            !std.mem.eql(u8, active_value_field.name, "reserved") and
-                            !std.mem.eql(u8, active_value_field.name, "timestamp")))
+                            !std.mem.eql(u8, active_value_field.name, "reserved")))
                         {
                             @field(
                                 @field(out.*, object_syntax_tree_field.name),
                                 active_value_field.name,
-                            ) = try std.fmt.parseInt(
+                            ) = try parse_int(
                                 active_value_field.type,
                                 value_to_validate,
-                                10,
                             );
                         }
 
@@ -259,6 +256,27 @@ pub const Parser = struct {
         }
     }
 
+    fn parse_int(comptime T: type, input: []const u8) !T {
+        const info = @typeInfo(T);
+        comptime assert(info == .Int);
+
+        // When base is zero the string prefix is examined to detect the true base:
+        // "0b", "0o" or "0x", otherwise base=10 is assumed.
+        const base_unknown = 0;
+
+        assert(input.len > 0);
+        const input_negative = input[0] == '-';
+
+        if (info.Int.signedness == .unsigned and input_negative) {
+            // Negative input means `maxInt - input`.
+            // Useful for representing sentinels such as `AMOUNT_MAX`, as `-0`.
+            const max = std.math.maxInt(T);
+            return max - try std.fmt.parseUnsigned(T, input[1..], base_unknown);
+        }
+
+        return try std.fmt.parseUnsigned(T, input, base_unknown);
+    }
+
     fn parse_arguments(
         parser: *Parser,
         operation: Operation,
@@ -271,6 +289,10 @@ pub const Parser = struct {
             .lookup_accounts, .lookup_transfers => .{ .id = .{ .id = 0 } },
             .get_account_transfers, .get_account_balances => .{ .account_filter = tb.AccountFilter{
                 .account_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
                 .limit = switch (operation) {
@@ -633,13 +655,15 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             var client = try Client.init(
                 allocator,
-                client_id,
-                cluster_id,
-                @intCast(addresses.len),
-                &message_pool,
                 .{
-                    .configuration = addresses,
-                    .io = &io,
+                    .id = client_id,
+                    .cluster = cluster_id,
+                    .replica_count = @intCast(addresses.len),
+                    .message_pool = &message_pool,
+                    .message_bus_options = .{
+                        .configuration = addresses,
+                        .io = &io,
+                    },
                 },
             );
             repl.client = &client;
@@ -651,67 +675,73 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
             repl.event_loop_done = false;
 
-            if (statements.len > 0) {
-                var statements_iterator = std.mem.split(u8, statements, ";");
-                while (statements_iterator.next()) |statement_string| {
-                    // Release allocation after every execution.
-                    var execution_arena = std.heap.ArenaAllocator.init(allocator);
-                    defer execution_arena.deinit();
-                    const statement = Parser.parse_statement(
-                        &execution_arena,
-                        statement_string,
-                        repl.printer,
-                    ) catch |err| {
-                        switch (err) {
-                            // These are parsing errors and since this
-                            // is not an interactive command, we should
-                            // exit immediately. Parsing error info
-                            // has already been emitted to stderr.
-                            Parser.Error.BadIdentifier,
-                            Parser.Error.BadOperation,
-                            Parser.Error.BadValue,
-                            Parser.Error.BadKeyValuePair,
-                            Parser.Error.MissingEqualBetweenKeyValuePair,
-                            Parser.Error.NoSyntaxMatch,
-                            // TODO: This will be more convenient to express
-                            // once https://github.com/ziglang/zig/issues/2473 is
-                            // in.
-                            => std.posix.exit(1),
-
-                            // An unexpected error for which we do
-                            // want the stacktrace.
-                            error.AccessDenied,
-                            error.BrokenPipe,
-                            error.ConnectionResetByPeer,
-                            error.DeviceBusy,
-                            error.DiskQuota,
-                            error.FileTooBig,
-                            error.InputOutput,
-                            error.InvalidArgument,
-                            error.LockViolation,
-                            error.NoSpaceLeft,
-                            error.NotOpenForWriting,
-                            error.OperationAborted,
-                            error.OutOfMemory,
-                            error.SystemResources,
-                            error.Unexpected,
-                            error.WouldBlock,
-                            => return err,
-                        }
-                    };
-                    try repl.do_statement(statement);
-                }
-            } else {
+            if (repl.interactive) {
                 try repl.display_help();
             }
 
+            var statements_iterator = if (statements.len > 0)
+                std.mem.split(u8, statements, ";")
+            else
+                null;
+
             while (!repl.event_loop_done) {
-                if (repl.request_done and repl.interactive) {
+                if (repl.request_done) {
                     // Release allocation after every execution.
                     var execution_arena = std.heap.ArenaAllocator.init(allocator);
                     defer execution_arena.deinit();
-                    try repl.do_repl(&execution_arena);
+
+                    if (repl.interactive) {
+                        try repl.do_repl(&execution_arena);
+                    } else blk: {
+                        const statement_string = statements_iterator.?.next() orelse break :blk;
+
+                        const statement = Parser.parse_statement(
+                            &execution_arena,
+                            statement_string,
+                            repl.printer,
+                        ) catch |err| {
+                            switch (err) {
+                                // These are parsing errors and since this
+                                // is not an interactive command, we should
+                                // exit immediately. Parsing error info
+                                // has already been emitted to stderr.
+                                Parser.Error.BadIdentifier,
+                                Parser.Error.BadOperation,
+                                Parser.Error.BadValue,
+                                Parser.Error.BadKeyValuePair,
+                                Parser.Error.MissingEqualBetweenKeyValuePair,
+                                Parser.Error.NoSyntaxMatch,
+                                // TODO: This will be more convenient to express
+                                // once https://github.com/ziglang/zig/issues/2473 is
+                                // in.
+                                => std.posix.exit(1),
+
+                                // An unexpected error for which we do
+                                // want the stacktrace.
+                                error.AccessDenied,
+                                error.BrokenPipe,
+                                error.ConnectionResetByPeer,
+                                error.DeviceBusy,
+                                error.DiskQuota,
+                                error.FileTooBig,
+                                error.InputOutput,
+                                error.InvalidArgument,
+                                error.LockViolation,
+                                error.NoSpaceLeft,
+                                error.NotOpenForWriting,
+                                error.OperationAborted,
+                                error.OutOfMemory,
+                                error.SystemResources,
+                                error.Unexpected,
+                                error.WouldBlock,
+                                => return err,
+                            }
+                        };
+
+                        try repl.do_statement(statement);
+                    }
                 }
+
                 repl.client.tick();
                 try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
             }
@@ -953,6 +983,24 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
+            .in = "create_transfers timestamp=1",
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 0,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 1,
+            },
+        },
+        .{
             .in =
             \\create_transfers id=32 amount=65 ledger=12 code=9999 pending_id=7
             \\ credit_account_id=2121 debit_account_id=77 user_data_128=2
@@ -1004,6 +1052,106 @@ test "repl.zig: Parser single transfer successfully" {
                     .pending = true,
                     .linked = true,
                 },
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers amount=-0
+            ,
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = std.math.maxInt(u128),
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers amount=-1
+            ,
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = std.math.maxInt(u128) - 1,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers amount=0xbee71e
+            ,
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 0xbee71e,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers amount=1_000_000
+            ,
+            .want = tb.Transfer{
+                .id = 0,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 1_000_000,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
+                .timestamp = 0,
+            },
+        },
+        .{
+            .in =
+            \\create_transfers id=0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6
+            ,
+            .want = tb.Transfer{
+                .id = 0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6,
+                .debit_account_id = 0,
+                .credit_account_id = 0,
+                .amount = 0,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 0,
+                .ledger = 0,
+                .code = 0,
+                .flags = .{},
                 .timestamp = 0,
             },
         },
@@ -1101,6 +1249,7 @@ test "repl.zig: Parser single account successfully" {
                 .ledger = 0,
                 .code = 0,
                 .flags = .{},
+                .timestamp = 0,
             },
         },
         .{
@@ -1122,6 +1271,7 @@ test "repl.zig: Parser single account successfully" {
                 .ledger = 12,
                 .code = 9999,
                 .flags = .{ .linked = true, .debits_must_not_exceed_credits = true },
+                .timestamp = 0,
             },
         },
         .{
@@ -1146,6 +1296,7 @@ test "repl.zig: Parser single account successfully" {
                     .linked = true,
                     .debits_must_not_exceed_credits = true,
                 },
+                .timestamp = 0,
             },
         },
     };
@@ -1176,6 +1327,10 @@ test "repl.zig: Parser account filter successfully" {
             .operation = .get_account_transfers,
             .want = tb.AccountFilter{
                 .account_id = 1,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
                 .limit = StateMachine.constants.batch_max.get_account_transfers,
@@ -1189,6 +1344,8 @@ test "repl.zig: Parser account filter successfully" {
         .{
             .in =
             \\get_account_balances account_id=1000
+            \\user_data_128=128 user_data_64=64 user_data_32=32
+            \\code=2
             \\flags=debits|reversed limit=10
             \\timestamp_min=1 timestamp_max=9999;
             \\
@@ -1196,6 +1353,10 @@ test "repl.zig: Parser account filter successfully" {
             .operation = .get_account_balances,
             .want = tb.AccountFilter{
                 .account_id = 1000,
+                .user_data_128 = 128,
+                .user_data_64 = 64,
+                .user_data_32 = 32,
+                .code = 2,
                 .timestamp_min = 1,
                 .timestamp_max = 9999,
                 .limit = 10,
@@ -1308,6 +1469,7 @@ test "repl.zig: Parser multiple accounts successfully" {
                     .ledger = 0,
                     .code = 0,
                     .flags = .{},
+                    .timestamp = 0,
                 },
                 tb.Account{
                     .id = 2,
@@ -1322,6 +1484,7 @@ test "repl.zig: Parser multiple accounts successfully" {
                     .ledger = 0,
                     .code = 0,
                     .flags = .{},
+                    .timestamp = 0,
                 },
             },
         },
@@ -1516,6 +1679,14 @@ test "repl.zig: Handle parsing errors" {
         },
         .{
             .in = "create_transfers id=abcd",
+            .err = error.BadKeyValuePair,
+        },
+        .{
+            .in = "create_transfers amount=0y1234",
+            .err = error.BadKeyValuePair,
+        },
+        .{
+            .in = "create_transfers amount=--0",
             .err = error.BadKeyValuePair,
         },
     };

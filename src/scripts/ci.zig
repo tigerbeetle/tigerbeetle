@@ -12,7 +12,6 @@ const stdx = @import("../stdx.zig");
 const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
-const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
 
 const client_readmes = @import("./client_readmes.zig");
 
@@ -24,12 +23,12 @@ const LanguageCI = .{
     .node = @import("../clients/node/ci.zig"),
 };
 
-pub const CliArgs = struct {
+pub const CLIArgs = struct {
     language: ?Language = null,
     validate_release: bool = false,
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (cli_args.validate_release) {
         try validate_release(shell, gpa, cli_args.language);
     } else {
@@ -128,15 +127,15 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     // Enable this once deterministic zip generation has been merged in and released.
     // const raw_run_number = stdx.cut(stdx.cut(tag, ".").?.suffix, ".").?.suffix;
 
-    // // The +185 comes from how release.zig calculates the version number.
+    // // The +188 comes from how release.zig calculates the version number.
     // const run_number = try std.fmt.allocPrint(
     //     shell.arena.allocator(),
     //     "{}",
-    //     .{try std.fmt.parseInt(u32, raw_run_number, 10) + 185},
+    //     .{try std.fmt.parseInt(u32, raw_run_number, 10) + 188},
     // );
 
     // const sha = try shell.exec_stdout("git rev-parse HEAD", .{});
-    // try shell.zig("build scripts -- release --build  --run-number={run_number} " ++
+    // try shell.exec_zig("build scripts -- release --build  --run-number={run_number} " ++
     //     "--sha={sha} --language=zig", .{
     //     .run_number = run_number,
     //     .sha = sha,

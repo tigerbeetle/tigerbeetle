@@ -17,10 +17,14 @@ TigerBeetle is a single, small, statically-linked binary.
 ```console
 # macOS
 curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+```
 
+```console
 # Linux
 curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+```
 
+```console
 # Windows
 powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .; .\tigerbeetle version"
 ```
@@ -31,8 +35,8 @@ To build TigerBeetle from source, clone the repo, install Zig and run `zig build
 
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
-./scripts/install_zig.sh # or .bat if you're on Windows.
-zig/zig build
+./zig/download.sh # .bat if you're on Windows.
+./zig/zig build
 ./tigerbeetle version
 ```
 

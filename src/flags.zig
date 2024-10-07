@@ -42,16 +42,20 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 /// Format and print an error message to stderr, then exit with an exit code of 1.
-pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
+fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
-    std.posix.exit(1);
+    // NB: this status must match vsr.FatalReason.cli, but it would be wrong for flags to depend on
+    // vsr. The right way would be to parametrize flags by this behavior, and let the caller inject
+    // the implementation of fatal function, but let's be pragmatic here and just match the behavior
+    // manually.
+    std.process.exit(1);
 }
 
 /// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:
 ///
 /// ```
-/// const CliArgs = union(enum) {
+/// const CLIArgs = union(enum) {
 ///    start: struct { addresses: []const u8, replica: u32 },
 ///    format: struct {
 ///        verbose: bool = false,
@@ -65,16 +69,16 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///        \\ tigerbeetle format [--verbose] <path>
 /// }
 ///
-/// const cli_args = parse_commands(&args, CliArgs);
+/// const cli_args = parse_commands(&args, CLIArgs);
 /// ```
 ///
 /// `positional` field is treated specially, it designates positional arguments.
 ///
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
-pub fn parse(args: *std.process.ArgIterator, comptime CliArgs: type) CliArgs {
-    comptime assert(CliArgs != void);
+pub fn parse(args: *std.process.ArgIterator, comptime CLIArgs: type) CLIArgs {
+    comptime assert(CLIArgs != void);
     assert(args.skip()); // Discard executable name.
-    return parse_flags(args, CliArgs);
+    return parse_flags(args, CLIArgs);
 }
 
 fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
@@ -89,8 +93,8 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
     // NB: help must be declared as *pub* const to be visible here.
     if (@hasDecl(Commands, "help")) {
         if (std.mem.eql(u8, first_arg, "-h") or std.mem.eql(u8, first_arg, "--help")) {
-            std.io.getStdOut().writeAll(Commands.help) catch std.posix.exit(1);
-            std.posix.exit(0);
+            std.io.getStdOut().writeAll(Commands.help) catch std.process.exit(1);
+            std.process.exit(0);
         }
     }
 
@@ -580,7 +584,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
     // For production builds, don't include the main function.
     // This is `if __name__ == "__main__":` at comptime!
 } else struct {
-    const CliArgs = union(enum) {
+    const CLIArgs = union(enum) {
         empty,
         prefix: struct {
             foo: u8 = 0,
@@ -629,7 +633,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
         var args = try std.process.argsWithAllocator(gpa);
         defer args.deinit();
 
-        const cli_args = parse(&args, CliArgs);
+        const cli_args = parse(&args, CLIArgs);
 
         const stdout = std.io.getStdOut();
         const out_stream = stdout.writer();
@@ -680,7 +684,7 @@ test "flags" {
         gpa: std.mem.Allocator,
         tmp_dir: std.testing.TmpDir,
         output_buf: std.ArrayList(u8),
-        flags_exe_buf: *[std.fs.MAX_PATH_BYTES]u8,
+        flags_exe_buf: *[std.fs.max_path_bytes]u8,
         flags_exe: []const u8,
 
         fn init(gpa: std.mem.Allocator) !T {
@@ -702,7 +706,7 @@ test "flags" {
             const output_buf = std.ArrayList(u8).init(gpa);
             errdefer output_buf.deinit();
 
-            const flags_exe_buf = try gpa.create([std.fs.MAX_PATH_BYTES]u8);
+            const flags_exe_buf = try gpa.create([std.fs.max_path_bytes]u8);
             errdefer gpa.destroy(flags_exe_buf);
 
             { // Compile this file as an executable!

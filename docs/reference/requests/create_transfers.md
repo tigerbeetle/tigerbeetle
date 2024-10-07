@@ -31,10 +31,41 @@ The transfer was not created. The [`Transfer.flags.linked`](../transfer.md#flags
 on the last event in the batch, which is not legal. (`flags.linked` indicates that the chain
 continues to the next operation).
 
+### `imported_event_expected`
+
+The transfer was not created. The [`Transfer.flags.imported`](../transfer.md#flagsimported) was
+set on the first transfer of the batch, but not all transfers in the batch.
+Batches cannot mix imported transfers with non-imported transfers.
+
+### `imported_event_not_expected`
+
+The transfer was not created. The [`Transfer.flags.imported`](../transfer.md#flagsimported) was
+expected to _not_ be set, as it's not allowed to mix transfers with different `imported` flag
+in the same batch. The first transfer determines the entire operation.
+
 ### `timestamp_must_be_zero`
 
-The transfer was not created. The [`Transfer.timestamp`](../account.md#timestamp) is nonzero, but
+This result only applies when [`Account.flags.imported`](../account.md#flagsimported) is _not_ set.
+
+The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is nonzero, but
 must be zero. The cluster is responsible for setting this field.
+
+The [`Transfer.timestamp`](../transfer.md#timestamp) can only be assigned when creating transfers
+with [`Transfer.flags.imported`](../transfer.md#flagsimported) set.
+
+### `imported_event_timestamp_out_of_range`
+
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The [`Transfer.timestamp`](../transfer.md#timestamp) is out of range,
+but must be a user-defined timestamp greater than `0` and less than `2^63`.
+
+### `imported_event_timestamp_must_not_advance`
+
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
+
+The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp) is
+greater than the current [cluster time](../../coding/time.md), but it must be a past timestamp.
 
 ### `reserved_flag`
 
@@ -49,9 +80,131 @@ The transfer was not created. [`Transfer.id`](../transfer.md#id) is zero, which 
 The transfer was not created. [`Transfer.id`](../transfer.md#id) is `2^128 - 1`, which is a reserved
 value.
 
+### `exists_with_different_flags`
+
+A transfer with the same `id` already exists, but with different [`flags`](../transfer.md#flags).
+
+### `exists_with_different_pending_id`
+
+A transfer with the same `id` already exists, but with a different
+[`pending_id`](../transfer.md#pending_id).
+
+### `exists_with_different_timeout`
+
+A transfer with the same `id` already exists, but with a different
+[`timeout`](../transfer.md#timeout).
+
+### `exists_with_different_debit_account_id`
+
+A transfer with the same `id` already exists, but with a different
+[`debit_account_id`](../transfer.md#debit_account_id).
+
+### `exists_with_different_credit_account_id`
+
+A transfer with the same `id` already exists, but with a different
+[`credit_account_id`](../transfer.md#credit_account_id).
+
+### `exists_with_different_amount`
+
+A transfer with the same `id` already exists, but with a different
+[`amount`](../transfer.md#amount).
+
+If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the actual amount
+transferred exceeds this failed transfer's `amount`.
+
+### `exists_with_different_user_data_128`
+
+A transfer with the same `id` already exists, but with a different
+[`user_data_128`](../transfer.md#user_data_128).
+
+### `exists_with_different_user_data_64`
+
+A transfer with the same `id` already exists, but with a different
+[`user_data_64`](../transfer.md#user_data_64).
+
+### `exists_with_different_user_data_32`
+
+A transfer with the same `id` already exists, but with a different
+[`user_data_32`](../transfer.md#user_data_32).
+
+### `exists_with_different_ledger`
+
+A transfer with the same `id` already exists, but with a different [`ledger`](../transfer.md#ledger).
+
+### `exists_with_different_code`
+
+A transfer with the same `id` already exists, but with a different [`code`](../transfer.md#code).
+
+### `exists`
+
+A transfer with the same `id` already exists.
+
+If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
+transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
+`amount` of the transfer in the request.
+
+If the transfer has [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+set, then the existing transfer may have a different [`amount`](../transfer.md#amount):
+- If the original posted amount was less than the pending amount,
+  then the transfer amount must be equal to the posted amount.
+- Otherwise, the transfer amount must be greater than or equal to the pending amount.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
+If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
+[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
+transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
+`amount` of the transfer in the request.
+
+</details>
+
+Otherwise, with the possible exception of the `timestamp` field, the existing transfer is identical
+to the transfer in the request.
+
+To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
+many applications should handle `exists` exactly as [`ok`](#ok).
+
+### `id_already_failed`
+
+The transfer was not created. A previous transfer with the same [`id`](../transfer.md#id) failed
+due to one of the following _transient errors_:
+
+- [`debit_account_not_found`](#debit_account_not_found)
+- [`credit_account_not_found`](#credit_account_not_found)
+- [`pending_transfer_not_found`](#pending_transfer_not_found)
+- [`exceeds_credits`](#exceeds_credits)
+- [`exceeds_debits`](#exceeds_debits)
+- [`debit_account_already_closed`](#debit_account_already_closed)
+- [`credit_account_already_closed`](#credit_account_already_closed)
+
+Transient errors depend on the database state at a given point in time, and each attempt
+is uniquely associated with the corresponding [`Transfer.id`](../transfer.md#id).
+This behavior guarantees that retrying a transfer will not produce a different outcome
+(either success or failure).
+
+Without this mechanism, a transfer that previously failed could succeed if retried when the
+underlying state changes (e.g., the target account has sufficient credits).
+
+**Note:** The application should retry an event only if it was unable to acknowledge the last
+response (e.g., due to an application restart) or because it is correcting a previously rejected
+malformed request (e.g., due to an application bug).
+If the application intends to submit the transfer again even after a transient error, it must
+generate a new [idempotency id](../../coding/data-modeling.md#id).
+
+<details>
+<summary>Client release &lt; 0.16.4</summary>
+
+The [`id`](../transfer.md#id) is never checked against failed transfers, regardless of the error.
+Therefore, a transfer that failed due to a transient error could succeed if retried later.
+
+</details>
+
 ### `flags_are_mutually_exclusive`
 
-The transfer was not created. An account cannot be created with the specified combination of
+The transfer was not created. A transfer cannot be created with the specified combination of
 [`Transfer.flags`](../transfer.md#flags).
 
 Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
@@ -61,26 +214,65 @@ Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✗ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✗ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✗ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✗ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✗ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✗ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
 - [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
   - ✓ [`flags.pending`](../transfer.md#flagspending)
   - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
   - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
   - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+- [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+- [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✗ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✗ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.imported`](../transfer.md#flagsimported)
+- [`flags.imported`](../transfer.md#flagsimported)
+  - ✓ [`flags.pending`](../transfer.md#flagspending)
+  - ✓ [`flags.post_pending_transfer`](../transfer.md#flagspost_pending_transfer)
+  - ✓ [`flags.void_pending_transfer`](../transfer.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit)
+  - ✓ [`flags.closing_debit`](../transfer.md#flagsclosing_debit)
+  - ✓ [`flags.closing_credit`](../transfer.md#flagsclosing_credit)
 
 ### `debit_account_id_must_not_be_zero`
 
@@ -145,13 +337,35 @@ transfer.
 The transfer was not created. [`Transfer.timeout`](../transfer.md#timeout) is nonzero, but only
 [pending](../transfer.md#flagspending) transfers have nonzero timeouts.
 
+### `closing_transfer_must_be_pending`
+
+The transfer was not created. [`Transfer.flags.pending`](../transfer.md#flagspending) is not set,
+but closing transfers must be two-phase pending transfers.
+
+If either [`Transfer.flags.closing_debit`](../transfer.md#flagsclosing_debit) or
+[`Transfer.flags.closing_credit`](../transfer.md#flagsclosing_credit) is set,
+[`Transfer.flags.pending`](../transfer.md#flagspending) must also be set.
+
+This ensures that closing transfers are reversible by
+[voiding](../transfer.md#flagsvoid_pending_transfer) the pending transfer, and requires that the
+reversal operation references the corresponding closing transfer, guarding against unexpected
+interleaving of close/unclose operations.
+
 ### `amount_must_not_be_zero`
+
+**Deprecated**: This error code is only returned to clients prior to release `0.16.0`.
+Since `0.16.0`, zero-amount transfers are permitted.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
 
 The transfer was not created. [`Transfer.amount`](../transfer.md#amount) is zero, but must be
 nonzero.
 
 Every transfer must move value. Only posting and voiding transfer amounts may be zero — when zero,
 they will move the full pending amount.
+
+</details>
 
 ### `ledger_must_not_be_zero`
 
@@ -167,10 +381,20 @@ The transfer was not created. [`Transfer.code`](../transfer.md#code) is zero, bu
 The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
 refer to an existing `Account`.
 
+This is a [transient error](#id_already_failed).
+The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
+upon retry, even if the underlying issue is resolved.
+To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
+
 ### `credit_account_not_found`
 
 The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
 refer to an existing `Account`.
+
+This is a [transient error](#id_already_failed).
+The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
+upon retry, even if the underlying issue is resolved.
+To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
 
 ### `accounts_must_have_the_same_ledger`
 
@@ -193,6 +417,11 @@ The transfer was not created. The accounts referred to by
 
 The transfer was not created. The transfer referenced by
 [`Transfer.pending_id`](../transfer.md#pending_id) does not exist.
+
+This is a [transient error](#id_already_failed).
+The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
+upon retry, even if the underlying issue is resolved.
+To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
 
 ### `pending_transfer_not_pending`
 
@@ -248,7 +477,15 @@ The transfer was not created. The transfer is attempting to
 transfer.
 
 To partially void a transfer, create a [posting transfer](../transfer.md#flagspost_pending_transfer)
+with an amount less than the pending transfer's `amount`.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
+To partially void a transfer, create a [posting transfer](../transfer.md#flagspost_pending_transfer)
 with an amount between `0` and the pending transfer's `amount`.
+
+</details>
 
 ### `pending_transfer_already_posted`
 
@@ -265,71 +502,61 @@ already voided by a [`void_pending_transfer`](../transfer.md#flagsvoid_pending_t
 The transfer was not created. The referenced [pending](../transfer.md#pending_id) transfer was
 already voided because its [timeout](../transfer.md#timeout) has passed.
 
-### `exists_with_different_flags`
+### `imported_event_timestamp_must_not_regress`
 
-A transfer with the same `id` already exists, but with different [`flags`](../transfer.md#flags).
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
-### `exists_with_different_debit_account_id`
+The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp)
+regressed, but it must be greater than the last timestamp assigned to any `Transfer` in the cluster and cannot be equal to the timestamp of any existing [`Account`](../account.md).
 
-A transfer with the same `id` already exists, but with a different
-[`debit_account_id`](../transfer.md#debit_account_id).
+### `imported_event_timestamp_must_postdate_debit_account`
 
-### `exists_with_different_credit_account_id`
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
-A transfer with the same `id` already exists, but with a different
-[`credit_account_id`](../transfer.md#credit_account_id).
+The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
+refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than the
+[`Transfer.timestamp`](../transfer.md#timestamp).
 
-### `exists_with_different_amount`
+### `imported_event_timestamp_must_postdate_credit_account`
 
-A transfer with the same `id` already exists, but with a different
-[`amount`](../transfer.md#amount).
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
-If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
-[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the actual amount
-transferred exceeds this failed transfer's `amount`.
+The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
+refer to an `Account` whose [`timestamp`](../account.md#timestamp) is less than the
+[`Transfer.timestamp`](../transfer.md#timestamp).
 
-### `exists_with_different_pending_id`
+### `imported_event_timeout_must_be_zero`
 
-A transfer with the same `id` already exists, but with a different
-[`pending_id`](../transfer.md#pending_id).
+This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
-### `exists_with_different_user_data_128`
+The transfer was not created. The [`Transfer.timeout`](../transfer.md#timeout) is nonzero, but
+must be zero.
 
-A transfer with the same `id` already exists, but with a different
-[`user_data_128`](../transfer.md#user_data_128).
+It's possible to import [pending](../transfer.md#flagspending) transfers with a user-defined
+timestamp, but since it's not driven by the cluster clock, it cannot define a timeout for
+automatic expiration.
+In those cases, the [two-phase post or rollback](../../coding/two-phase-transfers.md) must be
+done manually.
 
-### `exists_with_different_user_data_64`
+### `debit_account_already_closed`
 
-A transfer with the same `id` already exists, but with a different
-[`user_data_64`](../transfer.md#user_data_64).
+The transfer was not created. [`Transfer.debit_account_id`](../transfer.md#debit_account_id) must
+refer to an `Account` whose [`Account.flags.closed`](../account.md#flagsclosed) is not already set.
 
-### `exists_with_different_user_data_32`
+This is a [transient error](#id_already_failed).
+The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
+upon retry, even if the underlying issue is resolved.
+To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
 
-A transfer with the same `id` already exists, but with a different
-[`user_data_32`](../transfer.md#user_data_32).
+### `credit_account_already_closed`
 
-### `exists_with_different_timeout`
+The transfer was not created. [`Transfer.credit_account_id`](../transfer.md#credit_account_id) must
+refer to an `Account` whose [`Account.flags.closed`](../account.md#flagsclosed) is not already set.
 
-A transfer with the same `id` already exists, but with a different
-[`timeout`](../transfer.md#timeout).
-
-### `exists_with_different_code`
-
-A transfer with the same `id` already exists, but with a different [`code`](../transfer.md#code).
-
-### `exists`
-
-A transfer with the same `id` already exists.
-
-If the transfer has [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) or
-[`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) set, then the existing
-transfer may have a different [`amount`](../transfer.md#amount), limited to the maximum
-(if non-zero) `amount` of the transfer in the request.
-
-Otherwise, the existing transfer is identical to the transfer in the request.
-
-To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
-many applications should handle `exists` exactly as [`ok`](#ok).
+This is a [transient error](#id_already_failed).
+The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
+upon retry, even if the underlying issue is resolved.
+To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
 
 ### `overflows_debits_pending`
 
@@ -377,27 +604,47 @@ replica, not the `0` value sent by the client.
 
 The transfer was not created.
 
+The [debit account](../transfer.md#debit_account_id) has
+[`flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) set, but
+`debit_account.debits_pending + debit_account.debits_posted + transfer.amount` would exceed
+`debit_account.credits_posted`.
+
+This is a [transient error](#id_already_failed).
+The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
+upon retry, even if the underlying issue is resolved.
+To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
 If [`flags.balancing_debit`](../transfer.md#flagsbalancing_debit) is set, then
 `debit_account.debits_pending + debit_account.debits_posted + 1` would exceed
 `debit_account.credits_posted`.
 
-Otherwise, the [debit account](../transfer.md#debit_account_id) has
-[`flags.debits_must_not_exceed_credits`](../account.md#flagsdebits_must_not_exceed_credits) set, but
-`debit_account.debits_pending + debit_account.debits_posted + transfer.amount` would exceed
-`debit_account.credits_posted`.
+</details>
 
 ### `exceeds_debits`
 
 The transfer was not created.
 
+The [credit account](../transfer.md#credit_account_id) has
+[`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) set, but
+`credit_account.credits_pending + credit_account.credits_posted + transfer.amount` would exceed
+`credit_account.debits_posted`.
+
+This is a [transient error](#id_already_failed).
+The [`Transfer.id`](../transfer.md#id) associated with this particular attempt will always fail
+upon retry, even if the underlying issue is resolved.
+To succeed, a new [idempotency id](../../coding/data-modeling.md#id) must be submitted.
+
+<details>
+<summary>Client release &lt; 0.16.0</summary>
+
 If [`flags.balancing_credit`](../transfer.md#flagsbalancing_credit) is set, then
 `credit_account.credits_pending + credit_account.credits_posted + 1` would exceed
 `credit_account.debits_posted`.
 
-Otherwise, the [credit account](../transfer.md#credit_account_id) has
-[`flags.credits_must_not_exceed_debits`](../account.md#flagscredits_must_not_exceed_debits) set, but
-`credit_account.credits_pending + credit_account.credits_posted + transfer.amount` would exceed
-`credit_account.debits_posted`.
+</details>
 
 ## Client libraries
 

@@ -97,8 +97,6 @@ pub const Header = extern struct {
             .eviction => Eviction,
             .request_blocks => RequestBlocks,
             .block => Block,
-            .request_sync_checkpoint => RequestSyncCheckpoint,
-            .sync_checkpoint => SyncCheckpoint,
         };
     }
 
@@ -208,10 +206,28 @@ pub const Header = extern struct {
                 }
             },
             .prepare => return .unknown,
+            .block => return .unknown,
+            .reply => return .unknown,
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
+
             // All other messages identify the peer as a replica:
-            else => return .{ .replica = self.replica },
+            .ping,
+            .pong,
+            .pong_client,
+            .prepare_ok,
+            .commit,
+            .start_view_change,
+            .do_view_change,
+            .start_view,
+            .request_start_view,
+            .request_headers,
+            .request_prepare,
+            .request_reply,
+            .headers,
+            .eviction,
+            .request_blocks,
+            => return .{ .replica = self.replica },
         }
     }
 
@@ -348,7 +364,7 @@ pub const Header = extern struct {
         release: vsr.Release,
         protocol: u16 = vsr.Version,
         command: Command,
-        replica: u8 = 0,
+        replica: u8,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         ping_timestamp_monotonic: u64,
@@ -1236,11 +1252,13 @@ pub const Header = extern struct {
         pub const Reason = enum(u8) {
             reserved = 0,
             no_session = 1,
-            release_too_low = 2,
-            release_too_high = 3,
+            client_release_too_low = 2,
+            client_release_too_high = 3,
             invalid_request_operation = 4,
             invalid_request_body = 5,
             invalid_request_body_size = 6,
+            session_too_low = 7,
+            session_release_mismatch = 8,
 
             comptime {
                 for (std.enums.values(Reason), 0..) |reason, index| {
@@ -1323,76 +1341,6 @@ pub const Header = extern struct {
             if (!self.block_type.valid()) return "block_type invalid";
             if (self.block_type == .reserved) return "block_type == .reserved";
             // TODO When manifest blocks include a snapshot, verify that snapshot≠0.
-            return null;
-        }
-    };
-
-    pub const RequestSyncCheckpoint = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
-
-        checksum: u128 = 0,
-        checksum_padding: u128 = 0,
-        checksum_body: u128 = 0,
-        checksum_body_padding: u128 = 0,
-        nonce_reserved: u128 = 0,
-        cluster: u128,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
-        command: Command,
-        replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-        checkpoint_id: u128,
-        checkpoint_op: u64,
-        reserved: [104]u8 = [_]u8{0} ** 104,
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_sync_checkpoint);
-            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.view != 0) return "view != 0";
-            if (self.release.value != 0) return "release != 0";
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-            return null;
-        }
-    };
-
-    pub const SyncCheckpoint = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
-
-        checksum: u128 = 0,
-        checksum_padding: u128 = 0,
-        checksum_body: u128 = 0,
-        checksum_body_padding: u128 = 0,
-        nonce_reserved: u128 = 0,
-        cluster: u128,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
-        command: Command,
-        replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-        /// Strictly speaking, this is identical to `checksum_body`.
-        /// It is included separately to mirror the RequestSyncCheckpoint header.
-        checkpoint_id: u128,
-        checkpoint_op: u64,
-        reserved: [104]u8 = [_]u8{0} ** 104,
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .sync_checkpoint);
-            if (self.size != @sizeOf(Header) + @sizeOf(vsr.CheckpointState)) {
-                return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
-            }
-            if (self.view != 0) return "view != 0";
-            if (self.release.value != 0) return "release != 0";
-            if (self.checkpoint_id != self.checksum_body) return "checkpoint_id != checksum_body";
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
     };

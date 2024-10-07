@@ -11,8 +11,6 @@ const div_ceil = @import("../stdx.zig").div_ceil;
 const maybe = @import("../stdx.zig").maybe;
 const verify = constants.verify;
 
-const tracer = @import("../tracer.zig");
-
 pub const Layout = struct {
     ways: u64 = 16,
     tag_bits: u64 = 8,
@@ -22,7 +20,7 @@ pub const Layout = struct {
     value_alignment: ?u29 = null,
 };
 
-const TracerStats = struct {
+const Metrics = struct {
     hits: u64 = 0,
     misses: u64 = 0,
 };
@@ -108,7 +106,8 @@ pub fn SetAssociativeCacheType(
         name: []const u8,
         sets: u64,
 
-        tracer_stats: *TracerStats,
+        // TODO Expose these as metrics.
+        metrics: *Metrics,
 
         /// A short, partial hash of a Key, corresponding to a Value.
         /// Because the tag is small, collisions are possible:
@@ -185,8 +184,8 @@ pub fn SetAssociativeCacheType(
             errdefer allocator.free(clocks);
 
             // Explicitly allocated so that get / get_index can be `*const Self`.
-            const tracer_stats = try allocator.create(TracerStats);
-            errdefer allocator.destroy(tracer_stats);
+            const metrics = try allocator.create(Metrics);
+            errdefer allocator.destroy(metrics);
 
             var self = Self{
                 .name = options.name,
@@ -195,7 +194,7 @@ pub fn SetAssociativeCacheType(
                 .values = values,
                 .counts = .{ .words = counts },
                 .clocks = .{ .words = clocks },
-                .tracer_stats = tracer_stats,
+                .metrics = metrics,
             };
 
             self.reset();
@@ -211,33 +210,25 @@ pub fn SetAssociativeCacheType(
             allocator.free(self.values);
             allocator.free(self.counts.words);
             allocator.free(self.clocks.words);
-            allocator.destroy(self.tracer_stats);
+            allocator.destroy(self.metrics);
         }
 
         pub fn reset(self: *Self) void {
             @memset(self.tags, 0);
             @memset(self.counts.words, 0);
             @memset(self.clocks.words, 0);
-            self.tracer_stats.* = .{};
+            self.metrics.* = .{};
         }
 
         pub fn get_index(self: *const Self, key: Key) ?usize {
             const set = self.associate(key);
             if (self.search(set, key)) |way| {
-                self.tracer_stats.hits += 1;
-                tracer.plot(
-                    .{ .cache_hits = .{ .cache_name = self.name } },
-                    @as(f64, @floatFromInt(self.tracer_stats.hits)),
-                );
+                self.metrics.hits += 1;
                 const count = self.counts.get(set.offset + way);
                 self.counts.set(set.offset + way, count +| 1);
                 return set.offset + way;
             } else {
-                self.tracer_stats.misses += 1;
-                tracer.plot(
-                    .{ .cache_misses = .{ .cache_name = self.name } },
-                    @as(f64, @floatFromInt(self.tracer_stats.misses)),
-                );
+                self.metrics.misses += 1;
                 return null;
             }
         }

@@ -20,45 +20,36 @@ const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
-const flags = @import("../flags.zig");
-const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
+const changelog = @import("./changelog.zig");
+
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
+const multiversion_binary_platform_size_max = multiversioning.multiversion_binary_platform_size_max;
+const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
-pub const CliArgs = struct {
-    run_number: u32,
+pub const CLIArgs = struct {
     sha: []const u8,
     language: ?Language = null,
     build: bool = false,
     publish: bool = false,
+    // Set if there's no changelog entry for the current code. That is, if the top changelog
+    // entry describes a past release, and not the release we are creating here.
+    //
+    // This flag is used to test the release process on the main branch.
+    no_changelog: bool = false,
 };
 
 const VersionInfo = struct {
     release_triple: []const u8,
+    release_triple_multiversion: []const u8,
     release_triple_client_min: []const u8,
     sha: []const u8,
 };
 
-/// 0.15.4 will be the first version with the ability to read the multiversion metadata embedded in
-/// TigerBeetle. This presents a bootstrapping problem:
-///
-/// * Operator replaces 0.15.3 with 0.15.4,
-/// * 0.15.4 starts up, re-execs into 0.15.3,
-/// * 0.15.3 knows nothing about 0.15.4 or how to check it's available, so we just hang.
-///
-/// Work around this by creating a custom re-release of 0.15.3, hardcoding that if 0.15.3 is present
-/// in a pack, 0.15.4 must be too.
-///
-const multiversion_epoch = "0.15.3";
-
-/// This commit references https://github.com/tigerbeetle/tigerbeetle/pull/1935.
-const multiversion_epoch_commit = "035c895bf85f5106d94f08cac49719994344880e";
-
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(builtin.target.os.tag == .linux);
     assert(builtin.target.cpu.arch == .x86_64);
     _ = gpa;
@@ -68,14 +59,46 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     else
         LanguageSet.initFull();
 
-    // Run number is a monotonically incremented integer. Map it to a three-component version
-    // number.
-    // If you change this, make sure to change the validation code in release_validate.zig!
-    const release_triple = .{
-        .major = 0,
-        .minor = 15,
-        .patch = cli_args.run_number - 185,
+    const changelog_text = try shell.project_root.readFileAlloc(
+        shell.arena.allocator(),
+        "CHANGELOG.md",
+        1024 * 1024,
+    );
+    var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
+    const release, const release_multiversion, const changelog_body = blk: {
+        if (cli_args.no_changelog) {
+            var last_release = changelog_iteratator.next_changelog().?;
+            while (last_release.release == null) {
+                last_release = changelog_iteratator.next_changelog().?;
+            }
+
+            break :blk .{
+                multiversioning.Release.from(.{
+                    .major = last_release.release.?.triple().major,
+                    .minor = last_release.release.?.triple().minor,
+                    .patch = last_release.release.?.triple().patch + 1,
+                }),
+                last_release.release.?,
+                "",
+            };
+        } else {
+            const changelog_current = changelog_iteratator.next_changelog().?;
+            const changelog_previous = changelog_iteratator.next_changelog().?;
+            break :blk .{
+                changelog_current.release.?,
+                changelog_previous.release.?,
+                changelog_current.text_body,
+            };
+        }
     };
+    assert(multiversioning.Release.less_than({}, release_multiversion, release));
+
+    // Ensure we're building a version newer than the first multiversion release. That was
+    // bootstrapped with code to do a custom build of the release before that (see git history)
+    // whereas now past binaries are downloaded and the multiversion parts extracted.
+    const first_multiversion_release = "0.15.4";
+    assert(release.value >
+        (try multiversioning.Release.parse(first_multiversion_release)).value);
 
     // The minimum client version allowed to connect. This has implications for backwards
     // compatibility and the upgrade path for replicas and clients. If there's no overlap
@@ -89,13 +112,15 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     };
 
     const version_info = VersionInfo{
-        .release_triple = try std.fmt.allocPrint(
-            shell.arena.allocator(),
+        .release_triple = try shell.fmt(
             "{[major]}.{[minor]}.{[patch]}",
-            release_triple,
+            release.triple(),
         ),
-        .release_triple_client_min = try std.fmt.allocPrint(
-            shell.arena.allocator(),
+        .release_triple_multiversion = try shell.fmt(
+            "{[major]}.{[minor]}.{[patch]}",
+            release_multiversion.triple(),
+        ),
+        .release_triple_client_min = try shell.fmt(
             "{[major]}.{[minor]}.{[patch]}",
             release_triple_client_min,
         ),
@@ -108,7 +133,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     }
 
     if (cli_args.publish) {
-        try publish(shell, languages, version_info);
+        assert(!cli_args.no_changelog);
+        try publish(shell, languages, changelog_body, version_info);
     }
 }
 
@@ -116,8 +142,8 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     var section = try shell.open_section("build all");
     defer section.close();
 
-    try shell.project_root.deleteTree("dist");
-    var dist_dir = try shell.project_root.makeOpenPath("dist", .{});
+    try shell.project_root.deleteTree("zig-out/dist");
+    var dist_dir = try shell.project_root.makeOpenPath("zig-out/dist", .{});
     defer dist_dir.close();
 
     log.info("building TigerBeetle distribution into {s}", .{
@@ -164,422 +190,71 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     var section = try shell.open_section("build tigerbeetle");
     defer section.close();
 
-    // TODO(multiversioning): This code only supports building the 0.15.4 release.
-    assert((try multiversioning.Release.parse(info.release_triple)).value ==
-        (try multiversioning.Release.parse("0.15.4")).value);
-
-    const llvm_objcopy = for (@as([2][]const u8, .{
-        "llvm-objcopy-16",
-        "llvm-objcopy",
-    })) |llvm_objcopy| {
-        if (shell.exec_stdout("{llvm_objcopy} --version", .{
-            .llvm_objcopy = llvm_objcopy,
-        })) |llvm_objcopy_version| {
-            log.info("llvm-objcopy version {s}", .{llvm_objcopy_version});
-            break llvm_objcopy;
-        } else |_| {}
-    } else {
-        fatal("can't find llvm-objcopy", .{});
-    };
-
     // We shell out to `zip` for creating archives, so we need an absolute path here.
     const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
-
-    // TODO(multiversioning): Remove once multiversion releases have been bootstrapped.
-    const is_multiversion_epoch = std.mem.eql(
-        u8,
-        try shell.exec_stdout("gh release view --json tagName --template {template}", .{
-            .template = "{{.tagName}}", // Static, but shell.zig is not happy with '{'.
-        }),
-        multiversion_epoch,
-    );
-    if (!is_multiversion_epoch) @panic("non-epoch builds unsupported");
-
-    defer shell.project_root.deleteTree("tigerbeetle-epoch") catch {};
-    try build_tigerbeetle_epoch(shell);
 
     const targets = .{
         "x86_64-linux",
         "x86_64-windows",
         "aarch64-linux",
+        "aarch64-macos", // Will build a universal binary.
     };
 
+    const sha_date = try shell.exec_stdout("git show --no-patch --no-notes --pretty=%cI {sha}", .{
+        .sha = info.sha,
+    });
+
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
-    // `dist`. MacOS is special cased below --- we use an extra step to merge x86 and arm binaries
-    // into one.
-    // TODO: use std.Target here
-    defer shell.project_root.deleteFile("dist/tigerbeetle-multiversion-test") catch {};
+    // `dist`.
     inline for (.{ true, false }) |debug| {
-        const debug_suffix = if (debug) "-debug" else "";
         inline for (targets) |target| {
-            try shell.zig(
+            try shell.exec_zig(
                 \\build
                 \\    -Dtarget={target}
                 \\    -Drelease={release}
                 \\    -Dgit-commit={commit}
                 \\    -Dconfig-release={release_triple}
                 \\    -Dconfig-release-client-min={release_triple_client_min}
+                \\    -Dmultiversion={release_triple_multiversion}
             , .{
                 .target = target,
                 .release = if (debug) "false" else "true",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
                 .release_triple_client_min = info.release_triple_client_min,
+                .release_triple_multiversion = info.release_triple_multiversion,
             });
 
             const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
+            const macos = comptime std.mem.indexOf(u8, target, "macos") != null;
+
             const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
+            const zip_name = "tigerbeetle-" ++
+                (if (macos) "universal-macos" else target) ++
+                (if (debug) "-debug" else "") ++
+                ".zip";
 
-            // Copy the object using llvm-objcopy before taking our hash. This is to ensure we're
-            // round trip deterministic between adding and removing sections:
-            // `llvm-objcopy --add-section ... src dst_added` followed by
-            // `llvm-objcopy --remove-section ... dst_added src_back` means
-            // checksum(src) == checksum(src_back)
-            // Note: actually don't think this is needed, we could assert it?
-            try shell.exec(
-                "{llvm_objcopy} --enable-deterministic-archives {exe_name} {exe_name}",
-                .{
-                    .llvm_objcopy = llvm_objcopy,
-                    .exe_name = exe_name,
-                },
-            );
-            defer shell.project_root.deleteFile(exe_name) catch {};
-
-            if (!windows) {
-                const allocator = shell.arena.allocator();
-                const current_checksum: u128 = blk: {
-                    const current_binary = try shell.project_root.openFile(exe_name, .{
-                        .mode = .read_only,
-                    });
-                    defer current_binary.close();
-
-                    const current_binary_contents = try current_binary.readToEndAlloc(
-                        allocator,
-                        multiversion_binary_size_max,
-                    );
-                    break :blk multiversioning.checksum.checksum(current_binary_contents);
-                };
-
-                const past_versions = try build_multiversion_body(
-                    shell,
-                    target,
-                    debug,
-                    "multiversion.body",
-                );
-                defer shell.project_root.deleteFile("multiversion.body") catch {};
-
-                // Explicitly write out zeros for the header, to compute the checksum.
-                var header = std.mem.zeroes(multiversioning.MultiversionHeader);
-
-                var header_file = try shell.project_root.createFile("multiversion.header", .{
-                    .truncate = true,
-                });
-                defer shell.project_root.deleteFile("multiversion.header") catch {};
-                try header_file.writeAll(std.mem.asBytes(&header));
-                header_file.close();
-
-                // Use objcopy to add in our new body, as well as its header - even though the
-                // header is still zero!
-                try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined" ++
-                    " --add-section .tb_mvb=multiversion.body" ++
-                    " --set-section-flags .tb_mvb=contents,noload,readonly" ++
-                    " --add-section .tb_mvh=multiversion.header" ++
-                    " --set-section-flags .tb_mvh=contents,noload,readonly {exe_name}", .{
-                    .llvm_objcopy = llvm_objcopy,
+            if (std.mem.eql(u8, target, "x86_64-linux")) {
+                const output = try shell.exec_stdout("./{exe_name} version --verbose", .{
                     .exe_name = exe_name,
                 });
-
-                // Take the checksum of the binary, with the zero'd header.
-                const checksum_binary_without_header: u128 = blk: {
-                    const current_binary = try shell.project_root.openFile(exe_name, .{
-                        .mode = .read_only,
-                    });
-                    defer current_binary.close();
-
-                    const current_binary_contents = try current_binary.readToEndAlloc(
-                        allocator,
-                        multiversion_binary_size_max,
-                    );
-                    break :blk multiversioning.checksum.checksum(current_binary_contents);
-                };
-
-                header = multiversioning.MultiversionHeader{
-                    .current_release = (try multiversioning.Release.parse(
-                        info.release_triple,
-                    )).value,
-                    .current_checksum = current_checksum,
-                    .current_flags = .{
-                        .debug = debug,
-                        .visit = true,
-                    },
-                    .past = past_versions,
-                    .checksum_binary_without_header = checksum_binary_without_header,
-                };
-                header.checksum_header = header.calculate_header_checksum();
-
-                header_file = try shell.project_root.createFile("multiversion.header", .{
-                    .truncate = true,
-                });
-                // Cleaned up by a defer higher up.
-
-                try header_file.writeAll(std.mem.asBytes(&header));
-                header_file.close();
-
-                // Replace the header with the final version.
-                try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined" ++
-                    " --remove-section .tb_mvh --add-section .tb_mvh=multiversion.header" ++
-                    " --set-section-flags .tb_mvh=contents,noload,readonly {exe_name}", .{
-                    .llvm_objcopy = llvm_objcopy,
-                    .exe_name = exe_name,
-                });
-
-                // If running on x86_64-linux (our only supported CI system, asserted in main())
-                // copy the binary somewhere to use it to test built multiversion binaries.
-                if (std.mem.eql(u8, target, "x86_64-linux")) {
-                    try shell.exec("cp {exe_name} dist/tigerbeetle-multiversion-test", .{
-                        .exe_name = exe_name,
-                    });
-                }
-
-                // Finally, check the binary produced using both the old and new versions.
-                // TODO(multiversioning): Do the check with the old binary downloaded, if it wasn't
-                // the epoch.
-                try shell.exec("dist/tigerbeetle-multiversion-test multiversion {exe_name}", .{
-                    .exe_name = exe_name,
-                });
+                assert(std.mem.indexOf(u8, output, "process.verify=true") != null);
+                const build_mode = if (debug)
+                    "build.mode=builtin.OptimizeMode.Debug"
+                else
+                    "build.mode=builtin.OptimizeMode.ReleaseSafe";
+                assert(std.mem.indexOf(u8, output, build_mode) != null);
             }
 
-            const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
+            try shell.exec("touch -d {sha_date} {exe_name}", .{
+                .sha_date = sha_date,
+                .exe_name = exe_name,
+            });
             try shell.exec("zip -9 {zip_path} {exe_name}", .{
                 .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
-                .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
+                .exe_name = exe_name,
             });
         }
-    }
-
-    // macOS handling.
-    inline for (.{ true, false }) |debug| {
-        const debug_suffix = if (debug) "-debug" else "";
-        inline for (.{ "aarch64-macos", "x86_64-macos" }) |target| {
-            try shell.zig(
-                \\build install
-                \\    -Dtarget={target}
-                \\    -Drelease={release}
-                \\    -Dgit-commit={commit}
-                \\    -Dconfig-release={release_triple}
-                \\    -Dconfig-release-client-min={release_triple_client_min}
-            , .{
-                .target = target,
-                .release = if (debug) "false" else "true",
-                .commit = info.sha,
-                .release_triple = info.release_triple,
-                .release_triple_client_min = info.release_triple_client_min,
-            });
-
-            try Shell.copy_path(
-                shell.project_root,
-                "tigerbeetle",
-                shell.project_root,
-                "tigerbeetle-" ++ target,
-            );
-        }
-
-        try build_macos_universal_binary(shell, "tigerbeetle", &.{
-            .{
-                .cpu_type = std.macho.CPU_TYPE_ARM64,
-                .cpu_subtype = std.macho.CPU_SUBTYPE_ARM_ALL,
-                .path = "tigerbeetle-aarch64-macos",
-            },
-            .{
-                .cpu_type = std.macho.CPU_TYPE_X86_64,
-                .cpu_subtype = std.macho.CPU_SUBTYPE_X86_64_ALL,
-                .path = "tigerbeetle-x86_64-macos",
-            },
-        });
-        defer shell.project_root.deleteFile("tigerbeetle") catch {};
-
-        try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
-        try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
-        const zip_name = "tigerbeetle-universal-macos" ++ debug_suffix ++ ".zip";
-        try shell.exec("touch -d 1970-01-01T00:00:00Z {exe_name}", .{
-            .exe_name = "tigerbeetle",
-        });
-        try shell.exec("zip -9 -oX {zip_path} {exe_name}", .{
-            .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
-            .exe_name = "tigerbeetle",
-        });
-    }
-}
-
-/// Buildception! Rather than rely on a hardcoded binary, build the custom 0.15.3 release here.
-/// The caller must clean up the `tigerbeetle-epoch/` directory after use.
-fn build_tigerbeetle_epoch(shell: *Shell) !void {
-    var section = try shell.open_section("build tigerbeetle epoch");
-    defer section.close();
-
-    try shell.exec("git clone https://github.com/tigerbeetle/tigerbeetle.git tigerbeetle-epoch", .{});
-
-    try shell.pushd("./tigerbeetle-epoch");
-    defer shell.popd();
-
-    try shell.exec("git checkout {commit}", .{
-        .commit = multiversion_epoch_commit,
-    });
-    try shell.exec("scripts/install_zig.sh", .{});
-    try shell.exec("zig/zig build scripts -- release --run-number={run_number} --sha={commit} " ++
-        "--language=zig --build", .{
-        .commit = multiversion_epoch_commit,
-
-        // 188 corresponds to 0.15.3, in 0.15.3's release code.
-        .run_number = 188,
-    });
-}
-
-/// Builds a multiversion body for the `target` specified, returns the PastReleases metadata and
-/// writes the output to `body_path`.
-fn build_multiversion_body(
-    shell: *Shell,
-    comptime target: []const u8,
-    debug: bool,
-    body_path: []const u8,
-) !multiversioning.MultiversionHeader.PastReleases {
-    assert(std.mem.indexOf(u8, target, "-linux") != null);
-
-    var section = try shell.open_section("build multiversion body");
-    defer section.close();
-
-    // TODO(multiversioning): Normally this would download and extract the last published release
-    // of TigerBeetle. For the 0.15.4 release, it uses the custom build provided in
-    // `tigerbeetle-epoch/` by build_tigerbeetle_epoch().
-    try shell.exec("unzip -d tigerbeetle-epoch/dist/extracted " ++
-        "tigerbeetle-epoch/dist/tigerbeetle/tigerbeetle-{target}{debug}.zip", .{
-        .target = target,
-        .debug = if (debug) "-debug" else "",
-    });
-    defer shell.project_root.deleteTree("tigerbeetle-epoch/dist/extracted") catch {};
-
-    const past_binary = try shell.project_root
-        .openFile("./tigerbeetle-epoch/dist/extracted/tigerbeetle", .{ .mode = .read_only });
-    defer past_binary.close();
-
-    const past_binary_contents = try past_binary.readToEndAlloc(
-        shell.arena.allocator(),
-        multiversion_binary_size_max,
-    );
-
-    const checksum: u128 = multiversioning.checksum.checksum(past_binary_contents);
-
-    const body_file = try shell.project_root.createFile(body_path, .{ .truncate = true });
-    defer body_file.close();
-
-    try body_file.writeAll(past_binary_contents);
-
-    const git_commit: [20]u8 = blk: {
-        var commit_bytes: [20]u8 = std.mem.zeroes([20]u8);
-        for (0..@divExact(multiversion_epoch_commit.len, 2)) |i| {
-            const byte = try std.fmt.parseInt(u8, multiversion_epoch_commit[i * 2 ..][0..2], 16);
-            commit_bytes[i] = byte;
-        }
-
-        var multiversion_epoch_commit_roundtrip: [40]u8 = undefined;
-        assert(std.mem.eql(u8, try std.fmt.bufPrint(
-            &multiversion_epoch_commit_roundtrip,
-            "{s}",
-            .{std.fmt.fmtSliceHexLower(&commit_bytes)},
-        ), multiversion_epoch_commit));
-
-        break :blk commit_bytes;
-    };
-
-    return multiversioning.MultiversionHeader.PastReleases.init(1, .{
-        .releases = &.{
-            (try multiversioning.Release.parse(multiversion_epoch)).value,
-        },
-        .checksums = &.{checksum},
-        .offsets = &.{0},
-        .sizes = &.{@as(u32, @intCast(past_binary_contents.len))},
-        .flags = &.{.{ .visit = false, .debug = debug }},
-        .git_commits = &.{git_commit},
-        .release_client_mins = &.{
-            (try multiversioning.Release.parse(multiversion_epoch)).value,
-        },
-    });
-}
-
-/// Does the same thing as llvm-lipo (builds a universal binary) but allows building binaries
-/// that have deprecated architectures. This is used by multiversioning on macOS, where these
-/// deprecated architectures hold the multiversion header and body.
-/// It's much easier to embed and read them here, then to do it in the inner MachO binary, like
-/// we do with ELF or PE.
-fn build_macos_universal_binary(
-    shell: *Shell,
-    output_path: []const u8,
-    binaries: []const struct { cpu_type: i32, cpu_subtype: i32, path: []const u8 },
-) !void {
-    var section = try shell.open_section("build macos universal binary");
-    defer section.close();
-
-    // The offset start is relative to the end of the headers, rounded up to the alignment.
-    const alignment_power = 14;
-    const alignment = std.math.pow(u32, 2, alignment_power);
-
-    // Ensure alignment of 2^14 == 16384 to match macOS.
-    assert(alignment == 16384);
-
-    const headers_size = @sizeOf(std.macho.fat_header) + @sizeOf(std.macho.fat_arch) *
-        binaries.len;
-    assert(headers_size < alignment);
-
-    const binary_headers = try shell.arena.allocator().alloc(std.macho.fat_arch, binaries.len);
-
-    var current_offset: u32 = alignment;
-    for (binaries, binary_headers) |binary, *binary_header| {
-        const binary_file = try shell.project_root.openFile(binary.path, .{ .mode = .read_only });
-        defer binary_file.close();
-
-        const binary_size: u32 = @intCast((try binary_file.stat()).size);
-
-        // The Mach-O header is big-endian...
-        binary_header.* = std.macho.fat_arch{
-            .cputype = @byteSwap(binary.cpu_type),
-            .cpusubtype = @byteSwap(binary.cpu_subtype),
-            .offset = @byteSwap(current_offset),
-            .size = @byteSwap(binary_size),
-            .@"align" = @byteSwap(@as(u32, @intCast(alignment_power))),
-        };
-
-        current_offset += binary_size;
-        current_offset = std.mem.alignForward(u32, current_offset, alignment);
-    }
-
-    var output_file = try shell.project_root.createFile(output_path, .{ .truncate = false });
-    defer output_file.close();
-
-    const fat_header = std.macho.fat_header{
-        .magic = std.macho.FAT_CIGAM,
-        .nfat_arch = @byteSwap(@as(u32, @intCast(binaries.len))),
-    };
-    assert(@sizeOf(std.macho.fat_header) == 8);
-    try output_file.writeAll(std.mem.asBytes(&fat_header));
-
-    assert(@sizeOf(std.macho.fat_arch) == 20);
-    try output_file.writeAll(std.mem.sliceAsBytes(binary_headers));
-
-    try output_file.seekTo(alignment);
-
-    for (binaries, binary_headers) |binary, binary_header| {
-        const binary_file = try shell.project_root.openFile(binary.path, .{ .mode = .read_only });
-        defer binary_file.close();
-
-        try output_file.seekTo(@byteSwap(binary_header.offset));
-
-        const binary_contents = try binary_file.readToEndAlloc(
-            shell.arena.allocator(),
-            multiversion_binary_size_max,
-        );
-        assert(binary_contents.len == @byteSwap(binary_header.size));
-
-        try output_file.writeAll(binary_contents);
     }
 }
 
@@ -591,12 +266,12 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer shell.popd();
 
     const dotnet_version = shell.exec_stdout("dotnet --version", .{}) catch {
-        fatal("can't find dotnet", .{});
+        return error.NoDotnet;
     };
     log.info("dotnet version {s}", .{dotnet_version});
 
-    try shell.zig(
-        \\build clients:dotnet -Drelease -Dconfig=production -Dconfig-release={release_triple}
+    try shell.exec_zig(
+        \\build clients:dotnet -Drelease -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,
@@ -622,8 +297,8 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     try shell.pushd("./src/clients/go");
     defer shell.popd();
 
-    try shell.zig(
-        \\build clients:go -Drelease -Dconfig=production -Dconfig-release={release_triple}
+    try shell.exec_zig(
+        \\build clients:go -Drelease -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,
@@ -672,12 +347,12 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer shell.popd();
 
     const java_version = shell.exec_stdout("java --version", .{}) catch {
-        fatal("can't find java", .{});
+        return error.NoJava;
     };
     log.info("java version {s}", .{java_version});
 
-    try shell.zig(
-        \\build clients:java -Drelease -Dconfig=production -Dconfig-release={release_triple}
+    try shell.exec_zig(
+        \\build clients:java -Drelease -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,
@@ -714,12 +389,12 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer shell.popd();
 
     const node_version = shell.exec_stdout("node --version", .{}) catch {
-        fatal("can't find nodejs", .{});
+        return error.NoNode;
     };
     log.info("node version {s}", .{node_version});
 
-    try shell.zig(
-        \\build clients:node -Drelease -Dconfig=production -Dconfig-release={release_triple}
+    try shell.exec_zig(
+        \\build clients:node -Drelease -Dconfig-release={release_triple}
         \\ -Dconfig-release-client-min={release_triple_client_min}
     , .{
         .release_triple = info.release_triple,
@@ -747,31 +422,80 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     );
 }
 
-fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
+fn publish(
+    shell: *Shell,
+    languages: LanguageSet,
+    changelog_body: []const u8,
+    info: VersionInfo,
+) !void {
     var section = try shell.open_section("publish all");
     defer section.close();
 
-    assert(try shell.dir_exists("dist"));
+    {
+        // Sanity check that the new release doesn't exist but the multiversion does.
+        var release_multiversion_exists = false;
+        var release_exists = false;
+        const releases_exiting = try shell.exec_stdout(
+            "gh release list --json tagName --jq {query}",
+            .{ .query = ".[].tagName" },
+        );
+        var it = std.mem.split(u8, releases_exiting, "\n");
+        while (it.next()) |release_existing| {
+            assert(std.mem.trim(u8, release_existing, " \t\n\r").len == release_existing.len);
+            if (std.mem.eql(u8, release_existing, info.release_triple)) {
+                release_exists = true;
+            }
+            if (std.mem.eql(u8, release_existing, info.release_triple_multiversion)) {
+                release_multiversion_exists = true;
+            }
+        }
+        assert(!release_exists and release_multiversion_exists);
+    }
+
+    assert(try shell.dir_exists("zig-out/dist"));
 
     if (languages.contains(.zig)) {
         _ = try shell.env_get("GITHUB_TOKEN");
         const gh_version = shell.exec_stdout("gh --version", .{}) catch {
-            fatal("can't find gh", .{});
+            return error.NoGh;
         };
         log.info("gh version {s}", .{gh_version});
 
-        const full_changelog = try shell.project_root.readFileAlloc(
-            shell.arena.allocator(),
-            "CHANGELOG.md",
-            1024 * 1024,
-        );
+        const release_included_min = blk: {
+            shell.project_root.deleteFile("tigerbeetle") catch {};
+            defer shell.project_root.deleteFile("tigerbeetle") catch {};
+
+            try shell.exec("unzip ./zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+            const past_binary_contents = try shell.cwd.readFileAllocOptions(
+                shell.arena.allocator(),
+                "tigerbeetle",
+                multiversion_binary_size_max,
+                null,
+                8,
+                null,
+            );
+
+            const parsed_offsets = try multiversioning.parse_elf(past_binary_contents);
+            const header_bytes =
+                past_binary_contents[parsed_offsets.x86_64.?.header_offset..][0..@sizeOf(
+                multiversioning.MultiversionHeader,
+            )];
+
+            const header = try multiversioning.MultiversionHeader.init_from_bytes(header_bytes);
+            const release_min = header.past.releases[0];
+            const release_max = header.past.releases[header.past.count - 1];
+            assert(release_min < release_max);
+
+            break :blk multiversioning.Release{ .value = release_min };
+        };
 
         const notes = try shell.fmt(
-            \\{[release_triple]s}
+            \\# {[release_triple]s}
             \\
-            \\**NOTE**: You must run the same version of server and client. We do
-            \\not yet follow semantic versioning where all patch releases are
-            \\interchangeable.
+            \\### Supported upgrade versions
+            \\
+            \\Oldest supported client version: {[release_triple_client_min]s}
+            \\Oldest upgradable replica version: {[release_included_min]s}
             \\
             \\## Server
             \\
@@ -796,7 +520,9 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             \\{[changelog]s}
         , .{
             .release_triple = info.release_triple,
-            .changelog = latest_changelog_entry(full_changelog),
+            .release_triple_client_min = info.release_triple_client_min,
+            .release_included_min = release_included_min,
+            .changelog = changelog_body,
         });
 
         try shell.exec(
@@ -813,14 +539,14 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
         // Here and elsewhere for publishing we explicitly spell out the files we are uploading
         // instead of using a for loop to double-check the logic in `build`.
         const artifacts: []const []const u8 = &.{
-            "dist/tigerbeetle/tigerbeetle-aarch64-linux-debug.zip",
-            "dist/tigerbeetle/tigerbeetle-aarch64-linux.zip",
-            "dist/tigerbeetle/tigerbeetle-universal-macos-debug.zip",
-            "dist/tigerbeetle/tigerbeetle-universal-macos.zip",
-            "dist/tigerbeetle/tigerbeetle-x86_64-linux-debug.zip",
-            "dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
-            "dist/tigerbeetle/tigerbeetle-x86_64-windows-debug.zip",
-            "dist/tigerbeetle/tigerbeetle-x86_64-windows.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-aarch64-linux-debug.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-aarch64-linux.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-universal-macos-debug.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-universal-macos.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux-debug.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-windows-debug.zip",
+            "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-windows.zip",
         };
         try shell.exec("gh release upload {tag} {artifacts}", .{
             .tag = info.release_triple,
@@ -846,42 +572,11 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     }
 }
 
-fn latest_changelog_entry(changelog: []const u8) []const u8 {
-    // Extract the first entry between two `## ` headers, excluding the header itself
-    const changelog_with_header = stdx.cut(stdx.cut(changelog, "\n## ").?.suffix, "\n## ").?.prefix;
-    return stdx.cut(changelog_with_header, "\n\n").?.suffix;
-}
-
-test latest_changelog_entry {
-    const changelog =
-        \\# TigerBeetle Changelog
-        \\
-        \\## 2023-10-23
-        \\
-        \\This is the start of the changelog.
-        \\
-        \\### Features
-        \\
-        \\
-        \\## 1970-01-01
-        \\
-        \\ The beginning.
-        \\
-    ;
-    try std.testing.expectEqualStrings(latest_changelog_entry(changelog),
-        \\This is the start of the changelog.
-        \\
-        \\### Features
-        \\
-        \\
-    );
-}
-
 fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish dotnet");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/dotnet"));
+    assert(try shell.dir_exists("zig-out/dist/dotnet"));
 
     const nuget_key = try shell.env_get("NUGET_KEY");
     try shell.exec(
@@ -891,7 +586,9 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
         \\    {package}
     , .{
         .nuget_key = nuget_key,
-        .package = try shell.fmt("dist/dotnet/tigerbeetle.{s}.nupkg", .{info.release_triple}),
+        .package = try shell.fmt("zig-out/dist/dotnet/tigerbeetle.{s}.nupkg", .{
+            info.release_triple,
+        }),
     });
 }
 
@@ -899,7 +596,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish go");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/go"));
+    assert(try shell.dir_exists("zig-out/dist/go"));
 
     const token = try shell.env_get("TIGERBEETLE_GO_PAT");
     try shell.exec(
@@ -910,7 +607,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
         shell.project_root.deleteTree("tigerbeetle-go") catch {};
     }
 
-    const dist_files = try shell.find(.{ .where = &.{"dist/go"} });
+    const dist_files = try shell.find(.{ .where = &.{"zig-out/dist/go"} });
     assert(dist_files.len > 10);
     for (dist_files) |file| {
         try Shell.copy_path(
@@ -921,7 +618,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
                 u8,
                 shell.arena.allocator(),
                 file,
-                "dist/go",
+                "zig-out/dist/go",
                 "tigerbeetle-go",
             ),
         );
@@ -955,7 +652,7 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish java");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/java"));
+    assert(try shell.dir_exists("zig-out/dist/java"));
 
     // These variables don't have a special meaning in maven, and instead are a part of
     // settings.xml generated by GitHub actions.
@@ -994,7 +691,7 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish node");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/node"));
+    assert(try shell.dir_exists("zig-out/dist/node"));
 
     // `NODE_AUTH_TOKEN` env var doesn't have a special meaning in npm. It does have special meaning
     // in GitHub Actions, which adds a literal
@@ -1004,15 +701,19 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     // to the .npmrc file (that is, node config file itself supports env variables).
     _ = try shell.env_get("NODE_AUTH_TOKEN");
     try shell.exec("npm publish {package}", .{
-        .package = try shell.fmt("dist/node/tigerbeetle-node-{s}.tgz", .{info.release_triple}),
+        .package = try shell.fmt("zig-out/dist/node/tigerbeetle-node-{s}.tgz", .{
+            info.release_triple,
+        }),
     });
 }
 
+// Docker is not required and not recommended for running TigerBeetle. A container is published
+// just for convenience of consumers expecting one!
 fn publish_docker(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish docker");
     defer section.close();
 
-    assert(try shell.dir_exists("dist/tigerbeetle"));
+    assert(try shell.dir_exists("zig-out/dist/tigerbeetle"));
 
     try shell.exec(
         \\docker login --username tigerbeetle --password {password} ghcr.io
@@ -1031,7 +732,7 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             // We need to unzip binaries from dist. For simplicity, don't bother with a temporary
             // directory.
             shell.project_root.deleteFile("tigerbeetle") catch {};
-            try shell.exec("unzip ./dist/tigerbeetle/tigerbeetle-{triple}{debug}.zip", .{
+            try shell.exec("unzip ./zig-out/dist/tigerbeetle/tigerbeetle-{triple}{debug}.zip", .{
                 .triple = triple,
                 .debug = if (debug) "-debug" else "",
             });
@@ -1040,19 +741,37 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
                 try shell.fmt("tigerbeetle-{s}", .{docker_arch}),
             );
         }
-        try shell.exec(
-            \\docker buildx build --file tools/docker/Dockerfile . --platform linux/amd64,linux/arm64
+        // Build docker container by copying pre-build executable inside.
+        //
+        // TigerBeetle doesn't install its own signal handlers, and PID 1 doesn't have a default
+        // SIGTERM signal handler. (See https://github.com/krallin/tini#why-tini). Using "tini" as
+        // PID 1 ensures that signals work as expected, so e.g. "docker stop" will not hang.
+        try shell.exec_options(
+            .{
+                .stdin_slice =
+                \\FROM alpine:3.19
+                \\RUN apk add --no-cache tini
+                \\ARG TARGETARCH
+                \\COPY tigerbeetle-${TARGETARCH} /tigerbeetle
+                \\ENTRYPOINT ["tini", "--", "/tigerbeetle"]
+                ,
+            },
+            \\docker buildx build
+            \\   --file - .
+            \\   --platform linux/amd64,linux/arm64
             \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{release_triple}{debug}
             \\   {tag_latest}
             \\   --push
-        , .{
-            .release_triple = info.release_triple,
-            .debug = if (debug) "-debug" else "",
-            .tag_latest = @as(
-                []const []const u8,
-                if (debug) &.{} else &.{ "--tag", "ghcr.io/tigerbeetle/tigerbeetle:latest" },
-            ),
-        });
+        ,
+            .{
+                .release_triple = info.release_triple,
+                .debug = if (debug) "-debug" else "",
+                .tag_latest = @as(
+                    []const []const u8,
+                    if (debug) &.{} else &.{ "--tag", "ghcr.io/tigerbeetle/tigerbeetle:latest" },
+                ),
+            },
+        );
 
         // Sadly, there isn't an easy way to locally build & test a multiplatform image without
         // pushing it out to the registry first. As docker testing isn't covered under not rocket

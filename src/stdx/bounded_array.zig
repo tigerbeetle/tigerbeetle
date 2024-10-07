@@ -49,6 +49,14 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
             return array.inner.constSlice();
         }
 
+        pub inline fn unused_capacity_slice(array: *Self) []T {
+            return array.inner.unusedCapacitySlice();
+        }
+
+        pub fn resize(array: *Self, len: usize) error{Overflow}!void {
+            try array.inner.resize(len);
+        }
+
         pub inline fn add_one_assume_capacity(array: *Self) *T {
             return array.inner.addOneAssumeCapacity();
         }
@@ -87,6 +95,10 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
 
         pub inline fn clear(array: *Self) void {
             array.inner.len = 0;
+        }
+
+        pub inline fn pop(array: *Self) T {
+            return array.inner.pop();
         }
     };
 }

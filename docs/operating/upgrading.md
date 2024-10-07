@@ -39,11 +39,15 @@ Upgrading causes a short period of unavailability as the replicas restart. This 
 5 seconds, and will show up as a latency spike on requests. The TigerBeetle clients will internally
 retry any requests during the period.
 
-Any special instructions, like that when upgrading from 0.15.3 to 0.15.4, will be explicitly
-mentioned in the changelog and release notes.
-
 Even though this period is short, scheduling a maintenance windows for upgrades is still
 recommended, for an extra layer of safety.
+
+Any special instructions, like that when upgrading from 0.15.3 to 0.15.4, will be explicitly
+mentioned in the [changelog](https://github.com/tigerbeetle/tigerbeetle/blob/main/CHANGELOG.md)
+and [release notes](https://github.com/tigerbeetle/tigerbeetle/releases).
+
+Additionally, subscribe to [this tracking issue](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+to be notified when there are breaking API/behavior changes that are visible to the client.
 
 ## Upgrading binary-based installations
 If TigerBeetle is installed under `/usr/bin/tigerbeetle`, and you wish to upgrade to `0.15.4`:
@@ -101,11 +105,11 @@ go mod edit -require github.com/tigerbeetle/tigerbeetle-go@v0.15.4
 Edit your `pom.xml`:
 
 ```
-	<dependency>
-		<groupId>com.tigerbeetle</groupId>
-		<artifactId>tigerbeetle-java</artifactId>
-		<version>0.15.4</version>
-	</dependency>
+    <dependency>
+        <groupId>com.tigerbeetle</groupId>
+        <artifactId>tigerbeetle-java</artifactId>
+        <version>0.15.4</version>
+    </dependency>
 ```
 
 ### Node.js
@@ -121,7 +125,3 @@ to upgrade, with two options:
   duration of the upgrade and unavailability will be extended.
 * Upgrade the replicas to the latest release that supports the client version in use, then upgrade
   the clients to that version. Repeat this until you're on the latest release.
-
-## Upgrading Windows / macOS
-Upgrading development data files on Windows / macOS is not yet supported. This will be added in the
-next release.

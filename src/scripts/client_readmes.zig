@@ -59,7 +59,7 @@ pub fn test_freshness(
         ctx.buffer.clearRetainingCapacity();
         try readme_root(&ctx);
 
-        const update = try shell.file_ensure_content("README.md", ctx.buffer.items);
+        const update = try shell.file_ensure_content("README.md", ctx.buffer.items, .{});
         updated_any = updated_any or (update == .updated);
     }
 
@@ -69,7 +69,7 @@ pub fn test_freshness(
         try readme_sample(&ctx, sample);
 
         const sample_readme = try shell.fmt("samples/{s}/README.md", .{sample.directory});
-        const update = try shell.file_ensure_content(sample_readme, ctx.buffer.items);
+        const update = try shell.file_ensure_content(sample_readme, ctx.buffer.items, .{});
         updated_any = updated_any or (update == .updated);
     }
 
@@ -440,6 +440,23 @@ fn readme_root(ctx: *Context) !void {
             \\chain will have their error result set to `linked_event_failed`.
         );
         ctx.code_section("linked-events");
+    }
+
+    {
+        ctx.header(2, "Imported Events");
+        ctx.paragraph(
+            \\When the `imported` flag is specified for an account when creating accounts or
+            \\a transfer when creating transfers, it allows importing historical events with
+            \\a user-defined timestamp.
+            \\
+            \\The entire batch of events must be set with the flag `imported`.
+            \\
+            \\It's recommended to submit the whole batch as a `linked` chain of events, ensuring that
+            \\if any event fails, none of them are committed, preserving the last timestamp unchanged.
+            \\This approach gives the application a chance to correct failed imported events, re-submitting
+            \\the batch again with the same user-defined timestamps.
+        );
+        ctx.code_section("imported-events");
     }
 
     ctx.ensure_final_newline();

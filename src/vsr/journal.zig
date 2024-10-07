@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;
@@ -174,13 +173,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             message: *Message.Prepare,
             trigger: Trigger,
-
-            /// True if this Write has acquired a lock on a sector of headers.
-            /// This also means that the Write is currently writing sectors or queuing to do so.
-            header_sector_locked: bool = false,
-
-            /// Linked list of Writes waiting to acquire the same header sector as this Write.
-            header_sector_next: ?*Write = null,
 
             /// This is reset to undefined and reused for each Storage.write_sectors() call.
             range: Range,
@@ -1303,14 +1295,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
             assert(journal.headers.len == cases.len);
 
+            const torn_prepares_ = journal.torn_prepares(&cases);
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
-            if (journal.recover_torn_prepare(&cases)) |torn_slot| {
-                assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
-                cases[torn_slot.index] = &case_cut_torn;
-
+            for (torn_prepares_.const_slice()) |torn_prepare| {
+                assert(cases[torn_prepare.index].decision(replica.solo()) == .vsr);
+                cases[torn_prepare.index] = &case_cut_torn;
                 log.warn("{}: recover_slots: torn prepare in slot={}", .{
                     journal.replica,
-                    torn_slot.index,
+                    torn_prepare.index,
                 });
             }
 
@@ -1323,7 +1315,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // - after prepare_op_max is computed,
             // - after the case decisions are made (to avoid @H:vsr arising from an
             //   artificially reserved prepare),
-            // - after recover_torn_prepare(), which computes its own max ops.
+            // - after torn_prepares(), which computes its own max ops.
             // - before we repair the 'fix' cases.
             //
             // (These headers can originate if we join a view, write some prepares from the new
@@ -1364,93 +1356,145 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.recover_fix();
         }
 
-        /// Returns a slot that is safe to truncate.
-        //
-        /// Truncate any prepare that was torn while being appended to the log before a crash, when:
-        /// * the maximum valid op is the same in the prepare headers and redundant headers,
-        /// * in the slot following the maximum valid op:
+        /// Returns the slots that are safe to truncate.
+        ///
+        /// The goal of this function is to identify all prepares that were torn while being
+        /// appended to the log before a crash. These torn prepares must be truncated to ensure
+        /// that the replica doesn't start up in recovering_head.
+        ///
+        /// Conditions for torn prepares to be truncated:
+        /// * op_max, computed as the max of the prepare headers and redundant headers must be
+        ///   certain.
+        /// * for certainty of op_max, there must be no faults between (op_max, op_prepare_max]
+        ///   other than "torn prepares", which manifest as:
         ///   - the redundant header is valid,
-        ///   - the redundant header is reserved, and/or the op is at least a log cycle behind,
-        ///   - the prepare is corrupt, and
-        /// * there are no faults except for those between `op_checkpoint` and `op_max + 1`,
-        ///   so that we can be sure that the maximum valid op is in fact the maximum.
-        fn recover_torn_prepare(journal: *const Journal, cases: []const *const Case) ?Slot {
+        ///   - the redundant header's op is at least a log cycle behind,
+        ///   - the prepare is corrupt
+        /// * faults may exist outside of (op_max, op_prepare_max]. They have no bearing on the
+        ///   certainty of op_max as they lie between (op_checkpoint, op_max].
+        fn torn_prepares(
+            journal: *const Journal,
+            cases: []const *const Case,
+        ) stdx.BoundedArray(Slot, constants.journal_iops_write_max) {
             const replica: *const Replica = @alignCast(@fieldParentPtr("journal", journal));
 
             assert(journal.status == .recovering);
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
 
-            const op_max = op_maximum_headers_untrusted(replica.cluster, journal.headers_redundant);
-            if (op_max != op_maximum_headers_untrusted(replica.cluster, journal.headers))
-                return null;
-            if (op_max < replica.op_checkpoint()) return null;
-            // We can't assume that the header at `op_max` is a prepare — an empty journal with a
-            // corrupt root prepare (op_max=0) will be repaired later.
+            const op_max = @max(
+                op_maximum_headers_untrusted(replica.cluster, journal.headers_redundant),
+                op_maximum_headers_untrusted(replica.cluster, journal.headers),
+            );
 
-            const torn_op = op_max + 1;
-            const torn_slot = journal.slot_for_op(torn_op);
+            // Nothing to truncate - head op is not certain as it must be >= op_checkpoint.
+            if (op_max < replica.op_checkpoint()) return .{};
 
-            const torn_prepare_untrusted = &journal.headers[torn_slot.index];
-            if (torn_prepare_untrusted.valid_checksum()) return null;
-            // The prepare is at least corrupt, possibly torn, but not valid and simply misdirected.
+            // Nothing to truncate - replica could not have prepared anything beyond prepare_max.
+            if (op_max == replica.op_prepare_max()) return .{};
 
-            const header_untrusted = &journal.headers_redundant[torn_slot.index];
-            const header = header_ok(replica.cluster, torn_slot, header_untrusted) orelse
-                return null;
-            // The redundant header is valid, also for the correct cluster and not misdirected.
+            const op_checkpoint = replica.op_checkpoint();
+            const op_prepare_max = replica.op_prepare_max();
+            const op_prepare_max_slot = journal.slot_for_op(op_prepare_max);
+            const op_checkpoint_slot = journal.slot_for_op(op_checkpoint);
 
-            if (header.operation == .reserved) {
-                // This is the first log cycle.
+            assert(op_max < op_prepare_max);
 
-                // TODO Can we be more sure about this? What if op_max is clearly many cycles ahead?
-                // Any previous log cycle is then expected to have a prepare, not a reserved header,
-                // unless the prepare header was lost, in which case this slot may also not be torn.
-            } else {
-                // The redundant header was already written, so the prepare is corrupt, not torn.
-                if (header.op == torn_op) return null;
+            // Range is constructed such that the op for all *valid* prepares or headers in it
+            // should be less than op_max. If a prepare/header within this range is corrupted, that
+            // makes our op_max uncertain.
+            const op_max_to_op_prepare_max = SlotRange{
+                .head = journal.slot_for_op(op_max + 1),
+                .tail = prepare_max: {
+                    if (op_checkpoint > 0 and op_max == op_checkpoint) {
+                        assert(op_prepare_max_slot.index == op_checkpoint_slot.index);
+                        assert(op_prepare_max > 0);
 
-                assert(header.op < torn_op); // Since torn_op > op_max.
-                // The redundant header is from any previous log cycle.
-            }
-
-            const checkpoint_index = journal.slot_for_op(replica.op_checkpoint()).index;
-            const known_range = SlotRange{
-                .head = Slot{ .index = checkpoint_index },
-                .tail = torn_slot,
+                        break :prepare_max journal.slot_for_op(op_prepare_max - 1);
+                    } else {
+                        break :prepare_max op_prepare_max_slot;
+                    }
+                },
             };
 
-            // We must be certain that the torn prepare really was being appended to the WAL.
-            // Return null if any faults do not lie between the checkpoint and the torn prepare,
-            // such as:
+            // We only consider journal_iops_write_max torn slots, as that is the maximum number of
+            // prepare writes that could be concurrently underway. If we find more (due to
+            // corruptions), we err on the side of caution and don't truncate any prepares.
+            var torn_slots: stdx.BoundedArray(Slot, constants.journal_iops_write_max) = .{};
+
+            // We now search for torn prepares between op_max and op_prepare_max. A torn prepare
+            // manifests as a prepare with an *invalid checksum* and a *valid* header from any
+            // previous wrap. If our op_max is certain, i.e. we are guaranteed to not find any
+            // op > op_max in our journal, then we can say with certainty that a torn prepare was
+            // being appended to the WAL. However, if we find a "non torn-prepare" fault outside of
+            // [op_max + 1, op_prepare_max], we return an empty slice.
             //
-            //   (fault  [checkpoint..........torn]        fault)
-            //   (...torn]    fault     fault  [checkpoint......)
+            //   (fault  [op_max+1..........op_prepare_max]        fault)
+            //   (...op_prepare_max]    fault     fault  [op_max+1......)
             //
-            // When there is a fault between the checkpoint and the torn prepare, we cannot be
-            // certain if the prepare was truly torn (safe to truncate) or corrupted (not safe to
-            // truncate).
-            //
-            // When the checkpoint and torn op are in the same slot, then we can only be certain
-            // if there are no faults other than the torn op itself.
+            // When there exists a "non torn-prepare" fault outside of [op_max + 1, op_prepare_max],
+            // op_max is not certain, as the faulty slot could be the true op_max. Consequently, we
+            // can't say if a torn prepare was truly torn (safe to truncate) or corrupted (not safe
+            // to truncate).
             for (cases, 0..) |case, index| {
                 // Do not use `faulty.bit()` because the decisions have not been processed yet.
                 if (case.decision(replica.solo()) == .vsr) {
-                    if (checkpoint_index == torn_slot.index) {
-                        assert(op_max >= replica.op_checkpoint());
-                        assert(torn_op > replica.op_checkpoint());
-                        if (index != torn_slot.index) return null;
-                    } else {
-                        if (!known_range.contains(Slot{ .index = index })) return null;
+                    const slot = Slot{ .index = index };
+
+                    // Checked separately as SlotRange.contains doesn't handle empty ranges.
+                    const range_empty = op_max_to_op_prepare_max.head.index ==
+                        op_max_to_op_prepare_max.tail.index;
+
+                    if ((range_empty and index == op_prepare_max_slot.index) or
+                        (!range_empty and op_max_to_op_prepare_max.contains(slot)))
+                    {
+                        const header_prepare_untrusted = &journal.headers[index];
+                        const header_redundant_ok = header_ok(
+                            replica.cluster,
+                            slot,
+                            &journal.headers_redundant[index],
+                        );
+
+                        // We need our head op to be certain to reliably truncate torn prepares.
+                        // Head op is uncertain if we encounter one of the below faults:
+
+                        // 1. Corrupt redundant header or a misdirected read to a redundant header.
+                        if (header_redundant_ok == null) return .{};
+
+                        // 2. Redundant header is set to .reserved. Could happen if:
+                        //    i. Slot was found corrupt on a previous startup, which set the header
+                        //       to reserved in memory.
+                        //    ii. Replica crashes *before* the corrupt slot was repaired, but
+                        //       *after* the reserved header was written to disk with a write to
+                        //       a nearby header (there are multiple headers in a single sector)
+                        if (header_redundant_ok.?.operation == .reserved) return .{};
+
+                        // 3. Prepare must be invalid for the slot to be eligible for truncation. A
+                        //    valid prepare could be faulty due to a misdirected read/write.
+                        if (header_prepare_untrusted.valid_checksum()) return .{};
+
+                        // Header is valid and from a previous wrap.
+                        assert(header_redundant_ok != null);
+                        assert(header_redundant_ok.?.op < op_max);
+                        assert(header_redundant_ok.?.op <= op_checkpoint);
+
+                        assert(!header_prepare_untrusted.valid_checksum());
+                        assert(!journal.prepare_inhabited[index]);
+
+                        if (torn_slots.count() < constants.journal_iops_write_max) {
+                            torn_slots.append_assume_capacity(slot);
+                        } else {
+                            log.warn("{}: torn_prepares: not truncating, found >{} " ++
+                                "torn prepares!", .{
+                                journal.replica,
+                                constants.journal_iops_write_max,
+                            });
+                            return .{};
+                        }
                     }
                 }
             }
-
-            // The prepare is torn.
-            assert(!journal.prepare_inhabited[torn_slot.index]);
-            assert(!torn_prepare_untrusted.valid_checksum());
-            assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
-            return torn_slot;
+            return torn_slots;
         }
 
         fn recover_slot(journal: *Journal, slot: Slot, case: *const Case) void {
@@ -1834,42 +1878,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 journal.write_prepare_release(write, null);
                 return;
             }
-
-            assert(!write.header_sector_locked);
-            assert(write.header_sector_next == null);
-
-            const write_offset = journal.offset_logical_in_headers_for_message(message);
-
-            var it = journal.writes.iterate();
-            while (it.next()) |other| {
-                if (other == write) continue;
-                if (!other.header_sector_locked) continue;
-
-                const other_offset = journal.offset_logical_in_headers_for_message(other.message);
-                if (other_offset == write_offset) {
-                    // The `other` and `write` target the same sector; append to the list.
-                    var tail = other;
-                    while (tail.header_sector_next) |next| tail = next;
-                    tail.header_sector_next = write;
-                    return;
-                }
-            }
-
-            write.header_sector_locked = true;
-            journal.write_prepare_on_lock_header_sector(write);
-        }
-
-        fn write_prepare_on_lock_header_sector(journal: *Journal, write: *Write) void {
-            assert(journal.status == .recovered);
-            assert(write.header_sector_locked);
-
             // TODO It's possible within this section that the header has since been replaced but we
             // continue writing, even when the dirty bit is no longer set. This is not a problem
             // but it would be good to stop writing as soon as we see we no longer need to.
             // For this, we'll need to have a way to tweak write_prepare_release() to release locks.
             // At present, we don't return early here simply because it doesn't yet do that.
 
-            const message = write.message;
             const slot_of_message = journal.slot_for_header(message.header);
             const offset = Ring.headers.offset(slot_of_message);
             assert(offset % constants.sector_size == 0);
@@ -1885,7 +1899,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 offset,
                 offset + constants.sector_size,
             });
-
             // Memory must not be owned by journal.headers as these may be modified concurrently:
             assert(@intFromPtr(buffer.ptr) < @intFromPtr(journal.headers.ptr) or
                 @intFromPtr(buffer.ptr) > @intFromPtr(journal.headers.ptr) + headers_size);
@@ -1896,9 +1909,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn write_prepare_on_write_header(write: *Journal.Write) void {
             const journal = write.journal;
             const message = write.message;
-
-            assert(write.header_sector_locked);
-            journal.write_prepare_unlock_header_sector(write);
 
             if (!journal.has(message.header)) {
                 journal.write_prepare_debug(message.header, "entry changed while writing headers");
@@ -1924,25 +1934,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.faulty.clear(slot);
 
             journal.write_prepare_release(write, message);
-        }
-
-        /// Release the lock held by a write on an in-memory header sector and pass
-        /// it to a waiting Write, if any.
-        fn write_prepare_unlock_header_sector(journal: *Journal, write: *Journal.Write) void {
-            assert(write.header_sector_locked);
-            write.header_sector_locked = false;
-
-            // Unlike the ranges of physical memory we lock when writing to disk,
-            // these header sector locks are always an exact match, so there's no
-            // need to re-check the waiting writes against all other writes.
-            if (write.header_sector_next) |waiting| {
-                write.header_sector_next = null;
-
-                assert(waiting.header_sector_locked == false);
-                waiting.header_sector_locked = true;
-                journal.write_prepare_on_lock_header_sector(waiting);
-            }
-            assert(write.header_sector_next == null);
         }
 
         fn write_prepare_release(
@@ -1983,13 +1974,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             });
         }
 
-        fn offset_logical_in_headers_for_message(
-            journal: *const Journal,
-            message: *const Message.Prepare,
-        ) u64 {
-            return Ring.headers.offset(journal.slot_for_header(message.header));
-        }
-
         fn write_sectors(
             journal: *Journal,
             callback: *const fn (write: *Journal.Write) void,
@@ -2021,6 +2005,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (!other.range.locked) continue;
 
                 if (other.range.overlaps(&write.range)) {
+                    assert(other.range.offset == write.range.offset);
+                    assert(other.range.buffer.len == write.range.buffer.len);
+
                     var tail = &other.range;
                     while (tail.next) |next| tail = next;
                     tail.next = &write.range;
@@ -2180,8 +2167,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///
 /// 1. The replica crashed while writing the redundant header (torn write).
 /// 2. The read to the header is corrupt or misdirected.
-/// 3. Multiple faults, for example: the redundant header read is corrupt, and the prepare read is
-///    misdirected.
+/// 3. Multiple faults, for example: the redundant header read is corrupt, and the latest prepare
+///    write is misdirected.
 ///
 ///
 /// @F and @G:

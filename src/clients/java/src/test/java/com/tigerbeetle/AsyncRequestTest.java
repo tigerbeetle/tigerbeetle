@@ -258,9 +258,9 @@ public class AsyncRequestTest {
         var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putInt(0);
-        dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.ordinal());
+        dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(1);
-        dummyReplyBuffer.putInt(CreateAccountResult.Exists.ordinal());
+        dummyReplyBuffer.putInt(CreateAccountResult.Exists.value);
 
         var callback = new CallbackSimulator<CreateAccountResultBatch>(
                 AsyncRequest.createAccounts(client, batch),
@@ -294,9 +294,9 @@ public class AsyncRequestTest {
         var dummyReplyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putInt(0);
-        dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.ordinal());
+        dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(1);
-        dummyReplyBuffer.putInt(CreateTransferResult.Exists.ordinal());
+        dummyReplyBuffer.putInt(CreateTransferResult.Exists.value);
 
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
                 AsyncRequest.createTransfers(client, batch),
@@ -526,8 +526,29 @@ public class AsyncRequestTest {
         }
     }
 
+    @Test(expected = IllegalStateException.class)
+    public void testFailedFutureCompletedTwice() {
+        var client = getDummyClient();
+        var batch = new IdBatch(1);
+        batch.add();
+
+        var request = AsyncRequest.lookupTransfers(client, batch);
+        var status = PacketStatus.TooMuchData.value;
+
+        try {
+            // First completion is OK, registering the exception in the CompletableFuture.
+            request.setException(new RequestException(status));
+        } catch (Throwable any) {
+            // No exception is expected in the first call.
+            assert false;
+        }
+        // Second time throws an exception, because it can only be completed once.
+        request.setException(new RequestException(status));
+
+    }
+
     private static NativeClient getDummyClient() {
-        return NativeClient.initEcho(UInt128.asBytes(0), "3000", 1);
+        return NativeClient.initEcho(UInt128.asBytes(0), "3000");
     }
 
     private class CallbackSimulator<T extends Batch> extends Thread {

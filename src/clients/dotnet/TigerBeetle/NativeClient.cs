@@ -10,6 +10,10 @@ namespace TigerBeetle;
 
 internal sealed class NativeClient : IDisposable
 {
+    // Once the client handle is set, all interactions with it are synchronized using `lock(this)`
+    // to prevent threads from accidentally using a deinitialized client handle. It's safe to
+    // synchronize on the NativeClient object as it's private to Client and can't be arbitrarily
+    // or externally locked by the library user.
     private volatile IntPtr client;
 
     private unsafe delegate InitializationStatus InitFunction(
@@ -17,7 +21,6 @@ internal sealed class NativeClient : IDisposable
                 UInt128Extensions.UnsafeU128 cluster_id,
                 byte* address_ptr,
                 uint address_len,
-                uint num_packets,
                 IntPtr on_completion_ctx,
                 delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
             );
@@ -34,26 +37,24 @@ internal sealed class NativeClient : IDisposable
         return Encoding.UTF8.GetBytes(string.Join(',', addresses) + "\0");
     }
 
-    public static NativeClient Init(UInt128 clusterID, string[] addresses, int concurrencyMax)
+    public static NativeClient Init(UInt128 clusterID, string[] addresses)
     {
         unsafe
         {
-            return CallInit(tb_client_init, clusterID, addresses, concurrencyMax);
+            return CallInit(tb_client_init, clusterID, addresses);
         }
     }
 
-    public static NativeClient InitEcho(UInt128 clusterID, string[] addresses, int concurrencyMax)
+    public static NativeClient InitEcho(UInt128 clusterID, string[] addresses)
     {
         unsafe
         {
-            return CallInit(tb_client_init_echo, clusterID, addresses, concurrencyMax);
+            return CallInit(tb_client_init_echo, clusterID, addresses);
         }
     }
 
-    private static NativeClient CallInit(InitFunction initFunction, UInt128Extensions.UnsafeU128 clusterID, string[] addresses, int concurrencyMax)
+    private static NativeClient CallInit(InitFunction initFunction, UInt128Extensions.UnsafeU128 clusterID, string[] addresses)
     {
-        if (concurrencyMax <= 0) throw new ArgumentOutOfRangeException(nameof(concurrencyMax), "Concurrency must be positive");
-
         var addresses_byte = GetBytes(addresses);
         unsafe
         {
@@ -66,7 +67,6 @@ internal sealed class NativeClient : IDisposable
                     clusterID,
                     addressPtr,
                     (uint)addresses_byte.Length - 1,
-                    (uint)concurrencyMax,
                     IntPtr.Zero,
                     &OnCompletionCallback
                 );
@@ -85,8 +85,8 @@ internal sealed class NativeClient : IDisposable
         {
             fixed (void* pointer = batch)
             {
-                var blockingRequest = new BlockingRequest<TResult, TBody>(this, operation);
-                blockingRequest.Submit(pointer, batch.Length);
+                var blockingRequest = new BlockingRequest<TResult, TBody>(operation);
+                blockingRequest.Submit(this, pointer, batch.Length);
                 return blockingRequest.Wait();
             }
         }
@@ -98,86 +98,65 @@ internal sealed class NativeClient : IDisposable
     {
         using (var memoryHandler = batch.Pin())
         {
-            var asyncRequest = new AsyncRequest<TResult, TBody>(this, operation);
+            var asyncRequest = new AsyncRequest<TResult, TBody>(operation);
 
             unsafe
             {
-                asyncRequest.Submit(memoryHandler.Pointer, batch.Length);
+                asyncRequest.Submit(this, memoryHandler.Pointer, batch.Length);
             }
 
             return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
         }
     }
 
-    public void ReleasePacket(Packet packet)
+    public unsafe void Submit(TBPacket* packet)
     {
         unsafe
-        {
-            // It is unexpected for the client to be disposed here
-            // Since we wait for all acquired packets to be submitted and returned before disposing.
-            AssertTrue(client != IntPtr.Zero, "Client is closed");
-            AssertTrue(packet.Pointer != null, "Null packet pointer");
-            tb_client_release_packet(client, packet.Pointer);
-        }
-    }
-
-    public void Submit(Packet packet)
-    {
-        unsafe
-        {
-            // It is unexpected for the client to be disposed here
-            // Since we wait for all acquired packets to be submitted and returned before disposing.
-            AssertTrue(client != IntPtr.Zero, "Client is closed");
-            tb_client_submit(client, packet.Pointer);
-        }
-    }
-
-    public Packet AcquirePacket()
-    {
-        unsafe
-        {
-            if (client == IntPtr.Zero) throw new ObjectDisposedException("Client is closed");
-
-            TBPacket* packet;
-            var status = tb_client_acquire_packet(client, &packet);
-            switch (status)
-            {
-                case PacketAcquireStatus.Ok:
-                    AssertTrue(packet != null);
-                    return new Packet(packet);
-                case PacketAcquireStatus.ConcurrencyMaxExceeded:
-                    throw new ConcurrencyExceededException();
-                case PacketAcquireStatus.Shutdown:
-                    throw new ObjectDisposedException("Client is closing");
-                default:
-                    throw new NotImplementedException();
-            }
-        }
-    }
-
-    public void Dispose()
-    {
-        if (client != IntPtr.Zero)
         {
             lock (this)
             {
                 if (client != IntPtr.Zero)
                 {
-                    tb_client_deinit(client);
-                    this.client = IntPtr.Zero;
+                    tb_client_submit(client, packet);
+                    return;
                 }
+            }
+
+            packet->status = PacketStatus.ClientShutdown;
+            OnComplete(packet, null, 0);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (this)
+        {
+            if (client != IntPtr.Zero)
+            {
+                tb_client_deinit(client);
+                this.client = IntPtr.Zero;
             }
         }
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
+    private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint resultLen)
     {
-        var request = IRequest.FromUserData(packet->userData);
-        if (request != null)
+        try
         {
-            var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
-            request.Complete(new Packet(packet), span);
+            AssertTrue(ctx == IntPtr.Zero);
+            OnComplete(packet, result, resultLen);
         }
+        catch (Exception e)
+        {
+            // The caller is unmanaged code, so if an exception occurs here we should force panic.
+            Environment.FailFast("Failed to process a packet in the OnCompletionCallback", e);
+        }
+    }
+
+    private unsafe static void OnComplete(TBPacket* packet, byte* result, uint resultLen)
+    {
+        var span = resultLen > 0 ? new ReadOnlySpan<byte>(result, (int)resultLen) : ReadOnlySpan<byte>.Empty;
+        NativeRequest.OnComplete(packet, span);
     }
 }

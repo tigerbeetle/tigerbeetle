@@ -29,6 +29,16 @@ export enum AccountFlags {
   * See [history](https://docs.tigerbeetle.com/reference/account#flagshistory)
   */
   history = (1 << 3),
+
+  /**
+  * See [imported](https://docs.tigerbeetle.com/reference/account#flagsimported)
+  */
+  imported = (1 << 4),
+
+  /**
+  * See [closed](https://docs.tigerbeetle.com/reference/account#flagsclosed)
+  */
+  closed = (1 << 5),
 }
 
 
@@ -67,6 +77,21 @@ export enum TransferFlags {
   * See [balancing_credit](https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_credit)
   */
   balancing_credit = (1 << 5),
+
+  /**
+  * See [closing_debit](https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit)
+  */
+  closing_debit = (1 << 6),
+
+  /**
+  * See [closing_credit](https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit)
+  */
+  closing_credit = (1 << 7),
+
+  /**
+  * See [imported](https://docs.tigerbeetle.com/reference/transfer#flagsimported)
+  */
+  imported = (1 << 8),
 }
 
 
@@ -271,9 +296,29 @@ export enum CreateAccountError {
   linked_event_chain_open = 2,
 
   /**
+  * See [imported_event_expected](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_expected)
+  */
+  imported_event_expected = 22,
+
+  /**
+  * See [imported_event_not_expected](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_not_expected)
+  */
+  imported_event_not_expected = 23,
+
+  /**
   * See [timestamp_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero)
   */
   timestamp_must_be_zero = 3,
+
+  /**
+  * See [imported_event_timestamp_out_of_range](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_out_of_range)
+  */
+  imported_event_timestamp_out_of_range = 24,
+
+  /**
+  * See [imported_event_timestamp_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance)
+  */
+  imported_event_timestamp_must_not_advance = 25,
 
   /**
   * See [reserved_field](https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field)
@@ -294,6 +339,41 @@ export enum CreateAccountError {
   * See [id_must_not_be_int_max](https://docs.tigerbeetle.com/reference/requests/create_accounts#id_must_not_be_int_max)
   */
   id_must_not_be_int_max = 7,
+
+  /**
+  * See [exists_with_different_flags](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_flags)
+  */
+  exists_with_different_flags = 15,
+
+  /**
+  * See [exists_with_different_user_data_128](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_128)
+  */
+  exists_with_different_user_data_128 = 16,
+
+  /**
+  * See [exists_with_different_user_data_64](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_64)
+  */
+  exists_with_different_user_data_64 = 17,
+
+  /**
+  * See [exists_with_different_user_data_32](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_32)
+  */
+  exists_with_different_user_data_32 = 18,
+
+  /**
+  * See [exists_with_different_ledger](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_ledger)
+  */
+  exists_with_different_ledger = 19,
+
+  /**
+  * See [exists_with_different_code](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_code)
+  */
+  exists_with_different_code = 20,
+
+  /**
+  * See [exists](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
+  */
+  exists = 21,
 
   /**
   * See [flags_are_mutually_exclusive](https://docs.tigerbeetle.com/reference/requests/create_accounts#flags_are_mutually_exclusive)
@@ -331,39 +411,9 @@ export enum CreateAccountError {
   code_must_not_be_zero = 14,
 
   /**
-  * See [exists_with_different_flags](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_flags)
+  * See [imported_event_timestamp_must_not_regress](https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_regress)
   */
-  exists_with_different_flags = 15,
-
-  /**
-  * See [exists_with_different_user_data_128](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_128)
-  */
-  exists_with_different_user_data_128 = 16,
-
-  /**
-  * See [exists_with_different_user_data_64](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_64)
-  */
-  exists_with_different_user_data_64 = 17,
-
-  /**
-  * See [exists_with_different_user_data_32](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_32)
-  */
-  exists_with_different_user_data_32 = 18,
-
-  /**
-  * See [exists_with_different_ledger](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_ledger)
-  */
-  exists_with_different_ledger = 19,
-
-  /**
-  * See [exists_with_different_code](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_code)
-  */
-  exists_with_different_code = 20,
-
-  /**
-  * See [exists](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
-  */
-  exists = 21,
+  imported_event_timestamp_must_not_regress = 26,
 }
 
 
@@ -388,9 +438,29 @@ export enum CreateTransferError {
   linked_event_chain_open = 2,
 
   /**
+  * See [imported_event_expected](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_expected)
+  */
+  imported_event_expected = 56,
+
+  /**
+  * See [imported_event_not_expected](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_not_expected)
+  */
+  imported_event_not_expected = 57,
+
+  /**
   * See [timestamp_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#timestamp_must_be_zero)
   */
   timestamp_must_be_zero = 3,
+
+  /**
+  * See [imported_event_timestamp_out_of_range](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_out_of_range)
+  */
+  imported_event_timestamp_out_of_range = 58,
+
+  /**
+  * See [imported_event_timestamp_must_not_advance](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance)
+  */
+  imported_event_timestamp_must_not_advance = 59,
 
   /**
   * See [reserved_flag](https://docs.tigerbeetle.com/reference/requests/create_transfers#reserved_flag)
@@ -406,6 +476,71 @@ export enum CreateTransferError {
   * See [id_must_not_be_int_max](https://docs.tigerbeetle.com/reference/requests/create_transfers#id_must_not_be_int_max)
   */
   id_must_not_be_int_max = 6,
+
+  /**
+  * See [exists_with_different_flags](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_flags)
+  */
+  exists_with_different_flags = 36,
+
+  /**
+  * See [exists_with_different_pending_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id)
+  */
+  exists_with_different_pending_id = 40,
+
+  /**
+  * See [exists_with_different_timeout](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout)
+  */
+  exists_with_different_timeout = 44,
+
+  /**
+  * See [exists_with_different_debit_account_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_debit_account_id)
+  */
+  exists_with_different_debit_account_id = 37,
+
+  /**
+  * See [exists_with_different_credit_account_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_credit_account_id)
+  */
+  exists_with_different_credit_account_id = 38,
+
+  /**
+  * See [exists_with_different_amount](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_amount)
+  */
+  exists_with_different_amount = 39,
+
+  /**
+  * See [exists_with_different_user_data_128](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_128)
+  */
+  exists_with_different_user_data_128 = 41,
+
+  /**
+  * See [exists_with_different_user_data_64](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_64)
+  */
+  exists_with_different_user_data_64 = 42,
+
+  /**
+  * See [exists_with_different_user_data_32](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_32)
+  */
+  exists_with_different_user_data_32 = 43,
+
+  /**
+  * See [exists_with_different_ledger](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_ledger)
+  */
+  exists_with_different_ledger = 67,
+
+  /**
+  * See [exists_with_different_code](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_code)
+  */
+  exists_with_different_code = 45,
+
+  /**
+  * See [exists](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
+  */
+  exists = 46,
+
+  /**
+  * See [id_already_failed](https://docs.tigerbeetle.com/reference/requests/create_transfers#id_already_failed)
+  */
+  id_already_failed = 68,
 
   /**
   * See [flags_are_mutually_exclusive](https://docs.tigerbeetle.com/reference/requests/create_transfers#flags_are_mutually_exclusive)
@@ -461,6 +596,11 @@ export enum CreateTransferError {
   * See [timeout_reserved_for_pending_transfer](https://docs.tigerbeetle.com/reference/requests/create_transfers#timeout_reserved_for_pending_transfer)
   */
   timeout_reserved_for_pending_transfer = 17,
+
+  /**
+  * See [closing_transfer_must_be_pending](https://docs.tigerbeetle.com/reference/requests/create_transfers#closing_transfer_must_be_pending)
+  */
+  closing_transfer_must_be_pending = 64,
 
   /**
   * See [amount_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#amount_must_not_be_zero)
@@ -553,59 +693,34 @@ export enum CreateTransferError {
   pending_transfer_expired = 35,
 
   /**
-  * See [exists_with_different_flags](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_flags)
+  * See [imported_event_timestamp_must_not_regress](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress)
   */
-  exists_with_different_flags = 36,
+  imported_event_timestamp_must_not_regress = 60,
 
   /**
-  * See [exists_with_different_debit_account_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_debit_account_id)
+  * See [imported_event_timestamp_must_postdate_debit_account](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account)
   */
-  exists_with_different_debit_account_id = 37,
+  imported_event_timestamp_must_postdate_debit_account = 61,
 
   /**
-  * See [exists_with_different_credit_account_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_credit_account_id)
+  * See [imported_event_timestamp_must_postdate_credit_account](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account)
   */
-  exists_with_different_credit_account_id = 38,
+  imported_event_timestamp_must_postdate_credit_account = 62,
 
   /**
-  * See [exists_with_different_amount](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_amount)
+  * See [imported_event_timeout_must_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero)
   */
-  exists_with_different_amount = 39,
+  imported_event_timeout_must_be_zero = 63,
 
   /**
-  * See [exists_with_different_pending_id](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id)
+  * See [debit_account_already_closed](https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed)
   */
-  exists_with_different_pending_id = 40,
+  debit_account_already_closed = 65,
 
   /**
-  * See [exists_with_different_user_data_128](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_128)
+  * See [credit_account_already_closed](https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed)
   */
-  exists_with_different_user_data_128 = 41,
-
-  /**
-  * See [exists_with_different_user_data_64](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_64)
-  */
-  exists_with_different_user_data_64 = 42,
-
-  /**
-  * See [exists_with_different_user_data_32](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_32)
-  */
-  exists_with_different_user_data_32 = 43,
-
-  /**
-  * See [exists_with_different_timeout](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout)
-  */
-  exists_with_different_timeout = 44,
-
-  /**
-  * See [exists_with_different_code](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_code)
-  */
-  exists_with_different_code = 45,
-
-  /**
-  * See [exists](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
-  */
-  exists = 46,
+  credit_account_already_closed = 66,
 
   /**
   * See [overflows_debits_pending](https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_debits_pending)
@@ -673,6 +788,26 @@ export type AccountFilter = {
   * See [account_id](https://docs.tigerbeetle.com/reference/account-filter#account_id)
   */
   account_id: bigint
+
+  /**
+  * See [user_data_128](https://docs.tigerbeetle.com/reference/account-filter#user_data_128)
+  */
+  user_data_128: bigint
+
+  /**
+  * See [user_data_64](https://docs.tigerbeetle.com/reference/account-filter#user_data_64)
+  */
+  user_data_64: bigint
+
+  /**
+  * See [user_data_32](https://docs.tigerbeetle.com/reference/account-filter#user_data_32)
+  */
+  user_data_32: number
+
+  /**
+  * See [code](https://docs.tigerbeetle.com/reference/account-filter#code)
+  */
+  code: number
 
   /**
   * See [timestamp_min](https://docs.tigerbeetle.com/reference/account-filter#timestamp_min)

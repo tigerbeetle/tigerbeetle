@@ -1,13 +1,10 @@
 const std = @import("std");
-const assert = std.debug.assert;
+const vsr = @import("vsr");
 
-// TODO: Move this back to src/clients/dotnet when there's a better solution for main_pkg_path=src/
-const vsr = @import("vsr.zig");
+const assert = std.debug.assert;
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
-
-const output_file = "src/clients/dotnet/TigerBeetle/Bindings.cs";
 
 const TypeMapping = struct {
     name: []const u8,
@@ -15,6 +12,7 @@ const TypeMapping = struct {
     private_fields: []const []const u8 = &.{},
     readonly_fields: []const []const u8 = &.{},
     docs_link: ?[]const u8 = null,
+    constants: []const u8 = "",
 
     pub fn is_private(comptime self: @This(), name: []const u8) bool {
         inline for (self.private_fields) |field| {
@@ -67,17 +65,22 @@ const type_mappings = .{
             "credits_pending",
             "debits_posted",
             "credits_posted",
-            "timestamp",
         },
         .docs_link = "reference/account#",
     } },
-    .{ tb.Transfer, TypeMapping{
-        .name = "Transfer",
-        .visibility = .public,
-        .private_fields = &.{"reserved"},
-        .readonly_fields = &.{"timestamp"},
-        .docs_link = "reference/transfer#",
-    } },
+    .{
+        tb.Transfer, TypeMapping{
+            .name = "Transfer",
+            .visibility = .public,
+            .private_fields = &.{"reserved"},
+            .readonly_fields = &.{},
+            .docs_link = "reference/transfer#",
+            .constants =
+            \\    public static UInt128 AmountMax => UInt128.MaxValue;
+            \\
+            ,
+        },
+    },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
         .visibility = .public,
@@ -121,10 +124,6 @@ const type_mappings = .{
     .{ tb_client.tb_packet_status_t, TypeMapping{
         .name = "PacketStatus",
         .visibility = .public,
-    } },
-    .{ tb_client.tb_packet_acquire_status_t, TypeMapping{
-        .name = "PacketAcquireStatus",
-        .visibility = .internal,
     } },
     .{ tb_client.tb_operation_t, TypeMapping{
         .name = "TBOperation",
@@ -270,12 +269,14 @@ fn emit_struct(
         \\{{
         \\    public const int SIZE = {};
         \\
+        \\{s}
         \\
     , .{
         @tagName(mapping.visibility),
         if (mapping.visibility == .internal) "unsafe " else "",
         mapping.name,
         size,
+        mapping.constants,
     });
 
     // Fixed len array are exposed as internal structs with stackalloc fields
@@ -481,7 +482,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        UInt128Extensions.UnsafeU128 cluster_id,
         \\        byte* address_ptr,
         \\        uint address_len,
-        \\        uint num_packets,
         \\        IntPtr on_completion_ctx,
         \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
         \\    );
@@ -492,21 +492,8 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        UInt128Extensions.UnsafeU128 cluster_id,
         \\        byte* address_ptr,
         \\        uint address_len,
-        \\        uint num_packets,
         \\        IntPtr on_completion_ctx,
         \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
-        \\    );
-        \\
-        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\    public static unsafe extern PacketAcquireStatus tb_client_acquire_packet(
-        \\        IntPtr client,
-        \\        TBPacket** out_packet
-        \\    );
-        \\
-        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\    public static unsafe extern void tb_client_release_packet(
-        \\        IntPtr client,
-        \\        TBPacket* packet
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -533,23 +520,5 @@ pub fn main() !void {
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
 
-    try std.fs.cwd().writeFile(.{ .sub_path = output_file, .data = buffer.items });
-}
-
-const testing = std.testing;
-
-test "bindings dotnet" {
-    var buffer = std.ArrayList(u8).init(testing.allocator);
-    defer buffer.deinit();
-
-    try generate_bindings(&buffer);
-
-    const current = try std.fs.cwd().readFileAlloc(
-        testing.allocator,
-        output_file,
-        std.math.maxInt(usize),
-    );
-    defer testing.allocator.free(current);
-
-    try testing.expectEqualStrings(current, buffer.items);
+    try std.io.getStdOut().writeAll(buffer.items);
 }

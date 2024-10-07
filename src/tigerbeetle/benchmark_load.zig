@@ -41,26 +41,29 @@ pub fn main(
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built with '-Drelease' for reasonable results.\n", .{});
     }
-    if (!vsr.constants.config.is_production()) {
-        try stderr.print(
-            \\Benchmark must be built with '-Dconfig=production' for reasonable results.
-            \\
-        , .{});
+    if (!vsr.constants.config.process.direct_io) {
+        log.warn("direct io is disabled", .{});
+    }
+    if (vsr.constants.config.process.verify) {
+        log.warn("extra assertions are enabled", .{});
     }
 
-    if (cli_args.account_count < 2) flags.fatal(
+    if (cli_args.account_count < 2) vsr.fatal(
+        .cli,
         "--account-count: need at least two accounts, got {}",
         .{cli_args.account_count},
     );
 
     // The first account_count_hot accounts are "hot" -- they will be the debit side of
     // transfer_hot_percent of the transfers.
-    if (cli_args.account_count_hot > cli_args.account_count) flags.fatal(
+    if (cli_args.account_count_hot > cli_args.account_count) vsr.fatal(
+        .cli,
         "--account-count-hot: must be less-than-or-equal-to --account-count, got {}",
         .{cli_args.account_count_hot},
     );
 
-    if (cli_args.transfer_hot_percent > 100) flags.fatal(
+    if (cli_args.transfer_hot_percent > 100) vsr.fatal(
+        .cli,
         "--transfer-hot-percent: must be less-than-or-equal-to 100, got {}",
         .{cli_args.transfer_hot_percent},
     );
@@ -76,13 +79,15 @@ pub fn main(
 
     var client = try Client.init(
         allocator,
-        client_id,
-        cluster_id,
-        @intCast(addresses.len),
-        &message_pool,
         .{
-            .configuration = addresses,
-            .io = &io,
+            .id = client_id,
+            .cluster = cluster_id,
+            .replica_count = @intCast(addresses.len),
+            .message_pool = &message_pool,
+            .message_bus_options = .{
+                .configuration = addresses,
+                .io = &io,
+            },
         },
     );
 
@@ -148,7 +153,8 @@ pub fn main(
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
         .account_count_hot = cli_args.account_count_hot,
-        .account_balances = cli_args.account_balances,
+        .flag_history = cli_args.flag_history,
+        .flag_imported = cli_args.flag_imported,
         .account_index = 0,
         .query_count = cli_args.query_count,
         .query_index = 0,
@@ -233,7 +239,8 @@ const Benchmark = struct {
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
     account_count_hot: usize,
-    account_balances: bool,
+    flag_history: bool,
+    flag_imported: bool,
     account_index: usize,
     query_count: usize,
     query_index: usize,
@@ -275,12 +282,14 @@ const Benchmark = struct {
             .ledger = 2,
             .code = 1,
             .flags = .{
-                .history = b.account_balances,
+                .history = b.flag_history,
+                .imported = b.flag_imported,
             },
             .debits_pending = 0,
             .debits_posted = 0,
             .credits_pending = 0,
             .credits_posted = 0,
+            .timestamp = if (b.flag_imported) b.account_index + 1 else 0,
         };
     }
 
@@ -362,10 +371,13 @@ const Benchmark = struct {
             .pending_id = 0,
             .ledger = 2,
             .code = random.int(u16) +| 1,
-            .flags = .{ .pending = pending },
+            .flags = .{
+                .pending = pending,
+                .imported = b.flag_imported,
+            },
             .timeout = if (pending) random.intRangeAtMost(u32, 1, 60) else 0,
             .amount = random_int_exponential(random, u64, 10_000) +| 1,
-            .timestamp = 0,
+            .timestamp = if (b.flag_imported) b.account_index + b.transfer_index + 1 else 0,
         };
     }
 
@@ -421,7 +433,7 @@ const Benchmark = struct {
         const ms_time = @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms);
 
         if (b.print_batch_timings) {
-            log.info("batch {}: {} tx in {} ms\n", .{
+            log.info("batch {}: {} tx in {} ms", .{
                 b.batch_index,
                 b.batch_transfers.items.len,
                 ms_time,
@@ -484,6 +496,10 @@ const Benchmark = struct {
         b.account_index = b.rng.random().intRangeLessThan(usize, 0, b.account_count);
         var filter = tb.AccountFilter{
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .code = 0,
             .timestamp_min = 0,
             .timestamp_max = 0,
             .limit = @divExact(
@@ -694,25 +710,6 @@ const Benchmark = struct {
         b.done = true;
     }
 };
-
-fn print_deciles(
-    stdout: anytype,
-    label: []const u8,
-    latencies: []const u64,
-) void {
-    var decile: usize = 0;
-    while (decile <= 10) : (decile += 1) {
-        const index = @divTrunc(latencies.len * decile, 10) -| 1;
-        stdout.print("{s} latency p{}0 = {} ms\n", .{
-            label,
-            decile,
-            @divTrunc(
-                latencies[index],
-                std.time.ns_per_ms,
-            ),
-        }) catch unreachable;
-    }
-}
 
 fn print_percentiles_histogram(
     stdout: anytype,

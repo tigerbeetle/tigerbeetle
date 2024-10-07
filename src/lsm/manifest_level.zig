@@ -23,7 +23,7 @@ pub fn ManifestLevelType(
     comptime assert(@typeInfo(Key) == .Int or @typeInfo(Key) == .ComptimeInt);
 
     return struct {
-        const Self = @This();
+        const ManifestLevel = @This();
 
         pub const Keys = SortedSegmentedArray(
             Key,
@@ -103,7 +103,7 @@ pub fn ManifestLevelType(
             fn exclude(self: *LevelKeyRange, exclude_range: KeyRange) void {
                 assert(self.key_range != null);
 
-                var level: *Self = @fieldParentPtr("key_range_latest", self);
+                var level: *ManifestLevel = @fieldParentPtr("key_range_latest", self);
                 if (level.table_count_visible == 0) {
                     self.key_range = null;
                     return;
@@ -171,27 +171,27 @@ pub fn ManifestLevelType(
         /// TableInfo references.
         generation: u32 = 0,
 
-        pub fn init(allocator: mem.Allocator) !Self {
-            var keys = try Keys.init(allocator);
-            errdefer keys.deinit(allocator, null);
-
-            var tables = try Tables.init(allocator);
-            errdefer tables.deinit(allocator, null);
-
-            return Self{
-                .keys = keys,
-                .tables = tables,
+        pub fn init(level: *ManifestLevel, allocator: mem.Allocator) !void {
+            level.* = .{
+                .keys = undefined,
+                .tables = undefined,
             };
+
+            level.keys = try Keys.init(allocator);
+            errdefer level.keys.deinit(allocator, null);
+
+            level.tables = try Tables.init(allocator);
+            errdefer level.tables.deinit(allocator, null);
         }
 
-        pub fn deinit(level: *Self, allocator: mem.Allocator, node_pool: *NodePool) void {
+        pub fn deinit(level: *ManifestLevel, allocator: mem.Allocator, node_pool: *NodePool) void {
             level.keys.deinit(allocator, node_pool);
             level.tables.deinit(allocator, node_pool);
 
             level.* = undefined;
         }
 
-        pub fn reset(level: *Self) void {
+        pub fn reset(level: *ManifestLevel) void {
             level.keys.reset();
             level.tables.reset();
 
@@ -203,7 +203,11 @@ pub fn ManifestLevelType(
         }
 
         /// Inserts the given table into the ManifestLevel.
-        pub fn insert_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
+        pub fn insert_table(
+            level: *ManifestLevel,
+            node_pool: *NodePool,
+            table: *const TableInfo,
+        ) void {
             if (constants.verify) {
                 assert(!level.contains(table));
             }
@@ -245,7 +249,11 @@ pub fn ManifestLevelType(
         /// * The table is mutable so that this function can update its snapshot.
         /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
         /// * Asserts that the table exists in the manifest.
-        pub fn set_snapshot_max(level: *Self, snapshot: u64, table_ref: TableInfoReference) void {
+        pub fn set_snapshot_max(
+            level: *ManifestLevel,
+            snapshot: u64,
+            table_ref: TableInfoReference,
+        ) void {
             var table = table_ref.table_info;
 
             assert(table_ref.generation == level.generation);
@@ -266,7 +274,11 @@ pub fn ManifestLevelType(
 
         /// Remove the given table.
         /// The `table` parameter must *not* be a pointer into the `tables`' SegmentedArray memory.
-        pub fn remove_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
+        pub fn remove_table(
+            level: *ManifestLevel,
+            node_pool: *NodePool,
+            table: *const TableInfo,
+        ) void {
             assert(level.keys.len() == level.tables.len());
             assert(table.key_min <= table.key_max);
 
@@ -307,7 +319,7 @@ pub fn ManifestLevelType(
         ///
         /// Our key range keeps track of tables that are visible to snapshot_latest, so it cannot
         /// be relied upon for queries to older snapshots.
-        pub fn key_range_contains(level: *const Self, snapshot: u64, key: Key) bool {
+        pub fn key_range_contains(level: *const ManifestLevel, snapshot: u64, key: Key) bool {
             if (snapshot == lsm.snapshot_latest) {
                 return level.key_range_latest.contains(key);
             } else {
@@ -326,7 +338,7 @@ pub fn ManifestLevelType(
         };
 
         pub fn iterator(
-            level: *const Self,
+            level: *const ManifestLevel,
             visibility: Visibility,
             snapshots: []const u64,
             direction: Direction,
@@ -377,7 +389,7 @@ pub fn ManifestLevelType(
         }
 
         pub const Iterator = struct {
-            level: *const Self,
+            level: *const ManifestLevel,
             inner: Tables.Iterator,
             visibility: Visibility,
             snapshots: []const u64,
@@ -455,7 +467,7 @@ pub fn ManifestLevelType(
         /// the key_max is stored in the index structures, not the key_min, and only the start
         /// bound for the given direction is checked here.
         fn iterator_start(
-            level: Self,
+            level: ManifestLevel,
             key_min: Key,
             key_max: Key,
             direction: Direction,
@@ -498,7 +510,7 @@ pub fn ManifestLevelType(
         /// `key_max`, and `iterator_start`'s binary search (`key_cursor`) may have landed in the
         /// middle of them.
         fn iterator_start_boundary(
-            level: Self,
+            level: ManifestLevel,
             key_cursor: Keys.Cursor,
             direction: Direction,
         ) Keys.Cursor {
@@ -527,7 +539,7 @@ pub fn ManifestLevelType(
         }
 
         /// The function is only used for verification; it is not performance-critical.
-        pub fn contains(level: Self, table: *const TableInfo) bool {
+        pub fn contains(level: ManifestLevel, table: *const TableInfo) bool {
             assert(constants.verify);
             var level_tables = level.iterator(.visible, &.{
                 table.snapshot_min,
@@ -548,8 +560,8 @@ pub fn ManifestLevelType(
         /// * Exits early if it finds a table that doesn't overlap with any
         ///   tables in the second level.
         pub fn table_with_least_overlap(
-            level_a: *const Self,
-            level_b: *const Self,
+            level_a: *const ManifestLevel,
+            level_b: *const ManifestLevel,
             snapshot: u64,
             max_overlapping_tables: usize,
         ) ?LeastOverlapTable {
@@ -598,7 +610,7 @@ pub fn ManifestLevelType(
         /// Returns the next table in the range, after `key_exclusive` if provided.
         ///
         /// * The table returned is visible to `snapshot`.
-        pub fn next_table(self: *const Self, parameters: struct {
+        pub fn next_table(self: *const ManifestLevel, parameters: struct {
             snapshot: u64,
             key_min: Key,
             key_max: Key,
@@ -691,7 +703,7 @@ pub fn ManifestLevelType(
         ///   compaction strategy that is guaranteed to choose a table with that
         ///   intersects with <= lsm_growth_factor tables in the next level.
         pub fn tables_overlapping_with_key_range(
-            level: *const Self,
+            level: *const ManifestLevel,
             key_min: Key,
             key_max: Key,
             snapshot: u64,
@@ -747,13 +759,13 @@ pub fn ManifestLevelType(
     };
 }
 
-pub fn TestContext(
+pub fn TestContextType(
     comptime node_size: u32,
     comptime Key: type,
     comptime table_count_max: u32,
 ) type {
     return struct {
-        const Self = @This();
+        const TestContext = @This();
 
         const testing = std.testing;
 
@@ -794,9 +806,9 @@ pub fn TestContext(
         );
 
         const TableInfo = @import("manifest.zig").TreeTableInfoType(Table);
-        const NodePool = @import("node_pool.zig").NodePool;
+        const NodePoolType = @import("node_pool.zig").NodePoolType;
 
-        const TestPool = NodePool(node_size, @alignOf(TableInfo));
+        const TestPool = NodePoolType(node_size, @alignOf(TableInfo));
         const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, table_count_max);
         const KeyRange = TestLevel.KeyRange;
 
@@ -815,28 +827,29 @@ pub fn TestContext(
         inserts: u64 = 0,
         removes: u64 = 0,
 
-        fn init(random: std.rand.Random) !Self {
-            var pool = try TestPool.init(
+        fn init(context: *TestContext, random: std.rand.Random) !void {
+            context.* = .{
+                .random = random,
+
+                .pool = undefined,
+                .level = undefined,
+                .reference = undefined,
+            };
+
+            try context.pool.init(
                 testing.allocator,
                 TestLevel.Keys.node_count_max + TestLevel.Tables.node_count_max,
             );
-            errdefer pool.deinit(testing.allocator);
+            errdefer context.pool.deinit(testing.allocator);
 
-            var level = try TestLevel.init(testing.allocator);
-            errdefer level.deinit(testing.allocator, &pool);
+            try context.level.init(testing.allocator);
+            errdefer context.level.deinit(testing.allocator, &context.pool);
 
-            var reference = std.ArrayList(TableInfo).init(testing.allocator);
-            errdefer reference.deinit();
-
-            return Self{
-                .random = random,
-                .pool = pool,
-                .level = level,
-                .reference = reference,
-            };
+            context.reference = std.ArrayList(TableInfo).init(testing.allocator);
+            errdefer context.reference.deinit();
         }
 
-        fn deinit(context: *Self) void {
+        fn deinit(context: *TestContext) void {
             context.level.deinit(testing.allocator, &context.pool);
             context.pool.deinit(testing.allocator);
 
@@ -845,7 +858,7 @@ pub fn TestContext(
             context.reference.deinit();
         }
 
-        fn run(context: *Self) !void {
+        fn run(context: *TestContext) !void {
             if (log) std.debug.print("\n", .{});
 
             {
@@ -877,7 +890,7 @@ pub fn TestContext(
             try context.remove_all();
         }
 
-        fn insert_tables(context: *Self) !void {
+        fn insert_tables(context: *TestContext) !void {
             const count_free = table_count_max - context.level.keys.len();
 
             if (count_free == 0) return;
@@ -921,7 +934,7 @@ pub fn TestContext(
             try context.verify();
         }
 
-        fn random_greater_non_overlapping_table(context: *Self, key: Key) TableInfo {
+        fn random_greater_non_overlapping_table(context: *TestContext, key: Key) TableInfo {
             var new_key_min = key + context.random.uintLessThanBiased(Key, 31) + 1;
 
             assert(new_key_min > key);
@@ -963,7 +976,7 @@ pub fn TestContext(
         }
 
         /// See Manifest.take_snapshot()
-        fn take_snapshot(context: *Self) u64 {
+        fn take_snapshot(context: *TestContext) u64 {
             // A snapshot cannot be 0 as this is a reserved value in the superblock.
             assert(context.snapshot_max > 0);
             // The constant snapshot_latest must compare greater than any issued snapshot.
@@ -975,7 +988,7 @@ pub fn TestContext(
             return context.snapshot_max;
         }
 
-        fn create_snapshot(context: *Self) !void {
+        fn create_snapshot(context: *TestContext) !void {
             if (context.snapshots.full()) return;
 
             context.snapshots.append_assume_capacity(context.take_snapshot());
@@ -985,7 +998,7 @@ pub fn TestContext(
             try tables.insertSlice(0, context.reference.items);
         }
 
-        fn drop_snapshot(context: *Self) !void {
+        fn drop_snapshot(context: *TestContext) !void {
             if (context.snapshots.empty()) return;
 
             const index = context.random.uintLessThanBiased(usize, context.snapshots.count());
@@ -1016,7 +1029,7 @@ pub fn TestContext(
             }
         }
 
-        fn delete_tables(context: *Self) !void {
+        fn delete_tables(context: *TestContext) !void {
             const reference_len: u32 = @intCast(context.reference.items.len);
             if (reference_len == 0) return;
 
@@ -1101,7 +1114,7 @@ pub fn TestContext(
             try context.verify();
         }
 
-        fn remove_all(context: *Self) !void {
+        fn remove_all(context: *TestContext) !void {
             while (context.snapshots.count() > 0) try context.drop_snapshot();
             while (context.reference.items.len > 0) try context.delete_tables();
 
@@ -1120,7 +1133,7 @@ pub fn TestContext(
             try context.verify();
         }
 
-        fn verify(context: *Self) !void {
+        fn verify(context: *TestContext) !void {
             try context.verify_snapshot(lsm.snapshot_latest, context.reference.items);
 
             for (context.snapshots.slice(), 0..) |snapshot, i| {
@@ -1128,7 +1141,11 @@ pub fn TestContext(
             }
         }
 
-        fn verify_snapshot(context: *Self, snapshot: u64, reference: []const TableInfo) !void {
+        fn verify_snapshot(
+            context: *TestContext,
+            snapshot: u64,
+            reference: []const TableInfo,
+        ) !void {
             if (log) {
                 std.debug.print("\nsnapshot: {}\n", .{snapshot});
                 std.debug.print("expect: ", .{});
@@ -1248,13 +1265,14 @@ test "ManifestLevel" {
         Options{ .key_type = u64, .node_size = 512, .table_count_max = 1024 },
         Options{ .key_type = u64, .node_size = 1024, .table_count_max = 1024 },
     }) |options| {
-        const Context = TestContext(
+        const TestContext = TestContextType(
             options.node_size,
             options.key_type,
             options.table_count_max,
         );
 
-        var context = try Context.init(random);
+        var context: TestContext = undefined;
+        try context.init(random);
         defer context.deinit();
 
         try context.run();

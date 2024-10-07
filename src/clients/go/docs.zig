@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 const Docs = @import("../docs_types.zig").Docs;
 
@@ -44,11 +43,7 @@ pub const GoDocs = Docs{
 
     .examples = "",
 
-    .client_object_documentation =
-    \\The third argument to `NewClient` is a `uint` max concurrency
-    \\setting. `256` is a good default and can increase to `8192`
-    \\as you need increased throughput.
-    ,
+    .client_object_documentation = "",
 
     .create_accounts_documentation =
     \\The `Uint128` fields like `ID`, `UserData128`, `Amount` and

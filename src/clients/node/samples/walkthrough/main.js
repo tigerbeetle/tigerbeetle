@@ -10,6 +10,8 @@ const {
   CreateTransferError,
   CreateAccountError,
   AccountFilterFlags,
+  QueryFilterFlags,
+  amount_max,
 } = require("tigerbeetle-node");
 
 async function main() {
@@ -198,7 +200,7 @@ async function main() {
   // section:no-batch
   for (let i = 0; i < transfers.len; i++) {
     const transferErrors = await client.createTransfers(transfers[i]);
-    // error handling omitted
+    // Error handling omitted.
   }
   // endsection:no-batch
 
@@ -208,7 +210,7 @@ async function main() {
     const transferErrors = await client.createTransfers(
       transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)),
     );
-    // error handling omitted
+    // Error handling omitted.
   }
   // endsection:batch
 
@@ -270,7 +272,8 @@ async function main() {
     id: 5n,
     debit_account_id: 102n,
     credit_account_id: 103n,
-    amount: 10n,
+    // Post the entire pending amount.
+    amount: amount_max,
     pending_id: 4n,
     user_data_128: 0n,
     user_data_64: 0n,
@@ -345,6 +348,10 @@ async function main() {
   // section:get-account-transfers
   let filter = {
     account_id: 2n,
+    user_data_128: 0n, // No filter by UserData.
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0, // No filter by Code.
     timestamp_min: 0n, // No filter by Timestamp.
     timestamp_max: 0n, // No filter by Timestamp.
     limit: 10, // Limit to ten balances at most.
@@ -359,6 +366,10 @@ async function main() {
   // section:get-account-balances
   filter = {
     account_id: 2n,
+    user_data_128: 0n, // No filter by UserData.
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0, // No filter by Code.
     timestamp_min: 0n, // No filter by Timestamp.
     timestamp_max: 0n, // No filter by Timestamp.
     limit: 10, // Limit to ten balances at most.
@@ -380,9 +391,7 @@ async function main() {
     timestamp_min: 0n, // No filter by Timestamp.
     timestamp_max: 0n, // No filter by Timestamp.
     limit: 10, // Limit to ten balances at most.
-    flags: AccountFilterFlags.debits | // Include transfer from the debit side.
-      AccountFilterFlags.credits | // Include transfer from the credit side.
-      AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+    flags: QueryFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
   };
   const query_accounts = await client.queryAccounts(query_filter);
   // endsection:query-accounts
@@ -397,9 +406,7 @@ async function main() {
     timestamp_min: 0n, // No filter by Timestamp.
     timestamp_max: 0n, // No filter by Timestamp.
     limit: 10, // Limit to ten balances at most.
-    flags: AccountFilterFlags.debits | // Include transfer from the debit side.
-      AccountFilterFlags.credits | // Include transfer from the credit side.
-      AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+    flags: QueryFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
   };
   const query_transfers = await client.queryTransfers(query_filter);
   // endsection:query-transfers
@@ -446,6 +453,56 @@ async function main() {
          * ]
          */
         // endsection:linked-events
+
+        // External source of time.
+        let historicalTimestamp = 0n
+        const historicalAccounts = [];
+        const historicalTransfers = [];
+
+        // section:imported-events
+        // First, load and import all accounts with their timestamps from the historical source.
+        const accountsBatch = [];
+        for (let index = 0; i < historicalAccounts.length; i++) {
+          let account = historicalAccounts[i];
+          // Set a unique and strictly increasing timestamp.
+          historicalTimestamp += 1;
+          account.timestamp = historicalTimestamp;
+          // Set the account as `imported`.
+          account.flags = AccountFlags.imported;
+          // To ensure atomicity, the entire batch (except the last event in the chain)
+          // must be `linked`.
+          if (index < historicalAccounts.length - 1) {
+            account.flags |= AccountFlags.linked;
+          }
+
+          accountsBatch.push(account);
+        }
+        accountErrors = await client.createAccounts(accountsBatch);
+
+        // Error handling omitted.
+        // Then, load and import all transfers with their timestamps from the historical source.
+        const transfersBatch = [];
+        for (let index = 0; i < historicalTransfers.length; i++) {
+          let transfer = historicalTransfers[i];
+          // Set a unique and strictly increasing timestamp.
+          historicalTimestamp += 1;
+          transfer.timestamp = historicalTimestamp;
+          // Set the account as `imported`.
+          transfer.flags = TransferFlags.imported;
+          // To ensure atomicity, the entire batch (except the last event in the chain)
+          // must be `linked`.
+          if (index < historicalTransfers.length - 1) {
+            transfer.flags |= TransferFlags.linked;
+          }
+
+          transfersBatch.push(transfer);
+        }
+        transferErrors = await client.createAccounts(transfersBatch);
+        // Error handling omitted.
+        // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+        // with the same historical timestamps without regressing the cluster timestamp.
+        // endsection:imported-events
+
     } catch (exception) {
         // This currently throws because the batch is actually invalid (most of fields are
         // undefined). Ideally, we prepare a correct batch here while keeping the syntax compact,

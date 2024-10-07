@@ -7,13 +7,12 @@ const log = std.log.scoped(.forest);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const vsr = @import("../vsr.zig");
 
 const schema = @import("schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
-const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
 const CompactionInfo = @import("compaction.zig").CompactionInfo;
@@ -187,7 +186,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         const CompactionPipeline = CompactionPipelineType(Forest, Grid);
 
         const Callback = *const fn (*Forest) void;
-        const GroovesBitSet = std.StaticBitSet(std.meta.fields(Grooves).len);
 
         pub const Storage = _Storage;
         pub const groove_config = groove_cfg;
@@ -223,89 +221,95 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             },
         } = null,
 
-        compaction_progress: enum { idle, trees_or_manifest, trees_and_manifest } = .idle,
+        compaction_progress: ?struct {
+            trees_done: bool,
+            manifest_log_done: bool,
+
+            fn all_done(compaction_progress: @This()) bool {
+                return compaction_progress.trees_done and compaction_progress.manifest_log_done;
+            }
+        } = null,
 
         grid: *Grid,
         grooves: Grooves,
-        node_pool: *NodePool,
+        node_pool: NodePool,
         manifest_log: ManifestLog,
-        manifest_log_progress: enum { idle, compacting, done, skip } = .idle,
 
         compaction_pipeline: CompactionPipeline,
 
         scan_buffer_pool: ScanBufferPool,
 
         pub fn init(
+            forest: *Forest,
             allocator: mem.Allocator,
             grid: *Grid,
             options: Options,
             // (e.g.) .{ .transfers = .{ .cache_entries_max = 128, … }, .accounts = … }
             grooves_options: GroovesOptions,
-        ) !Forest {
+        ) !void {
             assert(options.compaction_block_count >= Options.compaction_block_count_min);
 
-            // NodePool must be allocated to pass in a stable address for the Grooves.
-            const node_pool = try allocator.create(NodePool);
-            errdefer allocator.destroy(node_pool);
+            forest.* = .{
+                .grid = grid,
+                .grooves = undefined,
+                .node_pool = undefined,
+                .manifest_log = undefined,
+                .compaction_pipeline = undefined,
+                .scan_buffer_pool = undefined,
+            };
 
             // TODO: look into using lsm_table_size_max for the node_count.
-            node_pool.* = try NodePool.init(allocator, options.node_count);
-            errdefer node_pool.deinit(allocator);
+            try forest.node_pool.init(allocator, options.node_count);
+            errdefer forest.node_pool.deinit(allocator);
 
-            var manifest_log = try ManifestLog.init(allocator, grid, .{
+            try forest.manifest_log.init(allocator, grid, .{
                 .tree_id_min = tree_id_range.min,
                 .tree_id_max = tree_id_range.max,
                 // TODO Make this a runtime argument (from the CLI, derived from storage-size-max if
                 // possible).
                 .forest_table_count_max = table_count_max,
             });
-            errdefer manifest_log.deinit(allocator);
+            errdefer forest.manifest_log.deinit(allocator);
 
-            var grooves: Grooves = undefined;
             var grooves_initialized: usize = 0;
-
             errdefer inline for (std.meta.fields(Grooves), 0..) |field, field_index| {
                 if (grooves_initialized >= field_index + 1) {
-                    @field(grooves, field.name).deinit(allocator);
+                    const Groove = field.type;
+                    const groove: *Groove = &@field(forest.grooves, field.name);
+                    groove.deinit(allocator);
                 }
             };
 
-            inline for (std.meta.fields(Grooves)) |groove_field| {
-                const groove = &@field(grooves, groove_field.name);
-                const Groove = @TypeOf(groove.*);
-                const groove_options: Groove.Options = @field(grooves_options, groove_field.name);
+            inline for (std.meta.fields(Grooves)) |field| {
+                const Groove = field.type;
+                const groove: *Groove = &@field(forest.grooves, field.name);
+                const groove_options: Groove.Options = @field(grooves_options, field.name);
 
-                groove.* = try Groove.init(allocator, node_pool, grid, groove_options);
+                try groove.init(allocator, &forest.node_pool, grid, groove_options);
                 grooves_initialized += 1;
             }
 
-            var compaction_pipeline =
-                try CompactionPipeline.init(allocator, grid, options.compaction_block_count);
-            errdefer compaction_pipeline.deinit(allocator);
+            try forest.compaction_pipeline.init(
+                allocator,
+                grid,
+                forest,
+                options.compaction_block_count,
+            );
+            errdefer forest.compaction_pipeline.deinit(allocator);
 
-            const scan_buffer_pool = try ScanBufferPool.init(allocator);
-            errdefer scan_buffer_pool.deinit(allocator);
-
-            return Forest{
-                .grid = grid,
-                .grooves = grooves,
-                .node_pool = node_pool,
-                .manifest_log = manifest_log,
-
-                .compaction_pipeline = compaction_pipeline,
-
-                .scan_buffer_pool = scan_buffer_pool,
-            };
+            try forest.scan_buffer_pool.init(allocator);
+            errdefer forest.scan_buffer_pool.deinit(allocator);
         }
 
         pub fn deinit(forest: *Forest, allocator: mem.Allocator) void {
             inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).deinit(allocator);
+                const Groove = field.type;
+                const groove: *Groove = &@field(forest.grooves, field.name);
+                groove.deinit(allocator);
             }
 
             forest.manifest_log.deinit(allocator);
             forest.node_pool.deinit(allocator);
-            allocator.destroy(forest.node_pool);
 
             forest.compaction_pipeline.deinit(allocator);
             forest.scan_buffer_pool.deinit(allocator);
@@ -315,6 +319,11 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).reset();
             }
+
+            forest.grid.trace.reset(.lookup);
+            forest.grid.trace.reset(.lookup_worker);
+            forest.grid.trace.reset(.scan_tree);
+            forest.grid.trace.reset(.scan_tree_level);
 
             forest.manifest_log.reset();
             forest.node_pool.reset();
@@ -336,7 +345,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         pub fn open(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
 
             forest.progress = .{ .open = .{ .callback = callback } };
 
@@ -353,7 +362,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         ) void {
             const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
             assert(table.label.level < constants.lsm_levels);
             assert(table.label.event != .remove);
 
@@ -372,7 +381,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
             const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
             forest.verify_tables_recovered();
 
             inline for (std.meta.fields(Grooves)) |field| {
@@ -386,39 +395,45 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
-            const compaction_beat = op % constants.lsm_batch_multiple;
+            const compaction_beat = op % constants.lsm_compaction_ops;
 
             const first_beat = compaction_beat == 0;
             const last_half_beat = compaction_beat ==
-                @divExact(constants.lsm_batch_multiple, 2) - 1;
-            const half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2);
-            const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
+                @divExact(constants.lsm_compaction_ops, 2) - 1;
+            const half_beat = compaction_beat == @divExact(constants.lsm_compaction_ops, 2);
+            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
             assert(@as(usize, @intFromBool(first_beat)) + @intFromBool(last_half_beat) +
                 @intFromBool(half_beat) + @intFromBool(last_beat) <= 1);
 
-            log.debug("entering forest.compact() op={} constants.lsm_batch_multiple={} " ++
+            log.debug("entering forest.compact() op={} constants.lsm_compaction_ops={} " ++
                 "first_beat={} last_half_beat={} half_beat={} last_beat={}", .{
                 op,
-                constants.lsm_batch_multiple,
+                constants.lsm_compaction_ops,
                 first_beat,
                 last_half_beat,
                 half_beat,
                 last_beat,
             });
 
+            assert(forest.progress == null);
             forest.progress = .{ .compact = .{
                 .op = op,
                 .callback = callback,
             } };
 
-            // Compaction only starts > lsm_batch_multiple because nothing compacts in the first
-            // bar.
-            assert(op >= constants.lsm_batch_multiple or
-                forest.compaction_pipeline.compactions.count() == 0);
-            assert(forest.compaction_progress == .idle);
+            // Run trees and manifest log compaction in parallel, join in compact_finish.
+            assert(forest.compaction_progress == null);
+            forest.compaction_progress = .{
+                .trees_done = false,
+                .manifest_log_done = false,
+            };
 
-            forest.compaction_progress = .trees_or_manifest;
-            forest.compaction_pipeline.beat(forest, op, compact_callback);
+            // Compaction only starts > lsm_compaction_ops because nothing compacts in the first
+            // bar.
+            assert(op >= constants.lsm_compaction_ops or
+                forest.compaction_pipeline.compactions.count() == 0);
+
+            forest.compaction_pipeline.beat(op, compact_trees_callback);
             if (forest.grid.superblock.working.vsr_state.op_compacted(op)) {
                 assert(forest.compaction_pipeline.compactions.count() == 0);
                 assert(forest.compaction_pipeline.bar_active.count() == 0);
@@ -429,42 +444,52 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // balances out, because we expect to naturally do less other compaction work on the
             // last beat.
             // The first bar has no manifest compaction.
-            if ((last_beat or last_half_beat) and op > constants.lsm_batch_multiple) {
-                forest.manifest_log_progress = .compacting;
+            if ((last_beat or last_half_beat) and op > constants.lsm_compaction_ops) {
                 forest.manifest_log.compact(compact_manifest_log_callback, op);
-                forest.compaction_progress = .trees_and_manifest;
             } else {
-                assert(forest.manifest_log_progress == .idle);
+                forest.compaction_progress.?.manifest_log_done = true;
             }
         }
 
-        fn compact_callback(forest: *Forest) void {
+        fn compact_trees_callback(forest: *Forest) void {
             assert(forest.progress.? == .compact);
-            assert(forest.compaction_progress != .idle);
+            assert(forest.compaction_progress != null);
+            assert(!forest.compaction_progress.?.trees_done);
+            forest.compaction_progress.?.trees_done = true;
 
-            if (forest.compaction_progress == .trees_and_manifest) {
-                assert(forest.manifest_log_progress != .idle);
+            if (forest.compaction_progress.?.all_done()) {
+                forest.compact_finish();
             }
+        }
 
-            forest.compaction_progress = if (forest.compaction_progress == .trees_and_manifest)
-                .trees_or_manifest
-            else
-                .idle;
-            if (forest.compaction_progress != .idle) return;
+        fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
+
+            assert(forest.progress.? == .compact);
+            assert(forest.compaction_progress != null);
+            assert(!forest.compaction_progress.?.manifest_log_done);
+            forest.compaction_progress.?.manifest_log_done = true;
+
+            if (forest.compaction_progress.?.all_done()) {
+                forest.compact_finish();
+            }
+        }
+
+        fn compact_finish(forest: *Forest) void {
+            assert(forest.progress.? == .compact);
+            assert(forest.compaction_progress != null);
+            assert(forest.compaction_progress.?.trees_done);
+            assert(forest.compaction_progress.?.manifest_log_done);
 
             forest.verify_table_extents();
-
-            const progress = &forest.progress.?.compact;
 
             assert(forest.progress.? == .compact);
             const op = forest.progress.?.compact.op;
 
-            const compaction_beat = op % constants.lsm_batch_multiple;
-            const last_half_beat = compaction_beat == @divExact(
-                constants.lsm_batch_multiple,
-                2,
-            ) - 1;
-            const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
+            const compaction_beat = op % constants.lsm_compaction_ops;
+            const last_half_beat = compaction_beat ==
+                @divExact(constants.lsm_compaction_ops, 2) - 1;
+            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
             // Apply the changes to the manifest. This will run at the target compaction beat
             // that is requested.
@@ -473,13 +498,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     if (compaction.level_b % 2 == 0 and last_half_beat) continue;
                     if (compaction.level_b % 2 != 0 and last_beat) continue;
 
-                    assert(forest.manifest_log_progress == .compacting or
-                        forest.manifest_log_progress == .done);
                     switch (tree_id_cast(compaction.tree_id)) {
                         inline else => |tree_id| {
                             forest.tree_for_id(tree_id).compactions[compaction.level_b]
                                 .bar_blocks_unassign(&forest.compaction_pipeline.block_pool);
 
+                            assert(forest.compaction_progress.?.manifest_log_done);
                             forest.tree_for_id(tree_id).compactions[compaction.level_b]
                                 .bar_apply_to_manifest();
                         },
@@ -490,6 +514,11 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 // blocks to the block pool.
                 assert(forest.compaction_pipeline.block_pool.count ==
                     forest.compaction_pipeline.block_pool_raw.len);
+            }
+
+            // Groove sync compaction - must be done after all async work for the beat completes.
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).compact(op);
             }
 
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
@@ -513,53 +542,21 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 forest.compaction_pipeline.compactions.clear();
             }
 
-            // Groove sync compaction - must be done after all async work for the beat completes???
-            inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).compact(op);
-            }
-
             // On the last beat of the bar, make sure that manifest log compaction is finished.
-            if (last_beat or last_half_beat) {
-                switch (forest.manifest_log_progress) {
-                    .idle => {},
-                    .compacting => unreachable,
-                    .done => {
-                        forest.manifest_log.compact_end();
-                        forest.manifest_log_progress = .idle;
-                    },
-                    .skip => {},
-                }
+            if ((last_beat or last_half_beat) and op > constants.lsm_compaction_ops) {
+                forest.manifest_log.compact_end();
             }
 
-            const callback = progress.callback;
+            const callback = forest.progress.?.compact.callback;
             forest.progress = null;
+            forest.compaction_progress = null;
 
             callback(forest);
         }
 
-        fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
-            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
-            assert(forest.manifest_log_progress == .compacting);
-
-            forest.manifest_log_progress = .done;
-
-            if (forest.progress) |progress| {
-                assert(progress == .compact);
-
-                forest.compact_callback();
-            } else {
-                // The manifest log compaction completed between compaction beats.
-            }
-        }
-
-        fn GrooveFor(comptime groove_field_name: []const u8) type {
-            const groove_field = @field(std.meta.FieldEnum(Grooves), groove_field_name);
-            return std.meta.FieldType(Grooves, groove_field);
-        }
-
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
             forest.grid.assert_only_repairing();
             forest.verify_table_extents();
 
@@ -575,7 +572,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
             const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .checkpoint);
-            assert(forest.manifest_log_progress == .idle);
+            assert(forest.compaction_progress == null);
             forest.verify_table_extents();
             forest.verify_tables_recovered();
 
@@ -770,7 +767,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         /// be shared between compactions, so these are all multiplied by the number
         /// of concurrent compactions.
         /// TODO: This is currently the case for fixed half-bar scheduling.
-        const block_count_bar_single: u64 = 3;
+        const block_count_bar_single: u64 = 2;
 
         const block_count_bar_concurrent: u64 = blk: {
             var block_count: u64 = 0;
@@ -826,6 +823,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         const CompactionBitset = std.StaticBitSet(compaction_count);
 
         grid: *Grid,
+        forest: *Forest,
 
         block_pool: CompactionBlockFIFO,
 
@@ -855,38 +853,45 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         next_tick: Grid.NextTick = undefined,
 
-        forest: ?*Forest = null,
         callback: ?*const fn (*Forest) void = null,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid, block_count: u32) !CompactionPipeline {
+        pub fn init(
+            self: *CompactionPipeline,
+            allocator: mem.Allocator,
+            grid: *Grid,
+            forest: *Forest,
+            block_count: u32,
+        ) !void {
             log.debug("block_count={}", .{block_count});
             assert(block_count >= block_count_min);
 
-            var block_pool: CompactionBlockFIFO = .{
+            self.* = .{
+                .grid = grid,
+                .forest = forest,
+
+                .block_pool = undefined,
+                .block_pool_raw = undefined,
+            };
+
+            self.block_pool = .{
                 .name = "block_pool",
                 .verify_push = false,
             };
 
-            const block_pool_raw = try allocator.alloc(
+            self.block_pool_raw = try allocator.alloc(
                 CompactionHelper.CompactionBlock,
                 block_count,
             );
-            errdefer allocator.free(block_pool_raw);
+            errdefer allocator.free(self.block_pool_raw);
 
-            for (block_pool_raw, 0..) |*compaction_block, i| {
-                errdefer for (block_pool_raw[0..i]) |block| allocator.free(block.block);
+            for (self.block_pool_raw, 0..) |*compaction_block, i| {
+                errdefer for (self.block_pool_raw[0..i]) |block| allocator.free(block.block);
                 compaction_block.* = .{
                     .block = try allocate_block(allocator),
                 };
-                block_pool.push(compaction_block);
+                self.block_pool.push(compaction_block);
             }
-            errdefer for (block_pool_raw) |block| allocator.free(block.block);
-
-            return .{
-                .block_pool = block_pool,
-                .block_pool_raw = block_pool_raw,
-                .grid = grid,
-            };
+            errdefer for (self.block_pool_raw) |block| allocator.free(block.block);
         }
 
         pub fn deinit(self: *CompactionPipeline, allocator: mem.Allocator) void {
@@ -907,6 +912,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
             self.* = .{
                 .grid = self.grid,
+                .forest = self.forest,
                 .block_pool = block_pool,
                 .block_pool_raw = self.block_pool_raw,
             };
@@ -962,16 +968,12 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         pub fn beat(
             self: *CompactionPipeline,
-            forest: *Forest,
             op: u64,
             callback: Forest.Callback,
         ) void {
-            const compaction_beat = op % constants.lsm_batch_multiple;
+            const compaction_beat = op % constants.lsm_compaction_ops;
             const first_beat = compaction_beat == 0;
-            const half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2);
-
-            if (self.forest == null) self.forest = forest;
-            assert(self.forest == forest);
+            const half_beat = compaction_beat == @divExact(constants.lsm_compaction_ops, 2);
 
             self.slot_filled_count = 0;
             self.slot_running_count = 0;
@@ -983,7 +985,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             // causing the storage state of the replica to diverge from the cluster.
             // See also: compaction_op_min().
             if ((first_beat or half_beat) and
-                !forest.grid.superblock.working.vsr_state.op_compacted(op))
+                !self.forest.grid.superblock.working.vsr_state.op_compacted(op))
             {
                 if (first_beat) {
                     assert(self.compactions.count() == 0);
@@ -993,7 +995,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 // time-of-death for writes. This helps internal SSD GC.
                 for (0..constants.lsm_levels) |level_b| {
                     inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
-                        var tree = Forest.tree_for_id(forest, tree_id);
+                        var tree = Forest.tree_for_id(self.forest, tree_id);
                         assert(tree.compactions.len == constants.lsm_levels);
 
                         var compaction = &tree.compactions[level_b];
@@ -1038,11 +1040,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                         block_pool_count_start - self.block_pool.count == block_count_bar_single,
                     );
 
-                    const immutable_table_a_block = self.block_pool.pop().?;
-                    const target_index_blocks = CompactionHelper.BlockFIFO.init(
-                        &self.block_pool,
-                        2,
-                    );
+                    const target_index_blocks =
+                        CompactionHelper.BlockFIFO.init(&self.block_pool, 2);
 
                     // A compaction is marked as live at the start of a bar, unless it's
                     // move_table...
@@ -1058,9 +1057,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                     switch (Forest.tree_id_cast(compaction.tree_id)) {
                         inline else => |tree_id| {
                             self.tree_compaction(tree_id, compaction.level_b).bar_setup_budget(
-                                @divExact(constants.lsm_batch_multiple, 2),
+                                @divExact(constants.lsm_compaction_ops, 2),
                                 target_index_blocks,
-                                immutable_table_a_block,
                             );
                         },
                     }
@@ -1091,9 +1089,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             self.callback = callback;
 
             if (self.compactions.count() == 0) {
-                // No compactions - we're done! Likely we're < lsm_batch_multiple but it could
+                // No compactions - we're done! Likely we're < lsm_compaction_ops but it could
                 // be that empty ops were pulsed through.
-                maybe(op < constants.lsm_batch_multiple);
+                maybe(op < constants.lsm_compaction_ops);
 
                 self.grid.on_next_tick(beat_finished_next_tick, &self.next_tick);
                 return;
@@ -1114,18 +1112,17 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             assert(self.slot_running_count == 0);
             for (self.slots) |slot| assert(slot == null);
 
-            assert(self.callback != null and self.forest != null);
+            assert(self.callback != null);
 
             // Forfeit any remaining grid reservations.
             self.beat_grid_forfeit_all();
             assert(self.beat_reserved.count() == 0);
 
             const callback = self.callback.?;
-            const forest = self.forest.?;
 
             self.callback = null;
 
-            callback(forest);
+            callback(self.forest);
         }
 
         // TODO: It would be great to get rid of *anyopaque here. Batiati's scan approach
@@ -1387,7 +1384,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             comptime tree_id: Forest.TreeID,
             level_b: u8,
         ) *Forest.TreeForIdType(tree_id).Compaction {
-            return &self.forest.?.tree_for_id(tree_id).compactions[level_b];
+            return &self.forest.tree_for_id(tree_id).compactions[level_b];
         }
     };
 }

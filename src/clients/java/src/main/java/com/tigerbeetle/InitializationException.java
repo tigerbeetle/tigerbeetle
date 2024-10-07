@@ -27,8 +27,6 @@ public final class InitializationException extends RuntimeException {
             return "Replica addresses format is invalid";
         else if (status == InitializationStatus.AddressLimitExceeded.value)
             return "Replica addresses limit exceeded";
-        else if (status == InitializationStatus.ConcurrencyMaxInvalid.value)
-            return "Invalid concurrencyMax";
         else if (status == InitializationStatus.SystemResources.value)
             return "Internal client ran out of system resources";
         else if (status == InitializationStatus.NetworkSubsystem.value)

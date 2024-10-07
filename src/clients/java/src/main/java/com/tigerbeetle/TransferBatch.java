@@ -10,6 +10,9 @@ import java.math.BigInteger;
 
 public final class TransferBatch extends Batch {
 
+    public static final BigInteger AMOUNT_MAX =
+        UInt128.asBigInteger(Long.MIN_VALUE, Long.MIN_VALUE);
+
     interface Struct {
         int SIZE = 128;
 
@@ -502,7 +505,7 @@ public final class TransferBatch extends Batch {
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      * @see <a href="https://docs.tigerbeetle.com/reference/transfer#timestamp">timestamp</a>
      */
-    void setTimestamp(final long timestamp) {
+    public void setTimestamp(final long timestamp) {
         putUInt64(at(Struct.Timestamp), timestamp);
     }
 

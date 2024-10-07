@@ -4,9 +4,11 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
-pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
+const vsr = @import("../vsr.zig");
+
+pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) type {
     return struct {
-        const Self = @This();
+        const NodePool = @This();
 
         pub const node_size = _node_size;
         pub const node_alignment = _node_alignment;
@@ -24,23 +26,22 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
         buffer: []align(node_alignment) u8,
         free: std.bit_set.DynamicBitSetUnmanaged,
 
-        pub fn init(allocator: mem.Allocator, node_count: u32) !Self {
+        pub fn init(pool: *NodePool, allocator: mem.Allocator, node_count: u32) !void {
             assert(node_count > 0);
 
-            const size = node_size * node_count;
-            const buffer = try allocator.alignedAlloc(u8, node_alignment, size);
-            errdefer allocator.free(buffer);
-
-            const free = try std.bit_set.DynamicBitSetUnmanaged.initFull(allocator, node_count);
-            errdefer free.deinit(allocator);
-
-            return Self{
-                .buffer = buffer,
-                .free = free,
+            pool.* = .{
+                .buffer = undefined,
+                .free = undefined,
             };
+            const size = node_size * node_count;
+            pool.buffer = try allocator.alignedAlloc(u8, node_alignment, size);
+            errdefer allocator.free(pool.buffer);
+
+            pool.free = try std.bit_set.DynamicBitSetUnmanaged.initFull(allocator, node_count);
+            errdefer pool.free.deinit(allocator);
         }
 
-        pub fn deinit(pool: *Self, allocator: mem.Allocator) void {
+        pub fn deinit(pool: *NodePool, allocator: mem.Allocator) void {
             // If the NodePool is being deinitialized, all nodes should have already been
             // released to the pool.
             assert(pool.free.count() == pool.free.bit_length);
@@ -49,7 +50,7 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             pool.free.deinit(allocator);
         }
 
-        pub fn reset(pool: *Self) void {
+        pub fn reset(pool: *NodePool) void {
             pool.free.setRangeValue(.{ .start = 0, .end = pool.free.capacity() }, true);
 
             pool.* = .{
@@ -58,10 +59,15 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             };
         }
 
-        pub fn acquire(pool: *Self) Node {
+        pub fn acquire(pool: *NodePool) Node {
             // TODO: To ensure this "unreachable" is never reached, the primary must reject
             // new requests when storage space is too low to fulfill them.
-            const node_index = pool.free.findFirstSet() orelse unreachable;
+            const node_index = pool.free.findFirstSet() orelse vsr.fatal(
+                .manifest_node_pool_exhausted,
+                "out of memory for manifest, " ++
+                    "restart the replica increasing '--memory-lsm-manifest'",
+                .{},
+            );
             assert(pool.free.isSet(node_index));
             pool.free.unset(node_index);
 
@@ -69,7 +75,7 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             return @alignCast(node);
         }
 
-        pub fn release(pool: *Self, node: Node) void {
+        pub fn release(pool: *NodePool, node: Node) void {
             // Our pointer arithmetic assumes that the unit of node_size is a u8.
             comptime assert(meta.Elem(Node) == u8);
             comptime assert(meta.Elem(@TypeOf(pool.buffer)) == u8);
@@ -85,49 +91,48 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
     };
 }
 
-fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
+fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type {
     const testing = std.testing;
-    const TestPool = NodePool(node_size, node_alignment);
+    const TestPool = NodePoolType(node_size, node_alignment);
 
     const log = false;
 
     return struct {
-        const Self = @This();
+        const TestContext = @This();
 
         node_count: u32,
         random: std.rand.Random,
+        sentinel: u64,
         node_pool: TestPool,
         node_map: std.AutoArrayHashMap(TestPool.Node, u64),
-        sentinel: u64,
 
         acquires: u64 = 0,
         releases: u64 = 0,
 
-        fn init(random: std.rand.Random, node_count: u32) !Self {
-            var node_pool = try TestPool.init(testing.allocator, node_count);
-            errdefer node_pool.deinit(testing.allocator);
-
-            var node_map = std.AutoArrayHashMap(TestPool.Node, u64).init(testing.allocator);
-            errdefer node_map.deinit();
-
-            const sentinel = random.int(u64);
-            @memset(mem.bytesAsSlice(u64, node_pool.buffer), sentinel);
-
-            return Self{
+        fn init(context: *TestContext, random: std.rand.Random, node_count: u32) !void {
+            context.* = .{
                 .node_count = node_count,
                 .random = random,
-                .node_pool = node_pool,
-                .node_map = node_map,
-                .sentinel = sentinel,
+                .sentinel = random.int(u64),
+
+                .node_pool = undefined,
+                .node_map = undefined,
             };
+
+            try context.node_pool.init(testing.allocator, node_count);
+            errdefer context.node_pool.deinit(testing.allocator);
+            @memset(mem.bytesAsSlice(u64, context.node_pool.buffer), context.sentinel);
+
+            context.node_map = std.AutoArrayHashMap(TestPool.Node, u64).init(testing.allocator);
+            errdefer context.node_map.deinit();
         }
 
-        fn deinit(context: *Self) void {
+        fn deinit(context: *TestContext) void {
             context.node_pool.deinit(testing.allocator);
             context.node_map.deinit();
         }
 
-        fn run(context: *Self) !void {
+        fn run(context: *TestContext) !void {
             {
                 var i: usize = 0;
                 while (i < context.node_count * 4) : (i += 1) {
@@ -153,7 +158,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             try context.release_all();
         }
 
-        fn acquire(context: *Self) !void {
+        fn acquire(context: *TestContext) !void {
             if (context.node_map.count() == context.node_count) return;
 
             const node = context.node_pool.acquire();
@@ -174,7 +179,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             context.acquires += 1;
         }
 
-        fn release(context: *Self) !void {
+        fn release(context: *TestContext) !void {
             if (context.node_map.count() == 0) return;
 
             const index = context.random.uintLessThanBiased(usize, context.node_map.count());
@@ -193,7 +198,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             context.releases += 1;
         }
 
-        fn release_all(context: *Self) !void {
+        fn release_all(context: *TestContext) !void {
             while (context.node_map.count() > 0) try context.release();
 
             // Verify that nothing in the entire buffer has been acquired.
@@ -233,11 +238,12 @@ test "NodePool" {
         Tuple{ .node_size = 32, .node_alignment = 16 },
         Tuple{ .node_size = 128, .node_alignment = 16 },
     }) |tuple| {
-        const Context = TestContext(tuple.node_size, tuple.node_alignment);
+        const TestContext = TestContextType(tuple.node_size, tuple.node_alignment);
 
         var i: u32 = 1;
         while (i < 64) : (i += 1) {
-            var context = try Context.init(random, i);
+            var context: TestContext = undefined;
+            try context.init(random, i);
             defer context.deinit();
 
             try context.run();

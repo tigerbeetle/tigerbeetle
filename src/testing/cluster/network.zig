@@ -230,6 +230,14 @@ pub const Network = struct {
             message.header.command,
         });
 
+        const peer_type = message.header.peer_type();
+        if (peer_type != .unknown) {
+            switch (path.source) {
+                .client => |client_id| assert(std.meta.eql(peer_type, .{ .client = client_id })),
+                .replica => |index| assert(std.meta.eql(peer_type, .{ .replica = index })),
+            }
+        }
+
         const network_message = network.message_pool.get_message(null);
         defer network.message_pool.unref(network_message);
 

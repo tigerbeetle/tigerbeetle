@@ -15,7 +15,6 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock);
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../testing/storage.zig").Storage;
 const StorageFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
@@ -122,7 +121,6 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
             .commit_max = 0,
             .sync_op_min = 0,
             .sync_op_max = 0,
-            .sync_view = 0,
             .log_view = 0,
             .view = 0,
             .replica_id = members[replica],
@@ -335,7 +333,6 @@ const Environment = struct {
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
             .sync_op_min = 0,
             .sync_op_max = 0,
-            .sync_view = 0,
             .log_view = env.superblock.staging.vsr_state.log_view + 4,
             .view = env.superblock.staging.vsr_state.view + 5,
             .replica_id = env.members[replica],
@@ -372,6 +369,7 @@ const Environment = struct {
                 .command = .do_view_change,
                 .array = vsr_headers,
             },
+            .sync_checkpoint = null,
         });
     }
 
@@ -417,7 +415,6 @@ const Environment = struct {
             .commit_max = vsr_state_old.commit_max + 1,
             .sync_op_min = 0,
             .sync_op_max = 0,
-            .sync_view = 0,
             .log_view = vsr_state_old.log_view,
             .view = vsr_state_old.view,
             .replica_id = env.members[replica],
@@ -442,6 +439,7 @@ const Environment = struct {
                 .newest_address = 0,
                 .block_count = 0,
             },
+            .view_attributes = null,
             .free_set_reference = .{
                 .last_block_checksum = 0,
                 .last_block_address = 0,
@@ -458,7 +456,6 @@ const Environment = struct {
             .commit_max = vsr_state.commit_max,
             .sync_op_min = 0,
             .sync_op_max = 0,
-            .sync_view = 0,
             .storage_size = data_file_size_min,
             .release = vsr.Release.minimum,
         });

@@ -124,6 +124,9 @@ Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code fore
   - On occasion, you may use a blatantly true assertion instead of a comment as stronger
     documentation where the assertion condition is critical and surprising.
 
+  - Split compound assertions: prefer `assert(a); assert(b);` over `assert(a and b);`.
+    The former is simpler to read, and provides more precise information if the condition fails.
+
   - **Assert the relationships of compile-time constants** as a sanity check, and also to document
     and enforce [subtle
     invariants](https://github.com/coilhq/tigerbeetle/blob/db789acfb93584e5cb9f331f9d6092ef90b53ea6/src/vsr/journal.zig#L45-L47)
@@ -333,6 +336,41 @@ Beyond these rules:
 - If you don't mean a function argument to be copied when passed by value, and if the argument type
   is more than 16 bytes, then pass the argument as `*const`. This will catch bugs where the caller
   makes an accidental copy on the stack before calling the function.
+
+- Construct larger structs _in-place_ by passing an _out pointer_ during initialization.
+
+  In-place initializations can assume **pointer stability** and **immovable types** while
+  eliminating intermediate copy-move allocations, which can lead to undesirable stack growth.
+
+  Keep in mind that in-place initializations are viral — if any field is initialized
+  in-place, the entire container struct should be initialized in-place as well.
+
+  **Prefer:**
+  ```zig
+  fn init(target: *LargeStruct) !void {
+    target.* = .{
+      // in-place initialization.
+    };
+  }
+
+  fn main() !void {
+    var target: LargeStruct = undefined;
+    try target.init();
+  }
+  ```
+
+  **Over:**
+  ```zig
+  fn init() !LargeStruct {
+    return LargeStruct {
+      // moving the initialized object.
+    }
+  }
+
+  fn main() !void {
+    var target = try LargeStruct.init();
+  }
+  ```
 
 - **Shrink the scope** to minimize the number of variables at play and reduce the probability that
   the wrong variable is used.

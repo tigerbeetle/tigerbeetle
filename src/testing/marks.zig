@@ -63,6 +63,17 @@ pub const Mark = struct {
             return error.MarkNotHit;
         }
     }
+
+    pub fn expect_not_hit(mark: Mark) !void {
+        comptime assert(builtin.is_test);
+        assert(global_state.mark_name.?.ptr == mark.name.ptr);
+        defer global_state = .{};
+
+        if (global_state.mark_hit_count != 0) {
+            std.debug.print("mark '{s}' hit", .{mark.name});
+            return error.MarkHit;
+        }
+    }
 };
 
 pub fn check(name: []const u8) Mark {

@@ -221,7 +221,7 @@ public class BlockingRequestTest {
         request.waitForResult();
     }
 
-    @Test(expected = AssertionError.class)
+    @Test(expected = IllegalStateException.class)
     public void testEndRequestTwice() {
         var client = getDummyClient();
 
@@ -237,19 +237,24 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+
+        // First completion is OK, registering the exception.
+        try {
+            request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+        } catch (Throwable any) {
+            // No exception is expected in the first call.
+            assert false;
+        }
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(1, result.getLength());
 
-        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
-
-        assertTrue(request.isDone());
-
-        request.waitForResult();
-        assert false;
+        // Can't end the request twice.
+        // NOTE: Normally this is caught by `Request.endRequest`, halting the VM immediately.
+        // But we can't test that in a good way, so we use `setException` here and catch the
+        // IllegalStateException.
+        request.setException(new RequestException(PacketStatus.TooMuchData.value));
     }
 
     @Test
@@ -265,9 +270,9 @@ public class BlockingRequestTest {
         var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putInt(0);
-        dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.ordinal());
+        dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(1);
-        dummyReplyBuffer.putInt(CreateAccountResult.Exists.ordinal());
+        dummyReplyBuffer.putInt(CreateAccountResult.Exists.value);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
         request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
@@ -298,9 +303,9 @@ public class BlockingRequestTest {
         var dummyReplyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putInt(0);
-        dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.ordinal());
+        dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(1);
-        dummyReplyBuffer.putInt(CreateTransferResult.Exists.ordinal());
+        dummyReplyBuffer.putInt(CreateTransferResult.Exists.value);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value);
@@ -437,7 +442,7 @@ public class BlockingRequestTest {
     }
 
     private static NativeClient getDummyClient() {
-        return NativeClient.initEcho(UInt128.asBytes(0), "3000", 1);
+        return NativeClient.initEcho(UInt128.asBytes(0), "3000");
     }
 
     private class CallbackSimulator<T extends Batch> extends Thread {

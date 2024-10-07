@@ -28,6 +28,16 @@ public interface AccountFlags {
      */
     int HISTORY = (int) (1 << 3);
 
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/account#flagsimported">imported</a>
+     */
+    int IMPORTED = (int) (1 << 4);
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/account#flagsclosed">closed</a>
+     */
+    int CLOSED = (int) (1 << 5);
+
     static boolean hasLinked(final int flags) {
         return (flags & LINKED) == LINKED;
     }
@@ -42,6 +52,14 @@ public interface AccountFlags {
 
     static boolean hasHistory(final int flags) {
         return (flags & HISTORY) == HISTORY;
+    }
+
+    static boolean hasImported(final int flags) {
+        return (flags & IMPORTED) == IMPORTED;
+    }
+
+    static boolean hasClosed(final int flags) {
+        return (flags & CLOSED) == CLOSED;
     }
 
 }

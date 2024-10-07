@@ -88,7 +88,7 @@ pub const IO = struct {
                 timeout_ms = if (expires == os.windows.INFINITE) expires - 1 else expires;
             }
 
-            // Poll for IO iff theres IO pending and flush_timeouts() found no ready completions
+            // Poll for IO iff there's IO pending and flush_timeouts() found no ready completions
             if (self.io_pending > 0 and self.completed.empty()) {
                 // In blocking mode, we're always waiting at least until the timeout by run_for_ns.
                 // In non-blocking mode, we shouldn't wait at all.
@@ -764,6 +764,8 @@ pub const IO = struct {
             },
         );
     }
+
+    pub const OpenatError = std.posix.OpenError || std.posix.UnexpectedError;
 
     pub const ReadError = error{
         WouldBlock,

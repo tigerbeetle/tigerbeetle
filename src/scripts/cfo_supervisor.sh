@@ -14,7 +14,7 @@ do
     (
         git clone https://github.com/tigerbeetle/tigerbeetle tigerbeetle
         cd tigerbeetle
-        ./scripts/install_zig.sh
+        ./zig/download.sh
         # `unshare --pid` ensures that, if the parent process dies, all children die as well.
         # `unshare --user` is needed to make `--pid` work without root.
         unshare --user -f --pid ./zig/zig build -Drelease scripts -- cfo

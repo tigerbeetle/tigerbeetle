@@ -10,9 +10,9 @@ production deployments, TigerBeetle also works on Windows and MacOS.
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle.git
 cd tigerbeetle
-./scripts/install_zig.sh # There's a .bat version for Windows.
+./zig/download.sh # .bat if you're on Windows.
 ./zig/zig build -Drelease
-./tigerbeetle --version
+./tigerbeetle version
 ```
 
 See the [Quick Start](./quick-start.md) for how to use a freshly-built TigerBeetle.
@@ -44,13 +44,13 @@ See [/src/fuzz_tests.zig](/src/fuzz_tests.zig) for the menu of available fuzzers
 To run TigerBeetle's long-running simulation, called *The VOPR*:
 
 ```console
-zig/zig build simulator_run
+zig/zig build vopr
 ```
 
 To run the VOPR using a specific seed:
 
 ```console
-zig/zig build simulator_run -- 123
+zig/zig build vopr -- 123
 ```
 
 *The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames,
@@ -88,7 +88,7 @@ cd src/clients/lang
 lang_package_manager test
 ```
 
-See `client/$LANG/ci.zig` scripts for exact commands we use on CI to build clients.
+See `src/clients/$LANG/ci.zig` scripts for exact commands we use on CI to build clients.
 
 ### Testing Client Libraries
 

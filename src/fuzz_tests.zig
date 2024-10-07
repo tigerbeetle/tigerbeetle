@@ -27,7 +27,6 @@ const Fuzzers = .{
     .lsm_cache_map = @import("./lsm/cache_map_fuzz.zig"),
     .lsm_forest = @import("./lsm/forest_fuzz.zig"),
     .lsm_manifest_log = @import("./lsm/manifest_log_fuzz.zig"),
-    // TODO: This one currently doesn't compile.
     .lsm_manifest_level = @import("./lsm/manifest_level_fuzz.zig"),
     .lsm_segmented_array = @import("./lsm/segmented_array_fuzz.zig"),
     .lsm_tree = @import("./lsm/tree_fuzz.zig"),
@@ -44,7 +43,7 @@ const Fuzzers = .{
 
 const FuzzersEnum = std.meta.FieldEnum(@TypeOf(Fuzzers));
 
-const CliArgs = struct {
+const CLIArgs = struct {
     events_max: ?usize = null,
     positional: struct {
         fuzzer: FuzzersEnum,
@@ -56,7 +55,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(fuzz.allocator);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CliArgs);
+    const cli_args = flags.parse(&args, CLIArgs);
 
     switch (cli_args.positional.fuzzer) {
         .smoke => {
@@ -105,7 +104,7 @@ fn main_smoke() !void {
     log.info("done in {}", .{std.fmt.fmtDuration(timer_all.lap())});
 }
 
-fn main_single(cli_args: CliArgs) !void {
+fn main_single(cli_args: CLIArgs) !void {
     assert(cli_args.positional.fuzzer != .smoke);
 
     const seed = cli_args.positional.seed orelse std.crypto.random.int(u64);

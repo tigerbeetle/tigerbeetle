@@ -21,8 +21,8 @@ Want to build from source locally?
 
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
-./scripts/install_zig.sh # or .bat if you're on Windows.
-zig/zig build
+./zig/download.sh # or .bat if you're on Windows.
+./zig/zig build
 ./tigerbeetle version
 ```
 
@@ -120,8 +120,9 @@ and account `2` has `credits_posted` as `10`. The `10` amount is fully
 accounted for!
 
 For further reading:
-* [Run a single-node cluster](https://docs.tigerbeetle.com/getting-started/single-binary)
-* [Run a three-node cluster](https://docs.tigerbeetle.com/getting-started/single-binary-three)
+* [Run a single-node cluster](https://docs.tigerbeetle.com/quick-start)
+* [Run a three-node cluster](https://docs.tigerbeetle.com/quick-start/#optional-run-a-multi-node-cluster)
+* [Run on docker](https://docs.tigerbeetle.com/operating/docker)
 
 ## Next Steps
 
@@ -151,7 +152,7 @@ Here are a few key pages you might be interested in:
 - Deployment
   - [Hardware](https://docs.tigerbeetle.com/deploy/hardware/)
 - Usage
-  - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
+  - [Integration](https://docs.tigerbeetle.com/coding/system-architecture)
 - Reference
   - [Account](https://docs.tigerbeetle.com/reference/account)
   - [Transfer](https://docs.tigerbeetle.com/reference/transfer)
@@ -167,7 +168,7 @@ Here are a few key pages you might be interested in:
 ## Community
 
 * [Projects using TigerBeetle developed by community members.](./docs/COMMUNITY_PROJECTS.md)
-* [Join the TigerBeetle chat on Slack.](https://slack.tigerbeetle.com/invite)
+* [Join the TigerBeetle chat on Slack.](https://join.slack.com/t/tigerbeetle/shared_invite/zt-21xk62q7l-p~~G7~H01zQb88rQn7tWfQ)
 * [Follow us on Twitter](https://twitter.com/TigerBeetleDB), [YouTube](https://www.youtube.com/@tigerbeetledb), and [Twitch](https://www.twitch.tv/tigerbeetle).
 * [Subscribe to our monthly newsletter for the backstory on recent database changes.](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
 * [Check out past and upcoming talks.](/docs/TALKS.md)

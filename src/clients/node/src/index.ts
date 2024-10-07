@@ -73,9 +73,10 @@ export type Event = Account | Transfer | AccountID | TransferID | AccountFilter 
 export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer | AccountBalance
 export type ResultCallback = (error: Error | null, results: Result[] | null) => void
 
+export const amount_max: bigint = (2n ** 128n) - 1n
+
 interface BindingInitArgs {
   cluster_id: bigint, // u128
-  concurrency: number, // u32
   replica_addresses: Buffer,
 }
 
@@ -87,7 +88,6 @@ interface Binding {
 
 export interface ClientInitArgs {
   cluster_id: bigint, // u128
-  concurrency_max?: number, // u32
   replica_addresses: Array<string | number>,
 }
 
@@ -104,16 +104,22 @@ export interface Client {
 }
 
 export function createClient (args: ClientInitArgs): Client {
-  const concurrency_max_default = 256 // arbitrary
-  const context = binding.init({
+  // Context becomes null when `destroy` is called. After that point, further `request` Promises
+  // throw a shutdown Error. This prevents tb_client calls from happening after tb_client_deinit().
+  let context: Context | null = binding.init({
     cluster_id: args.cluster_id,
-    concurrency: args.concurrency_max || concurrency_max_default,
     replica_addresses: Buffer.from(args.replica_addresses.join(',')),
   })
+
+  const destroy = () => {
+    if (context) binding.deinit(context)
+    context = null;
+  }
 
   const request = <T extends Result>(operation: Operation, batch: Event[]): Promise<T[]> => {
     return new Promise((resolve, reject) => {
       try {
+        if (!context) throw new Error('Client was shutdown.');
         binding.submit(context, operation, batch, (error, result) => {
           if (error) {
             reject(error)
@@ -138,7 +144,7 @@ export function createClient (args: ClientInitArgs): Client {
     getAccountBalances(filter) { return request(Operation.get_account_balances, [filter]) },
     queryAccounts(filter) { return request(Operation.query_accounts, [filter]) },
     queryTransfers(filter) { return request(Operation.query_transfers, [filter]) },
-    destroy() { binding.deinit(context) },
+    destroy,
   }
 }
 

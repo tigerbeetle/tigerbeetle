@@ -9,6 +9,7 @@ import {
   AccountFilter,
   AccountFilterFlags,
   AccountFlags,
+  amount_max,
   id,
   QueryFilter,
   QueryFilterFlags,
@@ -20,8 +21,6 @@ const client = createClient({
 })
 
 // Test data
-const Zeroed32Bytes = Buffer.alloc(32, 0)
-const Zeroed48Bytes = Buffer.alloc(48, 0)
 const accountA: Account = {
   id: 17n,
   debits_pending: 0n,
@@ -230,7 +229,7 @@ test('can post a two-phase transfer', async (): Promise<void> => {
     id: 3n,
     debit_account_id: BigInt(0),
     credit_account_id: BigInt(0),
-    amount: 0n,
+    amount: amount_max,
     user_data_128: 0n,
     user_data_64: 0n,
     user_data_32: 0,
@@ -437,6 +436,61 @@ test('cannot void an expired transfer', async (): Promise<void> => {
   assert.deepStrictEqual(errors[0], { index: 0, result: CreateTransferError.pending_transfer_expired })
 })
 
+test('can close accounts', async (): Promise<void> => {
+  const closing_transfer: Transfer = {
+    id: id(),
+    debit_account_id: accountB.id,
+    credit_account_id: accountA.id,
+    amount: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: TransferFlags.closing_debit | TransferFlags.closing_credit | TransferFlags.pending,
+    timestamp: 0n, // will be set correctly by the TigerBeetle server
+  }
+  let errors = await client.createTransfers([closing_transfer])
+  assert.strictEqual(errors.length, 0)
+
+  let accounts = await client.lookupAccounts([accountA.id, accountB.id])
+  assert.strictEqual(accounts.length, 2)
+  assert.ok(accountA.flags != accounts[0].flags)
+  assert.ok((accounts[0].flags & AccountFlags.closed) != 0)
+
+  assert.ok(accountB.flags != accounts[1].flags)
+  assert.ok((accounts[1].flags & AccountFlags.closed) != 0)
+
+  const voiding_transfer: Transfer = {
+    id: id(),
+    debit_account_id: accountB.id,
+    credit_account_id: accountA.id,
+    amount: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: TransferFlags.void_pending_transfer,
+    pending_id: closing_transfer.id,
+    timestamp: 0n, // will be set correctly by the TigerBeetle server
+  }
+
+  errors = await client.createTransfers([voiding_transfer])
+  assert.strictEqual(errors.length, 0)
+
+  accounts = await client.lookupAccounts([accountA.id, accountB.id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accountA.flags, accounts[0].flags)
+  assert.ok((accounts[0].flags & AccountFlags.closed) == 0)
+
+  assert.strictEqual(accountB.flags, accounts[1].flags)
+  assert.ok((accounts[1].flags & AccountFlags.closed) == 0)
+})
+
 test('can get account transfers', async (): Promise<void> => {
   const accountC: Account = {
     id: 21n,
@@ -482,6 +536,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query all transfers for accountC:
   var filter: AccountFilter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -505,6 +563,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query only the debit transfers for accountC, descending:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -529,6 +591,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query only the credit transfers for accountC, descending:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -553,6 +619,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the first 5 transfers for accountC:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: transfers_created.length / 2,
@@ -577,6 +647,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the next 5 transfers for accountC, with pagination:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: timestamp + 1n,
     timestamp_max: 0n,
     limit: transfers_created.length / 2,
@@ -600,6 +674,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query again, no more transfers should be found:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: timestamp + 1n,
     timestamp_max: 0n,
     limit: transfers_created.length / 2,
@@ -614,6 +692,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the first 5 transfers for accountC ORDER BY DESC:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: transfers_created.length / 2,
@@ -638,6 +720,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the next 5 transfers for accountC, with pagination:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: timestamp - 1n,
     limit: transfers_created.length / 2,
@@ -661,6 +747,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Query again, no more transfers should be found:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: timestamp - 1n,
     limit: transfers_created.length / 2,
@@ -675,6 +765,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid account:
   filter = {
     account_id: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -686,6 +780,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid timestamp min:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: (1n << 64n) - 1n, // ulong max value
     timestamp_max: 0n,
     limit: 8190,
@@ -697,6 +795,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid timestamp max:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: (1n << 64n) - 1n, // ulong max value
     limit: 8190,
@@ -708,6 +810,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid timestamp range:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: (1n << 64n) - 2n, // ulong max - 1
     timestamp_max: 1n,
     limit: 8190,
@@ -719,6 +825,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Zero limit:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 0,
@@ -730,6 +840,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Empty flags:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -741,6 +855,10 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid flags:
   filter = {
     account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: 8190,
@@ -1198,6 +1316,96 @@ test('query with invalid filter', async (): Promise<void> => {
   }
   assert.deepStrictEqual((await client.queryAccounts(filter)), [])
   assert.deepStrictEqual((await client.queryTransfers(filter)), [])
+})
+
+
+test('can import accounts and transfers', async (): Promise<void> => {
+  const accountTmp: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 718,
+    flags: 0,
+    timestamp: 0n // this will be set correctly by the TigerBeetle server
+  }
+  let accountsErrors = await client.createAccounts([accountTmp])
+  assert.deepStrictEqual(accountsErrors, [])
+
+  let accountLookup = await client.lookupAccounts([accountTmp.id])
+  assert.strictEqual(accountLookup.length, 1)
+  const timestampMax = accountLookup[0].timestamp
+
+  // Wait 10 ms so we can use the account's timestamp as the reference for past time
+  // after the last object inserted.
+  await new Promise(_ => setTimeout(_, 10));
+
+  const accountA: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 718,
+    flags: AccountFlags.imported,
+    timestamp: timestampMax + 1n // user-defined timestamp
+  }
+  const accountB: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 718,
+    flags: AccountFlags.imported,
+    timestamp: timestampMax + 2n // user-defined timestamp
+  }
+  accountsErrors = await client.createAccounts([accountA, accountB])
+  assert.deepStrictEqual(accountsErrors, [])
+
+  accountLookup = await client.lookupAccounts([accountA.id, accountB.id])
+  assert.strictEqual(accountLookup.length, 2)
+  assert.strictEqual(accountLookup[0].timestamp, accountA.timestamp)
+  assert.strictEqual(accountLookup[1].timestamp, accountB.timestamp)
+
+  const transfer: Transfer = {
+    id: id(),
+    debit_account_id: accountA.id,
+    credit_account_id: accountB.id,
+    amount: 100n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: TransferFlags.imported,
+    timestamp: timestampMax + 3n, // user-defined timestamp.
+  }
+
+  const errors = await client.createTransfers([transfer])
+  assert.deepStrictEqual(errors, [])
+
+  const transfers = await client.lookupTransfers([transfer.id])
+  assert.strictEqual(transfers.length, 1)
+  assert.strictEqual(transfers[0].timestamp, timestampMax + 3n)
 })
 
 async function main () {
