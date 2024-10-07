@@ -7488,6 +7488,11 @@ pub fn ReplicaType(
                     maybe(nacks.isSet(i));
                     present.set(i);
                 }
+
+                if (vsr.Headers.dvc_header_type(header) == .blank) {
+                    assert(!present.isSet(i));
+                    if (nacks.isSet(i)) assert(!faulty);
+                }
             }
 
             const message = self.message_bus.get_message(.do_view_change);
