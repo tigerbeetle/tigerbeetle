@@ -197,6 +197,12 @@ fn readme_root(ctx: *Context) !void {
             \\reference](https://docs.tigerbeetle.com/reference/account).
         );
         ctx.code_section("create-accounts");
+
+        ctx.paragraph(
+            \\See details for the recommended ID scheme in
+            \\[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
+        );
+
         ctx.paragraph(ctx.docs.create_accounts_documentation);
 
         ctx.header(3, "Account Flags");
@@ -255,6 +261,11 @@ fn readme_root(ctx: *Context) !void {
             \\reference](https://docs.tigerbeetle.com/reference/transfer).
         );
         ctx.code_section("create-transfers");
+
+        ctx.paragraph(
+            \\See details for the recommended ID scheme in
+            \\[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
+        );
 
         ctx.header(3, "Response and Errors");
         ctx.paragraph(
@@ -574,7 +585,7 @@ const Context = struct {
                 while (line[indent_line] == ' ' or line[indent_line] == '\t') indent_line += 1;
                 indent_min = @min(indent_min, indent_line);
             }
-            assert(indent_min < 16);
+            assert(indent_min < 18);
 
             lines = std.mem.split(u8, section, "\n");
             while (lines.next()) |line| {
