@@ -530,7 +530,7 @@ fn upload_results(
         const json = try SeedRecord.to_json(arena.allocator(), seeds_merged);
         try shell.cwd.writeFile(.{ .sub_path = "./fuzzing/data.json", .data = json });
         try shell.exec("git add ./fuzzing/data.json", .{});
-        try shell.git_env_setup();
+        try shell.git_env_setup(.{ .use_hostname = true });
         try shell.exec("git commit -m 🌱", .{});
         if (shell.exec("git push", .{})) {
             log.info("seeds updated", .{});

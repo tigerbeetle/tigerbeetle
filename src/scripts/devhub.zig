@@ -200,7 +200,7 @@ fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
         }
 
         try shell.exec("git add ./devhub/data.json", .{});
-        try shell.git_env_setup();
+        try shell.git_env_setup(.{ .use_hostname = false });
         try shell.exec("git commit -m 📈", .{});
         if (shell.exec("git push", .{})) {
             log.info("metrics uploaded", .{});

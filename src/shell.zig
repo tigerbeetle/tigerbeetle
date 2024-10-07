@@ -609,10 +609,22 @@ pub fn spawn(
 /// On GitHub Actions runners, `git commit` fails with an "Author identity unknown" error.
 ///
 /// This function sets up appropriate environmental variables to correct that error.
-pub fn git_env_setup(shell: *Shell) !void {
-    try shell.env.put("GIT_AUTHOR_NAME", "TigerBeetle Bot");
+pub fn git_env_setup(shell: *Shell, options: struct { use_hostname: bool }) !void {
+    if (options.use_hostname) {
+        if (builtin.target.os.tag != .linux) {
+            @panic("use_hostname only supported on linux");
+        }
+        var hostname_buffer = std.mem.zeroes([std.posix.HOST_NAME_MAX]u8);
+        const hostname = try std.posix.gethostname(&hostname_buffer);
+
+        try shell.env.put("GIT_AUTHOR_NAME", hostname);
+        try shell.env.put("GIT_COMMITTER_NAME", hostname);
+    } else {
+        try shell.env.put("GIT_AUTHOR_NAME", "TigerBeetle Bot");
+        try shell.env.put("GIT_COMMITTER_NAME", "TigerBeetle Bot");
+    }
+
     try shell.env.put("GIT_AUTHOR_EMAIL", "bot@tigerbeetle.com");
-    try shell.env.put("GIT_COMMITTER_NAME", "TigerBeetle Bot");
     try shell.env.put("GIT_COMMITTER_EMAIL", "bot@tigerbeetle.com");
 }
 
