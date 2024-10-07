@@ -15,6 +15,8 @@ const type_mappings = .{
     .{ tb.AccountFilter, "tb_account_filter_t" },
     .{ tb.AccountFilterFlags, "TB_ACCOUNT_FILTER_FLAGS" },
     .{ tb.AccountBalance, "tb_account_balance_t" },
+    .{ tb.QueryFilter, "tb_query_filter_t" },
+    .{ tb.QueryFilterFlags, "TB_QUERY_FILTER_FLAGS" },
 
     .{ tb_client.tb_operation_t, "TB_OPERATION" },
     .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
