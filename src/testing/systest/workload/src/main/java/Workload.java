@@ -101,11 +101,13 @@ public class Workload implements Callable<Void> {
         for (int i = 0; i < newAccountsCount; i++) {
           var id = random.nextLong(0, Long.MAX_VALUE);
           var code = random.nextInt(1, 100);
-          var flags = Arbitrary.element(random,
-              List.of(AccountFlags.NONE, AccountFlags.LINKED,
+          var flags = Arbitrary.flags(random,
+              List.of(AccountFlags.LINKED,
                   AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS,
-                  AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS, AccountFlags.HISTORY,
-                  AccountFlags.IMPORTED, AccountFlags.CLOSED));
+                  AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS, 
+                  AccountFlags.HISTORY,
+                  AccountFlags.IMPORTED, 
+                  AccountFlags.CLOSED));
           newAccounts.add(new NewAccount(id, ledger, code, flags));
         }
 
@@ -133,11 +135,17 @@ public class Workload implements Callable<Void> {
         var id = random.nextLong(0, Long.MAX_VALUE);
         var code = random.nextInt(1, 100);
         var amount = BigInteger.valueOf(random.nextLong(0, Long.MAX_VALUE));
-        var flags = Arbitrary.element(random,
-            List.of(TransferFlags.NONE, TransferFlags.LINKED, TransferFlags.PENDING,
-                TransferFlags.POST_PENDING_TRANSFER, TransferFlags.VOID_PENDING_TRANSFER,
-                TransferFlags.BALANCING_DEBIT, TransferFlags.BALANCING_CREDIT,
-                TransferFlags.CLOSING_DEBIT, TransferFlags.CLOSING_CREDIT));
+        var flags = Arbitrary.flags(random,
+            List.of(
+              TransferFlags.LINKED, 
+              TransferFlags.PENDING,
+              TransferFlags.POST_PENDING_TRANSFER, 
+              TransferFlags.VOID_PENDING_TRANSFER,
+              TransferFlags.BALANCING_DEBIT, 
+              TransferFlags.BALANCING_CREDIT,
+              TransferFlags.CLOSING_DEBIT, 
+              TransferFlags.CLOSING_CREDIT,
+              TransferFlags.IMPORTED));
 
         int debitAccountIndex = random.nextInt(0, accounts.size());
         int creditAccountIndex = random.ints(0, accounts.size())

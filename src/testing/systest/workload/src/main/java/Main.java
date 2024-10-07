@@ -66,7 +66,9 @@ public final class Main {
         var requestsFailed = statistics.failed();
         var requestsTotal = requestsSuccessful + requestsFailed;
         var requestsPerSecond = statistics.requestsPerSecond();
-        var requestSuccessRate = (double) requestsSuccessful / requestsTotal;
+        var requestSuccessRate = requestsTotal > 0 
+          ? ((double) requestsSuccessful / requestsTotal) 
+          : 0.0;
 
         System.err.println(
             "%d requests in total, %s successful, throughput of %d req/s".formatted(
