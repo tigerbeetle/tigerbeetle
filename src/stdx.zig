@@ -235,6 +235,18 @@ const TimeIt = struct {
     }
 };
 
+/// Utility for print-if debugging, a-la Rust's dbg! macro.
+///
+/// dbg prints the value with the prefix, while also returning the value, which makes it convenient
+/// to drop it in the middle of a complex expression.
+pub fn dbg(prefix: []const u8, value: anytype) @TypeOf(value) {
+    std.debug.print("{s} = {any}\n", .{
+        prefix,
+        std.json.fmt(value, .{ .whitespace = .indent_2 }),
+    });
+    return value;
+}
+
 pub const log = if (builtin.is_test)
     // Downgrade `err` to `warn` for tests.
     // Zig fails any test that does `log.err`, but we want to test those code paths here.
