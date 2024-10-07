@@ -939,6 +939,66 @@ public class IntegrationTest {
         }
     }
 
+    @Test
+    public void testZeroLengthCreateAccounts() throws Throwable {
+        final var accounts = new AccountBatch(1); // Capacity 1 but zero items.
+        final var createAccountErrors = client.createAccounts(accounts);
+        assertTrue(createAccountErrors.getLength() == 0);
+    }
+
+    @Test
+    public void testZeroLengthCreateAccountsAsync() throws Throwable {
+        final var accounts = new AccountBatch(1); // Capacity 1 but zero items.
+        final var createAccountErrorsFuture = client.createAccountsAsync(accounts);
+        final var createAccountErrors = createAccountErrorsFuture.get();
+        assertTrue(createAccountErrors.getLength() == 0);
+    }
+
+    @Test
+    public void testZeroLengthCreateTransfers() throws Throwable {
+        final var transfers = new TransferBatch(0);
+        final var createTransfersErrors = client.createTransfers(transfers);
+        assertTrue(createTransfersErrors.getLength() == 0);
+    }
+
+    @Test
+    public void testZeroLengthCreateTransfersAsync() throws Throwable {
+        final var transfers = new TransferBatch(0);
+        final var createTransfersErrorsFuture = client.createTransfersAsync(transfers);
+        final var createTransfersErrors = createTransfersErrorsFuture.get();
+        assertTrue(createTransfersErrors.getLength() == 0);
+    }
+
+    @Test
+    public void testZeroLengthLookupAccounts() throws Throwable {
+        final var ids = new IdBatch(0);
+        final var accounts = client.lookupAccounts(ids);
+        assertTrue(accounts.getLength() == 0);
+    }
+
+    @Test
+    public void testZeroLengthLookupAccountsAsync() throws Throwable {
+        final var ids = new IdBatch(0);
+        final var accountsFuture = client.lookupAccountsAsync(ids);
+        final var accounts = accountsFuture.get();
+        assertTrue(accounts.getLength() == 0);
+    }
+
+    @Test
+    public void testZeroLengthLookupTransfers() throws Throwable {
+        final var ids = new IdBatch(0);
+        final var transfers = client.lookupTransfers(ids);
+        assertTrue(transfers.getLength() == 0);
+    }
+
+    @Test
+    public void testZeroLengthLookupTransfersAsync() throws Throwable {
+        final var ids = new IdBatch(0);
+        final var transfersFuture = client.lookupTransfersAsync(ids);
+        final var transfers = transfersFuture.get();
+        assertTrue(transfers.getLength() == 0);
+    }
+
     /**
      * This test asserts that the client can handle parallel threads up to concurrencyMax.
      */

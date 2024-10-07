@@ -37,7 +37,6 @@ public sealed class Client : IDisposable
 
     public CreateAccountsResult[] CreateAccounts(ReadOnlySpan<Account> batch)
     {
-        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequest<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
     }
 
@@ -49,7 +48,6 @@ public sealed class Client : IDisposable
 
     public Task<CreateAccountsResult[]> CreateAccountsAsync(ReadOnlyMemory<Account> batch)
     {
-        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequestAsync<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
     }
 
@@ -61,7 +59,6 @@ public sealed class Client : IDisposable
 
     public CreateTransfersResult[] CreateTransfers(ReadOnlySpan<Transfer> batch)
     {
-        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequest<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
@@ -73,7 +70,6 @@ public sealed class Client : IDisposable
 
     public Task<CreateTransfersResult[]> CreateTransfersAsync(ReadOnlyMemory<Transfer> batch)
     {
-        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
@@ -85,7 +81,6 @@ public sealed class Client : IDisposable
 
     public Account[] LookupAccounts(ReadOnlySpan<UInt128> batch)
     {
-        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequest<Account, UInt128>(TBOperation.LookupAccounts, batch);
     }
 
@@ -97,7 +92,6 @@ public sealed class Client : IDisposable
 
     public Task<Account[]> LookupAccountsAsync(ReadOnlyMemory<UInt128> batch)
     {
-        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequestAsync<Account, UInt128>(TBOperation.LookupAccounts, batch);
     }
 
@@ -109,7 +103,6 @@ public sealed class Client : IDisposable
 
     public Transfer[] LookupTransfers(ReadOnlySpan<UInt128> batch)
     {
-        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequest<Transfer, UInt128>(TBOperation.LookupTransfers, batch);
     }
 
@@ -121,7 +114,6 @@ public sealed class Client : IDisposable
 
     public Task<Transfer[]> LookupTransfersAsync(ReadOnlyMemory<UInt128> batch)
     {
-        if (batch.Length == 0) throw new ArgumentException("The batch cannot be empty", nameof(batch));
         return nativeClient.CallRequestAsync<Transfer, UInt128>(TBOperation.LookupTransfers, batch);
     }
 

@@ -211,11 +211,7 @@ fn request(
         std.log.warn("Failed to delete reference to callback on error.", .{});
     };
 
-    const array_length = try translate.array_length(env, array);
-    if (array_length < 1) {
-        return translate.throw(env, "Batch must contain at least one event.");
-    }
-
+    const array_length: u32 = try translate.array_length(env, array);
     const packet, const packet_data = switch (operation) {
         inline else => |op| blk: {
             const buffer = try BufferType(op).alloc(

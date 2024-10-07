@@ -1318,7 +1318,6 @@ test('query with invalid filter', async (): Promise<void> => {
   assert.deepStrictEqual((await client.queryTransfers(filter)), [])
 })
 
-
 test('can import accounts and transfers', async (): Promise<void> => {
   const accountTmp: Account = {
     id: id(),
@@ -1406,6 +1405,26 @@ test('can import accounts and transfers', async (): Promise<void> => {
   const transfers = await client.lookupTransfers([transfer.id])
   assert.strictEqual(transfers.length, 1)
   assert.strictEqual(transfers[0].timestamp, timestampMax + 3n)
+})
+
+test('accept zero-length create_accounts', async (): Promise<void> => {
+  const errors = await client.createAccounts([])
+  assert.deepStrictEqual(errors, [])
+})
+
+test('accept zero-length create_transfers', async (): Promise<void> => {
+  const errors = await client.createTransfers([])
+  assert.deepStrictEqual(errors, [])
+})
+
+test('accept zero-length lookup_accounts', async (): Promise<void> => {
+  const accounts = await client.lookupAccounts([])
+  assert.deepStrictEqual(accounts, [])
+})
+
+test('accept zero-length lookup_transfers', async (): Promise<void> => {
+  const transfers = await client.lookupTransfers([])
+  assert.deepStrictEqual(transfers, [])
 })
 
 async function main () {

@@ -74,22 +74,16 @@ public class AsyncRequestTest {
         assert false;
     }
 
-    @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroCapacityBatch() {
         var client = getDummyClient();
         var batch = new AccountBatch(0);
-
         AsyncRequest.createAccounts(client, batch);
-        assert false;
     }
 
-    @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroItemsBatch() {
         var client = getDummyClient();
         var batch = new AccountBatch(1);
-
         AsyncRequest.createAccounts(client, batch);
-        assert false;
     }
 
     @Test(expected = AssertionError.class)

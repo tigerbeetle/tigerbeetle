@@ -308,8 +308,16 @@ pub fn ContextType(
             };
 
             // Make sure the packet.data size is correct:
-            const events = @as([*]const u8, @ptrCast(packet.data))[0..packet.data_size];
-            if (events.len == 0 or events.len % event_size != 0) {
+            const events: []const u8 = if (packet.data_size > 0) events: {
+                const data: [*]const u8 = @ptrCast(packet.data.?);
+                break :events data[0..packet.data_size];
+            } else empty: {
+                // It may be an empty array (null pointer)
+                // or a buffer with no elements (valid pointer and size == 0).
+                stdx.maybe(packet.data == null);
+                break :empty &[0]u8{};
+            };
+            if (events.len % event_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
 
@@ -395,7 +403,14 @@ pub fn ContextType(
             while (it) |batched| {
                 it = batched.batch_next;
 
-                const event_data = @as([*]const u8, @ptrCast(batched.data.?))[0..batched.data_size];
+                const event_data: []const u8 = if (batched.data_size > 0)
+                    @as([*]const u8, @ptrCast(batched.data.?))[0..batched.data_size]
+                else empty: {
+                    // It may be an empty array (null pointer)
+                    // or a buffer with no elements (valid pointer and size == 0).
+                    stdx.maybe(batched.data == null);
+                    break :empty &[0]u8{};
+                };
                 stdx.copy_disjoint(.inexact, u8, message.body()[offset..], event_data);
                 offset += @intCast(event_data.len);
             }

@@ -347,6 +347,46 @@ func doTestClient(t *testing.T, client Client) {
 		assert.True(t, !accounts[1].AccountFlags().Closed)
 	})
 
+	t.Run("accept zero-length create_accounts", func(t *testing.T) {
+		t.Parallel()
+		results, err := client.CreateAccounts([]types.Account{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		assert.Empty(t, results)
+	})
+
+	t.Run("accept zero-length create_transfers", func(t *testing.T) {
+		t.Parallel()
+		results, err := client.CreateTransfers([]types.Transfer{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		assert.Empty(t, results)
+	})
+
+	t.Run("accept zero-length lookup_accounts", func(t *testing.T) {
+		t.Parallel()
+		results, err := client.LookupAccounts([]types.Uint128{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		assert.Empty(t, results)
+	})
+
+	t.Run("accept zero-length lookup_transfers", func(t *testing.T) {
+		t.Parallel()
+		results, err := client.LookupTransfers([]types.Uint128{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		assert.Empty(t, results)
+	})
+
 	t.Run("can create concurrent transfers", func(t *testing.T) {
 		accountA, accountB := createTwoAccounts(t)
 
