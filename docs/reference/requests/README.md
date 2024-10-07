@@ -23,6 +23,8 @@ event in the request.
   `credit_account_id`
 - [`get_account_balances`](./get_account_balances.md): fetch the historical account balance by the
   `Account`'s `id`.
+- [`query_accounts`](./query_accounts.md): query `Account`s
+- [`query_transfers`](./query_transfers.md): query `Transfer`s
 
 _More request types, including more powerful queries, are coming soon!_
 
@@ -36,8 +38,10 @@ Each request has a corresponding _event_ and _result_ type:
 | `create_transfers`      | [`Transfer`](./create_transfers.md#Event)           | [`CreateTransferResult`](./create_transfers.md#Result)          |
 | `lookup_accounts`       | [`Account.id`](./lookup_accounts.md#Event)          | [`Account`](./lookup_accounts.md#Result) or nothing             |
 | `lookup_transfers`      | [`Transfer.id`](./lookup_transfers.md#Event)        | [`Transfer`](./lookup_transfers.md#Result) or nothing           |
-| `get_account_transfers` | [`AccountFilter`](./get_account_transfers.md#Event) | [`Transfer`](./get_account_transfers.md#Result) or nothing      |
-| `get_account_balances`  | [`AccountFilter`](./get_account_balances.md#Event)  | [`AccountBalance`](./get_account_balances.md#Result) or nothing |
+| `get_account_transfers` | [`AccountFilter`](../account-filter.md)             | [`Transfer`](./get_account_transfers.md#Result) or nothing      |
+| `get_account_balances`  | [`AccountFilter`](../account-filter.md)             | [`AccountBalance`](./get_account_balances.md#Result) or nothing |
+| `query_accounts`        | [`QueryFilter`](../query-filter.md)                 | [`Account`](./lookup_accounts.md#Result) or nothing             |
+| `query_transfers`       | [`QueryFilter`](../query-filter.md)                 | [`Transfer`](./lookup_transfers.md#Result) or nothing           |
 
 ### Idempotency
 
@@ -60,6 +64,8 @@ In the default configuration, the maximum batch sizes for each request type are:
 | `create_transfers`      |                        8190 |                       8190 |
 | `get_account_transfers` |                           1 |                       8190 |
 | `get_account_balances`  |                           1 |                       8190 |
+| `query_accounts`        |                           1 |                       8190 |
+| `query_transfers`       |                           1 |                       8190 |
 
 TigerBeetle clients automatically batch events. Therefore, it is recommended to share the client
 instances between multiple threads or tasks to have events batched transparently.
