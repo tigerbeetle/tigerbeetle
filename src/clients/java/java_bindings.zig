@@ -106,8 +106,7 @@ const type_mappings = .{
             .readonly_fields = &.{},
             .docs_link = "reference/transfer#",
             .constants =
-            \\    public static final BigInteger AMOUNT_MAX =
-            \\        UInt128.asBigInteger(Long.MIN_VALUE, Long.MIN_VALUE);
+            \\    public static final BigInteger AMOUNT_MAX = UInt128.asBigInteger(-1L, -1L);
             \\
             ,
         },
