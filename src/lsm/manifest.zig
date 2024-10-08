@@ -647,7 +647,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn compaction_must_drop_tombstones(
             manifest: *const Manifest,
             level_b: u8,
-            range: CompactionRange,
+            range: *const CompactionRange,
         ) bool {
             assert(level_b < constants.lsm_levels);
             assert(range.key_min <= range.key_max);

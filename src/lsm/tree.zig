@@ -147,14 +147,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             for (0..tree.compactions.len) |i| {
                 errdefer for (tree.compactions[0..i]) |*c| c.deinit();
-                tree.compactions[i] = Compaction.init(config, grid, @intCast(i));
+                tree.compactions[i] = Compaction.init(tree, grid, @intCast(i));
             }
             errdefer for (tree.compactions) |*c| c.deinit();
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            for (&tree.compactions) |*compaction| compaction.deinit();
-
             tree.manifest.deinit(allocator);
             tree.table_immutable.deinit(allocator);
             tree.table_mutable.deinit(allocator);
