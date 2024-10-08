@@ -28,6 +28,7 @@ public final class Main {
     }
 
     Random random = new SecureRandom();
+
     byte[] clusterID = UInt128.asBytes(Long.parseLong(env.getOrDefault("CLUSTER", "1")));
 
     try (var client = new Client(clusterID, replicaAddresses)) {
@@ -50,6 +51,9 @@ public final class Main {
           var result = completionService.take();
           result.get();
         }
+      } catch (Throwable e) {
+        System.err.println("Test failed: " + e.toString());
+        e.printStackTrace();
       } finally {
         executor.shutdownNow();
       }
@@ -62,19 +66,19 @@ public final class Main {
       try {
         Thread.sleep(Duration.ofSeconds(10));
 
-        var requestsSuccessful = statistics.successful();
-        var requestsFailed = statistics.failed();
-        var requestsTotal = requestsSuccessful + requestsFailed;
-        var requestsPerSecond = statistics.requestsPerSecond();
-        var requestSuccessRate = requestsTotal > 0 
-          ? ((double) requestsSuccessful / requestsTotal) 
+        var eventsSuccessful = statistics.successful();
+        var eventsFailed = statistics.failed();
+        var eventsTotal = eventsSuccessful + eventsFailed;
+        var eventsPerSecond = statistics.eventsPerSecond();
+        var eventSuccessRate = eventsTotal > 0 
+          ? ((double) eventsSuccessful / eventsTotal) 
           : 0.0;
 
         System.err.println(
-            "%d requests in total, %s successful, throughput of %d req/s".formatted(
-              requestsTotal,
-              NumberFormat.getPercentInstance().format(requestSuccessRate),
-              requestsPerSecond));
+            "%d events in total, %s successful, throughput of %d events/sec".formatted(
+              eventsTotal,
+              NumberFormat.getPercentInstance().format(eventSuccessRate),
+              eventsPerSecond));
       } catch (InterruptedException e) {
         break;
       }
