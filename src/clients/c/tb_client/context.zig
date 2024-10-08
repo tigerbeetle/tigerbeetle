@@ -46,7 +46,8 @@ pub fn ContextType(
     return struct {
         const Context = @This();
 
-        const allowed_operations = [_]Client.StateMachine.Operation{
+        const StateMachine = Client.StateMachine;
+        const allowed_operations = [_]StateMachine.Operation{
             .create_accounts,
             .create_transfers,
             .lookup_accounts,
@@ -57,7 +58,6 @@ pub fn ContextType(
             .query_transfers,
         };
 
-        const StateMachine = Client.StateMachine;
         const UserData = extern struct {
             self: *Context,
             packet: *Packet,
@@ -67,7 +67,7 @@ pub fn ContextType(
             assert(@sizeOf(UserData) == @sizeOf(u128));
         }
 
-        fn operation_from_int(op: u8) ?Client.StateMachine.Operation {
+        fn operation_from_int(op: u8) ?StateMachine.Operation {
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
                     return operation;
@@ -79,7 +79,7 @@ pub fn ContextType(
         fn operation_event_size(op: u8) ?usize {
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
-                    return @sizeOf(Client.StateMachine.Event(operation));
+                    return @sizeOf(StateMachine.Event(operation));
                 }
             }
             return null;
@@ -303,7 +303,7 @@ pub fn ContextType(
             // Get the size of each request structure in the packet.data:
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| blk: {
-                    break :blk @sizeOf(Client.StateMachine.Event(operation_comptime));
+                    break :blk @sizeOf(StateMachine.Event(operation_comptime));
                 },
             };
 
@@ -351,7 +351,7 @@ pub fn ContextType(
             }
 
             // Otherwise, try to batch the packet with another already in self.pending.
-            if (StateMachine.batch_logical_allowed.get(@enumFromInt(packet.operation))) {
+            if (batch_logical_allowed(packet)) {
                 var it = self.pending.peek();
                 while (it) |root| {
                     it = root.next;
@@ -372,6 +372,36 @@ pub fn ContextType(
             // Couldn't batch with existing packet so push to pending directly.
             packet.next = null;
             self.pending.push(packet);
+        }
+
+        fn batch_logical_allowed(packet: *const Packet) bool {
+            const operation: StateMachine.Operation = @enumFromInt(packet.operation);
+            if (!StateMachine.batch_logical_allowed.get(operation)) return false;
+
+            // TODO(king): Remove this code once protocol batching is implemented.
+            //
+            // If the application submits an unclosed linked chain, it can inadvertently make
+            // the elements of the next batch part of it.
+            // To work around this issue, we don't allow unclosed linked chains to be batched.
+            if (packet.data_size > 0) {
+                assert(packet.data != null);
+                const linked_chain_open: bool = switch (operation) {
+                    inline .create_accounts,
+                    .create_transfers,
+                    => |tag| linked_chain_open: {
+                        const Event = StateMachine.Event(tag);
+                        // Packet data isn't necessarily aligned.
+                        const events: [*]align(@alignOf(u8)) Event = @ptrCast(packet.data.?);
+                        const len: usize = @divExact(packet.data_size, @sizeOf(Event));
+                        break :linked_chain_open events[len - 1].flags.linked;
+                    },
+                    else => false,
+                };
+
+                if (linked_chain_open) return false;
+            }
+
+            return true;
         }
 
         fn submit(self: *Context, packet: *Packet) void {
@@ -528,6 +558,45 @@ pub fn ContextType(
         fn on_deinit(implementation: *ContextImplementation) void {
             const self = get_context(implementation);
             self.deinit();
+        }
+
+        test "client_batch_linked_chain" {
+            inline for ([_]StateMachine.Operation{
+                .create_accounts,
+                .create_transfers,
+            }) |operation| {
+                const Event = StateMachine.Event(operation);
+                var data = [_]Event{std.mem.zeroInit(Event, .{})} ** 3;
+                var packet = Packet{
+                    .next = null,
+                    .user_data = null,
+                    .operation = @intFromEnum(operation),
+                    .status = .ok,
+                    .data_size = data.len * @sizeOf(Event),
+                    .data = &data,
+                    .batch_next = null,
+                    .batch_tail = null,
+                    .batch_size = 0,
+                };
+
+                // Broken linked chain cannot be batched.
+                for (&data) |*item| item.flags.linked = true;
+                try std.testing.expect(!batch_logical_allowed(&packet));
+
+                // Valid linked chain.
+                data[data.len - 1].flags.linked = false;
+                try std.testing.expect(batch_logical_allowed(&packet));
+
+                // Single element.
+                packet.data_size = 1 * @sizeOf(Event);
+                packet.data = &data[data.len - 1];
+                try std.testing.expect(batch_logical_allowed(&packet));
+
+                // No elements.
+                packet.data_size = 0;
+                packet.data = null;
+                try std.testing.expect(batch_logical_allowed(&packet));
+            }
         }
     };
 }
