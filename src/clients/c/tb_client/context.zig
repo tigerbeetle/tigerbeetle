@@ -392,8 +392,8 @@ pub fn ContextType(
                         const Event = StateMachine.Event(tag);
                         // Packet data isn't necessarily aligned.
                         const events: [*]align(@alignOf(u8)) Event = @ptrCast(packet.data.?);
-                        const len: usize = @divExact(packet.data_size, @sizeOf(Event));
-                        break :linked_chain_open events[len - 1].flags.linked;
+                        const events_count: usize = @divExact(packet.data_size, @sizeOf(Event));
+                        break :linked_chain_open events[events_count - 1].flags.linked;
                     },
                     else => false,
                 };
