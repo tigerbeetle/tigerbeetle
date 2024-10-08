@@ -680,7 +680,7 @@ pub const Simulator = struct {
 
         // Don't check for missing uncommitted ops (since the StateChecker does not record them).
         // There may be uncommitted ops due to pulses/upgrades sent during liveness mode.
-        const commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
+        const cluster_commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
 
         var missing_header_op: ?u64 = null;
         var missing_prepare_op: ?u64 = null;
@@ -688,12 +688,14 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
-                if (replica.op > replica.commit_min) {
+                const commit_max = @min(replica.op, cluster_commit_max);
+                const commit_min = replica.commit_min;
+                if (commit_min < commit_max) {
                     // Check if replica was stuck while repairing headers. Find largest missing
                     // header as we repair headers from high -> low ops.
                     if (replica.journal.find_latest_headers_break_between(
-                        replica.commit_min,
-                        @min(replica.op, commit_max),
+                        commit_min + 1,
+                        commit_max,
                     )) |range| {
                         if (missing_header_op == null or missing_header_op.? < range.op_max) {
                             missing_header_op = range.op_max;
@@ -701,7 +703,7 @@ pub const Simulator = struct {
                     } else {
                         // Check if replica was stuck while repairing prepares. Find smallest
                         // missing prepare as we repair prepares from low -> high ops.
-                        for (replica.commit_min + 1..@min(replica.op, commit_max) + 1) |op| {
+                        for (commit_min + 1..commit_max + 1) |op| {
                             const header = simulator.cluster.state_checker.header_with_op(op);
                             if (!replica.journal.has_clean(&header)) {
                                 if (missing_prepare_op == null or missing_prepare_op.? > op) {
