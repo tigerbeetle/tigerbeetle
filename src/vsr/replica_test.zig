@@ -59,6 +59,15 @@ comptime {
     assert(constants.lsm_compaction_ops == 4);
 }
 
+test "Cluster: smoke" {
+    const t = try TestContext.init(.{ .replica_count = 1 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+}
+
 test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();

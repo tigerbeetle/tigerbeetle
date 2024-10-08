@@ -15,13 +15,12 @@ const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
-const CompactionInfo = @import("compaction.zig").CompactionInfo;
-const CompactionHelperType = @import("compaction.zig").CompactionHelperType;
-const BlipStage = @import("compaction.zig").BlipStage;
-const Exhausted = @import("compaction.zig").Exhausted;
+const ResourcePoolType = @import("compaction.zig").ResourcePoolType;
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 const snapshot_max_for_table_input = @import("compaction.zig").snapshot_max_for_table_input;
 const compaction_op_min = @import("compaction.zig").compaction_op_min;
+const compaction_block_count_bar_max = @import("compaction.zig").compaction_block_count_bar_max;
+const compaction_block_count_beat_min = @import("compaction.zig").compaction_block_count_beat_min;
 
 const IO = @import("../io.zig").IO;
 
@@ -183,7 +182,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         const Forest = @This();
 
         pub const ManifestLog = ManifestLogType(Storage);
-        const CompactionPipeline = CompactionPipelineType(Forest, Grid);
+        const CompactionSchedule = CompactionScheduleType(Forest, Grid);
 
         const Callback = *const fn (*Forest) void;
 
@@ -209,7 +208,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             /// memory.
             compaction_block_count: u32,
 
-            pub const compaction_block_count_min: u32 = CompactionPipeline.block_count_min;
+            pub const compaction_block_count_min: u32 = CompactionSchedule.forest_block_count_min;
         };
 
         progress: ?union(enum) {
@@ -235,7 +234,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         node_pool: NodePool,
         manifest_log: ManifestLog,
 
-        compaction_pipeline: CompactionPipeline,
+        compaction_schedule: CompactionSchedule,
 
         scan_buffer_pool: ScanBufferPool,
 
@@ -254,7 +253,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .grooves = undefined,
                 .node_pool = undefined,
                 .manifest_log = undefined,
-                .compaction_pipeline = undefined,
+                .compaction_schedule = undefined,
                 .scan_buffer_pool = undefined,
             };
 
@@ -289,13 +288,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 grooves_initialized += 1;
             }
 
-            try forest.compaction_pipeline.init(
+            try forest.compaction_schedule.init(
                 allocator,
                 grid,
                 forest,
                 options.compaction_block_count,
             );
-            errdefer forest.compaction_pipeline.deinit(allocator);
+            errdefer forest.compaction_schedule.deinit(allocator);
 
             try forest.scan_buffer_pool.init(allocator);
             errdefer forest.scan_buffer_pool.deinit(allocator);
@@ -311,7 +310,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             forest.manifest_log.deinit(allocator);
             forest.node_pool.deinit(allocator);
 
-            forest.compaction_pipeline.deinit(allocator);
+            forest.compaction_schedule.deinit(allocator);
             forest.scan_buffer_pool.deinit(allocator);
         }
 
@@ -328,7 +327,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             forest.manifest_log.reset();
             forest.node_pool.reset();
             forest.scan_buffer_pool.reset();
-            forest.compaction_pipeline.reset();
+            forest.compaction_schedule.reset();
 
             forest.* = .{
                 // Don't reset the grid – replica is responsible for grid cancellation.
@@ -337,7 +336,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .node_pool = forest.node_pool,
                 .manifest_log = forest.manifest_log,
 
-                .compaction_pipeline = forest.compaction_pipeline,
+                .compaction_schedule = forest.compaction_schedule,
 
                 .scan_buffer_pool = forest.scan_buffer_pool,
             };
@@ -428,16 +427,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .manifest_log_done = false,
             };
 
-            // Compaction only starts > lsm_compaction_ops because nothing compacts in the first
-            // bar.
-            assert(op >= constants.lsm_compaction_ops or
-                forest.compaction_pipeline.compactions.count() == 0);
-
-            forest.compaction_pipeline.beat(op, compact_trees_callback);
-            if (forest.grid.superblock.working.vsr_state.op_compacted(op)) {
-                assert(forest.compaction_pipeline.compactions.count() == 0);
-                assert(forest.compaction_pipeline.bar_active.count() == 0);
-            }
+            forest.compaction_schedule.beat_start(op, compact_trees_callback);
 
             // Manifest log compaction. Run on the last beat of each half-bar.
             // TODO: Figure out a plan wrt the pacing here. Putting it on the last beat kinda-sorta
@@ -480,6 +470,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.compaction_progress != null);
             assert(forest.compaction_progress.?.trees_done);
             assert(forest.compaction_progress.?.manifest_log_done);
+            assert(forest.compaction_schedule.pool.idle());
+            assert(forest.compaction_schedule.pool.blocks_acquired() <=
+                CompactionSchedule.forest_block_count_bar_max);
 
             forest.verify_table_extents();
 
@@ -491,29 +484,23 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 @divExact(constants.lsm_compaction_ops, 2) - 1;
             const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
-            // Apply the changes to the manifest. This will run at the target compaction beat
-            // that is requested.
-            if (last_beat or last_half_beat) {
-                for (forest.compaction_pipeline.compactions.slice()) |*compaction| {
-                    if (compaction.level_b % 2 == 0 and last_half_beat) continue;
-                    if (compaction.level_b % 2 != 0 and last_beat) continue;
-
-                    switch (tree_id_cast(compaction.tree_id)) {
-                        inline else => |tree_id| {
-                            forest.tree_for_id(tree_id).compactions[compaction.level_b]
-                                .bar_blocks_unassign(&forest.compaction_pipeline.block_pool);
-
-                            assert(forest.compaction_progress.?.manifest_log_done);
-                            forest.tree_for_id(tree_id).compactions[compaction.level_b]
-                                .bar_apply_to_manifest();
-                        },
+            if (op < constants.lsm_compaction_ops or
+                forest.grid.superblock.working.vsr_state.op_compacted(op))
+            {
+                // No compaction was run.
+            } else {
+                // Apply the changes to the manifest. This will run at the target compaction beat
+                // that is requested.
+                if (last_beat or last_half_beat) {
+                    for (0..constants.lsm_levels) |level_b| {
+                        if (level_active(.{ .level_b = level_b, .op = op })) {
+                            inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
+                                forest.compaction_schedule.compaction_at(level_b, tree_id)
+                                    .bar_complete();
+                            }
+                        }
                     }
                 }
-
-                // At the last beat or last half beat, all compactions must have returned their
-                // blocks to the block pool.
-                assert(forest.compaction_pipeline.block_pool.count ==
-                    forest.compaction_pipeline.block_pool_raw.len);
             }
 
             // Groove sync compaction - must be done after all async work for the beat completes.
@@ -535,11 +522,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     // Ensure tables haven't overflowed.
                     tree.manifest.assert_level_table_counts();
                 }
-
-                // While we're here, check that all compactions have finished by the last beat, and
-                // reset our pipeline state.
-                assert(forest.compaction_pipeline.bar_active.count() == 0);
-                forest.compaction_pipeline.compactions.clear();
             }
 
             // On the last beat of the bar, make sure that manifest log compaction is finished.
@@ -756,635 +738,169 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     };
 }
 
-fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
-    const CompactionHelper = CompactionHelperType(Grid);
-    const CompactionBlockFIFO = CompactionHelper.CompactionBlockFIFO;
-
+fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
     return struct {
-        const CompactionPipeline = @This();
-
-        /// Some blocks need to be reserved for the lifetime of the bar, and can't
-        /// be shared between compactions, so these are all multiplied by the number
-        /// of concurrent compactions.
-        /// TODO: This is currently the case for fixed half-bar scheduling.
-        const block_count_bar_single: u64 = 2;
-
-        const block_count_bar_concurrent: u64 = blk: {
-            var block_count: u64 = 0;
-
-            block_count = block_count_bar_single;
-
-            // All trees can potentially compact concurrently.
-            block_count *= Forest.tree_infos.len;
-
-            // There can be up to half (rounded up) levels compacting at once with the half
-            // bar split.
-            block_count *= stdx.div_ceil(constants.lsm_levels, 2);
-
-            break :blk block_count;
-        };
-
-        /// Some blocks only need to be valid for a beat, after which they're used for
-        /// the next compaction.
-        const minimum_block_count_beat: u64 = blk: {
-            var minimum_block_count: u64 = 0;
-
-            // We need a minimum of 2 source value blocks; one from each table.
-            minimum_block_count += 2;
-
-            // We need a minimum of 1 output value block.
-            minimum_block_count += 1;
-
-            // Because we're a 3 stage pipeline, with the middle stage (merge) having a
-            // data dependency on both read and write value blocks, we need to split our
-            // memory in the middle. This results in a doubling of what we have so far.
-            minimum_block_count *= 2;
-
-            // We need a 2 source index blocks; one for each table.
-            minimum_block_count += 2;
-
-            break :blk minimum_block_count;
-        };
-
-        pub const block_count_min = block_count_bar_concurrent + minimum_block_count_beat;
-
-        /// If you think of a pipeline diagram, a pipeline slot is a single instruction.
-        const PipelineSlot = struct {
-            pipeline: *CompactionPipeline,
-            active_operation: BlipStage,
-            // Invariant: .{tree_id, level_b} == compactions[compaction_index].{tree_id, level_b}
-            tree_id: u16,
-            level_b: u8,
-            /// Index within `CompactionPipeline.compactions`.
-            compaction_index: usize,
-        };
-
-        const compaction_count = Forest.tree_infos.len * constants.lsm_levels;
-        const CompactionBitset = std.StaticBitSet(compaction_count);
-
         grid: *Grid,
         forest: *Forest,
-
-        block_pool: CompactionBlockFIFO,
-
-        /// Raw, linear buffer of blocks + reads / writes that will be split up. The
-        /// CompactionPipeline owns this memory, and anything pointing to a CompactionBlock
-        /// ultimately lives here.
-        block_pool_raw: []CompactionHelper.CompactionBlock,
-
-        compactions: stdx.BoundedArray(CompactionInfo, compaction_count) = .{},
-
-        bar_active: CompactionBitset = CompactionBitset.initEmpty(),
-        beat_active: CompactionBitset = CompactionBitset.initEmpty(),
-        /// Set for compactions (within `compactions`) have an outstanding grid reservation.
-        beat_reserved: CompactionBitset = CompactionBitset.initEmpty(),
-
-        // TODO: This whole interface around slot_filled_count / slot_running_count needs to be
-        // refactored.
-        slots: [3]?PipelineSlot = .{ null, null, null },
-        slot_filled_count: usize = 0,
-        slot_running_count: usize = 0,
-
-        // Used for invoking the CPU work after a next_tick.
-        // Points to one of the `CompactionPipeline.slots`.
-        cpu_slot: ?*PipelineSlot = null,
-
-        state: enum { filling, full, draining, drained } = .filling,
-
+        pool: ResourcePool,
         next_tick: Grid.NextTick = undefined,
-
         callback: ?*const fn (*Forest) void = null,
 
+        const CompactionSchedule = @This();
+        const ResourcePool = ResourcePoolType(Grid);
+
+        const forest_compactions_concurrent_max =
+            stdx.div_ceil(constants.lsm_levels, 2) * Forest.tree_infos.len;
+        const forest_block_count_bar_max =
+            forest_compactions_concurrent_max * compaction_block_count_bar_max;
+        /// The minimum number of blocks required to complete all compactions. This is the sum of
+        /// blocks reserved between the bars plus enough blocks to complete a single beat.
+        const forest_block_count_min = forest_block_count_bar_max +
+            // beat_min includes bar_max for that beat.
+            (compaction_block_count_beat_min - compaction_block_count_bar_max);
+
         pub fn init(
-            self: *CompactionPipeline,
+            self: *CompactionSchedule,
             allocator: mem.Allocator,
             grid: *Grid,
             forest: *Forest,
             block_count: u32,
         ) !void {
-            log.debug("block_count={}", .{block_count});
-            assert(block_count >= block_count_min);
+            assert(block_count >= CompactionSchedule.forest_block_count_min);
 
-            self.* = .{
-                .grid = grid,
-                .forest = forest,
-
-                .block_pool = undefined,
-                .block_pool_raw = undefined,
-            };
-
-            self.block_pool = .{
-                .name = "block_pool",
-                .verify_push = false,
-            };
-
-            self.block_pool_raw = try allocator.alloc(
-                CompactionHelper.CompactionBlock,
-                block_count,
-            );
-            errdefer allocator.free(self.block_pool_raw);
-
-            for (self.block_pool_raw, 0..) |*compaction_block, i| {
-                errdefer for (self.block_pool_raw[0..i]) |block| allocator.free(block.block);
-                compaction_block.* = .{
-                    .block = try allocate_block(allocator),
-                };
-                self.block_pool.push(compaction_block);
-            }
-            errdefer for (self.block_pool_raw) |block| allocator.free(block.block);
+            self.* = .{ .grid = grid, .forest = forest, .pool = undefined };
+            self.pool = try ResourcePool.init(allocator, block_count);
+            errdefer self.pool.deinit(allocator);
         }
 
-        pub fn deinit(self: *CompactionPipeline, allocator: mem.Allocator) void {
-            for (self.block_pool_raw) |block| allocator.free(block.block);
-            allocator.free(self.block_pool_raw);
+        pub fn deinit(self: *CompactionSchedule, allocator: mem.Allocator) void {
+            self.pool.deinit(allocator);
         }
 
-        pub fn reset(self: *CompactionPipeline) void {
-            var block_pool: CompactionBlockFIFO = .{
-                .name = "block_pool",
-                .verify_push = false,
-            };
-
-            for (self.block_pool_raw) |*compaction_block| {
-                compaction_block.* = .{ .block = compaction_block.block };
-                block_pool.push(compaction_block);
-            }
+        pub fn reset(self: *CompactionSchedule) void {
+            self.pool.reset();
 
             self.* = .{
                 .grid = self.grid,
                 .forest = self.forest,
-                .block_pool = block_pool,
-                .block_pool_raw = self.block_pool_raw,
+                .pool = self.pool,
             };
         }
 
-        /// Our source and output blocks (excluding index blocks for now) are split two ways.
-        /// First, equally by pipeline stage, then by table a / table b:
-        /// -------------------------------------------------------------
-        /// | Pipeline 0                  | Pipeline 1                  |
-        /// |-----------------------------|-----------------------------|
-        /// | Table A     | Table B       | Table A     | Table B       |
-        /// -------------------------------------------------------------
-        fn divide_blocks(self: *CompactionPipeline) CompactionHelper.CompactionBlocks {
-            assert(self.block_pool.count >= minimum_block_count_beat);
-
-            // By the end, we must have consumed more than minimum_block_count_beat or our
-            // calculation there is wrong.
-            const block_pool_count_start = self.block_pool.count;
-            defer assert(block_pool_count_start - self.block_pool.count >=
-                minimum_block_count_beat);
-
-            // Split the remaining blocks equally, with the remainder going to the target pool.
-            // TODO: Splitting equally is definitely not the best way!
-            // TODO: If level_b is 0, level_a needs no memory at all.
-            // TODO: This wastes the remainder, but we have other code that requires the count
-            // to be even for now.
-            var equal_split_count = @divFloor(self.block_pool.count - 2, 3);
-            if (equal_split_count % 2 != 0) equal_split_count -= 1; // Must be even, for now.
-
-            log.debug("divide_blocks: block_count_bar_concurrent={} block_pool.count={} " ++
-                "source_value_level_a={} source_value_level_b={} " ++
-                " target_value_blocks={}", .{
-                block_count_bar_concurrent,
-                self.block_pool.count,
-                equal_split_count,
-                equal_split_count,
-                equal_split_count,
-            });
-
-            return .{
-                .source_index_block_a = self.block_pool.pop().?,
-                .source_index_block_b = self.block_pool.pop().?,
-                .source_value_blocks = .{
-                    CompactionHelper.BlockFIFO.init(&self.block_pool, equal_split_count),
-                    CompactionHelper.BlockFIFO.init(&self.block_pool, equal_split_count),
-                },
-                .target_value_blocks = CompactionHelper.BlockFIFO.init(
-                    &self.block_pool,
-                    equal_split_count,
-                ),
-            };
-        }
-
-        pub fn beat(
-            self: *CompactionPipeline,
+        pub fn beat_start(
+            self: *CompactionSchedule,
             op: u64,
             callback: Forest.Callback,
         ) void {
-            const compaction_beat = op % constants.lsm_compaction_ops;
-            const first_beat = compaction_beat == 0;
-            const half_beat = compaction_beat == @divExact(constants.lsm_compaction_ops, 2);
+            assert(self.callback == null);
+            self.callback = callback;
 
-            self.slot_filled_count = 0;
-            self.slot_running_count = 0;
-
-            // Setup loop, runs only on the first beat of every half-bar, before any async work is
-            // done. If we recovered from a checkpoint, we must avoid replaying one bar of
-            // compactions that were applied before the checkpoint. Repeating these ops'
-            // compactions would actually perform different compactions than before,
-            // causing the storage state of the replica to diverge from the cluster.
-            // See also: compaction_op_min().
-            if ((first_beat or half_beat) and
-                !self.forest.grid.superblock.working.vsr_state.op_compacted(op))
+            if (op < constants.lsm_compaction_ops or
+                self.grid.superblock.working.vsr_state.op_compacted(op))
             {
-                if (first_beat) {
-                    assert(self.compactions.count() == 0);
-                }
+                self.beat_finish();
+                return;
+            }
 
-                // Iterate by levels first, then trees, as we expect similar levels to have similar
-                // time-of-death for writes. This helps internal SSD GC.
+            const half_bar = @divExact(constants.lsm_compaction_ops, 2);
+            const compaction_beat = op % constants.lsm_compaction_ops;
+
+            const first_beat = compaction_beat == 0;
+            const half_beat = compaction_beat == half_bar;
+
+            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
+            const last_half_beat = compaction_beat == half_bar - 1;
+
+            if (first_beat or half_beat) {
                 for (0..constants.lsm_levels) |level_b| {
-                    inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
-                        var tree = Forest.tree_for_id(self.forest, tree_id);
-                        assert(tree.compactions.len == constants.lsm_levels);
-
-                        var compaction = &tree.compactions[level_b];
-
-                        // This returns information on what compaction work needs to be done. In
-                        // future, this will be used to schedule compactions in a more optimal way.
-                        if ((compaction.level_b % 2 != 0 and first_beat) or
-                            (compaction.level_b % 2 == 0 and half_beat))
-                        {
-                            if (compaction.bar_setup(tree, op)) |info| {
-                                self.compactions.append_assume_capacity(info);
-                                log.debug("level_b={} tree={s} op={}", .{
-                                    level_b,
-                                    tree.config.name,
-                                    op,
-                                });
-                            }
+                    if (level_active(.{ .level_b = level_b, .op = op })) {
+                        inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
+                            self.compaction_at(level_b, tree_id)
+                                .bar_commence(op);
                         }
                     }
                 }
             }
 
-            if (first_beat or half_beat) {
-                // At the first beat or first half beat, the block pool must be full.
-                assert(self.block_pool.count == self.block_pool_raw.len);
-
-                if (first_beat) {
-                    self.bar_active = CompactionBitset.initEmpty();
-                }
-
-                for (self.compactions.slice(), 0..) |*compaction, i| {
-                    if (compaction.level_b % 2 == 0 and first_beat) continue;
-                    if (compaction.level_b % 2 != 0 and half_beat) continue;
-                    if (compaction.move_table) continue;
-
-                    assert(
-                        self.block_pool.count >= minimum_block_count_beat + block_count_bar_single,
-                    );
-
-                    const block_pool_count_start = self.block_pool.count;
-                    defer assert(
-                        block_pool_count_start - self.block_pool.count == block_count_bar_single,
-                    );
-
-                    const target_index_blocks =
-                        CompactionHelper.BlockFIFO.init(&self.block_pool, 2);
-
-                    // A compaction is marked as live at the start of a bar, unless it's
-                    // move_table...
-                    self.bar_active.set(i);
-
-                    // ... and has its bar scoped buffers and budget assigned.
-                    // TODO: This is an _excellent_ value to fuzz on.
-                    // NB: While compaction is deterministic regardless of how much memory
-                    // you give it, it's _not_ deterministic across different target
-                    // budgets. This is because the target budget determines the beat grid
-                    // block allocation, so whatever function calculates this in the future
-                    // needs to itself be deterministic.
-                    switch (Forest.tree_id_cast(compaction.tree_id)) {
-                        inline else => |tree_id| {
-                            self.tree_compaction(tree_id, compaction.level_b).bar_setup_budget(
-                                @divExact(constants.lsm_compaction_ops, 2),
-                                target_index_blocks,
-                            );
-                        },
+            for (0..constants.lsm_levels) |level_b| {
+                if (level_active(.{ .level_b = level_b, .op = op })) {
+                    inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
+                        const beats_total = half_bar;
+                        const beats_done = compaction_beat % half_bar;
+                        const beats_remaining = beats_total - beats_done;
+                        self.compaction_at(level_b, tree_id)
+                            .beat_commence(beats_remaining);
+                        if (last_beat or last_half_beat) {
+                            const quotas = self.compaction_at(level_b, tree_id).quotas;
+                            assert(beats_remaining == 1);
+                            assert(quotas.beat == quotas.bar);
+                        }
                     }
                 }
             }
 
-            // At the start of a beat, the active compactions are those that are still active
-            // in the bar.
-            self.beat_active = self.bar_active;
-
-            // TODO: Assert no compactions are running, and the pipeline is empty in a better
-            // way. Maybe move to a union enum for state.
-            for (self.slots) |slot| assert(slot == null);
-            assert(self.callback == null);
-
-            for (self.compactions.slice(), 0..) |*compaction, i| {
-                if (!self.bar_active.isSet(i)) continue;
-                if (compaction.move_table) continue;
-
-                self.beat_reserved.set(i);
-                switch (Forest.tree_id_cast(compaction.tree_id)) {
-                    inline else => |tree_id| {
-                        self.tree_compaction(tree_id, compaction.level_b).beat_grid_reserve();
-                    },
-                }
-            }
-
-            self.callback = callback;
-
-            if (self.compactions.count() == 0) {
-                // No compactions - we're done! Likely we're < lsm_compaction_ops but it could
-                // be that empty ops were pulsed through.
-                maybe(op < constants.lsm_compaction_ops);
-
-                self.grid.on_next_tick(beat_finished_next_tick, &self.next_tick);
-                return;
-            }
-
-            // Everything up to this point has been sync and deterministic. We now enter
-            // async-land by starting a read. The blip_callback will do the rest, including
-            // filling and draining.
-            self.state = .filling;
-            self.advance_pipeline();
+            self.beat_resume();
         }
 
-        fn beat_finished_next_tick(next_tick: *Grid.NextTick) void {
-            const self: *CompactionPipeline = @alignCast(@fieldParentPtr("next_tick", next_tick));
+        fn beat_resume(self: *CompactionSchedule) void {
+            const op = self.forest.progress.?.compact.op;
+            for (0..constants.lsm_levels) |level_b| {
+                if (level_active(.{ .level_b = level_b, .op = op })) {
+                    inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
+                        const resumed = self.compaction_at(level_b, tree_id)
+                            .compaction_dispatch_enter(&self.pool, beat_resume_callback);
 
-            assert(self.beat_active.count() == 0);
-            assert(self.slot_filled_count == 0);
-            assert(self.slot_running_count == 0);
-            for (self.slots) |slot| assert(slot == null);
+                        switch (resumed) {
+                            .beat_finished => {},
+                            .active => return,
+                        }
+                    }
+                }
+            }
+            self.beat_finish();
+        }
 
+        fn beat_resume_callback(pool: *ResourcePool) void {
+            const self: *CompactionSchedule = @fieldParentPtr("pool", pool);
+            self.beat_resume();
+        }
+
+        fn beat_finish(self: *CompactionSchedule) void {
             assert(self.callback != null);
+            self.grid.on_next_tick(beat_finish_next_tick, &self.next_tick);
+        }
 
-            // Forfeit any remaining grid reservations.
-            self.beat_grid_forfeit_all();
-            assert(self.beat_reserved.count() == 0);
-
+        fn beat_finish_next_tick(next_tick: *Grid.NextTick) void {
+            const self: *CompactionSchedule = @alignCast(
+                @fieldParentPtr("next_tick", next_tick),
+            );
             const callback = self.callback.?;
-
             self.callback = null;
-
             callback(self.forest);
         }
 
-        // TODO: It would be great to get rid of *anyopaque here. Batiati's scan approach
-        // wouldn't compile for some reason.
-        fn blip_callback(
-            slot_opaque: *anyopaque,
-            maybe_exhausted: ?Exhausted,
-        ) void {
-            const slot: *PipelineSlot = @ptrCast(@alignCast(slot_opaque));
-            const pipeline: *CompactionPipeline = slot.pipeline;
-
-            // Currently only merge is allowed to tell us we're exhausted.
-            // TODO: In future, this will be extended to read, which might be able to, based
-            // on key ranges.
-            assert(maybe_exhausted == null or slot.active_operation == .merge);
-
-            if (maybe_exhausted) |exhausted| {
-                if (exhausted.beat) {
-                    assert(pipeline.state != .draining);
-                    assert(pipeline.state != .drained);
-
-                    log.debug("blip_callback: entering draining state", .{});
-                    pipeline.state = .draining;
-                }
-
-                if (exhausted.bar) {
-                    // If the bar is exhausted the beat must be exhausted too.
-                    assert(pipeline.state == .draining);
-                    assert(pipeline.bar_active.isSet(slot.compaction_index));
-
-                    log.debug(
-                        "blip_callback: unsetting bar_active[{}]",
-                        .{slot.compaction_index},
-                    );
-                    // Unset bar_active for the *next* beat.
-                    // There may still be writes in-flight for this compaction.
-                    pipeline.bar_active.unset(slot.compaction_index);
-                }
-            }
-
-            pipeline.slot_running_count -= 1;
-            if (pipeline.slot_running_count > 0) return;
-
-            log.debug("blip_callback: all slots joined - advancing pipeline", .{});
-            pipeline.advance_pipeline();
-        }
-
-        fn advance_pipeline(self: *CompactionPipeline) void {
-            assert(self.slot_running_count == 0);
-
-            const active_compaction_index = self.beat_active.findFirstSet() orelse {
-                log.debug("advance_pipeline: all compactions finished - " ++
-                    "calling beat_finished_next_tick()", .{});
-                self.grid.on_next_tick(beat_finished_next_tick, &self.next_tick);
-                return;
-            };
-            log.debug("advance_pipeline: active compaction is: {}", .{active_compaction_index});
-
-            if (self.state == .filling or self.state == .full) {
-                // Advanced any filled stages, making sure to start our IO before CPU.
-                for (self.slots[0..self.slot_filled_count], 0..) |*slot_wrapped, i| {
-                    const slot: *PipelineSlot = &slot_wrapped.*.?;
-                    assert(slot.compaction_index == active_compaction_index);
-
-                    switch (slot.active_operation) {
-                        .read => {
-                            log.debug("advance_pipeline: read done, scheduling " ++
-                                "blip_merge on {}", .{i});
-
-                            assert(self.cpu_slot == null);
-
-                            self.cpu_slot = slot;
-                            slot.active_operation = .merge;
-                            self.slot_running_count += 1;
-
-                            // TODO: This doesn't actually allow the CPU work and IO work to
-                            // happen at the same time! next_tick goes to a queue which is
-                            // processed before submitted IO...
-                            self.grid.on_next_tick(
-                                advance_pipeline_next_tick,
-                                &self.next_tick,
-                            );
-                        },
-                        .merge => {
-                            log.debug("advance_pipeline: merge done, calling " ++
-                                "blip_write on {}", .{i});
-
-                            slot.active_operation = .write;
-                            self.slot_running_count += 1;
-                            switch (Forest.tree_id_cast(slot.tree_id)) {
-                                inline else => |tree_id| {
-                                    self.tree_compaction(
-                                        tree_id,
-                                        slot.level_b,
-                                    ).blip_write(blip_callback, slot);
-                                },
-                            }
-                        },
-                        .write => {
-                            log.debug("advance_pipeline: write done, calling " ++
-                                "blip_read on {}", .{i});
-                            slot.active_operation = .read;
-                            self.slot_running_count += 1;
-                            switch (Forest.tree_id_cast(slot.tree_id)) {
-                                inline else => |tree_id| {
-                                    self.tree_compaction(
-                                        tree_id,
-                                        slot.level_b,
-                                    ).blip_read(blip_callback, slot);
-                                },
-                            }
-                        },
-                        .drained => unreachable,
-                    }
-                }
-
-                // Fill any empty slots (slots always start in read).
-                if (self.state == .filling) {
-                    const slot_idx = self.slot_filled_count;
-
-                    log.debug("advance_pipeline: filling slot={} with blip_read", .{slot_idx});
-                    assert(self.slots[slot_idx] == null);
-
-                    self.slots[slot_idx] = .{
-                        .pipeline = self,
-                        .tree_id = self.compactions.slice()[active_compaction_index].tree_id,
-                        .level_b = self.compactions.slice()[active_compaction_index].level_b,
-                        .active_operation = .read,
-                        .compaction_index = active_compaction_index,
-                    };
-
-                    if (slot_idx == 0) {
-                        switch (Forest.tree_id_cast(self.slots[slot_idx].?.tree_id)) {
-                            inline else => |tree_id| {
-                                self.tree_compaction(
-                                    tree_id,
-                                    self.slots[slot_idx].?.level_b,
-                                ).beat_blocks_assign(self.divide_blocks());
-                            },
-                        }
-                    }
-
-                    // We always start with a read.
-                    self.slot_running_count += 1;
-                    self.slot_filled_count += 1;
-
-                    switch (Forest.tree_id_cast(self.slots[slot_idx].?.tree_id)) {
-                        inline else => |tree_id| {
-                            self.tree_compaction(
-                                tree_id,
-                                self.slots[slot_idx].?.level_b,
-                            ).blip_read(blip_callback, &self.slots[slot_idx]);
-                        },
-                    }
-                    if (self.slot_filled_count == 3) {
-                        self.state = .full;
-                    }
-                }
-            } else if (self.state == .draining) {
-                // We enter the draining state by blip_merge. Any concurrent writes would have
-                // a barrier along with it, but we need to worry about writing the blocks that
-                // this last blip_merge _just_ created.
-                for (self.slots[0..self.slot_filled_count]) |*slot_wrapped| {
-                    const slot: *PipelineSlot = &slot_wrapped.*.?;
-
-                    switch (slot.active_operation) {
-                        .merge => {
-                            slot.active_operation = .write;
-                            self.slot_running_count += 1;
-                            self.state = .drained;
-                            switch (Forest.tree_id_cast(slot.tree_id)) {
-                                inline else => |tree_id| {
-                                    self.tree_compaction(
-                                        tree_id,
-                                        slot.level_b,
-                                    ).blip_write(blip_callback, slot);
-                                },
-                            }
-                        },
-                        else => {
-                            slot.active_operation = .drained;
-                        },
-                    }
-                }
-            } else if (self.state == .drained) {
-                // Reclaim our blocks from this compaction.
-                const slot = self.slots[0].?;
-                switch (Forest.tree_id_cast(slot.tree_id)) {
-                    inline else => |tree_id| {
-                        self.tree_compaction(
-                            tree_id,
-                            slot.level_b,
-                        ).beat_blocks_unassign(&self.block_pool);
-                    },
-                }
-
-                // TODO: Resetting these below variables like this isn't great.
-                self.beat_active.unset(self.slots[0].?.compaction_index);
-
-                self.slot_filled_count = 0;
-                assert(self.slot_running_count == 0);
-                self.state = .filling;
-                self.slots = .{ null, null, null };
-
-                return self.advance_pipeline();
-            } else unreachable;
-
-            // TODO: Take a leaf out of vsr's book and implement logging showing state.
-        }
-
-        fn advance_pipeline_next_tick(next_tick: *Grid.NextTick) void {
-            const self: *CompactionPipeline = @alignCast(@fieldParentPtr("next_tick", next_tick));
-            assert(self.cpu_slot != null);
-            const cpu_slot = self.cpu_slot.?;
-            self.cpu_slot = null;
-
-            // TODO: next_tick will just invoke our CPU work sync. We need to submit to the
-            // underlying event loop before calling blip_merge.
-            // var timeouts: usize = 0;
-            // var etime = false;
-            // self.grid.superblock.storage.io.flush_submissions(0, &timeouts, &etime) catch
-            //     unreachable;
-
-            assert(cpu_slot.active_operation == .merge);
-            assert(self.slot_running_count > 0);
-
-            log.debug("advance_pipeline_next_tick: calling blip_merge on cpu_slot", .{});
-            switch (Forest.tree_id_cast(cpu_slot.tree_id)) {
-                inline else => |tree_id| {
-                    self.tree_compaction(
-                        tree_id,
-                        cpu_slot.level_b,
-                    ).blip_merge(blip_callback, cpu_slot);
-                },
-            }
-        }
-
-        fn beat_grid_forfeit_all(self: *CompactionPipeline) void {
-            // We need to run this for all compactions that ran acquire - even if they
-            // transitioned to being finished, so we can't just use bar_active.
-            var compactions_reserved = self.beat_reserved.iterator(.{});
-            while (compactions_reserved.next()) |i| {
-                switch (Forest.tree_id_cast(self.compactions.slice()[i].tree_id)) {
-                    inline else => |tree_id| {
-                        self.tree_compaction(
-                            tree_id,
-                            self.compactions.slice()[i].level_b,
-                        ).beat_grid_forfeit();
-                    },
-                }
-                self.beat_reserved.unset(i);
-            }
-
-            assert(self.beat_reserved.count() == 0);
-        }
-
-        fn tree_compaction(
-            self: *CompactionPipeline,
+        fn compaction_at(
+            self: *CompactionSchedule,
+            level_b: usize,
             comptime tree_id: Forest.TreeID,
-            level_b: u8,
         ) *Forest.TreeForIdType(tree_id).Compaction {
             return &self.forest.tree_for_id(tree_id).compactions[level_b];
         }
     };
+}
+
+fn level_active(options: struct { level_b: usize, op: u64 }) bool {
+    const half_bar_beat_count = @divExact(constants.lsm_compaction_ops, 2);
+    const compaction_beat = options.op % constants.lsm_compaction_ops;
+    return (compaction_beat < half_bar_beat_count) == (options.level_b % 2 == 1);
+}
+
+test level_active {
+    assert(!level_active(.{ .level_b = 0, .op = constants.lsm_compaction_ops }));
+    assert(level_active(.{ .level_b = 1, .op = constants.lsm_compaction_ops }));
+    assert(!level_active(.{ .level_b = 2, .op = constants.lsm_compaction_ops }));
+
+    assert(level_active(.{ .level_b = 0, .op = @divExact(constants.lsm_compaction_ops, 2) }));
+    assert(!level_active(.{ .level_b = 1, .op = @divExact(constants.lsm_compaction_ops, 2) }));
+    assert(level_active(.{ .level_b = 2, .op = @divExact(constants.lsm_compaction_ops, 2) }));
 }
