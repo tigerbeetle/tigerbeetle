@@ -7451,7 +7451,7 @@ pub fn ReplicaType(
             var present = BitSet.initEmpty();
             for (self.view_headers.array.const_slice(), 0..) |*header, i| {
                 const slot = self.journal.slot_for_op(header.op);
-                const journal_header = self.journal.header_for_op(header.op);
+                const journal_header = self.journal.header_with_op(header.op);
                 const dirty = self.journal.dirty.bit(slot);
                 const faulty = self.journal.faulty.bit(slot);
 
