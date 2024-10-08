@@ -121,3 +121,7 @@ pub fn deinit(
     const context = client_to_context(client);
     (context.deinit_fn)(context);
 }
+
+test {
+    std.testing.refAllDecls(DefaultContext);
+}

@@ -12,7 +12,7 @@ pub const Packet = extern struct {
     batch_next: ?*Packet,
     batch_tail: ?*Packet,
     batch_size: u32,
-    reserved: [8]u8,
+    reserved: [8]u8 = [_]u8{0} ** 8,
 
     comptime {
         assert(@sizeOf(Packet) == 64);
