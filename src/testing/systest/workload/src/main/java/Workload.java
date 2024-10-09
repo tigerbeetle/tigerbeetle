@@ -45,9 +45,21 @@ public class Workload implements Callable<Void> {
 
     while (true) {
       var command = randomCommand();
+
+      var builder = new StringBuilder();
+      builder.append("ledger ").append(ledger).append(", command:\n");
+      command.render(builder, true, "  ");
+      System.err.print(builder.toString());
+
       Result result = null;
       try {
         result = command.execute(client);
+
+        var resultBuilder = new StringBuilder();
+        resultBuilder.append("ledger ").append(ledger).append(", result:\n");
+        result.render(resultBuilder, true, "  ");
+        System.err.print(resultBuilder.toString());
+
         result.reconcile(model);
         recordResult(result);
 
@@ -61,15 +73,6 @@ public class Workload implements Callable<Void> {
         previousResult = Optional.of(result);
 
       } catch (AssertionError e) {
-        var builder = new StringBuilder();
-
-        builder.append("ledger ").append(ledger).append(", command:\n");
-        command.render(builder, true, "  ");
-
-        builder.append("ledger ").append(ledger).append(", result:\n");
-        result.render(builder, true, "  ");
-
-        System.err.print(builder.toString());
 
         throw e;
       }
@@ -151,7 +154,7 @@ public class Workload implements Callable<Void> {
           // test error handling as well.
           double linkedProbability = i < (newAccountsCount - 1)
             ? 0.1
-            : 0.001;
+            : 0.9;
           if (random.nextDouble(1.0) < linkedProbability) {
             flags |= TransferFlags.LINKED;
           }
@@ -210,7 +213,7 @@ public class Workload implements Callable<Void> {
         // test error handling as well.
         double linkedProbability = i < (transfersCount - 1)
           ? 0.1
-          : 0.001;
+          : 0.9;
         if (random.nextDouble(1.0) < linkedProbability) {
           flags |= TransferFlags.LINKED;
         }
