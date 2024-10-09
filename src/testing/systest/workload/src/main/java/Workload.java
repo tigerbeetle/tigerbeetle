@@ -142,10 +142,19 @@ public class Workload implements Callable<Void> {
           var id = random.nextLong(0, Long.MAX_VALUE);
           var code = random.nextInt(1, 100);
           var flags = Arbitrary.flags(random,
-              List.of(AccountFlags.LINKED,
-                  AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS,
-                  AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS, 
-                  AccountFlags.HISTORY));
+              List.of(
+                AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS,
+                AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS, 
+                AccountFlags.HISTORY));
+
+          // The last account in a batch shouldn't be linked, but we do it anyway (less often) to
+          // test error handling as well.
+          double linkedProbability = i < (newAccountsCount - 1)
+            ? 0.1
+            : 0.001;
+          if (random.nextDouble(1.0) < linkedProbability) {
+            flags |= TransferFlags.LINKED;
+          }
           
           if (random.nextDouble(1.0) > 0.99) {
             flags |= AccountFlags.CLOSED;
@@ -197,8 +206,12 @@ public class Workload implements Callable<Void> {
                 TransferFlags.BALANCING_CREDIT));
         }
 
-        // The last transfer in a batch can't be linked.
-        if (i < (transfersCount - 1) && random.nextDouble(1.0) > 0.9) {
+        // The last transfer in a batch shouldn't be linked, but we do it anyway (less often) to 
+        // test error handling as well.
+        double linkedProbability = i < (transfersCount - 1)
+          ? 0.1
+          : 0.001;
+        if (random.nextDouble(1.0) < linkedProbability) {
           flags |= TransferFlags.LINKED;
         }
 
