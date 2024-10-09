@@ -4884,8 +4884,18 @@ pub fn ReplicaType(
                 op_head_no_gaps,
             );
             const op_min = if (range) |r| r.op_max + 1 else range_min;
+
             assert(op_min <= op);
-            assert(op_min <= self.op_repair_min());
+            if (self.op_checkpoint() == 0 and range != null) {
+                // We may get here with a missing root op if a we're a backup that is advancing its
+                // checkpoint mid repair.
+                assert(self.status == .normal and self.backup());
+                assert(self.commit_min == self.op_checkpoint_next_trigger());
+                assert(range.?.op_max == 0);
+                assert(range.?.op_min == 0);
+            } else {
+                assert(op_min <= self.op_repair_min());
+            }
 
             // The SV includes headers corresponding to the op_prepare_max for preceding
             // checkpoints (as many as we have and can help repair, which is at most 2).
