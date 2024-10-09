@@ -797,7 +797,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     };
                 },
                 .sync_stage_changed => switch (replica.syncing) {
-                    .idle => cluster.log_replica(.sync_completed, replica.replica),
+                    .idle => cluster.log_replica(.sync, replica.replica),
                     else => {},
                 },
                 .client_evicted => |client_id| cluster.cluster_on_eviction(client_id),
@@ -821,12 +821,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         fn log_replica(
             cluster: *const Self,
             event: enum(u8) {
-                crash = '$',
+                crash = '!',
                 recover = '^',
                 commit = ' ',
+                sync = '$',
                 checkpoint_commenced = '[',
                 checkpoint_completed = ']',
-                sync_completed = '>',
             },
             replica_index: u8,
         ) void {
