@@ -1018,8 +1018,8 @@ public class IntegrationTest {
             final var tasks = new TransferTask[TASKS_COUNT];
             for (int i = 0; i < TASKS_COUNT; i++) {
                 // Starting multiple threads submitting transfers.
-                tasks[i] = new TransferTask(client, account1Id, account2Id, barrier,
-                        new CountDownLatch(0));
+                tasks[i] = new TransferTask(client, account1Id, account2Id, TransferFlags.NONE,
+                        barrier, new CountDownLatch(0));
                 tasks[i].start();
             }
 
@@ -1048,6 +1048,49 @@ public class IntegrationTest {
 
             assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getDebitsPosted());
             assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+        }
+    }
+
+    /**
+     * This test asserts that a linked chain is consistent across concurrent requests.
+     */
+    @Test
+    public void testConcurrentLinkedChainsTasks() throws Throwable {
+        final int TASKS_COUNT = 10_000;
+        final var barrier = new CountDownLatch(TASKS_COUNT);
+
+        try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
+            final var account1Id = UInt128.id();
+            final var account2Id = UInt128.id();
+            final var accounts = generateAccounts(account1Id, account2Id);
+
+            final var createAccountErrors = client.createAccounts(accounts);
+            assertTrue(createAccountErrors.getLength() == 0);
+
+            final var tasks = new TransferTask[TASKS_COUNT];
+            for (int i = 0; i < TASKS_COUNT; i++) {
+                // Starting multiple threads submitting transfers.
+                // The Linked flag will cause the
+                // batch to fail due to LinkedEventChainOpen.
+                final var flag = i % 10 == 0 ? TransferFlags.LINKED : TransferFlags.NONE;
+                tasks[i] = new TransferTask(client, account1Id, account2Id, flag, barrier,
+                        new CountDownLatch(0));
+                tasks[i].start();
+            }
+
+            // Wait for all threads:
+            for (int i = 0; i < TASKS_COUNT; i++) {
+                tasks[i].join();
+
+                if (i % 10 == 0) {
+                    assertTrue(tasks[i].result.getLength() == 1);
+                    assertTrue(tasks[i].result.next());
+                    assertTrue(tasks[i].result
+                            .getResult() == CreateTransferResult.LinkedEventChainOpen);
+                } else {
+                    assertTrue(tasks[i].result.getLength() == 0);
+                }
+            }
         }
     }
 
@@ -1082,8 +1125,8 @@ public class IntegrationTest {
             for (int i = 0; i < TASKS_COUNT; i++) {
 
                 // Starting multiple threads submitting transfers.
-                tasks[i] =
-                        new TransferTask(client, account1Id, account2Id, enterBarrier, exitBarrier);
+                tasks[i] = new TransferTask(client, account1Id, account2Id, TransferFlags.NONE,
+                        enterBarrier, exitBarrier);
                 tasks[i].start();
             }
 
@@ -2104,16 +2147,18 @@ public class IntegrationTest {
         public Throwable exception;
         private byte[] account1Id;
         private byte[] account2Id;
+        private int flags;
         private CountDownLatch enterBarrier;
         private CountDownLatch exitBarrier;
 
-        public TransferTask(Client client, byte[] account1Id, byte[] account2Id,
+        public TransferTask(Client client, byte[] account1Id, byte[] account2Id, int flags,
                 CountDownLatch enterBarrier, CountDownLatch exitBarrier) {
             this.client = client;
             this.result = null;
             this.exception = null;
             this.account1Id = account1Id;
             this.account2Id = account2Id;
+            this.flags = flags;
             this.enterBarrier = enterBarrier;
             this.exitBarrier = exitBarrier;
         }
@@ -2130,6 +2175,7 @@ public class IntegrationTest {
             transfers.setLedger(720);
             transfers.setCode(1);
             transfers.setAmount(100);
+            transfers.setFlags(flags);
 
             try {
                 enterBarrier.countDown();
