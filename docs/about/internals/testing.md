@@ -12,12 +12,12 @@ Documentation for (roughly) code in the `src/testing` directory.
 
 1. Replica index.
 2. Event:
-    - `$`: crash
+    - `!`: crash
     - `^`: recover
     - ` `: commit
+    - `$`: sync
     - `[`: checkpoint start
     - `]`: checkpoint done
-    - `>`: sync done
 3. Role (according to the replica itself):
     - `/`: primary
     - `\`: backup
