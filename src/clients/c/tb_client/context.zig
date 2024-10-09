@@ -296,7 +296,7 @@ pub fn ContextType(
         }
 
         fn request(self: *Context, packet: *Packet) void {
-            const operation = operation_from_int(packet.operation) orelse {
+            const operation: StateMachine.Operation = operation_from_int(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
             };
 
@@ -339,6 +339,11 @@ pub fn ContextType(
             packet.batch_next = null;
             packet.batch_tail = packet;
             packet.batch_size = packet.data_size;
+            packet.batch_allowed = batch_logical_allowed(
+                operation,
+                packet.data,
+                packet.data_size,
+            );
 
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
             if (self.shutdown.load(.acquire)) {
@@ -350,14 +355,15 @@ pub fn ContextType(
                 return self.submit(packet);
             }
 
-            // Otherwise, try to batch the packet with another already in self.pending.
-            if (batch_logical_allowed(packet)) {
+            // If allowed, try to batch the packet with another already in self.pending.
+            if (packet.batch_allowed) {
                 var it = self.pending.peek();
                 while (it) |root| {
                     it = root.next;
 
                     // Check for pending packets of the same operation which can be batched.
                     if (root.operation != packet.operation) continue;
+                    if (!root.batch_allowed) continue;
 
                     const merged_events = @divExact(root.batch_size + packet.data_size, event_size);
                     if (merged_events > events_batch_max) continue;
@@ -374,8 +380,11 @@ pub fn ContextType(
             self.pending.push(packet);
         }
 
-        fn batch_logical_allowed(packet: *const Packet) bool {
-            const operation: StateMachine.Operation = @enumFromInt(packet.operation);
+        fn batch_logical_allowed(
+            operation: StateMachine.Operation,
+            data: ?*const anyopaque,
+            data_size: u32,
+        ) bool {
             if (!StateMachine.batch_logical_allowed.get(operation)) return false;
 
             // TODO(king): Remove this code once protocol batching is implemented.
@@ -383,16 +392,16 @@ pub fn ContextType(
             // If the application submits an unclosed linked chain, it can inadvertently make
             // the elements of the next batch part of it.
             // To work around this issue, we don't allow unclosed linked chains to be batched.
-            if (packet.data_size > 0) {
-                assert(packet.data != null);
+            if (data_size > 0) {
+                assert(data != null);
                 const linked_chain_open: bool = switch (operation) {
                     inline .create_accounts,
                     .create_transfers,
                     => |tag| linked_chain_open: {
                         const Event = StateMachine.Event(tag);
                         // Packet data isn't necessarily aligned.
-                        const events: [*]align(@alignOf(u8)) Event = @ptrCast(packet.data.?);
-                        const events_count: usize = @divExact(packet.data_size, @sizeOf(Event));
+                        const events: [*]align(@alignOf(u8)) const Event = @ptrCast(data.?);
+                        const events_count: usize = @divExact(data_size, @sizeOf(Event));
                         break :linked_chain_open events[events_count - 1].flags.linked;
                     },
                     else => false,
@@ -431,6 +440,7 @@ pub fn ContextType(
             var offset: u32 = 0;
             var it: ?*Packet = packet;
             while (it) |batched| {
+                assert(batched.batch_next == null or batched.batch_allowed);
                 it = batched.batch_next;
 
                 const event_data: []const u8 = if (batched.data_size > 0)
@@ -490,6 +500,7 @@ pub fn ContextType(
                     var it: ?*Packet = packet;
                     var event_offset: u32 = 0;
                     while (it) |batched| {
+                        assert(batched.batch_next == null or batched.batch_allowed);
                         it = batched.batch_next;
 
                         const event_count = @divExact(
@@ -513,6 +524,7 @@ pub fn ContextType(
         fn cancel(self: *Context, packet: *Packet) void {
             var it: ?*Packet = packet;
             while (it) |batched| {
+                assert(batched.batch_next == null or batched.batch_allowed);
                 it = batched.batch_next;
                 self.on_complete(batched, error.ClientShutdown);
             }
@@ -567,35 +579,36 @@ pub fn ContextType(
             }) |operation| {
                 const Event = StateMachine.Event(operation);
                 var data = [_]Event{std.mem.zeroInit(Event, .{})} ** 3;
-                var packet = Packet{
-                    .next = null,
-                    .user_data = null,
-                    .operation = @intFromEnum(operation),
-                    .status = .ok,
-                    .data_size = data.len * @sizeOf(Event),
-                    .data = &data,
-                    .batch_next = null,
-                    .batch_tail = null,
-                    .batch_size = 0,
-                };
 
                 // Broken linked chain cannot be batched.
                 for (&data) |*item| item.flags.linked = true;
-                try std.testing.expect(!batch_logical_allowed(&packet));
+                try std.testing.expect(!batch_logical_allowed(
+                    operation,
+                    data[0..],
+                    data.len * @sizeOf(Event),
+                ));
 
                 // Valid linked chain.
                 data[data.len - 1].flags.linked = false;
-                try std.testing.expect(batch_logical_allowed(&packet));
+                try std.testing.expect(batch_logical_allowed(
+                    operation,
+                    data[0..],
+                    data.len * @sizeOf(Event),
+                ));
 
                 // Single element.
-                packet.data_size = 1 * @sizeOf(Event);
-                packet.data = &data[data.len - 1];
-                try std.testing.expect(batch_logical_allowed(&packet));
+                try std.testing.expect(batch_logical_allowed(
+                    operation,
+                    &data[data.len - 1],
+                    1 * @sizeOf(Event),
+                ));
 
                 // No elements.
-                packet.data_size = 0;
-                packet.data = null;
-                try std.testing.expect(batch_logical_allowed(&packet));
+                try std.testing.expect(batch_logical_allowed(
+                    operation,
+                    null,
+                    0,
+                ));
             }
         }
     };

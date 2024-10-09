@@ -239,6 +239,7 @@ fn request(
         .batch_next = undefined,
         .batch_tail = undefined,
         .batch_size = undefined,
+        .batch_allowed = undefined,
         .reserved = undefined,
     };
 
