@@ -141,6 +141,7 @@ fn dotnet_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
         .Enum, .Struct => return comptime get_mapped_type_name(Type) orelse
             @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
+        .Bool => return "byte",
         .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {

@@ -30,6 +30,7 @@ fn resolve_c_type(comptime Type: type) []const u8 {
         .Array => |info| return resolve_c_type(info.child),
         .Enum => |info| return resolve_c_type(info.tag_type),
         .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+        .Bool => return "uint8_t",
         .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {

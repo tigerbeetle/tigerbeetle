@@ -1947,7 +1947,6 @@ public class IntegrationTests
         var accountResults = client.CreateAccounts(accounts);
         Assert.IsTrue(accountResults.Length == 0);
 
-
         var tasks = new Task<CreateTransferResult>[TASKS_QTY];
 
         async Task<CreateTransferResult> asyncAction(Transfer transfer)
@@ -1991,6 +1990,74 @@ public class IntegrationTests
 
         Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0LU);
         Assert.AreEqual(lookupAccounts[1].DebitsPosted, (uint)TASKS_QTY);
+    }
+
+    /// <summary>
+    /// This test asserts that a linked chain is consistent across concurrent requests.
+    /// </summary>
+
+    [TestMethod]
+    public void ConcurrentLinkedChainTest() => ConcurrentLinkedChainTest(isAsync: false);
+
+    [TestMethod]
+    public void ConcurrentLinkedChainTestAsync() => ConcurrentLinkedChainTest(isAsync: true);
+
+    private void ConcurrentLinkedChainTest(bool isAsync)
+    {
+        const int TASKS_QTY = 10_000;
+
+        using var client = new Client(0, new[] { server.Address });
+
+        var accounts = GenerateAccounts();
+        var accountResults = client.CreateAccounts(accounts);
+        Assert.IsTrue(accountResults.Length == 0);
+
+        var tasks = new Task<CreateTransferResult>[TASKS_QTY];
+
+        async Task<CreateTransferResult> asyncAction(Transfer transfer)
+        {
+            return await client.CreateTransferAsync(transfer);
+        }
+
+        CreateTransferResult syncAction(Transfer transfer)
+        {
+            return client.CreateTransfer(transfer);
+        }
+
+        for (int i = 0; i < TASKS_QTY; i++)
+        {
+            // The Linked flag will cause the
+            // batch to fail due to LinkedEventChainOpen.
+            var flags = i % 10 == 0 ? TransferFlags.Linked : TransferFlags.None;
+            var transfer = new Transfer
+            {
+                Id = ID.Create(),
+                CreditAccountId = accounts[0].Id,
+                DebitAccountId = accounts[1].Id,
+                Amount = 1,
+                Ledger = 1,
+                Code = 1,
+                Flags = flags
+            };
+
+            // Starts multiple requests.
+            // Wraps the syncAction into a Task for unified logic handling both async and sync tests.
+            tasks[i] = isAsync ? asyncAction(transfer) : Task.Run(() => syncAction(transfer));
+        }
+
+        Task.WhenAll(tasks).Wait();
+
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            if (i % 10 == 0)
+            {
+                Assert.IsTrue(tasks[i].Result == CreateTransferResult.LinkedEventChainOpen);
+            }
+            else
+            {
+                Assert.IsTrue(tasks[i].Result == CreateTransferResult.Ok);
+            }
+        }
     }
 
     /// <summary>

@@ -110,6 +110,7 @@ test "valid tb_client.h" {
                                 field_type = std.meta.Int(.unsigned, @bitSizeOf(field_type));
                             },
                             .Enum => |info| field_type = info.tag_type,
+                            .Bool => field_type = u8,
                             else => {},
                         }
 
