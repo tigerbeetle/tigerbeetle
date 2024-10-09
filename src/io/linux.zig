@@ -16,6 +16,8 @@ const DirectIO = @import("../io.zig").DirectIO;
 const parse_dirty_semver = stdx.parse_dirty_semver;
 
 pub const IO = struct {
+    pub const tag = .linux;
+
     ring: IO_Uring,
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
@@ -298,7 +300,7 @@ pub const IO = struct {
         fn complete(completion: *Completion) void {
             switch (completion.operation) {
                 .accept => {
-                    const result: anyerror!posix.socket_t = blk: {
+                    const result: anyerror!socket_t = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -590,7 +592,7 @@ pub const IO = struct {
     /// This union encodes the set of operations supported as well as their arguments.
     const Operation = union(enum) {
         accept: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             address: posix.sockaddr = undefined,
             address_size: posix.socklen_t = @sizeOf(posix.sockaddr),
         },
@@ -598,7 +600,7 @@ pub const IO = struct {
             fd: fd_t,
         },
         connect: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             address: std.net.Address,
         },
         openat: struct {
@@ -613,11 +615,11 @@ pub const IO = struct {
             offset: u64,
         },
         recv: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             buffer: []u8,
         },
         send: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             buffer: []const u8,
         },
         statx: struct {
@@ -658,10 +660,10 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: AcceptError!posix.socket_t,
+            result: AcceptError!socket_t,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
     ) void {
         completion.* = .{
             .io = self,
@@ -671,7 +673,7 @@ pub const IO = struct {
                     callback(
                         @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const AcceptError!posix.socket_t, @ptrCast(@alignCast(res))).*,
+                        @as(*const AcceptError!socket_t, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -753,7 +755,7 @@ pub const IO = struct {
             result: ConnectError!void,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         address: std.net.Address,
     ) void {
         completion.* = .{
@@ -892,7 +894,7 @@ pub const IO = struct {
             result: RecvError!usize,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         buffer: []u8,
     ) void {
         completion.* = .{
@@ -943,7 +945,7 @@ pub const IO = struct {
             result: SendError!usize,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         buffer: []const u8,
     ) void {
         completion.* = .{
@@ -1105,18 +1107,56 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
+    pub const socket_t = posix.socket_t;
+    pub const socklen_t = u32;
     pub const INVALID_SOCKET = -1;
 
+    pub fn setsockopt(
+        io: *IO,
+        fd: socket_t,
+        level: i32,
+        optname: u32,
+        opt: []const u8,
+    ) posix.SetSockOptError!void {
+        _ = io;
+        return posix.setsockopt(fd, level, optname, opt);
+    }
+
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !posix.socket_t {
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
         _ = self;
         return posix.socket(family, sock_type | posix.SOCK.CLOEXEC, protocol);
     }
 
     /// Closes a socket opened by the IO instance.
-    pub fn close_socket(self: *IO, socket: posix.socket_t) void {
+    pub fn close_socket(self: *IO, socket: socket_t) void {
         _ = self;
         posix.close(socket);
+    }
+
+    pub fn getsockname(
+        io: *IO,
+        sock: socket_t,
+        addr: *posix.sockaddr,
+        addrlen: *socklen_t,
+    ) posix.GetSockNameError!void {
+        _ = io;
+        return posix.getsockname(sock, addr, addrlen);
+    }
+
+    pub fn bind(
+        io: *IO,
+        sock: socket_t,
+        addr: *const posix.sockaddr,
+        len: socklen_t,
+    ) posix.BindError!void {
+        _ = io;
+        return posix.bind(sock, addr, len);
+    }
+
+    pub fn listen(io: *IO, sock: socket_t, backlog: u31) posix.ListenError!void {
+        _ = io;
+        return posix.listen(sock, backlog);
     }
 
     /// Opens a directory with read only access.
