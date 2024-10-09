@@ -24,6 +24,8 @@ const TableType = @import("table.zig").TableType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 const compaction_op_min = @import("compaction.zig").compaction_op_min;
+const compaction_block_count_bar_max = @import("compaction.zig").compaction_block_count_bar_max;
+const compaction_block_count_beat_min = @import("compaction.zig").compaction_block_count_beat_min;
 const ResourcePool = @import("compaction.zig").ResourcePoolType(Grid);
 
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
@@ -70,6 +72,7 @@ const FuzzOp = union(enum) {
 
     compact: struct {
         op: u64,
+        beats_remaining: u64,
         checkpoint: bool,
     },
     put: Value,
@@ -153,7 +156,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         pool: ResourcePool,
 
-        pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
+        pub fn run(storage: *Storage, block_count: u32, fuzz_ops: []const FuzzOp) !void {
             var env: Environment = undefined;
             env.state = .init;
             env.storage = storage;
@@ -197,10 +200,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.scan_results_model = try allocator.alloc(Value, scan_results_max);
             defer allocator.free(env.scan_results_model);
-
-            // TODO: Pull out these constants. 3 is block_count_bar_single, 8 is
-            // minimum_block_count_beat.
-            const block_count = 3 * stdx.div_ceil(constants.lsm_levels, 2) + 8;
 
             env.pool = try ResourcePool.init(allocator, block_count);
             defer env.pool.deinit(allocator);
@@ -295,35 +294,40 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.manifest_log_open, .fuzzing);
         }
 
-        pub fn compact(env: *Environment, op: u64) void {
-            if (op < @divExact(constants.lsm_compaction_ops, 2)) return;
+        pub fn compact(env: *Environment, op: u64, beats_remaining: u64) void {
+            const half_bar = @divExact(constants.lsm_compaction_ops, 2);
+            if (op < half_bar) return;
             const compaction_beat = op % constants.lsm_compaction_ops;
 
-            const last_half_beat =
-                compaction_beat == @divExact(constants.lsm_compaction_ops, 2) - 1;
+            const first_beat = compaction_beat == 0;
+            const half_beat = compaction_beat == half_bar;
+
+            const last_half_beat = compaction_beat == half_bar - 1;
             const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
-            if (!last_beat and !last_half_beat) return;
+            if (last_beat or last_half_beat) assert(beats_remaining == 1);
 
             assert(env.pool.idle());
-            assert(env.pool.blocks_acquired() == 0);
+            if (first_beat or half_beat) {
+                assert(env.pool.blocks_acquired() == 0);
+            }
 
             var compactions_active: [constants.lsm_levels]*Tree.Compaction = undefined;
             var compactions_active_count: usize = 0;
             for (&env.tree.compactions) |*compaction| {
-                if (last_half_beat and compaction.level_b % 2 != 0) continue;
-                if (last_beat and compaction.level_b % 2 == 0) continue;
-                compactions_active[compactions_active_count] = compaction;
-                compactions_active_count += 1;
+                if ((compaction_beat < half_bar) == (compaction.level_b % 2 == 1)) {
+                    compactions_active[compactions_active_count] = compaction;
+                    compactions_active_count += 1;
+                }
             }
             assert(compactions_active_count <= stdx.div_ceil(constants.lsm_levels, 2));
             const compactions_slice = compactions_active[0..compactions_active_count];
 
             for (compactions_slice) |compaction| {
-                compaction.bar_commence(op);
+                if (first_beat or half_beat) compaction.bar_commence(op);
             }
             for (compactions_slice) |compaction| {
-                compaction.beat_commence(1);
+                compaction.beat_commence(beats_remaining);
             }
             for (compactions_slice) |compaction| {
                 assert(env.pool.idle());
@@ -335,21 +339,22 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 assert(env.pool.idle());
             }
 
-            if (op >= constants.lsm_compaction_ops) {
-                env.change_state(.fuzzing, .manifest_log_compact);
-                env.manifest_log.compact(manifest_log_compact_callback, op);
-                env.tick_until_state_change(.manifest_log_compact, .fuzzing);
-            }
+            if (last_beat or last_half_beat) {
+                assert(env.pool.blocks_acquired() == 0);
 
-            for (compactions_slice) |compaction| {
-                compaction.bar_complete();
-            }
+                if (op >= constants.lsm_compaction_ops) {
+                    env.change_state(.fuzzing, .manifest_log_compact);
+                    env.manifest_log.compact(manifest_log_compact_callback, op);
+                    env.tick_until_state_change(.manifest_log_compact, .fuzzing);
+                }
 
-            assert(env.pool.idle());
-            assert(env.pool.blocks_acquired() == 0);
+                for (compactions_slice) |compaction| {
+                    compaction.bar_complete();
+                }
 
-            if (op >= constants.lsm_compaction_ops) {
-                env.manifest_log.compact_end();
+                if (op >= constants.lsm_compaction_ops) {
+                    env.manifest_log.compact_end();
+                }
             }
 
             if (last_beat) {
@@ -518,7 +523,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 switch (fuzz_op) {
                     .compact => |c| {
                         if (tree_full) continue;
-                        env.compact(c.op);
+                        env.compact(c.op, c.beats_remaining);
                         if (c.checkpoint) env.checkpoint(c.op);
                     },
                     .put => |value| {
@@ -828,6 +833,7 @@ fn generate_compact(
     random: std.rand.Random,
     options: struct { op: u64 },
 ) FuzzOp {
+    const half_bar = @divExact(constants.lsm_compaction_ops, 2);
     const checkpoint =
         // Can only checkpoint on the last beat of the bar.
         options.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
@@ -837,6 +843,7 @@ fn generate_compact(
     return FuzzOp{ .compact = .{
         .op = options.op,
         .checkpoint = checkpoint,
+        .beats_remaining = random.intRangeAtMost(u64, 1, half_bar - options.op % half_bar),
     } };
 }
 
@@ -867,6 +874,14 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
         .fault_atlas = &storage_fault_atlas,
     };
 
+    const block_count_min =
+        stdx.div_ceil(constants.lsm_levels, 2) * compaction_block_count_bar_max +
+        (compaction_block_count_beat_min - compaction_block_count_bar_max);
+    const block_count = if (random.uintAtMost(u8, 5) == 0)
+        block_count_min
+    else
+        random.intRangeAtMost(u32, block_count_min, block_count_min * 64);
+
     const fuzz_op_count = @min(
         fuzz_args.events_max orelse events_max,
         fuzz.random_int_exponential(random, usize, 1E6),
@@ -881,7 +896,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
 
     switch (table_usage) {
         inline else => |usage| {
-            try EnvironmentType(usage).run(&storage, fuzz_ops);
+            try EnvironmentType(usage).run(&storage, block_count, fuzz_ops);
         },
     }
 
