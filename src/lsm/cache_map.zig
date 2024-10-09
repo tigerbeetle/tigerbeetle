@@ -270,6 +270,7 @@ pub fn CacheMapType(
             // The scope_rollback_log stores the operations we need to reverse the changes a scope
             // made. They get replayed in reverse order.
             var i: usize = self.scope_rollback_log.items.len;
+            assert(self.scope_rollback_log.items.len == 0); // this should fail sometimes
             while (i > 0) {
                 i -= 1;
 
