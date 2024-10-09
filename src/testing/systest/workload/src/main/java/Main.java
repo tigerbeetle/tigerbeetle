@@ -2,6 +2,7 @@ import java.security.SecureRandom;
 import java.text.NumberFormat;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
@@ -11,12 +12,8 @@ import com.tigerbeetle.UInt128;
 public final class Main {
   public static void main(String[] args) throws Exception {
     Map<String, String> env = System.getenv();
-    
-    if (args.length != 1) {
-      System.err.println("the workload must be called with a single argument (the replicas)");
-      System.exit(1);
-    }
-    String replicaAddressesArg = args[0];
+    String replicaAddressesArg = Objects.requireNonNull(env.get("REPLICAS"),
+        "REPLICAS environment variable must be set (comma-separated list)");
 
     String[] replicaAddresses = replicaAddressesArg.split(",");
     if (replicaAddresses.length == 0) {

@@ -1,5 +1,6 @@
 //! This provides actions for injecting network faults, to test TigerBeetle for fault tolerance.
 //! It's inspired by Jepsen's "nemesis".
+
 const std = @import("std");
 const arbitrary = @import("./arbitrary.zig");
 

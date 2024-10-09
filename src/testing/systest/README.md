@@ -2,7 +2,7 @@
 
 ## Images
 
-The system test, running in Antithesis, consists of 3 images:
+This full system test, running in Antithesis, consists of 3 images:
 
 - `replica`: A TigerBeetle replica.
 - `workload`:
@@ -30,7 +30,7 @@ In the output of the above build script, there's something like the following:
 > 
 >     cd /tmp/tmp.xxxxxxxxxx && TAG=<tag> docker compose up
 
-Run that command to locally start the systest using docker compose.
+Run that command to locally start the test using docker compose.
 
 Clean up afterwards:
 

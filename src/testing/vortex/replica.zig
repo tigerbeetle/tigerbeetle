@@ -1,6 +1,10 @@
 //! Models a replica, which can be started, terminated, and restarted over time.
 //!
+//! As this can restart the underlying LoggedProcess over time, it needs to be managed, i.e. hold
+//! on to an allocator.
+//!
 //! NOTE: In the future we might want to implement various upgrade procedures here.
+
 const std = @import("std");
 const LoggedProcess = @import("./logged_process.zig");
 
@@ -12,8 +16,7 @@ pub const State = enum(u8) { initial, running, terminated, completed };
 // Passed in to create:
 allocator: std.mem.Allocator,
 executable_path: []const u8,
-replica_ports: []const u16,
-replica_index: u8,
+replica_addresses: []const u8,
 datafile: []const u8,
 
 // Lifecycle state:
@@ -22,8 +25,7 @@ process: ?*LoggedProcess,
 pub fn create(
     allocator: std.mem.Allocator,
     executable_path: []const u8,
-    replica_ports: []const u16,
-    replica_index: u8,
+    replica_addresses: []const u8,
     datafile: []const u8,
 ) !*Self {
     const self = try allocator.create(Self);
@@ -31,9 +33,8 @@ pub fn create(
 
     self.* = .{
         .allocator = allocator,
-        .replica_index = replica_index,
         .executable_path = executable_path,
-        .replica_ports = replica_ports,
+        .replica_addresses = replica_addresses,
         .datafile = datafile,
         .process = null,
     };
@@ -67,13 +68,10 @@ pub fn start(self: *Self) !void {
         process.destroy(self.allocator);
     }
 
-    const ports = try LoggedProcess.comma_separate_ports(self.allocator, self.replica_ports);
-    defer self.allocator.free(ports);
-
     const addresses = try std.fmt.allocPrint(
         self.allocator,
         "--addresses={s}",
-        .{ports},
+        .{self.replica_addresses},
     );
     defer self.allocator.free(addresses);
 
@@ -94,5 +92,5 @@ pub fn terminate(
     defer assert(self.state() == .terminated);
 
     assert(self.process != null);
-    return try self.process.?.terminate();
+    return try self.process.?.terminate(std.posix.SIG.KILL);
 }
