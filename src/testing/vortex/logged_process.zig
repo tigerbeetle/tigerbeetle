@@ -102,6 +102,7 @@ pub fn state(self: *Self) State {
 
 pub fn terminate(
     self: *Self,
+    signal: comptime_int,
 ) !std.process.Child.Term {
     self.expect_state_in(.{.running});
     defer self.expect_state_in(.{.terminated});
@@ -115,7 +116,7 @@ pub fn terminate(
             const exit_code = 1;
             break :kill std.os.windows.TerminateProcess(self.child.id, exit_code);
         } else {
-            break :kill std.posix.kill(self.child.id, std.posix.SIG.KILL);
+            break :kill std.posix.kill(self.child.id, signal);
         }
     } catch |err| {
         log.err(
@@ -229,7 +230,7 @@ test "LoggedProcess: starts and stops" {
     defer process.destroy(allocator);
 
     std.time.sleep(10 * std.time.ns_per_ms);
-    _ = try process.terminate();
+    _ = try process.terminate(std.posix.SIG.KILL);
 }
 
 /// Formats the ports as comma-separated. Caller owns slice after successful return.
