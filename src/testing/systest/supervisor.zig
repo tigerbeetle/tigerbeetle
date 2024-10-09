@@ -45,17 +45,20 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const Shell = @import("../../../shell.zig");
+const Shell = @import("../../shell.zig");
 const LoggedProcess = @import("./logged_process.zig");
 const Replica = @import("./replica.zig");
+const Driver = @import("./driver.zig");
 const NetworkFaults = @import("./network_faults.zig");
 const arbitrary = @import("./arbitrary.zig");
-const log = std.log.scoped(.systest);
+
+const log = std.log.scoped(.supervisor);
 
 const assert = std.debug.assert;
 
 const replica_count = 3;
 const replica_ports = [replica_count]u16{ 3000, 3001, 3002 };
+const replica_addresses = comma_separate_ports(&replica_ports);
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
@@ -111,8 +114,7 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
         var replica = try Replica.create(
             allocator,
             args.tigerbeetle_executable,
-            &replica_ports,
-            @intCast(i),
+            replica_addresses,
             datafile,
         );
         errdefer replica.destroy();
@@ -132,6 +134,28 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
             replica.destroy();
         }
     }
+
+    // TODO: don't hardcode drivers in like this
+    // Start driver.
+    const driver = try Driver.spawn(allocator, &.{
+        shell.zig_exe.?,
+        "build",
+        "scripts",
+        "--",
+        "systest",
+        "driver",
+        replica_addresses,
+    });
+    defer {
+        if (driver.state() == .running) {
+            _ = driver.terminate() catch {};
+        }
+        driver.destroy(allocator);
+    }
+
+    try driver.send(.create_accounts, &.{
+        std.mem.zeroInit(Driver.Event(.create_accounts), .{ .id = 1 }),
+    });
 
     // Start workload.
     const workload = try start_workload(shell, allocator);
@@ -175,7 +199,7 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         // Restart any (by the nemesis) terminated replicas. Any other termination reason
         // than SIGKILL is considered unexpected and fails the test.
-        for (replicas) |replica| {
+        for (replicas, 0..) |replica, index| {
             if (replica.state() == .terminated) {
                 const replica_result = try replica.process.?.wait();
                 switch (replica_result) {
@@ -184,14 +208,14 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
                             std.posix.SIG.KILL => {
                                 log.info(
                                     "restarting terminated replica {d}",
-                                    .{replica.replica_index},
+                                    .{index},
                                 );
                                 try replica.start();
                             },
                             else => {
                                 log.err(
                                     "replica {d} exited unexpectedly with on signal {d}",
-                                    .{ replica.replica_index, signal },
+                                    .{ index, signal },
                                 );
                                 std.process.exit(1);
                             },
@@ -241,24 +265,26 @@ pub fn main(shell: *Shell, allocator: std.mem.Allocator, args: CLIArgs) !void {
 }
 
 fn terminate_random_replica(random: std.Random, replicas: []*Replica) !void {
-    if (random_replica_in_state(random, replicas, .running)) |replica| {
-        log.info("terminating replica {d}", .{replica.replica_index});
-        _ = try replica.terminate();
-        log.info("replica {d} terminating", .{replica.replica_index});
+    if (random_replica_in_state(random, replicas, .running)) |found| {
+        log.info("terminating replica {d}", .{found.index});
+        _ = try found.replica.terminate();
+        log.info("replica {d} terminated", .{found.index});
     } else return error.NoRunningReplica;
 }
+
+const RandomReplica = struct { replica: *Replica, index: u8 };
 
 fn random_replica_in_state(
     random: std.Random,
     replicas: []*Replica,
     state: Replica.State,
-) ?*Replica {
-    var matching: [replica_count]*Replica = undefined;
+) ?RandomReplica {
+    var matching: [replica_count]RandomReplica = undefined;
     var count: u8 = 0;
 
-    for (replicas) |replica| {
+    for (replicas, 0..) |replica, index| {
         if (replica.state() == state) {
-            matching[count] = replica;
+            matching[count] = .{ .replica = replica, .index = @intCast(index) };
             count += 1;
         }
     }
@@ -274,11 +300,20 @@ fn start_workload(shell: *Shell, allocator: std.mem.Allocator) !*LoggedProcess {
     const workload_jar = "src/testing/systest/workload/target/workload-0.0.1-SNAPSHOT.jar";
 
     const class_path = try shell.fmt("{s}:{s}", .{ client_jar, workload_jar });
-    const replicas = try LoggedProcess.comma_separate_ports(
-        shell.arena.allocator(),
-        &replica_ports,
-    );
-    const argv = &.{ "java", "-ea", "-cp", class_path, "Main", replicas };
+    const argv = &.{ "java", "-ea", "-cp", class_path, "Main", replica_addresses };
 
     return try LoggedProcess.spawn(allocator, argv);
+}
+
+pub fn comma_separate_ports(comptime ports: []const u16) []const u8 {
+    assert(ports.len > 0);
+
+    var out: []const u8 = std.fmt.comptimePrint("{d}", .{ports[0]});
+
+    inline for (ports[1..]) |port| {
+        out = out ++ std.fmt.comptimePrint(",{d}", .{port});
+    }
+
+    assert(std.mem.count(u8, out, ",") == ports.len - 1);
+    return out;
 }

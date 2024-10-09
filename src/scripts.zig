@@ -22,7 +22,7 @@ const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const changelog = @import("./scripts/changelog.zig");
 const antithesis = @import("./scripts/antithesis.zig");
-const systest = @import("./testing/systest/supervisor/systest.zig");
+const systest = @import("./testing/systest/systest.zig");
 
 const CLIArgs = union(enum) {
     cfo: cfo.CLIArgs,
