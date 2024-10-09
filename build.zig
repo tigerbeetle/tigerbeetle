@@ -74,6 +74,7 @@ pub fn build(b: *std.Build) !void {
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
         .run = b.step("run", "Run TigerBeetle"),
         .scripts = b.step("scripts", "Free form automation scripts"),
+        .vortex = b.step("vortex", "Full system tests with pluggable client drivers"),
         .@"test" = b.step("test", "Run all tests"),
         .test_fmt = b.step("test:fmt", "Check formatting"),
         .test_integration = b.step("test:integration", "Run integration tests"),
@@ -247,6 +248,14 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
+    });
+
+    // zig build vortex
+    _ = build_vortex(b, build_steps.vortex, .{
+        .vsr_options = vsr_options,
+        .target = target,
+        .mode = mode,
+        .tb_client_header = tb_client_header.path,
     });
 
     // zig build clients:$lang
@@ -594,6 +603,7 @@ fn build_test(
     steps.test_unit.dependOn(&run_unit_tests.step);
 
     build_test_integration(b, steps.test_integration, .{
+        .tb_client_header = options.tb_client_header.path,
         .llvm_objcopy = options.llvm_objcopy,
         .target = options.target,
         .mode = options.mode,
@@ -610,6 +620,7 @@ fn build_test(
 }
 
 fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step, options: struct {
+    tb_client_header: std.Build.LazyPath,
     llvm_objcopy: ?[]const u8,
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
@@ -636,19 +647,31 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
         .mode = options.mode,
     });
 
+    const step_vortex = b.step(
+        "vortex_integration_test",
+        "special build of vortex for multiversion integration test",
+    );
+    const vortex_exe = build_vortex(b, step_vortex, .{
+        .tb_client_header = options.tb_client_header,
+        .vsr_options = vsr_options,
+        .target = options.target,
+        .mode = options.mode,
+    });
+
     const integration_tests_options = b.addOptions();
     integration_tests_options.addOptionPath("tigerbeetle_exe", tigerbeetle);
     integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_previous);
+    integration_tests_options.addOptionPath("vortex_exe", vortex_exe);
     const integration_tests = b.addTest(.{
         .root_source_file = b.path("src/integration_tests.zig"),
         .target = options.target,
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
-    integration_tests.root_module.addOptions("vsr_options", vsr_options);
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
+    integration_tests.step.dependOn(step_vortex);
+
     const run_integration_tests = b.addRunArtifact(integration_tests);
-    run_integration_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     if (b.args != null) { // Don't cache test results if running a specific test.
         run_integration_tests.has_side_effects = true;
     }
@@ -812,6 +835,33 @@ fn build_scripts(
     scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     if (b.args) |args| scripts_run.addArgs(args);
     step_scripts.dependOn(&scripts_run.step);
+}
+
+fn build_vortex(
+    b: *std.Build,
+    step_vortex: *std.Build.Step,
+    options: struct {
+        tb_client_header: std.Build.LazyPath,
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) std.Build.LazyPath {
+    const vortex = b.addExecutable(.{
+        .name = "vortex",
+        .root_source_file = b.path("src/vortex.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+    });
+
+    vortex.root_module.addOptions("vsr_options", options.vsr_options);
+    vortex.linkLibC();
+    vortex.addIncludePath(options.tb_client_header.dirname());
+
+    const install_step = b.addInstallArtifact(vortex, .{});
+    step_vortex.dependOn(&install_step.step);
+
+    return install_step.emitted_bin.?;
 }
 
 // Zig cross-targets, Dotnet RID (Runtime Identifier), CPU features.
