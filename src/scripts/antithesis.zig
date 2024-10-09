@@ -1,4 +1,4 @@
-//! Deployment script for our systest (src/testing/systest).
+//! Deployment script for vortex (src/testing/vortex).
 //!
 //! * Builds the Java client and the associated workload using Maven
 //! * Builds Docker images for the workload, replicas, and config
@@ -56,7 +56,7 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     // Build workload
     {
-        try shell.pushd("./src/testing/systest/workload");
+        try shell.pushd("./src/testing/vortex/workload");
         defer shell.popd();
 
         try shell.exec("mvn clean package --batch-mode --quiet", .{});
@@ -272,7 +272,7 @@ const dockerfiles = .{
     \\
     \\COPY src/clients/java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar \
     \\      ./tigerbeetle-java.jar
-    \\COPY src/testing/systest/workload/target/workload-0.0.1-SNAPSHOT.jar \
+    \\COPY src/testing/vortex/workload/target/workload-0.0.1-SNAPSHOT.jar \
     \\      ./workload.jar
     \\
     \\ENTRYPOINT ["java", "-ea", "-cp", "workload.jar:tigerbeetle-java.jar", "Main"]
