@@ -163,7 +163,7 @@ Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code fore
     statements in the "parent" function, and move non-branchy logic fragments to helper
     functions. Divide responsibility. All control flow should be handled by _one_ function, the rest shouldn't
     care about control flow at all. In other words,
-    ["push ifs up and fors down"](https://matklad.github.io/2023/11/15/push-ifs-up-and-fors-down.html).
+    ["push `if`s up and `for`s down"](https://matklad.github.io/2023/11/15/push-ifs-up-and-fors-down.html).
   * Similarly, centralize state manipulation. Let the parent function keep all relevant state in
     local variables, and use helpers to compute what needs to change, rather than applying the
     change directly. Keep leaf functions pure.
