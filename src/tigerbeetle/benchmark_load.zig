@@ -28,6 +28,8 @@ const Client = vsr.Client(StateMachine, MessageBus);
 const tb = vsr.tigerbeetle;
 const StatsD = vsr.statsd.StatsD;
 const IdPermutation = vsr.testing.IdPermutation;
+const ZipfianGenerator = stdx.ZipfianGenerator;
+const ZipfianShuffled = stdx.ZipfianShuffled;
 
 const cli = @import("./cli.zig");
 
@@ -146,6 +148,22 @@ pub fn main(
         .reversed => .{ .inversion = {} },
     };
 
+    assert(cli_args.account_count >= cli_args.account_count_hot);
+    const account_generator = Generator.from_distribution(
+        cli_args.account_distribution,
+        cli_args.account_count - cli_args.account_count_hot,
+        random,
+    );
+    const account_generator_hot = Generator.from_distribution(
+        cli_args.account_distribution,
+        cli_args.account_count_hot,
+        random,
+    );
+
+    log.info("Account distribution: {s}", .{
+        @tagName(cli_args.account_distribution),
+    });
+
     var benchmark = Benchmark{
         .io = &io,
         .message_pool = &message_pool,
@@ -153,6 +171,8 @@ pub fn main(
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
         .account_count_hot = cli_args.account_count_hot,
+        .account_generator = account_generator,
+        .account_generator_hot = account_generator_hot,
         .flag_history = cli_args.flag_history,
         .flag_imported = cli_args.flag_imported,
         .account_index = 0,
@@ -232,6 +252,28 @@ pub fn main(
     }
 }
 
+const Generator = union(enum) {
+    zipfian: ZipfianShuffled,
+    latest: ZipfianGenerator,
+    uniform,
+
+    fn from_distribution(
+        distribution: cli.Command.Benchmark.Distribution,
+        count: u64,
+        random: std.Random,
+    ) Generator {
+        return switch (distribution) {
+            .zipfian => .{
+                .zipfian = ZipfianShuffled.init(count, random),
+            },
+            .latest => .{
+                .latest = ZipfianGenerator.init(count),
+            },
+            .uniform => .uniform,
+        };
+    }
+};
+
 const Benchmark = struct {
     io: *IO,
     message_pool: *MessagePool,
@@ -239,6 +281,8 @@ const Benchmark = struct {
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
     account_count_hot: usize,
+    account_generator: Generator,
+    account_generator_hot: Generator,
     flag_history: bool,
     flag_imported: bool,
     account_index: usize,
@@ -334,20 +378,47 @@ const Benchmark = struct {
         b.create_accounts();
     }
 
+    fn gen_account_index(b: *Benchmark, generator: *Generator) u64 {
+        const random = b.rng.random();
+        switch (generator.*) {
+            .zipfian => |gen| {
+                // zipfian set size must be same as account set size
+                assert(b.account_count == gen.gen.n);
+                const index = gen.next(random);
+                assert(index < b.account_count);
+                return index;
+            },
+            .latest => |gen| {
+                assert(b.account_count == gen.n);
+                const index_rev = gen.next(random);
+                assert(index_rev < b.account_count);
+                return b.account_count - index_rev - 1;
+            },
+            .uniform => {
+                return random.uintLessThan(u64, b.account_count);
+            },
+        }
+    }
+
     fn create_transfer(b: *Benchmark) tb.Transfer {
         const random = b.rng.random();
+
+        // The set of accounts is divided into two different "worlds" by
+        // `account_count_hot`. Sometimes the debit account will be selected
+        // from the first `account_count_hot` accounts; otherwise both
+        // debit and credit will be selected from an account >= `account_count_hot`.
 
         const debit_account_hot = b.account_count_hot > 0 and
             random.uintLessThan(u64, 100) < b.transfer_hot_percent;
 
         const debit_account_index = if (debit_account_hot)
-            random.uintLessThan(u64, b.account_count_hot)
+            b.gen_account_index(&b.account_generator_hot)
         else
-            random.uintLessThan(u64, b.account_count);
+            b.gen_account_index(&b.account_generator) + b.account_count_hot;
         const credit_account_index = index: {
-            var index = random.uintLessThan(u64, b.account_count);
+            var index = b.gen_account_index(&b.account_generator) + b.account_count_hot;
             if (index == debit_account_index) {
-                index = (index + 1) % b.account_count;
+                index = (index + 1) % b.account_count + b.account_count_hot;
             }
             break :index index;
         };
@@ -493,7 +564,7 @@ const Benchmark = struct {
             return;
         }
 
-        b.account_index = b.rng.random().intRangeLessThan(usize, 0, b.account_count);
+        b.account_index = b.gen_account_index(&b.account_generator);
         var filter = tb.AccountFilter{
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
             .user_data_128 = 0,

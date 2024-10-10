@@ -97,6 +97,9 @@ const CLIArgs = union(enum) {
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_count_hot: usize = 0,
+        /// The probability distribution used to select accounts when making
+        /// transfers or queries.
+        account_distribution: Command.Benchmark.Distribution = .uniform,
         flag_history: bool = false,
         flag_imported: bool = false,
         account_batch_size: usize = @divExact(
@@ -421,6 +424,15 @@ pub const Command = union(enum) {
         /// optimizations such as avoiding negative prefetch) while random/reversed can't.
         pub const IdOrder = enum { sequential, random, reversed };
 
+        pub const Distribution = enum {
+            /// Shuffled zipfian numbers where relatively few indexes are selected frequently.
+            zipfian,
+            /// Also zipfian, but the most recent indexes are selected frequently.
+            latest,
+            /// Uniform distribution; unrealistic workloads.
+            uniform,
+        };
+
         cache_accounts: ?[]const u8,
         cache_transfers: ?[]const u8,
         cache_transfers_pending: ?[]const u8,
@@ -428,6 +440,7 @@ pub const Command = union(enum) {
         cache_grid: ?[]const u8,
         account_count: usize,
         account_count_hot: usize,
+        account_distribution: Distribution,
         flag_history: bool,
         flag_imported: bool,
         account_batch_size: usize,
@@ -816,6 +829,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .cache_grid = benchmark.cache_grid,
         .account_count = benchmark.account_count,
         .account_count_hot = benchmark.account_count_hot,
+        .account_distribution = benchmark.account_distribution,
         .flag_history = benchmark.flag_history,
         .flag_imported = benchmark.flag_imported,
         .account_batch_size = benchmark.account_batch_size,
