@@ -896,8 +896,8 @@ test "Cluster: view_change: lagging replica advances checkpoint during view chan
     try expectEqual(b2.commit_max(), checkpoint_2_trigger);
     try expectEqual(b2.status(), .normal);
 
-    // Progress a0 & b2's head past op_prepare_max for checkpoint_2 (but commit_max stays at
-    // op_prepare_ok_max).
+    // Progress a0 & b2's head past op_prepare_ok_max for checkpoint_2 (commit_max stays at
+    // op_prepare_ok_max since a syncing replica's don't prepare_ok ops past prepare_ok_max).
     try c.request(
         checkpoint_2_prepare_max,
         checkpoint_2_prepare_ok_max,
@@ -1579,6 +1579,105 @@ test "Cluster: eviction: session_too_low" {
     try c0.request(2, 1);
     try mark.expect_hit();
     try expectEqual(c0.eviction_reason(), .session_too_low);
+}
+
+test "Cluster: view_change: DVC header doesn't match current header in journal" {
+    // It could be the case that a replica's DVC headers don't match the journal's current state.
+    // For example, a header could be blank in the DVC but present in the journal (could happen if
+    // the DVC was computed when that header was corrupt/missing in the replica's journal, and the
+    // replica is simply reusing an old DVC). The replica must check the journal before
+    // broadcasating its DVC, so it appropriately acks/nacks headers in the DVC based on the current
+    // state of the journal.
+
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+    var c = t.clients(0, t.cluster.clients.len);
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    b2.stop();
+
+    // Ensure b1 only commits up till checkpoint_2_trigger - 1, so it stays at checkpoint_1 while
+    // a0 moves to checkpoint_2.
+    b1.drop(.R_, .incoming, .commit);
+
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    try expectEqual(a0.commit(), checkpoint_2_trigger);
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+    try expectEqual(b1.commit(), checkpoint_2_trigger - 1);
+    try expectEqual(b1.op_checkpoint(), checkpoint_1);
+
+    b1.stop();
+
+    try b2.open();
+    t.run();
+
+    // b2 performs state sync to get caught up with a0.
+    try expectEqual(b2.op_checkpoint(), checkpoint_2);
+    try expectEqual(b2.commit_max(), checkpoint_2_trigger);
+    try expectEqual(b2.status(), .normal);
+    try b2.expect_sync_done();
+
+    try c.request(checkpoint_2_prepare_max, checkpoint_2_prepare_max);
+
+    // a0 and b2 both prepare and commit up to the prepare_max for checkpoint_2.
+    try expectEqual(a0.op_head(), checkpoint_2_prepare_max);
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+    try expectEqual(a0.commit_max(), checkpoint_2_prepare_max);
+
+    try expectEqual(b2.op_head(), checkpoint_2_prepare_max);
+    try expectEqual(b2.op_checkpoint(), checkpoint_2);
+    try expectEqual(b2.commit_max(), checkpoint_2_prepare_max);
+
+    b2.stop();
+    a0.stop();
+
+    // Corrupt op_head() - 1 to ensure that the DVC headers computed by a0 on startup contain a
+    // blank header for op_header() - 1.
+    a0.corrupt(.{ .wal_prepare = (a0.op_head() - 1) % slot_count });
+
+    const mark = marks.check("quorum received, awaiting repair");
+
+    try a0.open();
+    try b1.open();
+
+    t.run();
+
+    // The two replicas are stuck in view change:
+    // B1 is still on checkpoint_1, it's DVC header lagging behind A0's. A0's DVC headers contain a
+    // blank header for op_head() - 1, which it can't nack/ack because it is corrupted in the
+    // journal. There aren't enough nacks for truncating op_head() -1 (nack_quorum=2), and no acks
+    // for it to be retained in the view change.
+    try expectEqual(a0.status(), .view_change);
+    try expectEqual(b1.status(), .view_change);
+    try mark.expect_hit();
+
+    a0.stop();
+    const a0_storage = &t.cluster.storages[a0.replicas.get(0)];
+
+    a0_storage.faulty = false;
+    const mark2 = marks.check("quorum received, awaiting repair");
+
+    try a0.open();
+
+    t.run();
+
+    // The two replicas are stuck in view change still. a0 reuses its old DVC headers with a blank
+    // header for op_head() - 1, but it still can't ack/nack it.
+    try mark2.expect_hit();
+    try expectEqual(a0.status(), .view_change);
+    try expectEqual(b1.status(), .view_change);
+
+    a0_storage.faulty = true;
+    try b2.open();
+    t.run();
+
+    // a0 is able to resolve its dilemma about op_head() - 1 with the help of b2, which acks it.
+    try expectEqual(t.replica(.R0).status(), .normal);
+    try expectEqual(t.replica(.R0).op_checkpoint(), checkpoint_2);
+    try expectEqual(t.replica(.R0).commit_max(), checkpoint_2_prepare_max);
 }
 
 const ProcessSelector = enum {
