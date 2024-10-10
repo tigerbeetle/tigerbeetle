@@ -86,7 +86,7 @@ check that code behaves exactly as expected.
 Importantly, TigerBeetle is one of the only OLTP databases that was designed to handle storage
 faults. Research on how storage faults affect databases only came out in 2018
 (["fsyncgate 2018"](https://danluu.com/fsyncgate/)), and TigerBeetle was built from the ground up
-with these lessons in mind. TigerBeetle uses cryptographic hash chains to detect storage faults, it
+with these lessons in mind. TigerBeetle uses hash chains to detect storage faults, it
 supports [Protocol-Aware Recovery](https://www.usenix.org/conference/fast18/presentation/alagappan),
 and uses a deterministic on-disk format to speed up the cluster's recovery.
 
