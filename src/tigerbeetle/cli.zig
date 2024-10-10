@@ -96,7 +96,12 @@ const CLIArgs = union(enum) {
         cache_account_balances: ?[]const u8 = null,
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
-        account_count_hot: usize = 0,
+        /// The probability distribution used to select accounts when making
+        /// transfers or queries.
+        account_distribution: Command.Benchmark.Distribution = .uniform,
+        account_distribution_debit: Command.Benchmark.DistributionInherited = .inherit,
+        account_distribution_credit: Command.Benchmark.DistributionInherited = .inherit,
+        account_distribution_query: Command.Benchmark.DistributionInherited = .inherit,
         flag_history: bool = false,
         flag_imported: bool = false,
         account_batch_size: usize = @divExact(
@@ -104,7 +109,6 @@ const CLIArgs = union(enum) {
             @sizeOf(tigerbeetle.Account),
         ),
         transfer_count: usize = 10_000_000,
-        transfer_hot_percent: usize = 100,
         transfer_pending: bool = false,
         transfer_batch_size: usize = @divExact(
             constants.message_size_max - @sizeOf(vsr.Header),
@@ -421,18 +425,35 @@ pub const Command = union(enum) {
         /// optimizations such as avoiding negative prefetch) while random/reversed can't.
         pub const IdOrder = enum { sequential, random, reversed };
 
+        pub const Distribution = enum {
+            /// Shuffled zipfian numbers where relatively few indexes are selected frequently.
+            zipfian,
+            /// Also zipfian, but the most recent indexes are selected frequently.
+            latest,
+            /// Uniform distribution; unrealistic workloads.
+            uniform,
+        };
+
+        pub const DistributionInherited = enum {
+            inherit,
+            zipfian,
+            latest,
+            uniform,
+        };
+
         cache_accounts: ?[]const u8,
         cache_transfers: ?[]const u8,
         cache_transfers_pending: ?[]const u8,
         cache_account_balances: ?[]const u8,
         cache_grid: ?[]const u8,
         account_count: usize,
-        account_count_hot: usize,
+        account_distribution_debit: Distribution,
+        account_distribution_credit: Distribution,
+        account_distribution_query: Distribution,
         flag_history: bool,
         flag_imported: bool,
         account_batch_size: usize,
         transfer_count: usize,
-        transfer_hot_percent: usize,
         transfer_pending: bool,
         transfer_batch_size: usize,
         transfer_batch_delay_us: usize,
@@ -798,6 +819,18 @@ fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
     };
 }
 
+fn distribution_or_inherit(
+    distribution: Command.Benchmark.DistributionInherited,
+    default: Command.Benchmark.Distribution,
+) Command.Benchmark.Distribution {
+    return switch (distribution) {
+        Command.Benchmark.DistributionInherited.zipfian => Command.Benchmark.Distribution.zipfian,
+        Command.Benchmark.DistributionInherited.latest => Command.Benchmark.Distribution.latest,
+        Command.Benchmark.DistributionInherited.uniform => Command.Benchmark.Distribution.uniform,
+        Command.Benchmark.DistributionInherited.inherit => default,
+    };
+}
+
 fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
         parse_addresses(addresses)
@@ -815,12 +848,22 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .cache_account_balances = benchmark.cache_account_balances,
         .cache_grid = benchmark.cache_grid,
         .account_count = benchmark.account_count,
-        .account_count_hot = benchmark.account_count_hot,
+        .account_distribution_debit = distribution_or_inherit(
+            benchmark.account_distribution_debit,
+            benchmark.account_distribution,
+        ),
+        .account_distribution_credit = distribution_or_inherit(
+            benchmark.account_distribution_credit,
+            benchmark.account_distribution,
+        ),
+        .account_distribution_query = distribution_or_inherit(
+            benchmark.account_distribution_query,
+            benchmark.account_distribution,
+        ),
         .flag_history = benchmark.flag_history,
         .flag_imported = benchmark.flag_imported,
         .account_batch_size = benchmark.account_batch_size,
         .transfer_count = benchmark.transfer_count,
-        .transfer_hot_percent = benchmark.transfer_hot_percent,
         .transfer_pending = benchmark.transfer_pending,
         .transfer_batch_size = benchmark.transfer_batch_size,
         .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
