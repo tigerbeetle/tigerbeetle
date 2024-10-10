@@ -19,7 +19,7 @@ as MySQL or an in-memory database such as Redis:
   and
   [0.466% of Nearline HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)),
   and **detects and repairs data tampering** (on a minority of the cluster, as if it were
-  non-Byzantine corruption) with hash-chained cryptographic checksums.
+  non-Byzantine corruption) with hash-chained checksums.
 
 - TigerBeetle **uses Direct I/O by design** to sidestep
   [cache coherency bugs in the kernel page cache](https://www.usenix.org/system/files/atc20-rebello.pdf)

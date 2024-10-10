@@ -68,7 +68,7 @@ speeding up the passing of time within the simulation itself.
 
 Beyond being a deterministic simulator, *The VOPR* also features [a state
 checker](/src/testing/cluster/state_checker.zig) that can hook into all the replicas, and check all
-their state transitions the instant they take place, using cryptographic hash chaining to prove
+their state transitions the instant they take place, using hash chaining to prove
 causality and check that all interim state transitions are valid, based on any of the set of
 inflight client requests at the time, without divergent states, and then check for convergence to
 the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.

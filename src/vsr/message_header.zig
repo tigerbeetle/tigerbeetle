@@ -585,7 +585,7 @@ pub const Header = extern struct {
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// A backpointer to the previous prepare checksum for hash chain verification.
-        /// This provides a cryptographic guarantee for linearizability across our distributed log
+        /// This provides a strong guarantee for linearizability across our distributed log
         /// of prepares.
         ///
         /// This may also be used as the initialization vector for AEAD encryption at rest, provided
@@ -842,7 +842,7 @@ pub const Header = extern struct {
         request_checksum: u128,
         request_checksum_padding: u128 = 0,
         /// The checksum of the prepare message to which this message refers.
-        /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which
+        /// This allows for strong guarantees beyond request, op, and commit numbers, which
         /// have low entropy and may otherwise collide in the event of any correctness bugs.
         context: u128 = 0,
         context_padding: u128 = 0,
