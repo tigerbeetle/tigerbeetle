@@ -7462,45 +7462,48 @@ pub fn ReplicaType(
             var present = BitSet.initEmpty();
             for (self.view_headers.array.const_slice(), 0..) |*header, i| {
                 const slot = self.journal.slot_for_op(header.op);
-                const journal_header = self.journal.header_for_op(header.op);
+                const journal_header = self.journal.header_with_op(header.op);
                 const dirty = self.journal.dirty.bit(slot);
                 const faulty = self.journal.faulty.bit(slot);
 
-                // Case 1: We have this header in memory, but haven't persisted it to disk yet.
-                if (journal_header != null and journal_header.?.checksum == header.checksum and
-                    dirty and !faulty)
-                {
-                    nacks.set(i);
-                }
-
-                // Case 2: We have a _different_ prepare — safe to nack even if it is faulty.
-                if (journal_header != null and vsr.Headers.dvc_header_type(header) == .valid and
-                    journal_header.?.checksum != header.checksum)
-                {
-                    nacks.set(i);
-                }
-
-                // Case 3: We don't have a prepare at all, and that's not due to a fault.
+                // Nack bit case 1: We don't have a prepare at all, and that's not due to a fault.
                 if (journal_header == null and !faulty) {
                     nacks.set(i);
                 }
 
-                // Presence bit: the prepare is on disk, is being written to disk, or is cached
-                // in memory. These conditions mirror logic in `on_request_prepare` and imply
-                // that we can help the new primary to repair this prepare.
-                if ((self.journal.prepare_inhabited[slot.index] and
-                    self.journal.prepare_checksums[slot.index] == header.checksum) or
-                    self.journal.writing(header.op, header.checksum) or
-                    self.pipeline_prepare_by_op_and_checksum(header.op, header.checksum) != null)
-                {
-                    if (journal_header != null) {
-                        assert(journal_header.?.checksum == header.checksum);
+                // We should only access header.checksum if the DVC header is valid.
+                if (vsr.Headers.dvc_header_type(header) == .valid) {
+                    // Nack bit case 2: We have this header in memory, but haven't persisted it to
+                    // disk yet.
+                    if (journal_header != null and journal_header.?.checksum == header.checksum and
+                        dirty and !faulty)
+                    {
+                        nacks.set(i);
                     }
-                    maybe(nacks.isSet(i));
-                    present.set(i);
-                }
+                    // Nack bit case 3: We have a _different_ prepare — safe to nack even if it is
+                    // faulty.
+                    if (journal_header != null and journal_header.?.checksum != header.checksum) {
+                        nacks.set(i);
+                    }
 
-                if (vsr.Headers.dvc_header_type(header) == .blank) {
+                    // Presence bit: the prepare is on disk, is being written to disk, or is cached
+                    // in memory. These conditions mirror logic in `on_request_prepare` and imply
+                    // that we can help the new primary to repair this prepare.
+                    if ((self.journal.prepare_inhabited[slot.index] and
+                        self.journal.prepare_checksums[slot.index] == header.checksum) or
+                        self.journal.writing(header.op, header.checksum) or
+                        self.pipeline_prepare_by_op_and_checksum(
+                        header.op,
+                        header.checksum,
+                    ) != null) {
+                        if (journal_header != null) {
+                            assert(journal_header.?.checksum == header.checksum);
+                        }
+                        maybe(nacks.isSet(i));
+                        present.set(i);
+                    }
+                } else {
+                    assert(vsr.Headers.dvc_header_type(header) == .blank);
                     assert(!present.isSet(i));
                     if (nacks.isSet(i)) assert(!faulty);
                 }
