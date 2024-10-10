@@ -208,6 +208,9 @@ pub const IO = struct {
             address: std.net.Address,
             initiated: bool,
         },
+        fsync: struct {
+            fd: fd_t,
+        },
         read: struct {
             fd: fd_t,
             buf: [*]u8,
@@ -232,6 +235,7 @@ pub const IO = struct {
             buf: [*]const u8,
             len: u32,
             offset: u64,
+            dsync: bool,
         },
     };
 
@@ -428,6 +432,36 @@ pub const IO = struct {
         );
     }
 
+    // Can't happen - but keep the same signature as Linux.
+    pub const FsyncError = posix.UnexpectedError;
+
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
+        completion: *Completion,
+        fd: fd_t,
+    ) void {
+        self.submit(
+            context,
+            callback,
+            completion,
+            .fsync,
+            .{
+                .fd = fd,
+            },
+            struct {
+                fn do_operation(op: anytype) FsyncError!void {
+                    fs_sync(op.fd);
+                }
+            },
+        );
+    }
     pub const OpenatError = posix.OpenError || posix.UnexpectedError;
 
     pub const ReadError = error{
@@ -630,6 +664,7 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
         offset: u64,
+        options: struct { dsync: bool },
     ) void {
         self.submit(
             context,
@@ -641,6 +676,7 @@ pub const IO = struct {
                 .buf = buffer.ptr,
                 .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
+                .dsync = options.dsync,
             },
             struct {
                 fn do_operation(op: anytype) WriteError!usize {
@@ -648,7 +684,9 @@ pub const IO = struct {
                     // below) is _synchronous_, so it's safe to call fs_sync after it has
                     // completed.
                     const result = posix.pwrite(op.fd, op.buf[0..op.len], op.offset);
-                    try fs_sync(op.fd);
+                    if (op.dsync) {
+                        fs_sync(op.fd);
+                    }
 
                     return result;
                 }
@@ -714,7 +752,11 @@ pub const IO = struct {
         var flags: posix.O = .{
             .CLOEXEC = true,
             .ACCMODE = if (method == .open_read_only) .RDONLY else .RDWR,
-            .DSYNC = true,
+
+            // Even though DSYNC false is the default, spell it out here explicitly. Non-grid writes
+            // are flushed immediately after writing with fs_sync. Grid writes aren't, and are
+            // flushed before returning from compaction after each beat.
+            .DSYNC = false,
         };
         var mode: posix.mode_t = 0;
 
@@ -738,8 +780,8 @@ pub const IO = struct {
             },
         }
 
-        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert(flags.DSYNC);
+        // Potentially surprising: see the explanation in `var flags`.
+        assert(!flags.DSYNC);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
@@ -771,12 +813,12 @@ pub const IO = struct {
         // making decisions on data that was never durably written by a previously crashed process.
         // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
-        try fs_sync(fd);
+        fs_sync(fd);
 
         // We fsync the parent directory to ensure that the file inode is durably written.
         // The caller is responsible for the parent directory inode stored under the grandparent.
         // We always do this when opening because we don't know if this was done before crashing.
-        try fs_sync(dir_fd);
+        fs_sync(dir_fd);
 
         // TODO Document that `size` is now `data_file_size_min` from `main.zig`.
         const stat = try posix.fstat(fd);
@@ -788,8 +830,8 @@ pub const IO = struct {
     /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC
     /// instead.
     /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
-    fn fs_sync(fd: fd_t) !void {
-        _ = posix.fcntl(fd, posix.F.FULLFSYNC, 1) catch return posix.fsync(fd);
+    fn fs_sync(fd: fd_t) void {
+        _ = posix.fcntl(fd, posix.F.FULLFSYNC, 1) catch @panic("F_FULLFSYNC failed");
     }
 
     /// Allocates a file contiguously using fallocate() if supported.
