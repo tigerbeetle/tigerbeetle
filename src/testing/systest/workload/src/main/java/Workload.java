@@ -37,7 +37,7 @@ public class Workload implements Callable<Void> {
 
   @Override
   public Void call() {
-    for (int n = 0; true; n++) {
+    while (true) {
       var command = randomCommand();
       try {
         var result = command.execute(client);
@@ -175,3 +175,4 @@ public class Workload implements Callable<Void> {
     return Optional.empty();
   }
 }
+
