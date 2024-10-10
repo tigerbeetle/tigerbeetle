@@ -4857,9 +4857,6 @@ pub fn ReplicaType(
             // All replicas are guaranteed to have no gaps in their headers between op_checkpoint
             // and commit_min. Between commit_min and self.op:
             // * The primary is guaranteed to have no gaps.
-            // * A potential primary in .view_change status is guaranteed to have no gaps, since we
-            //   only start committing *after* we have the hash chain intact up to self.op
-            //   (see `repair`).
             // * Backups are not guaranteed to have no gaps, they may have not received some
             //   prepares yet.
             const op_head_no_gaps = if (self.primary_index(self.view) == self.replica)
@@ -4884,15 +4881,19 @@ pub fn ReplicaType(
                 op_head_no_gaps,
             );
             const op_min = if (range) |r| r.op_max + 1 else range_min;
-
             assert(op_min <= op);
+
             if (self.op_checkpoint() == 0 and range != null) {
-                // We may get here with a missing root op if a we're a backup that is advancing its
-                // checkpoint mid repair.
-                assert(self.status == .normal and self.backup());
+                // We get here only if we are a backup with a missing/corrupt root op, advancing our
+                // checkpoint mid-repair. Primaries can never have a corrupt root op as repair
+                // ensures a primary's journal is clean before it transitions to .normal status.
+                assert(self.status == .normal);
+                assert(self.backup());
                 assert(self.commit_min == self.op_checkpoint_next_trigger());
+                assert(op_min == 1);
                 assert(range.?.op_max == 0);
                 assert(range.?.op_min == 0);
+                assert(self.journal.faulty.bit(.{ .index = 0 }));
             } else {
                 assert(op_min <= self.op_repair_min());
             }
