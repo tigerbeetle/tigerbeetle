@@ -9,22 +9,15 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/apexcharts/3.45.2/apexcharts.min.js"
     integrity="sha512-vIqZt7ReO939RQssENNbZ+Iu3j0CSsgk41nP3AYabLiIFajyebORlk7rKPjGddmO1FQkbuOb2EVK6rJkiHsmag=="
     crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <style>
-    @media (prefers-color-scheme: dark) {
-      :root {
-        background: white;
-        filter: invert(100%);
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-  <h1>TigerBeetle DevHub</h1>
+  <h1><img id="logo" src="logo.svg" height="40px" alt="TigerBeetle DevHub"></h1>
 
-  <div style="display: flex; flex-direction: row;">
+  <div id="top-section">
 
-    <section>
+    <section id="release">
       <h2>Release</h2>
 
       Release Manager for:
@@ -35,7 +28,7 @@
       </ul>
     </section>
 
-    <section>
+    <section id="links">
       <h2>Links</h2>
       <ul>
         <li><a href="https://github.com/tigerbeetle/tigerbeetle/pulls/assigned/@me">My Code Review</a></li>
@@ -44,11 +37,10 @@
       </ul>
     </section>
 
-    <section>
-      <h2>Fuzz failures (
-          <a href="?all">show all</a>,
-          <a href="https://github.com/tigerbeetle/devhubdb/tree/main/fuzzing">raw data</a>
-        )</h2>
+    <section id="fuzz-failures">
+      <h2>Fuzz failures (<a href="?all">show all</a>,
+        <a href="https://github.com/tigerbeetle/devhubdb/tree/main/fuzzing">raw data</a>)
+      </h2>
       <table id="seeds">
         <thead>
           <tr>
