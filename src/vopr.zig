@@ -945,7 +945,12 @@ pub const Simulator = struct {
                     break :index client_index;
                 }
             } else {
-                unreachable;
+                for (0..client_count) |index| {
+                    assert(simulator.cluster.client_eviction_reasons[index] != null);
+                    assert(simulator.cluster.client_eviction_reasons[index] == .no_session or
+                        simulator.cluster.client_eviction_reasons[index] == .session_too_low);
+                }
+                stdx.unimplemented("client replacement; all clients were evicted");
             }
         };
 
