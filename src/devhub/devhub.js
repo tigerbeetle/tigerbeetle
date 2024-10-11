@@ -91,7 +91,6 @@ async function mainSeeds() {
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
   let commit_count = 0;
-  const colors = ["#CCC", "#EEE"];
 
   for (const record of records) {
     let include = undefined;
@@ -127,10 +126,8 @@ async function mainSeeds() {
     const rowDom = document.createElement("tr");
 
     const seedSuccess = record.fuzzer === "canary" ? !record.ok : record.ok;
-    rowDom.style.setProperty(
-      "background",
-      seedSuccess ? "#CF0" : colors[commit_count % colors.length],
-    );
+    if (seedSuccess) rowDom.classList.add("success");
+    rowDom.classList.add(commit_count % 2 == 0 ? "even" : "odd");
 
     const pull = pullsByURL.get(record.branch);
     const prLink = pullRequestNumber(record)
@@ -167,7 +164,7 @@ async function mainSeeds() {
       }
     }
   }
-  seedsDom.append(
+  seedsDom.parentElement.append(
     `main branch ok=${mainBranchOk} fail=${mainBranchFail} canary=${mainBranchCanary}`,
   );
 }

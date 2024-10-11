@@ -607,15 +607,16 @@ test "tidy extensions" {
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
-        .{".editorconfig"},                 .{".gitignore"},
-        .{".nojekyll"},                     .{"CNAME"},
-        .{"exclude-pmd.properties"},        .{"favicon.ico"},
-        .{"favicon.png"},                   .{"LICENSE"},
-        .{"module-info.test"},              .{"index.html"},
-        .{"logo.svg"},                      .{"logo-white.svg"},
-        .{"logo-with-text-white.svg"},      .{"zig/download.sh"},
-        .{"src/scripts/cfo_supervisor.sh"}, .{"src/docs_website/scripts/build.sh"},
-        .{".github/ci/docs_check.sh"},      .{".github/ci/test_aof.sh"},
+        .{".editorconfig"},                     .{".gitignore"},
+        .{".nojekyll"},                         .{"CNAME"},
+        .{"exclude-pmd.properties"},            .{"favicon.ico"},
+        .{"favicon.png"},                       .{"LICENSE"},
+        .{"module-info.test"},                  .{"index.html"},
+        .{"style.css"},                         .{"logo.svg"},
+        .{"logo-white.svg"},                    .{"logo-with-text-white.svg"},
+        .{"zig/download.sh"},                   .{"src/scripts/cfo_supervisor.sh"},
+        .{"src/docs_website/scripts/build.sh"}, .{".github/ci/docs_check.sh"},
+        .{".github/ci/test_aof.sh"},
     });
 
     const allocator = std.testing.allocator;
