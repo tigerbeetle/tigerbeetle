@@ -149,7 +149,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             },
             // The index block is freed immediately after the read for the last value block is
             // submitted so, by the time merge consumes a value block, the index block is gone
-            // already. Use this field to mark the spots when the compaciton position should advance
+            // already. Use this field to mark the spots when the compaction position should advance
             // to the next index block.
             last_block_in_the_table: bool,
 
@@ -436,7 +436,7 @@ pub fn CompactionType(
         // as the read for the last value block is scheduled, the pipeline should not dry out even
         // when switching between the tables.
         //
-        // Note that level_L_position field tracks the logical, deterministic progression of
+        // Note that level_{a,b}_position fields track the logical, deterministic progression of
         // compaction. To track which block should be read next, separate `_next` fields are used.
         //
         // For output blocks:
@@ -527,7 +527,8 @@ pub fn CompactionType(
             assert(compaction.idle());
             assert(compaction.stage == .inactive);
             compaction.stage = .paused;
-            compaction.op_min = compaction_op_min(op);
+            assert(op == compaction_op_min(op));
+            compaction.op_min = op;
 
             // level_b 0 is special; unlike all the others which have level_a on disk, level 0's
             // level_a comes from the immutable table. This means that blip_read will be a partial,
@@ -612,7 +613,7 @@ pub fn CompactionType(
             }
 
             // Append the entries to the manifest update queue here and now if we're doing
-            // move table. They'll be applied later by bar_apply_to_manifest.
+            // move table. They'll be applied later by bar_complete().
             if (compaction.move_table) {
                 const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
                 assert(compaction.table_info_a.?.disk.table_info.snapshot_max >= snapshot_max);
@@ -651,6 +652,8 @@ pub fn CompactionType(
 
             if (compaction.table_info_a == null) {
                 assert(compaction.range_b == null);
+                assert(compaction.manifest_entries.count() == 0);
+                assert(compaction.quotas.bar == 0);
                 if (compaction.level_b == 0) {
                     assert(compaction.tree.table_immutable.mutability.immutable.flushed);
                 }
@@ -658,6 +661,7 @@ pub fn CompactionType(
             }
             assert(compaction.table_info_a != null);
             assert(compaction.range_b != null);
+            assert(compaction.quotas.bar > 0);
 
             log.debug("{s}:{}: bar_complete: " ++
                 "values_in={} values_out={} values_dropped={} values_wasted={}", .{
@@ -671,6 +675,7 @@ pub fn CompactionType(
 
             // Mark the immutable table as flushed, if we were compacting into level 0.
             if (compaction.level_b == 0) {
+                assert(!compaction.tree.table_immutable.mutability.immutable.flushed);
                 compaction.tree.table_immutable.mutability.immutable.flushed = true;
             }
 
@@ -783,6 +788,7 @@ pub fn CompactionType(
                 });
                 return;
             }
+            assert(!compaction.move_table);
             compaction.stage = .beat;
 
             // The +1 is for imperfections in pacing our immutable table, which might cause us

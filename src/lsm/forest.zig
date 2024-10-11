@@ -427,7 +427,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .manifest_log_done = false,
             };
 
-            forest.compaction_schedule.beat_start(op, compact_trees_callback);
+            forest.compaction_schedule.beat_start(compact_trees_callback, op);
 
             // Manifest log compaction. Run on the last beat of each half-bar.
             // TODO: Figure out a plan wrt the pacing here. Putting it on the last beat kinda-sorta
@@ -789,9 +789,10 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
 
         pub fn beat_start(
             self: *CompactionSchedule,
-            op: u64,
             callback: Forest.Callback,
+            op: u64,
         ) void {
+            assert(self.pool.idle());
             assert(self.callback == null);
             self.callback = callback;
 
@@ -810,6 +811,8 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
 
             const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
             const last_half_beat = compaction_beat == half_bar - 1;
+
+            if (first_beat or half_beat) assert(self.pool.blocks_acquired() == 0);
 
             if (first_beat or half_beat) {
                 for (0..constants.lsm_levels) |level_b| {
@@ -843,6 +846,8 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn beat_resume(self: *CompactionSchedule) void {
+            assert(self.callback != null);
+
             const op = self.forest.progress.?.compact.op;
             for (0..constants.lsm_levels) |level_b| {
                 if (level_active(.{ .level_b = level_b, .op = op })) {
@@ -862,6 +867,7 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
 
         fn beat_resume_callback(pool: *ResourcePool) void {
             const self: *CompactionSchedule = @fieldParentPtr("pool", pool);
+            assert(self.callback != null);
             self.beat_resume();
         }
 
