@@ -530,9 +530,6 @@ pub fn CompactionType(
             assert(op == compaction_op_min(op));
             compaction.op_min = op;
 
-            // level_b 0 is special; unlike all the others which have level_a on disk, level 0's
-            // level_a comes from the immutable table. This means that blip_read will be a partial,
-            // no-op, and that the minimum input blocks are lowered by one.
             if (compaction.level_b == 0) {
                 // Do not start compaction if the immutable table does not require compaction.
                 if (compaction.tree.table_immutable.mutability.immutable.flushed) {
@@ -585,6 +582,18 @@ pub fn CompactionType(
                     compaction.table_info_a.?.disk.table_info.key_min);
                 assert(compaction.table_info_a.?.disk.table_info.key_max <=
                     compaction.range_b.?.key_max);
+            }
+
+            switch (compaction.table_info_a.?) {
+                .immutable => {},
+                .disk => |table| {
+                    assert(!compaction.grid.free_set.is_released(table.table_info.address));
+                    assert(!compaction.grid.free_set.is_free(table.table_info.address));
+                },
+            }
+            for (compaction.range_b.?.tables.slice()) |table| {
+                assert(!compaction.grid.free_set.is_released(table.table_info.address));
+                assert(!compaction.grid.free_set.is_free(table.table_info.address));
             }
 
             var quota_bar = switch (compaction.table_info_a.?) {
@@ -662,6 +671,21 @@ pub fn CompactionType(
             assert(compaction.table_info_a != null);
             assert(compaction.range_b != null);
             assert(compaction.quotas.bar > 0);
+
+            switch (compaction.table_info_a.?) {
+                .immutable => {},
+                .disk => |table| {
+                    if (compaction.move_table) {
+                        assert(!compaction.grid.free_set.is_released(table.table_info.address));
+                        assert(!compaction.grid.free_set.is_free(table.table_info.address));
+                    } else {
+                        assert(compaction.grid.free_set.is_released(table.table_info.address));
+                    }
+                },
+            }
+            for (compaction.range_b.?.tables.slice()) |table| {
+                assert(compaction.grid.free_set.is_released(table.table_info.address));
+            }
 
             log.debug("{s}:{}: bar_complete: " ++
                 "values_in={} values_out={} values_dropped={} values_wasted={}", .{
@@ -1161,7 +1185,7 @@ pub fn CompactionType(
                         progressed = true;
                     }
                 }
-            }
+            } else unreachable;
             assert(!progressed);
             assert(!compaction.pool.?.idle());
         }
@@ -1431,9 +1455,9 @@ pub fn CompactionType(
                 }
             } else {
                 for (data_block_addresses) |address| {
-                    compaction.grid.free_set.release(address);
+                    compaction.grid.release(address);
                 }
-                compaction.grid.free_set.release(index_block_address);
+                compaction.grid.release(index_block_address);
             }
         }
 
@@ -1589,8 +1613,8 @@ pub fn CompactionType(
 
             const level_a_values = if (level_a_values_used) |values_used| values: {
                 const values_remaining = values_used[compaction.level_a_position.value..];
-                // Only consume one block at a time so that `blip_merge` never goes over its
-                // target by more than 1 value block.
+                // Only consume one block at a time so that a beat never outputs past its quota
+                // by more than one value block.
                 const limit = @min(
                     Table.data.value_count_max,
                     values_remaining.len,
