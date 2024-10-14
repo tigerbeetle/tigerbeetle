@@ -108,10 +108,6 @@ const SigIllHandler = struct {
         std.log.err("These instructions can be unsupported on older processors, leading to", .{});
         std.log.err("\"illegal instruction\" panics.", .{});
         std.log.err("", .{});
-        std.log.err("If you'd like to try TigerBeetle on an older processor, you can", .{});
-        std.log.err("compile from source with the changes detailed at", .{});
-        std.log.err("https://github.com/tigerbeetle/tigerbeetle/issues/1592", .{});
-        std.log.err("", .{});
     }
 
     fn register() !void {
