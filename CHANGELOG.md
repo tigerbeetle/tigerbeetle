@@ -3,6 +3,62 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.9
+
+Released: 2024-10-15
+
+### Safety And Performance
+
+- [#2394](https://github.com/tigerbeetle/tigerbeetle/pull/2394),
+  [#2401](https://github.com/tigerbeetle/tigerbeetle/pull/2401)
+
+  TigerBeetle clients internally batch operations for improved performance. Fix a bug where an
+  unclosed link chain could be batched before another linked chain, causing them to be treated as
+  one long linked chain. Additionally, prevent non-batchable requests from sharing packets entirely.
+
+- [#2398](https://github.com/tigerbeetle/tigerbeetle/pull/2398)
+
+  `AMOUNT_MAX` is used as a sentinel value for things like balancing transfers to specify moving
+  as much as possible. Correct and fix its value in the Java client. Thanks @tKe!
+
+### Features
+
+- [#2274](https://github.com/tigerbeetle/tigerbeetle/pull/2274)
+
+  Improve the benchmark by adding Zipfian distributed random numbers, to better simulate realistic
+  conditions and as a precursor to approximating YCSB.
+
+- [#2393](https://github.com/tigerbeetle/tigerbeetle/pull/2393)
+
+  Previously, TigerBeetle's clients disallowed empty batches locally, before the request was even
+  sent to the cluster. However, this is actually a valid protocol message - even if it's not used by
+  the current state machine - so allow empty batches to be sent from clients.
+
+- [#2384](https://github.com/tigerbeetle/tigerbeetle/pull/2384)
+
+  Revamp client documentation so that each snippet is self-contained, and standardize it across all
+  languages.
+
+### Internals
+
+- [#2404](https://github.com/tigerbeetle/tigerbeetle/pull/2404)
+
+  Give the [DevHub](https://tigerbeetle.github.io/tigerbeetle/) a fresh coat of paint, and fix
+  passing seeds being blue in dark mode.
+
+- [#2408](https://github.com/tigerbeetle/tigerbeetle/pull/2408),
+  [#2400](https://github.com/tigerbeetle/tigerbeetle/pull/2400),
+  [#2391](https://github.com/tigerbeetle/tigerbeetle/pull/2391),
+  [#2399](https://github.com/tigerbeetle/tigerbeetle/pull/2399),
+  [#2402](https://github.com/tigerbeetle/tigerbeetle/pull/2402),
+  [#2385](https://github.com/tigerbeetle/tigerbeetle/pull/2385)
+
+  Improve VOPR logging and fix a few failing seeds.
+
+### TigerTracks 🎧
+
+- [99 Luftballons](https://www.youtube.com/watch?v=Fpu5a0Bl8eY)
+
 ## TigerBeetle 0.16.8
 
 Released: 2024-10-07

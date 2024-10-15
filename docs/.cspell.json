@@ -12,6 +12,7 @@
         "backports",
         "backronyms",
         "baggins",
+        "batchable",
         "batiati",
         "biodigital",
         "bitcast",
@@ -100,6 +101,7 @@
         "LMAX",
         "longsleep",
         "Lookin",
+        "Luftballons",
         "makefiles",
         "matklad",
         "MEGAHIT",
@@ -185,6 +187,7 @@
         "tigerbeetlex",
         "timestamping",
         "tini",
+        "tKe",
         "TOCTOU",
         "Tornow",
         "tprt",
@@ -212,6 +215,8 @@
         "woksin",
         "WOPR",
         "Xlint",
+        "YCSB",
+        "Zipfian",
         "жизни",
         "Линия"
     ]
