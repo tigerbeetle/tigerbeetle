@@ -159,6 +159,10 @@ pub fn RingBuffer(
             return self.count == self.buffer.len;
         }
 
+        pub inline fn spare_capacity(self: Self) usize {
+            return self.buffer.len - self.count;
+        }
+
         /// Returns whether the ring buffer is completely empty.
         pub inline fn empty(self: Self) bool {
             return self.count == 0;
