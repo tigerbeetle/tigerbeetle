@@ -251,6 +251,9 @@ pub const IO = struct {
                         op.address.getOsSockLen(),
                     );
                 },
+                .fsync => |op| {
+                    sqe.prep_fsync(op.fd, op.flags);
+                },
                 .openat => |op| {
                     sqe.prep_openat(
                         op.dir_fd,
@@ -284,12 +287,16 @@ pub const IO = struct {
                 .timeout => |*op| {
                     sqe.prep_timeout(&op.timespec, 0, 0);
                 },
-                .write => |op| {
-                    sqe.prep_write(
+                .writev2 => |*op| {
+                    // By setting rw_flags below, writev becomes writev2 - this is what liburing
+                    // does.
+                    sqe.prep_writev(
                         op.fd,
-                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        @as(*const [1]posix.iovec_const, &op.iovec),
                         op.offset,
                     );
+
+                    sqe.rw_flags = op.rw_flags;
                 },
             }
             sqe.user_data = @intFromPtr(completion);
@@ -371,6 +378,26 @@ pub const IO = struct {
                                 .PERM => error.PermissionDenied,
                                 .PROTOTYPE => error.ProtocolNotSupported,
                                 .TIMEDOUT => error.ConnectionTimedOut,
+                                else => |errno| posix.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
+                    completion.callback(completion.context, completion, &result);
+                },
+                .fsync => {
+                    const result: anyerror!void = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .BADF => error.FileDescriptorInvalid,
+                                .IO => error.InputOutput,
+                                .INVAL => unreachable,
                                 else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -552,7 +579,7 @@ pub const IO = struct {
                     const result: anyerror!void = err;
                     completion.callback(completion.context, completion, &result);
                 },
-                .write => {
+                .writev2 => {
                     const result: anyerror!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
@@ -601,6 +628,10 @@ pub const IO = struct {
             socket: posix.socket_t,
             address: std.net.Address,
         },
+        fsync: struct {
+            fd: fd_t,
+            flags: u32,
+        },
         openat: struct {
             dir_fd: fd_t,
             file_path: [*:0]const u8,
@@ -630,10 +661,11 @@ pub const IO = struct {
         timeout: struct {
             timespec: os.linux.kernel_timespec,
         },
-        write: struct {
+        writev2: struct {
             fd: fd_t,
-            buffer: []const u8,
+            iovec: posix.iovec_const,
             offset: u64,
+            rw_flags: u32,
         },
     };
 
@@ -772,6 +804,45 @@ pub const IO = struct {
                 .connect = .{
                     .socket = socket,
                     .address = address,
+                },
+            },
+        };
+        self.enqueue(completion);
+    }
+
+    pub const FsyncError = error{
+        FileDescriptorInvalid,
+        InputOutput,
+    } || posix.UnexpectedError;
+
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
+        completion: *Completion,
+        fd: fd_t,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @ptrCast(@alignCast(ctx)),
+                        comp,
+                        @as(*const FsyncError!void, @ptrCast(@alignCast(res))).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .fsync = .{
+                    .fd = fd,
+                    .flags = os.linux.IORING_FSYNC_DATASYNC,
                 },
             },
         };
@@ -1081,6 +1152,7 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
         offset: u64,
+        options: struct { dsync: bool },
     ) void {
         completion.* = .{
             .io = self,
@@ -1095,10 +1167,17 @@ pub const IO = struct {
                 }
             }.wrapper,
             .operation = .{
-                .write = .{
+                // Internally, use the writev operation: it allows per IO control of fsync. This is
+                // only available on the vectorized write op, so use that, but limit it to a single
+                // iovec.
+                .writev2 = .{
                     .fd = fd,
-                    .buffer = buffer,
+                    .iovec = .{
+                        .base = buffer.ptr,
+                        .len = buffer_limit(buffer.len),
+                    },
                     .offset = offset,
+                    .rw_flags = if (options.dsync) os.linux.RWF.DSYNC else 0,
                 },
             },
         };
@@ -1150,7 +1229,11 @@ pub const IO = struct {
         var flags: posix.O = .{
             .CLOEXEC = true,
             .ACCMODE = if (method == .open_read_only) .RDONLY else .RDWR,
-            .DSYNC = true,
+
+            // Even though DSYNC false is the default, spell it out here explicitly. Non-grid writes
+            // are written on a per IO basis with RWF_DSYNC. Grid writes aren't, and are flushed
+            // before returning from compaction after each beat.
+            .DSYNC = false,
         };
         var mode: posix.mode_t = 0;
 
@@ -1263,8 +1346,8 @@ pub const IO = struct {
             },
         }
 
-        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert(flags.DSYNC);
+        // Potentially surprising: see the explanation in `var flags`.
+        assert(!flags.DSYNC);
 
         const fd = try posix.openat(dir_fd, relative_path, flags, mode);
         // TODO Return a proper error message when the path exists or does not exist (init/start).
