@@ -681,6 +681,15 @@ pub const Simulator = struct {
         // Don't check for missing uncommitted ops (since the StateChecker does not record them).
         // There may be uncommitted ops due to pulses/upgrades sent during liveness mode.
         const cluster_commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
+        var cluster_op_checkpoint: u64 = 0;
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                cluster_op_checkpoint = @max(
+                    cluster_op_checkpoint,
+                    replica.superblock.working.vsr_state.checkpoint.header.op,
+                );
+            }
+        }
 
         var missing_header_op: ?u64 = null;
         var missing_prepare_op: ?u64 = null;
@@ -688,6 +697,11 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
+
+                // Lagging replicas do not initiate WAL repair during view change.
+                if (replica.status == .view_change and
+                    replica.op_checkpoint() < cluster_op_checkpoint) continue;
+
                 const commit_max = @min(replica.op, cluster_commit_max);
                 const commit_min = replica.commit_min;
                 if (commit_min < commit_max) {
