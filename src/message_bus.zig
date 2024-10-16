@@ -179,6 +179,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             for (bus.connections) |*connection| {
+                connection.terminate(bus, .shutdown);
                 if (connection.recv_message) |message| bus.unref(message);
                 while (connection.send_queue.pop()) |message| bus.unref(message);
             }
