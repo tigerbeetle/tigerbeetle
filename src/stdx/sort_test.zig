@@ -14,15 +14,13 @@ test "sort_stable" {
             return a.x < b.x;
         }
 
+        fn compare_x_descending(_: void, a: Value, b: Value) bool {
+            return a.x > b.x;
+        }
+
         fn compare_xy_ascending(_: void, a: Value, b: Value) bool {
             if (a.x < b.x) return true;
             if (a.x > b.x) return false;
-            return a.y < b.y;
-        }
-
-        fn compare_xy_descending(_: void, a: Value, b: Value) bool {
-            if (a.x > b.x) return true;
-            if (a.x < b.x) return false;
             return a.y < b.y;
         }
     };
@@ -47,10 +45,10 @@ test "sort_stable" {
         {
             // Set up `values`.
 
-            for (values, 0..) |*value, i| {
+            for (values) |*value| {
                 value.* = .{
                     .x = random.uintLessThan(u32, values_count * 2),
-                    .y = @intCast(i),
+                    .y = undefined,
                 };
             }
 
@@ -69,26 +67,24 @@ test "sort_stable" {
                     if (partitions_remaining == 1) {
                         break :size values_count - partition_offset;
                     } else {
-                        break :size random.intRangeAtMost(
-                            u32,
-                            1,
-                            values_count - partition_offset,
-                        );
+                        break :size random.intRangeAtMost(u32, 1, values_count - partition_offset);
                     }
                 };
 
                 if (random.uintLessThan(u8, 100) < partition_sort_percent) {
                     const partition = values[partition_offset..][0..partition_size];
                     if (random.uintLessThan(u8, 100) < partition_reverse_percent) {
-                        std.mem.sortUnstable(Value, partition, {}, Value.compare_xy_descending);
+                        std.mem.sortUnstable(Value, partition, {}, Value.compare_x_descending);
                     } else {
-                        std.mem.sortUnstable(Value, partition, {}, Value.compare_xy_ascending);
+                        std.mem.sortUnstable(Value, partition, {}, Value.compare_x_ascending);
                     }
                 }
 
                 partitions_remaining -= 1;
                 partition_offset += partition_size;
             }
+
+            for (values, 0..) |*value, i| value.y = @intCast(i);
         }
 
         {
