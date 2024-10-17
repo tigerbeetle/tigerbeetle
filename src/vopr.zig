@@ -681,6 +681,15 @@ pub const Simulator = struct {
         // Don't check for missing uncommitted ops (since the StateChecker does not record them).
         // There may be uncommitted ops due to pulses/upgrades sent during liveness mode.
         const cluster_commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
+        var cluster_op_checkpoint: u64 = 0;
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                cluster_op_checkpoint = @max(
+                    cluster_op_checkpoint,
+                    replica.superblock.working.vsr_state.checkpoint.header.op,
+                );
+            }
+        }
 
         var missing_header_op: ?u64 = null;
         var missing_prepare_op: ?u64 = null;
@@ -688,11 +697,17 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
+
+                // Lagging replicas do not initiate WAL repair during view change.
+                if (replica.status == .view_change and
+                    replica.op_checkpoint() < cluster_op_checkpoint) continue;
+
                 const commit_max = @min(replica.op, cluster_commit_max);
                 const commit_min = replica.commit_min;
+
                 if (commit_min < commit_max) {
-                    // Check if replica was stuck while repairing headers. Find largest missing
-                    // header as we repair headers from high -> low ops.
+                    // Check if replica's commit pipeline was stuck due to missing headers.
+                    // Find largest missing header as we repair headers from high -> low ops.
                     if (replica.journal.find_latest_headers_break_between(
                         commit_min + 1,
                         commit_max,
@@ -701,8 +716,8 @@ pub const Simulator = struct {
                             missing_header_op = range.op_max;
                         }
                     } else {
-                        // Check if replica was stuck while repairing prepares. Find smallest
-                        // missing prepare as we repair prepares from low -> high ops.
+                        // Check if replica's commit pipeline was stuck due to missing prepares.
+                        // Find smallest missing prepare as we repair prepares from low -> high ops.
                         for (commit_min + 1..commit_max + 1) |op| {
                             const header = simulator.cluster.state_checker.header_with_op(op);
                             if (!replica.journal.has_clean(&header)) {
@@ -710,6 +725,18 @@ pub const Simulator = struct {
                                     missing_prepare_op = op;
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Potential primaries repair *all* faulty prepares in their journal before
+                // transitioning to normal status (even if they have committed up to commit_max).
+                // Check if replica was stuck repairing such faulty prepares.
+                for (replica.journal.headers, 0..) |_, index| {
+                    const header = replica.journal.header_for_op(index);
+                    if (replica.journal.faulty.bits.isSet(index) and header != null) {
+                        if (missing_prepare_op == null or missing_prepare_op.? > header.?.op) {
+                            missing_prepare_op = header.?.op;
                         }
                     }
                 }
