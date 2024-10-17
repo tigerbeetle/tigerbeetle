@@ -815,12 +815,10 @@ fn build_scripts(
         .target = options.target,
         .optimize = options.mode,
     });
-
     scripts.root_module.addOptions("vsr_options", options.vsr_options);
-
     const scripts_run = b.addRunArtifact(scripts);
-    if (b.args) |args| scripts_run.addArgs(args);
     scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
+    if (b.args) |args| scripts_run.addArgs(args);
     step_scripts.dependOn(&scripts_run.step);
 }
 
