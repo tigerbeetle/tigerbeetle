@@ -1,4 +1,4 @@
-//! Deployment script for our systest (src/testing/systest).
+//! Deployment script for old systest (src/testing/systest).
 //!
 //! * Builds the Java client and the associated workload using Maven
 //! * Builds Docker images for the workload, replicas, and config
