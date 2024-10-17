@@ -5,9 +5,10 @@ const tb = @import("../../tigerbeetle.zig");
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
-const expect = std.testing.expect;
+const testing = std.testing;
 
 const events_count_max = Driver.events_count_max;
+const accounts_count_max = 100;
 
 pub const CLIArgs = struct {
     @"cluster-id": u128,
@@ -24,7 +25,9 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         driver.destroy(allocator);
     }
 
-    var model = Model{};
+    var model = Model{
+        .accounts = std.ArrayListUnmanaged(tb.Account).initBuffer(&accounts_buffer),
+    };
     const seed = std.crypto.random.int(u64);
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
@@ -34,14 +37,20 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         const result = try execute(command, driver) orelse break;
         try reconcile(result, &command, &model);
 
-        log.info("accounts created = {d}, commands run = {d}", .{ model.accounts_id_next, i });
+        const query = lookup_all_accounts(&model);
+        const query_result = try execute(query, driver) orelse break;
+        try reconcile(query_result, &query, &model);
+
+        log.info("accounts created = {d}, commands run = {d}", .{ model.accounts.items.len, i });
     }
 }
+
+var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
 
 const Command = union(enum) {
     create_accounts: []Driver.Event(.create_accounts),
     create_transfers: []Driver.Event(.create_transfers),
-    lookup_accounts: []Driver.Event(.lookup_accounts),
+    lookup_all_accounts: []Driver.Event(.lookup_accounts),
 };
 
 const CommandBuffers = FixedSizeBuffers(Command);
@@ -50,101 +59,189 @@ var command_buffers: CommandBuffers = std.mem.zeroes(CommandBuffers);
 const Result = union(enum) {
     create_accounts: []Driver.Result(.create_accounts),
     create_transfers: []Driver.Result(.create_transfers),
-    lookup_accounts: []Driver.Result(.lookup_accounts),
+    lookup_all_accounts: []Driver.Result(.lookup_accounts),
 };
 const ResultBuffers = FixedSizeBuffers(Result);
 var result_buffers: ResultBuffers = std.mem.zeroes(ResultBuffers);
 
 fn execute(command: Command, driver: *const Driver) !?Result {
     switch (command) {
-        .create_accounts => |events| return try execute_regular(.create_accounts, events, driver),
-        .create_transfers => |events| return try execute_regular(.create_transfers, events, driver),
-        .lookup_accounts => |events| return try execute_regular(.lookup_accounts, events, driver),
+        .create_accounts => |events| return try execute_regular(
+            .create_accounts,
+            .create_accounts,
+            events,
+            driver,
+        ),
+        .create_transfers => |events| return try execute_regular(
+            .create_transfers,
+            .create_transfers,
+            events,
+            driver,
+        ),
+        .lookup_all_accounts => |events| return try execute_regular(
+            .lookup_all_accounts,
+            .lookup_accounts,
+            events,
+            driver,
+        ),
     }
 }
 
 fn execute_regular(
+    comptime command_tag: std.meta.Tag(Command),
     comptime operation: Driver.Operation,
     events: []Driver.Event(operation),
     driver: *const Driver,
 ) !?Result {
     try driver.send(operation, events);
 
-    const buffer = @field(result_buffers, @tagName(operation))[0..events.len];
+    const buffer = @field(result_buffers, @tagName(command_tag))[0..events.len];
     const results = driver.receive(operation, buffer) catch |err| {
         switch (err) {
             error.EndOfStream => return null,
             else => return err,
         }
     };
-    return @unionInit(Result, @tagName(operation), results);
+    return @unionInit(Result, @tagName(command_tag), results);
 }
 
 fn reconcile(result: Result, command: *const Command, model: *Model) !void {
     switch (result) {
         .create_accounts => |entries| {
+            const accounts_new = command.create_accounts;
+
+            // Track results for all new accounts, assuming `.ok` if response from driver is
+            // omitted.
+            var accounts_created: [accounts_count_max]struct { tb.CreateAccountResult, tb.Account } = undefined;
+            for (accounts_new, accounts_created[0..accounts_new.len]) |account_new, *account_created| {
+                account_created[0] = .ok;
+                account_created[1] = account_new;
+            }
+
             for (entries) |entry| {
-                if (entry.result != .ok) {
+                accounts_created[entry.index][0] = entry.result;
+            }
+
+            for (accounts_created[0..accounts_new.len], 0..) |account_created, i| {
+                if (account_created[0] == .ok) {
+                    model.accounts.appendAssumeCapacity(account_created[1]);
+                } else {
+                    log.err("enum: {d}", .{@intFromEnum(account_created[0])});
                     log.err("got result {s} for event {d}: {any}", .{
-                        @tagName(entry.result),
-                        entry.index,
-                        command.create_accounts[entry.index],
+                        @tagName(account_created[0]),
+                        i,
+                        account_created[1],
                     });
                     return error.TestFailed;
                 }
             }
-            model.accounts_id_next += @intCast(command.create_accounts.len);
         },
         .create_transfers => |entries| {
             const transfers = command.create_transfers;
 
             for (entries, 0..) |entry, e| {
+                const transfer = transfers[entry.index];
+
                 // Check that linked transfers fail together.
                 if (entry.index > 0) {
                     const preceeding_transfer = transfers[entry.index - 1];
                     if (preceeding_transfer.flags.linked) {
-                        try expect(e > 0);
+                        try testing.expect(e > 0);
                         const preceeding_entry = entries[e - 1];
-                        try expect(preceeding_entry.index == entry.index - 1);
-                        try expect(preceeding_entry.result != .ok);
+                        try testing.expect(preceeding_entry.index == entry.index - 1);
+                        try testing.expect(preceeding_entry.result != .ok);
                     }
                 }
+
                 // No further validation needed for failed transfers.
                 if (entry.result != .ok) {
                     continue;
                 }
+
+                try testing.expect(model.account_exists(transfer.debit_account_id));
+                try testing.expect(model.account_exists(transfer.credit_account_id));
             }
         },
-        else => {}, // TODO
+        .lookup_all_accounts => |accounts_found| {
+            // Get all known account ids (sorted).
+            var id_buffer: [accounts_count_max]u128 = undefined;
+            const account_ids_known = model.account_ids(id_buffer[0..]);
+
+            // Extract and sort all found account ids.
+            var account_ids_found_buffer: [accounts_count_max]u128 = undefined;
+            for (accounts_found, 0..) |account, i| {
+                account_ids_found_buffer[i] = account.id;
+            }
+            const account_ids_found = account_ids_found_buffer[0..accounts_found.len];
+            std.mem.sort(u128, account_ids_found, {}, std.sort.asc(u128));
+
+            // All known accounts are found by the query, and no others.
+            try testing.expectEqualSlices(u128, account_ids_known, account_ids_found);
+
+            try testing.expectEqual(0, debits_credits_difference(accounts_found));
+        },
     }
 }
 
 const Model = struct {
-    accounts_id_next: u128 = 1,
+    accounts: std.ArrayListUnmanaged(tb.Account),
+
+    // O(n) lookup, but it's limited by `accounts_count_max`, so it's OK for this test.
+    fn account_exists(self: @This(), id: u128) bool {
+        for (self.accounts.items) |account| {
+            if (account.id == id) return true;
+        }
+        return false;
+    }
+
+    /// Returns a sorted slice of the account ids known by the model.
+    fn account_ids(self: @This(), buffer: []u128) []u128 {
+        assert(buffer.len >= self.accounts.items.len);
+        const ids = buffer[0..self.accounts.items.len];
+
+        for (self.accounts.items, 0..) |account, i| {
+            ids[i] = account.id;
+        }
+        std.mem.sort(u128, ids, {}, std.sort.asc(u128));
+        return ids;
+    }
 };
+
+fn debits_credits_difference(accounts: []tb.Account) i128 {
+    var balance: i128 = 0;
+    for (accounts) |account| {
+        balance += @intCast(account.debits_posted);
+        balance -= @intCast(account.credits_posted);
+    }
+    return balance;
+}
 
 fn random_command(random: std.Random, model: *const Model) !Command {
     const command_tag = arbitrary.weighted(random, std.meta.Tag(Command), .{
-        .create_accounts = if (model.accounts_id_next < 100) 1 else 0,
-        .create_transfers = if (model.accounts_id_next > 2) 10 else 0,
-        .lookup_accounts = 0,
+        .create_accounts = if (model.accounts.items.len < accounts_count_max) 1 else 0,
+        .create_transfers = if (model.accounts.items.len > 2) 10 else 0,
+        .lookup_all_accounts = 0,
     }).?;
     switch (command_tag) {
         .create_accounts => return random_create_accounts(random, model),
         .create_transfers => return random_create_transfers(random, model),
-        .lookup_accounts => unreachable,
+        .lookup_all_accounts => unreachable,
     }
 }
 
 fn random_create_accounts(random: std.Random, model: *const Model) !Command {
-    const events_count = random.intRangeAtMost(usize, 1, Driver.events_count_max);
+    const events_count = random.intRangeAtMost(
+        usize,
+        1,
+        accounts_count_max - model.accounts.items.len,
+    );
     assert(events_count <= events_count_max);
 
     var buffer = command_buffers.create_accounts[0..events_count];
     var i: usize = 0;
     for (buffer) |*event| {
         event.* = std.mem.zeroInit(Driver.Event(.create_accounts), .{
-            .id = model.accounts_id_next + i,
+            .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
             .ledger = 1,
             .code = random.intRangeAtMost(u16, 1, 100),
         });
@@ -160,11 +257,11 @@ fn random_create_transfers(random: std.Random, model: *const Model) !Command {
 
     var buffer = command_buffers.create_transfers[0..events_count];
     for (buffer, 0..) |*event, i| {
-        const debit_account_id = random.intRangeLessThan(u128, 1, model.accounts_id_next);
-        var credit_account_id: u128 = 0;
+        const debit_account = arbitrary.element(random, tb.Account, model.accounts.items);
+        var credit_account: ?tb.Account = null;
         var flags = std.mem.zeroes(tb.TransferFlags);
-        while (credit_account_id == 0 or credit_account_id == debit_account_id) {
-            credit_account_id = random.intRangeLessThan(u128, 1, model.accounts_id_next);
+        while (credit_account == null or credit_account.?.id == debit_account.id) {
+            credit_account = arbitrary.element(random, tb.Account, model.accounts.items);
         }
 
         // The last transfer in a batch can't be linked.
@@ -173,14 +270,23 @@ fn random_create_transfers(random: std.Random, model: *const Model) !Command {
         event.* = std.mem.zeroInit(Driver.Event(.create_transfers), .{
             .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
             .ledger = 1,
-            .debit_account_id = debit_account_id,
-            .credit_account_id = credit_account_id,
-            .amount = random.uintAtMost(u128, std.math.maxInt(u128)),
+            .debit_account_id = debit_account.id,
+            .credit_account_id = credit_account.?.id,
+            .amount = random.uintAtMost(u128, 1 << 32),
             .code = random.intRangeAtMost(u16, 1, 100),
         });
     }
 
     return .{ .create_transfers = buffer[0..events_count] };
+}
+
+fn lookup_all_accounts(model: *const Model) Command {
+    const events_count = model.accounts.items.len;
+    var buffer = command_buffers.lookup_all_accounts[0..events_count];
+    for (buffer, model.accounts.items) |*event, account| {
+        event.* = account.id;
+    }
+    return .{ .lookup_all_accounts = buffer[0..events_count] };
 }
 
 fn start_driver(allocator: std.mem.Allocator, args: CLIArgs) !*Driver {

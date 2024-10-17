@@ -2,6 +2,10 @@ const std = @import("std");
 
 const assert = std.debug.assert;
 
+pub fn element(random: std.rand.Random, comptime T: type, values: []T) T {
+    return values[random.uintLessThan(usize, values.len)];
+}
+
 /// Draw an enum value from `E` based on the relative `weights`. Fields in the weights struct must
 /// match the enum.
 ///
