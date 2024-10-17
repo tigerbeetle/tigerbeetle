@@ -2312,7 +2312,7 @@ pub fn ReplicaType(
                             break;
                         }
                     }
-                } else unreachable;
+                } else return;
 
                 for (view_headers) |*header| {
                     if (header.op <= self.op_prepare_max_sync()) {
@@ -4883,21 +4883,6 @@ pub fn ReplicaType(
             const op_min = if (range) |r| r.op_max + 1 else range_min;
             assert(op_min <= op);
 
-            if (self.op_checkpoint() == 0 and range != null) {
-                // We get here only if we are a backup with a missing/corrupt root op, advancing our
-                // checkpoint mid-repair. Primaries can never have a corrupt root op as repair
-                // ensures a primary's journal is clean before it transitions to .normal status.
-                assert(self.status == .normal);
-                assert(self.backup());
-                assert(self.commit_min == self.op_checkpoint_next_trigger());
-                assert(op_min == 1);
-                assert(range.?.op_max == 0);
-                assert(range.?.op_min == 0);
-                assert(self.journal.faulty.bit(.{ .index = 0 }));
-            } else {
-                assert(op_min <= self.op_repair_min());
-            }
-
             // The SV includes headers corresponding to the op_prepare_max for preceding
             // checkpoints (as many as we have and can help repair, which is at most 2).
             for ([_]u64{
@@ -6446,7 +6431,7 @@ pub fn ReplicaType(
                 self.repair_prepares(op_min);
             }
 
-            if (header_break != null and header_break.?.op_max > self.op_checkpoint()) {
+            if (header_break != null and header_break.?.op_max >= self.op_checkpoint()) {
                 return;
             }
 
@@ -6466,6 +6451,26 @@ pub fn ReplicaType(
                 // and drive further repairs.
                 assert(!self.solo());
                 self.commit_journal();
+            } else {
+                if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
+                    if (self.commit_stage != .idle) {
+                        // If we still have a commit running, we started it the last time we were
+                        // primary, and its still running. Wait for it to finish before repairing
+                        // the pipeline so that it doesn't wind up in the new pipeline.
+                        assert(self.commit_prepare.?.header.op >= self.commit_min);
+                        assert(self.commit_prepare.?.header.op <= self.commit_min + 1);
+                        assert(self.commit_prepare.?.header.view < self.view);
+                        return;
+                    }
+
+                    // Repair the pipeline, which may discover faulty prepares and drive more
+                    // repairs.
+                    switch (self.primary_repair_pipeline()) {
+                        // primary_repair_pipeline() is already working.
+                        .busy => {},
+                        .done => self.primary_start_view_as_the_new_primary(),
+                    }
+                }
             }
 
             if (self.client_replies.faulty.findFirstSet()) |slot| {
@@ -6486,30 +6491,6 @@ pub fn ReplicaType(
                         .reply_checksum = entry.header.checksum,
                     }),
                 );
-            }
-
-            if (header_break != null or self.journal.dirty.count > 0) return;
-
-            if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                if (self.commit_min == self.commit_max) {
-                    if (self.commit_stage != .idle) {
-                        // If we still have a commit running, we started it the last time we were
-                        // primary, and its still running. Wait for it to finish before repairing
-                        // the pipeline so that it doesn't wind up in the new pipeline.
-                        assert(self.commit_prepare.?.header.op >= self.commit_min);
-                        assert(self.commit_prepare.?.header.op <= self.commit_min + 1);
-                        assert(self.commit_prepare.?.header.view < self.view);
-                        return;
-                    }
-
-                    // Repair the pipeline, which may discover faulty prepares and drive more
-                    // repairs.
-                    switch (self.primary_repair_pipeline()) {
-                        // primary_repair_pipeline() is already working.
-                        .busy => {},
-                        .done => self.primary_start_view_as_the_new_primary(),
-                    }
-                }
             }
         }
 
@@ -6712,7 +6693,6 @@ pub fn ReplicaType(
             assert(self.primary_index(self.view) == self.replica);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
-            assert(self.journal.dirty.count == 0);
             assert(self.pipeline == .cache);
 
             if (self.pipeline_repairing) {
@@ -6738,8 +6718,10 @@ pub fn ReplicaType(
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
-            assert(self.journal.dirty.count == 0);
-            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
+            assert(self.valid_hash_chain_between(
+                @min(self.op_checkpoint() + 1, self.op),
+                self.op,
+            ));
             assert(self.pipeline == .cache);
             assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
@@ -8380,10 +8362,10 @@ pub fn ReplicaType(
 
             assert(self.commit_min == self.commit_max);
             assert(self.commit_max <= self.op);
-            assert(self.journal.dirty.count == 0);
-            assert(self.journal.faulty.count == 0);
-            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
-
+            assert(self.valid_hash_chain_between(
+                @min(self.op_checkpoint() + 1, self.op),
+                self.op,
+            ));
             {
                 const pipeline_queue = self.primary_repair_pipeline_done();
                 assert(pipeline_queue.request_queue.empty());
@@ -8628,8 +8610,6 @@ pub fn ReplicaType(
                 assert(self.view == view_new);
                 assert(self.log_view == view_new);
                 assert(self.commit_min == self.commit_max);
-                assert(self.journal.dirty.count == 0);
-                assert(self.journal.faulty.count == 0);
 
                 // Now that the primary is repaired and in status=normal, it can update its
                 // view-change headers. view-change headers and log_view may already be durable if
