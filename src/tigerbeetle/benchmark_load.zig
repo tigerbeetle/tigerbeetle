@@ -255,7 +255,7 @@ pub fn main(
 const Generator = union(enum) {
     zipfian: ZipfianShuffled,
     latest: ZipfianGenerator,
-    uniform,
+    uniform: u64,
 
     fn from_distribution(
         distribution: cli.Command.Benchmark.Distribution,
@@ -269,7 +269,7 @@ const Generator = union(enum) {
             .latest => .{
                 .latest = ZipfianGenerator.init(count),
             },
-            .uniform => .uniform,
+            .uniform => .{ .uniform = count },
         };
     }
 };
@@ -394,8 +394,10 @@ const Benchmark = struct {
                 assert(index_rev < b.account_count);
                 return b.account_count - index_rev - 1;
             },
-            .uniform => {
-                return random.uintLessThan(u64, b.account_count);
+            .uniform => |count| {
+                const index = random.uintLessThan(u64, count);
+                assert(index < b.account_count);
+                return index;
             },
         }
     }
@@ -422,10 +424,13 @@ const Benchmark = struct {
             }
             break :index index;
         };
+        assert(debit_account_index < b.account_count);
+        assert(credit_account_index < b.account_count);
+        assert(debit_account_index != credit_account_index);
 
         const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
         const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
-        assert(debit_account_index != credit_account_index);
+        assert(debit_account_id != credit_account_id);
 
         // 30% of pending transfers.
         const pending = b.transfer_pending and random.intRangeAtMost(u8, 0, 9) < 3;
