@@ -27,7 +27,10 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     var model = Model{
         .accounts = std.ArrayListUnmanaged(tb.Account).initBuffer(&accounts_buffer),
+        .pending_transfers = std.AutoHashMap(u128, void).init(allocator),
     };
+    defer model.pending_transfers.deinit();
+
     const seed = std.crypto.random.int(u64);
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
@@ -112,8 +115,14 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
 
             // Track results for all new accounts, assuming `.ok` if response from driver is
             // omitted.
-            var accounts_created: [accounts_count_max]struct { tb.CreateAccountResult, tb.Account } = undefined;
-            for (accounts_new, accounts_created[0..accounts_new.len]) |account_new, *account_created| {
+            var accounts_created: [accounts_count_max]struct {
+                tb.CreateAccountResult,
+                tb.Account,
+            } = undefined;
+            for (
+                accounts_new,
+                accounts_created[0..accounts_new.len],
+            ) |account_new, *account_created| {
                 account_created[0] = .ok;
                 account_created[1] = account_new;
             }
@@ -158,6 +167,15 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                     continue;
                 }
 
+                if (transfer.flags.pending) {
+                    try testing.expect(!model.pending_transfers.contains(transfer.id));
+                    try model.pending_transfers.put(transfer.id, {});
+                }
+
+                if (transfer.flags.void_pending_transfer or transfer.flags.post_pending_transfer) {
+                    try testing.expect(model.pending_transfers.remove(transfer.id));
+                }
+
                 try testing.expect(model.account_exists(transfer.debit_account_id));
                 try testing.expect(model.account_exists(transfer.credit_account_id));
             }
@@ -185,6 +203,7 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
 
 const Model = struct {
     accounts: std.ArrayListUnmanaged(tb.Account),
+    pending_transfers: std.AutoHashMap(u128, void),
 
     // O(n) lookup, but it's limited by `accounts_count_max`, so it's OK for this test.
     fn account_exists(self: @This(), id: u128) bool {
@@ -240,10 +259,23 @@ fn random_create_accounts(random: std.Random, model: *const Model) !Command {
     var buffer = command_buffers.create_accounts[0..events_count];
     var i: usize = 0;
     for (buffer) |*event| {
+        var flags = std.mem.zeroes(tb.AccountFlags);
+
+        flags.history = arbitrary.odds(random, 1, 10);
+
+        if (arbitrary.odds(random, 1, 10)) {
+            flags.debits_must_not_exceed_credits = random.boolean();
+            flags.credits_must_not_exceed_debits = !flags.debits_must_not_exceed_credits;
+        }
+
+        // The last account in a batch can't be linked.
+        flags.linked = i < events_count - 1 and arbitrary.odds(random, 1, 100);
+
         event.* = std.mem.zeroInit(Driver.Event(.create_accounts), .{
             .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
             .ledger = 1,
             .code = random.intRangeAtMost(u16, 1, 100),
+            .flags = flags,
         });
         i += 1;
     }
@@ -257,23 +289,54 @@ fn random_create_transfers(random: std.Random, model: *const Model) !Command {
 
     var buffer = command_buffers.create_transfers[0..events_count];
     for (buffer, 0..) |*event, i| {
-        const debit_account = arbitrary.element(random, tb.Account, model.accounts.items);
-        var credit_account: ?tb.Account = null;
         var flags = std.mem.zeroes(tb.TransferFlags);
-        while (credit_account == null or credit_account.?.id == debit_account.id) {
-            credit_account = arbitrary.element(random, tb.Account, model.accounts.items);
+        var pending_id: u128 = 0;
+        var code = random.intRangeAtMost(u16, 1, 100);
+
+        var debit_account_id = arbitrary.element(random, tb.Account, model.accounts.items).id;
+        var credit_account_id: u128 = 0;
+        while (credit_account_id == 0 or credit_account_id == debit_account_id) {
+            credit_account_id = arbitrary.element(random, tb.Account, model.accounts.items).id;
+        }
+
+        if (arbitrary.odds(random, 1, 10) and model.pending_transfers.count() > 0) {
+            if (random.boolean()) {
+                flags.post_pending_transfer = true;
+            } else {
+                flags.void_pending_transfer = true;
+            }
+        } else if (arbitrary.odds(random, 1, 100_000)) {
+            if (random.boolean()) {
+                flags.closing_debit = true;
+            } else {
+                flags.closing_credit = true;
+            }
+        } else {
+            flags = arbitrary.flags(random, tb.TransferFlags, .{
+                .pending,
+                .balancing_debit,
+                .balancing_credit,
+            });
         }
 
         // The last transfer in a batch can't be linked.
         flags.linked = i < events_count - 1 and arbitrary.odds(random, 1, 100);
 
+        if (flags.post_pending_transfer or flags.void_pending_transfer) {
+            pending_id = arbitrary.set_element(random, u128, model.pending_transfers);
+            code = 0;
+            debit_account_id = 0;
+            credit_account_id = 0;
+        }
+
         event.* = std.mem.zeroInit(Driver.Event(.create_transfers), .{
             .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
             .ledger = 1,
-            .debit_account_id = debit_account.id,
-            .credit_account_id = credit_account.?.id,
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
             .amount = random.uintAtMost(u128, 1 << 32),
-            .code = random.intRangeAtMost(u16, 1, 100),
+            .code = code,
+            .pending_id = pending_id,
         });
     }
 

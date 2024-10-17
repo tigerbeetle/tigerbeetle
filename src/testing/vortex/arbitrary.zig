@@ -2,8 +2,60 @@ const std = @import("std");
 
 const assert = std.debug.assert;
 
+/// Pick a random element from the slice.
 pub fn element(random: std.rand.Random, comptime T: type, values: []T) T {
     return values[random.uintLessThan(usize, values.len)];
+}
+
+/// Pick a random element from the set (hashmap with void values).
+pub fn set_element(random: std.rand.Random, comptime K: type, set: std.AutoHashMap(K, void)) K {
+    const pick = random.uintLessThan(usize, set.count());
+    var it = set.keyIterator();
+    var i: usize = 0;
+    while (it.next()) |value| {
+        if (i == pick) {
+            return value.*;
+        }
+        i += 1;
+    }
+    unreachable;
+}
+
+/// Set any (zero or more) of the provided flags randomly.
+pub fn flags(random: std.rand.Random, comptime Flags: type, fields: anytype) Flags {
+    var result = std.mem.zeroes(Flags);
+    const flags_struct = @typeInfo(Flags).Struct;
+    inline for (fields) |field| {
+        // Check that provided flag fields are indeed booleans.
+        inline for (flags_struct.fields) |struct_field| {
+            if (std.mem.eql(u8, struct_field.name, @tagName(field))) {
+                assert(struct_field.type == bool);
+            }
+        }
+        @field(result, @tagName(field)) = random.boolean();
+    }
+    return result;
+}
+
+test flags {
+    const F = packed struct { a: bool, b: bool, c: bool };
+    var prng = std.rand.DefaultPrng.init(0);
+    const random = prng.random();
+
+    var a = false;
+    var b = false;
+    var c = false;
+
+    for (0..1000) |_| {
+        const result = flags(random, F, .{ .a, .b });
+        a = a or result.a;
+        b = b or result.b;
+        c = c or result.c;
+    }
+
+    try std.testing.expect(a);
+    try std.testing.expect(b);
+    try std.testing.expect(!c);
 }
 
 /// Draw an enum value from `E` based on the relative `weights`. Fields in the weights struct must
