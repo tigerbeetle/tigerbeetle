@@ -16,6 +16,7 @@ const Snap = @import("./testing/snaptest.zig").Snap;
 const snap = Snap.snap;
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
+const vortex_exe: []const u8 = @import("test_options").vortex_exe;
 const tigerbeetle: []const u8 = @import("test_options").tigerbeetle_exe;
 const tigerbeetle_past: []const u8 = @import("test_options").tigerbeetle_exe_past;
 
@@ -510,10 +511,11 @@ test "vortex smoke" {
     log.info("running 1m vortex test...", .{});
     try shell.exec(
         \\ unshare -nfr 
-        \\   ./zig-out/bin/vortex supervisor
+        \\   {vortex} supervisor
         \\      --test-duration-minutes=1 
         \\      --tigerbeetle-executable={tigerbeetle} 
     , .{
+        .vortex = vortex_exe,
         .tigerbeetle = tigerbeetle,
     });
     log.info("vortex passed", .{});

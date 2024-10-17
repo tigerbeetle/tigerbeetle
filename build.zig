@@ -245,7 +245,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     // zig build vortex
-    build_vortex(b, build_steps.vortex, .{
+    _ = build_vortex(b, build_steps.vortex, .{
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
@@ -637,7 +637,7 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
         "vortex_integration_test",
         "special build of vortex for multiversion integration test",
     );
-    build_vortex(b, step_vortex, .{
+    const vortex_exe = build_vortex(b, step_vortex, .{
         .tb_client_header = options.tb_client_header,
         .vsr_options = vsr_options,
         .target = options.target,
@@ -647,6 +647,7 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
     const integration_tests_options = b.addOptions();
     integration_tests_options.addOptionPath("tigerbeetle_exe", tigerbeetle);
     integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_previous);
+    integration_tests_options.addOptionPath("vortex_exe", vortex_exe);
     const integration_tests = b.addTest(.{
         .root_source_file = b.path("src/integration_tests.zig"),
         .target = options.target,
@@ -831,7 +832,7 @@ fn build_vortex(
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
-) void {
+) std.Build.LazyPath {
     const vortex = b.addExecutable(.{
         .name = "vortex",
         .root_source_file = b.path("src/vortex.zig"),
@@ -845,6 +846,8 @@ fn build_vortex(
 
     const install_step = b.addInstallArtifact(vortex, .{});
     step_vortex.dependOn(&install_step.step);
+
+    return install_step.emitted_bin.?;
 }
 
 // Zig cross-targets, Dotnet RID (Runtime Identifier), CPU features.
