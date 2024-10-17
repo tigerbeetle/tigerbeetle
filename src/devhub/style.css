@@ -127,6 +127,7 @@ td {
     }
 
     #charts {
+        color: black;
         filter: invert(100%);
     }
 }
