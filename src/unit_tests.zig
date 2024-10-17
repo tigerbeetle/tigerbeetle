@@ -11,6 +11,7 @@ comptime {
     _ = @import("shell.zig");
     _ = @import("stdx.zig");
     _ = @import("stdx/bounded_array.zig");
+    _ = @import("stdx/sort_test.zig");
     _ = @import("stdx/zipfian.zig");
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
