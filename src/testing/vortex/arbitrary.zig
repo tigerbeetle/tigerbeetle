@@ -101,3 +101,17 @@ test "weighted: equal weights are picked equally often over time" {
         @as(f64, @floatFromInt(sample_count)) / 100,
     );
 }
+
+/// Draws a boolean where the probability of `true` is given by the odds (a ratio).
+///
+/// `odds(random, 2, 5)` means "a probability of 2 in 5".
+pub fn odds(
+    random: std.rand.Random,
+    numerator: u32,
+    denominator: u32,
+) bool {
+    assert(numerator > 0);
+    assert(denominator > 0);
+    assert(numerator < denominator);
+    return random.uintLessThan(u32, denominator) < numerator;
+}

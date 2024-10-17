@@ -1,6 +1,7 @@
 const std = @import("std");
 const Driver = @import("./driver.zig");
 const arbitrary = @import("./arbitrary.zig");
+const tb = @import("../../tigerbeetle.zig");
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
@@ -158,15 +159,16 @@ fn random_create_transfers(random: std.Random, model: *const Model) !Command {
     assert(events_count <= events_count_max);
 
     var buffer = command_buffers.create_transfers[0..events_count];
-    var i: usize = 0;
-    for (buffer) |*event| {
+    for (buffer, 0..) |*event, i| {
         const debit_account_id = random.intRangeLessThan(u128, 1, model.accounts_id_next);
         var credit_account_id: u128 = 0;
+        var flags = std.mem.zeroes(tb.TransferFlags);
         while (credit_account_id == 0 or credit_account_id == debit_account_id) {
             credit_account_id = random.intRangeLessThan(u128, 1, model.accounts_id_next);
         }
 
-        // TODO: flags
+        // The last transfer in a batch can't be linked.
+        flags.linked = i < events_count - 1 and arbitrary.odds(random, 1, 100);
 
         event.* = std.mem.zeroInit(Driver.Event(.create_transfers), .{
             .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
@@ -176,7 +178,6 @@ fn random_create_transfers(random: std.Random, model: *const Model) !Command {
             .amount = random.uintAtMost(u128, std.math.maxInt(u128)),
             .code = random.intRangeAtMost(u16, 1, 100),
         });
-        i += 1;
     }
 
     return .{ .create_transfers = buffer[0..events_count] };
