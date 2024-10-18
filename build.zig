@@ -154,7 +154,7 @@ pub fn build(b: *std.Build) !void {
         const tb_client_header_generator = b.addExecutable(.{
             .name = "tb_client_header",
             .root_source_file = b.path("src/clients/c/tb_client_header.zig"),
-            .target = target,
+            .target = b.graph.host,
         });
         tb_client_header_generator.root_module.addImport("vsr", vsr_module);
         tb_client_header_generator.root_module.addOptions("vsr_options", vsr_options);
