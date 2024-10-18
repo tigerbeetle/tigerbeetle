@@ -669,7 +669,6 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
         .filters = b.args orelse &.{},
     });
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
-    integration_tests.step.dependOn(step_vortex);
 
     const run_integration_tests = b.addRunArtifact(integration_tests);
     if (b.args != null) { // Don't cache test results if running a specific test.

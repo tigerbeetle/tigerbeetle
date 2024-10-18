@@ -1,5 +1,7 @@
 const std = @import("std");
-const Driver = @import("driver.zig");
+const constants = @import("../../constants.zig");
+const StateMachineType = @import("../../state_machine.zig").StateMachineType;
+const StateMachine = StateMachineType(void, constants.state_machine_config);
 
 const c = @cImport({
     _ = @import("../../tb_client_exports.zig"); // Needed for the @export()'ed C ffi functions.
@@ -9,6 +11,7 @@ const c = @cImport({
 const assert = std.debug.assert;
 
 const log = std.log.scoped(.zig_driver);
+const events_count_max = 8190;
 
 pub const CLIArgs = struct {
     positional: struct {
@@ -68,7 +71,7 @@ pub fn on_complete(
     _ = tb_context;
     _ = tb_client;
     const writer: *std.io.AnyWriter = @ptrCast(@alignCast(tb_packet.*.user_data.?));
-    const operation: Driver.Operation = @enumFromInt(tb_packet.*.operation);
+    const operation: StateMachine.Operation = @enumFromInt(tb_packet.*.operation);
 
     // We might want to move this off the callback thread eventually, at least of we want
     // multithreading within this driver. But for now it's OK.
@@ -82,10 +85,14 @@ pub fn on_complete(
     }
 }
 
-fn write_results(writer: *std.io.AnyWriter, operation: Driver.Operation, result: []const u8) !void {
+fn write_results(
+    writer: *std.io.AnyWriter,
+    operation: StateMachine.Operation,
+    result: []const u8,
+) !void {
     switch (operation) {
         inline else => |comptime_operation| {
-            const size = @sizeOf(Driver.Result(comptime_operation));
+            const size = @sizeOf(StateMachine.Result(comptime_operation));
             if (size > 0) {
                 const count = @divExact(result.len, size);
                 try writer.writeInt(u32, @intCast(count), .little);
@@ -100,19 +107,19 @@ fn write_results(writer: *std.io.AnyWriter, operation: Driver.Operation, result:
     }
 }
 
-fn receive(reader: std.io.AnyReader) !struct { Driver.Operation, []const u8 } {
-    const operation = try reader.readEnum(Driver.Operation, .little);
+fn receive(reader: std.io.AnyReader) !struct { StateMachine.Operation, []const u8 } {
+    const operation = try reader.readEnum(StateMachine.Operation, .little);
     const count = try reader.readInt(u32, .little);
 
     return switch (operation) {
         inline else => |comptime_operation| {
-            assert(count <= Driver.events_count_max);
+            assert(count <= events_count_max);
             const buffer_size_max =
-                @sizeOf(Driver.Event(comptime_operation)) * Driver.events_count_max;
+                @sizeOf(StateMachine.Event(comptime_operation)) * events_count_max;
 
             var buffer: [buffer_size_max]u8 = undefined;
 
-            const buffer_size = @sizeOf(Driver.Event(comptime_operation)) * count;
+            const buffer_size = @sizeOf(StateMachine.Event(comptime_operation)) * count;
             assert(try reader.readAtLeast(buffer[0..buffer_size], buffer_size) == buffer_size);
 
             return .{ comptime_operation, buffer[0..buffer_size] };
