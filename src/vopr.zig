@@ -706,7 +706,7 @@ pub const Simulator = struct {
                 const op_repair_min = replica.op_repair_min();
 
                 // Check if replica's commit pipeline was stuck due to missing headers.
-                // Find largest missing header as we repair headers from high -> low ops.
+                // Find latest missing header as we repair headers from high -> low ops.
                 if (replica.journal.find_latest_headers_break_between(
                     op_repair_min,
                     commit_max,
@@ -716,7 +716,7 @@ pub const Simulator = struct {
                     }
                 } else {
                     // Check if replica's commit pipeline was stuck due to missing prepares.
-                    // Find smallest missing prepare as we repair prepares from low -> high ops.
+                    // Find earliest missing prepare as we repair prepares from low -> high ops.
                     for (op_repair_min..commit_max + 1) |op| {
                         const header = simulator.cluster.state_checker.header_with_op(op);
                         if (!replica.journal.has_clean(&header)) {
