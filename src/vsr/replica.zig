@@ -6489,19 +6489,8 @@ pub fn ReplicaType(
             }
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                // Primary must have no missing headers and no faulty prepares between op_repair_min
-                // and self.op, to maintain the invariant that a replica can repair everything back
-                // till op_repair_min.
-                if (header_break != null) return;
+                if (!self.primary_journal_repaired()) return;
 
-                const slots = vsr.SlotRange{
-                    .head = self.journal.slot_for_op(self.op_repair_min()),
-                    .tail = self.journal.slot_with_op(self.op).?,
-                };
-                var iterator = self.journal.dirty.bits.iterator(.{ .kind = .set });
-                while (iterator.next()) |index| {
-                    if (slots.contains(.{ .index = index })) return;
-                }
                 if (self.commit_min == self.commit_max) {
                     if (self.commit_stage != .idle) {
                         // If we still have a commit running, we started it the last time we were
@@ -6717,6 +6706,27 @@ pub fn ReplicaType(
             return true;
         }
 
+        /// Primary must have no missing headers and no faulty prepares between op_repair_min
+        /// and self.op, to maintain the invariant that a replica can repair everything back
+        /// till op_repair_min
+        fn primary_journal_repaired(self: *Self) bool {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.primary_index(self.view) == self.replica);
+            assert(self.view == self.log_view);
+
+            if (!self.valid_hash_chain_between(self.op_repair_min(), self.op)) return false;
+
+            for (self.op_repair_min()..self.op + 1) |op| {
+                const header = self.journal.header_with_op(op);
+                assert(header != null);
+                if (self.journal.dirty.bits.isSet(self.journal.slot_for_header(header.?).index)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         /// Reads prepares into the pipeline (before we start the view as the new primary).
         fn primary_repair_pipeline(self: *Self) enum { done, busy } {
             assert(self.status == .view_change);
@@ -6724,6 +6734,7 @@ pub fn ReplicaType(
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
+            assert(self.primary_journal_repaired());
 
             if (self.pipeline_repairing) {
                 log.debug("{}: primary_repair_pipeline: already repairing...", .{self.replica});
@@ -6748,10 +6759,10 @@ pub fn ReplicaType(
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
-            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
             assert(self.pipeline == .cache);
             assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
+            assert(self.primary_journal_repaired());
 
             var pipeline_queue = PipelineQueue{
                 .pipeline_request_queue_limit = self.pipeline_request_queue_limit,
@@ -8386,6 +8397,7 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum);
             assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
+            assert(self.primary_journal_repaired());
 
             assert(self.commit_min == self.commit_max);
             assert(self.commit_max <= self.op);
@@ -8635,6 +8647,7 @@ pub fn ReplicaType(
                 assert(self.view == view_new);
                 assert(self.log_view == view_new);
                 assert(self.commit_min == self.commit_max);
+                assert(self.primary_journal_repaired());
 
                 // Now that the primary is repaired and in status=normal, it can update its
                 // view-change headers. view-change headers and log_view may already be durable if
