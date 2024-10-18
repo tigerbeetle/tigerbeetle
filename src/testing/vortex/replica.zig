@@ -13,13 +13,10 @@ const assert = std.debug.assert;
 const Self = @This();
 pub const State = enum(u8) { initial, running, terminated, completed };
 
-// Passed in to create:
 allocator: std.mem.Allocator,
 executable_path: []const u8,
-replica_addresses: []const u8,
+replica_addresses_arg: []const u8,
 datafile: []const u8,
-
-// Lifecycle state:
 process: ?*LoggedProcess,
 
 pub fn create(
@@ -31,10 +28,16 @@ pub fn create(
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
+    const replica_addresses_arg = try std.fmt.allocPrint(
+        allocator,
+        "--addresses={s}",
+        .{replica_addresses},
+    );
+
     self.* = .{
         .allocator = allocator,
         .executable_path = executable_path,
-        .replica_addresses = replica_addresses,
+        .replica_addresses_arg = replica_addresses_arg,
         .datafile = datafile,
         .process = null,
     };
@@ -47,17 +50,18 @@ pub fn destroy(self: *Self) void {
     if (self.process) |process| {
         process.destroy(allocator);
     }
+    allocator.free(self.replica_addresses_arg);
     allocator.destroy(self);
 }
 
 pub fn state(self: *Self) State {
     if (self.process) |process| {
         switch (process.state()) {
-            .running => return State.running,
-            .terminated => return State.terminated,
-            .completed => return State.completed,
+            .running => return .running,
+            .terminated => return .terminated,
+            .completed => return .completed,
         }
-    } else return State.initial;
+    } else return .initial;
 }
 
 pub fn start(self: *Self) !void {
@@ -68,17 +72,10 @@ pub fn start(self: *Self) !void {
         process.destroy(self.allocator);
     }
 
-    const addresses = try std.fmt.allocPrint(
-        self.allocator,
-        "--addresses={s}",
-        .{self.replica_addresses},
-    );
-    defer self.allocator.free(addresses);
-
     const argv = &.{
         self.executable_path,
         "start",
-        addresses,
+        self.replica_addresses_arg,
         self.datafile,
     };
 
@@ -92,5 +89,5 @@ pub fn terminate(
     defer assert(self.state() == .terminated);
 
     assert(self.process != null);
-    return try self.process.?.terminate(std.posix.SIG.KILL);
+    return try self.process.?.terminate();
 }

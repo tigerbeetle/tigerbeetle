@@ -72,10 +72,12 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
 
     const tmp_dir = try create_tmp_dir(allocator);
-    defer allocator.free(tmp_dir);
-    defer std.fs.cwd().deleteTree(tmp_dir) catch |err| {
-        log.err("failed deleting temporary directory ({s}): {any}", .{ tmp_dir, err });
-    };
+    defer {
+        std.fs.cwd().deleteTree(tmp_dir) catch |err| {
+            log.err("failed deleting temporary directory ({s}): {any}", .{ tmp_dir, err });
+        };
+        allocator.free(tmp_dir);
+    }
 
     // Check that we are running as root.
     const user_id = std.os.linux.getuid();
@@ -97,12 +99,22 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const test_deadline = std.time.nanoTimestamp() + test_duration_ns;
 
     var replicas: [replica_count]*Replica = undefined;
-    inline for (0..replica_count) |i| {
-        var datafile_buf: [1024]u8 = undefined;
+    defer {
+        for (replicas) |replica| {
+            // We might have terminated the replica and never restarted it,
+            // so we need to check its state.
+            if (replica.state() == .running) {
+                _ = replica.terminate() catch {};
+            }
+            replica.destroy();
+        }
+    }
+    inline for (0..replica_count) |replica_index| {
+        var datafile_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const datafile = try std.fmt.bufPrint(
-            datafile_buf[0..],
+            datafile_buffer[0..],
             "{s}/{d}_{d}.tigerbeetle",
-            .{ tmp_dir, cluster_id, i },
+            .{ tmp_dir, cluster_id, replica_index },
         );
 
         // Format each replica's datafile.
@@ -110,24 +122,18 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             args.tigerbeetle_executable,
             "format",
             std.fmt.comptimePrint("--cluster={d}", .{cluster_id}),
-            std.fmt.comptimePrint("--replica={d}", .{i}),
+            std.fmt.comptimePrint("--replica={d}", .{replica_index}),
             std.fmt.comptimePrint("--replica-count={d}", .{replica_count}),
             datafile,
         } });
-        defer allocator.free(result.stderr);
-        defer allocator.free(result.stdout);
+        defer {
+            allocator.free(result.stderr);
+            allocator.free(result.stdout);
+        }
 
-        switch (result.term) {
-            .Exited => |code| {
-                if (code != 0) {
-                    log.err("failed formatting datafile: {s}", .{result.stderr});
-                    process.exit(1);
-                }
-            },
-            else => {
-                log.err("failed formatting datafile: {s}", .{result.stderr});
-                process.exit(1);
-            },
+        if (!std.meta.eql(result.term, .{ .Exited = 0 })) {
+            log.err("failed formatting datafile: {s}", .{result.stderr});
+            process.exit(1);
         }
 
         // Start replica.
@@ -141,24 +147,13 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         try replica.start();
 
-        replicas[i] = replica;
-    }
-
-    defer {
-        for (replicas) |replica| {
-            // We might have terminated the replica and never restarted it,
-            // so we need to check its state.
-            if (replica.state() == .running) {
-                _ = replica.terminate() catch {};
-            }
-            replica.destroy();
-        }
+        replicas[replica_index] = replica;
     }
 
     const workload = try start_workload(allocator);
     defer {
         if (workload.state() == .running) {
-            _ = workload.terminate(std.posix.SIG.KILL) catch {};
+            _ = workload.terminate() catch {};
         }
         workload.destroy(allocator);
     }
@@ -209,7 +204,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                             },
                             else => {
                                 log.err(
-                                    "replica {d} exited unexpectedly with on signal {d}",
+                                    "replica {d} terminated unexpectedly with signal {d}",
                                     .{ index, signal },
                                 );
                                 process.exit(1);
@@ -235,7 +230,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         // required duration.
         log.info("terminating workload due to max duration", .{});
         break :blk if (workload.state() == .running)
-            try workload.terminate(std.posix.SIG.KILL)
+            try workload.terminate()
         else
             try workload.wait();
     };
@@ -295,12 +290,22 @@ fn random_replica_in_state(
 }
 
 fn start_workload(allocator: std.mem.Allocator) !*LoggedProcess {
+    var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
+
+    var driver_command_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const driver_command = try std.fmt.bufPrint(
+        &driver_command_buffer,
+        "--driver-command={s} driver",
+        .{vortex_path},
+    );
+
     const argv = &.{
-        "zig-out/bin/vortex",
+        vortex_path,
         "workload",
         std.fmt.comptimePrint("--cluster-id={d}", .{cluster_id}),
         std.fmt.comptimePrint("--addresses={s}", .{replica_addresses}),
-        "--driver-command=zig-out/bin/vortex driver",
+        driver_command,
     };
 
     return try LoggedProcess.spawn(allocator, argv);
@@ -321,16 +326,14 @@ pub fn comma_separate_ports(comptime ports: []const u16) []const u8 {
 
 // Create a new Vortex-specific temporary directory. Caller owns the returned memory.
 fn create_tmp_dir(allocator: std.mem.Allocator) ![]const u8 {
-    const root = process.getEnvVarOwned(allocator, "TMPDIR") catch try allocator.dupe(u8, "/tmp");
-    defer allocator.free(root);
+    const working_directory = std.fs.cwd();
 
-    const path = try std.fmt.allocPrint(allocator, "{s}/vortex-{d}", .{
-        root,
+    const path = try std.fmt.allocPrint(allocator, ".zig-cache/vortex-{d}", .{
         std.crypto.random.int(u64),
     });
-    errdefer allocator.free(path);
+    defer allocator.free(path);
 
-    try std.fs.makeDirAbsolute(path);
+    try working_directory.makePath(path);
 
-    return path;
+    return working_directory.realpathAlloc(allocator, path);
 }
