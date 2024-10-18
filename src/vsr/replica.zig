@@ -6047,7 +6047,7 @@ pub fn ReplicaType(
         ///
         /// When called from status=recovering_head or status=recovering, the caller is responsible
         /// for ensuring that replica.op is valid.
-        fn op_repair_min(self: *const Self) u64 {
+        pub fn op_repair_min(self: *const Self) u64 {
             if (self.status == .recovering) assert(self.solo());
             assert(self.syncing == .updating_checkpoint or self.op >= self.op_checkpoint());
             assert(self.op <= self.op_prepare_max_sync());
