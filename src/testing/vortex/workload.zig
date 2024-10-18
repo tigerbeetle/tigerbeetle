@@ -1,38 +1,50 @@
-//! This workload runs in an loop, generating and executing operations on a cluster.
+//! This workload runs in an loop, generating and executing operations on a cluster through a
+//! _driver_.
 //!
 //! Any sucessful operations are reconciled with a model, tracking what accounts exist. Future
 //! operations are generated based on this model.
 //!
 //! After every operation, all accounts are queried, and basic invariants are checked.
+//!
+//! The workload and drivers communicate with a binary protocol over stdio. The protocol is based
+//! on the extern structs in `src/tigerbeetle.zig` and `src/state_machine.zig`, and it works like
+//! this:
+//!
+//! 1. Workload sends a request, which is:
+//!    * the _operation_ (1 byte),
+//!    * the _event count_ (4 bytes), and
+//!    * the events (event count * size of event).
+//! 2. The driver uses its client to submit those events. When receiving results, it sends them
+//!    back on its stdout as:
+//!    * the _operation_ (1 byte)
+//!    * the _result count_ (4 bytes), and
+//!    * the results (resulgt count * size of result pair), where each pair holds an index and a
+//!      result enum value (see `src/tigerbeetle.zig`)
+//! 3. The workload receives the results, and expects them to be of the same operation type as
+//!    originally requested. There might be fewer results than events, because clients can omit
+//!    .ok results.
 
 const std = @import("std");
-const Driver = @import("./driver.zig");
 const arbitrary = @import("./arbitrary.zig");
 const tb = @import("../../tigerbeetle.zig");
+const constants = @import("../../constants.zig");
+const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
 const testing = std.testing;
+const StateMachine = StateMachineType(void, constants.state_machine_config);
 
-const events_count_max = Driver.events_count_max;
+const events_count_max = 8190;
 const pending_transfers_count_max = 1024;
 const accounts_count_max = 128;
 
-pub const CLIArgs = struct {
-    @"cluster-id": u128,
-    addresses: []const u8,
-    @"driver-command": []const u8,
-};
+const DriverStdio = struct { input: std.fs.File, output: std.fs.File };
 
-pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
-    var driver = try start_driver(allocator, args);
-    defer {
-        if (driver.state() == .running) {
-            _ = driver.terminate() catch {};
-        }
-        driver.destroy(allocator);
-    }
-
+pub fn main(
+    allocator: std.mem.Allocator,
+    driver: *const DriverStdio,
+) !void {
     var model = Model{
         .accounts = std.ArrayListUnmanaged(tb.Account).initBuffer(&accounts_buffer),
         .pending_transfers = std.AutoHashMap(u128, void).init(allocator),
@@ -59,23 +71,23 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
 
 const Command = union(enum) {
-    create_accounts: []Driver.Event(.create_accounts),
-    create_transfers: []Driver.Event(.create_transfers),
-    lookup_all_accounts: []Driver.Event(.lookup_accounts),
+    create_accounts: []tb.Account,
+    create_transfers: []tb.Transfer,
+    lookup_all_accounts: []u128,
 };
 
 const CommandBuffers = FixedSizeBuffers(Command);
 var command_buffers: CommandBuffers = std.mem.zeroes(CommandBuffers);
 
 const Result = union(enum) {
-    create_accounts: []Driver.Result(.create_accounts),
-    create_transfers: []Driver.Result(.create_transfers),
-    lookup_all_accounts: []Driver.Result(.lookup_accounts),
+    create_accounts: []tb.CreateAccountsResult,
+    create_transfers: []tb.CreateTransfersResult,
+    lookup_all_accounts: []tb.Account,
 };
 const ResultBuffers = FixedSizeBuffers(Result);
 var result_buffers: ResultBuffers = std.mem.zeroes(ResultBuffers);
 
-fn execute(command: Command, driver: *const Driver) !?Result {
+fn execute(command: Command, driver: *const DriverStdio) !?Result {
     switch (command) {
         .create_accounts => |events| return try execute_regular(
             .create_accounts,
@@ -100,14 +112,14 @@ fn execute(command: Command, driver: *const Driver) !?Result {
 
 fn execute_regular(
     comptime command_tag: std.meta.Tag(Command),
-    comptime operation: Driver.Operation,
-    events: []Driver.Event(operation),
-    driver: *const Driver,
+    comptime operation: StateMachine.Operation,
+    events: []StateMachine.Event(operation),
+    driver: *const DriverStdio,
 ) !?Result {
-    try driver.send(operation, events);
+    try send(driver, operation, events);
 
     const buffer = @field(result_buffers, @tagName(command_tag))[0..events.len];
-    const results = driver.receive(operation, buffer) catch |err| {
+    const results = receive(driver, operation, buffer) catch |err| {
         switch (err) {
             error.EndOfStream => return null,
             else => return err,
@@ -283,7 +295,7 @@ fn random_create_accounts(random: std.Random, model: *const Model) !Command {
         // The last account in a batch can't be linked.
         flags.linked = i < events_count - 1 and arbitrary.odds(random, 1, 100);
 
-        event.* = std.mem.zeroInit(Driver.Event(.create_accounts), .{
+        event.* = std.mem.zeroInit(tb.Account, .{
             .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
             .ledger = 1,
             .code = random.intRangeAtMost(u16, 1, 100),
@@ -295,7 +307,7 @@ fn random_create_accounts(random: std.Random, model: *const Model) !Command {
 }
 
 fn random_create_transfers(random: std.Random, model: *const Model) !Command {
-    const events_count = random.intRangeAtMost(usize, 1, Driver.events_count_max);
+    const events_count = random.intRangeAtMost(usize, 1, events_count_max);
     assert(events_count <= events_count_max);
 
     var buffer = command_buffers.create_transfers[0..events_count];
@@ -334,7 +346,7 @@ fn random_create_transfers(random: std.Random, model: *const Model) !Command {
             credit_account_id = 0;
         }
 
-        event.* = std.mem.zeroInit(Driver.Event(.create_transfers), .{
+        event.* = std.mem.zeroInit(tb.Transfer, .{
             .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
             .ledger = 1,
             .debit_account_id = debit_account_id,
@@ -355,26 +367,6 @@ fn lookup_all_accounts(model: *const Model) Command {
         event.* = account.id;
     }
     return .{ .lookup_all_accounts = buffer[0..events_count] };
-}
-
-fn start_driver(allocator: std.mem.Allocator, args: CLIArgs) !*Driver {
-    var argv = std.ArrayList([]const u8).init(allocator);
-    defer argv.deinit();
-
-    assert(std.mem.indexOf(u8, args.@"driver-command", "\"") == null);
-    var cmd_parts = std.mem.split(u8, args.@"driver-command", " ");
-
-    while (cmd_parts.next()) |part| {
-        try argv.append(part);
-    }
-
-    var cluster_id_argument: [32]u8 = undefined;
-    const cluster_id = try std.fmt.bufPrint(cluster_id_argument[0..], "{d}", .{args.@"cluster-id"});
-
-    try argv.append(cluster_id);
-    try argv.append(args.addresses);
-
-    return try Driver.spawn(allocator, argv.items);
 }
 
 /// Converts a union type, where each field is of a slice type, into a struct of arrays of the
@@ -404,4 +396,37 @@ fn FixedSizeBuffers(Union: type) type {
         .layout = .auto,
         .decls = &.{},
     } });
+}
+
+pub fn send(
+    driver: *const DriverStdio,
+    comptime op: StateMachine.Operation,
+    events: []const StateMachine.Event(op),
+) !void {
+    assert(events.len <= events_count_max);
+
+    const writer = driver.input.writer().any();
+
+    try writer.writeInt(u8, @intFromEnum(op), .little);
+    try writer.writeInt(u32, @intCast(events.len), .little);
+
+    const bytes: []const u8 = std.mem.sliceAsBytes(events);
+    try writer.writeAll(bytes);
+}
+
+pub fn receive(
+    driver: *const DriverStdio,
+    comptime op: StateMachine.Operation,
+    results: []StateMachine.Result(op),
+) ![]StateMachine.Result(op) {
+    assert(results.len <= events_count_max);
+    const reader = driver.output.reader();
+
+    const results_count = try reader.readInt(u32, .little);
+    assert(results_count <= results.len);
+
+    const buf: []u8 = std.mem.sliceAsBytes(results[0..results_count]);
+    assert(try reader.readAtLeast(buf, buf.len) == buf.len);
+
+    return results[0..results_count];
 }
