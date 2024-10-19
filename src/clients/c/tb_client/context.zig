@@ -76,15 +76,6 @@ pub fn ContextType(
             return null;
         }
 
-        fn operation_event_size(op: u8) ?usize {
-            inline for (allowed_operations) |operation| {
-                if (op == @intFromEnum(operation)) {
-                    return @sizeOf(Client.StateMachine.Event(operation));
-                }
-            }
-            return null;
-        }
-
         const PacketError = error{
             TooMuchData,
             ClientShutdown,
@@ -280,6 +271,8 @@ pub fn ContextType(
             while (self.submitted.pop()) |packet| self.cancel(packet);
         }
 
+        
+
         fn on_signal(signal: *Signal) void {
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
 
@@ -301,11 +294,13 @@ pub fn ContextType(
             };
 
             // Get the size of each request structure in the packet.data:
-            const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| blk: {
-                    break :blk @sizeOf(Client.StateMachine.Event(operation_comptime));
-                },
+            const event_size: u32 = switch (operation) {
+                inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
             };
+
+            // Get the size of the Result from the client instead of the StateMachine as it can
+            // intercept and change the results.
+            const result_size = Client.size_of_result(operation);
 
             // Make sure the packet.data size is correct:
             const events = @as([*]const u8, @ptrCast(packet.data))[0..packet.data_size];
@@ -315,14 +310,25 @@ pub fn ContextType(
 
             // Make sure the packet.data wouldn't overflow a request, and that the corresponding
             // results won't overflow a reply.
-            const events_batch_max = switch (operation) {
+            const event_count_max, const result_count = switch (operation) {
                 .pulse => unreachable,
-                inline else => |operation_comptime| StateMachine.operation_batch_max(
-                    operation_comptime,
-                    self.batch_size_limit.?,
-                ),
+                inline else => |operation_comptime| .{
+                    StateMachine.operation_event_count_max(
+                        operation_comptime,
+                        self.batch_size_limit.?,
+                    ),
+                    StateMachine.operation_result_count_max(
+                        operation_comptime,
+                        events,
+                    ),
+                },
             };
-            if (@divExact(events.len, event_size) > events_batch_max) {
+
+            const event_count: u32 = @intCast(@divExact(events.len, event_size));
+            if (event_count > event_count_max or
+                vsr.Batch.overflows(event_count, event_size, 1) or
+                vsr.Batch.overflows(result_count, result_size, 1))
+            {
                 return self.on_complete(packet, error.TooMuchData);
             } else {
                 assert(events.len <= self.batch_size_limit.?);
@@ -330,7 +336,9 @@ pub fn ContextType(
 
             packet.batch_next = null;
             packet.batch_tail = packet;
-            packet.batch_size = packet.data_size;
+            packet.batch_count = 1;
+            packet.batch_events = @intCast(event_count);
+            packet.batch_results = @intCast(result_count);
 
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
             if (self.shutdown.load(.acquire)) {
@@ -351,10 +359,22 @@ pub fn ContextType(
                     // Check for pending packets of the same operation which can be batched.
                     if (root.operation != packet.operation) continue;
 
-                    const merged_events = @divExact(root.batch_size + packet.data_size, event_size);
-                    if (merged_events > events_batch_max) continue;
+                    // Check if adding to this batch would overflow a message buffer.
+                    const merged_count = root.batch_count + 1;
+                    const merged_events = root.batch_events + event_count;
+                    const merged_results = root.batch_results + result_count;
 
-                    root.batch_size += packet.data_size;
+                    if (merged_events > event_count_max or
+                        vsr.Batch.overflows(merged_events, event_size, merged_count) or
+                        vsr.Batch.overflows(merged_results, result_size, merged_count))
+                    {
+                        continue;
+                    }
+
+                    root.batch_count = merged_count;
+                    root.batch_events = @intCast(merged_events);
+                    root.batch_results = @intCast(merged_results);
+
                     root.batch_tail.?.batch_next = packet;
                     root.batch_tail = packet;
                     return;
@@ -365,6 +385,26 @@ pub fn ContextType(
             packet.next = null;
             self.pending.push(packet);
         }
+
+        const BatchIterator = struct {
+            current: ?*Packet,
+            count: u32,
+
+            fn init(root: *Packet) BatchIterator {
+                assert(root.batch_count > 0);
+                return .{ .current = root, .count = root.batch_count };
+            }
+
+            fn next(self: *BatchIterator) ?*Packet {
+                const packet = self.current orelse {
+                    assert(self.count == 0);
+                    return null;
+                };
+                self.current = packet.batch_next;
+                self.count -= 1;
+                return packet;
+            }
+        };
 
         fn submit(self: *Context, packet: *Packet) void {
             assert(self.client.request_inflight == null);
@@ -379,6 +419,11 @@ pub fn ContextType(
             errdefer self.client.release_message(message.base());
 
             const operation: StateMachine.Operation = @enumFromInt(packet.operation);
+            const event_size: u32 = switch (operation) {
+                inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
+            };
+            assert(event_size > 0);
+
             message.header.* = .{
                 .release = self.client.release,
                 .client = self.client.id,
@@ -386,21 +431,26 @@ pub fn ContextType(
                 .cluster = self.client.cluster,
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @sizeOf(vsr.Header) + packet.batch_size,
+                .size = @sizeOf(vsr.Header),
             };
 
             // Copy all batched packet event data into the message.
-            var offset: u32 = 0;
-            var it: ?*Packet = packet;
-            while (it) |batched| {
-                it = batched.batch_next;
-
+            var it = BatchIterator.init(packet);
+            var writer = vsr.Batch.Writer.init(message.buffer[@sizeOf(vsr.Header)..], event_size);
+            while (it.next()) |batched| {
                 const event_data = @as([*]const u8, @ptrCast(batched.data.?))[0..batched.data_size];
-                stdx.copy_disjoint(.inexact, u8, message.body()[offset..], event_data);
-                offset += @intCast(event_data.len);
+                assert(event_data.len % event_size == 0);
+                writer.write(event_data);
             }
 
-            assert(offset == packet.batch_size);
+            // Update the header with the body now written to its buffer.
+            const body = writer.finish();
+            assert(body.len <= constants.message_body_size_max);
+            assert(body.ptr == message.buffer[@sizeOf(vsr.Header)..].ptr);
+
+            message.header.size += @intCast(body.len);
+            assert(message.header.size <= constants.message_size_max);
+
             self.client.raw_request(
                 Context.on_result,
                 @bitCast(UserData{
@@ -413,7 +463,7 @@ pub fn ContextType(
 
         fn on_result(
             raw_user_data: u128,
-            op: StateMachine.Operation,
+            operation: StateMachine.Operation,
             reply: []u8,
         ) void {
             const user_data: UserData = @bitCast(raw_user_data);
@@ -429,46 +479,23 @@ pub fn ContextType(
                 if (self.client.request_inflight != null) break;
             }
 
-            switch (op) {
-                inline else => |operation| {
-                    // on_result should never be called with an operation not green-lit by request()
-                    // This also guards from passing an unsupported operation into DemuxerType.
-                    if (comptime operation_event_size(@intFromEnum(operation)) == null) {
-                        unreachable;
-                    }
+            // Get the size of the Result from the client instead of the StateMachine as it can
+            // intercept and change the results.
+            const result_size = Client.size_of_result(operation);
 
-                    // Demuxer expects []u8 but VSR callback provides []const u8.
-                    // The bytes are known to come from a Message body that will be soon discarded
-                    // therefore it's safe to @constCast and potentially modify the data in-place.
-                    var demuxer = Client.DemuxerType(operation).init(@constCast(reply));
-
-                    var it: ?*Packet = packet;
-                    var event_offset: u32 = 0;
-                    while (it) |batched| {
-                        it = batched.batch_next;
-
-                        const event_count = @divExact(
-                            batched.data_size,
-                            @sizeOf(StateMachine.Event(operation)),
-                        );
-                        const results = demuxer.decode(event_offset, event_count);
-                        event_offset += event_count;
-
-                        if (!StateMachine.batch_logical_allowed.get(operation)) {
-                            assert(results.len == reply.len);
-                        }
-
-                        assert(batched.operation == @intFromEnum(operation));
-                        self.on_complete(batched, results);
-                    }
-                },
+            var it = BatchIterator.init(packet);
+            var reader = vsr.Batch.Reader.init(reply, result_size);
+            while (it.next()) |batched| {
+                const results = reader.next() orelse unreachable;
+                self.on_complete(batched, results);
             }
+
+            assert(reader.next() == null);
         }
 
         fn cancel(self: *Context, packet: *Packet) void {
-            var it: ?*Packet = packet;
-            while (it) |batched| {
-                it = batched.batch_next;
+            var it = BatchIterator.init(packet);
+            while (it.next()) |batched| {
                 self.on_complete(batched, error.ClientShutdown);
             }
         }

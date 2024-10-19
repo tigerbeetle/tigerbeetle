@@ -12,7 +12,9 @@ public class EchoTest {
     static final int HEADER_SIZE = 256; // @sizeOf(vsr.Header)
     static final int TRANSFER_SIZE = 128; // @sizeOf(Transfer)
     static final int MESSAGE_SIZE_MAX = 1024 * 1024; // config.message_size_max
-    static final int ITEMS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;
+    static final int BATCH_HEADER_MIN = 2 * 2; // [u16:batch_count, u16:num_batches=1]
+    static final int BODY_SIZE_MAX = MESSAGE_SIZE_MAX - HEADER_SIZE - BATCH_HEADER_MIN;
+    static final int ITEMS_PER_BATCH = BODY_SIZE_MAX / TRANSFER_SIZE;
 
     // The number of times the same test is repeated, to stress the
     // cycle of packet exhaustion followed by completions.

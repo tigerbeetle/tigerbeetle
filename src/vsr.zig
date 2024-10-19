@@ -1686,3 +1686,128 @@ pub const Snapshot = struct {
         return op + 1;
     }
 };
+
+/// Type-erased readers and writers for working with values batched in VSR message bodies.
+pub const Batch = struct {
+    pub fn overflows(item_count: u32, item_size: u32, batch_count: u32) bool {
+        const items = item_size * item_count; // the values themselves.
+        const counts = @sizeOf(u16) * (batch_count + 1); // the counts for each batch + num batches.
+        return (items + counts) > constants.message_body_size_max;
+    }
+
+    pub const Writer = struct {
+        buffer: std.io.FixedBufferStream([]u8),
+        counts: stdx.BoundedArray(u16, 8192 + 1) = .{},
+        value_size: u32,
+
+        pub fn init(body: []u8, value_size: u32) Writer {
+            return .{
+                .buffer = std.io.fixedBufferStream(body),
+                .value_size = value_size,
+            };
+        }
+
+        pub fn writable(self: *const Writer) []u8 {
+            return self.buffer.buffer[self.buffer.pos..];
+        }
+
+        pub fn advance(self: *Writer, value_count: u16) void {
+            self.buffer.pos += value_count * self.value_size;
+            assert(self.buffer.pos < self.buffer.buffer.len);
+            self.counts.append_assume_capacity(value_count);
+        }
+
+        pub fn write(self: *Writer, values: []const u8) void {
+            if (self.value_size == 0) {
+                assert(values.len == 0);
+                return;
+            }
+
+            assert(values.len % self.value_size == 0);
+            assert(self.writable().len >= values.len);
+
+            stdx.copy_disjoint(.inexact, u8, self.writable(), values);
+            self.advance(@intCast(@divExact(values.len, self.value_size)));
+        }
+
+        pub fn finish(self: *Writer) []u8 {
+            if (self.value_size == 0) {
+                assert(self.counts.count() == 0);
+                return &.{};
+            }
+
+            const num_counts: u16 = @intCast(self.counts.count());
+            self.counts.append_assume_capacity(num_counts);
+
+            const count_buf = std.mem.sliceAsBytes(self.counts.slice());
+            self.buffer.writer().writeAll(count_buf) catch unreachable;
+
+            return self.buffer.getWritten();
+        }
+    };
+
+    pub const Reader = struct {
+        values: []const u8,
+        counts: []const u16,
+        value_size: u32,
+        empty: bool,
+
+        pub fn init(body: []const u8, value_size: u32) Reader {
+            if (body.len == 0) {
+                assert(value_size == 0);
+                return .{ .values = &.{}, .counts = &.{}, .value_size = 0, .empty = false };
+            }
+
+            assert(body.len >= 2);
+            const num_counts = std.mem.readInt(u16, body[body.len - 2 ..][0..2], .little);
+            assert(num_counts > 0);
+            assert(body.len >= 2 * (num_counts + 1));
+
+            // [[[v1, v2]:Account, [v3]:Account]:batch_values, [2, 1]:u16,batch_counts, [2]:u16,batch_counts_count]
+            // 
+
+            const count_buf = std.mem.bytesAsSlice(
+                u16,
+                body[body.len - 2 * (num_counts + 1) ..][0 .. 2 * num_counts],
+            );
+            assert(count_buf.len == num_counts);
+
+            var value_count: u16 = 0;
+            for (count_buf) |c| value_count += c;
+            assert(value_size > 0);
+            assert(body.len > value_count * value_size);
+
+            return .{
+                .values = body[0 .. value_count * value_size],
+                .counts = @alignCast(count_buf),
+                .value_size = value_size,
+                .empty = count_buf.len == 0,
+            };
+        }
+
+        pub fn next(self: *Reader) ?[]const u8 {
+            if (self.empty) return null;
+
+            // Handle ZST events by returning at least one empty buffer.
+            if (self.value_size == 0) {
+                assert(self.counts.len == 0);
+                assert(self.values.len == 0);
+                self.empty = true;
+                return &.{};
+            }
+
+            // Pop a count from the count_buf.
+            const count = self.counts[0];
+            self.counts = self.counts[1..];
+            self.empty = self.counts.len == 0;
+            maybe(count > 0);
+
+            // Pop a batch of values using the count.
+            assert(self.values.len >= count * self.value_size);
+            const values = self.values[0 .. count * self.value_size];
+            self.values = self.values[values.len..];
+
+            return values;
+        }
+    };
+};

@@ -20,7 +20,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         const Self = @This();
 
         pub const StateMachine = StateMachine_;
-        pub const DemuxerType = StateMachine.DemuxerType;
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
@@ -273,7 +272,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             operation: StateMachine.Operation,
             events: []const u8,
         ) void {
-            const event_size: usize = switch (operation) {
+            const event_size: u32 = switch (operation) {
                 inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
             };
             assert(!self.evicted);
@@ -293,10 +292,17 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .command = .request,
                 .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @intCast(@sizeOf(Header) + events.len),
+                .size = @sizeOf(Header),
             };
 
-            stdx.copy_disjoint(.exact, u8, message.body(), events);
+            var writer = vsr.Batch.Writer.init(message.buffer[@sizeOf(Header)..], event_size);
+            writer.write(events);
+            const body = writer.finish();
+            assert(body.len <= constants.message_body_size_max);
+
+            message.header.size += @intCast(body.len);
+            assert(message.header.size <= constants.message_size_max);
+            
             self.raw_request(callback, user_data, message);
         }
 
@@ -362,6 +368,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Releases a message back to the message bus.
         pub fn release_message(self: *Self, message: *Message) void {
             self.message_bus.unref(message);
+        }
+
+        // StateMachine wrapper for tb_client to return the Result size.
+        pub fn size_of_result(operation: StateMachine.Operation) u32 {
+            return switch (operation) {
+                inline else => |operation_comptime| @sizeOf(StateMachine.Result(operation_comptime)),
+            };
         }
 
         fn on_eviction(self: *Self, eviction: *const Message.Eviction) void {

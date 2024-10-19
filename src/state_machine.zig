@@ -57,21 +57,21 @@ pub fn StateMachineType(
             /// The maximum number of objects within a batch, by operation.
             pub const batch_max = struct {
                 pub const create_accounts =
-                    operation_batch_max(.create_accounts, config.message_body_size_max);
+                    operation_event_count_max(.create_accounts, config.message_body_size_max);
                 pub const create_transfers =
-                    operation_batch_max(.create_transfers, config.message_body_size_max);
+                    operation_event_count_max(.create_transfers, config.message_body_size_max);
                 pub const lookup_accounts =
-                    operation_batch_max(.lookup_accounts, config.message_body_size_max);
+                    operation_event_count_max(.lookup_accounts, config.message_body_size_max);
                 pub const lookup_transfers =
-                    operation_batch_max(.lookup_transfers, config.message_body_size_max);
+                    operation_event_count_max(.lookup_transfers, config.message_body_size_max);
                 pub const get_account_transfers =
-                    operation_batch_max(.get_account_transfers, config.message_body_size_max);
+                    operation_event_count_max(.get_account_transfers, config.message_body_size_max);
                 pub const get_account_balances =
-                    operation_batch_max(.get_account_balances, config.message_body_size_max);
+                    operation_event_count_max(.get_account_balances, config.message_body_size_max);
                 pub const query_accounts =
-                    operation_batch_max(.query_accounts, config.message_body_size_max);
+                    operation_event_count_max(.query_accounts, config.message_body_size_max);
                 pub const query_transfers =
-                    operation_batch_max(.query_transfers, config.message_body_size_max);
+                    operation_event_count_max(.query_transfers, config.message_body_size_max);
 
                 comptime {
                     assert(create_accounts > 0);
@@ -132,60 +132,14 @@ pub fn StateMachineType(
             .pulse = false,
             .create_accounts = true,
             .create_transfers = true,
-            // Don't batch lookups/queries for now.
-            .lookup_accounts = false,
-            .lookup_transfers = false,
+            .lookup_accounts = true,
+            .lookup_transfers = true,
+            // Don't batch queries for now (TODO scan_lookup limit and delimiting internally).
             .get_account_transfers = false,
             .get_account_balances = false,
             .query_accounts = false,
             .query_transfers = false,
         });
-
-        pub fn DemuxerType(comptime operation: Operation) type {
-            assert(@bitSizeOf(Event(operation)) > 0);
-            assert(@bitSizeOf(Result(operation)) > 0);
-
-            return struct {
-                const Demuxer = @This();
-                const DemuxerResult = Result(operation);
-
-                results: []DemuxerResult,
-
-                /// Create a Demuxer which can extract Results out of the reply bytes in-place.
-                /// Bytes must be aligned to hold Results (normally originating from message).
-                pub fn init(reply: []u8) Demuxer {
-                    return Demuxer{ .results = @alignCast(mem.bytesAsSlice(DemuxerResult, reply)) };
-                }
-
-                /// Returns a slice of bytes in the original reply with Results matching the Event
-                /// range (offset and size). Each subsequent call to demux() must have ranges that
-                /// are disjoint and increase monotonically.
-                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
-                    const demuxed = blk: {
-                        if (comptime batch_logical_allowed.get(operation)) {
-                            // Count all results from out slice which match the Event range,
-                            // updating the result.indexes to be related to the EVent in the
-                            // process.
-                            for (self.results, 0..) |*result, i| {
-                                if (result.index < event_offset) break :blk i;
-                                if (result.index >= event_offset + event_count) break :blk i;
-                                result.index -= event_offset;
-                            }
-                        } else {
-                            // Operations which aren't batched have the first Event consume the
-                            // entire Result down below.
-                            assert(event_offset == 0);
-                        }
-                        break :blk self.results.len;
-                    };
-
-                    // Return all results demuxed from the given Event, re-slicing them out of
-                    // self.results to "consume" them from subsequent decode() calls.
-                    defer self.results = self.results[demuxed..];
-                    return mem.sliceAsBytes(self.results[0..demuxed]);
-                }
-            };
-        }
 
         const batch_value_count_max = batch_value_counts_limit(config.message_body_size_max);
 
@@ -613,7 +567,7 @@ pub fn StateMachineType(
                     comptime assert(event_size > 0);
 
                     const batch_limit: u32 =
-                        operation_batch_max(comptime_operation, self.batch_size_limit);
+                        operation_event_count_max(comptime_operation, self.batch_size_limit);
                     assert(batch_limit > 0);
 
                     // Clients do not validate batch size == 0,
@@ -638,17 +592,7 @@ pub fn StateMachineType(
             assert(self.input_valid(client_release, operation, input));
             assert(input.len <= self.batch_size_limit);
 
-            self.prepare_timestamp += switch (operation) {
-                .pulse => 0,
-                .create_accounts => mem.bytesAsSlice(Account, input).len,
-                .create_transfers => mem.bytesAsSlice(Transfer, input).len,
-                .lookup_accounts => 0,
-                .lookup_transfers => 0,
-                .get_account_transfers => 0,
-                .get_account_balances => 0,
-                .query_accounts => 0,
-                .query_transfers => 0,
-            };
+            self.prepare_timestamp += operation_commit_count(operation, input);
         }
 
         pub fn pulse_needed(self: *const StateMachine, timestamp: u64) bool {
@@ -1467,7 +1411,7 @@ pub fn StateMachineType(
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             _ = client;
             assert(op != 0);
@@ -1576,7 +1520,7 @@ pub fn StateMachineType(
             client_release: vsr.Release,
             timestamp: u64,
             input: []align(16) const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             comptime assert(operation == .create_accounts or operation == .create_transfers);
 
@@ -1720,7 +1664,7 @@ pub fn StateMachineType(
         fn execute_lookup_accounts(
             self: *StateMachine,
             input: []const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             const batch = mem.bytesAsSlice(u128, input);
             const output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
@@ -1739,7 +1683,7 @@ pub fn StateMachineType(
         fn execute_lookup_transfers(
             self: *StateMachine,
             input: []const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             const batch = mem.bytesAsSlice(u128, input);
             const output_len = @divFloor(output.len, @sizeOf(Transfer)) * @sizeOf(Transfer);
@@ -1757,7 +1701,7 @@ pub fn StateMachineType(
         fn execute_get_account_transfers(
             self: *StateMachine,
             input: []const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             _ = input;
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
@@ -1782,7 +1726,7 @@ pub fn StateMachineType(
         fn execute_get_account_balances(
             self: *StateMachine,
             input: []const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
             assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_balances);
@@ -1834,7 +1778,7 @@ pub fn StateMachineType(
         fn execute_query_accounts(
             self: *StateMachine,
             input: []const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             _ = input;
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
@@ -1858,7 +1802,7 @@ pub fn StateMachineType(
         fn execute_query_transfers(
             self: *StateMachine,
             input: []const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: []align(16) u8,
         ) usize {
             _ = input;
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
@@ -2864,8 +2808,8 @@ pub fn StateMachineType(
         } {
             assert(batch_size_limit <= constants.message_body_size_max);
 
-            const batch_create_accounts = operation_batch_max(.create_accounts, batch_size_limit);
-            const batch_create_transfers = operation_batch_max(.create_transfers, batch_size_limit);
+            const batch_create_accounts = operation_event_count_max(.create_accounts, batch_size_limit);
+            const batch_create_transfers = operation_event_count_max(.create_transfers, batch_size_limit);
             assert(batch_create_accounts > 0);
             assert(batch_create_transfers > 0);
 
@@ -2911,7 +2855,7 @@ pub fn StateMachineType(
             };
         }
 
-        pub fn operation_batch_max(comptime operation: Operation, batch_size_limit: u32) u32 {
+        pub fn operation_event_count_max(comptime operation: Operation, batch_size_limit: u32) u32 {
             assert(batch_size_limit <= constants.message_body_size_max);
 
             const event_size = @sizeOf(Event(operation));
@@ -2923,6 +2867,50 @@ pub fn StateMachineType(
                 @divFloor(batch_size_limit, event_size),
                 @divFloor(constants.message_body_size_max, result_size),
             );
+        }
+
+        /// Returns the number of `Result(op)`s that *could* be generated from the `Event(op)`s.
+        /// The input bytes is not be align(16) as it may come from tb_client where language's
+        /// control packet/input_buffer allocation where custom align may not always be available.
+        pub fn operation_result_count_max(comptime operation: Operation, input: []const u8) u32 {
+            if (input.len == 0) return 0;
+
+            const events = mem.bytesAsSlice(Event(operation), input);
+            switch (operation) {
+                .pulse => unreachable,
+                // 1:1 max events and results.
+                .create_accounts,
+                .create_transfers,
+                .lookup_accounts,
+                .lookup_transfers,
+                => return @intCast(events.len),
+                // 1:N event with `e.limit` max results
+                .get_account_transfers,
+                .get_account_balances,
+                .query_accounts,
+                .query_transfers,
+                => {
+                    var results_max: u32 = 0;
+                    for (events) |e| results_max += e.limit;
+                    return results_max;
+                },
+            }
+        }
+
+        /// Returns the value to increment `prepare_timestamp` by before passing it to `commit()`.
+        /// The input buffer here is aligned as it's expected to come only from a message.
+        pub fn operation_commit_count(operation: Operation, input: []align(16) const u8) usize {
+            return switch (operation) {
+                .pulse => 0,
+                .create_accounts => mem.bytesAsSlice(Account, input).len,
+                .create_transfers => mem.bytesAsSlice(Transfer, input).len,
+                .lookup_accounts => 0,
+                .lookup_transfers => 0,
+                .get_account_transfers => 0,
+                .get_account_balances => 0,
+                .query_accounts => 0,
+                .query_transfers => 0,
+            };
         }
 
         // TODO(client_release_min): When client_release_min is bumped, remove this function and the
@@ -5714,60 +5702,6 @@ test "StateMachine: input_valid" {
             event.operation,
             input[0 .. 3 * (event.size / 2)],
         ));
-    }
-}
-
-test "StateMachine: Demuxer" {
-    const StateMachine = StateMachineType(
-        @import("testing/storage.zig").Storage,
-        global_constants.state_machine_config,
-    );
-
-    var prng = std.rand.DefaultPrng.init(42);
-    inline for ([_]StateMachine.Operation{
-        .create_accounts,
-        .create_transfers,
-    }) |operation| {
-        try expect(StateMachine.batch_logical_allowed.get(operation));
-
-        const Result = StateMachine.Result(operation);
-        var results: [@divExact(global_constants.message_body_size_max, @sizeOf(Result))]Result =
-            undefined;
-
-        for (0..100) |_| {
-            // Generate Result errors to Events at random.
-            var reply_len: u32 = 0;
-            for (0..results.len) |i| {
-                if (prng.random().boolean()) {
-                    results[reply_len] = .{ .index = @intCast(i), .result = .ok };
-                    reply_len += 1;
-                }
-            }
-
-            // Demux events of random strides from the generated results.
-            var demuxer = StateMachine.DemuxerType(operation)
-                .init(mem.sliceAsBytes(results[0..reply_len]));
-            const event_count: u32 = @intCast(@max(
-                1,
-                prng.random().uintAtMost(usize, results.len),
-            ));
-            var event_offset: u32 = 0;
-            while (event_offset < event_count) {
-                const event_size = @max(
-                    1,
-                    prng.random().uintAtMost(u32, event_count - event_offset),
-                );
-                const reply: []Result = @alignCast(
-                    mem.bytesAsSlice(Result, demuxer.decode(event_offset, event_size)),
-                );
-                defer event_offset += event_size;
-
-                for (reply) |*result| {
-                    try expectEqual(result.result, .ok);
-                    try expect(result.index < event_offset + event_size);
-                }
-            }
-        }
     }
 }
 

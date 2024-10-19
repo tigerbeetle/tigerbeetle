@@ -3976,13 +3976,19 @@ pub fn ReplicaType(
             }
 
             if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
+                const event_size: u32 = switch (prepare_operation) {
+                    inline else => |operation| @sizeOf(StateMachine.Event(operation)),
+                };
+
+                const reader = vsr.Batch.Reader.init(prepare.body(), event_size);
+
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_prefetch_callback,
                     prepare.header.release,
                     prepare.header.op,
                     prepare_operation,
-                    prepare.body(),
+                    @alignCast(reader.values),
                 );
                 return .pending;
             } else {
@@ -4444,15 +4450,75 @@ pub fn ReplicaType(
                     reply.buffer[@sizeOf(Header)..],
                 ),
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
-                else => self.state_machine.commit(
-                    prepare.header.client,
-                    prepare.header.release,
-                    prepare.header.op,
-                    prepare.header.timestamp,
-                    prepare.header.operation.cast(StateMachine),
-                    prepare.buffer[@sizeOf(Header)..prepare.header.size],
-                    reply.buffer[@sizeOf(Header)..],
-                ),
+                else => blk: {
+                    const prepare_operation = prepare.header.operation.cast(StateMachine);
+                    const event_size: u32, const result_size: u32 = switch (prepare_operation) {
+                        inline else => |operation| .{
+                            @sizeOf(StateMachine.Event(operation)),
+                            @sizeOf(StateMachine.Result(operation)),
+                        },
+                    };
+
+                    var reader = vsr.Batch.Reader.init(prepare.body(), event_size);
+                    var writer = vsr.Batch.Writer.init(
+                        reply.buffer[@sizeOf(Header)..],
+                        result_size,
+                    );
+
+                    // `prepare.header.timestamp` is pre-incremented before
+                    // `state_machine.commit_timestamp`, so we discover how much it was incremented
+                    // here to adjust each passed in `prepare_timestamp` for simulating batched
+                    // `state_machine.commit()`s.
+                    const commit_total = StateMachine.operation_commit_count(
+                        prepare_operation,
+                        @alignCast(reader.values),
+                    );
+
+                    // The `prepare_timestamp` given to each commit() must always be at least
+                    // `state_machine.commit_timestamp + operation_commit_count(op, values)` in the
+                    // future so we track the count backwards when making each `prepare_timestamp`.
+                    var commit_remaining = commit_total;
+                    defer assert(commit_remaining == 0);
+
+                    while (reader.next()) |prepare_input| {
+                        // Find how much this input would commit from `commit_remaining`.
+                        const commit_count = StateMachine.operation_commit_count(
+                            prepare_operation,
+                            @alignCast(prepare_input),
+                        );
+
+                        assert(commit_remaining <= commit_total);
+                        assert(commit_remaining >= commit_count);
+                        commit_remaining -= commit_count;
+
+                        // Generate an appropriate `prepare_timestamp` in the commit's future.
+                        const prepare_timestamp = prepare.header.timestamp - commit_remaining;
+                        assert(self.state_machine.commit_timestamp + commit_count <=
+                            prepare_timestamp or constants.aof_recovery);
+
+                        const bytes_written = self.state_machine.commit(
+                            prepare.header.client,
+                            prepare.header.release,
+                            prepare.header.op,
+                            prepare_timestamp,
+                            prepare_operation,
+                            @alignCast(prepare_input),
+                            @alignCast(writer.writable()),
+                        );
+
+                        assert(self.state_machine.commit_timestamp <= prepare_timestamp or
+                            constants.aof_recovery);
+
+                        if (result_size == 0) {
+                            assert(bytes_written == 0);
+                        } else {
+                            const num_results = @divExact(bytes_written, result_size);
+                            writer.advance(@intCast(num_results));
+                        }
+                    }
+
+                    break :blk writer.finish().len;
+                },
             };
 
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or
@@ -5215,10 +5281,16 @@ pub fn ReplicaType(
                 return true;
             }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
+                const event_size: u32 = switch (operation) {
+                    inline else => |op| @sizeOf(StateMachine.Event(op)),
+                };
+
+                const reader = vsr.Batch.Reader.init(message.body(), event_size);
+
                 if (!self.state_machine.input_valid(
                     message.header.release,
                     operation,
-                    message.body(),
+                    @alignCast(reader.values),
                 )) {
                     log.warn(
                         "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
@@ -6143,10 +6215,16 @@ pub fn ReplicaType(
                     }
                 },
                 else => {
+                    const operation = request.message.header.operation.cast(StateMachine);
+                    const event_size: u32 = switch (operation) {
+                        inline else => |prepare_op| @sizeOf(StateMachine.Event(prepare_op)),
+                    };
+
+                    const reader = vsr.Batch.Reader.init(request.message.body(), event_size);
                     self.state_machine.prepare(
                         request.message.header.release,
                         request.message.header.operation.cast(StateMachine),
-                        request.message.body(),
+                        @alignCast(reader.values),
                     );
                 },
             }

@@ -460,7 +460,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
@@ -492,7 +492,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.AccountFilterFlags{
 				Debits:   true,
 				Credits:  false,
@@ -524,7 +524,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.AccountFilterFlags{
 				Debits:   false,
 				Credits:  true,
@@ -730,7 +730,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    types.ToUint128(0),
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
@@ -754,7 +754,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    accountC.ID,
 			TimestampMin: ^uint64(0), // ulong max value
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
@@ -778,7 +778,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: ^uint64(0), // ulong max value
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
@@ -802,7 +802,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    accountC.ID,
 			TimestampMin: (^uint64(0)) - 1, // ulong max - 1
 			TimestampMax: 1,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
@@ -850,7 +850,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags:        0,
 		}
 		transfers_retrieved, err = client.GetAccountTransfers(filter)
@@ -870,7 +870,7 @@ func doTestClient(t *testing.T, client Client) {
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags:        0xFFFF,
 		}
 		transfers_retrieved, err = client.GetAccountTransfers(filter)
@@ -933,7 +933,7 @@ func doTestClient(t *testing.T, client Client) {
 			Ledger:       1,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -967,7 +967,7 @@ func doTestClient(t *testing.T, client Client) {
 			Ledger:       1,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: true,
 			}.ToUint32(),
@@ -1000,7 +1000,7 @@ func doTestClient(t *testing.T, client Client) {
 			Ledger:       0,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -1082,7 +1082,7 @@ func doTestClient(t *testing.T, client Client) {
 			Ledger:       0,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -1162,7 +1162,7 @@ func doTestClient(t *testing.T, client Client) {
 			Ledger:       1,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -1196,7 +1196,7 @@ func doTestClient(t *testing.T, client Client) {
 			Ledger:       1,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: true,
 			}.ToUint32(),
@@ -1229,7 +1229,7 @@ func doTestClient(t *testing.T, client Client) {
 			Ledger:       0,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -1311,7 +1311,7 @@ func doTestClient(t *testing.T, client Client) {
 			Ledger:       0,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -1336,7 +1336,7 @@ func doTestClient(t *testing.T, client Client) {
 			Code:         0,
 			TimestampMin: ^uint64(0), // ulong max value
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -1356,7 +1356,7 @@ func doTestClient(t *testing.T, client Client) {
 			Code:         0,
 			TimestampMin: 0,
 			TimestampMax: ^uint64(0), // ulong max value,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -1376,7 +1376,7 @@ func doTestClient(t *testing.T, client Client) {
 			Code:         0,
 			TimestampMin: (^uint64(0)) - 1, // ulong max - 1,
 			TimestampMax: 1,
-			Limit:        8190,
+			Limit:        1000,
 			Flags: types.QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
@@ -1416,7 +1416,7 @@ func doTestClient(t *testing.T, client Client) {
 			Code:         0,
 			TimestampMin: 0,
 			TimestampMax: 0,
-			Limit:        8190,
+			Limit:        1000,
 			Flags:        0xFFFF,
 		}
 		query, err = client.QueryTransfers(filter)
