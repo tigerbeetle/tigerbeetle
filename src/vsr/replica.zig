@@ -6040,14 +6040,14 @@ pub fn ReplicaType(
         /// Availability condition: each committed op must be present either in a quorum of WALs or
         /// in a quorum of checkpoints.
         ///
-        /// If op=prepare_max+1 is committed, a quorum of replicas have moved to the next
-        /// prepare_max, which in turn signals that the corresponding checkpoint is durably present
-        /// on a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
-        /// both conditions.
+        /// If op=prepare_ok_max+1 is committed, a quorum of replicas have moved to the *next*
+        /// prepare_ok_max, which in turn signals that the corresponding checkpoint is durably
+        /// present on a quorum of replicas. Repairing all ops since the latest durable checkpoint
+        /// satisfies both conditions.
         ///
         /// When called from status=recovering_head or status=recovering, the caller is responsible
         /// for ensuring that replica.op is valid.
-        fn op_repair_min(self: *const Self) u64 {
+        pub fn op_repair_min(self: *const Self) u64 {
             if (self.status == .recovering) assert(self.solo());
             assert(self.syncing == .updating_checkpoint or self.op >= self.op_checkpoint());
             assert(self.op <= self.op_prepare_max_sync());
