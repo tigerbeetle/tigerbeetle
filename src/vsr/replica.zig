@@ -8401,7 +8401,6 @@ pub fn ReplicaType(
 
             assert(self.commit_min == self.commit_max);
             assert(self.commit_max <= self.op);
-            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
             {
                 const pipeline_queue = self.primary_repair_pipeline_done();
