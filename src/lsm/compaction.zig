@@ -1063,6 +1063,7 @@ pub fn CompactionType(
                 // Read level A value block.
                 if (compaction.table_info_a.? == .immutable) {
                     // The whole table is in memory, no need to read anything.
+                    assert(compaction.level_a_index_block.count == 0);
                 } else {
                     if (compaction.level_a_index_block.head()) |index_block| {
                         assert(index_block.stage == .read_index_block or
