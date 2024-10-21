@@ -24,6 +24,7 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
     log.info("addresses: {s}", .{args.positional.addresses});
 
     const cluster_id = args.positional.@"cluster-id";
+
     var tb_client: c.tb_client_t = undefined;
     const result = c.tb_client_init(
         &tb_client,
@@ -49,17 +50,38 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
             }
         };
 
-        var packet: c.tb_packet_t = undefined;
-        packet.operation = @intFromEnum(operation);
-        packet.user_data = @constCast(@ptrCast(&stdout));
-        packet.data = @constCast(events_buffer.ptr);
-        packet.data_size = @intCast(events_buffer.len);
-        packet.next = null;
-        packet.status = c.TB_PACKET_OK;
+        var context = RequestContext{};
 
-        c.tb_client_submit(tb_client, &packet);
+        {
+            context.lock.lock();
+            defer context.lock.unlock();
+
+            var packet: c.tb_packet_t = undefined;
+            packet.operation = @intFromEnum(operation);
+            packet.user_data = @constCast(@ptrCast(&context));
+            packet.data = @constCast(events_buffer.ptr);
+            packet.data_size = @intCast(events_buffer.len);
+            packet.next = null;
+            packet.status = c.TB_PACKET_OK;
+
+            c.tb_client_submit(tb_client, &packet);
+
+            while (!context.completed) {
+                context.condition.wait(&context.lock);
+            }
+        }
+
+        try write_results(stdout, operation, context.result[0..context.result_size]);
     }
 }
+
+const RequestContext = struct {
+    lock: std.Thread.Mutex = .{},
+    condition: std.Thread.Condition = .{},
+    completed: bool = false,
+    result: [constants.message_body_size_max]u8 = undefined,
+    result_size: u32 = 0,
+};
 
 pub fn on_complete(
     tb_context: usize,
@@ -70,23 +92,22 @@ pub fn on_complete(
 ) callconv(.C) void {
     _ = tb_context;
     _ = tb_client;
-    const writer: *std.io.AnyWriter = @ptrCast(@alignCast(tb_packet.*.user_data.?));
-    const operation: StateMachine.Operation = @enumFromInt(tb_packet.*.operation);
+    const context: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
 
-    // We might want to move this off the callback thread eventually, at least of we want
-    // multithreading within this driver. But for now it's OK.
-    if (result_ptr) |result| {
-        write_results(writer, operation, result[0..result_len]) catch |err| {
-            switch (err) {
-                error.BrokenPipe => {},
-                else => log.err("error when writing back results: {any}", .{err}),
-            }
-        };
-    }
+    context.lock.lock();
+    defer context.lock.unlock();
+
+    assert(tb_packet.*.status == c.TB_PACKET_OK);
+    assert(result_ptr != null);
+
+    @memcpy(context.result[0..result_len], result_ptr[0..result_len]);
+    context.result_size = result_len;
+    context.completed = true;
+    context.condition.signal();
 }
 
 fn write_results(
-    writer: *std.io.AnyWriter,
+    writer: std.io.AnyWriter,
     operation: StateMachine.Operation,
     result: []const u8,
 ) !void {
