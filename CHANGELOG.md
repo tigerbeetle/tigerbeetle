@@ -3,6 +3,47 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.10
+
+Released: 2024-10-21
+
+### Safety And Performance
+
+- [#2414](https://github.com/tigerbeetle/tigerbeetle/pull/2414)
+
+  Improve performance & availability during view change by ensuring a replica only repairs the
+  portion of the WAL that is *required* to become primary, instead of repairing it in its entirety.
+
+- [#2412](https://github.com/tigerbeetle/tigerbeetle/pull/2412)
+
+  Add a unit test for Zig's stdlib sort.
+
+  Stable sort is critical for compaction correctness. Zig stdlib does have a sort fuzz test, but it
+  doesn't cover the presorted subarray case, and doesn't check arrays much larger than the sort
+  algorithm's on-stack cache.
+
+- [#2413](https://github.com/tigerbeetle/tigerbeetle/pull/2413)
+
+  Fix a bug in the MessageBus wherein connections weren't being terminated during client teardown.
+
+### Internals
+
+
+- [#2405](https://github.com/tigerbeetle/tigerbeetle/pull/2405)
+
+  Fix a bug in the benchmark wherein the usage of `--account-count-hot` was broken when used in
+  conjunction with the `uniform` distribution.
+
+- [#2409](https://github.com/tigerbeetle/tigerbeetle/pull/2409)
+
+  Revamp the `core_missing_prepares` liveness-mode check to correctly check for the prepares that a
+  replica should repair (after [#2414](https://github.com/tigerbeetle/tigerbeetle/pull/2414)).
+
+
+### TigerTracks 🎧
+
+- [Last Train Home](https://open.spotify.com/track/0tgBtQ0ISnMQOKorrN9HLX?si=8a05ab879730455b)
+
 ## TigerBeetle 0.16.9
 
 Released: 2024-10-15
