@@ -660,6 +660,17 @@ comptime {
     assert(lsm_compaction_ops % 2 == 0);
 }
 
+// Limits for the number of value blocks that a single compaction can queue up for IO and for the
+// number of IO operations themselves. The number of index blocks is always one per level.
+// This is a comptime upper bound. The actual number of concurrency is also limited by the
+// runtime-know number of free blocks.
+//
+// For simplicity for now, size IOPS to always be available.
+pub const lsm_compaction_queue_read_max = 8;
+pub const lsm_compaction_queue_write_max = 8;
+pub const lsm_compaction_iops_read_max = lsm_compaction_queue_read_max + 2; // + two index blocks.
+pub const lsm_compaction_iops_write_max = lsm_compaction_queue_write_max + 1; // + one index block.
+
 pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 
 /// The maximum number of blocks that can possibly be referenced by any table index block.
