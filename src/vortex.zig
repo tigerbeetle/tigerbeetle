@@ -56,7 +56,9 @@ pub fn main() !void {
         .workload => |driver_args| {
             var driver = try start_driver(allocator, driver_args);
             defer {
-                _ = driver.kill() catch {};
+                _ = driver.kill() catch {
+                    log.err("failed to kill driver", .{});
+                };
             }
 
             try Workload.main(allocator, &.{
