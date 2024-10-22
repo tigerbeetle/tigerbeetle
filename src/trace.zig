@@ -106,9 +106,8 @@ const trace_span_size_max = 1024;
 pub const Event = union(enum) {
     replica_commit,
 
-    compact_blip_read,
-    compact_blip_merge,
-    compact_blip_write,
+    compact_beat,
+    compact_beat_merge,
     compact_manifest,
     compact_mutable,
     compact_mutable_suffix,
@@ -145,9 +144,8 @@ pub const Event = union(enum) {
 
     const event_stack_cardinality = std.enums.EnumArray(EventTag, u32).init(.{
         .replica_commit = 1,
-        .compact_blip_read = 1,
-        .compact_blip_merge = 1,
-        .compact_blip_write = 1,
+        .compact_beat = 1,
+        .compact_beat_merge = 1,
         .compact_manifest = 1,
         .compact_mutable = 1,
         .compact_mutable_suffix = 1,

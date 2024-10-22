@@ -35,9 +35,14 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
             return self.free.count();
         }
 
+        pub fn total(self: *const Self) usize {
+            _ = self;
+            return size;
+        }
+
         /// Returns the count of IOPs in use.
         pub fn executing(self: *const Self) usize {
-            return size - self.available();
+            return self.total() - self.available();
         }
 
         pub const Iterator = struct {
