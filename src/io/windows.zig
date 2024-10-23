@@ -558,6 +558,9 @@ pub const IO = struct {
         );
     }
 
+    // Can't happen - but keep the same signature as Linux.
+    pub const FsyncError = std.posix.UnexpectedError;
+
     pub const SendError = std.posix.SendError;
 
     pub fn send(
@@ -840,7 +843,11 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
         offset: u64,
+        options: struct { dsync: bool },
     ) void {
+        // Writes are always O_DSYNC on Windows.
+        _ = options;
+
         self.submit(
             context,
             callback,
