@@ -104,7 +104,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         for (replicas) |replica| {
             // We might have terminated the replica and never restarted it,
             // so we need to check its state.
-            if (replica.state() == .running) {
+            if (replica.state() != .terminated) {
                 _ = replica.terminate() catch {};
             }
             replica.destroy();
@@ -165,14 +165,43 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     const workload_result = while (std.time.nanoTimestamp() < test_deadline) {
         // Things we do in this main loop, except supervising the replicas.
-        const Action = enum { sleep, terminate_replica, mutate_network };
+        const Action = enum {
+            sleep,
+            replica_terminate,
+            replica_stop,
+            replica_resume,
+            mutate_network,
+        };
+
+        const running_replica = random_replica_in_state(random, &replicas, .running);
+        const stopped_replica = random_replica_in_state(random, &replicas, .stopped);
+
         switch (arbitrary.weighted(random, Action, .{
-            .sleep = 4,
-            .terminate_replica = 1,
-            .mutate_network = 2,
+            .sleep = 20,
+            .replica_terminate = if (running_replica != null) 1 else 0,
+            .replica_stop = if (running_replica != null) 1 else 0,
+            .replica_resume = if (stopped_replica != null) 5 else 0,
+            .mutate_network = 3,
         }).?) {
             .sleep => std.time.sleep(5 * std.time.ns_per_s),
-            .terminate_replica => try terminate_random_replica(random, &replicas),
+            .replica_terminate => {
+                if (running_replica) |found| {
+                    log.info("terminating replica {d}", .{found.index});
+                    _ = try found.replica.terminate();
+                }
+            },
+            .replica_stop => {
+                if (running_replica) |found| {
+                    log.info("stopping replica {d}", .{found.index});
+                    _ = try found.replica.stop();
+                }
+            },
+            .replica_resume => {
+                if (stopped_replica) |found| {
+                    log.info("resuming replica {d}", .{found.index});
+                    _ = try found.replica.cont();
+                }
+            },
             .mutate_network => {
                 const weights = NetworkFaults.adjusted_weights(.{
                     .network_delay_add = 1,
@@ -222,12 +251,12 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         // We do not expect the workload to terminate on its own, but if it does,
         // we end the test.
-        if (workload.state() == .completed) {
+        if (workload.state() == .terminated) {
             log.info("workload terminated by itself", .{});
             break try workload.wait();
         }
     } else blk: {
-        // If the workload doesn't complete by itself, terminate it after we've run for the
+        // If the workload doesn't terminate by itself, we terminate it after we've run for the
         // required duration.
         log.info("terminating workload due to max duration", .{});
         break :blk if (workload.state() == .running)
@@ -257,14 +286,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             return error.TestFailed;
         },
     }
-}
-
-fn terminate_random_replica(random: std.Random, replicas: []*Replica) !void {
-    if (random_replica_in_state(random, replicas, .running)) |found| {
-        log.info("terminating replica {d}", .{found.index});
-        _ = try found.replica.terminate();
-        log.info("replica {d} terminated", .{found.index});
-    } else return error.NoRunningReplica;
 }
 
 const RandomReplica = struct { replica: *Replica, index: u8 };
@@ -341,7 +362,7 @@ fn create_tmp_dir(allocator: std.mem.Allocator) ![]const u8 {
 
 const Replica = struct {
     const Self = @This();
-    pub const State = enum(u8) { initial, running, terminated, completed };
+    pub const State = enum(u8) { initial, running, stopped, terminated };
 
     allocator: std.mem.Allocator,
     executable_path: []const u8,
@@ -378,8 +399,8 @@ const Replica = struct {
         if (self.process) |process| {
             switch (process.state()) {
                 .running => return .running,
+                .stopped => return .stopped,
                 .terminated => return .terminated,
-                .completed => return .completed,
             }
         } else return .initial;
     }
@@ -405,10 +426,30 @@ const Replica = struct {
     pub fn terminate(
         self: *Self,
     ) !std.process.Child.Term {
-        assert(self.state() == .running);
+        assert(self.state() == .running or self.state() == .stopped);
         defer assert(self.state() == .terminated);
 
         assert(self.process != null);
         return try self.process.?.terminate();
+    }
+
+    pub fn stop(
+        self: *Self,
+    ) !void {
+        assert(self.state() == .running);
+        defer assert(self.state() == .stopped);
+
+        assert(self.process != null);
+        return try self.process.?.stop();
+    }
+
+    pub fn cont(
+        self: *Self,
+    ) !void {
+        assert(self.state() == .stopped);
+        defer assert(self.state() == .running);
+
+        assert(self.process != null);
+        return try self.process.?.cont();
     }
 };
