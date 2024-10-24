@@ -13,7 +13,7 @@ const log = std.log.scoped(.logged_process);
 const assert = std.debug.assert;
 
 const Self = @This();
-pub const State = enum(u8) { running, terminated, completed };
+pub const State = enum(u8) { running, stopped, terminated };
 const AtomicState = std.atomic.Value(State);
 
 // Allocated by init
@@ -73,7 +73,7 @@ pub fn spawn(
                                 // want to overwrite that state.
                                 _ = process.current_state.cmpxchgStrong(
                                     .running,
-                                    .completed,
+                                    .terminated,
                                     .seq_cst,
                                     .seq_cst,
                                 );
@@ -92,7 +92,7 @@ pub fn spawn(
 }
 
 pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
-    assert(self.state() == .terminated or self.state() == .completed);
+    assert(self.state() == .terminated);
     allocator.destroy(self);
 }
 
@@ -100,10 +100,26 @@ pub fn state(self: *Self) State {
     return self.current_state.load(.seq_cst);
 }
 
+pub fn stop(
+    self: *Self,
+) !void {
+    assert(builtin.os.tag != .windows);
+    try std.posix.kill(self.child.id, std.posix.SIG.STOP);
+    self.current_state.store(.stopped, .seq_cst);
+}
+
+pub fn cont(
+    self: *Self,
+) !void {
+    assert(builtin.os.tag != .windows);
+    try std.posix.kill(self.child.id, std.posix.SIG.CONT);
+    self.current_state.store(.running, .seq_cst);
+}
+
 pub fn terminate(
     self: *Self,
 ) !std.process.Child.Term {
-    self.expect_state_in(.{.running});
+    self.expect_state_in(.{ .running, .stopped });
     defer self.expect_state_in(.{.terminated});
 
     // Terminate the process.
@@ -138,8 +154,8 @@ pub fn terminate(
 pub fn wait(
     self: *Self,
 ) !std.process.Child.Term {
-    self.expect_state_in(.{ .running, .terminated, .completed });
-    defer self.expect_state_in(.{ .terminated, .completed });
+    self.expect_state_in(.{ .running, .terminated });
+    defer self.expect_state_in(.{.terminated});
 
     // Wait until the process runs to completion.
     const term = self.child.wait();
