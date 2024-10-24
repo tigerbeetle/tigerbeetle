@@ -521,6 +521,7 @@ const DeadFilesDetector = struct {
             "java_bindings.zig",
             "build.zig",
             "build_multiversion.zig",
+            "vortex.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
