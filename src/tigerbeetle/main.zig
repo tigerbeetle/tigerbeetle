@@ -544,7 +544,7 @@ const Command = struct {
         );
         defer repl_instance.deinit(allocator);
 
-        try repl_instance.run(args.statements);
+        try repl_instance.run(args.statements, allocator);
     }
 };
 
