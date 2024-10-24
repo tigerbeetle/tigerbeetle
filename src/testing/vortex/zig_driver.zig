@@ -71,7 +71,15 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
             }
         }
 
-        try write_results(stdout, operation, context.result[0..context.result_size]);
+        write_results(stdout, operation, context.result[0..context.result_size]) catch |err| {
+            switch (err) {
+                error.BrokenPipe => {
+                    log.info("stdout is closed, exiting", .{});
+                    break;
+                },
+                else => return err,
+            }
+        };
     }
 }
 
