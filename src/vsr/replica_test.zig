@@ -1689,6 +1689,108 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
     try expectEqual(t.replica(.R0).commit_max(), checkpoint_2_prepare_max);
 }
 
+test "Cluster: view_change: lagging replica repairs WAL using start_view from potential primary" {
+    // It could be the case that the replica with the most advanced checkpoint has a corruption in
+    // its grid. In this case, a replica on an older checkpoint can use a start_view message from
+    // the most up-to-date replica to repair its WAL, advance its checkpoint, and become primary.
+
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+    var c = t.clients(0, t.cluster.clients.len);
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    b2.stop();
+
+    // Ensure b1 only commits up till checkpoint_2_trigger - 1, so it stays at checkpoint_1 while
+    // a0 moves to checkpoint_2.
+    b1.drop(.R_, .incoming, .commit);
+
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    try expectEqual(a0.commit(), checkpoint_2_trigger);
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+    try expectEqual(b1.commit(), checkpoint_2_trigger - 1);
+    try expectEqual(b1.op_checkpoint(), checkpoint_1);
+
+    // Start b2 so that the a0 & b2 can make progress to checkpoint_3; b1 is stopped so it remains
+    // lagging at checkpoint_1.
+    try b2.open();
+    b1.stop();
+
+    t.run();
+
+    try expectEqual(b2.op_checkpoint(), checkpoint_2);
+    try expectEqual(b2.commit_max(), checkpoint_2_trigger);
+    try expectEqual(b2.status(), .normal);
+    try b2.expect_sync_done();
+
+    try c.request(
+        checkpoint_3_trigger,
+        checkpoint_3_trigger,
+    );
+
+    try expectEqual(a0.op_head(), checkpoint_3_trigger);
+    try expectEqual(a0.op_checkpoint(), checkpoint_3);
+    try expectEqual(b2.op_head(), checkpoint_3_trigger);
+    try expectEqual(b2.op_checkpoint(), checkpoint_3);
+
+    // Simulate compaction getting stuck on a0 due to a grid corruption. Corrupting the grid doesn't
+    // work here since compaction in replica tests is always able to apply the move table
+    // optimization. This is because all requests in replica tests are `echo` operations, which are
+    // inserted into the LSM with monotonically increasing id.
+    const a0_replica = &t.cluster.replicas[a0.replicas.get(0)];
+    a0_replica.commit_stage = .compact;
+
+    try c.request(
+        checkpoint_3_trigger + 1,
+        checkpoint_3_trigger,
+    );
+
+    try expectEqual(a0.op_head(), checkpoint_3_trigger + 1);
+    try expectEqual(a0.commit(), checkpoint_3_trigger);
+
+    try expectEqual(b2.op_head(), checkpoint_3_trigger + 1);
+    try expectEqual(b2.commit(), checkpoint_3_trigger);
+
+    const committing_prepare = a0_replica.pipeline.queue.prepare_queue.head_ptr_const().?;
+    a0_replica.commit_prepare = committing_prepare.message.ref();
+
+    // Partition a0, force b1 & b2 into view_change by blocking outgoing .do_view_change messages.
+    a0.drop_all(.R_, .bidirectional);
+
+    try b1.open();
+    b1.drop(.R_, .outgoing, .do_view_change);
+    b2.drop(.R_, .outgoing, .do_view_change);
+
+    t.run();
+
+    try expectEqual(b1.status(), .view_change);
+    try expectEqual(b2.status(), .view_change);
+
+    // Stop b2, allow a0 and b1 to view change. a0 can't step up as primary since it has a
+    // corruption in its grid, due to which it can't make progress on its commit pipeline. However,
+    // since it has an intact WAL, it is able to send a .start_view message to b1. With the help
+    // of the .start_view message, b1 can repair, commit, advance from checkpoint_1 -> checkpoint_3,
+    // and step up as primary.
+    b2.stop();
+    a0.pass_all(.R_, .bidirectional);
+    b1.pass(.R_, .outgoing, .do_view_change);
+
+    t.run();
+
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b1.role(), .primary);
+    try expectEqual(b1.op_checkpoint(), checkpoint_3);
+    try expectEqual(b1.commit(), checkpoint_3_trigger + 1);
+
+    try expectEqual(a0.status(), .normal);
+    try expectEqual(a0.role(), .backup);
+    try expectEqual(a0.op_checkpoint(), checkpoint_3);
+    try expectEqual(b1.commit(), checkpoint_3_trigger + 1);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas

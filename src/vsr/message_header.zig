@@ -1026,8 +1026,9 @@ pub const Header = extern struct {
         /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
         nonce: u128,
         op: u64,
-        /// Set to `commit_min`/`commit_max` (they are the same).
-        commit: u64,
+        /// Equal to `commit_min` if the SV message is being sent by a .normal primary, but may not
+        /// be equal if the SV message is being sent by potential primary in .view_change status.
+        commit_max: u64,
         /// The replica's `op_checkpoint`.
         checkpoint_op: u64,
         reserved: [88]u8 = [_]u8{0} ** 88,
@@ -1035,8 +1036,8 @@ pub const Header = extern struct {
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
             if (self.release.value != 0) return "release != 0";
-            if (self.op < self.commit) return "op < commit_min";
-            if (self.commit < self.checkpoint_op) return "commit_min < checkpoint_op";
+            if (self.op < self.commit_max) return "op < commit_max";
+            if (self.commit_max < self.checkpoint_op) return "commit_max < checkpoint_op";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
