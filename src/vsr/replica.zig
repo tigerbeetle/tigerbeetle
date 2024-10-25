@@ -2179,12 +2179,15 @@ pub fn ReplicaType(
             assert(message.header.view >= self.view);
             assert(message.header.replica != self.replica);
             assert(message.header.replica == self.primary_index(message.header.view));
-            assert(message.header.commit >= message.header.checkpoint_op);
-            assert(message.header.commit - message.header.checkpoint_op <=
-                constants.vsr_checkpoint_ops + constants.lsm_compaction_ops);
-            assert(message.header.op >= message.header.commit);
-            assert(message.header.op - message.header.commit <=
+            assert(message.header.commit_max >= message.header.checkpoint_op);
+            assert(message.header.op >= message.header.commit_max);
+            assert(message.header.op - message.header.commit_max <=
                 constants.pipeline_prepare_queue_max);
+
+            // The SV message may be from a primary that hasn't yet committed up to its commit_max,
+            // and the commit_max may be from the primary's *next* checkpoint.
+            maybe(message.header.commit_max - message.header.checkpoint_op >
+                constants.vsr_checkpoint_ops + constants.lsm_compaction_ops);
 
             if (message.header.view == self.log_view and message.header.op < self.op) {
                 // We were already in this view prior to receiving the SV.
@@ -2214,10 +2217,15 @@ pub fn ReplicaType(
 
             const view_checkpoint = start_view_message_checkpoint(message);
             if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
-                assert(message.header.commit >= trigger);
+                assert(message.header.commit_max >= trigger);
             }
             assert(
                 message.header.op <= vsr.Checkpoint.prepare_max_for_checkpoint(
+                    vsr.Checkpoint.checkpoint_after(view_checkpoint.header.op),
+                ).?,
+            );
+            assert(
+                message.header.commit_max <= vsr.Checkpoint.prepare_max_for_checkpoint(
                     vsr.Checkpoint.checkpoint_after(view_checkpoint.header.op),
                 ).?,
             );
@@ -2226,12 +2234,12 @@ pub fn ReplicaType(
             assert(view_headers[0].op == message.header.op);
             assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
 
-            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit) and (
+            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit_max) and (
             //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
             //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
             //  prepares in this replica's WAL are no longer needed.
                 vsr.Checkpoint.durable(self.op_checkpoint_next() +
-                constants.vsr_checkpoint_ops, message.header.commit) or
+                constants.vsr_checkpoint_ops, message.header.commit_max) or
                 // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
                 // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
                 // there's evidence that the repair can't be completed.
@@ -2242,7 +2250,7 @@ pub fn ReplicaType(
                 // State sync: at this point, we know we want to replace our checkpoint
                 // with the one from this SV.
 
-                assert(message.header.commit > self.op_checkpoint_next_trigger());
+                assert(message.header.commit_max > self.op_checkpoint_next_trigger());
                 assert(view_checkpoint.header.op > self.op_checkpoint());
 
                 if (self.syncing == .idle) {
@@ -2300,15 +2308,19 @@ pub fn ReplicaType(
 
                 // Find the first message that fits, make it our new head.
                 for (view_headers) |*header| {
-                    assert(header.commit <= message.header.commit);
+                    assert(header.commit <= message.header.commit_max);
 
                     if (header.op <= self.op_prepare_max_sync()) {
                         if (self.log_view < self.view or
                             (self.log_view == self.view and header.op >= self.op))
                         {
-                            self.set_op_and_commit_max(header.op, message.header.commit, @src());
+                            self.set_op_and_commit_max(
+                                header.op,
+                                message.header.commit_max,
+                                @src(),
+                            );
                             assert(self.op == header.op);
-                            assert(self.commit_max >= message.header.commit);
+                            assert(self.commit_max >= message.header.commit_max);
                             break;
                         }
                     }
@@ -2392,7 +2404,7 @@ pub fn ReplicaType(
             assert(start_view_message.references == 1);
             assert(start_view_message.header.view == self.view);
             assert(start_view_message.header.op == self.op);
-            assert(start_view_message.header.commit == self.commit_max);
+            assert(start_view_message.header.commit_max == self.commit_max);
             assert(start_view_message.header.nonce == message.header.nonce);
 
             self.send_message_to_replica(message.header.replica, start_view_message);
@@ -4269,7 +4281,6 @@ pub fn ReplicaType(
                 // headers for a potential primary because we could arrive here while the potential
                 // primary is still repairing (and thus may still have gaps in its journal).
                 assert(self.do_view_change_quorum);
-                assert(self.view_headers.command == .do_view_change);
                 self.update_do_view_change_headers();
             } else {
                 // Update view_headers to include at least one op from the future checkpoint. This
@@ -4799,14 +4810,22 @@ pub fn ReplicaType(
         /// Construct a SV message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_start_view_message(self: *Self, nonce: u128) *Message.StartView {
-            assert(self.status == .normal);
+            assert(self.status == .normal or self.status == .view_change);
             assert(self.syncing != .updating_checkpoint);
             assert(self.replica == self.primary_index(self.view));
-            assert(self.commit_min == self.commit_max);
             assert(self.commit_min <= self.op);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
             assert(self.log_view == self.view);
+            if (self.status == .normal) {
+                assert(self.commit_min == self.commit_max);
+            } else {
+                // Potential primaries may send a SV message before committing up to commit_max.
+                // (see `repair`).
+                assert(self.status == .view_change);
+                assert(self.do_view_change_quorum);
+                assert(self.commit_min <= self.commit_max);
+            }
 
             self.primary_update_view_headers();
             assert(self.view_headers.command == .start_view);
@@ -4824,7 +4843,7 @@ pub fn ReplicaType(
                 .view = self.view,
                 .checkpoint_op = self.op_checkpoint(),
                 .op = self.op,
-                .commit = self.commit_min, // (Same as commit_max.)
+                .commit_max = self.commit_max,
                 .nonce = nonce,
             };
 
@@ -4921,6 +4940,7 @@ pub fn ReplicaType(
             assert(self.replica == self.primary_index(self.view));
             assert(self.view == self.log_view);
             if (self.status == .recovering) assert(self.solo());
+            self.view_headers.command = .start_view;
             self.update_start_view_headers();
         }
 
@@ -5707,7 +5727,7 @@ pub fn ReplicaType(
 
                     // Syncing replicas must be careful about receiving SV messages, since they
                     // may have fast-forwarded their commit_max via their checkpoint target.
-                    if (message_header.commit < self.op_checkpoint()) {
+                    if (message_header.commit_max < self.op_checkpoint()) {
                         log.debug("{}: on_{s}: ignoring (older checkpoint)", .{
                             self.replica,
                             command,
@@ -6489,7 +6509,18 @@ pub fn ReplicaType(
             }
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                if (!self.primary_journal_repaired()) return;
+                if (!self.primary_journal_headers_repaired()) return;
+
+                // Sending start_view messages to backups and committing up to commit_max can be
+                // performed concurrently. This is good for performance *and* availability, as
+                // it allows lagging backups to repair while the potential primary commits.
+                self.primary_send_start_view();
+
+                // Check staging as superblock.checkpoint() may currently be updating view/log_view.
+                if (self.log_view > self.superblock.staging.vsr_state.log_view) {
+                    self.view_durable_update();
+                }
+                if (!self.primary_journal_prepares_repaired()) return;
 
                 if (self.commit_min == self.commit_max) {
                     if (self.commit_stage != .idle) {
@@ -6713,8 +6744,17 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.view == self.log_view);
+            if (self.status == .view_change) assert(self.do_view_change_quorum);
 
-            if (!self.valid_hash_chain_between(self.op_repair_min(), self.op)) return false;
+            return self.primary_journal_headers_repaired() and
+                self.primary_journal_prepares_repaired();
+        }
+
+        fn primary_journal_prepares_repaired(self: *Self) bool {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.primary_index(self.view) == self.replica);
+            assert(self.view == self.log_view);
+            if (self.status == .view_change) assert(self.do_view_change_quorum);
 
             for (self.op_repair_min()..self.op + 1) |op| {
                 const header = self.journal.header_with_op(op);
@@ -6723,8 +6763,16 @@ pub fn ReplicaType(
                     return false;
                 }
             }
-
             return true;
+        }
+
+        fn primary_journal_headers_repaired(self: *Self) bool {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.primary_index(self.view) == self.replica);
+            assert(self.view == self.log_view);
+            if (self.status == .view_change) assert(self.do_view_change_quorum);
+
+            return self.valid_hash_chain_between(self.op_repair_min(), self.op);
         }
 
         /// Reads prepares into the pipeline (before we start the view as the new primary).
@@ -7812,14 +7860,13 @@ pub fn ReplicaType(
                 },
                 .start_view => |header| {
                     assert(!self.standby());
-                    assert(self.status == .normal);
-                    assert(!self.do_view_change_quorum);
+                    assert(self.status == .normal or self.status == .view_change);
+                    assert(self.replica == self.primary_index(self.view));
                     assert(self.syncing == .idle);
                     assert(header.view == self.view);
                     assert(header.replica == self.replica);
                     assert(header.replica != replica);
-                    assert(header.commit == self.commit_min);
-                    assert(header.commit == self.commit_max);
+                    assert(header.commit_max == self.commit_max);
                     assert(header.checkpoint_op == self.op_checkpoint());
                 },
                 .headers => {
@@ -8028,10 +8075,6 @@ pub fn ReplicaType(
                     self.view > self.view_durable() or
                     self.syncing == .updating_checkpoint,
             );
-            // The primary must only persist the SV headers after repairs are done.
-            // Otherwise headers could be nacked, truncated, then restored after a crash.
-            assert(self.log_view < self.view or self.replica != self.primary_index(self.view) or
-                self.status == .normal or self.status == .recovering);
             assert(self.view_headers.array.count() > 0);
             assert(self.view_headers.array.get(0).view <= self.log_view);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
@@ -8088,9 +8131,11 @@ pub fn ReplicaType(
             assert(self.view_durable_updating());
         }
 
-        fn primary_send_start_view_after_view_change(self: *Self) void {
-            assert(self.status == .normal);
-            assert(self.primary());
+        fn primary_send_start_view(self: *Self) void {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.replica == self.primary_index(self.view));
+            assert(self.primary_journal_headers_repaired());
+
             // Only replies to `request_start_view` need a nonce,
             // to guarantee freshness of the message.
             const nonce = 0;
@@ -8105,8 +8150,7 @@ pub fn ReplicaType(
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
             const self: *Self = @fieldParentPtr("superblock_context_view_change", context);
             assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.solo()) or
-                self.status == .recovering_head);
+                (self.status == .recovering and self.solo()));
             assert(!self.view_durable_updating());
             assert(self.superblock.working.vsr_state.view <= self.view);
             assert(self.superblock.working.vsr_state.log_view <= self.log_view);
@@ -8135,8 +8179,7 @@ pub fn ReplicaType(
             }
 
             // The view/log_view incremented while the previous view-change update was being saved.
-            // We check staging superblock here because a superblock.checkpoint() call may currently
-            // be making view & log_view durable.
+            // Check staging as superblock.checkpoint() may currently be updating view/log_view.
             const update = self.superblock.staging.vsr_state.log_view < self.log_view or
                 self.superblock.staging.vsr_state.view < self.view;
             const update_dvc = update and self.log_view < self.view;
@@ -8153,18 +8196,31 @@ pub fn ReplicaType(
             if (self.view_change_status_timeout.ticking) self.view_change_status_timeout.reset();
 
             // Trigger work that was deferred until after the view-change update.
-            if (self.status == .normal) {
-                assert(self.log_view == self.view);
-
-                if (self.primary_index(self.view) == self.replica) {
-                    self.primary_send_start_view_after_view_change();
-                } else {
-                    self.send_prepare_oks_after_view_change();
-                }
-            }
-
-            if (self.status == .view_change and self.log_view < self.view) {
-                if (!self.do_view_change_quorum) self.send_do_view_change();
+            switch (self.status) {
+                .normal => {
+                    assert(self.log_view == self.view);
+                    if (self.primary_index(self.view) == self.replica) {
+                        self.primary_send_start_view();
+                    } else {
+                        self.send_prepare_oks_after_view_change();
+                    }
+                },
+                .view_change => {
+                    if (self.log_view < self.view) {
+                        if (!self.do_view_change_quorum) self.send_do_view_change();
+                    } else {
+                        assert(self.log_view == self.view);
+                        // Potential primaries that have updated their SV headers can send out SV
+                        // messages (see `repair`)
+                        if (self.primary_index(self.view) == self.replica and
+                            self.view_headers.command == .start_view)
+                        {
+                            self.primary_send_start_view();
+                        }
+                    }
+                },
+                .recovering => {},
+                .recovering_head => unreachable,
             }
         }
 
@@ -8432,22 +8488,10 @@ pub fn ReplicaType(
                 self.pipeline.queue.verify();
             }
 
-            self.view_headers.command = .start_view;
-            self.primary_update_view_headers();
-
             self.transition_to_normal_from_view_change_status(self.view);
 
             assert(self.status == .normal);
             assert(self.primary());
-
-            // SVs will be sent out after the view_durable update completes. view-change headers
-            // and log_view may already be durable if checkpoint was advanced during repair.
-            if (self.log_view > self.log_view_durable()) {
-                assert(self.view_durable_updating());
-            } else {
-                assert(self.log_view == self.log_view_durable());
-                self.primary_send_start_view_after_view_change();
-            }
 
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();
@@ -8648,10 +8692,8 @@ pub fn ReplicaType(
                 assert(self.commit_min == self.commit_max);
                 assert(self.primary_journal_repaired());
 
-                // Now that the primary is repaired and in status=normal, it can update its
-                // view-change headers. view-change headers and log_view may already be durable if
-                // checkpoint was advanced during repair.
-                if (self.log_view > self.log_view_durable()) self.view_durable_update();
+                assert(self.log_view > self.log_view_durable() or
+                    self.log_view == self.superblock.staging.vsr_state.log_view);
 
                 self.ping_timeout.start();
                 self.commit_message_timeout.start();
