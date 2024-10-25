@@ -4824,7 +4824,7 @@ pub fn ReplicaType(
                 // (see `repair`).
                 assert(self.status == .view_change);
                 assert(self.do_view_change_quorum);
-                assert(self.commit_max >= self.commit_min);
+                assert(self.commit_min <= self.commit_max);
             }
 
             self.primary_update_view_headers();
@@ -6509,21 +6509,18 @@ pub fn ReplicaType(
             }
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                if (!self.primary_journal_headers_repaired()) {
-                    return;
-                } else {
-                    // Sending start_view messages to backups and committing up to commit_max can be
-                    // performed concurrently. This is good for performance *and* availability, as
-                    // it allows lagging backups to repair while the potential primary commits.
-                    self.primary_send_start_view();
+                if (!self.primary_journal_headers_repaired()) return;
 
-                    // Check staging as superblock.checkpoint() may currently be updating view or
-                    // log_view.
-                    if (self.log_view > self.superblock.staging.vsr_state.log_view) {
-                        self.view_durable_update();
-                    }
-                    if (!self.primary_journal_prepares_repaired()) return;
+                // Sending start_view messages to backups and committing up to commit_max can be
+                // performed concurrently. This is good for performance *and* availability, as
+                // it allows lagging backups to repair while the potential primary commits.
+                self.primary_send_start_view();
+
+                // Check staging as superblock.checkpoint() may currently be updating view/log_view.
+                if (self.log_view > self.superblock.staging.vsr_state.log_view) {
+                    self.view_durable_update();
                 }
+                if (!self.primary_journal_prepares_repaired()) return;
 
                 if (self.commit_min == self.commit_max) {
                     if (self.commit_stage != .idle) {
@@ -8214,9 +8211,7 @@ pub fn ReplicaType(
                     } else {
                         assert(self.log_view == self.view);
                         // Potential primaries that have updated their SV headers can send out SV
-                        // messages (see `repair`). Check primary_journal_repaired again as our
-                        // WAL may have been corrupted after SV headers were updated for a potential
-                        // primary.
+                        // messages (see `repair`)
                         if (self.primary_index(self.view) == self.replica and
                             self.view_headers.command == .start_view)
                         {
