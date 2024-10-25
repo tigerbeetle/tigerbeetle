@@ -4824,7 +4824,7 @@ pub fn ReplicaType(
                 // (see `repair`).
                 assert(self.status == .view_change);
                 assert(self.do_view_change_quorum);
-                maybe(self.commit_min < self.commit_max);
+                assert(self.commit_max >= self.commit_min);
             }
 
             self.primary_update_view_headers();
@@ -6509,17 +6509,20 @@ pub fn ReplicaType(
             }
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                if (!self.primary_journal_repaired()) return;
+                if (!self.primary_journal_headers_repaired()) {
+                    return;
+                } else {
+                    // Sending start_view messages to backups and committing up to commit_max can be
+                    // performed concurrently. This is good for performance *and* availability, as
+                    // it allows lagging backups to repair while the potential primary commits.
+                    self.primary_send_start_view();
 
-                // Sending start_view messages to backups and committing up to commit_max can be
-                // performed concurrently. This is good for performance *and* availability, as
-                // it allows lagging backups to repair while the potential primary commits.
-                self.send_start_view();
-
-                // Check staging as superblock.checkpoint() may currently be updating view or
-                // log_view.
-                if (self.log_view > self.superblock.staging.vsr_state.log_view) {
-                    self.view_durable_update();
+                    // Check staging as superblock.checkpoint() may currently be updating view or
+                    // log_view.
+                    if (self.log_view > self.superblock.staging.vsr_state.log_view) {
+                        self.view_durable_update();
+                    }
+                    if (!self.primary_journal_prepares_repaired()) return;
                 }
 
                 if (self.commit_min == self.commit_max) {
@@ -6746,7 +6749,15 @@ pub fn ReplicaType(
             assert(self.view == self.log_view);
             if (self.status == .view_change) assert(self.do_view_change_quorum);
 
-            if (!self.valid_hash_chain_between(self.op_repair_min(), self.op)) return false;
+            return self.primary_journal_headers_repaired() and
+                self.primary_journal_prepares_repaired();
+        }
+
+        fn primary_journal_prepares_repaired(self: *Self) bool {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.primary_index(self.view) == self.replica);
+            assert(self.view == self.log_view);
+            if (self.status == .view_change) assert(self.do_view_change_quorum);
 
             for (self.op_repair_min()..self.op + 1) |op| {
                 const header = self.journal.header_with_op(op);
@@ -6755,8 +6766,16 @@ pub fn ReplicaType(
                     return false;
                 }
             }
-
             return true;
+        }
+
+        fn primary_journal_headers_repaired(self: *Self) bool {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.primary_index(self.view) == self.replica);
+            assert(self.view == self.log_view);
+            if (self.status == .view_change) assert(self.do_view_change_quorum);
+
+            return self.valid_hash_chain_between(self.op_repair_min(), self.op);
         }
 
         /// Reads prepares into the pipeline (before we start the view as the new primary).
@@ -8115,9 +8134,10 @@ pub fn ReplicaType(
             assert(self.view_durable_updating());
         }
 
-        fn send_start_view(self: *Self) void {
+        fn primary_send_start_view(self: *Self) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.replica == self.primary_index(self.view));
+            assert(self.primary_journal_headers_repaired());
 
             // Only replies to `request_start_view` need a nonce,
             // to guarantee freshness of the message.
@@ -8183,7 +8203,7 @@ pub fn ReplicaType(
                 .normal => {
                     assert(self.log_view == self.view);
                     if (self.primary_index(self.view) == self.replica) {
-                        self.send_start_view();
+                        self.primary_send_start_view();
                     } else {
                         self.send_prepare_oks_after_view_change();
                     }
@@ -8198,10 +8218,9 @@ pub fn ReplicaType(
                         // WAL may have been corrupted after SV headers were updated for a potential
                         // primary.
                         if (self.primary_index(self.view) == self.replica and
-                            self.view_headers.command == .start_view and
-                            self.primary_journal_repaired())
+                            self.view_headers.command == .start_view)
                         {
-                            self.send_start_view();
+                            self.primary_send_start_view();
                         }
                     }
                 },
