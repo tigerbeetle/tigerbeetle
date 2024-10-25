@@ -874,6 +874,7 @@ fn build_vortex(
         .optimize = options.mode,
     });
 
+    vortex.root_module.omit_frame_pointer = false;
     vortex.root_module.addOptions("vsr_options", options.vsr_options);
     vortex.linkLibC();
     vortex.addIncludePath(options.tb_client_header.dirname());

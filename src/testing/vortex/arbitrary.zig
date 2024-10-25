@@ -173,7 +173,7 @@ pub fn odds(
 ) bool {
     assert(numerator > 0);
     assert(denominator > 0);
-    assert(numerator < denominator);
+    assert(numerator <= denominator);
     return random.uintLessThan(u32, denominator) < numerator;
 }
 
