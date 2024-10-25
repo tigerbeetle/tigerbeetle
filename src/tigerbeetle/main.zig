@@ -287,21 +287,13 @@ const Command = struct {
             if (constants.config.process.release.value ==
                 vsr.multiversioning.Release.minimum.value)
             {
-                log.info("multiversioning: disabled for development ({}) release.", .{
+                log.info("multiversioning: upgrades disabled for development ({}) release.", .{
                     constants.config.process.release,
                 });
                 break :blk null;
             }
-            if (args.development) {
-                log.info("multiversioning: disabled due to --development.", .{});
-                break :blk null;
-            }
-            if (args.experimental) {
-                log.info("multiversioning: disabled due to --experimental.", .{});
-                break :blk null;
-            }
             if (constants.aof_recovery) {
-                log.info("multiversioning: disabled due to aof_recovery.", .{});
+                log.info("multiversioning: upgrades disabled due to aof_recovery.", .{});
                 break :blk null;
             }
 
@@ -380,7 +372,15 @@ const Command = struct {
             else => |e| return e,
         };
 
-        if (multiversion != null) multiversion.?.timeout_start(replica.replica);
+        if (multiversion != null) {
+            if (args.development) {
+                log.info("multiversioning: upgrade polling disabled due to --development.", .{});
+            } else if (args.experimental) {
+                log.info("multiversioning: upgrade polling disabled due to --experimental.", .{});
+            } else {
+                multiversion.?.timeout_start(replica.replica);
+            }
+        }
 
         // Note that this does not account for the fact that any allocations will be rounded up to
         // the nearest page by `std.heap.page_allocator`.
