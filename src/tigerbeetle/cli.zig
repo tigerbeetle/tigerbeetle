@@ -615,7 +615,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         if (start.development) start_defaults_development else start_defaults_production;
 
     const start_limit_storage: flags.ByteSize = start.limit_storage orelse
-        .{ .value = constants.storage_size_limit_max };
+        .{ .value = constants.storage_size_limit_default };
     const start_memory_lsm_manifest: flags.ByteSize = start.memory_lsm_manifest orelse
         .{ .value = constants.lsm_manifest_memory_size_default };
 
