@@ -90,7 +90,12 @@ pub fn build(b: *std.Build) !void {
         .multiversion = b.option(
             []const u8,
             "multiversion",
-            "Past version to include for upgrades",
+            "Past version to include for upgrades (\"latest\" or \"x.y.z\")",
+        ),
+        .multiversion_file = b.option(
+            []const u8,
+            "multiversion-file",
+            "Past version to include for upgrades (local binary file)",
         ),
         .config_verify = b.option(bool, "config_verify", "Enable extra assertions.") orelse true,
         .config_aof_recovery = b.option(
@@ -183,6 +188,7 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
         .emit_llvm_ir = build_options.emit_llvm_ir,
         .multiversion = build_options.multiversion,
+        .multiversion_file = build_options.multiversion_file,
     });
 
     // zig build aof
@@ -355,16 +361,24 @@ fn build_tigerbeetle(
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
         multiversion: ?[]const u8,
+        multiversion_file: ?[]const u8,
         emit_llvm_ir: bool,
     },
 ) void {
-    const tigerbeetle_bin = if (options.multiversion) |version_past| bin: {
+    const multiversion_file: ?std.Build.LazyPath = if (options.multiversion_file) |path|
+        .{ .cwd_relative = path }
+    else if (options.multiversion) |version_past|
+        download_release(b, version_past, options.target, options.mode)
+    else
+        null;
+
+    const tigerbeetle_bin = if (multiversion_file) |multiversion_lazy_path| bin: {
         assert(!options.emit_llvm_ir);
         break :bin build_tigerbeetle_executable_multiversion(b, .{
             .vsr_module = options.vsr_module,
             .vsr_options = options.vsr_options,
             .llvm_objcopy = options.llvm_objcopy,
-            .tigerbeetle_previous = download_release(b, version_past, options.target, options.mode),
+            .tigerbeetle_previous = multiversion_lazy_path,
             .target = options.target,
             .mode = options.mode,
         });
