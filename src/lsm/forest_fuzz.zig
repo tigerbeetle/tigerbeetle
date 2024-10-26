@@ -234,7 +234,7 @@ const Environment = struct {
 
         var reservations: [free_set_fragments_max]Reservation = undefined;
         for (&reservations) |*reservation| {
-            reservation.* = env.grid.reserve(free_set_fragment_size).?;
+            reservation.* = env.grid.reserve(free_set_fragment_size);
         }
         for (reservations) |reservation| {
             _ = env.grid.free_set.acquire(reservation).?;
