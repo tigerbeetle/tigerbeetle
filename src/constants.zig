@@ -407,9 +407,9 @@ pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
 /// Napkin math for the "worst case" scrubber read overhead as a function of cycle duration
 /// (assuming a fully-loaded data file – maximum size and 100% acquired):
 ///
-///   storage_size_limit_max      = 16TiB
+///   storage_size_limit          = 64TiB
 ///   grid_scrubber_cycle_seconds = 180 days * 24 hr/day * 60 min/hr * 60 s/min (2 cycle/year)
-///   read_bytes_per_second       = storage_size_max / grid_scrubber_cycle_seconds ≈ 1.08 MiB/s
+///   read_bytes_per_second       = storage_size_limit / grid_scrubber_cycle_seconds ≈ 4.32 MiB/s
 ///
 pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
 
@@ -575,6 +575,10 @@ comptime {
     assert(superblock_copies <= 8);
 }
 
+/// The default maximum size of a local data file. This can be override, up to
+/// storage_size_limit_max, by a CLI flag.
+pub const storage_size_limit_default = config.process.storage_size_limit_default;
+
 /// The maximum size of a local data file.
 /// This should not be much larger than several TiB to limit:
 /// * blast radius and recovery time when a whole replica is lost,
@@ -584,6 +588,10 @@ comptime {
 /// This is a "firm" limit --- while it is a compile-time constant, it does not affect data file
 /// layout and can be safely changed for an existing cluster.
 pub const storage_size_limit_max = config.process.storage_size_limit_max;
+
+comptime {
+    assert(storage_size_limit_max >= storage_size_limit_default);
+}
 
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 ///

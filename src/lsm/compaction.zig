@@ -831,7 +831,7 @@ pub fn CompactionType(
             const beat_blocks_max = beat_value_blocks_max + beat_index_blocks_max;
 
             assert(compaction.grid_reservation == null);
-            compaction.grid_reservation = compaction.grid.reserve(beat_blocks_max).?;
+            compaction.grid_reservation = compaction.grid.reserve(beat_blocks_max);
 
             // These values were already processed during the previous beat and add to wastage.
             if (compaction.table_info_a.? == .disk) {

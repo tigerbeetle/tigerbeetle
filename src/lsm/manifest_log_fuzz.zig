@@ -280,12 +280,12 @@ const Environment = struct {
 
         fields_initialized += 1;
         env.storage =
-            try Storage.init(allocator, constants.storage_size_limit_max, storage_options);
+            try Storage.init(allocator, constants.storage_size_limit_default, storage_options);
         errdefer env.storage.deinit(allocator);
 
         fields_initialized += 1;
         env.storage_verify =
-            try Storage.init(allocator, constants.storage_size_limit_max, storage_options);
+            try Storage.init(allocator, constants.storage_size_limit_default, storage_options);
         errdefer env.storage_verify.deinit(allocator);
 
         fields_initialized += 1;
@@ -299,14 +299,14 @@ const Environment = struct {
         fields_initialized += 1;
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = &env.storage,
-            .storage_size_limit = constants.storage_size_limit_max,
+            .storage_size_limit = constants.storage_size_limit_default,
         });
         errdefer env.superblock.deinit(allocator);
 
         fields_initialized += 1;
         env.superblock_verify = try SuperBlock.init(allocator, .{
             .storage = &env.storage_verify,
-            .storage_size_limit = constants.storage_size_limit_max,
+            .storage_size_limit = constants.storage_size_limit_default,
         });
         errdefer env.superblock_verify.deinit(allocator);
 
@@ -543,7 +543,7 @@ const Environment = struct {
                 env.allocator,
                 .{
                     .storage = test_storage,
-                    .storage_size_limit = constants.storage_size_limit_max,
+                    .storage_size_limit = constants.storage_size_limit_default,
                 },
             );
 

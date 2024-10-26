@@ -465,10 +465,21 @@ pub fn GridType(comptime Storage: type) type {
             grid.superblock.storage.on_next_tick(.lsm, callback, next_tick);
         }
 
-        /// Returning null indicates that there are not enough free blocks to fill the reservation.
-        pub fn reserve(grid: *Grid, blocks_count: usize) ?Reservation {
+        /// Aborts if there are not enough free blocks to fill the reservation.
+        /// Should a use case arise where a null return would be preferred, this can be split
+        /// into panicking and non-panicking versions.
+        pub fn reserve(grid: *Grid, blocks_count: usize) Reservation {
             assert(grid.callback == .none);
-            return grid.free_set.reserve(blocks_count);
+            return grid.free_set.reserve(blocks_count) orelse vsr.fatal(
+                .storage_size_would_exceed_limit,
+                "data file would become too large size={} + reservation={} > limit={}, " ++
+                    "restart the replica increasing '--storage-size-limit'",
+                .{
+                    grid.superblock.working.vsr_state.checkpoint.storage_size,
+                    blocks_count * constants.block_size,
+                    grid.superblock.storage_size_limit,
+                },
+            );
         }
 
         /// Forfeit a reservation.

@@ -693,7 +693,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.grid_reservation = manifest_log.grid.reserve(
                 manifest_log.compact_blocks.? +
                     manifest_log.pace.half_bar_append_blocks_max,
-            ).?;
+            );
 
             manifest_log.read_callback = callback;
             manifest_log.flush(compact_next_block);

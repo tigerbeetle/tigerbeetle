@@ -166,7 +166,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.superblock = try SuperBlock.init(allocator, .{
                 .storage = env.storage,
-                .storage_size_limit = constants.storage_size_limit_max,
+                .storage_size_limit = constants.storage_size_limit_default,
             });
             defer env.superblock.deinit(allocator);
 
@@ -891,7 +891,11 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     defer allocator.free(fuzz_ops);
 
     // Init mocked storage.
-    var storage = try Storage.init(allocator, constants.storage_size_limit_max, storage_options);
+    var storage = try Storage.init(
+        allocator,
+        constants.storage_size_limit_default,
+        storage_options,
+    );
     defer storage.deinit(allocator);
 
     switch (table_usage) {

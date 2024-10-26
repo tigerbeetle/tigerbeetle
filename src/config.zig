@@ -92,7 +92,8 @@ const ConfigProcess = struct {
     git_commit: ?[40]u8 = null,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
-    storage_size_limit_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
+    storage_size_limit_default: u64 = 16 * 1024 * 1024 * 1024 * 1024,
+    storage_size_limit_max: u64 = 64 * 1024 * 1024 * 1024 * 1024,
     memory_size_max_default: u64 = 1024 * 1024 * 1024,
     cache_accounts_size_default: usize,
     cache_transfers_size_default: usize,
@@ -238,6 +239,7 @@ pub const configs = struct {
     /// reach.
     pub const test_min = Config{
         .process = .{
+            .storage_size_limit_default = 1 * 1024 * 1024 * 1024,
             .storage_size_limit_max = 1 * 1024 * 1024 * 1024,
             .direct_io = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 256,
