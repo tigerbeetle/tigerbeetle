@@ -43,15 +43,19 @@ pub const CLIArgs = struct {
 };
 
 const VersionInfo = struct {
+    // release_triple is a comptime parameter of the VSR used for the upgrade protocol.
     release_triple: []const u8,
-    release_triple_multiversion: []const u8,
     release_triple_client_min: []const u8,
+    // tag is the symbolic name of the release used as a git tag and a version for client libraries.
+    // Normally, the tag and the release_triple match, but it is possible to have different tags
+    // with matching release_triples, for hot-fixes.
+    tag: []const u8,
+    // The git tag/GitHub release to download to include in a multiversion binary.
+    tag_multiversion: []const u8,
     sha: []const u8,
 };
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
-    assert(builtin.target.os.tag == .linux);
-    assert(builtin.target.cpu.arch == .x86_64);
     _ = gpa;
 
     const languages = if (cli_args.language) |language|
@@ -116,17 +120,30 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             "{[major]}.{[minor]}.{[patch]}",
             release.triple(),
         ),
-        .release_triple_multiversion = try shell.fmt(
-            "{[major]}.{[minor]}.{[patch]}",
-            release_multiversion.triple(),
-        ),
         .release_triple_client_min = try shell.fmt(
             "{[major]}.{[minor]}.{[patch]}",
             release_triple_client_min,
         ),
+        .tag = try shell.fmt(
+            "{[major]}.{[minor]}.{[patch]}",
+            release.triple(),
+        ),
+        .tag_multiversion = try shell.fmt(
+            "{[major]}.{[minor]}.{[patch]}",
+            release_multiversion.triple(),
+        ),
         .sha = cli_args.sha,
     };
+
+    // Typically GitHub tag matches the release triple in the binary exactly. For exceptional
+    // hot-fix releases, the tag can be different. To make a hot-fix release, set the tag manually
+    // here and remove the assert.
+    assert(std.mem.eql(u8, version_info.release_triple, version_info.tag));
+
     log.info("release={s} sha={s}", .{ version_info.release_triple, version_info.sha });
+    if (!std.mem.eql(u8, version_info.release_triple, version_info.tag)) {
+        log.warn("tag != release, tag={s}", .{version_info.tag});
+    }
 
     if (cli_args.build) {
         try build(shell, languages, version_info);
@@ -215,18 +232,18 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Dgit-commit={commit}
                 \\    -Dconfig-release={release_triple}
                 \\    -Dconfig-release-client-min={release_triple_client_min}
-                \\    -Dmultiversion={release_triple_multiversion}
+                \\    -Dmultiversion={tag_multiversion}
             , .{
                 .target = target,
                 .release = if (debug) "false" else "true",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
                 .release_triple_client_min = info.release_triple_client_min,
-                .release_triple_multiversion = info.release_triple_multiversion,
+                .tag_multiversion = info.tag_multiversion,
             });
 
-            const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
-            const macos = comptime std.mem.indexOf(u8, target, "macos") != null;
+            const windows = comptime std.mem.eql(u8, target, "x86_64-windows");
+            const macos = comptime std.mem.eql(u8, target, "aarch64-macos");
 
             const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
             const zip_name = "tigerbeetle-" ++
@@ -234,7 +251,10 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 (if (debug) "-debug" else "") ++
                 ".zip";
 
-            if (std.mem.eql(u8, target, "x86_64-linux")) {
+            if ((std.mem.eql(u8, target, "x86_64-linux") and builtin.target.os.tag == .linux) or
+                (macos and builtin.target.os.tag == .macos) or
+                (windows and builtin.target.os.tag == .windows))
+            {
                 const output = try shell.exec_stdout("./{exe_name} version --verbose", .{
                     .exe_name = exe_name,
                 });
@@ -279,14 +299,14 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     });
     try shell.exec(
         \\dotnet pack TigerBeetle --configuration Release
-        \\/p:AssemblyVersion={release_triple} /p:Version={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\/p:AssemblyVersion={tag} /p:Version={tag}
+    , .{ .tag = info.tag });
 
     try Shell.copy_path(
         shell.cwd,
-        try shell.fmt("TigerBeetle/bin/Release/tigerbeetle.{s}.nupkg", .{info.release_triple}),
+        try shell.fmt("TigerBeetle/bin/Release/tigerbeetle.{s}.nupkg", .{info.tag}),
         dist_dir,
-        try shell.fmt("tigerbeetle.{s}.nupkg", .{info.release_triple}),
+        try shell.fmt("tigerbeetle.{s}.nupkg", .{info.tag}),
     );
 }
 
@@ -364,8 +384,8 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try shell.exec(
         \\mvn --batch-mode --quiet --file pom.xml
-        \\versions:set -DnewVersion={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\versions:set -DnewVersion={tag}
+    , .{ .tag = info.tag });
 
     try shell.exec(
         \\mvn --batch-mode --quiet --file pom.xml
@@ -375,9 +395,9 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 
     try Shell.copy_path(
         shell.cwd,
-        try shell.fmt("target/tigerbeetle-java-{s}.jar", .{info.release_triple}),
+        try shell.fmt("target/tigerbeetle-java-{s}.jar", .{info.tag}),
         dist_dir,
-        try shell.fmt("tigerbeetle-java-{s}.jar", .{info.release_triple}),
+        try shell.fmt("tigerbeetle-java-{s}.jar", .{info.tag}),
     );
 }
 
@@ -408,17 +428,17 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     defer backup_restore(shell.cwd, "package-lock.json");
 
     try shell.exec(
-        "npm version --no-git-tag-version {release_triple}",
-        .{ .release_triple = info.release_triple },
+        "npm version --no-git-tag-version {tag}",
+        .{ .tag = info.tag },
     );
     try shell.exec("npm install", .{});
     try shell.exec("npm pack --quiet", .{});
 
     try Shell.copy_path(
         shell.cwd,
-        try shell.fmt("tigerbeetle-node-{s}.tgz", .{info.release_triple}),
+        try shell.fmt("tigerbeetle-node-{s}.tgz", .{info.tag}),
         dist_dir,
-        try shell.fmt("tigerbeetle-node-{s}.tgz", .{info.release_triple}),
+        try shell.fmt("tigerbeetle-node-{s}.tgz", .{info.tag}),
     );
 }
 
@@ -431,25 +451,25 @@ fn publish(
     var section = try shell.open_section("publish all");
     defer section.close();
 
-    {
-        // Sanity check that the new release doesn't exist but the multiversion does.
-        var release_multiversion_exists = false;
-        var release_exists = false;
-        const releases_exiting = try shell.exec_stdout(
+    { // Sanity check that the new release doesn't exist but the multiversion does.
+        var tag_multiversion_exists = false;
+        var tag_exists = false;
+        const tags_exiting = try shell.exec_stdout(
             "gh release list --json tagName --jq {query}",
             .{ .query = ".[].tagName" },
         );
-        var it = std.mem.split(u8, releases_exiting, "\n");
-        while (it.next()) |release_existing| {
-            assert(std.mem.trim(u8, release_existing, " \t\n\r").len == release_existing.len);
-            if (std.mem.eql(u8, release_existing, info.release_triple)) {
-                release_exists = true;
+        var it = std.mem.split(u8, tags_exiting, "\n");
+        while (it.next()) |tag_existing| {
+            assert(std.mem.trim(u8, tag_existing, " \t\n\r").len == tag_existing.len);
+            if (std.mem.eql(u8, tag_existing, info.release_triple)) {
+                tag_exists = true;
             }
-            if (std.mem.eql(u8, release_existing, info.release_triple_multiversion)) {
-                release_multiversion_exists = true;
+            if (std.mem.eql(u8, tag_existing, info.tag_multiversion)) {
+                tag_multiversion_exists = true;
             }
         }
-        assert(!release_exists and release_multiversion_exists);
+        assert(!tag_exists);
+        assert(tag_multiversion_exists);
     }
 
     assert(try shell.dir_exists("zig-out/dist"));
@@ -490,7 +510,7 @@ fn publish(
         };
 
         const notes = try shell.fmt(
-            \\# {[release_triple]s}
+            \\# {[tag]s}
             \\
             \\### Supported upgrade versions
             \\
@@ -500,8 +520,8 @@ fn publish(
             \\## Server
             \\
             \\* Binary: Download the zip for your OS and architecture from this page and unzip.
-            \\* Docker: `docker pull ghcr.io/tigerbeetle/tigerbeetle:{[release_triple]s}`
-            \\* Docker (debug image): `docker pull ghcr.io/tigerbeetle/tigerbeetle:{[release_triple]s}-debug`
+            \\* Docker: `docker pull ghcr.io/tigerbeetle/tigerbeetle:{[tag]s}`
+            \\* Docker (debug image): `docker pull ghcr.io/tigerbeetle/tigerbeetle:{[tag]s}-debug`
             \\
             \\## Clients
             \\
@@ -509,17 +529,17 @@ fn publish(
             \\minutes after the release for this version to appear in the package
             \\manager.
             \\
-            \\* .NET: `dotnet add package tigerbeetle --version {[release_triple]s}`
-            \\* Go: `go mod edit -require github.com/tigerbeetle/tigerbeetle-go@v{[release_triple]s}`
+            \\* .NET: `dotnet add package tigerbeetle --version {[tag]s}`
+            \\* Go: `go mod edit -require github.com/tigerbeetle/tigerbeetle-go@v{[tag]s}`
             \\* Java: Update the version of `com.tigerbeetle.tigerbeetle-java` in `pom.xml`
-            \\  to `{[release_triple]s}`.
-            \\* Node.js: `npm install tigerbeetle-node@{[release_triple]s}`
+            \\  to `{[tag]s}`.
+            \\* Node.js: `npm install tigerbeetle-node@{[tag]s}`
             \\
             \\## Changelog
             \\
             \\{[changelog]s}
         , .{
-            .release_triple = info.release_triple,
+            .tag = info.tag,
             .release_triple_client_min = info.release_triple_client_min,
             .release_included_min = release_included_min,
             .changelog = changelog_body,
@@ -533,7 +553,7 @@ fn publish(
         , .{
             .sha = info.sha,
             .notes = notes,
-            .tag = info.release_triple,
+            .tag = info.tag,
         });
 
         // Here and elsewhere for publishing we explicitly spell out the files we are uploading
@@ -549,7 +569,7 @@ fn publish(
             "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-windows.zip",
         };
         try shell.exec("gh release upload {tag} {artifacts}", .{
-            .tag = info.release_triple,
+            .tag = info.tag,
             .artifacts = artifacts,
         });
     }
@@ -568,7 +588,7 @@ fn publish(
         try shell.exec(
             \\gh release edit --draft=false --latest=true
             \\  {tag}
-        , .{ .tag = info.release_triple });
+        , .{ .tag = info.tag });
     }
 }
 
@@ -587,7 +607,7 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
     , .{
         .nuget_key = nuget_key,
         .package = try shell.fmt("zig-out/dist/dotnet/tigerbeetle.{s}.nupkg", .{
-            info.release_triple,
+            info.tag,
         }),
     });
 }
@@ -641,11 +661,11 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
     });
 
     try shell.exec("git tag tigerbeetle-{sha}", .{ .sha = info.sha });
-    try shell.exec("git tag v{release_triple}", .{ .release_triple = info.release_triple });
+    try shell.exec("git tag v{tag}", .{ .tag = info.tag });
 
     try shell.exec("git push origin main", .{});
     try shell.exec("git push origin tigerbeetle-{sha}", .{ .sha = info.sha });
-    try shell.exec("git push origin v{release_triple}", .{ .release_triple = info.release_triple });
+    try shell.exec("git push origin v{tag}", .{ .tag = info.tag });
 }
 
 fn publish_java(shell: *Shell, info: VersionInfo) !void {
@@ -677,8 +697,8 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
 
     try shell.exec(
         \\mvn --batch-mode --quiet --file src/clients/java/pom.xml
-        \\  versions:set -DnewVersion={release_triple}
-    , .{ .release_triple = info.release_triple });
+        \\  versions:set -DnewVersion={tag}
+    , .{ .tag = info.tag });
 
     try shell.exec(
         \\mvn --batch-mode --quiet --file src/clients/java/pom.xml
@@ -702,7 +722,7 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     _ = try shell.env_get("NODE_AUTH_TOKEN");
     try shell.exec("npm publish {package}", .{
         .package = try shell.fmt("zig-out/dist/node/tigerbeetle-node-{s}.tgz", .{
-            info.release_triple,
+            info.tag,
         }),
     });
 }
@@ -759,12 +779,12 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             \\docker buildx build
             \\   --file - .
             \\   --platform linux/amd64,linux/arm64
-            \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{release_triple}{debug}
+            \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{tag}{debug}
             \\   {tag_latest}
             \\   --push
         ,
             .{
-                .release_triple = info.release_triple,
+                .tag = info.tag,
                 .debug = if (debug) "-debug" else "",
                 .tag_latest = @as(
                     []const []const u8,
@@ -777,9 +797,9 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         // pushing it out to the registry first. As docker testing isn't covered under not rocket
         // science rule, let's do a best effort after-the-fact testing here.
         const version_verbose = try shell.exec_stdout(
-            \\docker run ghcr.io/tigerbeetle/tigerbeetle:{release_triple}{debug} version --verbose
+            \\docker run ghcr.io/tigerbeetle/tigerbeetle:{tag}{debug} version --verbose
         , .{
-            .release_triple = info.release_triple,
+            .tag = info.tag,
             .debug = if (debug) "-debug" else "",
         });
         const mode = if (debug) "Debug" else "ReleaseSafe";
