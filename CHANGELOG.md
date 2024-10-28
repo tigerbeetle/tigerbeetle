@@ -3,6 +3,47 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.11
+
+Released: 2024-10-28
+
+### Safety And Performance
+
+- [#2428](https://github.com/tigerbeetle/tigerbeetle/pull/2428)
+
+  Make `Grid.reserve()` abort rather than returning null.
+  When `Grid.reserve()` aborts, that indicates that the data file size limit would be exceeded by
+  the reservation. We were already panicking in this case by unwrapping the result, but now it has
+  a useful error message.
+
+- [#2416](https://github.com/tigerbeetle/tigerbeetle/pull/2416)
+
+  Improve availability and performance by sending `start_view` message earlier in the new-primary
+  recovery – as soon as the journal headers are repaired.
+
+- [#2360](https://github.com/tigerbeetle/tigerbeetle/pull/2360)
+
+  Refactor compaction to clarify the scheduling logic, schedule more aggressively, and make it
+  easier to run multiple compactions concurrently. This also improved the benchmark performance.
+
+### Features
+
+- [#2425](https://github.com/tigerbeetle/tigerbeetle/pull/2425)
+
+  Support multiversion (non-automatic) upgrades when the replica is started with `--development`
+  or `--experimental`.
+
+### Internals
+
+- [#2427](https://github.com/tigerbeetle/tigerbeetle/pull/2427)
+
+  Allow a release's Git tag and `config.process.release` to differ. This simplifies the release
+  process for hotfixes, when the Git tag is bumped but the `config.process.release` is unchanged.
+
+### TigerTracks 🎧
+
+- [Stuck in a Timeloop](https://www.youtube.com/watch?v=FWBjzQnDb8o)
+
 ## TigerBeetle 0.16.10
 
 Released: 2024-10-21
