@@ -739,3 +739,101 @@ test "pipe data over socket" {
         }
     }.run();
 }
+
+test "cancel" {
+    const checksum = @import("../vsr/checksum.zig").checksum;
+    const allocator = std.testing.allocator;
+    const file_path = "test_cancel";
+    const read_count = 8;
+    const read_size = 1024 * 16;
+
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        canceled: bool = false,
+
+        fn run_test() !void {
+            defer std.fs.cwd().deleteFile(file_path) catch {};
+
+            var context: Context = .{ .io = try IO.init(32, 0) };
+            defer context.io.deinit();
+
+            {
+                // Initialize the file and fill it with test data.
+                const file = try std.fs.cwd().createFile(file_path, .{
+                    .read = true,
+                    .truncate = true,
+                });
+                defer file.close();
+
+                const file_buffer = try allocator.alloc(u8, read_size);
+                defer allocator.free(file_buffer);
+                for (file_buffer, 0..) |*b, i| b.* = @intCast(i % 256);
+
+                try file.writeAll(file_buffer);
+            }
+
+            var read_completions: [read_count]IO.Completion = undefined;
+            var read_buffers: [read_count][]u8 = undefined;
+            var read_buffer_checksums: [read_count]u128 = undefined;
+            var read_buffers_allocated: u32 = 0;
+            defer for (read_buffers[0..read_buffers_allocated]) |b| allocator.free(b);
+
+            for (&read_buffers) |*read_buffer| {
+                read_buffer.* = try allocator.alloc(u8, read_size);
+                read_buffers_allocated += 1;
+            }
+
+            // Test cancellation:
+            // 1. Re-open the file.
+            // 2. Kick off multiple (async) reads.
+            // 3. Abort the reads (ideally before they can complete, since that is more interesting
+            //    to test).
+            //
+            // The reason to re-open the file with DIRECT is that it slows down the reads enough to
+            // actually test the interesting case -- cancelling an in-flight read and verifying that
+            // the buffer is not written to after `cancel()` completes.
+            //
+            // (Without DIRECT the reads all finish their callbacks even before io.tick() returns.)
+            const file = try std.posix.open(file_path,.{ .DIRECT = true }, 0);
+            defer std.posix.close(file);
+
+            for (&read_completions, read_buffers) |*completion, buffer| {
+                context.io.read(*Context, &context, read_callback, completion, file, buffer, 0);
+            }
+            try context.io.tick();
+
+            // Set to true *before* calling cancel() to ensure that any farther callbacks from IO
+            // completion will panic.
+            context.canceled = true;
+
+            try context.io.cancel();
+
+            // All of the in-flight reads are canceled at this point.
+            // To verify, checksum all of the read buffer memory, then wait and make sure that there
+            // are no farther modifications to the buffers.
+            for (read_buffers, &read_buffer_checksums) |buffer, *buffer_checksum| {
+                buffer_checksum.* = checksum(buffer);
+            }
+
+            const sleep_ms = 50;
+            std.time.sleep(sleep_ms * std.time.ns_per_ms);
+
+            for (read_buffers, read_buffer_checksums) |buffer, buffer_checksum| {
+                try testing.expectEqual(checksum(buffer), buffer_checksum);
+            }
+        }
+
+        fn read_callback(
+            context: *Context,
+            completion: *IO.Completion,
+            result: IO.ReadError!usize,
+        ) void {
+            _ = completion;
+            _ = result catch @panic("read error");
+
+            assert(!context.canceled);
+        }
+    }.run_test();
+}
