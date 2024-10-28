@@ -14,6 +14,7 @@ const FIFO = @import("../fifo.zig").FIFO;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 const parse_dirty_semver = stdx.parse_dirty_semver;
+const maybe = stdx.maybe;
 
 pub const IO = struct {
     ring: IO_Uring,
@@ -28,6 +29,33 @@ pub const IO = struct {
     // TODO Track these as metrics:
     ios_queued: u64 = 0,
     ios_in_kernel: u64 = 0,
+
+    /// The head of a doubly-linked list of all operations that are:
+    /// - in the submission queue, or
+    /// - in the kernel, or
+    /// - in the completion queue, or
+    /// - in the `completed` list (excluding zero-duration timeouts)
+    awaiting: ?*Completion = null,
+    /// The number of Completions in the `awaiting` doubly-linked list.
+    /// This is only used for safety checks.
+    awaiting_count: u64 = 0,
+
+    // This is the completion that performs the cancellation.
+    // This is *not* the completion that is being canceled.
+    cancel_completion: Completion = undefined,
+
+    cancel_status: union(enum) {
+        // Not canceling.
+        inactive,
+        // Waiting to start canceling the next awaiting operation.
+        next,
+        // The target's cancellation SQE is queued; waiting for the cancellation's completion.
+        queued: struct { target: *Completion },
+        // Currently canceling the target operation.
+        wait: struct { target: *Completion },
+        // All operations have been canceled.
+        done,
+    } = .inactive,
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
@@ -59,6 +87,8 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn tick(self: *IO) !void {
+        assert(self.cancel_status != .done);
+
         // We assume that all timeouts submitted by `run_for_ns()` will be reaped by `run_for_ns()`
         // and that `tick()` and `run_for_ns()` cannot be run concurrently.
         // Therefore `timeouts` here will never be decremented and `etime` will always be false.
@@ -84,6 +114,8 @@ pub const IO = struct {
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
+        assert(self.cancel_status != .done);
+
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
@@ -141,7 +173,50 @@ pub const IO = struct {
         // and extend the duration of the loop, but this is fine as it 1) executes completions
         // that become ready without going through another syscall from flush_submissions() and
         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
-        while (self.completed.pop()) |completion| completion.complete();
+        while (self.completed.pop()) |completion| {
+            if (completion.operation == .timeout and
+                completion.operation.timeout.timespec.tv_sec == 0 and
+                completion.operation.timeout.timespec.tv_nsec == 0)
+            {
+                // Zero-duration timeouts are a special case, and aren't listed in `awaiting`.
+                maybe(self.awaiting == null);
+                maybe(self.awaiting_count == 0);
+                assert(completion.result == -@as(i32, @intFromEnum(posix.E.TIME)));
+                assert(completion.awaiting_previous == null);
+                assert(completion.awaiting_next == null);
+            } else {
+                assert(self.awaiting != null);
+                assert(self.awaiting_count > 0);
+
+                // Remove the `completion` from `awaiting`.
+                if (completion == self.awaiting.?) {
+                    assert(completion.awaiting_previous == null);
+                    self.awaiting = completion.awaiting_next;
+                }
+                if (completion.awaiting_next) |next| {
+                    assert(next.awaiting_previous.? == completion);
+                    next.awaiting_previous = completion.awaiting_previous;
+                }
+                if (completion.awaiting_previous) |previous| {
+                    assert(previous.awaiting_next.? == completion);
+                    previous.awaiting_next = completion.awaiting_next;
+                }
+                completion.awaiting_previous = null;
+                completion.awaiting_next = null;
+                self.awaiting_count -= 1;
+                if (self.awaiting_count == 0) assert(self.awaiting == null);
+            }
+
+            switch (self.cancel_status) {
+                .inactive => completion.complete(),
+                .next => {},
+                .queued => if (completion.operation == .cancel) completion.complete(),
+                .wait => |wait| if (wait.target == completion) {
+                    self.cancel_status = .next;
+                },
+                .done => unreachable,
+            }
+        }
 
         // At this point, unqueued could have completions either by 1) those who didn't get an SQE
         // during the popping of unqueued or 2) completion.complete() which start new IO. These
@@ -207,6 +282,12 @@ pub const IO = struct {
     }
 
     fn enqueue(self: *IO, completion: *Completion) void {
+        switch (self.cancel_status) {
+            .inactive => {},
+            .queued => assert(completion.operation == .cancel),
+            else => unreachable,
+        }
+
         const sqe = self.ring.get_sqe() catch |err| switch (err) {
             error.SubmissionQueueFull => {
                 self.unqueued.push(completion);
@@ -215,7 +296,106 @@ pub const IO = struct {
         };
         completion.prep(sqe);
 
+        if (self.awaiting) |first| {
+            assert(self.awaiting_count > 0);
+            assert(first.awaiting_previous == null);
+            first.awaiting_previous = completion;
+            completion.awaiting_next = first;
+        } else {
+            assert(self.awaiting_count == 0);
+        }
+        self.awaiting = completion;
+        self.awaiting_count += 1;
+
         self.ios_queued += 1;
+    }
+
+    /// Cancel should be invoked at most once, before any of the memory owned by read/recv buffers
+    /// is freed (so that lingering async operations do not write to them).
+    ///
+    /// After this function is invoked:
+    /// - No more completion callbacks will be called.
+    /// - No more IO may be submitted.
+    ///
+    /// This function doesn't return until either:
+    /// - All events submitted to io_uring have completed.
+    ///   (They may complete with `error.Canceled`).
+    /// - Or, an io_uring error occurs.
+    ///
+    /// TODO(Linux):
+    /// - Linux kernel ≥5.19 supports the IORING_ASYNC_CANCEL_ALL and IORING_ASYNC_CANCEL_ANY flags,
+    ///   which would allow all events to be cancelled simultaneously with a single "cancel"
+    ///   operation, without IO needing to maintain the `awaiting` doubly-linked list and the `next`
+    ///   cancellation stage.
+    /// - Linux kernel ≥6.0 supports `io_uring_register_sync_cancel` which would remove the `queued`
+    ///   cancellation stage.
+    pub fn cancel(self: *IO) !void {
+        assert(self.cancel_status == .inactive);
+
+        // Ensure that even if we return early due to an io_uring that IO won't accept more IO.
+        defer self.cancel_status = .done;
+
+        self.cancel_status = .next;
+
+        // Discard any operations that haven't started yet.
+        while (self.unqueued.pop()) |_| {}
+
+        while (self.awaiting) |target| {
+            assert(self.awaiting_count > 0);
+            assert(target.operation != .cancel);
+
+            if (self.cancel_status == .next) {
+                self.cancel_completion = .{
+                    .io = self,
+                    .context = self,
+                    .callback = struct {
+                        fn wrapper(
+                            ctx: ?*anyopaque,
+                            comp: *Completion,
+                            res: *const anyopaque,
+                        ) void {
+                            const io: *IO = @ptrCast(@alignCast(ctx.?));
+                            const result =
+                                @as(*const CancelError!void, @ptrCast(@alignCast(res))).*;
+                            io.cancel_callback(comp, result);
+                        }
+                    }.wrapper,
+                    .operation = .{ .cancel = .{ .target = target } },
+                };
+
+                self.cancel_status = .{ .queued = .{ .target = target } };
+                self.enqueue(&self.cancel_completion);
+            }
+
+            while (self.cancel_status == .queued or self.cancel_status == .wait) {
+                try self.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            }
+            assert(self.cancel_status == .next);
+        }
+        assert(self.awaiting_count == 0);
+        assert(self.ios_queued == 0);
+        assert(self.ios_in_kernel == 0);
+    }
+
+    const CancelError = error{
+        NotRunning,
+        NotInterruptable,
+    };
+
+    fn cancel_callback(self: *IO, completion: *Completion, result: CancelError!void) void {
+        assert(self.cancel_status == .queued);
+        assert(completion == &self.cancel_completion);
+        assert(completion.operation == .cancel);
+        assert(completion.operation.cancel.target == self.cancel_status.queued.target);
+
+        self.cancel_status = status: {
+            result catch |err| switch (err) {
+                error.NotRunning => break :status .next,
+                error.NotInterruptable => {},
+            };
+            // Wait for the target operation to complete or abort.
+            break :status .{ .wait = .{ .target = self.cancel_status.queued.target } };
+        };
     }
 
     /// This struct holds the data needed for a single io_uring operation
@@ -231,8 +411,15 @@ pub const IO = struct {
             result: *const anyopaque,
         ) void,
 
+        /// Used by the `IO.awaiting` doubly-linked list.
+        awaiting_previous: ?*Completion = null,
+        awaiting_next: ?*Completion = null,
+
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
+                .cancel => |op| {
+                    sqe.prep_cancel(@intFromPtr(op.target), 0);
+                },
                 .accept => |*op| {
                     sqe.prep_accept(
                         op.socket,
@@ -297,6 +484,24 @@ pub const IO = struct {
 
         fn complete(completion: *Completion) void {
             switch (completion.operation) {
+                .cancel => {
+                    const result: anyerror!void = result: {
+                        if (completion.result < 0) {
+                            break :result switch (@as(posix.E, @enumFromInt(-completion.result))) {
+                                // No operation matching the completion is queued, so there is
+                                // nothing to cancel.
+                                .NOENT => error.NotRunning,
+                                // The operation as far enough along that it cannot be canceled.
+                                // It should complete soon.
+                                .ALREADY => error.NotInterruptable,
+                                // SQE is invalid.
+                                .INVAL => unreachable,
+                                else => |errno| posix.unexpectedErrno(errno),
+                            };
+                        }
+                    };
+                    completion.callback(completion.context, completion, &result);
+                },
                 .accept => {
                     const result: anyerror!posix.socket_t = blk: {
                         if (completion.result < 0) {
@@ -307,6 +512,7 @@ pub const IO = struct {
                                 },
                                 .AGAIN => error.WouldBlock,
                                 .BADF => error.FileDescriptorInvalid,
+                                .CANCELED => error.Canceled,
                                 .CONNABORTED => error.ConnectionAborted,
                                 .FAULT => unreachable,
                                 .INVAL => error.SocketNotListening,
@@ -337,6 +543,7 @@ pub const IO = struct {
                                 .DQUOT => error.DiskQuota,
                                 .IO => error.InputOutput,
                                 .NOSPC => error.NoSpaceLeft,
+                                .CANCELED => error.Canceled,
                                 else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -361,6 +568,7 @@ pub const IO = struct {
                                 .AGAIN, .INPROGRESS => error.WouldBlock,
                                 .ALREADY => error.OpenAlreadyInProgress,
                                 .BADF => error.FileDescriptorInvalid,
+                                .CANCELED => error.Canceled,
                                 .CONNREFUSED => error.ConnectionRefused,
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .FAULT => unreachable,
@@ -410,6 +618,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.FileLocksNotSupported,
                                 .AGAIN => error.WouldBlock,
                                 .TXTBSY => error.FileBusy,
+                                .CANCELED => error.Canceled,
                                 else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -440,6 +649,7 @@ pub const IO = struct {
                                 .OVERFLOW => error.Unseekable,
                                 .SPIPE => error.Unseekable,
                                 .TIMEDOUT => error.ConnectionTimedOut,
+                                .CANCELED => error.Canceled,
                                 else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -468,6 +678,7 @@ pub const IO = struct {
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .TIMEDOUT => error.ConnectionTimedOut,
                                 .OPNOTSUPP => error.OperationNotSupported,
+                                .CANCELED => error.Canceled,
                                 else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -503,6 +714,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
                                 .TIMEDOUT => error.ConnectionTimedOut,
+                                .CANCELED => error.Canceled,
                                 else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -529,6 +741,7 @@ pub const IO = struct {
                                 .NOENT => error.FileNotFound,
                                 .NOMEM => error.SystemResources,
                                 .NOTDIR => error.NotDir,
+                                .CANCELED => error.Canceled,
                                 else => |errno| posix.unexpectedErrno(errno),
                             };
                             break :blk err;
@@ -562,6 +775,7 @@ pub const IO = struct {
                                 },
                                 .AGAIN => error.WouldBlock,
                                 .BADF => error.NotOpenForWriting,
+                                .CANCELED => error.Canceled,
                                 .DESTADDRREQ => error.NotConnected,
                                 .DQUOT => error.DiskQuota,
                                 .FAULT => unreachable,
@@ -589,6 +803,9 @@ pub const IO = struct {
 
     /// This union encodes the set of operations supported as well as their arguments.
     const Operation = union(enum) {
+        cancel: struct {
+            target: *Completion,
+        },
         accept: struct {
             socket: posix.socket_t,
             address: posix.sockaddr = undefined,

@@ -288,6 +288,11 @@ pub const IO = struct {
         }
     }
 
+    pub fn cancel(self: *IO) !void {
+        _ = self;
+        // TODO Cancel in-flight async IO and wait for all completions.
+    }
+
     pub const AcceptError = posix.AcceptError || posix.SetSockOptError;
 
     pub fn accept(
