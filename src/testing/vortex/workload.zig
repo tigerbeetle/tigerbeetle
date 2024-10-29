@@ -45,6 +45,7 @@ pub fn main(
     allocator: std.mem.Allocator,
     driver: *const DriverStdio,
 ) !void {
+    var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
     var model = Model{
         .accounts = std.ArrayListUnmanaged(tb.Account).initBuffer(&accounts_buffer),
         .pending_transfers = std.AutoHashMap(u128, void).init(allocator),
@@ -67,8 +68,6 @@ pub fn main(
         log.info("accounts created = {d}, commands run = {d}", .{ model.accounts.items.len, i });
     }
 }
-
-var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
 
 const Command = union(enum) {
     create_accounts: []tb.Account,
