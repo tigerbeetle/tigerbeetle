@@ -790,9 +790,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .checkpoint_completed => {
                     cluster.log_replica(.checkpoint_completed, replica.replica);
                     cluster.manifest_checker.forest_checkpoint(&replica.state_machine.forest);
-                    cluster.storage_checker.replica_checkpoint(
-                        &replica.superblock,
-                    ) catch |err| {
+                    cluster.storage_checker.replica_checkpoint(Replica, replica) catch |err| {
                         fatal(.correctness, "storage checker error: {}", .{err});
                     };
                 },
