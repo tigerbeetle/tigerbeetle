@@ -102,6 +102,7 @@ fn write_results(
                     "unexpected size {d} for op: {s}",
                     .{ size, @tagName(comptime_operation) },
                 );
+                unreachable;
             }
         },
     }
