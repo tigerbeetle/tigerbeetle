@@ -96,8 +96,8 @@ pub const IO = struct {
             if (change_events == 0 and self.completed.empty()) {
                 if (wait_for_completions) {
                     const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
-                    ts.tv_nsec = @as(@TypeOf(ts.tv_nsec), @intCast(timeout_ns % std.time.ns_per_s));
-                    ts.tv_sec = @as(@TypeOf(ts.tv_sec), @intCast(timeout_ns / std.time.ns_per_s));
+                    ts.nsec = @as(@TypeOf(ts.nsec), @intCast(timeout_ns % std.time.ns_per_s));
+                    ts.sec = @as(@TypeOf(ts.sec), @intCast(timeout_ns / std.time.ns_per_s));
                 } else if (self.io_inflight == 0) {
                     return;
                 }
