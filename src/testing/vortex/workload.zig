@@ -46,11 +46,13 @@ pub fn main(
     driver: *const DriverStdio,
 ) !void {
     var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
+
     var model = Model{
         .accounts = std.ArrayListUnmanaged(tb.Account).initBuffer(&accounts_buffer),
-        .pending_transfers = std.AutoHashMap(u128, void).init(allocator),
     };
-    defer model.pending_transfers.deinit();
+    defer model.pending_transfers.deinit(allocator);
+
+    try model.pending_transfers.ensureTotalCapacity(allocator, pending_transfers_count_max);
 
     const seed = std.crypto.random.int(u64);
     var prng = std.Random.DefaultPrng.init(seed);
@@ -186,9 +188,8 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
 
                 if (transfer.flags.pending) {
                     try testing.expect(!model.pending_transfers.contains(transfer.id));
-                    try model.pending_transfers.put(transfer.id, {});
-                    // We can't let this grow unboundedly:
                     assert(model.pending_transfers.count() <= pending_transfers_count_max);
+                    model.pending_transfers.putAssumeCapacity(transfer.id, {});
                 }
 
                 if (transfer.flags.void_pending_transfer or transfer.flags.post_pending_transfer) {
@@ -223,7 +224,7 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
 /// Tracks information about the accounts and transfers created by the workload.
 const Model = struct {
     accounts: std.ArrayListUnmanaged(tb.Account),
-    pending_transfers: std.AutoHashMap(u128, void),
+    pending_transfers: std.AutoHashMapUnmanaged(u128, void) = .{},
 
     // O(n) lookup, but it's limited by `accounts_count_max`, so it's OK for this test.
     fn account_exists(self: @This(), id: u128) bool {
