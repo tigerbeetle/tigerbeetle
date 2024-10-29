@@ -227,19 +227,19 @@ const Model = struct {
     pending_transfers: std.AutoHashMapUnmanaged(u128, void) = .{},
 
     // O(n) lookup, but it's limited by `accounts_count_max`, so it's OK for this test.
-    fn account_exists(self: @This(), id: u128) bool {
-        for (self.accounts.items) |account| {
+    fn account_exists(model: @This(), id: u128) bool {
+        for (model.accounts.items) |account| {
             if (account.id == id) return true;
         }
         return false;
     }
 
     /// Returns a sorted slice of the account ids known by the model.
-    fn account_ids(self: @This(), buffer: []u128) []u128 {
-        assert(buffer.len >= self.accounts.items.len);
-        const ids = buffer[0..self.accounts.items.len];
+    fn account_ids(model: @This(), buffer: []u128) []u128 {
+        assert(buffer.len >= model.accounts.items.len);
+        const ids = buffer[0..model.accounts.items.len];
 
-        for (self.accounts.items, 0..) |account, i| {
+        for (model.accounts.items, 0..) |account, i| {
             ids[i] = account.id;
         }
         std.mem.sort(u128, ids, {}, std.sort.asc(u128));
