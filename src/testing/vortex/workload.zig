@@ -1,7 +1,7 @@
 //! This workload runs in an loop, generating and executing operations on a cluster through a
 //! _driver_.
 //!
-//! Any sucessful operations are reconciled with a model, tracking what accounts exist. Future
+//! Any successful operations are reconciled with a model, tracking what accounts exist. Future
 //! operations are generated based on this model.
 //!
 //! After every operation, all accounts are queried, and basic invariants are checked.
@@ -45,18 +45,21 @@ pub fn main(
     allocator: std.mem.Allocator,
     driver: *const DriverStdio,
 ) !void {
+    var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
+
     var model = Model{
         .accounts = std.ArrayListUnmanaged(tb.Account).initBuffer(&accounts_buffer),
-        .pending_transfers = std.AutoHashMap(u128, void).init(allocator),
     };
-    defer model.pending_transfers.deinit();
+    defer model.pending_transfers.deinit(allocator);
+
+    try model.pending_transfers.ensureTotalCapacity(allocator, pending_transfers_count_max);
 
     const seed = std.crypto.random.int(u64);
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     for (0..std.math.maxInt(u64)) |i| {
-        const command = try random_command(random, &model);
+        const command = random_command(random, &model);
         const result = try execute(command, driver) orelse break;
         try reconcile(result, &command, &model);
 
@@ -67,8 +70,6 @@ pub fn main(
         log.info("accounts created = {d}, commands run = {d}", .{ model.accounts.items.len, i });
     }
 }
-
-var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
 
 const Command = union(enum) {
     create_accounts: []tb.Account,
@@ -89,43 +90,29 @@ var result_buffers: ResultBuffers = std.mem.zeroes(ResultBuffers);
 
 fn execute(command: Command, driver: *const DriverStdio) !?Result {
     switch (command) {
-        .create_accounts => |events| return try execute_regular(
-            .create_accounts,
-            .create_accounts,
-            events,
-            driver,
-        ),
-        .create_transfers => |events| return try execute_regular(
-            .create_transfers,
-            .create_transfers,
-            events,
-            driver,
-        ),
-        .lookup_all_accounts => |events| return try execute_regular(
-            .lookup_all_accounts,
-            .lookup_accounts,
-            events,
-            driver,
-        ),
+        inline else => |events, tag| {
+            const operation = comptime operation_from_command(tag);
+            try send(driver, operation, events);
+
+            const buffer = @field(result_buffers, @tagName(tag))[0..events.len];
+            const results = receive(driver, operation, buffer) catch |err| {
+                switch (err) {
+                    error.EndOfStream => return null,
+                    else => return err,
+                }
+            };
+            return @unionInit(Result, @tagName(tag), results);
+        },
     }
 }
 
-fn execute_regular(
-    comptime command_tag: std.meta.Tag(Command),
-    comptime operation: StateMachine.Operation,
-    events: []StateMachine.Event(operation),
-    driver: *const DriverStdio,
-) !?Result {
-    try send(driver, operation, events);
-
-    const buffer = @field(result_buffers, @tagName(command_tag))[0..events.len];
-    const results = receive(driver, operation, buffer) catch |err| {
-        switch (err) {
-            error.EndOfStream => return null,
-            else => return err,
-        }
+/// State machine operations and Vortex workload commands are not 1:1. This function maps the
+/// enum values from command to operation.
+fn operation_from_command(tag: std.meta.Tag(Command)) StateMachine.Operation {
+    return switch (tag) {
+        .lookup_all_accounts => .lookup_accounts,
+        else => std.enums.nameCast(StateMachine.Operation, tag),
     };
-    return @unionInit(Result, @tagName(command_tag), results);
 }
 
 fn reconcile(result: Result, command: *const Command, model: *Model) !void {
@@ -135,31 +122,28 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
 
             // Track results for all new accounts, assuming `.ok` if response from driver is
             // omitted.
-            var accounts_created: [accounts_count_max]struct {
-                tb.CreateAccountResult,
-                tb.Account,
-            } = undefined;
-            for (
-                accounts_new,
-                accounts_created[0..accounts_new.len],
-            ) |account_new, *account_created| {
-                account_created[0] = .ok;
-                account_created[1] = account_new;
+            var accounts_results: [accounts_count_max]tb.CreateAccountResult = undefined;
+            for (accounts_results[0..accounts_new.len]) |*account_result| {
+                account_result.* = .ok;
             }
 
+            // Fill in non-ok results.
             for (entries) |entry| {
-                accounts_created[entry.index][0] = entry.result;
+                accounts_results[entry.index] = entry.result;
             }
 
-            for (accounts_created[0..accounts_new.len], 0..) |account_created, i| {
-                if (account_created[0] == .ok) {
-                    model.accounts.appendAssumeCapacity(account_created[1]);
+            for (
+                accounts_results[0..accounts_new.len],
+                accounts_new,
+                0..,
+            ) |account_result, account, index| {
+                if (account_result == .ok) {
+                    model.accounts.appendAssumeCapacity(account);
                 } else {
-                    log.err("enum: {d}", .{@intFromEnum(account_created[0])});
                     log.err("got result {s} for event {d}: {any}", .{
-                        @tagName(account_created[0]),
-                        i,
-                        account_created[1],
+                        @tagName(account_result),
+                        index,
+                        account,
                     });
                     return error.TestFailed;
                 }
@@ -189,9 +173,8 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
 
                 if (transfer.flags.pending) {
                     try testing.expect(!model.pending_transfers.contains(transfer.id));
-                    try model.pending_transfers.put(transfer.id, {});
-                    // We can't let this grow unboundedly:
                     assert(model.pending_transfers.count() <= pending_transfers_count_max);
+                    model.pending_transfers.putAssumeCapacity(transfer.id, {});
                 }
 
                 if (transfer.flags.void_pending_transfer or transfer.flags.post_pending_transfer) {
@@ -226,22 +209,22 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
 /// Tracks information about the accounts and transfers created by the workload.
 const Model = struct {
     accounts: std.ArrayListUnmanaged(tb.Account),
-    pending_transfers: std.AutoHashMap(u128, void),
+    pending_transfers: std.AutoHashMapUnmanaged(u128, void) = .{},
 
     // O(n) lookup, but it's limited by `accounts_count_max`, so it's OK for this test.
-    fn account_exists(self: @This(), id: u128) bool {
-        for (self.accounts.items) |account| {
+    fn account_exists(model: @This(), id: u128) bool {
+        for (model.accounts.items) |account| {
             if (account.id == id) return true;
         }
         return false;
     }
 
     /// Returns a sorted slice of the account ids known by the model.
-    fn account_ids(self: @This(), buffer: []u128) []u128 {
-        assert(buffer.len >= self.accounts.items.len);
-        const ids = buffer[0..self.accounts.items.len];
+    fn account_ids(model: @This(), buffer: []u128) []u128 {
+        assert(buffer.len >= model.accounts.items.len);
+        const ids = buffer[0..model.accounts.items.len];
 
-        for (self.accounts.items, 0..) |account, i| {
+        for (model.accounts.items, 0..) |account, i| {
             ids[i] = account.id;
         }
         std.mem.sort(u128, ids, {}, std.sort.asc(u128));
@@ -258,7 +241,7 @@ fn debits_credits_difference(accounts: []tb.Account) i128 {
     return balance;
 }
 
-fn random_command(random: std.Random, model: *const Model) !Command {
+fn random_command(random: std.Random, model: *const Model) Command {
     const command_tag = arbitrary.weighted(random, std.meta.Tag(Command), .{
         .create_accounts = if (model.accounts.items.len < accounts_count_max) 1 else 0,
         .create_transfers = if (model.accounts.items.len > 2) 10 else 0,
@@ -271,7 +254,7 @@ fn random_command(random: std.Random, model: *const Model) !Command {
     }
 }
 
-fn random_create_accounts(random: std.Random, model: *const Model) !Command {
+fn random_create_accounts(random: std.Random, model: *const Model) Command {
     // NOTE: we're not generating closed or imported accounts yet.
 
     const events_count = random.intRangeAtMost(
@@ -306,7 +289,7 @@ fn random_create_accounts(random: std.Random, model: *const Model) !Command {
     return .{ .create_accounts = events[0..events_count] };
 }
 
-fn random_create_transfers(random: std.Random, model: *const Model) !Command {
+fn random_create_transfers(random: std.Random, model: *const Model) Command {
     const events_count = random.intRangeAtMost(usize, 1, events_count_max);
     assert(events_count <= events_count_max);
 

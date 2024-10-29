@@ -9,7 +9,11 @@ pub fn element(random: std.rand.Random, comptime T: type, values: []T) T {
 }
 
 /// Pick a random element from the set (hashmap with void values).
-pub fn set_element(random: std.rand.Random, comptime K: type, set: std.AutoHashMap(K, void)) K {
+pub fn set_element(
+    random: std.rand.Random,
+    comptime K: type,
+    set: std.AutoHashMapUnmanaged(K, void),
+) K {
     const pick = random.uintLessThan(usize, set.count());
     var it = set.keyIterator();
     var i: usize = 0;
