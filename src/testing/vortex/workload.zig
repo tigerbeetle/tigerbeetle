@@ -59,7 +59,7 @@ pub fn main(
     const random = prng.random();
 
     for (0..std.math.maxInt(u64)) |i| {
-        const command = try random_command(random, &model);
+        const command = random_command(random, &model);
         const result = try execute(command, driver) orelse break;
         try reconcile(result, &command, &model);
 
@@ -256,7 +256,7 @@ fn debits_credits_difference(accounts: []tb.Account) i128 {
     return balance;
 }
 
-fn random_command(random: std.Random, model: *const Model) !Command {
+fn random_command(random: std.Random, model: *const Model) Command {
     const command_tag = arbitrary.weighted(random, std.meta.Tag(Command), .{
         .create_accounts = if (model.accounts.items.len < accounts_count_max) 1 else 0,
         .create_transfers = if (model.accounts.items.len > 2) 10 else 0,
@@ -269,7 +269,7 @@ fn random_command(random: std.Random, model: *const Model) !Command {
     }
 }
 
-fn random_create_accounts(random: std.Random, model: *const Model) !Command {
+fn random_create_accounts(random: std.Random, model: *const Model) Command {
     // NOTE: we're not generating closed or imported accounts yet.
 
     const events_count = random.intRangeAtMost(
@@ -304,7 +304,7 @@ fn random_create_accounts(random: std.Random, model: *const Model) !Command {
     return .{ .create_accounts = events[0..events_count] };
 }
 
-fn random_create_transfers(random: std.Random, model: *const Model) !Command {
+fn random_create_transfers(random: std.Random, model: *const Model) Command {
     const events_count = random.intRangeAtMost(usize, 1, events_count_max);
     assert(events_count <= events_count_max);
 
