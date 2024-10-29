@@ -153,6 +153,8 @@ pub const IO = struct {
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
+        if (constants.verify) self.awaiting_verify();
+
         // Flush any queued SQEs and reuse the same syscall to wait for completions if required:
         try self.flush_submissions(wait_nr, timeouts, etime);
         // We can now just peek for any CQEs without waiting and without another syscall:
@@ -282,6 +284,8 @@ pub const IO = struct {
     }
 
     fn enqueue(self: *IO, completion: *Completion) void {
+        if (constants.verify) self.awaiting_verify();
+
         switch (self.cancel_status) {
             .inactive => {},
             .queued => assert(completion.operation == .cancel),
@@ -331,6 +335,7 @@ pub const IO = struct {
     ///   cancellation stage.
     pub fn cancel(self: *IO) !void {
         assert(self.cancel_status == .inactive);
+        self.awaiting_verify();
 
         // Ensure that even if we return early due to an io_uring that IO won't accept more IO.
         defer self.cancel_status = .done;
@@ -396,6 +401,25 @@ pub const IO = struct {
             // Wait for the target operation to complete or abort.
             break :status .{ .wait = .{ .target = self.cancel_status.queued.target } };
         };
+    }
+
+    fn awaiting_verify(self: *const IO) void {
+        var awaiting_count: u32 = 0;
+        var awaiting = self.awaiting;
+
+        if (awaiting) |completion| {
+            assert(completion.awaiting_previous == null);
+        }
+
+        while (awaiting) |completion| {
+            const awaiting_next = completion.awaiting_next;
+            if (awaiting_next) |next| {
+                assert(next.awaiting_previous == completion);
+            }
+            awaiting_count += 1;
+            awaiting = awaiting_next;
+        }
+        assert(awaiting_count == self.awaiting_count);
     }
 
     /// This struct holds the data needed for a single io_uring operation
