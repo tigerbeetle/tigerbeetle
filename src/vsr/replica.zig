@@ -895,6 +895,7 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
+            self.assert_free_set_consistent();
 
             log.debug("{}: state_machine_open_callback: sync_ops={}..{}", .{
                 self.replica,
@@ -9794,6 +9795,42 @@ pub fn ReplicaType(
         fn upgrading(self: *const Self) bool {
             return self.upgrade_release != null or
                 self.pipeline.queue.contains_operation(.upgrade);
+        }
+
+        /// Asserts that the count of acquired blocks in the free set is the sum of:
+        /// 1. Index blocks across all tables in the forest
+        /// 2. Data blocks across all tables in the forest
+        /// 3. ManifestLog blocks
+        /// 4. CheckpointTrailer blocks (client sessions & free set)
+        pub fn assert_free_set_consistent(self: *const Self) void {
+            assert(self.grid.free_set.opened);
+            assert(self.state_machine.forest.manifest_log.opened);
+            assert(self.grid.free_set.count_released() ==
+                self.grid.free_set_checkpoint.block_count() +
+                self.client_sessions_checkpoint.block_count());
+
+            // Must be invoked either on startup, or after checkpoint completes.
+            assert(!self.state_machine_opened or self.commit_stage == .checkpoint_superblock);
+
+            var forest_tables_iterator = ForestTableIterator{};
+            var tables_index_block_count: u32 = 0;
+            var tables_data_block_count: u32 = 0;
+            var forest: *StateMachine.Forest = @constCast(&self.state_machine.forest);
+            while (forest_tables_iterator.next(forest)) |table| {
+                const block_value_count = switch (StateMachine.Forest.tree_id_cast(table.tree_id)) {
+                    inline else => |tree_id| forest.tree_for_id(tree_id).block_value_count_max(),
+                };
+                tables_index_block_count += 1;
+                tables_data_block_count += stdx.div_ceil(
+                    table.value_count,
+                    block_value_count,
+                );
+            }
+            assert(self.grid.free_set.count_acquired() ==
+                (tables_index_block_count + tables_data_block_count +
+                self.client_sessions_checkpoint.block_count() +
+                self.grid.free_set_checkpoint.block_count() +
+                self.state_machine.forest.manifest_log.log_block_checksums.count));
         }
     };
 }
