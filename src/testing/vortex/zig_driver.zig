@@ -12,6 +12,13 @@ const assert = std.debug.assert;
 
 const log = std.log.scoped(.zig_driver);
 const events_count_max = 8190;
+const buffer_size_max = size: {
+    var event_size_max = 0;
+    for (std.enums.values(StateMachine.Operation)) |operation| {
+        event_size_max = @max(event_size_max, @sizeOf(StateMachine.Event(operation)));
+    }
+    break :size event_size_max * events_count_max;
+};
 
 pub const CLIArgs = struct {
     positional: struct {
@@ -43,7 +50,8 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
     const stdout = std.io.getStdOut().writer().any();
 
     while (true) {
-        const operation, const events_buffer = receive(stdin) catch |err| {
+        var buffer: [buffer_size_max]u8 = undefined;
+        const operation, const events_buffer = receive(stdin, buffer[0..]) catch |err| {
             switch (err) {
                 error.EndOfStream => break,
                 else => return err,
@@ -137,22 +145,19 @@ fn write_results(
     }
 }
 
-fn receive(reader: std.io.AnyReader) !struct { StateMachine.Operation, []const u8 } {
+fn receive(reader: std.io.AnyReader, buffer: []u8) !struct { StateMachine.Operation, []const u8 } {
     const operation = try reader.readEnum(StateMachine.Operation, .little);
     const count = try reader.readInt(u32, .little);
 
     return switch (operation) {
         inline else => |comptime_operation| {
             assert(count <= events_count_max);
-            const buffer_size_max =
-                @sizeOf(StateMachine.Event(comptime_operation)) * events_count_max;
 
-            var buffer: [buffer_size_max]u8 = undefined;
+            const events_size = @sizeOf(StateMachine.Event(comptime_operation)) * count;
+            assert(buffer.len >= events_size);
+            assert(try reader.readAtLeast(buffer, events_size) == events_size);
 
-            const buffer_size = @sizeOf(StateMachine.Event(comptime_operation)) * count;
-            assert(try reader.readAtLeast(buffer[0..buffer_size], buffer_size) == buffer_size);
-
-            return .{ comptime_operation, buffer[0..buffer_size] };
+            return .{ comptime_operation, buffer[0..events_size] };
         },
     };
 }
