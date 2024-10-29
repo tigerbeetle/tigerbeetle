@@ -139,12 +139,12 @@ pub const IO = struct {
             io_pending_top.* = completion.next;
 
             const event_info = switch (completion.operation) {
-                .accept => |op| [2]c_int{ op.socket, posix.system.EVFILT_READ },
-                .connect => |op| [2]c_int{ op.socket, posix.system.EVFILT_WRITE },
-                .read => |op| [2]c_int{ op.fd, posix.system.EVFILT_READ },
-                .write => |op| [2]c_int{ op.fd, posix.system.EVFILT_WRITE },
-                .recv => |op| [2]c_int{ op.socket, posix.system.EVFILT_READ },
-                .send => |op| [2]c_int{ op.socket, posix.system.EVFILT_WRITE },
+                .accept => |op| [2]c_int{ op.socket, posix.system.EVFILT.READ },
+                .connect => |op| [2]c_int{ op.socket, posix.system.EVFILT.WRITE },
+                .read => |op| [2]c_int{ op.fd, posix.system.EVFILT.READ },
+                .write => |op| [2]c_int{ op.fd, posix.system.EVFILT.WRITE },
+                .recv => |op| [2]c_int{ op.socket, posix.system.EVFILT.READ },
+                .send => |op| [2]c_int{ op.socket, posix.system.EVFILT.WRITE },
                 else => @panic("invalid completion operation queued for io"),
             };
 
