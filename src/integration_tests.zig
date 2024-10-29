@@ -510,7 +510,7 @@ test "vortex smoke" {
 
     log.info("running 1m vortex test...", .{});
     try shell.exec(
-        \\ unshare -nfr 
+        \\ unshare --net --fork --map-root-user --pid
         \\   {vortex} supervisor
         \\      --test-duration-minutes=1 
         \\      --tigerbeetle-executable={tigerbeetle} 
