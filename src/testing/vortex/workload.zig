@@ -1,7 +1,7 @@
 //! This workload runs in an loop, generating and executing operations on a cluster through a
 //! _driver_.
 //!
-//! Any sucessful operations are reconciled with a model, tracking what accounts exist. Future
+//! Any successful operations are reconciled with a model, tracking what accounts exist. Future
 //! operations are generated based on this model.
 //!
 //! After every operation, all accounts are queried, and basic invariants are checked.
