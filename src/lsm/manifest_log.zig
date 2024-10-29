@@ -860,8 +860,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 manifest_log.close_block();
                 assert(manifest_log.entry_count == 0);
                 assert(manifest_log.blocks_closed > 0);
-                assert(manifest_log.blocks_closed == manifest_log.blocks.count);
             }
+            assert(manifest_log.blocks_closed == manifest_log.blocks.count);
 
             manifest_log.flush(callback);
         }
