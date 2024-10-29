@@ -134,31 +134,29 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
 
             // Track results for all new accounts, assuming `.ok` if response from driver is
             // omitted.
-            var accounts_created: [accounts_count_max]struct {
-                tb.CreateAccountResult,
-                tb.Account,
-            } = undefined;
-            for (
-                accounts_new,
-                accounts_created[0..accounts_new.len],
-            ) |account_new, *account_created| {
-                account_created[0] = .ok;
-                account_created[1] = account_new;
+            var accounts_results: [accounts_count_max]tb.CreateAccountResult = undefined;
+            for (accounts_results[0..accounts_new.len]) |*account_result| {
+                account_result.* = .ok;
             }
 
+            // Fill in non-ok results.
             for (entries) |entry| {
-                accounts_created[entry.index][0] = entry.result;
+                accounts_results[entry.index] = entry.result;
             }
 
-            for (accounts_created[0..accounts_new.len], 0..) |account_created, i| {
-                if (account_created[0] == .ok) {
-                    model.accounts.appendAssumeCapacity(account_created[1]);
+            for (
+                accounts_results[0..accounts_new.len],
+                accounts_new,
+                0..,
+            ) |account_result, account, index| {
+                if (account_result == .ok) {
+                    model.accounts.appendAssumeCapacity(account);
                 } else {
-                    log.err("enum: {d}", .{@intFromEnum(account_created[0])});
+                    log.err("enum: {d}", .{@intFromEnum(account_result)});
                     log.err("got result {s} for event {d}: {any}", .{
-                        @tagName(account_created[0]),
-                        i,
-                        account_created[1],
+                        @tagName(account_result),
+                        index,
+                        account,
                     });
                     return error.TestFailed;
                 }
