@@ -19,16 +19,19 @@
 //! If you need more control, you can run this program directly:
 //!
 //!     $ zig build vortex
-//!     $ unshare -nfr zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle
+//!     $ unshare --net --fork --map-root-user --pid \
+//!         zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle
 //!
 //! Run a longer test:
 //!
-//!     $ unshare -nfr zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle \
+//!     $ unshare --net --fork --map-root-user --pid \
+//!         zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle \
 //!         --test-duration-minutes=10
 //!
 //! To capture its logs, for instance to run grep afterwards, redirect stderr to a file.
 //!
-//!     $ unshare -nfr zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle \
+//!     $ unshare --net --fork --map-root-user --pid \
+//!         zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle \
 //!         2> /tmp/vortex.log
 //!
 //! If you have permissions troubles with Ubuntu, see:
@@ -81,9 +84,9 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const user_id = std.os.linux.getuid();
     if (user_id != 0) {
         log.err(
-            "this script needs to be run in a separate namespace using 'unshare -nfr'",
-            .{},
-        );
+            \\ this script needs to be run in a separate namespace using
+            \\ 'unshare --net --fork --map-root-user --pid'
+        , .{});
         std.process.exit(1);
     }
 
