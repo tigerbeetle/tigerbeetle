@@ -9799,7 +9799,7 @@ pub fn ReplicaType(
 
         /// Asserts that the count of acquired blocks in the free set is the sum of:
         /// 1. Index blocks across all tables in the forest
-        /// 2. Data blocks across all tables in the forest
+        /// 2. Value blocks across all tables in the forest
         /// 3. ManifestLog blocks
         /// 4. CheckpointTrailer blocks (client sessions & free set)
         pub fn assert_free_set_consistent(self: *const Self) void {
@@ -9814,20 +9814,20 @@ pub fn ReplicaType(
 
             var forest_tables_iterator = ForestTableIterator{};
             var tables_index_block_count: u32 = 0;
-            var tables_data_block_count: u32 = 0;
+            var tables_value_block_count: u32 = 0;
             var forest: *StateMachine.Forest = @constCast(&self.state_machine.forest);
             while (forest_tables_iterator.next(forest)) |table| {
                 const block_value_count = switch (StateMachine.Forest.tree_id_cast(table.tree_id)) {
                     inline else => |tree_id| forest.tree_for_id(tree_id).block_value_count_max(),
                 };
                 tables_index_block_count += 1;
-                tables_data_block_count += stdx.div_ceil(
+                tables_value_block_count += stdx.div_ceil(
                     table.value_count,
                     block_value_count,
                 );
             }
             assert(self.grid.free_set.count_acquired() ==
-                (tables_index_block_count + tables_data_block_count +
+                (tables_index_block_count + tables_value_block_count +
                 self.client_sessions_checkpoint.block_count() +
                 self.grid.free_set_checkpoint.block_count() +
                 self.state_machine.forest.manifest_log.log_block_checksums.count));
