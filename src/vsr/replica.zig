@@ -9813,12 +9813,13 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened or self.commit_stage == .checkpoint_superblock);
 
             var forest_tables_iterator = ForestTableIterator{};
-            var tables_index_block_count: u32 = 0;
-            var tables_value_block_count: u32 = 0;
-            var forest: *StateMachine.Forest = @constCast(&self.state_machine.forest);
-            while (forest_tables_iterator.next(forest)) |table| {
+            var tables_index_block_count: u64 = 0;
+            var tables_value_block_count: u64 = 0;
+            while (forest_tables_iterator.next(&self.state_machine.forest)) |table| {
                 const block_value_count = switch (StateMachine.Forest.tree_id_cast(table.tree_id)) {
-                    inline else => |tree_id| forest.tree_for_id(tree_id).block_value_count_max(),
+                    inline else => |tree_id| self.state_machine.forest.tree_for_id_const(
+                        tree_id,
+                    ).block_value_count_max(),
                 };
                 tables_index_block_count += 1;
                 tables_value_block_count += stdx.div_ceil(
