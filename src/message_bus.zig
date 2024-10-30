@@ -879,16 +879,20 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 connection.peer = header_peer;
                 switch (connection.peer) {
-                    .replica => {
+                    .replica => |replica_index| {
+                        if (replica_index >= bus.configuration.len) {
+                            return false;
+                        }
+
                         // If there is a connection to this replica, terminate and replace it:
-                        if (bus.replicas[connection.peer.replica]) |old| {
+                        if (bus.replicas[replica_index]) |old| {
                             assert(old.peer == .replica);
-                            assert(old.peer.replica == connection.peer.replica);
+                            assert(old.peer.replica == replica_index);
                             assert(old.state != .free);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         }
-                        bus.replicas[connection.peer.replica] = connection;
-                        log.info("connection from replica {}", .{connection.peer.replica});
+                        bus.replicas[replica_index] = connection;
+                        log.info("connection from replica {}", .{replica_index});
                     },
                     .client => {
                         assert(connection.peer.client != 0);
