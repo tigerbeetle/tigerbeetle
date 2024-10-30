@@ -217,7 +217,7 @@ pub fn ContextType(
             return context;
         }
 
-        pub fn deinit(self: *Context) void {
+        pub fn deinit(self: *Context) !void {
             // Only one thread calls deinit() and it's UB for any further Context interaction.
             const already_shutdown = self.shutdown.swap(true, .release);
             assert(!already_shutdown);
@@ -226,6 +226,8 @@ pub fn ContextType(
             // packets, and finish running.
             self.signal.notify();
             self.thread.join();
+
+            self.io.cancel_all();
 
             self.signal.deinit();
             self.client.deinit(self.allocator);
@@ -569,7 +571,9 @@ pub fn ContextType(
 
         fn on_deinit(implementation: *ContextImplementation) void {
             const self = get_context(implementation);
-            self.deinit();
+            self.deinit() catch |err| {
+                std.debug.panic("deinit error: {}", .{err});
+            };
         }
 
         test "client_batch_linked_chain" {
