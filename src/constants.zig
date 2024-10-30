@@ -3,10 +3,8 @@
 //! - derived configuration values,
 
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
-const tracer = @import("tracer.zig");
 const Config = @import("config.zig").Config;
 const stdx = @import("stdx.zig");
 
@@ -24,14 +22,22 @@ pub const semver = std.SemanticVersion{
 /// One of: .err, .warn, .info, .debug
 pub const log_level: std.log.Level = config.process.log_level;
 
-pub const log = if (tracer_backend == .tracy)
-    tracer.log_fn
-else
-    std.log.defaultLog;
+pub const log = std.log.defaultLog;
 
-// Which backend to use for ./tracer.zig.
-// Default is `.none`.
-pub const tracer_backend = config.process.tracer_backend;
+/// A log function that discards all log entries.
+pub fn log_nop(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    _ = .{
+        message_level,
+        scope,
+        format,
+        args,
+    };
+}
 
 // Which mode to use for ./testing/hash_log.zig.
 pub const hash_log_mode = config.process.hash_log_mode;
@@ -53,9 +59,9 @@ comptime {
 
 /// The checkpoint interval is chosen to be the highest possible value that satisfies the
 /// constraints described below.
-pub const vsr_checkpoint_interval = journal_slot_count -
-    lsm_batch_multiple -
-    lsm_batch_multiple * stdx.div_ceil(pipeline_prepare_queue_max * 2, lsm_batch_multiple);
+pub const vsr_checkpoint_ops = journal_slot_count -
+    lsm_compaction_ops -
+    lsm_compaction_ops * stdx.div_ceil(pipeline_prepare_queue_max * 2, lsm_compaction_ops);
 
 comptime {
     // Invariant: to guarantee durability, a log entry from a previous checkpoint can be overwritten
@@ -67,26 +73,26 @@ comptime {
     //
     // More specifically, the checkpoint interval must be less than the WAL length by (at least) the
     // sum of:
-    // - `lsm_batch_multiple`: Ensure that the final batch of entries immediately preceding a
+    // - `lsm_compaction_ops`: Ensure that the final batch of entries immediately preceding a
     //   checkpoint trigger is not overwritten by the following checkpoint's entries. This final
     //   batch's updates were not persisted as part of the former checkpoint – they are only in
     //   memory until they are compacted by the *next* batch of commits (i.e. the first batch of
     //   the following checkpoint).
-    // - `2 * pipeline_prepare_queue_max` (rounded up to the nearest batch multiple): This margin
-    //    ensures that the entries prepared immediately following a checkpoint's prepare max never
-    //    overwrite an entry from the previous WAL wrap until a quorum of replicas has reached that
-    //    checkpoint. The first pipeline_prepare_queue_max is the maximum number of entries a
-    //    replica can prepare after a checkpoint trigger, so checkpointing doesn't stall normal
-    //    processing (referred to as the checkpoint's prepare_max). The second
-    //    pipeline_prepare_queue_max ensures entries prepared after a checkpoint's prepare_max
-    //    don't overwrite entries from the previous WAL wrap. By the time we start preparing entries
-    //    after the second pipeline_prepare_queue_max, a quorum of replicas is guaranteed to have
-    //    already reached the former checkpoint.
-    assert(vsr_checkpoint_interval + lsm_batch_multiple + pipeline_prepare_queue_max * 2 <=
+    // - `2 * pipeline_prepare_queue_max` (rounded up to the nearest lsm_compaction_ops multiple):
+    //    This margin ensures that the entries prepared immediately following a checkpoint's prepare
+    //    max never overwrite an entry from the previous WAL wrap until a quorum of replicas has
+    //    reached that checkpoint. The first pipeline_prepare_queue_max is the maximum number of
+    //    entries a replica can prepare after a checkpoint trigger, so checkpointing doesn't stall
+    //    normal processing (referred to as the checkpoint's prepare_max). The second
+    //    pipeline_prepare_queue_max ensures entries prepared after a checkpoint's prepare_max don't
+    //    overwrite entries from the previous WAL wrap. By the time we start preparing entries after
+    //    the second pipeline_prepare_queue_max, a quorum of replicas is guaranteed to have already
+    //    reached the former checkpoint.
+    assert(vsr_checkpoint_ops + lsm_compaction_ops + pipeline_prepare_queue_max * 2 <=
         journal_slot_count);
-    assert(vsr_checkpoint_interval >= pipeline_prepare_queue_max);
-    assert(vsr_checkpoint_interval >= lsm_batch_multiple);
-    assert(vsr_checkpoint_interval % lsm_batch_multiple == 0);
+    assert(vsr_checkpoint_ops >= pipeline_prepare_queue_max);
+    assert(vsr_checkpoint_ops >= lsm_compaction_ops);
+    assert(vsr_checkpoint_ops % lsm_compaction_ops == 0);
 }
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
@@ -105,20 +111,24 @@ pub const vsr_releases_max = config.cluster.vsr_releases_max;
 
 /// The maximum cumulative size of a final TigerBeetle output binary - including potential past
 /// releases and metadata.
-pub const multiversion_binary_platform_size_max = blk: {
+pub fn multiversion_binary_platform_size_max(options: struct { macos: bool, debug: bool }) u64 {
     // {Linux, Windows} get the base value. macOS gets 2x since it has universal binaries. All cases
     // get a further 2x in debug.
     var size_max = config.process.multiversion_binary_platform_size_max;
-    if (builtin.target.os.tag == .macos) size_max *= 2;
-    if (builtin.mode != .ReleaseSafe) size_max *= 2;
-    break :blk size_max;
-};
+    if (options.macos) size_max *= 2;
+    if (options.debug) size_max *= 2;
+
+    return size_max;
+}
 
 /// The maximum size, like above, but for any platform.
 pub const multiversion_binary_size_max =
     config.process.multiversion_binary_platform_size_max * 2 * 2;
 comptime {
-    assert(multiversion_binary_platform_size_max <= multiversion_binary_size_max);
+    assert(multiversion_binary_platform_size_max(.{
+        .macos = true,
+        .debug = true,
+    }) <= multiversion_binary_size_max);
 }
 
 pub const multiversion_poll_interval_ms = config.process.multiversion_poll_interval_ms;
@@ -213,7 +223,7 @@ pub const journal_size_headers = journal_slot_count * @sizeOf(vsr.Header);
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
 comptime {
-    // For the given WAL (lsm_batch_multiple=4):
+    // For the given WAL (lsm_compaction_ops=4):
     //
     //   A    B    C    D    E
     //   |····|····|····|····|
@@ -227,8 +237,8 @@ comptime {
     //
     // The journal must have at least two bars to ensure at least one is checkpointed.
     assert(journal_slot_count >= Config.Cluster.journal_slot_count_min);
-    assert(journal_slot_count >= lsm_batch_multiple * 2);
-    assert(journal_slot_count % lsm_batch_multiple == 0);
+    assert(journal_slot_count >= lsm_compaction_ops * 2);
+    assert(journal_slot_count % lsm_compaction_ops == 0);
     // The journal must have at least two pipelines of messages to ensure that a new, fully-repaired
     // primary has enough headers for a complete SV message, even if the view-change just truncated
     // another pipeline of messages. (See op_repair_min()).
@@ -322,7 +332,10 @@ comptime {
     assert(view_change_headers_max > 0);
     assert(view_change_headers_max >= pipeline_prepare_queue_max + 3);
     assert(view_change_headers_max <= journal_slot_count);
-    assert(view_change_headers_max <= @divFloor(message_body_size_max, @sizeOf(vsr.Header)));
+    assert(view_change_headers_max <= @divFloor(
+        message_body_size_max - @sizeOf(vsr.CheckpointState),
+        @sizeOf(vsr.Header),
+    ));
     assert(view_change_headers_max > view_change_headers_suffix_max);
 }
 
@@ -394,9 +407,9 @@ pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
 /// Napkin math for the "worst case" scrubber read overhead as a function of cycle duration
 /// (assuming a fully-loaded data file – maximum size and 100% acquired):
 ///
-///   storage_size_limit_max      = 16TiB
+///   storage_size_limit          = 64TiB
 ///   grid_scrubber_cycle_seconds = 180 days * 24 hr/day * 60 min/hr * 60 s/min (2 cycle/year)
-///   read_bytes_per_second       = storage_size_max / grid_scrubber_cycle_seconds ≈ 1.08 MiB/s
+///   read_bytes_per_second       = storage_size_limit / grid_scrubber_cycle_seconds ≈ 4.32 MiB/s
 ///
 pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
 
@@ -562,6 +575,10 @@ comptime {
     assert(superblock_copies <= 8);
 }
 
+/// The default maximum size of a local data file. This can be override, up to
+/// storage_size_limit_max, by a CLI flag.
+pub const storage_size_limit_default = config.process.storage_size_limit_default;
+
 /// The maximum size of a local data file.
 /// This should not be much larger than several TiB to limit:
 /// * blast radius and recovery time when a whole replica is lost,
@@ -571,6 +588,10 @@ comptime {
 /// This is a "firm" limit --- while it is a compile-time constant, it does not affect data file
 /// layout and can be safely changed for an existing cluster.
 pub const storage_size_limit_max = config.process.storage_size_limit_max;
+
+comptime {
+    assert(storage_size_limit_max >= storage_size_limit_default);
+}
 
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 ///
@@ -631,15 +652,32 @@ comptime {
     assert(lsm_manifest_compact_extra_blocks > 0);
 }
 
-/// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
-/// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
-/// means that the transfer tree's mutable table will be sized to 8190 * 4 = 32760 transfers.
-pub const lsm_batch_multiple = config.cluster.lsm_batch_multiple;
+/// Number of prepares accumulated in the in-memory table before flushing to disk.
+///
+/// This is a batch of batches. Each prepare can contain at most 8_190 transfers. With
+/// lsm_compaction_ops=32, 32 prepares are processed to fill the in-memory table with 262_080
+/// transfers. During processing of the next 32 prepares, this in-memory table is flushed to disk.
+/// Simultaneously, compaction is run to free up enough space to flush the in-memory table from the
+/// next batch of lsm_compaction_ops prepares.
+///
+/// Together with message_body_size_max, lsm_compaction_ops determines the size a table on disk.
+pub const lsm_compaction_ops = config.cluster.lsm_compaction_ops;
 
 comptime {
     // The LSM tree uses half-measures to balance compaction.
-    assert(lsm_batch_multiple % 2 == 0);
+    assert(lsm_compaction_ops % 2 == 0);
 }
+
+// Limits for the number of value blocks that a single compaction can queue up for IO and for the
+// number of IO operations themselves. The number of index blocks is always one per level.
+// This is a comptime upper bound. The actual number of concurrency is also limited by the
+// runtime-know number of free blocks.
+//
+// For simplicity for now, size IOPS to always be available.
+pub const lsm_compaction_queue_read_max = 8;
+pub const lsm_compaction_queue_write_max = 8;
+pub const lsm_compaction_iops_read_max = lsm_compaction_queue_read_max + 2; // + two index blocks.
+pub const lsm_compaction_iops_write_max = lsm_compaction_queue_write_max + 1; // + one index block.
 
 pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 
@@ -735,14 +773,16 @@ pub const clock_synchronization_window_min_ms = config.process.clock_synchroniza
 pub const clock_synchronization_window_max_ms = config.process.clock_synchronization_window_max_ms;
 
 pub const StateMachineConfig = struct {
+    release: vsr.Release,
     message_body_size_max: comptime_int,
-    lsm_batch_multiple: comptime_int,
+    lsm_compaction_ops: comptime_int,
     vsr_operations_reserved: u8,
 };
 
 pub const state_machine_config = StateMachineConfig{
+    .release = config.process.release,
     .message_body_size_max = message_body_size_max,
-    .lsm_batch_multiple = lsm_batch_multiple,
+    .lsm_compaction_ops = lsm_compaction_ops,
     .vsr_operations_reserved = vsr_operations_reserved,
 };
 
@@ -766,13 +806,6 @@ pub const state_machine_config = StateMachineConfig{
 /// Specific data structures might use a comptime parameter, to enable extra costly verification
 /// only during unit tests of the data structure.
 pub const verify = config.process.verify;
-
-/// AOF (Append Only File) logs all transactions synchronously to disk before replying
-/// to the client. The logic behind this code has been kept as simple as possible -
-/// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple log
-/// consisting of logged requests. Much like a redis AOF with fsync=on.
-/// Enabling this will have performance implications.
-pub const aof_record = config.process.aof_record;
 
 /// Place us in a special recovery state, where we accept timestamps passed in to us. Used to
 /// replay our AOF.

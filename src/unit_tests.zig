@@ -11,16 +11,15 @@ comptime {
     _ = @import("shell.zig");
     _ = @import("stdx.zig");
     _ = @import("stdx/bounded_array.zig");
+    _ = @import("stdx/sort_test.zig");
+    _ = @import("stdx/zipfian.zig");
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
+    _ = @import("trace.zig");
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client/echo_client.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
-    _ = @import("dotnet_bindings.zig");
-    _ = @import("go_bindings.zig");
-    _ = @import("java_bindings.zig");
-    _ = @import("node_bindings.zig");
 
     _ = @import("io/test.zig");
 
@@ -69,5 +68,6 @@ comptime {
     _ = @import("vsr/sync.zig");
 
     _ = @import("scripts/release.zig");
+    _ = @import("scripts/changelog.zig");
     _ = @import("scripts/cfo.zig");
 }

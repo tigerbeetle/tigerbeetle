@@ -2,12 +2,10 @@ const std = @import("std");
 const assert = std.debug.assert;
 const allocator = std.heap.c_allocator;
 
-const c = @import("clients/node/src/c.zig");
-const translate = @import("clients/node/src/translate.zig");
-const tb = struct {
-    pub usingnamespace @import("tigerbeetle.zig");
-    pub usingnamespace @import("clients/c/tb_client.zig");
-};
+const c = @import("src/c.zig");
+const translate = @import("src/translate.zig");
+const tb = vsr.tigerbeetle;
+const tb_client = vsr.tb_client;
 
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
@@ -21,7 +19,7 @@ const AccountBalance = tb.AccountBalance;
 const QueryFilter = tb.QueryFilter;
 const QueryFilterFlags = tb.QueryFilterFlags;
 
-const vsr = @import("vsr.zig");
+const vsr = @import("vsr");
 const Storage = vsr.storage.Storage(vsr.io.IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
@@ -30,6 +28,7 @@ const constants = vsr.constants;
 pub const std_options = .{
     // Since this is running in application space, log only critical messages to reduce noise.
     .log_level = .err,
+    .logFn = vsr.constants.log_nop,
 };
 
 // Cached value for JS (null).
@@ -152,7 +151,7 @@ fn create(
         return translate.throw(env, "Failed to acquire reference to thread-safe function.");
     }
 
-    const client = tb.init(
+    const client = tb_client.init(
         allocator,
         cluster_id,
         addresses,
@@ -166,7 +165,7 @@ fn create(
         error.SystemResources => return translate.throw(env, "Failed to reserve system resources."),
         error.NetworkSubsystemFailed => return translate.throw(env, "Network stack failure."),
     };
-    errdefer tb.deinit(client);
+    errdefer tb_client.deinit(client);
 
     return try translate.create_external(env, client);
 }
@@ -178,10 +177,10 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
         context,
         "Failed to get client context pointer.",
     );
-    const client: tb.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
-    defer tb.deinit(client);
+    const client: tb_client.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
+    defer tb_client.deinit(client);
 
-    const completion_ctx = tb.completion_context(client);
+    const completion_ctx = tb_client.completion_context(client);
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
 
     if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_abort) != c.napi_ok) {
@@ -201,7 +200,7 @@ fn request(
         context,
         "Failed to get client context pointer.",
     );
-    const client: tb.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
+    const client: tb_client.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
 
     // Create a reference to the callback so it stay alive until the packet completes.
     var callback_ref: c.napi_ref = undefined;
@@ -212,11 +211,7 @@ fn request(
         std.log.warn("Failed to delete reference to callback on error.", .{});
     };
 
-    const array_length = try translate.array_length(env, array);
-    if (array_length < 1) {
-        return translate.throw(env, "Batch must contain at least one event.");
-    }
-
+    const array_length: u32 = try translate.array_length(env, array);
     const packet, const packet_data = switch (operation) {
         inline else => |op| blk: {
             const buffer = try BufferType(op).alloc(
@@ -244,10 +239,11 @@ fn request(
         .batch_next = undefined,
         .batch_tail = undefined,
         .batch_size = undefined,
+        .batch_allowed = undefined,
         .reserved = undefined,
     };
 
-    tb.submit(client, packet);
+    tb_client.submit(client, packet);
 }
 
 // Packet only has one size field which normally tracks `BufferType(op).events().len`.
@@ -261,8 +257,8 @@ const BufferSize = packed struct(u32) {
 
 fn on_completion(
     completion_ctx: usize,
-    client: tb.tb_client_t,
-    packet: *tb.tb_packet_t,
+    client: tb_client.tb_client_t,
+    packet: *tb_client.tb_packet_t,
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void {
@@ -319,7 +315,7 @@ fn on_completion_js(
     _ = unused_context;
 
     // Extract the remaining packet information from the packet before it's freed.
-    const packet: *tb.tb_packet_t = @ptrCast(@alignCast(packet_argument.?));
+    const packet: *tb_client.tb_packet_t = @ptrCast(@alignCast(packet_argument.?));
     const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet.user_data.?));
 
     // Decode the packet's Buffer results into an array then free the packet/Buffer.
@@ -489,7 +485,7 @@ fn BufferType(comptime op: Operation) type {
         const Result = StateMachine.Result(op);
 
         const body_align = @max(@alignOf(Event), @alignOf(Result));
-        const body_offset = std.mem.alignForward(usize, @sizeOf(tb.tb_packet_t), body_align);
+        const body_offset = std.mem.alignForward(usize, @sizeOf(tb_client.tb_packet_t), body_align);
 
         ptr: [*]u8,
         count: u32,
@@ -504,7 +500,7 @@ fn BufferType(comptime op: Operation) type {
                 return translate.throw(env, "Batch is larger than the maximum message size.");
             }
 
-            const max_align = @max(body_align, @alignOf(tb.tb_packet_t));
+            const max_align = @max(body_align, @alignOf(tb_client.tb_packet_t));
             const max_bytes = body_offset + body_size;
 
             const bytes = allocator.alignedAlloc(u8, max_align, max_bytes) catch |e| switch (e) {
@@ -527,14 +523,14 @@ fn BufferType(comptime op: Operation) type {
                 @sizeOf(Result) * event_count(op, buffer.count),
             );
 
-            const max_align = @max(body_align, @alignOf(tb.tb_packet_t));
+            const max_align = @max(body_align, @alignOf(tb_client.tb_packet_t));
             const max_bytes = body_offset + body_size;
 
             const bytes: []align(max_align) u8 = @alignCast(buffer.ptr[0..max_bytes]);
             allocator.free(bytes);
         }
 
-        fn packet(buffer: Buffer) *tb.tb_packet_t {
+        fn packet(buffer: Buffer) *tb_client.tb_packet_t {
             return @alignCast(@ptrCast(buffer.ptr));
         }
 

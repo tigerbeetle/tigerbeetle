@@ -59,13 +59,13 @@ We will refer to two amounts:
 
 In this case, we are keeping the Destination Account's balance between the bounds.
 
-| Transfer | Debit Account | Credit Account | Amount   | Pending ID | Flags (Note: `|` sets multiple flags)                                                                                                                                                                   |
-| -------- | ------------- | -------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | Source        | Destination    | Transfer | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                               |
-| 2        | Control       | Operator       | Limit    | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                               |
-| 3        | Destination   | Control        | `0`      | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked) \| [`flags.balancing_debit`](../../reference/transfer.md#flagsbalancing_debit) \| [`flags.pending`](../../reference/transfer.md#flagspending) |
-| 4        | `0`           | `0`            | `0`      | `3`\*      | [`flags.linked`](../../reference/transfer.md#flagslinked) \| [`flags.void_pending_transfer`](../../reference/transfer.md#flagsvoid_pending_transfer)                                                    |
-| 5        | Operator      | Control        | Limit    | `0`        | `0`                                                                                                                                                                                                     |
+| Transfer | Debit Account | Credit Account | Amount       | Pending ID | Flags (Note: `|` sets multiple flags)                                                                                                                                                                   |
+| -------- | ------------- | -------------- | ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Source        | Destination    | Transfer     | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                               |
+| 2        | Control       | Operator       | Limit        | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                               |
+| 3        | Destination   | Control        | `AMOUNT_MAX` | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked) \| [`flags.balancing_debit`](../../reference/transfer.md#flagsbalancing_debit) \| [`flags.pending`](../../reference/transfer.md#flagspending) |
+| 4        | `0`           | `0`            | `0`          | `3`\*      | [`flags.linked`](../../reference/transfer.md#flagslinked) \| [`flags.void_pending_transfer`](../../reference/transfer.md#flagsvoid_pending_transfer)                                                    |
+| 5        | Operator      | Control        | Limit        | `0`        | `0`                                                                                                                                                                                                     |
 
 \*This must be set to the transfer ID of the pending transfer (in this example, it is transfer 3).
 
@@ -73,13 +73,13 @@ In this case, we are keeping the Destination Account's balance between the bound
 
 In this case, we are keeping the Destination Account's balance between the bounds.
 
-| Transfer | Debit Account | Credit Account | Amount   | Pending ID | Flags (Note `|` sets multiple flags)                                                                                                                                                                      |
-| -------- | ------------- | -------------- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | Destination   | Source         | Transfer | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                                 |
-| 2        | Operator      | Control        | Limit    | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                                 |
-| 3        | Control       | Destination    | `0`      | `0`        | [`flags.balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) \| [`flags.pending`](../../reference/transfer.md#flagspending) \| [`flags.linked`](../../reference/transfer.md#flagslinked) |
-| 4        | `0`           | `0`            | `0`      | `3`\*      | [`flags.void_pending_transfer`](../../reference/transfer.md#flagsvoid_pending_transfer) \| [`flags.linked`](../../reference/transfer.md#flagslinked)                                                      |
-| 5        | Control       | Operator       | Limit    | `0`        | `0`                                                                                                                                                                                                       |
+| Transfer | Debit Account | Credit Account | Amount       | Pending ID | Flags (Note `|` sets multiple flags)                                                                                                                                                                      |
+| -------- | ------------- | -------------- | ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Destination   | Source         | Transfer     | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                                 |
+| 2        | Operator      | Control        | Limit        | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                                 |
+| 3        | Control       | Destination    | `AMOUNT_MAX` | `0`        | [`flags.balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) \| [`flags.pending`](../../reference/transfer.md#flagspending) \| [`flags.linked`](../../reference/transfer.md#flagslinked) |
+| 4        | `0`           | `0`            | `0`          | `3`\*      | [`flags.void_pending_transfer`](../../reference/transfer.md#flagsvoid_pending_transfer) \| [`flags.linked`](../../reference/transfer.md#flagslinked)                                                      |
+| 5        | Control       | Operator       | Limit        | `0`        | `0`                                                                                                                                                                                                       |
 
 \*This must be set to the transfer ID of the pending transfer (in this example, it is transfer 3).
 

@@ -59,7 +59,7 @@ pub fn test_freshness(
         ctx.buffer.clearRetainingCapacity();
         try readme_root(&ctx);
 
-        const update = try shell.file_ensure_content("README.md", ctx.buffer.items);
+        const update = try shell.file_ensure_content("README.md", ctx.buffer.items, .{});
         updated_any = updated_any or (update == .updated);
     }
 
@@ -69,7 +69,7 @@ pub fn test_freshness(
         try readme_sample(&ctx, sample);
 
         const sample_readme = try shell.fmt("samples/{s}/README.md", .{sample.directory});
-        const update = try shell.file_ensure_content(sample_readme, ctx.buffer.items);
+        const update = try shell.file_ensure_content(sample_readme, ctx.buffer.items, .{});
         updated_any = updated_any or (update == .updated);
     }
 
@@ -197,6 +197,12 @@ fn readme_root(ctx: *Context) !void {
             \\reference](https://docs.tigerbeetle.com/reference/account).
         );
         ctx.code_section("create-accounts");
+
+        ctx.paragraph(
+            \\See details for the recommended ID scheme in
+            \\[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
+        );
+
         ctx.paragraph(ctx.docs.create_accounts_documentation);
 
         ctx.header(3, "Account Flags");
@@ -255,6 +261,11 @@ fn readme_root(ctx: *Context) !void {
             \\reference](https://docs.tigerbeetle.com/reference/transfer).
         );
         ctx.code_section("create-transfers");
+
+        ctx.paragraph(
+            \\See details for the recommended ID scheme in
+            \\[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
+        );
 
         ctx.header(3, "Response and Errors");
         ctx.paragraph(
@@ -442,6 +453,23 @@ fn readme_root(ctx: *Context) !void {
         ctx.code_section("linked-events");
     }
 
+    {
+        ctx.header(2, "Imported Events");
+        ctx.paragraph(
+            \\When the `imported` flag is specified for an account when creating accounts or
+            \\a transfer when creating transfers, it allows importing historical events with
+            \\a user-defined timestamp.
+            \\
+            \\The entire batch of events must be set with the flag `imported`.
+            \\
+            \\It's recommended to submit the whole batch as a `linked` chain of events, ensuring that
+            \\if any event fails, none of them are committed, preserving the last timestamp unchanged.
+            \\This approach gives the application a chance to correct failed imported events, re-submitting
+            \\the batch again with the same user-defined timestamps.
+        );
+        ctx.code_section("imported-events");
+    }
+
     ctx.ensure_final_newline();
 }
 
@@ -557,7 +585,7 @@ const Context = struct {
                 while (line[indent_line] == ' ' or line[indent_line] == '\t') indent_line += 1;
                 indent_min = @min(indent_min, indent_line);
             }
-            assert(indent_min < 16);
+            assert(indent_min < 18);
 
             lines = std.mem.split(u8, section, "\n");
             while (lines.next()) |line| {

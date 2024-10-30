@@ -27,276 +27,451 @@ func main() {
 	defer client.Close()
 	// endsection:client
 
-	// section:create-accounts
-	accountsRes, err := client.CreateAccounts([]Account{
-		{
-			ID:             ToUint128(137),
-			DebitsPending:  ToUint128(0),
-			DebitsPosted:   ToUint128(0),
-			CreditsPending: ToUint128(0),
-			CreditsPosted:  ToUint128(0),
-			UserData128:    ToUint128(0),
-			UserData64:     0,
-			UserData32:     0,
-			Reserved:       0,
-			Ledger:         1,
-			Code:           718,
-			Flags:          0,
-			Timestamp:      0,
-		},
-	})
-	if err != nil {
-		log.Printf("Error creating accounts: %s", err)
-		return
+	{
+		// section:create-accounts
+		accountErrors, err := client.CreateAccounts([]Account{
+			{
+				ID:          ID(), // TigerBeetle time-based ID.
+				UserData128: ToUint128(0),
+				UserData64:  0,
+				UserData32:  0,
+				Ledger:      1,
+				Code:        718,
+				Flags:       0,
+				Timestamp:   0,
+			},
+		})
+		// Error handling omitted.
+		// endsection:create-accounts
+		_, _ = accountErrors, err
 	}
 
-	for _, err := range accountsRes {
-		log.Printf("Error creating account %d: %s", err.Index, err.Result)
-		return
-	}
-	// endsection:create-accounts
-
-	// section:account-flags
-	account0 := Account{ /* ... account values ... */ }
-	account1 := Account{ /* ... account values ... */ }
-	account0.Flags = AccountFlags{Linked: true}.ToUint16()
-
-	accountErrors, err := client.CreateAccounts([]Account{account0, account1})
-	if err != nil {
-		log.Printf("Error creating accounts: %s", err)
-		return
-	}
-	// endsection:account-flags
-
-	// section:create-accounts-errors
-	account2 := Account{ /* ... account values ... */ }
-	account3 := Account{ /* ... account values ... */ }
-	account4 := Account{ /* ... account values ... */ }
-
-	accountErrors, err = client.CreateAccounts([]Account{account2, account3, account4})
-	if err != nil {
-		log.Printf("Error creating accounts: %s", err)
-		return
-	}
-	for _, err := range accountErrors {
-		log.Printf("Error creating account %d: %s", err.Index, err.Result)
-		return
-	}
-	// endsection:create-accounts-errors
-
-	// section:lookup-accounts
-	accounts, err := client.LookupAccounts([]Uint128{ToUint128(137), ToUint128(138)})
-	if err != nil {
-		log.Printf("Could not fetch accounts: %s", err)
-		return
-	}
-	log.Println(accounts)
-	// endsection:lookup-accounts
-
-	// section:create-transfers
-	transfers := []Transfer{{
-		ID:              ToUint128(1),
-		DebitAccountID:  ToUint128(1),
-		CreditAccountID: ToUint128(2),
-		Amount:          ToUint128(10),
-		PendingID:       ToUint128(0),
-		UserData128:     ToUint128(2),
-		UserData64:      0,
-		UserData32:      0,
-		Timeout:         0,
-		Ledger:          1,
-		Code:            1,
-		Flags:           0,
-		Timestamp:       0,
-	}}
-
-	transfersRes, err := client.CreateTransfers(transfers)
-	if err != nil {
-		log.Printf("Error creating transfer batch: %s", err)
-		return
-	}
-	// endsection:create-transfers
-
-	// section:create-transfers-errors
-	for _, err := range transfersRes {
-		log.Printf("Batch transfer at %d failed to create: %s", err.Index, err.Result)
-		return
-	}
-	// endsection:create-transfers-errors
-
-	// section:no-batch
-	for i := 0; i < len(transfers); i++ {
-		transfersRes, err = client.CreateTransfers([]Transfer{transfers[i]})
-		// error handling omitted
-	}
-	// endsection:no-batch
-
-	// section:batch
-	BATCH_SIZE := 8190
-	for i := 0; i < len(transfers); i += BATCH_SIZE {
-		batch := BATCH_SIZE
-		if i+BATCH_SIZE > len(transfers) {
-			batch = len(transfers) - i
+	{
+		// section:account-flags
+		account0 := Account{
+			ID:     ToUint128(100),
+			Ledger: 1,
+			Code:   718,
+			Flags: AccountFlags{
+				DebitsMustNotExceedCredits: true,
+				Linked:                     true,
+			}.ToUint16(),
 		}
-		transfersRes, err = client.CreateTransfers(transfers[i : i+batch])
-		// error handling omitted
-	}
-	// endsection:batch
+		account1 := Account{
+			ID:     ToUint128(101),
+			Ledger: 1,
+			Code:   718,
+			Flags: AccountFlags{
+				History: true,
+			}.ToUint16(),
+		}
 
-	// section:transfer-flags-link
-	transfer0 := Transfer{ /* ... account values ... */ }
-	transfer1 := Transfer{ /* ... account values ... */ }
-	transfer0.Flags = TransferFlags{Linked: true}.ToUint16()
-	transfersRes, err = client.CreateTransfers([]Transfer{transfer0, transfer1})
-	// error handling omitted
-	// endsection:transfer-flags-link
-
-	// section:transfer-flags-post
-	transfer := Transfer{
-		ID:        ToUint128(2),
-		PendingID: ToUint128(1),
-		Flags:     TransferFlags{PostPendingTransfer: true}.ToUint16(),
-		Timestamp: 0,
-	}
-	transfersRes, err = client.CreateTransfers([]Transfer{transfer})
-	// error handling omitted
-	// endsection:transfer-flags-post
-
-	// section:transfer-flags-void
-	transfer = Transfer{
-		ID:        ToUint128(2),
-		PendingID: ToUint128(1),
-		Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),
-		Timestamp: 0,
-	}
-	transfersRes, err = client.CreateTransfers([]Transfer{transfer})
-	// error handling omitted
-	// endsection:transfer-flags-void
-
-	// section:lookup-transfers
-	transfers, err = client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
-	if err != nil {
-		log.Printf("Could not fetch transfers: %s", err)
-		return
-	}
-	log.Println(transfers)
-	// endsection:lookup-transfers
-
-	// section:get-account-transfers
-	filter := AccountFilter{
-		AccountID:    ToUint128(2),
-		TimestampMin: 0,  // No filter by Timestamp.
-		TimestampMax: 0,  // No filter by Timestamp.
-		Limit:        10, // Limit to ten transfers at most.
-		Flags: AccountFilterFlags{
-			Debits:   true, // Include transfer from the debit side.
-			Credits:  true, // Include transfer from the credit side.
-			Reversed: true, // Sort by timestamp in reverse-chronological order.
-		}.ToUint32(),
+		accountErrors, err := client.CreateAccounts([]Account{account0, account1})
+		// Error handling omitted.
+		// endsection:account-flags
+		_, _ = accountErrors, err
 	}
 
-	transfers, err = client.GetAccountTransfers(filter)
-	if err != nil {
-		log.Printf("Could not fetch transfers: %s", err)
-		return
-	}
-	log.Println(transfers)
-	// endsection:get-account-transfers
+	{
+		// section:create-accounts-errors
+		account0 := Account{
+			ID:     ToUint128(102),
+			Ledger: 1,
+			Code:   718,
+			Flags:  0,
+		}
+		account1 := Account{
+			ID:     ToUint128(103),
+			Ledger: 1,
+			Code:   718,
+			Flags:  0,
+		}
+		account2 := Account{
+			ID:     ToUint128(104),
+			Ledger: 1,
+			Code:   718,
+			Flags:  0,
+		}
 
-	// section:get-account-balances
-	filter = AccountFilter{
-		AccountID:    ToUint128(2),
-		TimestampMin: 0,  // No filter by Timestamp.
-		TimestampMax: 0,  // No filter by Timestamp.
-		Limit:        10, // Limit to ten balances at most.
-		Flags: AccountFilterFlags{
-			Debits:   true, // Include transfer from the debit side.
-			Credits:  true, // Include transfer from the credit side.
-			Reversed: true, // Sort by timestamp in reverse-chronological order.
-		}.ToUint32(),
-	}
+		accountErrors, err := client.CreateAccounts([]Account{account0, account1, account2})
+		if err != nil {
+			log.Printf("Error creating accounts: %s", err)
+			return
+		}
 
-	account_balances, err := client.GetAccountBalances(filter)
-	if err != nil {
-		log.Printf("Could not fetch the history: %s", err)
-		return
-	}
-	log.Println(account_balances)
-	// endsection:get-account-balances
-
-	// section:query-accounts
-	query_filter := QueryFilter{
-		UserData128:  ToUint128(1000), // Filter by UserData
-		UserData64:   100,
-		UserData32:   10,
-		Code:         1,  // Filter by Code
-		Ledger:       0,  // No filter by Ledger
-		TimestampMin: 0,  // No filter by Timestamp.
-		TimestampMax: 0,  // No filter by Timestamp.
-		Limit:        10, // Limit to ten balances at most.
-		Flags: QueryFilterFlags{
-			Reversed: true, // Sort by timestamp in reverse-chronological order.
-		}.ToUint32(),
+		for _, err := range accountErrors {
+			switch err.Index {
+			case uint32(AccountExists):
+				log.Printf("Batch account at %d already exists.", err.Index)
+			default:
+				log.Printf("Batch account at %d failed to create: %s", err.Index, err.Result)
+			}
+		}
+		// endsection:create-accounts-errors
 	}
 
-	query_accounts, err := client.QueryAccounts(query_filter)
-	if err != nil {
-		log.Printf("Could not query accounts: %s", err)
-		return
-	}
-	log.Println(query_accounts)
-	// endsection:query-accounts
-
-	// section:query-transfers
-	query_filter = QueryFilter{
-		UserData128:  ToUint128(1000), // Filter by UserData.
-		UserData64:   100,
-		UserData32:   10,
-		Code:         1,  // Filter by Code.
-		Ledger:       0,  // No filter by Ledger.
-		TimestampMin: 0,  // No filter by Timestamp.
-		TimestampMax: 0,  // No filter by Timestamp.
-		Limit:        10, // Limit to ten balances at most.
-		Flags: QueryFilterFlags{
-			Reversed: true, // Sort by timestamp in reverse-chronological order.
-		}.ToUint32(),
+	{
+		// section:lookup-accounts
+		accounts, err := client.LookupAccounts([]Uint128{ToUint128(100), ToUint128(101)})
+		// endsection:lookup-accounts
+		_, _ = accounts, err
 	}
 
-	query_transfers, err := client.QueryTransfers(query_filter)
-	if err != nil {
-		log.Printf("Could not query transfers: %s", err)
-		return
+	{
+		// section:create-transfers
+		transfers := []Transfer{{
+			ID:              ID(), // TigerBeetle time-based ID.
+			DebitAccountID:  ToUint128(101),
+			CreditAccountID: ToUint128(102),
+			Amount:          ToUint128(10),
+			Ledger:          1,
+			Code:            1,
+			Flags:           0,
+			Timestamp:       0,
+		}}
+
+		transferErrors, err := client.CreateTransfers(transfers)
+		// Error handling omitted.
+		// endsection:create-transfers
+		_, _ = transferErrors, err
 	}
-	log.Println(query_transfers)
-	// endsection:query-transfers
 
-	// section:linked-events
-	batch := []Transfer{}
-	linkedFlag := TransferFlags{Linked: true}.ToUint16()
+	{
+		// section:create-transfers-errors
+		transfers := []Transfer{{
+			ID:              ToUint128(1),
+			DebitAccountID:  ToUint128(101),
+			CreditAccountID: ToUint128(102),
+			Amount:          ToUint128(10),
+			Ledger:          1,
+			Code:            1,
+			Flags:           0,
+		}, {
+			ID:              ToUint128(2),
+			DebitAccountID:  ToUint128(101),
+			CreditAccountID: ToUint128(102),
+			Amount:          ToUint128(10),
+			Ledger:          1,
+			Code:            1,
+			Flags:           0,
+		}, {
+			ID:              ToUint128(3),
+			DebitAccountID:  ToUint128(101),
+			CreditAccountID: ToUint128(102),
+			Amount:          ToUint128(10),
+			Ledger:          1,
+			Code:            1,
+			Flags:           0,
+		}}
 
-	// An individual transfer (successful):
-	batch = append(batch, Transfer{ID: ToUint128(1) /* ... rest of transfer ... */})
+		transferErrors, err := client.CreateTransfers(transfers)
+		if err != nil {
+			log.Printf("Error creating transfers: %s", err)
+			return
+		}
 
-	// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
-	batch = append(batch, Transfer{ID: ToUint128(2) /* ... , */, Flags: linkedFlag}) // Commit/rollback.
-	batch = append(batch, Transfer{ID: ToUint128(3) /* ... , */, Flags: linkedFlag}) // Commit/rollback.
-	batch = append(batch, Transfer{ID: ToUint128(2) /* ... , */, Flags: linkedFlag}) // Fail with exists
-	batch = append(batch, Transfer{ID: ToUint128(4) /* ... , */})                    // Fail without committing
+		for _, err := range transferErrors {
+			switch err.Index {
+			case uint32(TransferExists):
+				log.Printf("Batch transfer at %d already exists.", err.Index)
+			default:
+				log.Printf("Batch transfer at %d failed to create: %s", err.Index, err.Result)
+			}
+		}
+		// endsection:create-transfers-errors
+	}
 
-	// An individual transfer (successful):
-	// This should not see any effect from the failed chain above.
-	batch = append(batch, Transfer{ID: ToUint128(2) /* ... rest of transfer ... */})
+	{
+		// section:no-batch
+		batch := []Transfer{}
+		for i := 0; i < len(batch); i++ {
+			transferErrors, err := client.CreateTransfers([]Transfer{batch[i]})
+			_, _ = transferErrors, err // Error handling omitted.
+		}
+		// endsection:no-batch
+	}
 
-	// A chain of 2 transfers (the first transfer fails the chain):
-	batch = append(batch, Transfer{ID: ToUint128(2) /* ... rest of transfer ... */, Flags: linkedFlag})
-	batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */})
+	{
+		// section:batch
+		batch := []Transfer{}
+		BATCH_SIZE := 8190
+		for i := 0; i < len(batch); i += BATCH_SIZE {
+			size := BATCH_SIZE
+			if i+BATCH_SIZE > len(batch) {
+				size = len(batch) - i
+			}
+			transferErrors, err := client.CreateTransfers(batch[i : i+size])
+			_, _ = transferErrors, err // Error handling omitted.
+		}
+		// endsection:batch
+	}
 
-	// A chain of 2 transfers (successful):
-	batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */, Flags: linkedFlag})
-	batch = append(batch, Transfer{ID: ToUint128(4) /* ... rest of transfer ... */})
+	{
+		// section:transfer-flags-link
+		transfer0 := Transfer{
+			ID:              ToUint128(4),
+			DebitAccountID:  ToUint128(101),
+			CreditAccountID: ToUint128(102),
+			Amount:          ToUint128(10),
+			Ledger:          1,
+			Code:            1,
+			Flags:           TransferFlags{Linked: true}.ToUint16(),
+		}
+		transfer1 := Transfer{
+			ID:              ToUint128(5),
+			DebitAccountID:  ToUint128(101),
+			CreditAccountID: ToUint128(102),
+			Amount:          ToUint128(10),
+			Ledger:          1,
+			Code:            1,
+			Flags:           0,
+		}
 
-	transfersRes, err = client.CreateTransfers(batch)
-	// endsection:linked-events
+		transferErrors, err := client.CreateTransfers([]Transfer{transfer0, transfer1})
+		// Error handling omitted.
+		// endsection:transfer-flags-link
+		_, _ = transferErrors, err
+	}
+
+	{
+		// section:transfer-flags-post
+		transfer0 := Transfer{
+			ID:              ToUint128(6),
+			DebitAccountID:  ToUint128(101),
+			CreditAccountID: ToUint128(102),
+			Amount:          ToUint128(10),
+			Ledger:          1,
+			Code:            1,
+			Flags:           0,
+		}
+
+		transferErrors, err := client.CreateTransfers([]Transfer{transfer0})
+		// Error handling omitted.
+
+		transfer1 := Transfer{
+			ID: ToUint128(7),
+			// Post the entire pending amount.
+			Amount:    AmountMax,
+			PendingID: ToUint128(6),
+			Flags:     TransferFlags{PostPendingTransfer: true}.ToUint16(),
+		}
+
+		transferErrors, err = client.CreateTransfers([]Transfer{transfer1})
+		// Error handling omitted.
+		// endsection:transfer-flags-post
+		_, _ = transferErrors, err
+	}
+
+	{
+		// section:transfer-flags-void
+		transfer0 := Transfer{
+			ID:              ToUint128(8),
+			DebitAccountID:  ToUint128(101),
+			CreditAccountID: ToUint128(102),
+			Amount:          ToUint128(10),
+			Timeout:         0,
+			Ledger:          1,
+			Code:            1,
+			Flags:           0,
+		}
+
+		transferErrors, err := client.CreateTransfers([]Transfer{transfer0})
+		// Error handling omitted.
+
+		transfer1 := Transfer{
+			ID: ToUint128(9),
+			// Post the entire pending amount.
+			Amount:    ToUint128(0),
+			PendingID: ToUint128(8),
+			Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),
+		}
+
+		transferErrors, err = client.CreateTransfers([]Transfer{transfer1})
+		// Error handling omitted.
+		// endsection:transfer-flags-void
+		_, _ = transferErrors, err
+	}
+
+	{
+		// section:lookup-transfers
+		transfers, err := client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
+		// endsection:lookup-transfers
+		_, _ = transfers, err
+	}
+
+	{
+		// section:get-account-transfers
+		filter := AccountFilter{
+			AccountID:    ToUint128(2),
+			UserData128:  ToUint128(0), // No filter by UserData.
+			UserData64:   0,
+			UserData32:   0,
+			Code:         0,  // No filter by Code.
+			TimestampMin: 0,  // No filter by Timestamp.
+			TimestampMax: 0,  // No filter by Timestamp.
+			Limit:        10, // Limit to ten transfers at most.
+			Flags: AccountFilterFlags{
+				Debits:   true, // Include transfer from the debit side.
+				Credits:  true, // Include transfer from the credit side.
+				Reversed: true, // Sort by timestamp in reverse-chronological order.
+			}.ToUint32(),
+		}
+
+		transfers, err := client.GetAccountTransfers(filter)
+		// endsection:get-account-transfers
+		_, _ = transfers, err
+	}
+
+	{
+		// section:get-account-balances
+		filter := AccountFilter{
+			AccountID:    ToUint128(2),
+			UserData128:  ToUint128(0), // No filter by UserData.
+			UserData64:   0,
+			UserData32:   0,
+			Code:         0,  // No filter by Code.
+			TimestampMin: 0,  // No filter by Timestamp.
+			TimestampMax: 0,  // No filter by Timestamp.
+			Limit:        10, // Limit to ten balances at most.
+			Flags: AccountFilterFlags{
+				Debits:   true, // Include transfer from the debit side.
+				Credits:  true, // Include transfer from the credit side.
+				Reversed: true, // Sort by timestamp in reverse-chronological order.
+			}.ToUint32(),
+		}
+
+		account_balances, err := client.GetAccountBalances(filter)
+		// endsection:get-account-balances
+		_, _ = account_balances, err
+	}
+
+	{
+		// section:query-accounts
+		filter := QueryFilter{
+			UserData128:  ToUint128(1000), // Filter by UserData
+			UserData64:   100,
+			UserData32:   10,
+			Code:         1,  // Filter by Code
+			Ledger:       0,  // No filter by Ledger
+			TimestampMin: 0,  // No filter by Timestamp.
+			TimestampMax: 0,  // No filter by Timestamp.
+			Limit:        10, // Limit to ten balances at most.
+			Flags: QueryFilterFlags{
+				Reversed: true, // Sort by timestamp in reverse-chronological order.
+			}.ToUint32(),
+		}
+
+		accounts, err := client.QueryAccounts(filter)
+		// endsection:query-accounts
+		_, _ = accounts, err
+	}
+
+	{
+		// section:query-transfers
+		filter := QueryFilter{
+			UserData128:  ToUint128(1000), // Filter by UserData.
+			UserData64:   100,
+			UserData32:   10,
+			Code:         1,  // Filter by Code.
+			Ledger:       0,  // No filter by Ledger.
+			TimestampMin: 0,  // No filter by Timestamp.
+			TimestampMax: 0,  // No filter by Timestamp.
+			Limit:        10, // Limit to ten balances at most.
+			Flags: QueryFilterFlags{
+				Reversed: true, // Sort by timestamp in reverse-chronological order.
+			}.ToUint32(),
+		}
+
+		transfers, err := client.QueryTransfers(filter)
+		// endsection:query-transfers
+		_, _ = transfers, err
+	}
+
+	{
+		// section:linked-events
+		batch := []Transfer{}
+		linkedFlag := TransferFlags{Linked: true}.ToUint16()
+
+		// An individual transfer (successful):
+		batch = append(batch, Transfer{ID: ToUint128(1) /* ... rest of transfer ... */})
+
+		// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
+		batch = append(batch, Transfer{ID: ToUint128(2) /* ... , */, Flags: linkedFlag}) // Commit/rollback.
+		batch = append(batch, Transfer{ID: ToUint128(3) /* ... , */, Flags: linkedFlag}) // Commit/rollback.
+		batch = append(batch, Transfer{ID: ToUint128(2) /* ... , */, Flags: linkedFlag}) // Fail with exists
+		batch = append(batch, Transfer{ID: ToUint128(4) /* ... , */})                    // Fail without committing
+
+		// An individual transfer (successful):
+		// This should not see any effect from the failed chain above.
+		batch = append(batch, Transfer{ID: ToUint128(2) /* ... rest of transfer ... */})
+
+		// A chain of 2 transfers (the first transfer fails the chain):
+		batch = append(batch, Transfer{ID: ToUint128(2) /* ... rest of transfer ... */, Flags: linkedFlag})
+		batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */})
+
+		// A chain of 2 transfers (successful):
+		batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */, Flags: linkedFlag})
+		batch = append(batch, Transfer{ID: ToUint128(4) /* ... rest of transfer ... */})
+
+		transferErrors, err := client.CreateTransfers(batch)
+		// Error handling omitted.
+		// endsection:linked-events
+		_, _ = transferErrors, err
+	}
+
+	{
+		// section:imported-events
+		// External source of time.
+		var historicalTimestamp uint64 = 0
+		historicalAccounts := []Account{ /* Loaded from an external source. */ }
+		historicalTransfers := []Transfer{ /* Loaded from an external source. */ }
+
+		// First, load and import all accounts with their timestamps from the historical source.
+		accountsBatch := []Account{}
+		for index, account := range historicalAccounts {
+			// Set a unique and strictly increasing timestamp.
+			historicalTimestamp += 1
+			account.Timestamp = historicalTimestamp
+
+			account.Flags = AccountFlags{
+				// Set the account as `imported`.
+				Imported: true,
+				// To ensure atomicity, the entire batch (except the last event in the chain)
+				// must be `linked`.
+				Linked: index < len(historicalAccounts)-1,
+			}.ToUint16()
+
+			accountsBatch = append(accountsBatch, account)
+		}
+
+		accountErrors, err := client.CreateAccounts(accountsBatch)
+		// Error handling omitted.
+
+		// Then, load and import all transfers with their timestamps from the historical source.
+		transfersBatch := []Transfer{}
+		for index, transfer := range historicalTransfers {
+			// Set a unique and strictly increasing timestamp.
+			historicalTimestamp += 1
+			transfer.Timestamp = historicalTimestamp
+
+			transfer.Flags = TransferFlags{
+				// Set the transfer as `imported`.
+				Imported: true,
+				// To ensure atomicity, the entire batch (except the last event in the chain)
+				// must be `linked`.
+				Linked: index < len(historicalAccounts)-1,
+			}.ToUint16()
+
+			transfersBatch = append(transfersBatch, transfer)
+		}
+
+		transferErrors, err := client.CreateTransfers(transfersBatch)
+		// Error handling omitted..
+		// Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+		// with the same historical timestamps without regressing the cluster timestamp.
+		// endsection:imported-events
+		_, _, _ = accountErrors, transferErrors, err
+	}
 
 	// section:imports
 }

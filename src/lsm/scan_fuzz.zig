@@ -195,7 +195,9 @@ const ThingsGroove = GrooveType(
             .timestamp = batch_max,
         },
         .ignored = &[_][]const u8{"checksum"},
+        .optional = &[_][]const u8{},
         .derived = .{},
+        .orphaned_ids = false,
     },
 );
 
@@ -601,6 +603,7 @@ const Environment = struct {
     state: State,
 
     storage: *Storage,
+    trace: vsr.trace.Tracer,
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context = undefined,
     grid: Grid,
@@ -620,18 +623,23 @@ const Environment = struct {
         storage: *Storage,
         random: std.rand.Random,
     ) !void {
+        env.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        errdefer env.trace.deinit(allocator);
+
         env.* = .{
             .storage = storage,
             .random = random,
             .state = .init,
+            .trace = env.trace,
 
             .superblock = try SuperBlock.init(allocator, .{
                 .storage = env.storage,
-                .storage_size_limit = constants.storage_size_limit_max,
+                .storage_size_limit = constants.storage_size_limit_default,
             }),
 
             .grid = try Grid.init(allocator, .{
                 .superblock = &env.superblock,
+                .trace = &env.trace,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
             }),
@@ -647,6 +655,7 @@ const Environment = struct {
     fn deinit(env: *Environment) void {
         env.superblock.deinit(allocator);
         env.grid.deinit(allocator);
+        env.trace.deinit(allocator);
         allocator.free(env.scan_lookup_buffer);
     }
 
@@ -964,7 +973,7 @@ const Environment = struct {
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
 
-        env.forest = try Forest.init(allocator, &env.grid, .{
+        try env.forest.init(allocator, &env.grid, .{
             .compaction_block_count = Forest.Options.compaction_block_count_min,
             .node_count = node_count,
         }, forest_options);
@@ -983,8 +992,8 @@ const Environment = struct {
 
         const checkpoint =
             // Can only checkpoint on the last beat of the bar.
-            env.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-            env.op > constants.lsm_batch_multiple;
+            env.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
+            env.op > constants.lsm_compaction_ops;
 
         env.change_state(.fuzzing, .forest_compact);
         env.forest.compact(forest_compact_callback, env.op);
@@ -992,7 +1001,7 @@ const Environment = struct {
 
         if (checkpoint) {
             assert(env.checkpoint_op == null);
-            env.checkpoint_op = env.op - constants.lsm_batch_multiple;
+            env.checkpoint_op = env.op - constants.lsm_compaction_ops;
 
             env.change_state(.fuzzing, .forest_checkpoint);
             env.forest.checkpoint(forest_checkpoint_callback);
@@ -1008,6 +1017,7 @@ const Environment = struct {
                     header.set_checksum();
                     break :header header;
                 },
+                .view_attributes = null,
                 .manifest_references = env.forest.manifest_log.checkpoint_references(),
                 .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
                 .client_sessions_reference = .{
@@ -1019,7 +1029,6 @@ const Environment = struct {
                 .commit_max = env.checkpoint_op.? + 1,
                 .sync_op_min = 0,
                 .sync_op_max = 0,
-                .sync_view = 0,
                 .storage_size = vsr.superblock.data_file_size_min +
                     (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
                 .release = vsr.Release.minimum,
@@ -1087,7 +1096,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     // Init mocked storage.
     var storage = try Storage.init(
         allocator,
-        constants.storage_size_limit_max,
+        constants.storage_size_limit_default,
         Storage.Options{
             .seed = random.int(u64),
             .read_latency_min = 0,

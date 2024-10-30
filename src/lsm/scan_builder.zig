@@ -47,45 +47,41 @@ pub fn ScanBuilderType(
 
         pub const Scan = ScanType(Groove, Storage);
 
-        // Since `ScanTree` consume memory and IO, it is limited by `lsm_scans_max`,
-        // however, merging scans does not require resources.
-        // E.g, if `lsm_scans_max = 4` we can have at most 3 merge operations:
-        // M₁(M₂(C₁, C₂), M₃(C₃, C₄))
-        const ScanSlots = stdx.BoundedArray(Scan, constants.lsm_scans_max);
-        const MergeSlots = stdx.BoundedArray(Scan, constants.lsm_scans_max - 1);
+        /// Each `ScanTree` consumes memory and I/O, so they are limited by `lsm_scans_max`.
+        scans: *[constants.lsm_scans_max]Scan,
+        scan_count: u32 = 0,
 
-        scan_slots: *ScanSlots,
-        merge_slots: *MergeSlots,
+        /// Merging `ScanTree`s does not require additional resources, so `ScanMerge`s are stored
+        /// in a separate buffer limited to `lsm_scans_max - 1`.
+        /// If `lsm_scans_max = 4`, we can have at most 4 scans and 3 merge operations:
+        /// M₁(M₂(S₁, S₂), M₃(S₃, S₄)).
+        merges: *[constants.lsm_scans_max - 1]Scan,
+        merge_count: u32 = 0,
 
-        pub fn init(allocator: Allocator) !ScanBuilder {
-            const scan_slots = try allocator.create(ScanSlots);
-            errdefer allocator.destroy(scan_slots);
-            scan_slots.* = .{};
-
-            const merge_slots = try allocator.create(MergeSlots);
-            errdefer allocator.destroy(merge_slots);
-            merge_slots.* = .{};
-
-            return ScanBuilder{
-                .scan_slots = scan_slots,
-                .merge_slots = merge_slots,
+        pub fn init(self: *ScanBuilder, allocator: Allocator) !void {
+            self.* = .{
+                .scans = undefined,
+                .merges = undefined,
             };
+
+            self.scans = try allocator.create([constants.lsm_scans_max]Scan);
+            errdefer allocator.destroy(self.scans);
+
+            self.merges = try allocator.create([constants.lsm_scans_max - 1]Scan);
+            errdefer allocator.destroy(self.merges);
         }
 
         pub fn deinit(self: *ScanBuilder, allocator: Allocator) void {
-            allocator.destroy(self.scan_slots);
-            allocator.destroy(self.merge_slots);
+            allocator.destroy(self.scans);
+            allocator.destroy(self.merges);
 
             self.* = undefined;
         }
 
         pub fn reset(self: *ScanBuilder) void {
-            self.scan_slots.* = .{};
-            self.merge_slots.* = .{};
-
             self.* = .{
-                .scan_slots = self.scan_slots,
-                .merge_slots = self.merge_slots,
+                .scans = self.scans,
+                .merges = self.merges,
             };
         }
 
@@ -223,9 +219,14 @@ pub fn ScanBuilderType(
             comptime field: std.meta.FieldEnum(Scan.Dispatcher),
             init_expression: ScanImplType(field),
         ) Error!*Scan {
-            if (self.scan_slots.full()) return Error.ScansMaxExceeded;
+            if (self.scan_count == self.scans.len) {
+                return Error.ScansMaxExceeded;
+            }
 
-            const scan = self.scan_slots.add_one_assume_capacity();
+            const scan = &self.scans[self.scan_count];
+            self.scan_count += 1;
+            assert(self.scan_count <= self.scans.len);
+
             scan.* = .{
                 .dispatcher = @unionInit(
                     Scan.Dispatcher,
@@ -243,9 +244,14 @@ pub fn ScanBuilderType(
             comptime field: std.meta.FieldEnum(Scan.Dispatcher),
             init_expression: ScanImplType(field),
         ) Error!*Scan {
-            if (self.merge_slots.full()) return Error.ScansMaxExceeded;
+            if (self.merge_count == self.merges.len) {
+                return Error.ScansMaxExceeded;
+            }
 
-            const scan = self.merge_slots.add_one_assume_capacity();
+            const scan = &self.merges[self.merge_count];
+            self.merge_count += 1;
+            assert(self.merge_count <= self.merges.len);
+
             scan.* = .{
                 .dispatcher = @unionInit(
                     Scan.Dispatcher,
@@ -426,7 +432,7 @@ pub fn ScanType(
                 .merge_intersection,
                 .merge_difference,
                 => |*scan_merge| return try scan_merge.next(),
-                inline else => |*scan_tree| {
+                inline else => |*scan_tree, index| {
                     while (try scan_tree.next()) |value| {
                         const ScanTree = @TypeOf(scan_tree.*);
                         if (ScanTree.Tree.Table.tombstone(&value)) {
@@ -435,6 +441,17 @@ pub fn ScanType(
                             continue;
                         }
 
+                        if (index == .id) {
+                            // When iterating over `IdTree` it can return a timestamp zero, which
+                            // indicates an orphaned id.
+                            if (value.timestamp == 0) {
+                                assert(Groove.config.orphaned_ids);
+                                continue;
+                            }
+                        }
+
+                        assert(value.timestamp >= TimestampRange.timestamp_min);
+                        assert(value.timestamp <= TimestampRange.timestamp_max);
                         return value.timestamp;
                     }
                     return null;

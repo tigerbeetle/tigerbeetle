@@ -142,10 +142,29 @@ pub fn ManifestLogType(comptime Storage: type) type {
         // operation.
         tables_removed: TablesRemoved,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !ManifestLog {
+        pub fn init(
+            manifest_log: *ManifestLog,
+            allocator: mem.Allocator,
+            grid: *Grid,
+            options: Options,
+        ) !void {
             assert(options.tree_id_min <= options.tree_id_max);
 
-            const pace = Pace.init(.{
+            manifest_log.* = .{
+                .superblock = grid.superblock,
+                .grid = grid,
+                .options = options,
+
+                .pace = undefined,
+                .log_block_checksums = undefined,
+                .log_block_addresses = undefined,
+                .blocks = undefined,
+                .writes = undefined,
+                .table_extents = undefined,
+                .tables_removed = undefined,
+            };
+
+            manifest_log.pace = Pace.init(.{
                 .tree_count = options.forest_tree_count(),
                 .tables_max = options.forest_table_count_max,
                 .compact_extra_blocks = constants.lsm_manifest_compact_extra_blocks,
@@ -155,17 +174,17 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 log.debug("{?}: Manifest.Pace.{s} = {d}", .{
                     grid.superblock.replica_index,
                     pace_field.name,
-                    @field(pace, pace_field.name),
+                    @field(manifest_log.pace, pace_field.name),
                 });
             }
 
-            var log_block_checksums =
-                try RingBuffer(u128, .slice).init(allocator, pace.log_blocks_max);
-            errdefer log_block_checksums.deinit(allocator);
+            manifest_log.log_block_checksums =
+                try RingBuffer(u128, .slice).init(allocator, manifest_log.pace.log_blocks_max);
+            errdefer manifest_log.log_block_checksums.deinit(allocator);
 
-            var log_block_addresses =
-                try RingBuffer(u64, .slice).init(allocator, pace.log_blocks_max);
-            errdefer log_block_addresses.deinit(allocator);
+            manifest_log.log_block_addresses =
+                try RingBuffer(u64, .slice).init(allocator, manifest_log.pace.log_blocks_max);
+            errdefer manifest_log.log_block_addresses.deinit(allocator);
 
             // The upper-bound of manifest blocks we must buffer.
             //
@@ -173,45 +192,32 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // - a leftover open block from the previous ops (+1 block)
             // - table updates copied from a half bar of manifest compactions
             // - table updates from a half bar of table compactions
-            const half_bar_buffer_blocks_max =
-                1 + pace.half_bar_compact_blocks_max + pace.half_bar_append_blocks_max;
+            const half_bar_buffer_blocks_max = 1 + manifest_log.pace.half_bar_compact_blocks_max +
+                manifest_log.pace.half_bar_append_blocks_max;
             assert(half_bar_buffer_blocks_max >= 3);
 
             // TODO RingBuffer for .slice should be extended to take care of alignment:
-            var blocks =
+            manifest_log.blocks =
                 try RingBuffer(BlockPtr, .slice).init(allocator, half_bar_buffer_blocks_max);
-            errdefer blocks.deinit(allocator);
+            errdefer manifest_log.blocks.deinit(allocator);
 
-            for (blocks.buffer, 0..) |*block, i| {
-                errdefer for (blocks.buffer[0..i]) |b| allocator.free(b);
+            for (manifest_log.blocks.buffer, 0..) |*block, i| {
+                errdefer for (manifest_log.blocks.buffer[0..i]) |b| allocator.free(b);
                 block.* = try allocate_block(allocator);
             }
-            errdefer for (blocks.buffer) |b| allocator.free(b);
+            errdefer for (manifest_log.blocks.buffer) |b| allocator.free(b);
 
-            const writes = try allocator.alloc(Write, half_bar_buffer_blocks_max);
-            errdefer allocator.free(writes);
-            @memset(writes, undefined);
+            manifest_log.writes = try allocator.alloc(Write, half_bar_buffer_blocks_max);
+            errdefer allocator.free(manifest_log.writes);
+            @memset(manifest_log.writes, undefined);
 
-            var table_extents = TableExtents{};
-            try table_extents.ensureTotalCapacity(allocator, tree.table_count_max);
-            errdefer table_extents.deinit(allocator);
+            manifest_log.table_extents = TableExtents{};
+            try manifest_log.table_extents.ensureTotalCapacity(allocator, tree.table_count_max);
+            errdefer manifest_log.table_extents.deinit(allocator);
 
-            var tables_removed = TablesRemoved{};
-            try tables_removed.ensureTotalCapacity(allocator, tree.table_count_max);
-            errdefer tables_removed.deinit(allocator);
-
-            return ManifestLog{
-                .superblock = grid.superblock,
-                .grid = grid,
-                .options = options,
-                .pace = pace,
-                .log_block_checksums = log_block_checksums,
-                .log_block_addresses = log_block_addresses,
-                .blocks = blocks,
-                .writes = writes,
-                .table_extents = table_extents,
-                .tables_removed = tables_removed,
-            };
+            manifest_log.tables_removed = TablesRemoved{};
+            try manifest_log.tables_removed.ensureTotalCapacity(allocator, tree.table_count_max);
+            errdefer manifest_log.tables_removed.deinit(allocator);
         }
 
         pub fn deinit(manifest_log: *ManifestLog, allocator: mem.Allocator) void {
@@ -227,6 +233,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
         pub fn reset(manifest_log: *ManifestLog) void {
             assert(manifest_log.log_block_checksums.count ==
                 manifest_log.log_block_addresses.count);
+
+            manifest_log.grid.trace.reset(.compact_manifest);
 
             manifest_log.log_block_checksums.clear();
             manifest_log.log_block_addresses.clear();
@@ -660,9 +668,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // half-bar.
             // This is because otherwise it would mess with our grid reserve / forfeit ordering,
             // since we now reserve / forfeit per beat.
-            assert((op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0);
+            assert((op + 1) % @divExact(constants.lsm_compaction_ops, 2) == 0);
 
-            if (op < constants.lsm_batch_multiple or
+            manifest_log.grid.trace.start(.compact_manifest, .{});
+
+            if (op < constants.lsm_compaction_ops or
                 manifest_log.superblock.working.vsr_state.op_compacted(op))
             {
                 manifest_log.read_callback = callback;
@@ -683,7 +693,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.grid_reservation = manifest_log.grid.reserve(
                 manifest_log.compact_blocks.? +
                     manifest_log.pace.half_bar_append_blocks_max,
-            ).?;
+            );
 
             manifest_log.read_callback = callback;
             manifest_log.flush(compact_next_block);
@@ -697,6 +707,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.blocks.count == 0);
             assert(manifest_log.entry_count == 0);
             assert(manifest_log.compact_blocks == null);
+
+            manifest_log.grid.trace.stop(.compact_manifest, .{});
 
             const callback = manifest_log.read_callback.?;
             manifest_log.read_callback = null;
@@ -810,6 +822,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.grid_reservation != null);
             assert(manifest_log.compact_blocks.? == 0);
 
+            manifest_log.grid.trace.stop(.compact_manifest, .{});
+
             const callback = manifest_log.read_callback.?;
             manifest_log.read_callback = null;
             manifest_log.compact_blocks = null;
@@ -846,8 +860,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 manifest_log.close_block();
                 assert(manifest_log.entry_count == 0);
                 assert(manifest_log.blocks_closed > 0);
-                assert(manifest_log.blocks_closed == manifest_log.blocks.count);
             }
+            assert(manifest_log.blocks_closed == manifest_log.blocks.count);
 
             manifest_log.flush(callback);
         }

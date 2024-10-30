@@ -15,8 +15,8 @@ coordination.
 
 Multiple versions in a single binary are required for two reasons:
 * It allows a replica to crash after the binary has been upgraded, and still come back online.
-	* It also allows for deployments, like Docker, where the binary is immutable and the process
-	  has to be terminated to learn about new versions from itself.
+  * It also allows for deployments, like Docker, where the binary is immutable and the process
+    has to be terminated to learn about new versions from itself.
 * It allows for migrations over a range to happen easily without having to manually jump from
   version to version.
 
@@ -85,7 +85,7 @@ version is what will checkpoint to the new version, at which point the exec happ
 
 ## Executing
 The final step is executing into the new version of TigerBeetle. On Linux, this is handled by
-`execveat` which allows executing from a `memfd`. If executing the latest release, `exec_latest`
+`execveat` which allows executing from a `memfd`. If executing the latest release, `exec_current`
 re-execs the `memfd` as-is. If executing an older release, `exec_release` copies it out of the
 pack, verifies its checksum, and then executes it.
 

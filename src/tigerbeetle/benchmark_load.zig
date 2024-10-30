@@ -28,6 +28,8 @@ const Client = vsr.Client(StateMachine, MessageBus);
 const tb = vsr.tigerbeetle;
 const StatsD = vsr.statsd.StatsD;
 const IdPermutation = vsr.testing.IdPermutation;
+const ZipfianGenerator = stdx.ZipfianGenerator;
+const ZipfianShuffled = stdx.ZipfianShuffled;
 
 const cli = @import("./cli.zig");
 
@@ -41,26 +43,29 @@ pub fn main(
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built with '-Drelease' for reasonable results.\n", .{});
     }
-    if (!vsr.constants.config.is_production()) {
-        try stderr.print(
-            \\Benchmark must be built with '-Dconfig=production' for reasonable results.
-            \\
-        , .{});
+    if (!vsr.constants.config.process.direct_io) {
+        log.warn("direct io is disabled", .{});
+    }
+    if (vsr.constants.config.process.verify) {
+        log.warn("extra assertions are enabled", .{});
     }
 
-    if (cli_args.account_count < 2) flags.fatal(
+    if (cli_args.account_count < 2) vsr.fatal(
+        .cli,
         "--account-count: need at least two accounts, got {}",
         .{cli_args.account_count},
     );
 
     // The first account_count_hot accounts are "hot" -- they will be the debit side of
     // transfer_hot_percent of the transfers.
-    if (cli_args.account_count_hot > cli_args.account_count) flags.fatal(
+    if (cli_args.account_count_hot > cli_args.account_count) vsr.fatal(
+        .cli,
         "--account-count-hot: must be less-than-or-equal-to --account-count, got {}",
         .{cli_args.account_count_hot},
     );
 
-    if (cli_args.transfer_hot_percent > 100) flags.fatal(
+    if (cli_args.transfer_hot_percent > 100) vsr.fatal(
+        .cli,
         "--transfer-hot-percent: must be less-than-or-equal-to 100, got {}",
         .{cli_args.transfer_hot_percent},
     );
@@ -143,6 +148,22 @@ pub fn main(
         .reversed => .{ .inversion = {} },
     };
 
+    assert(cli_args.account_count >= cli_args.account_count_hot);
+    const account_generator = Generator.from_distribution(
+        cli_args.account_distribution,
+        cli_args.account_count - cli_args.account_count_hot,
+        random,
+    );
+    const account_generator_hot = Generator.from_distribution(
+        cli_args.account_distribution,
+        cli_args.account_count_hot,
+        random,
+    );
+
+    log.info("Account distribution: {s}", .{
+        @tagName(cli_args.account_distribution),
+    });
+
     var benchmark = Benchmark{
         .io = &io,
         .message_pool = &message_pool,
@@ -150,7 +171,10 @@ pub fn main(
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
         .account_count_hot = cli_args.account_count_hot,
-        .account_balances = cli_args.account_balances,
+        .account_generator = account_generator,
+        .account_generator_hot = account_generator_hot,
+        .flag_history = cli_args.flag_history,
+        .flag_imported = cli_args.flag_imported,
         .account_index = 0,
         .query_count = cli_args.query_count,
         .query_index = 0,
@@ -228,6 +252,28 @@ pub fn main(
     }
 }
 
+const Generator = union(enum) {
+    zipfian: ZipfianShuffled,
+    latest: ZipfianGenerator,
+    uniform: u64,
+
+    fn from_distribution(
+        distribution: cli.Command.Benchmark.Distribution,
+        count: u64,
+        random: std.Random,
+    ) Generator {
+        return switch (distribution) {
+            .zipfian => .{
+                .zipfian = ZipfianShuffled.init(count, random),
+            },
+            .latest => .{
+                .latest = ZipfianGenerator.init(count),
+            },
+            .uniform => .{ .uniform = count },
+        };
+    }
+};
+
 const Benchmark = struct {
     io: *IO,
     message_pool: *MessagePool,
@@ -235,7 +281,10 @@ const Benchmark = struct {
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
     account_count_hot: usize,
-    account_balances: bool,
+    account_generator: Generator,
+    account_generator_hot: Generator,
+    flag_history: bool,
+    flag_imported: bool,
     account_index: usize,
     query_count: usize,
     query_index: usize,
@@ -277,12 +326,14 @@ const Benchmark = struct {
             .ledger = 2,
             .code = 1,
             .flags = .{
-                .history = b.account_balances,
+                .history = b.flag_history,
+                .imported = b.flag_imported,
             },
             .debits_pending = 0,
             .debits_posted = 0,
             .credits_pending = 0,
             .credits_posted = 0,
+            .timestamp = if (b.flag_imported) b.account_index + 1 else 0,
         };
     }
 
@@ -327,27 +378,59 @@ const Benchmark = struct {
         b.create_accounts();
     }
 
+    fn gen_account_index(b: *Benchmark, generator: *Generator) u64 {
+        const random = b.rng.random();
+        switch (generator.*) {
+            .zipfian => |gen| {
+                // zipfian set size must be same as account set size
+                assert(b.account_count == gen.gen.n);
+                const index = gen.next(random);
+                assert(index < b.account_count);
+                return index;
+            },
+            .latest => |gen| {
+                assert(b.account_count == gen.n);
+                const index_rev = gen.next(random);
+                assert(index_rev < b.account_count);
+                return b.account_count - index_rev - 1;
+            },
+            .uniform => |count| {
+                const index = random.uintLessThan(u64, count);
+                assert(index < b.account_count);
+                return index;
+            },
+        }
+    }
+
     fn create_transfer(b: *Benchmark) tb.Transfer {
         const random = b.rng.random();
+
+        // The set of accounts is divided into two different "worlds" by
+        // `account_count_hot`. Sometimes the debit account will be selected
+        // from the first `account_count_hot` accounts; otherwise both
+        // debit and credit will be selected from an account >= `account_count_hot`.
 
         const debit_account_hot = b.account_count_hot > 0 and
             random.uintLessThan(u64, 100) < b.transfer_hot_percent;
 
         const debit_account_index = if (debit_account_hot)
-            random.uintLessThan(u64, b.account_count_hot)
+            b.gen_account_index(&b.account_generator_hot)
         else
-            random.uintLessThan(u64, b.account_count);
+            b.gen_account_index(&b.account_generator) + b.account_count_hot;
         const credit_account_index = index: {
-            var index = random.uintLessThan(u64, b.account_count);
+            var index = b.gen_account_index(&b.account_generator) + b.account_count_hot;
             if (index == debit_account_index) {
-                index = (index + 1) % b.account_count;
+                index = (index + 1) % b.account_count + b.account_count_hot;
             }
             break :index index;
         };
+        assert(debit_account_index < b.account_count);
+        assert(credit_account_index < b.account_count);
+        assert(debit_account_index != credit_account_index);
 
         const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
         const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
-        assert(debit_account_index != credit_account_index);
+        assert(debit_account_id != credit_account_id);
 
         // 30% of pending transfers.
         const pending = b.transfer_pending and random.intRangeAtMost(u8, 0, 9) < 3;
@@ -364,10 +447,13 @@ const Benchmark = struct {
             .pending_id = 0,
             .ledger = 2,
             .code = random.int(u16) +| 1,
-            .flags = .{ .pending = pending },
+            .flags = .{
+                .pending = pending,
+                .imported = b.flag_imported,
+            },
             .timeout = if (pending) random.intRangeAtMost(u32, 1, 60) else 0,
             .amount = random_int_exponential(random, u64, 10_000) +| 1,
-            .timestamp = 0,
+            .timestamp = if (b.flag_imported) b.account_index + b.transfer_index + 1 else 0,
         };
     }
 
@@ -423,7 +509,7 @@ const Benchmark = struct {
         const ms_time = @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms);
 
         if (b.print_batch_timings) {
-            log.info("batch {}: {} tx in {} ms\n", .{
+            log.info("batch {}: {} tx in {} ms", .{
                 b.batch_index,
                 b.batch_transfers.items.len,
                 ms_time,
@@ -483,9 +569,13 @@ const Benchmark = struct {
             return;
         }
 
-        b.account_index = b.rng.random().intRangeLessThan(usize, 0, b.account_count);
+        b.account_index = b.gen_account_index(&b.account_generator);
         var filter = tb.AccountFilter{
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .code = 0,
             .timestamp_min = 0,
             .timestamp_max = 0,
             .limit = @divExact(
@@ -696,25 +786,6 @@ const Benchmark = struct {
         b.done = true;
     }
 };
-
-fn print_deciles(
-    stdout: anytype,
-    label: []const u8,
-    latencies: []const u64,
-) void {
-    var decile: usize = 0;
-    while (decile <= 10) : (decile += 1) {
-        const index = @divTrunc(latencies.len * decile, 10) -| 1;
-        stdout.print("{s} latency p{}0 = {} ms\n", .{
-            label,
-            decile,
-            @divTrunc(
-                latencies[index],
-                std.time.ns_per_ms,
-            ),
-        }) catch unreachable;
-    }
-}
 
 fn print_percentiles_histogram(
     stdout: anytype,

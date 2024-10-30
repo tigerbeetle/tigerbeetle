@@ -12,11 +12,11 @@
 //! The cluster address is then passed onto `benchmark_load.zig`, which deals with both offering
 //! the load and measuring response latencies and throughput. The load runs in-process.
 
-const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const ChildProcess = std.process.Child;
 
+const vsr = @import("vsr");
 const cli = @import("./cli.zig");
 const benchmark_load = @import("./benchmark_load.zig");
 
@@ -58,6 +58,10 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
             .data_file = data_file,
             .args = args,
         });
+    } else {
+        if (args.trace) |_| {
+            vsr.fatal(.cli, "--trace: incompatible with --addresses", .{});
+        }
     }
 
     const addresses = if (args.addresses) |*addresses|
@@ -150,6 +154,7 @@ fn start(allocator: std.mem.Allocator, options: struct {
         .{ options.args.cache_transfers_pending, "cache-transfers-pending" },
         .{ options.args.cache_account_balances, "cache-account-history" },
         .{ options.args.cache_grid, "cache-grid" },
+        .{ options.args.trace, "trace" },
     };
 
     inline for (forward_args) |forward_arg| {
@@ -162,6 +167,10 @@ fn start(allocator: std.mem.Allocator, options: struct {
                 }),
             );
         }
+    }
+
+    if (options.args.trace) |_| {
+        try start_args.append(arena.allocator(), "--experimental");
     }
 
     try start_args.append(arena.allocator(), options.data_file);

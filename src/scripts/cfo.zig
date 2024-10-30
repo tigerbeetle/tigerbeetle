@@ -5,7 +5,7 @@
 //!     git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
 //!     while True:
 //!         git fetch origin && git reset --hard origin/main
-//!         ./scripts/install_zig.sh
+//!         ./zig/download.sh
 //!         ./zig/zig build scripts -- cfo
 //!
 //! By modifying this script, we can make those machines do interesting things.
@@ -55,7 +55,7 @@ const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 
-pub const CliArgs = struct {
+pub const CLIArgs = struct {
     budget_minutes: u64 = 10,
     hang_minutes: u64 = 30,
     concurrency: ?u32 = null,
@@ -109,12 +109,15 @@ const Fuzzer = enum {
     }
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
         return error.NotSupported;
     }
 
-    assert(try shell.exec_status_ok("git --version", .{}));
+    log.info("start {}", .{stdx.DateTimeUTC.now()});
+    defer log.info("end {}", .{stdx.DateTimeUTC.now()});
+
+    try shell.exec("git --version", .{});
 
     // Read-write token for <https://github.com/tigerbeetle/devhubdb>.
     const devhub_token_option = shell.env_get_option("DEVHUBDB_PAT");
@@ -127,7 +130,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     if (gh_token_option == null) {
         log.err("'GH_TOKEN' environmental variable is not set, will not fetch pull requests", .{});
     } else {
-        assert(try shell.exec_status_ok("gh --version", .{}));
+        try shell.exec("gh --version", .{});
     }
 
     var seeds = std.ArrayList(SeedRecord).init(shell.arena.allocator());
@@ -214,10 +217,7 @@ fn run_fuzzers(
                         args.clearRetainingCapacity();
                         try args.appendSlice(&.{ "build", "-Drelease" });
                         try fuzzer.fill_args_build(&args);
-                        shell.exec_options(.{ .echo = false }, "{zig} {args}", .{
-                            .zig = shell.zig_exe.?,
-                            .args = args.items,
-                        }) catch {
+                        shell.exec_zig("{args}", .{ .args = args.items }) catch {
                             // Ignore the error, it'll get recorded by the run anyway.
                         };
                     }
@@ -530,7 +530,7 @@ fn upload_results(
         const json = try SeedRecord.to_json(arena.allocator(), seeds_merged);
         try shell.cwd.writeFile(.{ .sub_path = "./fuzzing/data.json", .data = json });
         try shell.exec("git add ./fuzzing/data.json", .{});
-        try shell.git_env_setup();
+        try shell.git_env_setup(.{ .use_hostname = true });
         try shell.exec("git commit -m 🌱", .{});
         if (shell.exec("git push", .{})) {
             log.info("seeds updated", .{});

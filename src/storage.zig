@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const os = std.os;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -242,7 +241,7 @@ pub fn Storage(comptime IO: type) type {
                     const target = read.target();
                     if (target.len > constants.sector_size) {
                         // We tried to read more than a logical sector and failed.
-                        log.err("latent sector error: offset={}, subdividing read...", .{
+                        log.warn("latent sector error: offset={}, subdividing read...", .{
                             read.offset,
                         });
 
@@ -268,7 +267,7 @@ pub fn Storage(comptime IO: type) type {
                         return;
                     } else {
                         // We tried to read at (or less than) logical sector granularity and failed.
-                        log.err("latent sector error: offset={}, zeroing sector...", .{
+                        log.warn("latent sector error: offset={}, zeroing sector...", .{
                             read.offset,
                         });
 
@@ -283,7 +282,7 @@ pub fn Storage(comptime IO: type) type {
                         // We could set `read.target_max` to `vsr.sector_ceil(read.buffer.len)` here
                         // in order to restart our pseudo-binary search on the rest of the sectors
                         // to be read, optimistically assuming that this is the last failing sector.
-                        // However, data corruption that causes EIO errors often has spacial
+                        // However, data corruption that causes EIO errors often has spatial
                         // locality. Therefore, restarting our pseudo-binary search here might give
                         // us abysmal performance in the (not uncommon) case of many successive
                         // failing sectors.
@@ -385,6 +384,13 @@ pub fn Storage(comptime IO: type) type {
                 error.InputOutput => @panic("latent sector error: no spare sectors to reallocate"),
                 // TODO: It seems like it might be possible for some filesystems to return ETIMEDOUT
                 // here. Consider handling this without panicking.
+                error.NoSpaceLeft => {
+                    vsr.fatal(
+                        .no_space_left,
+                        "write failed: no space left on device (offset={} size={})",
+                        .{ write.offset, write.buffer.len },
+                    );
+                },
                 else => {
                     log.err(
                         "impossible write: offset={} buffer.len={} error={s}",

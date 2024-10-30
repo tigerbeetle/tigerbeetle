@@ -119,7 +119,7 @@ pub const StorageChecker = struct {
         // If we are syncing, our grid will not be up to date.
         if (superblock.working.vsr_state.sync_op_max > 0) return;
 
-        const bar_beat_count = constants.lsm_batch_multiple;
+        const bar_beat_count = constants.lsm_compaction_ops;
         if ((replica.commit_min + 1) % bar_beat_count != 0) return;
 
         // The ManifestLog acquires a single address (for the "open" block) potentially multiple
@@ -164,12 +164,17 @@ pub const StorageChecker = struct {
         }
     }
 
-    pub fn replica_checkpoint(checker: *StorageChecker, superblock: *const SuperBlock) !void {
-        const syncing = superblock.working.vsr_state.sync_op_max > 0;
+    pub fn replica_checkpoint(
+        checker: *StorageChecker,
+        comptime Replica: type,
+        replica: *const Replica,
+    ) !void {
+        replica.assert_free_set_consistent();
 
+        const syncing = replica.superblock.working.vsr_state.sync_op_max > 0;
         try checker.check(
             "replica_checkpoint",
-            superblock,
+            &replica.superblock,
             std.enums.EnumSet(CheckpointArea).init(.{
                 .superblock_checkpoint = true,
                 .client_replies = !syncing,

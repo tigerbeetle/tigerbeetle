@@ -7,38 +7,32 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
-const binary_search = @import("binary_search.zig");
 const allocator = fuzz.allocator;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
-const tracer = @import("../tracer.zig");
 
 const Direction = @import("../direction.zig").Direction;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
-const StateMachine =
-    @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const GridType = @import("../vsr/grid.zig").GridType;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
-const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
 const TableType = @import("table.zig").TableType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 const compaction_op_min = @import("compaction.zig").compaction_op_min;
-const Exhausted = @import("compaction.zig").Exhausted;
+const compaction_block_count_bar_max = @import("compaction.zig").compaction_block_count_bar_max;
+const compaction_block_count_beat_min = @import("compaction.zig").compaction_block_count_beat_min;
+const ResourcePool = @import("compaction.zig").ResourcePoolType(Grid);
 
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
-const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
 const SortedSegmentedArray = @import("./segmented_array.zig").SortedSegmentedArray;
-
-const CompactionHelperType = @import("compaction.zig").CompactionHelperType;
-const CompactionHelper = CompactionHelperType(Grid);
 
 const Value = packed struct(u128) {
     id: u64,
@@ -78,6 +72,7 @@ const FuzzOp = union(enum) {
 
     compact: struct {
         op: u64,
+        beats_remaining: u64,
         checkpoint: bool,
     },
     put: Value,
@@ -88,7 +83,7 @@ const FuzzOp = union(enum) {
 
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
 const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Value));
-const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
+const value_count_max = constants.lsm_compaction_ops * commit_entries_max;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const table_count_max = @import("tree.zig").table_count_max;
 
@@ -100,12 +95,12 @@ const scan_results_max = 4096;
 const events_max = 10_000_000;
 
 // We must call compact after every 'batch'.
-// Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
+// Every `lsm_compaction_ops` batches may put/remove `value_count_max` values.
 // Every `FuzzOp.put` issues one remove and one put.
 const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
 const compacts_per_checkpoint = stdx.div_ceil(
     constants.journal_slot_count,
-    constants.lsm_batch_multiple,
+    constants.lsm_compaction_ops,
 );
 
 fn EnvironmentType(comptime table_usage: TableUsage) type {
@@ -124,7 +119,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             table_usage,
         );
         const ScanTree = ScanTreeType(*Environment, Tree, Storage);
-        const CompactionWork = stdx.BoundedArray(*Tree.Compaction, constants.lsm_levels);
 
         const State = enum {
             init,
@@ -134,7 +128,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             tree_init,
             manifest_log_open,
             fuzzing,
-            blipping,
             tree_compact,
             manifest_log_compact,
             grid_checkpoint,
@@ -145,6 +138,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         state: State,
         storage: *Storage,
+        trace: vsr.trace.Tracer,
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context,
         grid: Grid,
@@ -160,41 +154,44 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         scan_results_model: []Value,
         compaction_exhausted: bool = false,
 
-        block_pool: CompactionHelper.CompactionBlockFIFO,
-        block_pool_raw: []CompactionHelper.CompactionBlock,
+        pool: ResourcePool,
 
-        pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
+        pub fn run(storage: *Storage, block_count: u32, fuzz_ops: []const FuzzOp) !void {
             var env: Environment = undefined;
             env.state = .init;
             env.storage = storage;
 
+            env.trace = try vsr.trace.Tracer.init(allocator, replica, .{});
+            defer env.trace.deinit(allocator);
+
             env.superblock = try SuperBlock.init(allocator, .{
                 .storage = env.storage,
-                .storage_size_limit = constants.storage_size_limit_max,
+                .storage_size_limit = constants.storage_size_limit_default,
             });
             defer env.superblock.deinit(allocator);
 
             env.grid = try Grid.init(allocator, .{
                 .superblock = &env.superblock,
+                .trace = &env.trace,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
             });
             defer env.grid.deinit(allocator);
 
-            env.manifest_log = try ManifestLog.init(allocator, &env.grid, .{
+            try env.manifest_log.init(allocator, &env.grid, .{
                 .tree_id_min = 1,
                 .tree_id_max = 1,
                 .forest_table_count_max = table_count_max,
             });
             defer env.manifest_log.deinit(allocator);
 
-            env.node_pool = try NodePool.init(allocator, node_count);
+            try env.node_pool.init(allocator, node_count);
             defer env.node_pool.deinit(allocator);
 
             env.tree = undefined;
             env.lookup_value = null;
 
-            env.scan_buffer = try ScanBuffer.init(allocator);
+            try env.scan_buffer.init(allocator, .{ .index = 0 });
             defer env.scan_buffer.deinit(allocator);
 
             env.scan_results = try allocator.alloc(Value, scan_results_max);
@@ -204,25 +201,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.scan_results_model = try allocator.alloc(Value, scan_results_max);
             defer allocator.free(env.scan_results_model);
 
-            // TODO: Pull out these constants. 3 is block_count_bar_single, 8 is
-            // minimum_block_count_beat.
-            const block_count = 3 * stdx.div_ceil(constants.lsm_levels, 2) + 8;
-
-            env.block_pool_raw = try allocator.alloc(CompactionHelper.CompactionBlock, block_count);
-            defer allocator.free(env.block_pool_raw);
-
-            env.block_pool = .{
-                .name = "block_pool",
-                .verify_push = false,
-            };
-
-            for (env.block_pool_raw) |*compaction_block| {
-                compaction_block.* = .{
-                    .block = try allocate_block(allocator),
-                };
-                env.block_pool.push(compaction_block);
-            }
-            defer for (env.block_pool_raw) |block| allocator.free(block.block);
+            env.pool = try ResourcePool.init(allocator, block_count);
+            defer env.pool.deinit(allocator);
 
             try env.open_then_apply(fuzz_ops);
         }
@@ -239,7 +219,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         ) void {
             // Sometimes operations complete synchronously so we might already be in next_state
             // before ticking.
-            while (env.state == current_state) env.storage.tick();
+            assert(env.state == current_state or env.state == next_state);
+            const safety_counter = 10_000_000;
+            for (0..safety_counter) |_| {
+                if (env.state != current_state) break;
+                env.storage.tick();
+            } else unreachable;
             assert(env.state == next_state);
         }
 
@@ -259,7 +244,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.grid.open(grid_open_callback);
 
             env.tick_until_state_change(.free_set_open, .tree_init);
-            env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, .{
+            try env.tree.init(allocator, &env.node_pool, &env.grid, .{
                 .id = 1,
                 .name = "Key.Value",
             }, .{
@@ -309,83 +294,67 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.manifest_log_open, .fuzzing);
         }
 
-        pub fn compact(env: *Environment, op: u64) void {
-            const compaction_beat = op % constants.lsm_batch_multiple;
+        pub fn compact(env: *Environment, op: u64, beats_remaining: u64) void {
+            const half_bar = @divExact(constants.lsm_compaction_ops, 2);
+            if (op < half_bar) return;
+            const compaction_beat = op % constants.lsm_compaction_ops;
 
-            const last_half_beat =
-                compaction_beat == @divExact(constants.lsm_batch_multiple, 2) - 1;
-            const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
+            const first_beat = compaction_beat == 0;
+            const half_beat = compaction_beat == half_bar;
 
-            if (!last_beat and !last_half_beat) return;
+            const last_half_beat = compaction_beat == half_bar - 1;
+            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
-            var compaction_work = CompactionWork{};
+            if (last_beat or last_half_beat) assert(beats_remaining == 1);
+
+            assert(env.pool.idle());
+            if (first_beat or half_beat) {
+                assert(env.pool.blocks_acquired() == 0);
+            }
+
+            var compactions_active: [constants.lsm_levels]*Tree.Compaction = undefined;
+            var compactions_active_count: usize = 0;
             for (&env.tree.compactions) |*compaction| {
-                if (last_half_beat and compaction.level_b % 2 != 0) continue;
-                if (last_beat and compaction.level_b % 2 == 0) continue;
-
-                const maybe_compaction_work = compaction.bar_setup(&env.tree, op);
-                if (maybe_compaction_work != null) {
-                    compaction_work.append_assume_capacity(compaction);
+                if ((compaction_beat < half_bar) == (compaction.level_b % 2 == 1)) {
+                    compactions_active[compactions_active_count] = compaction;
+                    compactions_active_count += 1;
                 }
             }
+            assert(compactions_active_count <= stdx.div_ceil(constants.lsm_levels, 2));
+            const compactions_slice = compactions_active[0..compactions_active_count];
 
-            assert(env.block_pool.count == env.block_pool_raw.len);
-
-            for (compaction_work.const_slice()) |compaction| {
-                if (compaction.bar != null and compaction.bar.?.move_table) {
-                    continue;
+            for (compactions_slice) |compaction| {
+                if (first_beat or half_beat) compaction.bar_commence(op);
+            }
+            for (compactions_slice) |compaction| {
+                compaction.beat_commence(beats_remaining);
+            }
+            for (compactions_slice) |compaction| {
+                assert(env.pool.idle());
+                env.change_state(.fuzzing, .tree_compact);
+                switch (compaction.compaction_dispatch_enter(&env.pool, compact_callback)) {
+                    .active => env.tick_until_state_change(.tree_compact, .fuzzing),
+                    .beat_finished => env.change_state(.tree_compact, .fuzzing),
                 }
-                const source_a_immutable_block = env.block_pool.pop().?;
-                const target_index_blocks = CompactionHelper.BlockFIFO.init(&env.block_pool, 2);
+                assert(env.pool.idle());
+            }
 
-                const beat_blocks = .{
-                    .source_index_block_a = env.block_pool.pop().?,
-                    .source_index_block_b = env.block_pool.pop().?,
-                    .source_value_blocks = .{
-                        CompactionHelper.BlockFIFO.init(&env.block_pool, 2),
-                        CompactionHelper.BlockFIFO.init(&env.block_pool, 2),
-                    },
-                    .target_value_blocks = CompactionHelper.BlockFIFO.init(&env.block_pool, 2),
-                };
+            if (last_beat or last_half_beat) {
+                assert(env.pool.blocks_acquired() == 0);
 
-                compaction.bar_setup_budget(1, target_index_blocks, source_a_immutable_block);
-                compaction.beat_grid_reserve();
-                compaction.beat_blocks_assign(beat_blocks);
-
-                env.compaction_exhausted = false;
-                while (!env.compaction_exhausted) {
-                    env.change_state(.fuzzing, .blipping);
-                    compaction.blip_read(blip_callback, env);
-                    env.tick_until_state_change(.blipping, .fuzzing);
-
-                    env.change_state(.fuzzing, .blipping);
-                    compaction.blip_merge(blip_callback, env);
-                    env.tick_until_state_change(.blipping, .fuzzing);
-
-                    env.change_state(.fuzzing, .blipping);
-                    compaction.blip_write(blip_callback, env);
-                    env.tick_until_state_change(.blipping, .fuzzing);
+                if (op >= constants.lsm_compaction_ops) {
+                    env.change_state(.fuzzing, .manifest_log_compact);
+                    env.manifest_log.compact(manifest_log_compact_callback, op);
+                    env.tick_until_state_change(.manifest_log_compact, .fuzzing);
                 }
 
-                compaction.beat_blocks_unassign(&env.block_pool);
-                compaction.beat_grid_forfeit();
-            }
+                for (compactions_slice) |compaction| {
+                    compaction.bar_complete();
+                }
 
-            if (op >= constants.lsm_batch_multiple) {
-                env.change_state(.fuzzing, .manifest_log_compact);
-                env.manifest_log.compact(manifest_log_compact_callback, op);
-                env.tick_until_state_change(.manifest_log_compact, .fuzzing);
-            }
-
-            for (compaction_work.const_slice()) |compaction| {
-                compaction.bar_blocks_unassign(&env.block_pool);
-                compaction.bar_apply_to_manifest();
-            }
-
-            assert(env.block_pool.count == env.block_pool_raw.len);
-
-            if (op >= constants.lsm_batch_multiple) {
-                env.manifest_log.compact_end();
+                if (op >= constants.lsm_compaction_ops) {
+                    env.manifest_log.compact_end();
+                }
             }
 
             if (last_beat) {
@@ -397,24 +366,15 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 env.tree.manifest.assert_level_table_counts();
             }
         }
-        fn blip_callback(env_opaque: *anyopaque, maybe_exhausted: ?Exhausted) void {
-            const env: *Environment = @ptrCast(
-                @alignCast(env_opaque),
-            );
-            if (maybe_exhausted) |exhausted| {
-                env.compaction_exhausted = exhausted.bar;
-            }
-            env.change_state(.blipping, .fuzzing);
+
+        fn compact_callback(pool: *ResourcePool) void {
+            const env: *Environment = @fieldParentPtr("pool", pool);
+            env.change_state(.tree_compact, .fuzzing);
         }
 
         fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {
             const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
             env.change_state(.manifest_log_compact, .fuzzing);
-        }
-
-        fn tree_compact_callback(tree: *Tree) void {
-            const env: *Environment = @fieldParentPtr("tree", tree);
-            env.change_state(.tree_compact, .fuzzing);
         }
 
         pub fn checkpoint(env: *Environment, op: u64) void {
@@ -424,7 +384,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.fuzzing, .grid_checkpoint);
             env.tick_until_state_change(.grid_checkpoint, .fuzzing);
 
-            const checkpoint_op = op - constants.lsm_batch_multiple;
+            const checkpoint_op = op - constants.lsm_compaction_ops;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .header = header: {
                     var header = vsr.Header.Prepare.root(cluster);
@@ -432,6 +392,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     header.set_checksum();
                     break :header header;
                 },
+                .view_attributes = null,
                 .manifest_references = std.mem.zeroes(vsr.SuperBlockManifestReferences),
                 .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
                 .client_sessions_reference = .{
@@ -443,7 +404,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 .commit_max = checkpoint_op + 1,
                 .sync_op_min = 0,
                 .sync_op_max = 0,
-                .sync_view = 0,
                 .storage_size = vsr.superblock.data_file_size_min +
                     (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
                 .release = vsr.Release.minimum,
@@ -524,9 +484,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-            var model = try Model.init(table_usage);
+            var model: Model = undefined;
+            try model.init(table_usage);
             defer model.deinit();
 
+            var value_count: u64 = 0;
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
                 assert(env.state == .fuzzing);
                 log.debug("Running fuzz_ops[{}/{}] == {}", .{
@@ -542,13 +504,31 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                         @as(f64, @floatFromInt(model_size)),
                 });
 
+                // If the fuzzer manages to fill up the whole tree (unlikely, but possible), it
+                // continues to only issue read operations.
+                const tree_full = tree_full: {
+                    const last_level = &env.tree.manifest.levels[constants.lsm_levels - 1];
+                    const last_level_tables_max =
+                        std.math.pow(u32, constants.lsm_growth_factor, constants.lsm_levels);
+                    if (last_level.table_count_visible == last_level_tables_max) {
+                        // Sanity-check that this doesn't happen after too few ops.
+                        assert(value_count >= last_level_tables_max);
+                        break :tree_full true;
+                    } else {
+                        break :tree_full false;
+                    }
+                };
+
                 // Apply fuzz_op to the tree and the model.
                 switch (fuzz_op) {
                     .compact => |c| {
-                        env.compact(c.op);
+                        if (tree_full) continue;
+                        env.compact(c.op, c.beats_remaining);
                         if (c.checkpoint) env.checkpoint(c.op);
                     },
                     .put => |value| {
+                        if (tree_full) continue;
+                        value_count += 2;
                         if (table_usage == .secondary_index) {
                             // Secondary index requires that the key implies the value (typically
                             // key ≡ value), and that there are no updates.
@@ -568,6 +548,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                         }
                     },
                     .remove => |value| {
+                        if (tree_full) continue;
+                        value_count += 1;
                         if (table_usage == .secondary_index and !model.contains(&value)) {
                             // Not allowed to remove non-present keys
                         } else {
@@ -647,20 +629,34 @@ const Model = struct {
         .{ .verify = false },
     );
 
-    array: Array,
-    node_pool: NodePool,
     table_usage: TableUsage,
+    node_pool: NodePool,
+    array: Array,
 
-    fn init(table_usage: TableUsage) !Model {
+    fn init(model: *Model, table_usage: TableUsage) !void {
+        model.* = .{
+            .table_usage = table_usage,
+
+            .node_pool = undefined,
+            .array = undefined,
+        };
+
         const model_node_count = stdx.div_ceil(
             events_max * @sizeOf(Value),
             NodePool.node_size,
         );
-        return .{
-            .array = try Array.init(allocator),
-            .node_pool = try NodePool.init(allocator, model_node_count),
-            .table_usage = table_usage,
-        };
+
+        try model.node_pool.init(allocator, model_node_count);
+        errdefer model.node_pool.deinit(allocator);
+
+        model.array = try Array.init(allocator);
+        errdefer model.array.deinit(allocator, &model.node_pool);
+    }
+
+    fn deinit(model: *Model) void {
+        model.array.deinit(allocator, &model.node_pool);
+        model.node_pool.deinit(allocator);
+        model.* = undefined;
     }
 
     fn count(model: *const Model) u32 {
@@ -746,12 +742,6 @@ const Model = struct {
             );
         }
     }
-
-    fn deinit(model: *Model) void {
-        model.array.deinit(allocator, &model.node_pool);
-        model.node_pool.deinit(allocator);
-        model.* = undefined;
-    }
 };
 
 fn random_id(random: std.rand.Random, comptime Int: type) Int {
@@ -775,13 +765,13 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (random.boolean()) 0 else 1,
         // Always do puts, and always more puts than removes.
-        .put = constants.lsm_batch_multiple * 2,
+        .put = constants.lsm_compaction_ops * 2,
         // Maybe do some removes.
-        .remove = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .remove = if (random.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some gets.
-        .get = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .get = if (random.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
-        .scan = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .scan = if (random.boolean()) 0 else constants.lsm_compaction_ops,
     };
     log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
@@ -843,22 +833,21 @@ fn generate_compact(
     random: std.rand.Random,
     options: struct { op: u64 },
 ) FuzzOp {
+    const half_bar = @divExact(constants.lsm_compaction_ops, 2);
     const checkpoint =
         // Can only checkpoint on the last beat of the bar.
-        options.op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
-        options.op > constants.lsm_batch_multiple and
+        options.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
+        options.op > constants.lsm_compaction_ops and
         // Checkpoint at roughly the same rate as log wraparound.
         random.uintLessThan(usize, compacts_per_checkpoint) == 0;
     return FuzzOp{ .compact = .{
         .op = options.op,
         .checkpoint = checkpoint,
+        .beats_remaining = random.intRangeAtMost(u64, 1, half_bar - options.op % half_bar),
     } };
 }
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    try tracer.init(allocator);
-    defer tracer.deinit(allocator);
-
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
@@ -885,6 +874,14 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
         .fault_atlas = &storage_fault_atlas,
     };
 
+    const block_count_min =
+        stdx.div_ceil(constants.lsm_levels, 2) * compaction_block_count_bar_max +
+        (compaction_block_count_beat_min - compaction_block_count_bar_max);
+    const block_count = if (random.uintAtMost(u8, 5) == 0)
+        block_count_min
+    else
+        random.intRangeAtMost(u32, block_count_min, block_count_min * 64);
+
     const fuzz_op_count = @min(
         fuzz_args.events_max orelse events_max,
         fuzz.random_int_exponential(random, usize, 1E6),
@@ -894,12 +891,16 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     defer allocator.free(fuzz_ops);
 
     // Init mocked storage.
-    var storage = try Storage.init(allocator, constants.storage_size_limit_max, storage_options);
+    var storage = try Storage.init(
+        allocator,
+        constants.storage_size_limit_default,
+        storage_options,
+    );
     defer storage.deinit(allocator);
 
     switch (table_usage) {
         inline else => |usage| {
-            try EnvironmentType(usage).run(&storage, fuzz_ops);
+            try EnvironmentType(usage).run(&storage, block_count, fuzz_ops);
         },
     }
 

@@ -1,13 +1,10 @@
 const std = @import("std");
 
-// TODO: Move this back to src/clients/java when there's a better solution for main_pkg_path=src/
-const vsr = @import("vsr.zig");
+const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 const assert = std.debug.assert;
-
-const output_path = "src/clients/java/src/main/java/com/tigerbeetle/";
 
 const TypeMapping = struct {
     name: []const u8,
@@ -15,6 +12,7 @@ const TypeMapping = struct {
     readonly_fields: []const []const u8 = &.{},
     docs_link: ?[]const u8 = null,
     visibility: enum { public, internal } = .public,
+    constants: []const u8 = "",
 
     pub fn is_private(comptime self: @This(), name: []const u8) bool {
         inline for (self.private_fields) |field| {
@@ -86,7 +84,6 @@ const type_mappings = .{
             "credits_pending",
             "debits_posted",
             "credits_posted",
-            "timestamp",
         },
         .docs_link = "reference/account#",
     } },
@@ -102,12 +99,18 @@ const type_mappings = .{
         },
         .docs_link = "reference/account-balances#",
     } },
-    .{ tb.Transfer, TypeMapping{
-        .name = "TransferBatch",
-        .private_fields = &.{"reserved"},
-        .readonly_fields = &.{"timestamp"},
-        .docs_link = "reference/transfer#",
-    } },
+    .{
+        tb.Transfer, TypeMapping{
+            .name = "TransferBatch",
+            .private_fields = &.{"reserved"},
+            .readonly_fields = &.{},
+            .docs_link = "reference/transfer#",
+            .constants =
+            \\    public static final BigInteger AMOUNT_MAX = UInt128.asBigInteger(-1L, -1L);
+            \\
+            ,
+        },
+    },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
         .docs_link = "reference/requests/create_accounts#",
@@ -269,17 +272,28 @@ fn emit_enum(
         \\
         \\    public final {[int_type]s} value;
         \\
+        \\    static final {[name]s}[] enumByValue;
+        \\    static {{
+        \\    final var values = values();
+        \\      enumByValue = new {[name]s}[values.length];
+        \\       for (final var item : values) {{
+        \\          enumByValue[item.value] = item;
+        \\      }}
+        \\    }}
+        \\
         \\    {[name]s}({[int_type]s} value) {{
         \\        this.value = value;
         \\    }}
         \\
         \\    public static {[name]s} fromValue({[int_type]s} value) {{
-        \\        var values = {[name]s}.values();
-        \\        if (value < 0 || value >= values.length)
+        \\        if (value < 0 || value >= enumByValue.length)
         \\            throw new IllegalArgumentException(
         \\                    String.format("Invalid {[name]s} value=%d", value));
         \\
-        \\        return values[value];
+        \\        final var item = enumByValue[value];
+        \\        AssertionError.assertTrue(item.value == value,
+        \\          "Unexpected {[name]s}: found=%d expected=%d", item.value, value);
+        \\        return item;
         \\    }}
         \\}}
         \\
@@ -397,6 +411,7 @@ fn emit_batch(
         \\
         \\{[visibility]s}final class {[name]s} extends Batch {{
         \\
+        \\{[constants]s}
         \\    interface Struct {{
         \\        int SIZE = {[size]d};
         \\
@@ -410,6 +425,7 @@ fn emit_batch(
             "import java.math.BigInteger;"
         else
             "",
+        .constants = mapping.constants,
     });
 
     // Fields offset:
@@ -917,45 +933,31 @@ pub fn generate_bindings(
 }
 
 pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+    assert(args.skip());
+    const target_dir_path = args.next().?;
+    assert(args.next() == null);
+
+    var target_dir = try std.fs.cwd().openDir(target_dir_path, .{});
+    defer target_dir.close();
+
     // Emit Java declarations.
     inline for (type_mappings) |type_mapping| {
         const ZigType = type_mapping[0];
         const mapping = type_mapping[1];
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const allocator = arena.allocator();
-
         var buffer = std.ArrayList(u8).init(allocator);
         try generate_bindings(ZigType, mapping, &buffer);
 
-        try std.fs.cwd().writeFile(.{
-            .sub_path = output_path ++ mapping.name ++ ".java",
+        try target_dir.writeFile(.{
+            .sub_path = mapping.name ++ ".java",
             .data = buffer.items,
         });
-    }
-}
-
-const testing = std.testing;
-
-test "bindings java" {
-    // Test Java declarations.
-    inline for (type_mappings) |type_mapping| {
-        const ZigType = type_mapping[0];
-        const mapping = type_mapping[1];
-
-        var buffer = std.ArrayList(u8).init(testing.allocator);
-        defer buffer.deinit();
-
-        try generate_bindings(ZigType, mapping, &buffer);
-
-        const current = try std.fs.cwd().readFileAlloc(
-            testing.allocator,
-            output_path ++ mapping.name ++ ".java",
-            std.math.maxInt(usize),
-        );
-        defer testing.allocator.free(current);
-
-        try testing.expectEqualStrings(buffer.items, current);
     }
 }

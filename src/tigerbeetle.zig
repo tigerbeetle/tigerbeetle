@@ -20,7 +20,7 @@ pub const Account = extern struct {
     /// A chart of accounts code describing the type of account (e.g. clearing, settlement).
     code: u16,
     flags: AccountFlags,
-    timestamp: u64 = 0,
+    timestamp: u64,
 
     comptime {
         assert(stdx.no_padding(Account));
@@ -54,7 +54,9 @@ pub const AccountFlags = packed struct(u16) {
     debits_must_not_exceed_credits: bool = false,
     credits_must_not_exceed_debits: bool = false,
     history: bool = false,
-    padding: u12 = 0,
+    imported: bool = false,
+    closed: bool = false,
+    padding: u10 = 0,
 
     comptime {
         assert(@sizeOf(AccountFlags) == @sizeOf(u16));
@@ -95,7 +97,7 @@ pub const Transfer = extern struct {
     /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement).
     code: u16,
     flags: TransferFlags,
-    timestamp: u64 = 0,
+    timestamp: u64,
 
     // Converts the timeout from seconds to ns.
     pub fn timeout_ns(self: *const Transfer) u64 {
@@ -131,7 +133,10 @@ pub const TransferFlags = packed struct(u16) {
     void_pending_transfer: bool = false,
     balancing_debit: bool = false,
     balancing_credit: bool = false,
-    padding: u10 = 0,
+    closing_debit: bool = false,
+    closing_credit: bool = false,
+    imported: bool = false,
+    padding: u7 = 0,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
@@ -146,13 +151,28 @@ pub const CreateAccountResult = enum(u32) {
     ok = 0,
     linked_event_failed = 1,
     linked_event_chain_open = 2,
+
+    imported_event_expected = 22,
+    imported_event_not_expected = 23,
+
     timestamp_must_be_zero = 3,
+
+    imported_event_timestamp_out_of_range = 24,
+    imported_event_timestamp_must_not_advance = 25,
 
     reserved_field = 4,
     reserved_flag = 5,
 
     id_must_not_be_zero = 6,
     id_must_not_be_int_max = 7,
+
+    exists_with_different_flags = 15,
+    exists_with_different_user_data_128 = 16,
+    exists_with_different_user_data_64 = 17,
+    exists_with_different_user_data_32 = 18,
+    exists_with_different_ledger = 19,
+    exists_with_different_code = 20,
+    exists = 21,
 
     flags_are_mutually_exclusive = 8,
 
@@ -163,19 +183,23 @@ pub const CreateAccountResult = enum(u32) {
     ledger_must_not_be_zero = 13,
     code_must_not_be_zero = 14,
 
-    exists_with_different_flags = 15,
-
-    exists_with_different_user_data_128 = 16,
-    exists_with_different_user_data_64 = 17,
-    exists_with_different_user_data_32 = 18,
-    exists_with_different_ledger = 19,
-    exists_with_different_code = 20,
-    exists = 21,
+    imported_event_timestamp_must_not_regress = 26,
 
     comptime {
-        for (std.enums.values(CreateAccountResult), 0..) |result, index| {
-            assert(@intFromEnum(result) == index);
+        const values = std.enums.values(CreateAccountResult);
+        const BitSet = std.StaticBitSet(values.len);
+        var set = BitSet.initEmpty();
+        for (0..values.len) |index| {
+            const result: CreateAccountResult = @enumFromInt(index);
+            stdx.maybe(result == values[index]);
+
+            assert(!set.isSet(index));
+            set.set(index);
         }
+
+        // It's a non-ordered enum, we need to ensure
+        // there are no gaps in the numbering of the values.
+        assert(set.count() == set.capacity());
     }
 };
 
@@ -186,12 +210,34 @@ pub const CreateTransferResult = enum(u32) {
     ok = 0,
     linked_event_failed = 1,
     linked_event_chain_open = 2,
+
+    imported_event_expected = 56,
+    imported_event_not_expected = 57,
+
     timestamp_must_be_zero = 3,
+
+    imported_event_timestamp_out_of_range = 58,
+    imported_event_timestamp_must_not_advance = 59,
 
     reserved_flag = 4,
 
     id_must_not_be_zero = 5,
     id_must_not_be_int_max = 6,
+
+    exists_with_different_flags = 36,
+    exists_with_different_pending_id = 40,
+    exists_with_different_timeout = 44,
+    exists_with_different_debit_account_id = 37,
+    exists_with_different_credit_account_id = 38,
+    exists_with_different_amount = 39,
+    exists_with_different_user_data_128 = 41,
+    exists_with_different_user_data_64 = 42,
+    exists_with_different_user_data_32 = 43,
+    exists_with_different_ledger = 67,
+    exists_with_different_code = 45,
+    exists = 46,
+
+    id_already_failed = 68,
 
     flags_are_mutually_exclusive = 7,
 
@@ -206,6 +252,8 @@ pub const CreateTransferResult = enum(u32) {
     pending_id_must_not_be_int_max = 15,
     pending_id_must_be_different = 16,
     timeout_reserved_for_pending_transfer = 17,
+
+    closing_transfer_must_be_pending = 64,
 
     amount_must_not_be_zero = 18,
     ledger_must_not_be_zero = 19,
@@ -233,18 +281,13 @@ pub const CreateTransferResult = enum(u32) {
 
     pending_transfer_expired = 35,
 
-    exists_with_different_flags = 36,
+    imported_event_timestamp_must_not_regress = 60,
+    imported_event_timestamp_must_postdate_debit_account = 61,
+    imported_event_timestamp_must_postdate_credit_account = 62,
+    imported_event_timeout_must_be_zero = 63,
 
-    exists_with_different_debit_account_id = 37,
-    exists_with_different_credit_account_id = 38,
-    exists_with_different_amount = 39,
-    exists_with_different_pending_id = 40,
-    exists_with_different_user_data_128 = 41,
-    exists_with_different_user_data_64 = 42,
-    exists_with_different_user_data_32 = 43,
-    exists_with_different_timeout = 44,
-    exists_with_different_code = 45,
-    exists = 46,
+    debit_account_already_closed = 65,
+    credit_account_already_closed = 66,
 
     overflows_debits_pending = 47,
     overflows_credits_pending = 48,
@@ -257,9 +300,143 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_credits = 54,
     exceeds_debits = 55,
 
+    // Update this comment when adding a new value:
+    // Last item: id_already_failed = 68.
+
+    /// Returns `true` if the error code depends on transient system status and retrying
+    /// the same transfer with identical request data can produce different outcomes.
+    pub fn transient(result: CreateTransferResult) bool {
+        return switch (result) {
+            .ok => unreachable,
+
+            .debit_account_not_found,
+            .credit_account_not_found,
+            .pending_transfer_not_found,
+            .exceeds_credits,
+            .exceeds_debits,
+            .debit_account_already_closed,
+            .credit_account_already_closed,
+            => true,
+
+            .linked_event_failed,
+            .linked_event_chain_open,
+            .imported_event_expected,
+            .imported_event_not_expected,
+            .timestamp_must_be_zero,
+            .imported_event_timestamp_out_of_range,
+            .imported_event_timestamp_must_not_advance,
+            .reserved_flag,
+            .id_must_not_be_zero,
+            .id_must_not_be_int_max,
+            .id_already_failed,
+            .exists_with_different_flags,
+            .exists_with_different_pending_id,
+            .exists_with_different_timeout,
+            .exists_with_different_debit_account_id,
+            .exists_with_different_credit_account_id,
+            .exists_with_different_amount,
+            .exists_with_different_user_data_128,
+            .exists_with_different_user_data_64,
+            .exists_with_different_user_data_32,
+            .exists_with_different_ledger,
+            .exists_with_different_code,
+            .exists,
+            .imported_event_timestamp_must_not_regress,
+            .imported_event_timestamp_must_postdate_debit_account,
+            .imported_event_timestamp_must_postdate_credit_account,
+            .imported_event_timeout_must_be_zero,
+            .flags_are_mutually_exclusive,
+            .debit_account_id_must_not_be_zero,
+            .debit_account_id_must_not_be_int_max,
+            .credit_account_id_must_not_be_zero,
+            .credit_account_id_must_not_be_int_max,
+            .accounts_must_be_different,
+            .pending_id_must_be_zero,
+            .pending_id_must_not_be_zero,
+            .pending_id_must_not_be_int_max,
+            .pending_id_must_be_different,
+            .timeout_reserved_for_pending_transfer,
+            .closing_transfer_must_be_pending,
+            .amount_must_not_be_zero,
+            .ledger_must_not_be_zero,
+            .code_must_not_be_zero,
+            .accounts_must_have_the_same_ledger,
+            .transfer_must_have_the_same_ledger_as_accounts,
+            .pending_transfer_not_pending,
+            .pending_transfer_has_different_debit_account_id,
+            .pending_transfer_has_different_credit_account_id,
+            .pending_transfer_has_different_ledger,
+            .pending_transfer_has_different_code,
+            .exceeds_pending_transfer_amount,
+            .pending_transfer_has_different_amount,
+            .pending_transfer_already_posted,
+            .pending_transfer_already_voided,
+            .pending_transfer_expired,
+            .overflows_debits_pending,
+            .overflows_credits_pending,
+            .overflows_debits_posted,
+            .overflows_credits_posted,
+            .overflows_debits,
+            .overflows_credits,
+            .overflows_timeout,
+            => false,
+        };
+    }
+
     comptime {
-        for (std.enums.values(CreateTransferResult), 0..) |result, index| {
-            assert(@intFromEnum(result) == index);
+        const values = std.enums.values(CreateTransferResult);
+        const BitSet = std.StaticBitSet(values.len);
+        var set = BitSet.initEmpty();
+        for (0..values.len) |index| {
+            const result: CreateTransferResult = @enumFromInt(index);
+            stdx.maybe(result == values[index]);
+
+            assert(!set.isSet(index));
+            set.set(index);
+        }
+
+        // It's a non-ordered enum, we need to ensure
+        // there are no gaps in the numbering of the values.
+        assert(set.count() == set.capacity());
+    }
+
+    /// TODO(zig): CreateTransferResult is ordered by precedence, but it crashes
+    /// `EnumSet`, and `@setEvalBranchQuota()` isn't propagating correctly:
+    /// https://godbolt.org/z/6a45bx6xs
+    /// error: evaluation exceeded 1000 backwards branches
+    /// note: use @setEvalBranchQuota() to raise the branch limit from 1000.
+    ///
+    /// As a workaround we generate a new Ordered enum to be used in this case.
+    pub const Ordered = type: {
+        const values = std.enums.values(CreateTransferResult);
+        var fields: [values.len]std.builtin.Type.EnumField = undefined;
+        for (0..values.len) |index| {
+            const result: CreateTransferResult = @enumFromInt(index);
+            fields[index] = .{
+                .name = @tagName(result),
+                .value = index,
+            };
+        }
+
+        var type_info = @typeInfo(enum {});
+        type_info.Enum.tag_type = std.meta.Tag(CreateTransferResult);
+        type_info.Enum.fields = &fields;
+        break :type @Type(type_info);
+    };
+
+    pub fn to_ordered(value: CreateTransferResult) Ordered {
+        return @enumFromInt(@intFromEnum(value));
+    }
+
+    comptime {
+        const values = std.enums.values(Ordered);
+        assert(values.len == std.enums.values(CreateTransferResult).len);
+        for (0..values.len) |index| {
+            const value: Ordered = @enumFromInt(index);
+            assert(value == values[index]);
+
+            const value_source: CreateTransferResult = @enumFromInt(index);
+            assert(std.mem.eql(u8, @tagName(value_source), @tagName(value)));
         }
     }
 };
@@ -334,6 +511,20 @@ pub const QueryFilterFlags = packed struct(u32) {
 pub const AccountFilter = extern struct {
     /// The account id.
     account_id: u128,
+    /// Filter by the `user_data_128` index.
+    /// Use zero for no filter.
+    user_data_128: u128,
+    /// Filter by the `user_data_64` index.
+    /// Use zero for no filter.
+    user_data_64: u64,
+    /// Filter by the `user_data_32` index.
+    /// Use zero for no filter.
+    user_data_32: u32,
+    /// Query by the `code` index.
+    /// Use zero for no filter.
+    code: u16,
+
+    reserved: [58]u8 = [_]u8{0} ** 58,
     /// The initial timestamp (inclusive).
     /// Use zero for no filter.
     timestamp_min: u64,
@@ -345,10 +536,9 @@ pub const AccountFilter = extern struct {
     limit: u32,
     /// Query flags.
     flags: AccountFilterFlags,
-    reserved: [24]u8 = [_]u8{0} ** 24,
 
     comptime {
-        assert(@sizeOf(AccountFilter) == 64);
+        assert(@sizeOf(AccountFilter) == 128);
         assert(stdx.no_padding(AccountFilter));
     }
 };

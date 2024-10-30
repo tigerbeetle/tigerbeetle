@@ -15,6 +15,8 @@ const type_mappings = .{
     .{ tb.AccountFilter, "tb_account_filter_t" },
     .{ tb.AccountFilterFlags, "TB_ACCOUNT_FILTER_FLAGS" },
     .{ tb.AccountBalance, "tb_account_balance_t" },
+    .{ tb.QueryFilter, "tb_query_filter_t" },
+    .{ tb.QueryFilterFlags, "TB_QUERY_FILTER_FLAGS" },
 
     .{ tb_client.tb_operation_t, "TB_OPERATION" },
     .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
@@ -28,6 +30,7 @@ fn resolve_c_type(comptime Type: type) []const u8 {
         .Array => |info| return resolve_c_type(info.child),
         .Enum => |info| return resolve_c_type(info.tag_type),
         .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+        .Bool => return "uint8_t",
         .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
@@ -197,7 +200,7 @@ pub fn main() !void {
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     // Zig 0.9.1 has `decl.data.Fn.arg_names` but it's currently/incorrectly a zero-sized slice.
     try buffer.writer().print(
-        \\// Initialize a new TigerBeetle client which connects to the addresses provided and 
+        \\// Initialize a new TigerBeetle client which connects to the addresses provided and
         \\// completes submitted packets by invoking the callback with the given context.
         \\TB_STATUS tb_client_init(
         \\    tb_client_t* out_client,
@@ -218,7 +221,7 @@ pub fn main() !void {
         \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
         \\);
         \\
-        \\// Retrieve the callback context initially passed into `tb_client_init` or 
+        \\// Retrieve the callback context initially passed into `tb_client_init` or
         \\// `tb_client_init_echo`.
         \\uintptr_t tb_client_completion_context(
         \\    tb_client_t client

@@ -180,8 +180,8 @@ public abstract class Batch {
      * Moves to the element int the specified position.
      *
      * @param newPosition a zero-based index.
-     * @throws IndexOutOfBoundsException if {@code newPosition} is negative or greater than the
-     *         batch's {@link #getLength length}.
+     * @throws IndexOutOfBoundsException if {@code newPosition} is negative, or greater than or
+     *         equal to the batch's {@link #getLength length}.
      */
     public final void setPosition(final int newPosition) {
         if (newPosition < 0 || newPosition >= this.length)

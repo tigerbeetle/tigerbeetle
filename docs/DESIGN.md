@@ -28,10 +28,10 @@ Moved to [about/safety](./about/safety.md#fault-models).
 
 Moved to [about/architecture](./about/architecture.md#protocol).
 
-# Why C/Zig?
+## Why C/Zig?
 
 Moved to [about/zig](./about/zig.md).
 
-# References
+## References
 
 Moved to [about](./about/README.md#references).

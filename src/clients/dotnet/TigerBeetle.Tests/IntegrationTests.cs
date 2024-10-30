@@ -808,6 +808,53 @@ public class IntegrationTests
         Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
     }
 
+    [TestMethod]
+    public void CreateClosingTransfer()
+    {
+        var accounts = GenerateAccounts();
+        var accountResults = client.CreateAccounts(accounts);
+        Assert.IsTrue(accountResults.Length == 0);
+
+        var closingTransfer = new Transfer
+        {
+            Id = ID.Create(),
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 0,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.ClosingDebit | TransferFlags.ClosingCredit | TransferFlags.Pending,
+        };
+
+        var result = client.CreateTransfer(closingTransfer);
+        Assert.IsTrue(result == CreateTransferResult.Ok);
+
+        var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        Assert.AreNotEqual(lookupAccounts[0].Flags, accounts[0].Flags);
+        Assert.IsTrue(lookupAccounts[0].Flags.HasFlag(AccountFlags.Closed));
+
+        Assert.AreNotEqual(lookupAccounts[1].Flags, accounts[1].Flags);
+        Assert.IsTrue(lookupAccounts[1].Flags.HasFlag(AccountFlags.Closed));
+
+        var voidingTransfer = new Transfer
+        {
+            Id = ID.Create(),
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            PendingId = closingTransfer.Id,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.VoidPendingTransfer,
+        };
+
+        var voidingResult = client.CreateTransfer(voidingTransfer);
+        Assert.IsTrue(voidingResult == CreateTransferResult.Ok);
+
+        lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        Assert.IsFalse(lookupAccounts[0].Flags.HasFlag(AccountFlags.Closed));
+        Assert.IsFalse(lookupAccounts[1].Flags.HasFlag(AccountFlags.Closed));
+    }
 
     [TestMethod]
     public void CreateAccountTooMuchData()
@@ -917,6 +964,69 @@ public class IntegrationTests
         }
     }
 
+    [TestMethod]
+    public void CreateZeroLengthAccounts()
+    {
+        var accounts = Array.Empty<Account>();
+        var results = client.CreateAccounts(accounts);
+        Assert.IsTrue(results.Length == 0);
+    }
+
+    [TestMethod]
+    public async Task CreateZeroLengthAccountsAsync()
+    {
+        var accounts = Array.Empty<Account>();
+        var results = await client.CreateAccountsAsync(accounts);
+        Assert.IsTrue(results.Length == 0);
+    }
+
+    [TestMethod]
+    public void CreateZeroLengthTransfers()
+    {
+        var transfers = Array.Empty<Transfer>();
+        var results = client.CreateTransfers(transfers);
+        Assert.IsTrue(results.Length == 0);
+    }
+
+    [TestMethod]
+    public async Task CreateZeroLengthTransfersAsync()
+    {
+        var transfers = Array.Empty<Transfer>();
+        var results = await client.CreateTransfersAsync(transfers);
+        Assert.IsTrue(results.Length == 0);
+    }
+
+    [TestMethod]
+    public void LookupZeroLengthAccounts()
+    {
+        var ids = Array.Empty<UInt128>();
+        var accounts = client.LookupAccounts(ids);
+        Assert.IsTrue(accounts.Length == 0);
+    }
+
+    [TestMethod]
+    public async Task LookupZeroLengthAccountsAsync()
+    {
+        var ids = Array.Empty<UInt128>();
+        var accounts = await client.LookupAccountsAsync(ids);
+        Assert.IsTrue(accounts.Length == 0);
+    }
+
+    [TestMethod]
+    public void LookupZeroLengthTransfers()
+    {
+        var ids = Array.Empty<UInt128>();
+        var transfers = client.LookupTransfers(ids);
+        Assert.IsTrue(transfers.Length == 0);
+    }
+
+    [TestMethod]
+    public async Task LookupZeroLengthTransfersAsync()
+    {
+        var ids = Array.Empty<UInt128>();
+        var transfers = await client.LookupTransfersAsync(ids);
+        Assert.IsTrue(transfers.Length == 0);
+    }
 
     [TestMethod]
     public void TestGetAccountTransfers()
@@ -1708,6 +1818,115 @@ public class IntegrationTests
         }
     }
 
+    [TestMethod]
+    [DoNotParallelize]
+    public void ImportedFlag()
+    {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = GetTimestampLast();
+        Thread.Sleep(10);
+
+        var accounts = GenerateAccounts();
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            accounts[i].Flags = AccountFlags.Imported;
+            accounts[i].Timestamp = timestamp + (ulong)(i + 1);
+        }
+
+        var results = client.CreateAccounts(accounts);
+        Assert.IsTrue(results.Length == 0);
+
+        var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            Assert.AreEqual(accounts[i].Timestamp, timestamp + (ulong)(i + 1));
+        }
+
+        var transfer = new Transfer
+        {
+            Id = ID.Create(),
+            DebitAccountId = accounts[0].Id,
+            CreditAccountId = accounts[1].Id,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.Imported,
+            Amount = 10,
+            Timestamp = timestamp + (ulong)(accounts.Length + 1),
+        };
+
+        var createTransferResult = client.CreateTransfer(transfer);
+        Assert.AreEqual(CreateTransferResult.Ok, createTransferResult);
+
+        var lookupTransfer = client.LookupTransfer(transfer.Id);
+        Assert.IsNotNull(lookupTransfer);
+        AssertTransfer(transfer, lookupTransfer.Value);
+        Assert.AreEqual(transfer.Timestamp, lookupTransfer.Value.Timestamp);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task ImportedFlagAsync()
+    {
+        // Gets the last timestamp recorded and waits for 10ms so the
+        // timestamp can be used as reference for importing past movements.
+        var timestamp = GetTimestampLast();
+        Thread.Sleep(10);
+
+        var accounts = GenerateAccounts();
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            accounts[i].Flags = AccountFlags.Imported;
+            accounts[i].Timestamp = timestamp + (ulong)(i + 1);
+        }
+
+        var results = await client.CreateAccountsAsync(accounts);
+        Assert.IsTrue(results.Length == 0);
+
+        var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        for (int i = 0; i < accounts.Length; i++)
+        {
+            Assert.AreEqual(accounts[i].Timestamp, timestamp + (ulong)(i + 1));
+        }
+
+        var transfer = new Transfer
+        {
+            Id = ID.Create(),
+            DebitAccountId = accounts[0].Id,
+            CreditAccountId = accounts[1].Id,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.Imported,
+            Amount = 10,
+            Timestamp = timestamp + (ulong)(accounts.Length + 1),
+        };
+
+        var createTransferResult = await client.CreateTransferAsync(transfer);
+        Assert.AreEqual(CreateTransferResult.Ok, createTransferResult);
+
+        var lookupTransfer = await client.LookupTransferAsync(transfer.Id);
+        Assert.IsNotNull(lookupTransfer);
+        AssertTransfer(transfer, lookupTransfer.Value);
+        Assert.AreEqual(transfer.Timestamp, lookupTransfer.Value.Timestamp);
+    }
+
+    private static ulong GetTimestampLast()
+    {
+        // Inserts a dummy transfer just to retrieve the latest timestamp
+        // recorded by the cluster.
+        // Must be used only in "DoNotParallelize" tests.
+        var dummy_account = GenerateAccounts()[0];
+        var okResult = client.CreateAccount(dummy_account);
+        Assert.IsTrue(okResult == CreateAccountResult.Ok);
+
+        var lookup = client.LookupAccount(dummy_account.Id);
+        Assert.IsNotNull(lookup);
+
+        return lookup.Value.Timestamp;
+    }
+
     /// <summary>
     /// This test asserts that a single Client can be shared by multiple concurrent tasks
     /// </summary>
@@ -1727,7 +1946,6 @@ public class IntegrationTests
         var accounts = GenerateAccounts();
         var accountResults = client.CreateAccounts(accounts);
         Assert.IsTrue(accountResults.Length == 0);
-
 
         var tasks = new Task<CreateTransferResult>[TASKS_QTY];
 
@@ -1772,6 +1990,74 @@ public class IntegrationTests
 
         Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0LU);
         Assert.AreEqual(lookupAccounts[1].DebitsPosted, (uint)TASKS_QTY);
+    }
+
+    /// <summary>
+    /// This test asserts that a linked chain is consistent across concurrent requests.
+    /// </summary>
+
+    [TestMethod]
+    public void ConcurrentLinkedChainTest() => ConcurrentLinkedChainTest(isAsync: false);
+
+    [TestMethod]
+    public void ConcurrentLinkedChainTestAsync() => ConcurrentLinkedChainTest(isAsync: true);
+
+    private void ConcurrentLinkedChainTest(bool isAsync)
+    {
+        const int TASKS_QTY = 10_000;
+
+        using var client = new Client(0, new[] { server.Address });
+
+        var accounts = GenerateAccounts();
+        var accountResults = client.CreateAccounts(accounts);
+        Assert.IsTrue(accountResults.Length == 0);
+
+        var tasks = new Task<CreateTransferResult>[TASKS_QTY];
+
+        async Task<CreateTransferResult> asyncAction(Transfer transfer)
+        {
+            return await client.CreateTransferAsync(transfer);
+        }
+
+        CreateTransferResult syncAction(Transfer transfer)
+        {
+            return client.CreateTransfer(transfer);
+        }
+
+        for (int i = 0; i < TASKS_QTY; i++)
+        {
+            // The Linked flag will cause the
+            // batch to fail due to LinkedEventChainOpen.
+            var flags = i % 10 == 0 ? TransferFlags.Linked : TransferFlags.None;
+            var transfer = new Transfer
+            {
+                Id = ID.Create(),
+                CreditAccountId = accounts[0].Id,
+                DebitAccountId = accounts[1].Id,
+                Amount = 1,
+                Ledger = 1,
+                Code = 1,
+                Flags = flags
+            };
+
+            // Starts multiple requests.
+            // Wraps the syncAction into a Task for unified logic handling both async and sync tests.
+            tasks[i] = isAsync ? asyncAction(transfer) : Task.Run(() => syncAction(transfer));
+        }
+
+        Task.WhenAll(tasks).Wait();
+
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            if (i % 10 == 0)
+            {
+                Assert.IsTrue(tasks[i].Result == CreateTransferResult.LinkedEventChainOpen);
+            }
+            else
+            {
+                Assert.IsTrue(tasks[i].Result == CreateTransferResult.Ok);
+            }
+        }
     }
 
     /// <summary>

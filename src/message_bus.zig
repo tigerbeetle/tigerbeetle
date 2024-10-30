@@ -179,6 +179,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             for (bus.connections) |*connection| {
+                connection.terminate(bus, .shutdown);
                 if (connection.recv_message) |message| bus.unref(message);
                 while (connection.send_queue.pop()) |message| bus.unref(message);
             }
@@ -381,7 +382,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             const fd = result catch |err| {
                 bus.process.accept_connection.?.state = .free;
                 // TODO: some errors should probably be fatal
-                log.err("accept failed: {}", .{err});
+                log.warn("accept failed: {}", .{err});
                 return;
             };
             bus.process.accept_connection.?.on_accept(bus, fd);
@@ -587,7 +588,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.state = .connected;
 
                 result catch |err| {
-                    log.err("error connecting to replica {}: {}", .{
+                    log.warn("error connecting to replica {}: {}", .{
                         connection.peer.replica,
                         err,
                     });
@@ -748,13 +749,13 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 if (!connection.recv_checked_header) {
                     if (!header.valid_checksum()) {
-                        log.err("invalid header checksum received from {}", .{connection.peer});
+                        log.warn("invalid header checksum received from {}", .{connection.peer});
                         connection.terminate(bus, .shutdown);
                         return null;
                     }
 
                     if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
-                        log.err("header with invalid size {d} received from peer {}", .{
+                        log.warn("header with invalid size {d} received from peer {}", .{
                             header.size,
                             connection.peer,
                         });
@@ -763,7 +764,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     }
 
                     if (header.cluster != bus.cluster) {
-                        log.err("message addressed to the wrong cluster: {}", .{header.cluster});
+                        log.warn("message addressed to the wrong cluster: {}", .{header.cluster});
                         connection.terminate(bus, .shutdown);
                         return null;
                     }
@@ -775,7 +776,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         // bounded by the time it takes to ping, we can hear from a peer before we
                         // can send back to them.
                         .replica => if (!connection.set_and_verify_peer(bus, &header)) {
-                            log.err(
+                            log.warn(
                                 "message from unexpected peer: peer={} header={}",
                                 .{ connection.peer, header },
                             );
@@ -802,7 +803,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 const body = data[@sizeOf(Header)..header.size];
                 if (!header.valid_checksum_body(body)) {
-                    log.err("invalid body checksum received from {}", .{connection.peer});
+                    log.warn("invalid body checksum received from {}", .{connection.peer});
                     connection.terminate(bus, .shutdown);
                     return null;
                 }
@@ -973,7 +974,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.state == .connected);
                 const bytes_received = result catch |err| {
                     // TODO: maybe don't need to close on *every* error
-                    log.err("error receiving from {}: {}", .{ connection.peer, err });
+                    log.warn("error receiving from {}: {}", .{ connection.peer, err });
                     connection.terminate(bus, .shutdown);
                     return;
                 };
@@ -1018,7 +1019,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.state == .connected);
                 connection.send_progress += result catch |err| {
                     // TODO: maybe don't need to close on *every* error
-                    log.err("error sending message to replica at {}: {}", .{
+                    log.warn("error sending message to replica at {}: {}", .{
                         connection.peer,
                         err,
                     });
@@ -1098,7 +1099,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 }
 
                 result catch |err| {
-                    log.err("error closing connection to {}: {}", .{ connection.peer, err });
+                    log.warn("error closing connection to {}: {}", .{ connection.peer, err });
                     return;
                 };
             }

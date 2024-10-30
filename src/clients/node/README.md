@@ -26,6 +26,7 @@ npm install tigerbeetle-node
 Now, create `main.js` and copy this into it:
 
 ```javascript
+const { id } = require("tigerbeetle-node");
 const { createClient } = require("tigerbeetle-node");
 
 console.log("Import ok!");
@@ -94,8 +95,8 @@ See details for account fields in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account).
 
 ```javascript
-let account = {
-  id: 137n,
+const account = {
+  id: id(), // TigerBeetle time-based ID.
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
@@ -110,8 +111,12 @@ let account = {
   timestamp: 0n,
 };
 
-let accountErrors = await client.createAccounts([account]);
+const account_errors = await client.createAccounts([account]);
+// Error handling omitted.
 ```
+
+See details for the recommended ID scheme in
+[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
 
 ### Account Flags
 
@@ -133,7 +138,7 @@ For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```javascript
-let account0 = {
+const account0 = {
   id: 100n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -146,9 +151,9 @@ let account0 = {
   ledger: 1,
   code: 1,
   timestamp: 0n,
-  flags: 0,
+  flags: AccountFlags.linked | AccountFlags.debits_must_not_exceed_credits,
 };
-let account1 = {
+const account1 = {
   id: 101n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -161,11 +166,11 @@ let account1 = {
   ledger: 1,
   code: 1,
   timestamp: 0n,
-  flags: 0,
+  flags: AccountFlags.history,
 };
-account0.flags = AccountFlags.linked |
-  AccountFlags.debits_must_not_exceed_credits;
-accountErrors = await client.createAccounts([account0, account1]);
+
+const account_errors = await client.createAccounts([account0, account1]);
+// Error handling omitted.
 ```
 
 ### Response and Errors
@@ -181,7 +186,7 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```javascript
-let account2 = {
+const account0 = {
   id: 102n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -196,7 +201,7 @@ let account2 = {
   timestamp: 0n,
   flags: 0,
 };
-let account3 = {
+const account1 = {
   id: 103n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -211,7 +216,7 @@ let account3 = {
   timestamp: 0n,
   flags: 0,
 };
-let account4 = {
+const account2 = {
   id: 104n,
   debits_pending: 0n,
   debits_posted: 0n,
@@ -226,8 +231,9 @@ let account4 = {
   timestamp: 0n,
   flags: 0,
 };
-accountErrors = await client.createAccounts([account2, account3, account4]);
-for (const error of accountErrors) {
+
+const account_errors = await client.createAccounts([account0, account1, account2]);
+for (const error of account_errors) {
   switch (error.result) {
     case CreateAccountError.exists:
       console.error(`Batch account at ${error.index} already exists.`);
@@ -259,25 +265,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```javascript
-const accounts = await client.lookupAccounts([137n, 138n]);
-console.log(accounts);
-/*
- * [{
- *   id: 137n,
- *   debits_pending: 0n,
- *   debits_posted: 0n,
- *   credits_pending: 0n,
- *   credits_posted: 0n,
- *   user_data_128: 0n,
- *   user_data_64: 0n,
- *   user_data_32: 0,
- *   reserved: 0,
- *   ledger: 1,
- *   code: 718,
- *   flags: 0,
- *   timestamp: 1623062009212508993n,
- * }]
- */
+const accounts = await client.lookupAccounts([100n, 101n]);
 ```
 
 ## Create Transfers
@@ -288,8 +276,8 @@ See details for transfer fields in the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfer).
 
 ```javascript
-let transfers = [{
-  id: 1n,
+const transfers = [{
+  id: id(), // TigerBeetle time-based ID.
   debit_account_id: 102n,
   credit_account_id: 103n,
   amount: 10n,
@@ -303,8 +291,13 @@ let transfers = [{
   flags: 0,
   timestamp: 0n,
 }];
-let transferErrors = await client.createTransfers(transfers);
+
+const transfer_errors = await client.createTransfers(transfers);
+// Error handling omitted.
 ```
+
+See details for the recommended ID scheme in
+[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
 
 ### Response and Errors
 
@@ -318,7 +311,54 @@ See all error conditions in the [create_transfers
 reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```javascript
-for (const error of transferErrors) {
+const transfers = [{
+  id: 1n,
+  debit_account_id: 102n,
+  credit_account_id: 103n,
+  amount: 10n,
+  pending_id: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  timeout: 0,
+  ledger: 1,
+  code: 720,
+  flags: 0,
+  timestamp: 0n,
+},
+{
+  id: 2n,
+  debit_account_id: 102n,
+  credit_account_id: 103n,
+  amount: 10n,
+  pending_id: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  timeout: 0,
+  ledger: 1,
+  code: 720,
+  flags: 0,
+  timestamp: 0n,
+},
+{
+  id: 3n,
+  debit_account_id: 102n,
+  credit_account_id: 103n,
+  amount: 10n,
+  pending_id: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  timeout: 0,
+  ledger: 1,
+  code: 720,
+  flags: 0,
+  timestamp: 0n,
+}];
+
+const transfer_errors = await client.createTransfers(batch);
+for (const error of transfer_errors) {
   switch (error.result) {
     case CreateTransferError.exists:
       console.error(`Batch transfer at ${error.index} already exists.`);
@@ -346,9 +386,10 @@ you. So, for example, you *can* insert 1 million transfers
 one at a time like so:
 
 ```javascript
-for (let i = 0; i < transfers.len; i++) {
-  const transferErrors = await client.createTransfers(transfers[i]);
-  // error handling omitted
+const batch = []; // Array of transfer to create.
+for (let i = 0; i < batch.len; i++) {
+  const transfer_errors = await client.createTransfers(batch[i]);
+  // Error handling omitted.
 }
 ```
 
@@ -359,12 +400,13 @@ The maximum batch size is set in the TigerBeetle server. The default
 is 8190.
 
 ```javascript
+const batch = []; // Array of transfer to create.
 const BATCH_SIZE = 8190;
-for (let i = 0; i < transfers.length; i += BATCH_SIZE) {
-  const transferErrors = await client.createTransfers(
-    transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)),
+for (let i = 0; i < batch.length; i += BATCH_SIZE) {
+  const transfer_errors = await client.createTransfers(
+    batch.slice(i, Math.min(batch.length, BATCH_SIZE)),
   );
-  // error handling omitted
+  // Error handling omitted.
 }
 ```
 
@@ -394,8 +436,23 @@ bitwise-or:
 For example, to link `transfer0` and `transfer1`:
 
 ```javascript
-let transfer0 = {
-  id: 2n,
+const transfer0 = {
+  id: 4n,
+  debit_account_id: 102n,
+  credit_account_id: 103n,
+  amount: 10n,
+  pending_id: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  timeout: 0,
+  ledger: 1,
+  code: 720,
+  flags: TransferFlags.linked,
+  timestamp: 0n,
+};
+const transfer1 = {
+  id: 5n,
   debit_account_id: 102n,
   credit_account_id: 103n,
   amount: 10n,
@@ -409,24 +466,10 @@ let transfer0 = {
   flags: 0,
   timestamp: 0n,
 };
-let transfer1 = {
-  id: 3n,
-  debit_account_id: 102n,
-  credit_account_id: 103n,
-  amount: 10n,
-  pending_id: 0n,
-  user_data_128: 0n,
-  user_data_64: 0n,
-  user_data_32: 0,
-  timeout: 0,
-  ledger: 1,
-  code: 720,
-  flags: 0,
-  timestamp: 0n,
-};
-transfer0.flags = TransferFlags.linked;
+
 // Create the transfer
-transferErrors = await client.createTransfers([transfer0, transfer1]);
+const transfer_errors = await client.createTransfers([transfer0, transfer1]);
+// Error handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -446,8 +489,8 @@ appropriate accounts and apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```javascript
-let transfer2 = {
-  id: 4n,
+const transfer0 = {
+  id: 6n,
   debit_account_id: 102n,
   credit_account_id: 103n,
   amount: 10n,
@@ -461,14 +504,17 @@ let transfer2 = {
   flags: TransferFlags.pending,
   timestamp: 0n,
 };
-transferErrors = await client.createTransfers([transfer2]);
 
-let transfer3 = {
-  id: 5n,
+let transfer_errors = await client.createTransfers([transfer0]);
+// Error handling omitted.
+
+const transfer1 = {
+  id: 7n,
   debit_account_id: 102n,
   credit_account_id: 103n,
-  amount: 10n,
-  pending_id: 4n,
+  // Post the entire pending amount.
+  amount: amount_max,
+  pending_id: 6n,
   user_data_128: 0n,
   user_data_64: 0n,
   user_data_32: 0,
@@ -478,7 +524,9 @@ let transfer3 = {
   flags: TransferFlags.post_pending_transfer,
   timestamp: 0n,
 };
-transferErrors = await client.createTransfers([transfer3]);
+
+transfer_errors = await client.createTransfers([transfer1]);
+// Error handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -490,8 +538,8 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```javascript
-let transfer4 = {
-  id: 4n,
+const transfer0 = {
+  id: 8n,
   debit_account_id: 102n,
   credit_account_id: 103n,
   amount: 10n,
@@ -505,14 +553,16 @@ let transfer4 = {
   flags: TransferFlags.pending,
   timestamp: 0n,
 };
-transferErrors = await client.createTransfers([transfer4]);
 
-let transfer5 = {
-  id: 7n,
+let transfer_errors = await client.createTransfers([transfer0]);
+// Error handling omitted.
+
+const transfer1 = {
+  id: 9n,
   debit_account_id: 102n,
   credit_account_id: 103n,
   amount: 10n,
-  pending_id: 6n,
+  pending_id: 8n,
   user_data_128: 0n,
   user_data_64: 0n,
   user_data_32: 0,
@@ -522,7 +572,9 @@ let transfer5 = {
   flags: TransferFlags.void_pending_transfer,
   timestamp: 0n,
 };
-transferErrors = await client.createTransfers([transfer5]);
+
+transfer_errors = await client.createTransfers([transfer1]);
+// Error handling omitted.
 ```
 
 ## Transfer Lookup
@@ -540,25 +592,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```javascript
-transfers = await client.lookupTransfers([1n, 2n]);
-console.log(transfers);
-/*
- * [{
- *   id: 1n,
- *   debit_account_id: 102n,
- *   credit_account_id: 103n,
- *   amount: 10n,
- *   pending_id: 0n,
- *   user_data_128: 0n,
- *   user_data_64: 0n,
- *   user_data_32: 0,
- *   timeout: 0,
- *   ledger: 1,
- *   code: 720,
- *   flags: 0,
- *   timestamp: 1623062009212508993n,
- * }]
- */
+const transfers = await client.lookupTransfers([1n, 2n]);
 ```
 
 ## Get Account Transfers
@@ -573,8 +607,12 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```javascript
-let filter = {
+const filter = {
   account_id: 2n,
+  user_data_128: 0n, // No filter by UserData.
+  user_data_64: 0n,
+  user_data_32: 0,
+  code: 0, // No filter by Code.
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten balances at most.
@@ -602,8 +640,12 @@ The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```javascript
-filter = {
+const filter = {
   account_id: 2n,
+  user_data_128: 0n, // No filter by UserData.
+  user_data_64: 0n,
+  user_data_32: 0,
+  code: 0, // No filter by Code.
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten balances at most.
@@ -626,7 +668,7 @@ The accounts in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```javascript
-var query_filter = {
+const query_filter = {
   user_data_128: 1000n, // Filter by UserData.
   user_data_64: 100n,
   user_data_32: 10,
@@ -635,10 +677,9 @@ var query_filter = {
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten balances at most.
-  flags: AccountFilterFlags.debits | // Include transfer from the debit side.
-    AccountFilterFlags.credits | // Include transfer from the credit side.
-    AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+  flags: QueryFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
+
 const query_accounts = await client.queryAccounts(query_filter);
 ```
 
@@ -653,7 +694,7 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```javascript
-query_filter = {
+const query_filter = {
   user_data_128: 1000n, // Filter by UserData.
   user_data_64: 100n,
   user_data_32: 10,
@@ -662,10 +703,9 @@ query_filter = {
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten balances at most.
-  flags: AccountFilterFlags.debits | // Include transfer from the debit side.
-    AccountFilterFlags.credits | // Include transfer from the credit side.
-    AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+  flags: QueryFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
+
 const query_transfers = await client.queryTransfers(query_filter);
 ```
 
@@ -688,7 +728,7 @@ break the chain will have a unique error result. Other events in the
 chain will have their error result set to `linked_event_failed`.
 
 ```javascript
-const batch = [];
+const batch = []; // Array of transfer to create.
 let linkedFlag = 0;
 linkedFlag |= TransferFlags.linked;
 
@@ -713,18 +753,72 @@ batch.push({ id: 3n, /* ..., */ flags: 0 });
 batch.push({ id: 3n, /* ..., */ flags: linkedFlag });
 batch.push({ id: 4n, /* ..., */ flags: 0 });
 
-const errors = await client.createTransfers(batch);
+const transfer_errors = await client.createTransfers(batch);
+// Error handling omitted.
+```
 
-/**
- * console.log(errors);
- * [
- *  { index: 1, error: 1 },  // linked_event_failed
- *  { index: 2, error: 1 },  // linked_event_failed
- *  { index: 3, error: 25 }, // exists
- *  { index: 4, error: 1 },  // linked_event_failed
- *
- *  { index: 6, error: 17 }, // exists_with_different_flags
- *  { index: 7, error: 1 },  // linked_event_failed
- * ]
- */
+## Imported Events
+
+When the `imported` flag is specified for an account when creating accounts or
+a transfer when creating transfers, it allows importing historical events with
+a user-defined timestamp.
+
+The entire batch of events must be set with the flag `imported`.
+
+It's recommended to submit the whole batch as a `linked` chain of events, ensuring that
+if any event fails, none of them are committed, preserving the last timestamp unchanged.
+This approach gives the application a chance to correct failed imported events, re-submitting
+the batch again with the same user-defined timestamps.
+
+```javascript
+// External source of time.
+let historical_timestamp = 0n
+// Events loaded from an external source.
+const historical_accounts = []; // Loaded from an external source.
+const historical_transfers = []; // Loaded from an external source.
+
+// First, load and import all accounts with their timestamps from the historical source.
+const accounts = [];
+for (let index = 0; i < historical_accounts.length; i++) {
+  let account = historical_accounts[i];
+  // Set a unique and strictly increasing timestamp.
+  historical_timestamp += 1;
+  account.timestamp = historical_timestamp;
+  // Set the account as `imported`.
+  account.flags = AccountFlags.imported;
+  // To ensure atomicity, the entire batch (except the last event in the chain)
+  // must be `linked`.
+  if (index < historical_accounts.length - 1) {
+    account.flags |= AccountFlags.linked;
+  }
+
+  accounts.push(account);
+}
+
+const account_errors = await client.createAccounts(accounts);
+// Error handling omitted.
+
+// Then, load and import all transfers with their timestamps from the historical source.
+const transfers = [];
+for (let index = 0; i < historical_transfers.length; i++) {
+  let transfer = historical_transfers[i];
+  // Set a unique and strictly increasing timestamp.
+  historical_timestamp += 1;
+  transfer.timestamp = historical_timestamp;
+  // Set the account as `imported`.
+  transfer.flags = TransferFlags.imported;
+  // To ensure atomicity, the entire batch (except the last event in the chain)
+  // must be `linked`.
+  if (index < historical_transfers.length - 1) {
+    transfer.flags |= TransferFlags.linked;
+  }
+
+  transfers.push(transfer);
+}
+
+const transfer_errors = await client.createTransfers(transfers);
+// Error handling omitted.
+
+// Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+// with the same historical timestamps without regressing the cluster timestamp.
 ```

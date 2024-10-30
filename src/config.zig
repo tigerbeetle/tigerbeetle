@@ -9,19 +9,16 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
-const stdx = @import("./stdx.zig");
 
 const root = @import("root");
 
 const BuildOptions = struct {
-    config_base: ConfigBase,
     config_log_level: std.log.Level,
-    tracer_backend: TracerBackend,
+    config_verify: bool,
     hash_log_mode: HashLogMode,
     git_commit: ?[40]u8,
     release: ?[]const u8,
     release_client_min: ?[]const u8,
-    config_aof_record: bool,
     config_aof_recovery: bool,
 };
 
@@ -74,8 +71,7 @@ pub const Config = struct {
     /// Intended solely for extra sanity-checks: all meaningful decisions should be driven by
     /// specific fields of the config.
     pub fn is_production(config: *const Config) bool {
-        _ = config;
-        return build_options.config_base == .production;
+        return config.cluster.journal_slot_count > ConfigCluster.journal_slot_count_min;
     }
 };
 
@@ -89,7 +85,6 @@ pub const Config = struct {
 // TODO: Some of these could be runtime parameters (e.g. grid_scrubber_cycle_ms).
 const ConfigProcess = struct {
     log_level: std.log.Level = .info,
-    tracer_backend: TracerBackend = .none,
     hash_log_mode: HashLogMode = .none,
     verify: bool,
     release: vsr.Release = vsr.Release.minimum,
@@ -97,7 +92,8 @@ const ConfigProcess = struct {
     git_commit: ?[40]u8 = null,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
-    storage_size_limit_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
+    storage_size_limit_default: u64 = 16 * 1024 * 1024 * 1024 * 1024,
+    storage_size_limit_max: u64 = 64 * 1024 * 1024 * 1024 * 1024,
     memory_size_max_default: u64 = 1024 * 1024 * 1024,
     cache_accounts_size_default: usize,
     cache_transfers_size_default: usize,
@@ -131,11 +127,10 @@ const ConfigProcess = struct {
     grid_iops_read_max: u64 = 16,
     grid_iops_write_max: u64 = 16,
     grid_cache_size_default: u64 = 1024 * 1024 * 1024,
-    grid_repair_request_max: usize = 8,
-    grid_repair_reads_max: usize = 8,
+    grid_repair_request_max: usize = 4,
+    grid_repair_reads_max: usize = 4,
     grid_missing_blocks_max: usize = 30,
-    grid_missing_tables_max: usize = 3,
-    aof_record: bool = false,
+    grid_missing_tables_max: usize = 6,
     grid_scrubber_reads_max: usize = 1,
     grid_scrubber_cycle_ms: usize = std.time.ms_per_day * 180,
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
@@ -164,7 +159,7 @@ const ConfigCluster = struct {
     block_size: comptime_int = 512 * 1024,
     lsm_levels: u6 = 7,
     lsm_growth_factor: u32 = 8,
-    lsm_batch_multiple: comptime_int = 32,
+    lsm_compaction_ops: comptime_int = 32,
     lsm_snapshots_max: usize = 32,
     lsm_manifest_compact_extra_blocks: comptime_int = 1,
     lsm_table_coalescing_threshold_percent: comptime_int = 50,
@@ -173,7 +168,7 @@ const ConfigCluster = struct {
     /// Minimal value.
     // TODO(batiati): Maybe this constant should be derived from `grid_iops_read_max`,
     // since each scan can read from `lsm_levels` in parallel.
-    lsm_scans_max: comptime_int = 5,
+    lsm_scans_max: comptime_int = 6,
 
     /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them
     /// all to a single torn write. A replica needs at least one valid redundant header to
@@ -213,15 +208,8 @@ const ConfigCluster = struct {
 
 pub const ConfigBase = enum {
     production,
-    development,
     test_min,
     default,
-};
-
-pub const TracerBackend = enum {
-    none,
-    // Sends data to https://github.com/wolfpld/tracy.
-    tracy,
 };
 
 pub const HashLogMode = enum {
@@ -239,26 +227,11 @@ pub const configs = struct {
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
             .cache_account_balances_size_default = 0,
-            .verify = false,
+            .verify = true,
         },
         .cluster = .{
             .clients_max = 64,
         },
-    };
-
-    /// A good default config for local development.
-    /// (For production, use default_production instead.)
-    /// The cluster-config is compatible with the default production config.
-    pub const default_development = Config{
-        .process = .{
-            .direct_io = true,
-            .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
-            .cache_transfers_size_default = 0,
-            .cache_transfers_pending_size_default = 0,
-            .cache_account_balances_size_default = 0,
-            .verify = true,
-        },
-        .cluster = default_production.cluster,
     };
 
     /// Minimal test configuration — small WAL, small grid block size, etc.
@@ -266,6 +239,7 @@ pub const configs = struct {
     /// reach.
     pub const test_min = Config{
         .process = .{
+            .storage_size_limit_default = 1 * 1024 * 1024 * 1024,
             .storage_size_limit_max = 1 * 1024 * 1024 * 1024,
             .direct_io = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 256,
@@ -288,7 +262,7 @@ pub const configs = struct {
             .message_size_max = Config.Cluster.message_size_max_min(4),
 
             .block_size = sector_size,
-            .lsm_batch_multiple = 4,
+            .lsm_compaction_ops = 4,
             .lsm_growth_factor = 4,
             // (This is higher than the production default value because the block size is smaller.)
             .lsm_manifest_compact_extra_blocks = 5,
@@ -297,20 +271,13 @@ pub const configs = struct {
         },
     };
 
-    const default = if (@hasDecl(root, "tigerbeetle_config"))
-        root.tigerbeetle_config
-    else if (builtin.is_test)
-        test_min
-    else
-        default_development;
-
     pub const current = current: {
-        var base = switch (build_options.config_base) {
-            .default => default,
-            .production => default_production,
-            .development => default_development,
-            .test_min => test_min,
-        };
+        var base = if (@hasDecl(root, "tigerbeetle_config"))
+            root.tigerbeetle_config
+        else if (builtin.is_test)
+            test_min
+        else
+            default_production;
 
         if (build_options.release == null and build_options.release_client_min != null) {
             @compileError("must set release if setting release_client_min");
@@ -336,13 +303,12 @@ pub const configs = struct {
 
         // TODO Use additional build options to overwrite other fields.
         base.process.log_level = build_options.config_log_level;
-        base.process.tracer_backend = build_options.tracer_backend;
         base.process.hash_log_mode = build_options.hash_log_mode;
         base.process.release = release;
         base.process.release_client_min = release_client_min;
         base.process.git_commit = build_options.git_commit;
-        base.process.aof_record = build_options.config_aof_record;
         base.process.aof_recovery = build_options.config_aof_recovery;
+        base.process.verify = build_options.config_verify;
 
         assert(base.process.release.value >= base.process.release_client_min.value);
 

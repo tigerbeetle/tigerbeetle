@@ -19,7 +19,7 @@ pub const storage = @import("storage.zig");
 pub const tb_client = @import("clients/c/tb_client.zig");
 pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
-pub const tracer = @import("tracer.zig");
+pub const trace = @import("trace.zig");
 pub const stdx = @import("stdx.zig");
 pub const flags = @import("flags.zig");
 pub const grid = @import("vsr/grid.zig");
@@ -35,6 +35,7 @@ pub const lsm = .{
     .composite_key = @import("lsm/composite_key.zig"),
 };
 pub const testing = .{
+    .snaptest = @import("testing/snaptest.zig"),
     .cluster = @import("testing/cluster.zig"),
     .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
@@ -203,7 +204,6 @@ pub const Command = enum(u8) {
 
     start_view_change = 10,
     do_view_change = 11,
-    start_view = 12,
 
     request_start_view = 13,
     request_headers = 14,
@@ -216,17 +216,34 @@ pub const Command = enum(u8) {
     request_blocks = 19,
     block = 20,
 
-    request_sync_checkpoint = 21,
-    sync_checkpoint = 22,
+    start_view = 23,
+
+    // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
+    const gaps = .{
+        12, // start_view without checkpoint
+        21, // request_sync_checkpoint
+        22, // sync_checkpoint
+    };
 
     comptime {
-        for (std.enums.values(Command), 0..) |result, index| {
-            assert(@intFromEnum(result) == index);
+        var value_previous: ?u8 = null;
+        for (std.enums.values(Command)) |command| {
+            const value_current = @intFromEnum(command);
+            assert(std.mem.indexOfScalar(u8, &gaps, value_current) == null);
+            if (value_previous == null) {
+                assert(value_current == 0);
+            } else {
+                assert(value_previous.? < value_current);
+                for (value_previous.? + 1..value_current) |value_gap| {
+                    assert(std.mem.indexOfScalar(u8, &gaps, value_gap) != null);
+                }
+            }
+            value_previous = value_current;
         }
     }
 };
 
-/// This type exists to avoid making the Header type dependant on the state
+/// This type exists to avoid making the Header type dependent on the state
 /// machine used, which would cause awkward circular type dependencies.
 pub const Operation = enum(u8) {
     // Looking to make backwards incompatible changes here? Make sure to check release.zig for
@@ -620,6 +637,37 @@ pub const UpgradeRequest = extern struct {
         assert(stdx.no_padding(UpgradeRequest));
     }
 };
+
+/// To ease investigation of accidents, assign a separate exit status for each fatal condition.
+/// This is a process-global set.
+const FatalReason = enum(u8) {
+    cli = 1,
+    no_space_left = 2,
+    manifest_node_pool_exhausted = 3,
+    storage_size_exceeds_limit = 4,
+    storage_size_would_exceed_limit = 5,
+
+    fn exit_status(reason: FatalReason) u8 {
+        return @intFromEnum(reason);
+    }
+};
+
+/// Terminates the process with non-zero exit code.
+///
+/// Use fatal when encountering an environmental error where stopping is the intended end response.
+/// For example, when running out of disk space, use `fatal` instead of threading error.NoSpaceLeft
+/// up the stack. Propagating fatal errors up the stack needlessly increases dimensionality (unusual
+/// defers might run), but doesn't improve experience --- the leaf of the call stack has the most
+/// context for printing error message.
+///
+/// Don't use fatal for situations which are necessarily bugs in some replica process (not
+/// necessary this process), use assert or panic instead.
+pub fn fatal(reason: FatalReason, comptime fmt: []const u8, args: anytype) noreturn {
+    log.err(fmt, args);
+    const status = reason.exit_status();
+    assert(status != 0);
+    std.process.exit(status);
+}
 
 pub const Timeout = struct {
     name: []const u8,
@@ -1247,13 +1295,6 @@ const ViewChangeHeadersSlice = struct {
         // A SV never includes gaps or faulty headers.
         assert(Headers.dvc_header_type(head) == .valid);
 
-        if (headers.command == .start_view) {
-            assert(headers.slice.len >= @min(
-                constants.view_change_headers_suffix_max,
-                head.op + 1, // +1 to include the head itself.
-            ));
-        }
-
         var child = head;
         for (headers.slice[1..], 0..) |*header, i| {
             const index = i + 1;
@@ -1272,7 +1313,14 @@ const ViewChangeHeadersSlice = struct {
 
             switch (Headers.dvc_header_type(header)) {
                 .blank => {
-                    assert(headers.command == .do_view_change);
+                    // We can't verify that SV headers contain no gaps headers here:
+                    // superblock.checkpoint could make .do_view_change headers durable instead of
+                    // .start_view headers when view == log_view (see `commit_checkpoint_superblock`
+                    // in `replica.zig`). When these headers are loaded from the superblock on
+                    // startup, they are considered to be .start_view headers (see `vsr_headers` in
+                    // `superblock.zig`).
+                    maybe(headers.command == .do_view_change);
+                    maybe(headers.command == .start_view);
                     continue; // Don't update "child".
                 },
                 .valid => {
@@ -1393,27 +1441,18 @@ const ViewChangeHeadersArray = struct {
     array: Headers.Array,
 
     pub fn root(cluster: u128) ViewChangeHeadersArray {
-        return ViewChangeHeadersArray.init_from_slice(.start_view, &.{
+        return ViewChangeHeadersArray.init(.start_view, &.{
             Header.Prepare.root(cluster),
         });
     }
 
-    pub fn init_from_slice(
+    pub fn init(
         command: ViewChangeCommand,
         slice: []const Header.Prepare,
     ) ViewChangeHeadersArray {
         const headers = ViewChangeHeadersArray{
             .command = command,
             .array = Headers.Array.from_slice(slice) catch unreachable,
-        };
-        headers.verify();
-        return headers;
-    }
-
-    fn init_from_array(command: ViewChangeCommand, array: Headers.Array) ViewChangeHeadersArray {
-        const headers = ViewChangeHeadersArray{
-            .command = command,
-            .array = array,
         };
         headers.verify();
         return headers;
@@ -1450,9 +1489,9 @@ const ViewChangeHeadersArray = struct {
     }
 };
 
-/// For a replica with journal_slot_count=10, lsm_batch_multiple=2, pipeline_prepare_queue_max=2,
+/// For a replica with journal_slot_count=10, lsm_compaction_ops=2, pipeline_prepare_queue_max=2,
 /// and checkpoint_interval=4, which can be computed as follows:
-/// journal_slot_count - (lsm_batch_multiple + 2 * pipeline_prepare_queue_max) = 4
+/// journal_slot_count - (lsm_compaction_ops + 2 * pipeline_prepare_queue_max) = 4
 ///
 ///   checkpoint() call           0   1   2   3   4
 ///   op_checkpoint               0   3   7  11  15
@@ -1477,8 +1516,8 @@ const ViewChangeHeadersArray = struct {
 ///    [ ] range of ops from a checkpoint
 pub const Checkpoint = struct {
     comptime {
-        assert(constants.journal_slot_count > constants.lsm_batch_multiple);
-        assert(constants.journal_slot_count % constants.lsm_batch_multiple == 0);
+        assert(constants.journal_slot_count > constants.lsm_compaction_ops);
+        assert(constants.journal_slot_count % constants.lsm_compaction_ops == 0);
     }
 
     pub fn checkpoint_after(checkpoint: u64) u64 {
@@ -1487,16 +1526,16 @@ pub const Checkpoint = struct {
         const result = op: {
             if (checkpoint == 0) {
                 // First wrap: op_checkpoint_next = 6-1 = 5
-                // -1: vsr_checkpoint_interval is a count, result is an inclusive index.
-                break :op constants.vsr_checkpoint_interval - 1;
+                // -1: vsr_checkpoint_ops is a count, result is an inclusive index.
+                break :op constants.vsr_checkpoint_ops - 1;
             } else {
                 // Second wrap: op_checkpoint_next = 5+6 = 11
                 // Third wrap: op_checkpoint_next = 11+6 = 17
-                break :op checkpoint + constants.vsr_checkpoint_interval;
+                break :op checkpoint + constants.vsr_checkpoint_ops;
             }
         };
 
-        assert((result + 1) % constants.lsm_batch_multiple == 0);
+        assert((result + 1) % constants.lsm_compaction_ops == 0);
         assert(valid(result));
 
         return result;
@@ -1508,7 +1547,7 @@ pub const Checkpoint = struct {
         if (checkpoint == 0) {
             return null;
         } else {
-            return checkpoint + constants.lsm_batch_multiple;
+            return checkpoint + constants.lsm_compaction_ops;
         }
     }
 
@@ -1516,18 +1555,28 @@ pub const Checkpoint = struct {
         assert(valid(checkpoint));
 
         if (trigger_for_checkpoint(checkpoint)) |trigger| {
-            return trigger + constants.pipeline_prepare_queue_max;
+            return trigger + (2 * constants.pipeline_prepare_queue_max);
         } else {
             return null;
         }
     }
 
+    pub fn durable(checkpoint: u64, commit_max: u64) bool {
+        assert(valid(checkpoint));
+
+        if (trigger_for_checkpoint(checkpoint)) |trigger| {
+            return commit_max > (trigger + constants.pipeline_prepare_queue_max);
+        } else {
+            return true;
+        }
+    }
+
     pub fn valid(op: u64) bool {
-        // Divide by `lsm_batch_multiple` instead of `vsr_checkpoint_interval`:
+        // Divide by `lsm_compaction_ops` instead of `vsr_checkpoint_ops`:
         // although today in practice checkpoints are evenly spaced, the LSM layer doesn't assume
         // that. LSM allows any bar boundary to become a checkpoint which happens, e.g., in the tree
         // fuzzer.
-        return op == 0 or (op + 1) % constants.lsm_batch_multiple == 0;
+        return op == 0 or (op + 1) % constants.lsm_compaction_ops == 0;
     }
 };
 
@@ -1543,24 +1592,24 @@ test "Checkpoint ops diagram" {
 
     try string.writer().print(
         \\journal_slot_count={[journal_slot_count]}
-        \\lsm_batch_multiple={[lsm_batch_multiple]}
+        \\lsm_compaction_ops={[lsm_compaction_ops]}
         \\pipeline_prepare_queue_max={[pipeline_prepare_queue_max]}
-        \\vsr_checkpoint_interval={[vsr_checkpoint_interval]}
+        \\vsr_checkpoint_ops={[vsr_checkpoint_ops]}
         \\
         \\
     , .{
         .journal_slot_count = constants.journal_slot_count,
-        .lsm_batch_multiple = constants.lsm_batch_multiple,
+        .lsm_compaction_ops = constants.lsm_compaction_ops,
         .pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max,
-        .vsr_checkpoint_interval = constants.vsr_checkpoint_interval,
+        .vsr_checkpoint_ops = constants.vsr_checkpoint_ops,
     });
 
     var checkpoint_prev: u64 = 0;
     var checkpoint_next: u64 = 0;
     var checkpoint_count: u32 = 0;
     for (0..constants.journal_slot_count * 10) |op| {
-        const last_beat = op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1;
-        const last_slot = (op % constants.journal_slot_count) + 1 == constants.journal_slot_count;
+        const last_beat = (op + 1) % constants.lsm_compaction_ops == 0;
+        const last_slot = (op + 1) % constants.journal_slot_count == 0;
 
         const op_type: enum {
             normal,
@@ -1612,20 +1661,20 @@ test "Checkpoint ops diagram" {
 
     try snap(@src(),
         \\journal_slot_count=32
-        \\lsm_batch_multiple=4
+        \\lsm_compaction_ops=4
         \\pipeline_prepare_queue_max=4
-        \\vsr_checkpoint_interval=20
+        \\vsr_checkpoint_ops=20
         \\
-        \\OPS: [__0  __1  __2  __3   __4  __5  __6  __7   __8  __9  _10  _11   _12  _13  _14  _15   _16  _17  _18 {_19   _20  _21  _22 <_23>  _24  _25  _26  _27]  _28  _29  _30  _31
-        \\OPS:  _32  _33  _34  _35   _36  _37  _38 [_39   _40  _41  _42 <_43>  _44  _45  _46  _47}  _48  _49  _50  _51   _52  _53  _54  _55   _56  _57  _58 {_59   _60  _61  _62 <_63>
-        \\OPS:  _64  _65  _66  _67]  _68  _69  _70  _71   _72  _73  _74  _75   _76  _77  _78 [_79   _80  _81  _82 <_83>  _84  _85  _86  _87}  _88  _89  _90  _91   _92  _93  _94  _95
-        \\OPS:  _96  _97  _98 {_99   100  101  102 <103>  104  105  106  107]  108  109  110  111   112  113  114  115   116  117  118 [119   120  121  122 <123>  124  125  126  127}
-        \\OPS:  128  129  130  131   132  133  134  135   136  137  138 {139   140  141  142 <143>  144  145  146  147]  148  149  150  151   152  153  154  155   156  157  158 [159
-        \\OPS:  160  161  162 <163>  164  165  166  167}  168  169  170  171   172  173  174  175   176  177  178 {179   180  181  182 <183>  184  185  186  187]  188  189  190  191
-        \\OPS:  192  193  194  195   196  197  198 [199   200  201  202 <203>  204  205  206  207}  208  209  210  211   212  213  214  215   216  217  218 {219   220  221  222 <223>
-        \\OPS:  224  225  226  227]  228  229  230  231   232  233  234  235   236  237  238 [239   240  241  242 <243>  244  245  246  247}  248  249  250  251   252  253  254  255
-        \\OPS:  256  257  258 {259   260  261  262 <263>  264  265  266  267]  268  269  270  271   272  273  274  275   276  277  278 [279   280  281  282 <283>  284  285  286  287}
-        \\OPS:  288  289  290  291   292  293  294  295   296  297  298 {299   300  301  302 <303>  304  305  306  307]  308  309  310  311   312  313  314  315   316  317  318 [319
+        \\OPS: [__0  __1  __2  __3   __4  __5  __6  __7   __8  __9  _10  _11   _12  _13  _14  _15   _16  _17  _18 {_19   _20  _21  _22 <_23>  _24  _25  _26  _27   _28  _29  _30  _31]
+        \\OPS:  _32  _33  _34  _35   _36  _37  _38 [_39   _40  _41  _42 <_43>  _44  _45  _46  _47   _48  _49  _50  _51}  _52  _53  _54  _55   _56  _57  _58 {_59   _60  _61  _62 <_63>
+        \\OPS:  _64  _65  _66  _67   _68  _69  _70  _71]  _72  _73  _74  _75   _76  _77  _78 [_79   _80  _81  _82 <_83>  _84  _85  _86  _87   _88  _89  _90  _91}  _92  _93  _94  _95
+        \\OPS:  _96  _97  _98 {_99   100  101  102 <103>  104  105  106  107   108  109  110  111]  112  113  114  115   116  117  118 [119   120  121  122 <123>  124  125  126  127
+        \\OPS:  128  129  130  131}  132  133  134  135   136  137  138 {139   140  141  142 <143>  144  145  146  147   148  149  150  151]  152  153  154  155   156  157  158 [159
+        \\OPS:  160  161  162 <163>  164  165  166  167   168  169  170  171}  172  173  174  175   176  177  178 {179   180  181  182 <183>  184  185  186  187   188  189  190  191]
+        \\OPS:  192  193  194  195   196  197  198 [199   200  201  202 <203>  204  205  206  207   208  209  210  211}  212  213  214  215   216  217  218 {219   220  221  222 <223>
+        \\OPS:  224  225  226  227   228  229  230  231]  232  233  234  235   236  237  238 [239   240  241  242 <243>  244  245  246  247   248  249  250  251}  252  253  254  255
+        \\OPS:  256  257  258 {259   260  261  262 <263>  264  265  266  267   268  269  270  271]  272  273  274  275   276  277  278 [279   280  281  282 <283>  284  285  286  287
+        \\OPS:  288  289  290  291}  292  293  294  295   296  297  298 {299   300  301  302 <303>  304  305  306  307   308  309  310  311]  312  313  314  315   316  317  318 [319
         \\
     ).diff(string.items);
 }

@@ -31,14 +31,19 @@ import (
 	e "errors"
 	"runtime"
 	"strings"
-	"unsafe"
 	"sync"
+	"unsafe"
 
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 ///////////////////////////////////////////////////////////////
+
+var AmountMax = types.BytesToUint128([16]byte{
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+})
 
 type Client interface {
 	CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
@@ -61,7 +66,7 @@ type request struct {
 
 type c_client struct {
 	tb_client C.tb_client_t
-	mutex sync.Mutex
+	mutex     sync.Mutex
 }
 
 func NewClient(
@@ -173,14 +178,10 @@ func (c *c_client) doRequest(
 	data unsafe.Pointer,
 	result unsafe.Pointer,
 ) (int, error) {
-	if count == 0 {
-		return 0, errors.ErrEmptyBatch{}
-	}
-
 	var req request
 	req.result = result
 	req.ready = make(chan struct{}, 1) // buffered chan prevents completion handler blocking for Go.
-	
+
 	// NOTE: packet must be its own allocation and cannot live in request as then CGO is unable to
 	// correctly track it (panic: runtime error: cgo argument has Go pointer to unpinned Go pointer)
 	packet := new(C.tb_packet_t)
@@ -189,16 +190,20 @@ func (c *c_client) doRequest(
 	packet.status = C.TB_PACKET_OK
 	packet.data_size = C.uint32_t(count * int(getEventSize(op)))
 	packet.data = data
-	
-	// NOTE: Pin all go-allocated refs that will be accessed by onGoPacketCompletion after submit(). 
+
+	// NOTE: Pin all go-allocated refs that will be accessed by onGoPacketCompletion after submit().
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
 	pinner.Pin(&req)
-	pinner.Pin(data)
-	pinner.Pin(result)
 	pinner.Pin(packet)
-	
-	// Lock the mutex when accessing the `c.tb_client` handle. 
+	if data != nil {
+		pinner.Pin(data)
+	}
+	if result != nil {
+		pinner.Pin(result)
+	}
+
+	// Lock the mutex when accessing the `c.tb_client` handle.
 	c.mutex.Lock()
 	if c.tb_client != nil {
 		C.tb_client_submit(c.tb_client, packet)
@@ -243,6 +248,9 @@ func onGoPacketCompletion(
 	result_ptr C.tb_result_bytes_t,
 	result_len C.uint32_t,
 ) {
+	_ = _context
+	_ = client
+
 	// Get the request from the packet user data.
 	req := (*request)(unsafe.Pointer(packet.user_data))
 
@@ -283,11 +291,21 @@ func onGoPacketCompletion(
 func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error) {
 	count := len(accounts)
 	results := make([]types.AccountEventResult, count)
+
+	var dataPtr, resultPtr unsafe.Pointer
+	if count > 0 {
+		dataPtr = unsafe.Pointer(&accounts[0])
+		resultPtr = unsafe.Pointer(&results[0])
+	} else {
+		dataPtr = nil
+		resultPtr = nil
+	}
+
 	wrote, err := c.doRequest(
 		C.TB_OPERATION_CREATE_ACCOUNTS,
 		count,
-		unsafe.Pointer(&accounts[0]),
-		unsafe.Pointer(&results[0]),
+		dataPtr,
+		resultPtr,
 	)
 
 	if err != nil {
@@ -301,11 +319,21 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEven
 func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error) {
 	count := len(transfers)
 	results := make([]types.TransferEventResult, count)
+
+	var dataPtr, resultPtr unsafe.Pointer
+	if count > 0 {
+		dataPtr = unsafe.Pointer(&transfers[0])
+		resultPtr = unsafe.Pointer(&results[0])
+	} else {
+		dataPtr = nil
+		resultPtr = nil
+	}
+
 	wrote, err := c.doRequest(
 		C.TB_OPERATION_CREATE_TRANSFERS,
 		count,
-		unsafe.Pointer(&transfers[0]),
-		unsafe.Pointer(&results[0]),
+		dataPtr,
+		resultPtr,
 	)
 
 	if err != nil {
@@ -319,11 +347,21 @@ func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.Transfer
 func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error) {
 	count := len(accountIDs)
 	results := make([]types.Account, count)
+
+	var dataPtr, resultPtr unsafe.Pointer
+	if count > 0 {
+		dataPtr = unsafe.Pointer(&accountIDs[0])
+		resultPtr = unsafe.Pointer(&results[0])
+	} else {
+		dataPtr = nil
+		resultPtr = nil
+	}
+
 	wrote, err := c.doRequest(
 		C.TB_OPERATION_LOOKUP_ACCOUNTS,
 		count,
-		unsafe.Pointer(&accountIDs[0]),
-		unsafe.Pointer(&results[0]),
+		dataPtr,
+		resultPtr,
 	)
 
 	if err != nil {
@@ -337,11 +375,21 @@ func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, 
 func (c *c_client) LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error) {
 	count := len(transferIDs)
 	results := make([]types.Transfer, count)
+
+	var dataPtr, resultPtr unsafe.Pointer
+	if count > 0 {
+		dataPtr = unsafe.Pointer(&transferIDs[0])
+		resultPtr = unsafe.Pointer(&results[0])
+	} else {
+		dataPtr = nil
+		resultPtr = nil
+	}
+
 	wrote, err := c.doRequest(
 		C.TB_OPERATION_LOOKUP_TRANSFERS,
 		count,
-		unsafe.Pointer(&transferIDs[0]),
-		unsafe.Pointer(&results[0]),
+		dataPtr,
+		resultPtr,
 	)
 
 	if err != nil {

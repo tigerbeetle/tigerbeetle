@@ -715,6 +715,12 @@ pub const Storage = struct {
             assert(data_block_header.block_type == .data);
         }
     }
+
+    pub fn transition_to_liveness_mode(storage: *Storage) void {
+        storage.options.read_fault_probability = 0;
+        storage.options.write_fault_probability = 0;
+        storage.options.crash_fault_probability = 0;
+    }
 };
 
 pub const Area = union(enum) {
@@ -810,7 +816,6 @@ pub const ClusterFaultAtlas = struct {
         faulty_grid: bool,
     };
 
-    const CopySet = std.StaticBitSet(constants.superblock_copies);
     const ReplicaSet = std.StaticBitSet(constants.replicas_max);
     const headers_per_sector = @divExact(constants.sector_size, @sizeOf(vsr.Header));
     const header_sectors = @divExact(constants.journal_slot_count, headers_per_sector);

@@ -1,7 +1,7 @@
 //! Collection of utilities for scripting: an in-process sh+coreutils combo.
 //!
 //! Keep this as a single file, independent from the rest of the codebase, to make it easier to
-//! re-use across different processes (eg build.zig).
+//! reuse across different processes (eg build.zig).
 //!
 //! If possible, avoid shelling out to `sh` or other systems utils --- the whole purpose here is to
 //! avoid any extra dependencies.
@@ -193,7 +193,7 @@ pub fn env_get_option(shell: *Shell, var_name: []const u8) ?[]const u8 {
 
 pub fn env_get(shell: *Shell, var_name: []const u8) ![]const u8 {
     errdefer {
-        log.err("environment variable '{s}' not defined", .{var_name});
+        log.warn("environment variable '{s}' not defined", .{var_name});
     }
 
     return try std.process.getEnvVarOwned(shell.arena.allocator(), var_name);
@@ -206,7 +206,8 @@ pub fn env_get(shell: *Shell, var_name: []const u8) ![]const u8 {
 /// to restore the previous directory back.
 pub fn pushd(shell: *Shell, path: []const u8) !void {
     assert(shell.cwd_stack_count < cwd_stack_max);
-    assert(path[0] == '.'); // allow only explicitly relative paths
+    // allow only explicitly relative paths or absolute paths
+    assert(path[0] == '.' or path[0] == '/');
 
     const cwd_new = try shell.cwd.openDir(path, .{});
 
@@ -247,6 +248,15 @@ pub fn file_exists(shell: *Shell, path: []const u8) bool {
     return stat.kind == .file;
 }
 
+pub fn file_make_executable(shell: *Shell, path: []const u8) !void {
+    if (builtin.os.tag != .windows) {
+        const fd = try shell.cwd.openFile(path, .{ .mode = .read_write });
+        defer fd.close();
+
+        try fd.chmod(0o777);
+    }
+}
+
 fn subdir_exists(dir: std.fs.Dir, path: []const u8) !bool {
     const stat = dir.statFile(path) catch |err| switch (err) {
         error.FileNotFound => return false,
@@ -261,6 +271,7 @@ pub fn file_ensure_content(
     shell: *Shell,
     path: []const u8,
     content: []const u8,
+    create_flags: std.fs.File.CreateFlags,
 ) !enum { unchanged, updated } {
     const max_bytes = 1024 * 1024;
     const content_current = shell.cwd.readFileAlloc(shell.gpa, path, max_bytes) catch null;
@@ -270,8 +281,26 @@ pub fn file_ensure_content(
         return .unchanged;
     }
 
-    try shell.cwd.writeFile(.{ .sub_path = path, .data = content });
+    try shell.cwd.writeFile(.{ .sub_path = path, .data = content, .flags = create_flags });
     return .updated;
+}
+
+/// Creates a new temporary directory (in the project-level .zig-cache) and returns the
+/// absolute path.
+///
+/// It's the callers responsibility to delete the directory when done with it, e.g.
+/// with `defer shell.cwd.deleteTree(dir) catch {};`.
+pub fn create_tmp_dir(
+    shell: *Shell,
+) ![]const u8 {
+    const root = try shell.project_root.realpathAlloc(shell.arena.allocator(), ".");
+    const tmp_absolute = try shell.fmt("{s}/.zig-cache/tmp/{}", .{
+        root,
+        std.crypto.random.int(u64),
+    });
+    assert(!try shell.dir_exists(tmp_absolute));
+    try shell.project_root.makePath(tmp_absolute);
+    return tmp_absolute;
 }
 
 const FindOptions = struct {
@@ -343,7 +372,7 @@ pub fn copy_path(
     dst_path: []const u8,
 ) !void {
     errdefer {
-        log.err("failed to copy {s} to {s}", .{ src_path, dst_path });
+        log.warn("failed to copy {s} to {s}", .{ src_path, dst_path });
     }
     if (std.fs.path.dirname(dst_path)) |dir| {
         try dst_dir.makePath(dir);
@@ -351,7 +380,7 @@ pub fn copy_path(
     try src_dir.copyFile(src_path, dst_dir, dst_path, .{});
 }
 
-/// Runs the given command with inherited stdout and stderr.
+/// Runs the given command for side effects.
 /// Returns an error if exit status is non-zero.
 ///
 /// Supports interpolation using the following syntax:
@@ -363,89 +392,47 @@ pub fn copy_path(
 /// })
 /// ```
 pub fn exec(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
-    return exec_options(shell, .{ .echo = true }, cmd, cmd_args);
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
+    defer argv.deinit();
+
+    return exec_inner(shell, argv.slice(), .{});
 }
 
 pub fn exec_options(
     shell: *Shell,
-    options: struct { echo: bool },
+    options: struct {
+        stdin_slice: ?[]const u8 = null,
+        timeout_ns: u64 = 10 * std.time.ns_per_min,
+    },
     comptime cmd: []const u8,
     cmd_args: anytype,
 ) !void {
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    var child = try shell.create_process(argv.slice());
-
-    if (options.echo) {
-        child.stdout_behavior = .Inherit;
-        child.stderr_behavior = .Inherit;
-        echo_command(argv.slice());
-
-        const term = try child.spawnAndWait();
-        switch (term) {
-            .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
-            else => return error.CommandFailed,
-        }
-    } else {
-        var stdout = std.ArrayList(u8).init(shell.gpa);
-        defer stdout.deinit();
-
-        var stderr = std.ArrayList(u8).init(shell.gpa);
-        defer stderr.deinit();
-
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-        errdefer {
-            echo_command(argv.slice());
-            std.debug.print("stdout:{s}\n", .{stdout.items});
-            std.debug.print("stderr:{s}\n", .{stderr.items});
-        }
-
-        try child.spawn();
-        try child.collectOutput(
-            &stdout,
-            &stderr,
-            128 * 1024 * 1024,
-        );
-        const term = try child.wait();
-        switch (term) {
-            .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
-            else => return error.CommandFailed,
-        }
-    }
+    return exec_inner(shell, argv.slice(), .{
+        .stdin_slice = options.stdin_slice,
+        .timeout_ns = options.timeout_ns,
+    });
 }
 
-/// Returns `true` if the command executed successfully with a zero exit code.
-///
-/// One intended use-case is sanity-checking that an executable is present, by running
-/// `my-tool --version`.
-pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !bool {
+/// Runs the given command and returns its output.
+/// If the output is a single line, the final newline is stripped.
+pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) ![]const u8 {
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    var child = try shell.create_process(argv.slice());
-    const term = try child.spawnAndWait();
-    return switch (term) {
-        .Exited => |code| code == 0,
-        else => false,
-    };
-}
-
-/// Run the command and return its stdout.
-///
-/// Returns an error if the command exists with a non-zero status or a non-empty stderr.
-///
-/// Trims the trailing newline, if any.
-pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) ![]const u8 {
-    return shell.exec_stdout_options(.{}, cmd, cmd_args);
+    var captured_stdout: []const u8 = &.{};
+    try exec_inner(shell, argv.slice(), .{
+        .capture_stdout = &captured_stdout,
+    });
+    return captured_stdout;
 }
 
 pub fn exec_stdout_options(
     shell: *Shell,
     options: struct {
         stdin_slice: ?[]const u8 = null,
-        max_output_bytes: usize = 1024 * 1024,
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -453,66 +440,134 @@ pub fn exec_stdout_options(
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    var child = try shell.create_process(argv.slice());
-    child.stdin_behavior = if (options.stdin_slice == null) .Ignore else .Pipe;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
+    var captured_stdout: []const u8 = &.{};
+    try exec_inner(shell, argv.slice(), .{
+        .stdin_slice = options.stdin_slice,
+        .capture_stdout = &captured_stdout,
+    });
+    return captured_stdout;
+}
 
-    var stdout = std.ArrayList(u8).init(shell.gpa);
-    var stderr = std.ArrayList(u8).init(shell.gpa);
-    defer {
-        stdout.deinit();
-        stderr.deinit();
-    }
+/// Runs the zig compiler.
+pub fn exec_zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
+    var argv = Argv.init(shell.gpa);
+    defer argv.deinit();
 
-    try child.spawn();
-    defer {
-        _ = child.kill() catch {};
-    }
+    try argv.append_new_arg("{s}", .{shell.zig_exe.?});
+    try expand_argv(&argv, cmd, cmd_args);
+
+    return shell.exec_inner(argv.slice(), .{});
+}
+
+fn exec_inner(
+    shell: *Shell,
+    argv: []const []const u8,
+    options: struct {
+        stdin_slice: ?[]const u8 = null,
+        capture_stdout: ?*[]const u8 = null, // Optional out parameter.
+        output_limit_bytes: usize = 128 * 1024 * 1024,
+        timeout_ns: u64 = 10 * std.time.ns_per_min,
+    },
+) !void {
+    const argv_formatted = try std.mem.join(shell.gpa, " ", argv);
+    defer shell.gpa.free(argv_formatted);
 
     var stdin_writer: ?std.Thread = null;
     defer if (stdin_writer) |thread| thread.join();
 
-    if (options.stdin_slice) |stdin_slice| {
-        assert(child.stdin != null);
+    const Streams = enum { stdout, stderr };
+    var poller: ?std.io.Poller(Streams) = null;
+    defer if (poller) |*p| p.deinit();
 
-        stdin_writer = try std.Thread.spawn(
-            .{},
-            struct {
-                fn write_stdin(destination: std.fs.File, source: []const u8) void {
-                    defer destination.close();
-
-                    destination.writeAll(source) catch {};
+    errdefer |err| {
+        log.err("process failed with {s}: {s}", .{ @errorName(err), argv_formatted });
+        if (poller) |*p| {
+            inline for (comptime std.enums.values(Streams)) |stream| {
+                if (p.fifo(stream).count > 0) {
+                    log.err("{s}:\n++++\n{s}++++\n", .{
+                        @tagName(stream),
+                        p.fifo(stream).readableSlice(0),
+                    });
                 }
-            }.write_stdin,
-            .{ child.stdin.?, stdin_slice },
-        );
-        child.stdin = null;
+            }
+        }
     }
 
-    try child.collectOutput(&stdout, &stderr, options.max_output_bytes);
-    const term = try child.wait();
+    var child = std.process.Child.init(argv, shell.gpa);
+    child.cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
+    child.env_map = &shell.env;
+    child.stdin_behavior = if (options.stdin_slice != null) .Pipe else .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    try child.spawn();
     errdefer {
-        log.err("command failed", .{});
-        echo_command(argv.slice());
-        log.err("stdout:\n{s}\nstderr:\n{s}", .{ stdout.items, stderr.items });
+        _ = child.kill() catch {};
     }
 
+    if (options.stdin_slice) |stdin_slice| {
+        stdin_writer = try write_stdin(&child, stdin_slice);
+    }
+
+    poller = std.io.poll(shell.gpa, Streams, .{
+        .stdout = child.stdout.?,
+        .stderr = child.stderr.?,
+    });
+
+    {
+        defer inline for (comptime std.enums.values(Streams)) |stream| {
+            assert(poller.?.fifo(stream).head == 0);
+        };
+
+        const deadline: i128 = std.time.nanoTimestamp() + options.timeout_ns;
+        for (0..1_000_000) |_| {
+            const timeout: i128 = deadline - std.time.nanoTimestamp();
+            if (timeout <= 0) return error.ExecTimeout;
+            if (!try poller.?.pollTimeout(@intCast(timeout))) break;
+            inline for (comptime std.enums.values(Streams)) |stream| {
+                if (poller.?.fifo(stream).count > options.output_limit_bytes) {
+                    return error.StdoutStreamTooLong;
+                }
+            }
+        } else @panic("exec: safety counter exceeded");
+    }
+
+    const term = try child.wait();
     switch (term) {
-        .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
-        else => return error.CommandFailed,
+        .Exited => |code| if (code != 0) return error.ExecNonZeroExitStatus,
+        else => return error.ExecFailed,
     }
 
-    const trailing_newline = if (std.mem.indexOf(u8, stdout.items, "\n")) |first_newline|
-        first_newline == stdout.items.len - 1
-    else
-        false;
-    const len_without_newline = stdout.items.len - if (trailing_newline) @as(usize, 1) else 0;
-    return shell.arena.allocator().dupe(u8, stdout.items[0..len_without_newline]);
+    if (options.capture_stdout) |destination| {
+        const stdout = poller.?.fifo(.stdout).readableSlice(0);
+        const trailing_newline = if (std.mem.indexOf(u8, stdout, "\n")) |first_newline|
+            first_newline == stdout.len - 1
+        else
+            false;
+        const len_without_newline = stdout.len - @intFromBool(trailing_newline);
+        destination.* = try shell.arena.allocator().dupe(u8, stdout[0..len_without_newline]);
+    }
 }
 
-/// Run the command and return its status, stderr and stdout. The caller is responsible for checking
-/// the status.
+fn write_stdin(child: *std.process.Child, stdin: []const u8) !std.Thread {
+    assert(child.stdin != null);
+    defer child.stdin = null;
+
+    // Spawn a thread to avoid deadlock between us writing to stdin and reading from stdout.
+    return try std.Thread.spawn(
+        .{},
+        struct {
+            fn write_stdin(destination: std.fs.File, source: []const u8) void {
+                defer destination.close();
+
+                destination.writeAll(source) catch {};
+            }
+        }.write_stdin,
+        .{ child.stdin.?, stdin },
+    );
+}
+
+/// Run the command and return its status, stderr and stdout.
+/// The caller is responsible for checking the status.
 pub fn exec_raw(
     shell: *Shell,
     comptime cmd: []const u8,
@@ -542,65 +597,36 @@ pub fn spawn(
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
-    var child = try shell.create_process(argv.slice());
+    var child = std.process.Child.init(argv.slice(), shell.gpa);
+    child.cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
+    child.env_map = &shell.env;
     child.stdin_behavior = options.stdin_behavior;
     child.stdout_behavior = options.stdout_behavior;
     child.stderr_behavior = options.stderr_behavior;
-
     try child.spawn();
 
     return child;
 }
 
-/// Runs the zig compiler.
-pub fn zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
-    var argv = Argv.init(shell.gpa);
-    defer argv.deinit();
-
-    try argv.append_new_arg("{s}", .{shell.zig_exe.?});
-    try expand_argv(&argv, cmd, cmd_args);
-
-    var child = try shell.create_process(argv.slice());
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
-
-    echo_command(argv.slice());
-    const term = try child.spawnAndWait();
-
-    switch (term) {
-        .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
-        else => return error.CommandFailed,
-    }
-}
-
-fn create_process(shell: *Shell, argv: []const []const u8) !std.process.Child {
-    var child = std.process.Child.init(argv, shell.gpa);
-    child.cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
-    child.env_map = &shell.env;
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
-    return child;
-}
-
-/// If we inherit `stdout` to show the output to the user, it's also helpful to echo the command
-/// itself.
-fn echo_command(argv: []const []const u8) void {
-    std.debug.print("$ ", .{});
-    for (argv, 0..) |arg, i| {
-        if (i != 0) std.debug.print(" ", .{});
-        std.debug.print("{s}", .{arg});
-    }
-    std.debug.print("\n", .{});
-}
-
 /// On GitHub Actions runners, `git commit` fails with an "Author identity unknown" error.
 ///
 /// This function sets up appropriate environmental variables to correct that error.
-pub fn git_env_setup(shell: *Shell) !void {
-    try shell.env.put("GIT_AUTHOR_NAME", "TigerBeetle Bot");
+pub fn git_env_setup(shell: *Shell, options: struct { use_hostname: bool }) !void {
+    if (options.use_hostname) {
+        if (builtin.target.os.tag != .linux) {
+            @panic("use_hostname only supported on linux");
+        }
+        var hostname_buffer = std.mem.zeroes([std.posix.HOST_NAME_MAX]u8);
+        const hostname = try std.posix.gethostname(&hostname_buffer);
+
+        try shell.env.put("GIT_AUTHOR_NAME", hostname);
+        try shell.env.put("GIT_COMMITTER_NAME", hostname);
+    } else {
+        try shell.env.put("GIT_AUTHOR_NAME", "TigerBeetle Bot");
+        try shell.env.put("GIT_COMMITTER_NAME", "TigerBeetle Bot");
+    }
+
     try shell.env.put("GIT_AUTHOR_EMAIL", "bot@tigerbeetle.com");
-    try shell.env.put("GIT_COMMITTER_NAME", "TigerBeetle Bot");
     try shell.env.put("GIT_COMMITTER_EMAIL", "bot@tigerbeetle.com");
 }
 

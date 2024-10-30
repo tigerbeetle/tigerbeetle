@@ -23,7 +23,6 @@ const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 const ManifestLogOptions = @import("manifest_log.zig").Options;
 const fuzz = @import("../testing/fuzz.zig");
 const schema = @import("./schema.zig");
-const tree = @import("./tree.zig");
 const compaction_tables_input_max = @import("./compaction.zig").compaction_tables_input_max;
 const TableInfo = schema.ManifestNode.TableInfo;
 
@@ -36,12 +35,6 @@ const manifest_log_options = ManifestLogOptions{
     // that pacing is correct.
     .forest_table_count_max = schema.ManifestNode.entry_count_max * 100,
 };
-
-const pace = @import("manifest_log.zig").Pace.init(.{
-    .tree_count = manifest_log_options.forest_tree_count(),
-    .tables_max = manifest_log_options.forest_table_count_max,
-    .half_bar_compact_blocks_extra = constants.lsm_manifest_compact_blocks_extra,
-});
 
 pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
@@ -260,6 +253,8 @@ const Environment = struct {
     allocator: std.mem.Allocator,
     storage: Storage,
     storage_verify: Storage,
+    trace: vsr.trace.Tracer,
+    trace_verify: vsr.trace.Tracer,
     superblock: SuperBlock,
     superblock_verify: SuperBlock,
     superblock_context: SuperBlock.Context,
@@ -285,25 +280,33 @@ const Environment = struct {
 
         fields_initialized += 1;
         env.storage =
-            try Storage.init(allocator, constants.storage_size_limit_max, storage_options);
+            try Storage.init(allocator, constants.storage_size_limit_default, storage_options);
         errdefer env.storage.deinit(allocator);
 
         fields_initialized += 1;
         env.storage_verify =
-            try Storage.init(allocator, constants.storage_size_limit_max, storage_options);
+            try Storage.init(allocator, constants.storage_size_limit_default, storage_options);
         errdefer env.storage_verify.deinit(allocator);
+
+        fields_initialized += 1;
+        env.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        errdefer env.trace.deinit(allocator);
+
+        fields_initialized += 1;
+        env.trace_verify = try vsr.trace.Tracer.init(allocator, 0, .{});
+        errdefer env.trace_verify.deinit(allocator);
 
         fields_initialized += 1;
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = &env.storage,
-            .storage_size_limit = constants.storage_size_limit_max,
+            .storage_size_limit = constants.storage_size_limit_default,
         });
         errdefer env.superblock.deinit(allocator);
 
         fields_initialized += 1;
         env.superblock_verify = try SuperBlock.init(allocator, .{
             .storage = &env.storage_verify,
-            .storage_size_limit = constants.storage_size_limit_max,
+            .storage_size_limit = constants.storage_size_limit_default,
         });
         errdefer env.superblock_verify.deinit(allocator);
 
@@ -313,6 +316,7 @@ const Environment = struct {
         fields_initialized += 1;
         env.grid = try Grid.init(allocator, .{
             .superblock = &env.superblock,
+            .trace = &env.trace,
             .missing_blocks_max = 0,
             .missing_tables_max = 0,
         });
@@ -321,18 +325,18 @@ const Environment = struct {
         fields_initialized += 1;
         env.grid_verify = try Grid.init(allocator, .{
             .superblock = &env.superblock_verify,
+            .trace = &env.trace_verify,
             .missing_blocks_max = 0,
             .missing_tables_max = 0,
         });
         errdefer env.grid_verify.deinit(allocator);
 
         fields_initialized += 1;
-        env.manifest_log = try ManifestLog.init(allocator, &env.grid, manifest_log_options);
+        try env.manifest_log.init(allocator, &env.grid, manifest_log_options);
         errdefer env.manifest_log.deinit(allocator);
 
         fields_initialized += 1;
-        env.manifest_log_verify =
-            try ManifestLog.init(allocator, &env.grid_verify, manifest_log_options);
+        try env.manifest_log_verify.init(allocator, &env.grid_verify, manifest_log_options);
         errdefer env.manifest_log_verify.deinit(allocator);
 
         fields_initialized += 1;
@@ -356,6 +360,8 @@ const Environment = struct {
         env.grid.deinit(env.allocator);
         env.superblock_verify.deinit(env.allocator);
         env.superblock.deinit(env.allocator);
+        env.trace_verify.deinit(env.allocator);
+        env.trace.deinit(env.allocator);
         env.storage_verify.deinit(env.allocator);
         env.storage.deinit(env.allocator);
         env.* = undefined;
@@ -477,7 +483,7 @@ const Environment = struct {
                     header.set_checksum();
                     break :header header;
                 },
-
+                .view_attributes = null,
                 .manifest_references = env.manifest_log.checkpoint_references(),
                 .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
                 .client_sessions_reference = .{
@@ -489,7 +495,6 @@ const Environment = struct {
                 .commit_max = vsr.Checkpoint.checkpoint_after(vsr_state.commit_max),
                 .sync_op_min = 0,
                 .sync_op_max = 0,
-                .sync_view = 0,
                 .storage_size = vsr.superblock.data_file_size_min +
                     (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
                 .release = vsr.Release.minimum,
@@ -518,6 +523,7 @@ const Environment = struct {
     /// Verify that the state of a ManifestLog restored from checkpoint matches the state
     /// immediately after the checkpoint was created.
     fn verify(env: *Environment) !void {
+        const test_trace = &env.trace;
         const test_superblock = env.manifest_log_verify.superblock;
         const test_storage = test_superblock.storage;
         const test_grid = env.manifest_log_verify.grid;
@@ -527,6 +533,9 @@ const Environment = struct {
             test_storage.copy(env.manifest_log.superblock.storage);
             test_storage.reset();
 
+            test_trace.deinit(env.allocator);
+            test_trace.* = try vsr.trace.Tracer.init(env.allocator, 0, .{});
+
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().
             test_superblock.deinit(env.allocator);
@@ -534,20 +543,20 @@ const Environment = struct {
                 env.allocator,
                 .{
                     .storage = test_storage,
-                    .storage_size_limit = constants.storage_size_limit_max,
+                    .storage_size_limit = constants.storage_size_limit_default,
                 },
             );
 
             test_grid.deinit(env.allocator);
             test_grid.* = try Grid.init(env.allocator, .{
                 .superblock = test_superblock,
+                .trace = test_trace,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
             });
 
             test_manifest_log.deinit(env.allocator);
-            test_manifest_log.* =
-                try ManifestLog.init(env.allocator, test_grid, manifest_log_options);
+            try test_manifest_log.init(env.allocator, test_grid, manifest_log_options);
         }
 
         env.pending += 1;
@@ -623,12 +632,6 @@ const ManifestLogModel = struct {
     fn deinit(model: *ManifestLogModel) void {
         model.tables.deinit();
         model.appends.deinit();
-    }
-
-    fn current(model: ManifestLogModel, table_address: u64) ?TableInfo {
-        assert(model.appends.items.len == 0);
-
-        return model.tables.get(table_address);
     }
 
     fn append(model: *ManifestLogModel, table: *const TableInfo) !void {

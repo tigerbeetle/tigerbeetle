@@ -12,33 +12,102 @@ const std = @import("std");
 
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
+const changelog = @import("./changelog.zig");
+const Release = @import("../multiversioning.zig").Release;
 
 const log = std.log;
 
-pub const CliArgs = struct {
+pub const CLIArgs = struct {
     sha: []const u8,
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
-    _ = gpa;
+pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
+    try devhub_metrics(shell, cli_args);
+    try devhub_coverage(shell);
+}
 
+fn devhub_coverage(shell: *Shell) !void {
+    const kcov_version = shell.exec_stdout("kcov --version", .{}) catch {
+        return error.NoKcov;
+    };
+    log.info("kcov version {s}", .{kcov_version});
+
+    try shell.exec_zig("build test:unit:build", .{});
+    try shell.exec_zig("build vopr:build", .{});
+    try shell.exec_zig("build fuzz:build", .{});
+
+    // Put results into src/devhub, as that folder is deployed as GitHub pages.
+    try shell.project_root.deleteTree("./src/devhub/coverage");
+    try shell.project_root.makePath("./src/devhub/coverage");
+
+    const kcov: []const []const u8 = &.{ "kcov", "--include-path=./src", "./src/devhub/coverage" };
+    try shell.exec("{kcov} ./zig-out/bin/test", .{ .kcov = kcov });
+    try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_tree 92", .{ .kcov = kcov });
+    try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_forest 92", .{ .kcov = kcov });
+    try shell.exec("{kcov} ./zig-out/bin/vopr 92", .{ .kcov = kcov });
+
+    var coverage_dir = try shell.cwd.openDir("./src/devhub/coverage", .{ .iterate = true });
+    defer coverage_dir.close();
+
+    // kcov adds some symlinks to the output, which prevents upload to GitHub actions from working.
+    var it = coverage_dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind == .sym_link) {
+            try coverage_dir.deleteFile(entry.name);
+        }
+    }
+}
+
+fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     const commit_timestamp_str =
         try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = cli_args.sha });
     const commit_timestamp = try std.fmt.parseInt(u64, commit_timestamp_str, 10);
 
     // Only build the TigerBeetle binary to test build speed and build size. Throw it away once
-    // done, and use a release build from `dist/` to run the benchmark.
+    // done, and use a release build from `zig-out/dist/` to run the benchmark.
     var timer = try std.time.Timer.start();
-    try shell.zig("build -Drelease -Dconfig=production install", .{});
+    try shell.exec_zig("build -Drelease install", .{});
     const build_time_ms = timer.lap() / std.time.ns_per_ms;
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
     try shell.project_root.deleteFile("tigerbeetle");
 
-    try shell.zig(
-        \\build scripts -- release --build --run-number=192 --sha={sha}
-        \\    --language=zig
-    , .{ .sha = cli_args.sha });
-    try shell.exec("unzip dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+    // When doing a release, the latest release in the changelog on main will be newer than the
+    // latest release on GitHub. In this case, don't pass in --no-changelog - as doing that casuses
+    // the release code to try and look for a version which doesn't yet exist!
+    const no_changelog_flag = blk: {
+        const changelog_text = try shell.project_root.readFileAlloc(
+            shell.arena.allocator(),
+            "CHANGELOG.md",
+            1024 * 1024,
+        );
+        var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
+
+        const last_release_changelog = changelog_iteratator.next_changelog().?.release.?;
+        const last_release_published = try Release.parse(try shell.exec_stdout(
+            "gh release list --json tagName --jq {query} --limit 1",
+            .{ .query = ".[].tagName" },
+        ));
+
+        if (Release.less_than({}, last_release_published, last_release_changelog)) {
+            break :blk false;
+        } else {
+            break :blk true;
+        }
+    };
+
+    if (no_changelog_flag) {
+        try shell.exec_zig(
+            \\build scripts -- release --build --no-changelog --sha={sha}
+            \\    --language=zig
+        , .{ .sha = cli_args.sha });
+    } else {
+        try shell.exec_zig(
+            \\build scripts -- release --build --sha={sha}
+            \\    --language=zig
+        , .{ .sha = cli_args.sha });
+    }
+    try shell.project_root.deleteFile("tigerbeetle");
+    try shell.exec("unzip zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
 
     const benchmark_result = try shell.exec_stdout(
         "./tigerbeetle benchmark --validate --checksum-performance",
@@ -131,7 +200,7 @@ fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
         }
 
         try shell.exec("git add ./devhub/data.json", .{});
-        try shell.git_env_setup();
+        try shell.git_env_setup(.{ .use_hostname = false });
         try shell.exec("git commit -m 📈", .{});
         if (shell.exec("git push", .{})) {
             log.info("metrics uploaded", .{});

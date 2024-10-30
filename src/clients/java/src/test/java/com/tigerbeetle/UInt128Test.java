@@ -6,8 +6,6 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertSame;
 import java.util.concurrent.CountDownLatch;
 import java.math.BigInteger;
-import java.nio.ByteOrder;
-import java.nio.ByteBuffer;
 import java.util.UUID;
 import org.junit.Test;
 
@@ -15,6 +13,30 @@ public class UInt128Test {
 
     // bytes representing a pair of longs (100, 1000):
     final static byte[] bytes = new byte[] {100, 0, 0, 0, 0, 0, 0, 0, -24, 3, 0, 0, 0, 0, 0, 0};
+
+    /// Consistency of U128 across Zig and the language clients.
+    /// It must be kept in sync with all platforms.
+    @Test
+    public void consistencyTest() {
+        // Decimal representation:
+        final long upper = Long.parseUnsignedLong("11647051514084770242");
+        final long lower = Long.parseUnsignedLong("15119395263638463974");
+        final var u128 = UInt128.asBigInteger(lower, upper);
+        assertEquals("214850178493633095719753766415838275046", u128.toString());
+
+        // Binary representation:
+        final byte[] binary = new byte[] {(byte) 0xe6, (byte) 0xe5, (byte) 0xe4, (byte) 0xe3,
+                (byte) 0xe2, (byte) 0xe1, (byte) 0xd2, (byte) 0xd1, (byte) 0xc2, (byte) 0xc1,
+                (byte) 0xb2, (byte) 0xb1, (byte) 0xa4, (byte) 0xa3, (byte) 0xa2, (byte) 0xa1};
+        final var bytes = UInt128.asBytes(lower, upper);
+        assertArrayEquals(binary, bytes);
+
+        // UUID representation:
+        final var guid = UUID.fromString("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6");
+        assertEquals(guid, UInt128.asUUID(bytes));
+        assertArrayEquals(bytes, UInt128.asBytes(guid));
+        assertEquals(u128, UInt128.asBigInteger(UInt128.asBytes(guid)));
+    }
 
     @Test(expected = NullPointerException.class)
     public void testAsLongNull() {
@@ -35,7 +57,6 @@ public class UInt128Test {
 
     @Test
     public void testAsLong() {
-
         var ls = UInt128.asLong(bytes, UInt128.LeastSignificant);
         var ms = UInt128.asLong(bytes, UInt128.MostSignificant);
         assertEquals(100L, ls);
@@ -168,6 +189,33 @@ public class UInt128Test {
         assertSame(BigInteger.ZERO, UInt128.asBigInteger(0, 0));
         assertSame(BigInteger.ZERO, UInt128.asBigInteger(new byte[16]));
         assertArrayEquals(new byte[16], UInt128.asBytes(BigInteger.ZERO));
+    }
+
+    @Test
+    public void testLittleEndian() {
+        // Reference test:
+        // https://github.com/microsoft/windows-rs/blob/f19edde93252381b7a1789bf856a3a67df23f6db/crates/tests/core/tests/guid.rs#L25-L31
+        final var bytes_expected = new byte[] {(byte) 0x8f, (byte) 0x8c, (byte) 0x2b, (byte) 0x05,
+                (byte) 0xa4, (byte) 0x53, (byte) 0x3a, (byte) 0x82, (byte) 0xfe, (byte) 0x42,
+                (byte) 0xd2, (byte) 0xc0, (byte) 0xef, (byte) 0x3f, (byte) 0xd6, (byte) 0x1f,};
+
+        final var u128 = UInt128.asBytes(Long.parseUnsignedLong("823a53a4052b8c8f", 16),
+                Long.parseUnsignedLong("1fd63fefc0d242fe", 16));
+        final var decimal_expected = new BigInteger("1fd63fefc0d242fe823a53a4052b8c8f", 16);
+        final var uuid_expected = UUID.fromString("1fd63fef-c0d2-42fe-823a-53a4052b8c8f");
+
+        assertEquals(decimal_expected, UInt128.asBigInteger(u128));
+        assertEquals(decimal_expected, UInt128.asBigInteger(bytes_expected));
+        assertEquals(decimal_expected, UInt128.asBigInteger(UInt128.asBytes(uuid_expected)));
+
+        assertEquals(uuid_expected, UInt128.asUUID(u128));
+        assertEquals(uuid_expected, UInt128.asUUID(bytes_expected));
+        assertEquals(uuid_expected, UInt128.asUUID(UInt128.asBytes(decimal_expected)));
+
+        assertArrayEquals(bytes_expected, u128);
+        assertArrayEquals(bytes_expected, UInt128.asBytes(uuid_expected));
+        assertArrayEquals(bytes_expected, UInt128.asBytes(decimal_expected));
+
     }
 
     @Test

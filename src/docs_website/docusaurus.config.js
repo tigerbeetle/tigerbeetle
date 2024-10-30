@@ -52,6 +52,7 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     {
+      // Search key intentionally not hidden since it's also interceptable in every search request.
       algolia: {
         appId: 'NPDIZGXHAP',
         apiKey: 'c31d9000a1856050585f6b9a1a1a4eb8',

@@ -1,4 +1,885 @@
-# TigerBeetle Changelog
+# Changelog
+
+Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+to receive notifications about breaking changes!
+
+## TigerBeetle 0.16.11
+
+Released: 2024-10-28
+
+### Safety And Performance
+
+- [#2428](https://github.com/tigerbeetle/tigerbeetle/pull/2428)
+
+  Make `Grid.reserve()` abort rather than returning null.
+  When `Grid.reserve()` aborts, that indicates that the data file size limit would be exceeded by
+  the reservation. We were already panicking in this case by unwrapping the result, but now it has
+  a useful error message.
+
+- [#2416](https://github.com/tigerbeetle/tigerbeetle/pull/2416)
+
+  Improve availability and performance by sending `start_view` message earlier in the new-primary
+  recovery – as soon as the journal headers are repaired.
+
+- [#2360](https://github.com/tigerbeetle/tigerbeetle/pull/2360)
+
+  Refactor compaction to clarify the scheduling logic, schedule more aggressively, and make it
+  easier to run multiple compactions concurrently. This also improved the benchmark performance.
+
+### Features
+
+- [#2425](https://github.com/tigerbeetle/tigerbeetle/pull/2425)
+
+  Support multiversion (non-automatic) upgrades when the replica is started with `--development`
+  or `--experimental`.
+
+### Internals
+
+- [#2427](https://github.com/tigerbeetle/tigerbeetle/pull/2427)
+
+  Allow a release's Git tag and `config.process.release` to differ. This simplifies the release
+  process for hotfixes, when the Git tag is bumped but the `config.process.release` is unchanged.
+
+### TigerTracks 🎧
+
+- [Stuck in a Timeloop](https://www.youtube.com/watch?v=FWBjzQnDb8o)
+
+## TigerBeetle 0.16.10
+
+Released: 2024-10-21
+
+### Safety And Performance
+
+- [#2414](https://github.com/tigerbeetle/tigerbeetle/pull/2414)
+
+  Improve performance & availability during view change by ensuring a replica only repairs the
+  portion of the WAL that is *required* to become primary, instead of repairing it in its entirety.
+
+- [#2412](https://github.com/tigerbeetle/tigerbeetle/pull/2412)
+
+  Add a unit test for Zig's stdlib sort.
+
+  Stable sort is critical for compaction correctness. Zig stdlib does have a sort fuzz test, but it
+  doesn't cover the presorted subarray case, and doesn't check arrays much larger than the sort
+  algorithm's on-stack cache.
+
+- [#2413](https://github.com/tigerbeetle/tigerbeetle/pull/2413)
+
+  Fix a bug in the MessageBus wherein connections weren't being terminated during client teardown.
+
+### Internals
+
+
+- [#2405](https://github.com/tigerbeetle/tigerbeetle/pull/2405)
+
+  Fix a bug in the benchmark wherein the usage of `--account-count-hot` was broken when used in
+  conjunction with the `uniform` distribution.
+
+- [#2409](https://github.com/tigerbeetle/tigerbeetle/pull/2409)
+
+  Revamp the `core_missing_prepares` liveness-mode check to correctly check for the prepares that a
+  replica should repair (after [#2414](https://github.com/tigerbeetle/tigerbeetle/pull/2414)).
+
+
+### TigerTracks 🎧
+
+- [Last Train Home](https://open.spotify.com/track/0tgBtQ0ISnMQOKorrN9HLX?si=8a05ab879730455b)
+
+## TigerBeetle 0.16.9
+
+Released: 2024-10-15
+
+### Safety And Performance
+
+- [#2394](https://github.com/tigerbeetle/tigerbeetle/pull/2394),
+  [#2401](https://github.com/tigerbeetle/tigerbeetle/pull/2401)
+
+  TigerBeetle clients internally batch operations for improved performance. Fix a bug where an
+  unclosed link chain could be batched before another linked chain, causing them to be treated as
+  one long linked chain. Additionally, prevent non-batchable requests from sharing packets entirely.
+
+- [#2398](https://github.com/tigerbeetle/tigerbeetle/pull/2398)
+
+  `AMOUNT_MAX` is used as a sentinel value for things like balancing transfers to specify moving
+  as much as possible. Correct and fix its value in the Java client. Thanks @tKe!
+
+### Features
+
+- [#2274](https://github.com/tigerbeetle/tigerbeetle/pull/2274)
+
+  Improve the benchmark by adding Zipfian distributed random numbers, to better simulate realistic
+  conditions and as a precursor to approximating YCSB.
+
+- [#2393](https://github.com/tigerbeetle/tigerbeetle/pull/2393)
+
+  Previously, TigerBeetle's clients disallowed empty batches locally, before the request was even
+  sent to the cluster. However, this is actually a valid protocol message - even if it's not used by
+  the current state machine - so allow empty batches to be sent from clients.
+
+- [#2384](https://github.com/tigerbeetle/tigerbeetle/pull/2384)
+
+  Revamp client documentation so that each snippet is self-contained, and standardize it across all
+  languages.
+
+### Internals
+
+- [#2404](https://github.com/tigerbeetle/tigerbeetle/pull/2404)
+
+  Give the [DevHub](https://tigerbeetle.github.io/tigerbeetle/) a fresh coat of paint, and fix
+  passing seeds being blue in dark mode.
+
+- [#2408](https://github.com/tigerbeetle/tigerbeetle/pull/2408),
+  [#2400](https://github.com/tigerbeetle/tigerbeetle/pull/2400),
+  [#2391](https://github.com/tigerbeetle/tigerbeetle/pull/2391),
+  [#2399](https://github.com/tigerbeetle/tigerbeetle/pull/2399),
+  [#2402](https://github.com/tigerbeetle/tigerbeetle/pull/2402),
+  [#2385](https://github.com/tigerbeetle/tigerbeetle/pull/2385)
+
+  Improve VOPR logging and fix a few failing seeds.
+
+### TigerTracks 🎧
+
+- [99 Luftballons](https://www.youtube.com/watch?v=Fpu5a0Bl8eY)
+
+## TigerBeetle 0.16.8
+
+Released: 2024-10-07
+
+### Safety And Performance
+
+- [#2359](https://github.com/tigerbeetle/tigerbeetle/pull/2359)
+
+  Significantly reduced P100 latency by incrementally spreading the mutable table's sort during
+  compaction. This leverages the optimization of sort algorithms for processing sequences of
+  already sorted sub-arrays.
+
+- [#2367](https://github.com/tigerbeetle/tigerbeetle/pull/2367)
+
+  Improve the workload generator to support concurrent tests with different ledgers.
+
+- [#2382](https://github.com/tigerbeetle/tigerbeetle/pull/2382),
+  [#2363](https://github.com/tigerbeetle/tigerbeetle/pull/2363)
+
+  Fix VOPR seeds.
+  For more awesome details about the backstory and solutions to these issues,
+  please refer to the PR.
+
+### Features
+
+- [#2358](https://github.com/tigerbeetle/tigerbeetle/pull/2358)
+
+  Update the REPL to support representing the maximum integer value as `-0`,
+  serving as the `AMOUNT_MAX` sentinel.
+  Additionally, other negative values such as `-1` can be used to represent `maxInt - 1`.
+
+  Also, include support for hexadecimal numbers for more convenient inputting of GUID/UUID
+  literals (e.g. `0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6`).
+
+  Allow the `timestamp` field to be set, enabling the REPL to be used for `imported` events.
+
+### Internals
+
+- [#2376](https://github.com/tigerbeetle/tigerbeetle/pull/2376)
+
+  Use `zig fetch` as a replacement for downloading files, removing dependence on external tools.
+
+- [#2383](https://github.com/tigerbeetle/tigerbeetle/pull/2383)
+
+  Port of Rust's [`dbg!`](https://doc.rust-lang.org/std/macro.dbg.html) macro to Zig,
+  and the corresponding CI validation to prevent code using it from being merged into `main`! 😎
+
+- [#2370](https://github.com/tigerbeetle/tigerbeetle/pull/2370),
+  [#2373](https://github.com/tigerbeetle/tigerbeetle/pull/2373)
+
+  Verify the release versions included in the multiversion binary pack at build time (not only
+  during runtime) and improve the `tigerbeetle version --verbose` command's `multiversion` output.
+
+- [#2369](https://github.com/tigerbeetle/tigerbeetle/pull/2369)
+
+  Fix a multiversioning issue where the binary size exceeded the read buffer, failing to parse the
+  executable header.
+
+- [#2380](https://github.com/tigerbeetle/tigerbeetle/pull/2380)
+
+  Consistently use `transient_error` instead of `transient_failure` and cleanup the StateMachine
+  code.
+
+- [#2379](https://github.com/tigerbeetle/tigerbeetle/pull/2379)
+
+  Add missing links to the operations `query_accounts` and `query_transfers` in the documentation
+  and include the declaration for `QueryFilter` and `QueryFilterFlags` in the `tb_client.h` header.
+
+- [#2333](https://github.com/tigerbeetle/tigerbeetle/pull/2333)
+
+  Clearer error message when the replica crashes due to a data file being too large, instructing
+  the operator to increase the memory allocated for the manifest log.
+
+### TigerTracks 🎧
+
+- [Creep](https://www.youtube.com/watch?v=XFkzRNyygfk)
+
+## TigerBeetle 0.16.7
+
+Released: 2024-10-04
+
+Note: this is an extra release to correct an availability issue in the upgrade path for `0.16.4`.
+Specifically, the combination of `tigerbeetle 0.16.4` and a client at `0.16.3` can lead to an
+assertion failure and a server crash. No data is lost, but the server becomes unavailable.
+
+It is recommended to upgrade to `0.16.7`, but this is only _required_ if you are running older
+clients. To upgrade, replace the binary on disk, and manually restart the replica.
+
+Note that although the release is tagged at `0.16.7`, the binary advertises itself as `0.16.4`.
+
+### Safety And Performance
+
+- [#2377](https://github.com/tigerbeetle/tigerbeetle/pull/2378)
+
+  Fix an assertion which was incorrect when a pre-transient-error client retried a transient error,
+  and that transient error condition since disappeared. This mirrors #2345 which handles the case
+  when it is still failing.
+
+## TigerBeetle 0.16.6
+
+Released: 2024-10-04
+
+Note: this is an extra release to correct a potential issue in the upgrade path for `0.16.4`.
+Specifically, the combination of `tigerbeetle 0.16.2` and newer, and any client before `0.16.2` can
+lead to an assertion failure and a server crash. No data is lost, but the server becomes
+unavailable.
+
+It is recommended to upgrade to `0.16.6`, but this is only _required_ if you are running older
+clients. To upgrade, replace the binary on disk, and manually restart the replica.
+
+Note that although the release is tagged at `0.16.6`, the binary advertises itself as `0.16.4`.
+
+### Safety And Performance
+
+- [#2377](https://github.com/tigerbeetle/tigerbeetle/pull/2377)
+
+  Correctly parse AccountFilter from pre `0.16.2` clients.
+
+## TigerBeetle 0.16.5
+
+Released: 2024-10-03
+
+Note: this is an extra release to correct an availability issue in the upgrade path for `0.16.4`.
+Specifically, the combination of `tigerbeetle 0.16.4` and a client at `0.16.3` can lead to an
+assertion failure and a server crash. No data is lost, but the server becomes unavailable.
+
+It is recommended to upgrade to `0.16.5`, but this is only _required_ if you are running older
+clients. To upgrade, replace the binary on disk, and manually restart the replica.
+
+Note that although the release is tagged at `0.16.5`, the binary advertises itself as `0.16.4`.
+
+### Safety And Performance
+
+- [#2345](https://github.com/tigerbeetle/tigerbeetle/pull/2345)
+
+  Fix an assertion which was incorrect when a pre-transient-error client retried a transient error.
+
+## TigerBeetle 0.16.4
+
+Released: 2024-09-30
+
+This release introduces "transient errors": error codes for `create_transfers` which depend on the
+state of the database (e.g. `exceeds_credits`). Going forward, a transfer that fails with a
+transient error will not succeed if retried.
+
+See the [API tracking issue](https://github.com/tigerbeetle/tigerbeetle/issues/2231#issuecomment-2377879726)
+and the [documentation](https://docs.tigerbeetle.com/reference/requests/create_transfers)
+for more details.
+
+### Safety And Performance
+
+- [#2345](https://github.com/tigerbeetle/tigerbeetle/pull/2345)
+
+  Reduce chance of `recovering_head` status by recovering from torn writes in the WAL.
+  This improves the availability of the cluster, as `recovering_head` replicas cannot participate in
+  consensus until after they repair.
+
+### Features
+
+- [#2335](https://github.com/tigerbeetle/tigerbeetle/pull/2335)
+
+  Ensure idempotence for `create_transfers`' "transient errors" with new result code
+  `id_already_failed`. In particular, this guards against surprising behavior when the client is
+  running in a [stateless API service](https://docs.tigerbeetle.com/coding/system-architecture/).
+
+### Internals
+
+- [#2334](https://github.com/tigerbeetle/tigerbeetle/pull/2334),
+  [#2362](https://github.com/tigerbeetle/tigerbeetle/pull/2362)
+
+  Fix VOPR false positives.
+
+- [#2115](https://github.com/tigerbeetle/tigerbeetle/pull/2115)
+
+  Fix multiple commands for non-interactive REPL.
+
+### TigerTracks 🎧
+
+- [Lookin' Out My Back Door](https://www.youtube.com/watch?v=Aae_RHRptRg)
+
+## TigerBeetle 0.16.3
+
+Released: 2024-09-23
+
+### Safety And Performance
+
+- [#2313](https://github.com/tigerbeetle/tigerbeetle/pull/2313)
+
+  Improve cluster availability by more aggressive recovery for crashes that happen while a replica
+  is checkpointing.
+
+- [#2328](https://github.com/tigerbeetle/tigerbeetle/pull/2328)
+
+  Add a more efficient recipe for balance-conditional transfers. A balance-conditional transfer
+  is a transfer that succeeds only if the source account has more than a threshold amount of funds
+  in it.
+
+### Features
+
+- [#2327](https://github.com/tigerbeetle/tigerbeetle/pull/2327)
+
+  Add a new recipe for enforcing `debits_must_not_exceed_credits` on some subset of transfers (this
+  is a special case of a balance-conditional transfer, with the threshold value being equal to
+  transferred amount).
+
+### Internals
+
+- [#2330](https://github.com/tigerbeetle/tigerbeetle/pull/2330)
+
+  Add `triaged` issue label to prevent newly opened issues from slipping through the cracks.
+
+- [#2332](https://github.com/tigerbeetle/tigerbeetle/pull/2332)
+
+  Add CI check for dead code.
+
+- [#2323](https://github.com/tigerbeetle/tigerbeetle/pull/2323)
+
+  Cleanup the source tree by removing top-level `tools` directory.
+
+- [#2316](https://github.com/tigerbeetle/tigerbeetle/pull/2316)
+
+  Make sure that process-spawning API used for build-time "scripting" consistently reports
+  errors when the subprocess fails or hangs.
+
+### TigerTracks 🎧
+
+- [Prelude in G Major](https://open.spotify.com/track/70FROKEHubzMxSstCgaZZl?si=5bb7f8c6decc46aa)
+
+## TigerBeetle 0.16.2
+
+Released: 2024-09-16
+
+### Safety And Performance
+
+- [#2312](https://github.com/tigerbeetle/tigerbeetle/pull/2312)
+
+  Tighten up the VSR assertions so the transition to `.recovering_head` can only be called from the
+  `.recovering` status.
+
+- [#2311](https://github.com/tigerbeetle/tigerbeetle/pull/2311)
+
+  Make the primary abdicate if it is unable to process requests due to a broken clock.
+
+- [#2260](https://github.com/tigerbeetle/tigerbeetle/pull/2260)
+
+  Smoke integration test using the real multiversion binary.
+
+- [#2270](https://github.com/tigerbeetle/tigerbeetle/pull/2270)
+
+  Workload generator based on the Java client to be used in integration tests (i.e. Antithesis).
+
+### Features
+
+- [#2298](https://github.com/tigerbeetle/tigerbeetle/pull/2298),
+  [#2307](https://github.com/tigerbeetle/tigerbeetle/pull/2307),
+  [#2304](https://github.com/tigerbeetle/tigerbeetle/pull/2304),
+  [#2309](https://github.com/tigerbeetle/tigerbeetle/pull/2309),
+  [#2321](https://github.com/tigerbeetle/tigerbeetle/pull/2321)
+
+  Remove `Tracy` integration and dependencies.
+  Add JSON traces for events with multiple running instances, such as IO, lookups, and scans.
+
+- [#2300](https://github.com/tigerbeetle/tigerbeetle/pull/2300)
+
+  Add the ability to filter by `user_data_{128,64,32}` and `code` in `get_account_transfers`
+  and `get_account_balances`.
+
+### Internals
+
+- [#2314](https://github.com/tigerbeetle/tigerbeetle/pull/2314),
+  [#2315](https://github.com/tigerbeetle/tigerbeetle/pull/2315)
+
+  Mute the log on stderr when building client libraries.
+  Reduce the log's severity of some entries logged as `.err` to `.warn` for less noise when
+  running with `log_level = .err`.
+
+- [#2310](https://github.com/tigerbeetle/tigerbeetle/pull/2310)
+
+  Document and explain how time works in TigerBeetle ⏱️.
+
+- [#2291](https://github.com/tigerbeetle/tigerbeetle/pull/2291)
+
+  Refactor `Forest.compact` and remove some dead code.
+
+- [#2294](https://github.com/tigerbeetle/tigerbeetle/pull/2294)
+
+  Rewrite `commit_dispatch`, a chain of asynchronous stages calling each other, as a state machine
+  implementation that resembles linear control flow that is much easier to read.
+
+- [#2306](https://github.com/tigerbeetle/tigerbeetle/pull/2306)
+
+  Fix the Node.js example that was using an incorrect enum flag.
+  Thanks for the heads up @jorispz!
+
+- [#2319](https://github.com/tigerbeetle/tigerbeetle/pull/2319)
+
+  Update outdated scripts in `HACKING.md`.
+
+- [#2317](https://github.com/tigerbeetle/tigerbeetle/pull/2317)
+
+  Use git timestamps to build Docker images.
+  This is a requirement for being deterministic in CI.
+
+- [#2318](https://github.com/tigerbeetle/tigerbeetle/pull/2318)
+
+  Devhub link to pending code reviews.
+
+### TigerTracks 🎧
+
+- [What's On Your Mind](https://www.youtube.com/watch?v=Z5WRKnCRPHA)
+
+## TigerBeetle 0.16.1
+
+Released: 2024-09-09
+
+### Safety And Performance
+
+- [#2284](https://github.com/tigerbeetle/tigerbeetle/pull/2284)
+
+  Improve view change efficiency; new heuristic for lagging replicas to forfeit view change.
+
+  A lagging replicas first gives a more up-to-date replica a chance to become primary by forfeiting
+  view change. If the more up-to-date replica cannot step up as primary, the lagging replica
+  attempts to step up as primary.
+
+- [#2275](https://github.com/tigerbeetle/tigerbeetle/pull/2275),
+  [#2254](https://github.com/tigerbeetle/tigerbeetle/pull/2254),
+  [#2269](https://github.com/tigerbeetle/tigerbeetle/pull/2269),
+  [#2272](https://github.com/tigerbeetle/tigerbeetle/pull/2272)
+
+  Complete rollout of the new state sync protocol.
+
+  Remove in-code remnants of the old state sync protocol. Replicas now panic if they receive
+  messages belonging to the old protocol.
+
+
+### Internals
+
+- [#2283](https://github.com/tigerbeetle/tigerbeetle/pull/2283)
+
+  Improve log warnings for client eviction due to its version being too low/high.
+
+- [#2288](https://github.com/tigerbeetle/tigerbeetle/pull/2288)
+
+  Fix VOPR false positive wherein checkpoint was being updated twice in the upgrade path.
+
+- [#2286](https://github.com/tigerbeetle/tigerbeetle/pull/2286)
+
+  Fix typos found using [codespell](https://github.com/codespell-project/codespell).
+
+- [#2282](https://github.com/tigerbeetle/tigerbeetle/pull/2282)
+
+  Document example for debiting multiple accounts and crediting a single account wherein the total
+  amount to transfer to the credit account is known, but the balances of the individual debit
+  accounts are not known.
+
+- [#2281](https://github.com/tigerbeetle/tigerbeetle/pull/2281)
+
+  Document the behavior of `user_data_128/user_data_64/user_data_32` in the presence of pending
+  transfers.
+
+- [#2279](https://github.com/tigerbeetle/tigerbeetle/pull/2279)
+
+  Inline Dockerfile in the release code, removing tools/docker/Dockerfile.
+
+- [#2280](https://github.com/tigerbeetle/tigerbeetle/pull/2280),
+  [#2285](https://github.com/tigerbeetle/tigerbeetle/pull/2285)
+
+  Add [`kcov`](https://simonkagstrom.github.io/kcov/) code coverage to
+  [DevHub](https://tigerbeetle.github.io/tigerbeetle/).
+
+- [#2266](https://github.com/tigerbeetle/tigerbeetle/pull/2266),
+  [#2293](https://github.com/tigerbeetle/tigerbeetle/pull/2293)
+
+  Add support for tracing IO & CPU events. This allows for coarse-grained performance analysis,
+  for example collectively profiling IO and CPU performance (as opposed to IO or CPU in isolation).
+
+- [#2273](https://github.com/tigerbeetle/tigerbeetle/pull/2273)
+
+  Remove explicit header sector locks, using a common locking path for prepare and header sectors.
+
+- [#2258](https://github.com/tigerbeetle/tigerbeetle/pull/2258)
+
+  Change CliArgs -> CLIArgs in accordance with TigerStyle.
+
+- [#2263](https://github.com/tigerbeetle/tigerbeetle/pull/2263)
+
+  Vendor `llvm-objcopy` in the [dependencies](https://github.com/tigerbeetle/dependencies)
+  repository in accordance with our "no dependencies" policy. This ensures users don't have to
+  manually install LLVM.
+
+- [#2297](https://github.com/tigerbeetle/tigerbeetle/pull/2297)
+
+  Assign correct date to the release binary date; it was earlier set to the epoch ("Jan 1 1970").
+
+- [#2289](https://github.com/tigerbeetle/tigerbeetle/pull/2289)
+
+  Introduce fatal errors for crashing the replica process in the face of uncorrectable errors (for
+  example, insufficient memory/storage).
+
+- [#2287](https://github.com/tigerbeetle/tigerbeetle/pull/2287)
+
+  Add formatting check in the CI for the Go client.
+
+- [#2278](https://github.com/tigerbeetle/tigerbeetle/pull/2278),
+  [#2292](https://github.com/tigerbeetle/tigerbeetle/pull/2292)
+
+  Reduce dimensionality of configuration modes.
+
+  Removes the development configuration which was used to run the replica with asserts enabled,
+  enabling asserts for the production configuration instead. Additionally, removes the -Dconfig CLI
+  option, making production configuration the default.
+
+
+### TigerTracks 🎧
+
+- [Fire on the Mountain](https://open.spotify.com/track/4DpBfWl3q8e0gGB76lAaox?si=dc8e84acf3de464a)
+
+## TigerBeetle 0.16.0
+
+Released: 2024-09-02
+
+This release is 0.16.0 as it includes a new breaking API change around zero amount transfers, as
+well as the behavior around posting a full pending transfer amount or balancing as much as possible.
+These are all gated by the client's release version.
+
+If you're running a client older than 0.16.0, you'll see the old behavior where zero amount
+transfers are disallowed, but on newer clients these are supported and will create a transfer with
+an amount of 0.
+
+Additionally, the sentinel value to representing posting the full amount of a pending transfer, or
+doing a balancing transfer for as much as possible has changed. It's no longer 0, but instead
+`AMOUNT_MAX`.
+
+See the [**tracking issue**](https://github.com/tigerbeetle/tigerbeetle/issues/2231#issuecomment-2305132591) for more details.
+
+### Safety And Performance
+
+- [#2221](https://github.com/tigerbeetle/tigerbeetle/pull/2221)
+
+  Change how replicas that haven't finished syncing send a `prepare_ok` message,
+  preventing them from falsely contributing to the durability of a checkpoint, which could
+  potentially cause liveness issues in the event of storage faults.
+
+- [#2255](https://github.com/tigerbeetle/tigerbeetle/pull/2255)
+
+  The new state sync protocol regressed the behavior where the replica would try to repair the WAL
+  before switching to state sync, and this puts the old behavior back in.
+
+  [WAL repair](https://docs.tigerbeetle.com/about/internals/vsr#protocol-repair-wal) is used when
+  the lagging replica's log still intersects with the cluster's current log, while
+  [state sync](https://docs.tigerbeetle.com/about/internals/sync) is used when when the logs no
+  longer intersect.
+
+- [#2244](https://github.com/tigerbeetle/tigerbeetle/pull/2244)
+
+  Try to repair (but not commit) prepares, even if we don't have all the headers between checkpoint
+  and head.
+
+  This makes things consistent between the normal and repair paths, and improves concurrency while
+  repairing.
+
+- [#2253](https://github.com/tigerbeetle/tigerbeetle/pull/2253)
+
+  Reject prepares on the primary if its view isn't durable, much like solo clusters.
+
+  This solves a failing VOPR seed wherein a primary accepting prepares before making its log_view
+  durable exposes a break in its hash chain.
+
+- [#2259](https://github.com/tigerbeetle/tigerbeetle/pull/2259),
+  [#2246](https://github.com/tigerbeetle/tigerbeetle/pull/2246)
+
+  A few `sysctl`s and security frameworks (eg, seccomp) might block io_uring. Print out a more
+  helpful error message, rather than a generic "permission denied" or "system outdated".
+
+
+### Features
+
+- [#2171](https://github.com/tigerbeetle/tigerbeetle/pull/2171)
+
+  Add the new `imported` flag to allow user-defined timestamps when creating
+  `Account`s and `Transfer`s from historical events.
+
+- [#2220](https://github.com/tigerbeetle/tigerbeetle/pull/2220),
+  [#2237](https://github.com/tigerbeetle/tigerbeetle/pull/2237),
+  [#2238](https://github.com/tigerbeetle/tigerbeetle/pull/2238),
+  [#2239](https://github.com/tigerbeetle/tigerbeetle/pull/2239)
+
+  Allow `Transfer`s with `amount=0` and change behavior for _balancing_ and _post-pending_
+  transfers, introducing the constant `AMOUNT_MAX` to replace the use of the zero sentinel when
+  representing the maximum/original value in such cases.  Note that this is a
+  [**breaking change**](https://github.com/tigerbeetle/tigerbeetle/issues/2231#issuecomment-2305132591).
+
+  Also, explicitly define _optional indexes_, which previously were determined simply by not
+  indexing zeroed values.
+
+- [#2234](https://github.com/tigerbeetle/tigerbeetle/pull/2234)
+
+  Introduce a new flag, `Account.flags.closed`, which causes an account to reject any further
+  transfers, except for voiding two-phase transfers that are still pending.
+
+  The account flag can be set during creation or through a closing transfer. In the latter case,
+  closed account can be re-opened by voiding or expiring the closing transfer.
+
+
+### Internals
+
+- [#2211](https://github.com/tigerbeetle/tigerbeetle/pull/2211)
+
+  Deprecates the old state sync protocol, no longer supporting both protocols simultaneously.
+  As planned for this release, it only ignores old messages, allowing replicas to upgrade normally.
+  In the next release, replicas would panic if they receive an old message.
+
+- [#2233](https://github.com/tigerbeetle/tigerbeetle/pull/2233)
+
+  Move multiversion build logic into `build.zig` from `release.zig`. This makes it much easier to
+  build multiversion binaries as part of a regular `zig build`, without having to invoke CI or
+  release process specific code that's normally part of `release.zig`.
+
+  It also makes it possible to build multiversion binaries on platforms that aren't x86_64 Linux.
+
+- [#2215](https://github.com/tigerbeetle/tigerbeetle/pull/2215)
+
+  Refactor the _Multiversion_ API, bringing it in line with pre-existing code patterns.
+
+- [#2251](https://github.com/tigerbeetle/tigerbeetle/pull/2251)
+
+  Previously, TigerBeetle release numbers were based on a finicky conversion of GitHub's internal
+  action run number to a version number.
+
+  This was error prone, and difficult to reason about before hand (what would the given version
+  number for a release be?). Instead, make it so this very changelog is the source of truth for
+  the version number which is explicitly set.
+
+- [#2252](https://github.com/tigerbeetle/tigerbeetle/pull/2252)
+
+  Change `init` function signatures to allow for in-place initialization. This addresses the silent
+  stack growth caused by intermediate copy/move allocations during the initialization of large
+  objects.
+
+  Specifically, the `Forest` struct can grow indefinitely depending on the number of
+  `Grooves`/`IndexTrees` needed to support the StateMachine's custom logic, causing TigerBeetle to
+  crash during startup due to stack-overflow.
+
+- [#2265](https://github.com/tigerbeetle/tigerbeetle/pull/2265)
+
+  Don't cancel in-progress GitHub actions on the main branch. In particular, this ensures that the
+  devhub records the benchmark measurements for every merge to main, even if those merges occur in
+  quick succession.
+
+- [#2218](https://github.com/tigerbeetle/tigerbeetle/pull/2218)
+
+  Make the experimental feature `aof` (append-only file) a runtime flag instead of a build-time
+  setting. This simplifies operations, allowing the use of the same standard release binary in
+  environments that require `aof`.
+
+- [#2228](https://github.com/tigerbeetle/tigerbeetle/pull/2228)
+
+  Renames the LSM constant `lsm_batch_multiple` to `lsm_compaction_ops`, providing clearer meaning
+  on how it relates to the pace at which LSM tree compaction is triggered.
+
+- [#2240](https://github.com/tigerbeetle/tigerbeetle/pull/2240)
+
+  Add support for indexing flags, namely the new `imported` flag.
+
+### TigerTracks 🎧
+
+- [I Want To Break Free](https://open.spotify.com/track/7iAqvWLgZzXvH38lA06QZg?si=a5ad69b31f3a45dd)
+- [Used To Love Her](https://www.youtube.com/watch?v=FDIvIb06abI)
+
+## TigerBeetle 0.15.6
+
+Released: 2024-08-19
+
+### Safety And Performance
+
+- [#1951](https://github.com/tigerbeetle/tigerbeetle/pull/1951),
+  [#2212](https://github.com/tigerbeetle/tigerbeetle/pull/2212)
+
+  Add new state sync protocol, fixing a couple of liveness issues.
+  State sync is now performed as part of the view change.
+
+- [#2207](https://github.com/tigerbeetle/tigerbeetle/pull/2207)
+
+  Major state sync performance improvements.
+
+### Features
+
+- [#2224](https://github.com/tigerbeetle/tigerbeetle/pull/2224),
+  [#2225](https://github.com/tigerbeetle/tigerbeetle/pull/2225),
+  [#2226](https://github.com/tigerbeetle/tigerbeetle/pull/2226)
+
+  Ensure `u128` (and related type) consistency across client implementations.
+
+- [#2213](https://github.com/tigerbeetle/tigerbeetle/pull/2213)
+
+  Fix multiversioning builds for aarch64 macOS.
+
+### Internals
+
+- [#2210](https://github.com/tigerbeetle/tigerbeetle/pull/2210)
+
+  Automatically include oldest supported releases in release notes.
+
+- [#2214](https://github.com/tigerbeetle/tigerbeetle/pull/2214)
+
+  Refactor `build.zig` to break up the biggest function in the codebase.
+
+- [#2178](https://github.com/tigerbeetle/tigerbeetle/pull/2178)
+
+  Minor improvements to zig install scripts.
+
+### TigerTracks 🎧
+
+- [End of the Line](https://www.youtube.com/watch?v=UMVjToYOjbM)
+
+## TigerBeetle 0.15.5
+
+Released: 2024-08-12
+
+Highlight of this release is fully rolled-out support for multiversion binaries. This means that,
+from now on, the upgrade procedure is going to be as simple as dropping the new version of
+`tigerbeetle` binary onto the servers. TigerBeetle will take care of restarting the cluster at the
+new version when it is appropriate. See <https://docs.tigerbeetle.com/operating/upgrading> for
+reference documentation.
+
+Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involved.
+
+- When upgrading from `0.15.3`, you'll need to stop and restart `tigerbeetle` binary manually.
+- When upgrading from `0.15.4`, the binary will stop automatically by hitting an `assert`. You
+  should restart it after that.
+
+### Safety And Performance
+
+- [#2174](https://github.com/tigerbeetle/tigerbeetle/pull/2174)
+  [#2190](https://github.com/tigerbeetle/tigerbeetle/pull/2190),
+
+  Test client eviction in the VOPR.
+
+- [#2187](https://github.com/tigerbeetle/tigerbeetle/pull/2187)
+
+  Add integration tests for upgrades.
+
+- [#2188](https://github.com/tigerbeetle/tigerbeetle/pull/2188)
+
+  Add more hardening parameters to the suggested systemd unit definition.
+
+### Features
+
+- [#2180](https://github.com/tigerbeetle/tigerbeetle/pull/2180),
+  [#2185](https://github.com/tigerbeetle/tigerbeetle/pull/2185),
+  [#2189](https://github.com/tigerbeetle/tigerbeetle/pull/2189),
+  [#2196](https://github.com/tigerbeetle/tigerbeetle/pull/2196)
+
+  Make the root directory smaller by getting rid of `scripts` and `.gitattributes` entries.
+  Root directory is the first thing you see when opening the repository, this space shouldn't be
+  wasted!
+
+- [#2199](https://github.com/tigerbeetle/tigerbeetle/pull/2199),
+  [#2165](https://github.com/tigerbeetle/tigerbeetle/pull/2165),
+  [#2198](https://github.com/tigerbeetle/tigerbeetle/pull/2198),
+  [#2184](https://github.com/tigerbeetle/tigerbeetle/pull/2184).
+
+  Complete the integration of multiversion binaries with the release infrastructure. From now on,
+  the upgrade procedure is as simple as replacing the binary on disk with a new version. TigerBeetle
+  will take care of safely and seamlessly restarting the cluster when appropriate itself.
+
+- [#2181](https://github.com/tigerbeetle/tigerbeetle/pull/2181)
+
+  Prepare to rollout the new state sync protocol. Stay tuned
+  for the next release!
+
+### Internals
+
+- [#2179](https://github.com/tigerbeetle/tigerbeetle/pull/2179),
+  [#2200](https://github.com/tigerbeetle/tigerbeetle/pull/2200)
+
+  Simplify iteration over an LSM tree during scans.
+
+- [#2182](https://github.com/tigerbeetle/tigerbeetle/pull/2182)
+
+  Fix addresses logging in the client regressed by
+  [#2164](https://github.com/tigerbeetle/tigerbeetle/pull/2164).
+
+- [#2193](https://github.com/tigerbeetle/tigerbeetle/pull/2193)
+
+  Modernize scripts to generate client bindings to follow modern idioms for `build.zig`.
+
+- [#2195](https://github.com/tigerbeetle/tigerbeetle/pull/2195)
+
+  Fix typo in the currency exchange example.
+
+
+### TigerTracks 🎧
+
+- [High Hopes](https://open.spotify.com/track/236mI0lz8JdQjlmijARSwY?si=38f80fc31cfc4876)
+
+## 2024-08-05 (No release: Queued up to improve multiversion upgrade flow)
+
+### Safety And Performance
+
+- [#2162](https://github.com/tigerbeetle/tigerbeetle/pull/2162)
+
+  Past release checksums are further validated when printing multi-version information.
+
+- [#2143](https://github.com/tigerbeetle/tigerbeetle/pull/2143)
+
+  Write Ahead Log (WAL) appending was decoupled from WAL replication, tightening asserts.
+
+- [#2153](https://github.com/tigerbeetle/tigerbeetle/pull/2153),
+  [#2170](https://github.com/tigerbeetle/tigerbeetle/pull/2170)
+
+  VSR eviction edge cases receive more hardening.
+
+- [#2175](https://github.com/tigerbeetle/tigerbeetle/pull/2175)
+
+  Fix account overflows when doing a balance transfer for remaining funds (`amount=0`).
+
+- [#2168](https://github.com/tigerbeetle/tigerbeetle/pull/2168),
+  [#2164](https://github.com/tigerbeetle/tigerbeetle/pull/2164),
+  [#2152](https://github.com/tigerbeetle/tigerbeetle/pull/2152),
+  [#2122](https://github.com/tigerbeetle/tigerbeetle/pull/2122)
+
+  Command line argument parsing no longer dynamically allocates and handles error handling paths
+  more explicitly.
+
+### Internals
+
+- [#2169](https://github.com/tigerbeetle/tigerbeetle/pull/2169)
+
+  Golang's tests for the CI were re-enabled for ARM64 macOS.
+
+- [#2159](https://github.com/tigerbeetle/tigerbeetle/pull/2159)
+
+  This is a CHANGELOG entry about fixing a previous CHANGELOG entry.
+
+### TigerTracks 🎧
+
+- [Ramble On](https://www.youtube.com/watch?v=EYeG3QrvkEE)
 
 ## 2024-07-29
 

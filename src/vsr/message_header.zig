@@ -97,8 +97,6 @@ pub const Header = extern struct {
             .eviction => Eviction,
             .request_blocks => RequestBlocks,
             .block => Block,
-            .request_sync_checkpoint => RequestSyncCheckpoint,
-            .sync_checkpoint => SyncCheckpoint,
         };
     }
 
@@ -229,8 +227,6 @@ pub const Header = extern struct {
             .headers,
             .eviction,
             .request_blocks,
-            .request_sync_checkpoint,
-            .sync_checkpoint,
             => return .{ .replica = self.replica },
         }
     }
@@ -589,7 +585,7 @@ pub const Header = extern struct {
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// A backpointer to the previous prepare checksum for hash chain verification.
-        /// This provides a cryptographic guarantee for linearizability across our distributed log
+        /// This provides a strong guarantee for linearizability across our distributed log
         /// of prepares.
         ///
         /// This may also be used as the initialization vector for AEAD encryption at rest, provided
@@ -846,7 +842,7 @@ pub const Header = extern struct {
         request_checksum: u128,
         request_checksum_padding: u128 = 0,
         /// The checksum of the prepare message to which this message refers.
-        /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which
+        /// This allows for strong guarantees beyond request, op, and commit numbers, which
         /// have low entropy and may otherwise collide in the event of any correctness bugs.
         context: u128 = 0,
         context_padding: u128 = 0,
@@ -1030,8 +1026,9 @@ pub const Header = extern struct {
         /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
         nonce: u128,
         op: u64,
-        /// Set to `commit_min`/`commit_max` (they are the same).
-        commit: u64,
+        /// Equal to `commit_min` if the SV message is being sent by a .normal primary, but may not
+        /// be equal if the SV message is being sent by potential primary in .view_change status.
+        commit_max: u64,
         /// The replica's `op_checkpoint`.
         checkpoint_op: u64,
         reserved: [88]u8 = [_]u8{0} ** 88,
@@ -1039,8 +1036,8 @@ pub const Header = extern struct {
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
             if (self.release.value != 0) return "release != 0";
-            if (self.op < self.commit) return "op < commit_min";
-            if (self.commit < self.checkpoint_op) return "commit_min < checkpoint_op";
+            if (self.op < self.commit_max) return "op < commit_max";
+            if (self.commit_max < self.checkpoint_op) return "commit_max < checkpoint_op";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1256,12 +1253,13 @@ pub const Header = extern struct {
         pub const Reason = enum(u8) {
             reserved = 0,
             no_session = 1,
-            release_too_low = 2,
-            release_too_high = 3,
+            client_release_too_low = 2,
+            client_release_too_high = 3,
             invalid_request_operation = 4,
             invalid_request_body = 5,
             invalid_request_body_size = 6,
             session_too_low = 7,
+            session_release_mismatch = 8,
 
             comptime {
                 for (std.enums.values(Reason), 0..) |reason, index| {
@@ -1344,76 +1342,6 @@ pub const Header = extern struct {
             if (!self.block_type.valid()) return "block_type invalid";
             if (self.block_type == .reserved) return "block_type == .reserved";
             // TODO When manifest blocks include a snapshot, verify that snapshot≠0.
-            return null;
-        }
-    };
-
-    pub const RequestSyncCheckpoint = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
-
-        checksum: u128 = 0,
-        checksum_padding: u128 = 0,
-        checksum_body: u128 = 0,
-        checksum_body_padding: u128 = 0,
-        nonce_reserved: u128 = 0,
-        cluster: u128,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
-        command: Command,
-        replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-        checkpoint_id: u128,
-        checkpoint_op: u64,
-        reserved: [104]u8 = [_]u8{0} ** 104,
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_sync_checkpoint);
-            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.view != 0) return "view != 0";
-            if (self.release.value != 0) return "release != 0";
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-            return null;
-        }
-    };
-
-    pub const SyncCheckpoint = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
-
-        checksum: u128 = 0,
-        checksum_padding: u128 = 0,
-        checksum_body: u128 = 0,
-        checksum_body_padding: u128 = 0,
-        nonce_reserved: u128 = 0,
-        cluster: u128,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        release: vsr.Release = vsr.Release.zero, // Always 0.
-        protocol: u16 = vsr.Version,
-        command: Command,
-        replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-        /// Strictly speaking, this is identical to `checksum_body`.
-        /// It is included separately to mirror the RequestSyncCheckpoint header.
-        checkpoint_id: u128,
-        checkpoint_op: u64,
-        reserved: [104]u8 = [_]u8{0} ** 104,
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .sync_checkpoint);
-            if (self.size != @sizeOf(Header) + @sizeOf(vsr.CheckpointState)) {
-                return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
-            }
-            if (self.view != 0) return "view != 0";
-            if (self.release.value != 0) return "release != 0";
-            if (self.checkpoint_id != self.checksum_body) return "checkpoint_id != checksum_body";
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
     };

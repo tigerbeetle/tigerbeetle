@@ -5,7 +5,6 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const mem = std.mem;
 
-const tb = @import("tigerbeetle.zig");
 const constants = @import("constants.zig");
 const flags = @import("./flags.zig");
 const schema = @import("lsm/schema.zig");
@@ -67,7 +66,7 @@ pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
 
-const CliArgs = struct {
+const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
     ticks_max_requests: u32 = 40_000_000,
@@ -87,7 +86,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CliArgs);
+    const cli_args = flags.parse(&args, CLIArgs);
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
@@ -118,7 +117,10 @@ pub fn main() !void {
     const standby_count =
         if (cli_args.lite) 0 else random.uintAtMost(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
-    const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
+    // -1 since otherwise it is possible that all clients will evict each other.
+    // (Due to retried register messages from the first set of evicted clients.
+    // See the "Cluster: eviction: session_too_low" replica test for a related scenario.)
+    const client_count = @max(1, random.uintAtMost(u8, constants.clients_max * 2 - 1));
 
     const batch_size_limit_min = comptime batch_size_limit_min: {
         var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
@@ -203,6 +205,8 @@ pub fn main() !void {
                 .cache_entries_account_balances = 256,
             },
         },
+        .on_cluster_reply = Simulator.on_cluster_reply,
+        .on_client_reply = Simulator.on_client_reply,
     };
 
     const workload_options = StateMachine.Workload.Options.generate(random, .{
@@ -434,6 +438,8 @@ pub const Simulator = struct {
     /// Total number of requests sent, including those that have not been delivered.
     /// Does not include `register` messages.
     requests_sent: usize = 0,
+    /// Total number of replies received by non-evicted clients.
+    /// Does not include `register` messages.
     requests_replied: usize = 0,
     requests_idle: bool = false,
 
@@ -453,7 +459,7 @@ pub const Simulator = struct {
         assert(options.request_idle_off_probability > 0);
         assert(options.request_idle_off_probability <= 100);
 
-        var cluster = try Cluster.init(allocator, on_cluster_reply, options.cluster);
+        var cluster = try Cluster.init(allocator, options.cluster);
         errdefer cluster.deinit();
 
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
@@ -497,15 +503,21 @@ pub const Simulator = struct {
 
     pub fn pending(simulator: *const Simulator) ?[]const u8 {
         assert(simulator.core.count() > 0);
-        assert(simulator.requests_sent == simulator.options.requests_max);
+        assert(simulator.requests_sent - simulator.requests_cancelled() ==
+            simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
-        for (simulator.cluster.clients) |*client| {
-            if (client.request_inflight) |request| {
-                // Registration isn't counted by requests_sent, so an operation=register may still
-                // be in-flight. Any other requests should already be complete before done() is
-                // called.
-                assert(request.message.header.operation == .register);
-                return "pending register request";
+        for (
+            simulator.cluster.clients,
+            simulator.cluster.client_eviction_reasons,
+        ) |*client, reason| {
+            if (reason == null) {
+                if (client.request_inflight) |request| {
+                    // Registration isn't counted by requests_sent, so an operation=register may
+                    // still be in-flight. Any other requests should already be complete before
+                    // done() is called.
+                    assert(request.message.header.operation == .register);
+                    return "pending register request";
+                }
             }
         }
 
@@ -571,6 +583,15 @@ pub const Simulator = struct {
         simulator.tick_crash();
     }
 
+    /// Executes the following:
+    /// * Pick a quorum of replicas to be fully available (the core)
+    /// * Restart any core replicas that are down at the moment
+    /// * Heal all network partitions between core replicas
+    /// * Disable storage faults on the core replicas
+    /// * For all failures involving non-core replicas, make those failures permanent.
+    ///
+    /// See https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness for broader
+    /// context.
     pub fn transition_to_liveness_mode(simulator: *Simulator) void {
         simulator.core = random_core(
             simulator.random,
@@ -585,6 +606,7 @@ pub const Simulator = struct {
             if (simulator.cluster.replica_health[replica_index] == .down) {
                 simulator.restart_replica(@intCast(replica_index), fault);
             }
+            simulator.cluster.storages[replica_index].transition_to_liveness_mode();
         }
 
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
@@ -648,6 +670,9 @@ pub const Simulator = struct {
 
     // Returns a header for a prepare which can't be repaired by the core due to storage faults.
     //
+    // If a replica cannot make progress on committing, then it may be stuck while repairing either
+    // missing headers *or* prepares (see `repair` in replica.zig). This function checks for both.
+    //
     // When generating a FaultAtlas, we don't try to protect core from excessive errors. Instead,
     // if the core gets stuck, we verify that this is indeed due to storage faults.
     pub fn core_missing_prepare(simulator: *const Simulator) ?vsr.Header.Prepare {
@@ -655,18 +680,48 @@ pub const Simulator = struct {
 
         // Don't check for missing uncommitted ops (since the StateChecker does not record them).
         // There may be uncommitted ops due to pulses/upgrades sent during liveness mode.
-        const commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
+        const cluster_commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
+        var cluster_op_checkpoint: u64 = 0;
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                cluster_op_checkpoint = @max(
+                    cluster_op_checkpoint,
+                    replica.superblock.working.vsr_state.checkpoint.header.op,
+                );
+            }
+        }
 
-        var missing_op: ?u64 = null;
+        var missing_header_op: ?u64 = null;
+        var missing_prepare_op: ?u64 = null;
+
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
-                if (replica.op > replica.commit_min) {
-                    for (replica.commit_min + 1..@min(replica.op, commit_max) + 1) |op| {
+
+                // Lagging replicas do not initiate WAL repair during view change.
+                if (replica.status == .view_change and
+                    replica.op_checkpoint() < cluster_op_checkpoint) continue;
+
+                const commit_max = @min(replica.op, cluster_commit_max);
+                const op_repair_min = replica.op_repair_min();
+
+                // Check if replica's commit pipeline was stuck due to missing headers.
+                // Find latest missing header as we repair headers from high -> low ops.
+                if (replica.journal.find_latest_headers_break_between(
+                    op_repair_min,
+                    commit_max,
+                )) |range| {
+                    if (missing_header_op == null or missing_header_op.? < range.op_max) {
+                        missing_header_op = range.op_max;
+                    }
+                } else {
+                    // Check if replica's commit pipeline was stuck due to missing prepares.
+                    // Find earliest missing prepare as we repair prepares from low -> high ops.
+                    for (op_repair_min..commit_max + 1) |op| {
                         const header = simulator.cluster.state_checker.header_with_op(op);
                         if (!replica.journal.has_clean(&header)) {
-                            if (missing_op == null or missing_op.? > op) {
-                                missing_op = op;
+                            if (missing_prepare_op == null or missing_prepare_op.? > op) {
+                                missing_prepare_op = op;
                             }
                         }
                     }
@@ -674,9 +729,10 @@ pub const Simulator = struct {
             }
         }
 
-        if (missing_op == null) return null;
+        if (missing_header_op == null and missing_prepare_op == null) return null;
 
-        const missing_header = simulator.cluster.state_checker.header_with_op(missing_op.?);
+        const missing_op = if (missing_header_op) |op| op else missing_prepare_op.?;
+        const missing_header = simulator.cluster.state_checker.header_with_op(missing_op);
 
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
@@ -800,12 +856,18 @@ pub const Simulator = struct {
 
     fn on_cluster_reply(
         cluster: *Cluster,
-        reply_client: usize,
-        request: *Message.Request,
-        reply: *Message.Reply,
+        reply_client: ?usize,
+        prepare: *const Message.Prepare,
+        reply: *const Message.Reply,
     ) void {
+        assert((reply_client == null) == (prepare.header.client == 0));
+
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
-        simulator.reply_sequence.insert(reply_client, request, reply);
+
+        if (reply.header.op < simulator.reply_op_next) return;
+        if (simulator.reply_sequence.contains(reply)) return;
+
+        simulator.reply_sequence.insert(reply_client, prepare, reply);
 
         while (!simulator.reply_sequence.empty()) {
             const op = simulator.reply_op_next;
@@ -815,56 +877,57 @@ pub const Simulator = struct {
             if (simulator.reply_sequence.peek(op)) |commit| {
                 defer simulator.reply_sequence.next();
 
-                assert(prepare_header.client != 0);
                 simulator.reply_op_next += 1;
 
-                const commit_client = simulator.cluster.clients[commit.client_index];
                 assert(commit.reply.references == 1);
                 assert(commit.reply.header.op == op);
                 assert(commit.reply.header.command == .reply);
-                assert(commit.reply.header.client == commit_client.id);
-                assert(commit.reply.header.request == commit.request.header.request);
-                assert(commit.reply.header.operation == commit.request.header.operation);
-                assert(commit.reply.header.operation != .pulse);
-                assert(commit.request.references == 1);
-                assert(commit.request.header.checksum == prepare_header.request_checksum);
-                assert(commit.request.header.command == .request);
-                assert(commit.request.header.client == commit_client.id);
+                assert(commit.reply.header.request == commit.prepare.header.request);
+                assert(commit.reply.header.operation == commit.prepare.header.operation);
+                assert(commit.prepare.references == 1);
+                assert(commit.prepare.header.checksum == prepare_header.checksum);
+                assert(commit.prepare.header.command == .prepare);
 
                 log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
                     commit.reply.header.op,
                     commit.reply.header.operation,
-                    commit.request.header.client,
-                    commit.request.header.request,
+                    commit.prepare.header.client,
+                    commit.prepare.header.request,
                 });
 
-                if (!commit.request.header.operation.vsr_reserved()) {
-                    simulator.requests_replied += 1;
+                if (prepare_header.operation == .pulse) {
+                    simulator.workload.on_pulse(
+                        prepare_header.operation.cast(StateMachine),
+                        prepare_header.timestamp,
+                    );
+                }
+
+                if (!commit.prepare.header.operation.vsr_reserved()) {
                     simulator.workload.on_reply(
-                        commit.client_index,
+                        commit.client_index.?,
                         commit.reply.header.operation.cast(StateMachine),
                         commit.reply.header.timestamp,
-                        commit.request.body(),
+                        commit.prepare.body(),
                         commit.reply.body(),
                     );
                 }
-            } else {
-                if (prepare_header.client == 0) {
-                    if (prepare_header.operation == .pulse) {
-                        simulator.workload.on_pulse(
-                            prepare_header.operation.cast(StateMachine),
-                            prepare_header.timestamp,
-                        );
-                    }
-
-                    assert(prepare_header.operation.vsr_reserved());
-                    // We don't receive replies for requests that originated at the replicas.
-                    simulator.reply_op_next += 1;
-                } else {
-                    assert(prepare_header.operation != .pulse);
-                    break;
-                }
             }
+        }
+    }
+
+    fn on_client_reply(
+        cluster: *Cluster,
+        reply_client: usize,
+        request: *const Message.Request,
+        reply: *const Message.Reply,
+    ) void {
+        _ = reply;
+
+        const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
+        assert(simulator.cluster.client_eviction_reasons[reply_client] == null);
+
+        if (!request.header.operation.vsr_reserved()) {
+            simulator.requests_replied += 1;
         }
     }
 
@@ -881,11 +944,29 @@ pub const Simulator = struct {
         }
 
         if (simulator.requests_idle) return;
-        if (simulator.requests_sent == simulator.options.requests_max) return;
+        if (simulator.requests_sent - simulator.requests_cancelled() ==
+            simulator.options.requests_max) return;
         if (!chance(simulator.random, simulator.options.request_probability)) return;
 
-        const client_index =
-            simulator.random.uintLessThan(usize, simulator.options.cluster.client_count);
+        const client_index = index: {
+            const client_count = simulator.options.cluster.client_count;
+            const client_index_base =
+                simulator.random.uintLessThan(usize, client_count);
+            for (0..client_count) |offset| {
+                const client_index = (client_index_base + offset) % client_count;
+                if (simulator.cluster.client_eviction_reasons[client_index] == null) {
+                    break :index client_index;
+                }
+            } else {
+                for (0..client_count) |index| {
+                    assert(simulator.cluster.client_eviction_reasons[index] != null);
+                    assert(simulator.cluster.client_eviction_reasons[index] == .no_session or
+                        simulator.cluster.client_eviction_reasons[index] == .session_too_low);
+                }
+                stdx.unimplemented("client replacement; all clients were evicted");
+            }
+        };
+
         var client = &simulator.cluster.clients[client_index];
 
         // Messages aren't added to the ReplySequence until a reply arrives.
@@ -926,7 +1007,8 @@ pub const Simulator = struct {
             request_metadata.operation);
 
         simulator.requests_sent += 1;
-        assert(simulator.requests_sent <= simulator.options.requests_max);
+        assert(simulator.requests_sent - simulator.requests_cancelled() <=
+            simulator.options.requests_max);
     }
 
     fn tick_crash(simulator: *Simulator) void {
@@ -1007,8 +1089,8 @@ pub const Simulator = struct {
             // If the entire Zone.wal_headers is corrupted, the replica becomes permanently
             // unavailable (returns `WALInvalid` from `open`). In the simulator, there are only two
             // WAL sectors, which could both get corrupted when a replica crashes while writing them
-            // simultaneously. To keep the replica operational, arbitrarily repair one of the
-            // sectors.
+            // simultaneously. Repair both sectors so that even if one of them becomes corrupted on
+            // startup, the replica still remains operational.
             //
             // In production `journal_iops_write_max < header_sector_count`, which makes is
             // impossible to get torn writes for all journal header sectors at the same time.
@@ -1016,14 +1098,8 @@ pub const Simulator = struct {
                 @divExact(vsr.Zone.wal_headers.start(), constants.sector_size);
             const header_sector_count =
                 @divExact(constants.journal_size_headers, constants.sector_size);
-            var header_sector_count_faulty: u32 = 0;
             for (0..header_sector_count) |header_sector_index| {
-                header_sector_count_faulty += @intFromBool(replica_storage.faults.isSet(
-                    header_sector_offset + header_sector_index,
-                ));
-            }
-            if (header_sector_count_faulty == header_sector_count) {
-                replica_storage.faults.unset(header_sector_offset);
+                replica_storage.faults.unset(header_sector_offset + header_sector_index);
             }
         }
 
@@ -1070,13 +1146,8 @@ pub const Simulator = struct {
         ) catch unreachable;
 
         if (replica.status == .recovering_head) {
-            // Even with faults disabled, a replica that was syncing before it crashed
-            // (or just recently finished syncing before it crashed) may wind up in
-            // status=recovering_head.
-            assert(fault or
-                replica.op < replica.op_checkpoint() or
-                replica.log_view < replica.superblock.working.vsr_state.sync_view or
-                header_prepare_view_mismatch);
+            // Even with faults disabled, a replica may wind up in status=recovering_head.
+            assert(fault or header_prepare_view_mismatch);
         }
 
         replica_storage.faulty = true;
@@ -1090,12 +1161,25 @@ pub const Simulator = struct {
         simulator.replica_releases_limit =
             @max(simulator.replica_releases[replica_index], simulator.replica_releases_limit);
     }
+
+    fn requests_cancelled(simulator: *const Simulator) u32 {
+        var count: u32 = 0;
+        for (
+            simulator.cluster.clients,
+            simulator.cluster.client_eviction_reasons,
+        ) |*client, reason| {
+            count += @intFromBool(reason != null and
+                client.request_inflight != null and
+                client.request_inflight.?.message.header.operation != .register);
+        }
+        return count;
+    }
 };
 
 /// Print an error message and then exit with an exit code.
 fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
     output.err(fmt_string, args);
-    std.posix.exit(@intFromEnum(failure));
+    std.process.exit(@intFromEnum(failure));
 }
 
 /// Returns true, `p` percent of the time, else false.

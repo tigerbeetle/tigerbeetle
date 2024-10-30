@@ -29,7 +29,7 @@ const StateMachine = vsr.state_machine.StateMachineType(
     constants.state_machine_config,
 );
 
-const CliArgs = union(enum) {
+const CLIArgs = union(enum) {
     const Format = struct {
         cluster: u128,
         replica: ?u8 = null,
@@ -55,7 +55,7 @@ const CliArgs = union(enum) {
         // Everything below here is considered experimental, and requires `--experimental` to be
         // set. Experimental flags disable automatic upgrades with multiversion binaries; each
         // replica has to be manually restarted.
-        // Experimental flags must default to null.
+        // Experimental flags must default to null, except for bools which must be false.
         experimental: bool = false,
 
         limit_storage: ?flags.ByteSize = null,
@@ -67,6 +67,14 @@ const CliArgs = union(enum) {
         cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
+        trace: ?[:0]const u8 = null,
+
+        /// AOF (Append Only File) logs all transactions synchronously to disk before replying
+        /// to the client. The logic behind this code has been kept as simple as possible -
+        /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
+        /// log consisting of logged requests. Much like a redis AOF with fsync=on.
+        /// Enabling this will have performance implications.
+        aof: bool = false,
     };
 
     const Version = struct {
@@ -89,7 +97,11 @@ const CliArgs = union(enum) {
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_count_hot: usize = 0,
-        account_balances: bool = false,
+        /// The probability distribution used to select accounts when making
+        /// transfers or queries.
+        account_distribution: Command.Benchmark.Distribution = .uniform,
+        flag_history: bool = false,
+        flag_imported: bool = false,
         account_batch_size: usize = @divExact(
             constants.message_size_max - @sizeOf(vsr.Header),
             @sizeOf(tigerbeetle.Account),
@@ -108,6 +120,7 @@ const CliArgs = union(enum) {
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
+        trace: ?[:0]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
@@ -357,7 +370,7 @@ const start_defaults_development = StartDefaults{
 const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
 const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
-/// While CliArgs store raw arguments as passed on the command line, Command ensures that
+/// While CLIArgs store raw arguments as passed on the command line, Command ensures that
 /// arguments are properly validated and desugared (e.g, sizes converted to counts where
 ///  appropriate).
 pub const Command = union(enum) {
@@ -387,8 +400,10 @@ pub const Command = union(enum) {
         cache_grid_blocks: u32,
         lsm_forest_compaction_block_count: u32,
         lsm_forest_node_count: u32,
+        trace: ?[:0]const u8,
         development: bool,
         experimental: bool,
+        aof: bool,
         path: [:0]const u8,
     };
 
@@ -409,6 +424,15 @@ pub const Command = union(enum) {
         /// optimizations such as avoiding negative prefetch) while random/reversed can't.
         pub const IdOrder = enum { sequential, random, reversed };
 
+        pub const Distribution = enum {
+            /// Shuffled zipfian numbers where relatively few indexes are selected frequently.
+            zipfian,
+            /// Also zipfian, but the most recent indexes are selected frequently.
+            latest,
+            /// Uniform distribution; unrealistic workloads.
+            uniform,
+        };
+
         cache_accounts: ?[]const u8,
         cache_transfers: ?[]const u8,
         cache_transfers_pending: ?[]const u8,
@@ -416,7 +440,9 @@ pub const Command = union(enum) {
         cache_grid: ?[]const u8,
         account_count: usize,
         account_count_hot: usize,
-        account_balances: bool,
+        account_distribution: Distribution,
+        flag_history: bool,
+        flag_imported: bool,
         account_batch_size: usize,
         transfer_count: usize,
         transfer_hot_percent: usize,
@@ -429,6 +455,7 @@ pub const Command = union(enum) {
         print_batch_timings: bool,
         id_order: IdOrder,
         statsd: bool,
+        trace: ?[:0]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
         seed: ?[]const u8,
@@ -476,7 +503,7 @@ pub const Command = union(enum) {
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
 pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
-    const cli_args = flags.parse(args_iterator, CliArgs);
+    const cli_args = flags.parse(args_iterator, CLIArgs);
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },
@@ -489,28 +516,28 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
     };
 }
 
-fn parse_args_format(format: CliArgs.Format) Command.Format {
+fn parse_args_format(format: CLIArgs.Format) Command.Format {
     if (format.replica_count == 0) {
-        flags.fatal("--replica-count: value needs to be greater than zero", .{});
+        vsr.fatal(.cli, "--replica-count: value needs to be greater than zero", .{});
     }
     if (format.replica_count > constants.replicas_max) {
-        flags.fatal("--replica-count: value is too large ({}), at most {} is allowed", .{
+        vsr.fatal(.cli, "--replica-count: value is too large ({}), at most {} is allowed", .{
             format.replica_count,
             constants.replicas_max,
         });
     }
 
     if (format.replica == null and format.standby == null) {
-        flags.fatal("--replica: argument is required", .{});
+        vsr.fatal(.cli, "--replica: argument is required", .{});
     }
 
     if (format.replica != null and format.standby != null) {
-        flags.fatal("--standby: conflicts with '--replica'", .{});
+        vsr.fatal(.cli, "--standby: conflicts with '--replica'", .{});
     }
 
     if (format.replica) |replica| {
         if (replica >= format.replica_count) {
-            flags.fatal("--replica: value is too large ({}), at most {} is allowed", .{
+            vsr.fatal(.cli, "--replica: value is too large ({}), at most {} is allowed", .{
                 replica,
                 format.replica_count - 1,
             });
@@ -519,13 +546,13 @@ fn parse_args_format(format: CliArgs.Format) Command.Format {
 
     if (format.standby) |standby| {
         if (standby < format.replica_count) {
-            flags.fatal("--standby: value is too small ({}), at least {} is required", .{
+            vsr.fatal(.cli, "--standby: value is too small ({}), at least {} is required", .{
                 standby,
                 format.replica_count,
             });
         }
         if (standby >= format.replica_count + constants.standbys_max) {
-            flags.fatal("--standby: value is too large ({}), at most {} is allowed", .{
+            vsr.fatal(.cli, "--standby: value is too large ({}), at most {} is allowed", .{
                 standby,
                 format.replica_count + constants.standbys_max - 1,
             });
@@ -545,7 +572,7 @@ fn parse_args_format(format: CliArgs.Format) Command.Format {
     };
 }
 
-fn parse_args_start(start: CliArgs.Start) Command.Start {
+fn parse_args_start(start: CLIArgs.Start) Command.Start {
     // Allowlist of stable flags. --development will disable automatic multiversion
     // upgrades too, but the flag itself is stable.
     const stable_args = .{
@@ -565,10 +592,12 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
 
         // If you've added a flag and get a comptime error here, it's likely because
         // we require experimental flags to default to null.
-        assert(flags.default_value(field).? == null);
+        const required_default = if (field.type == bool) false else null;
+        assert(flags.default_value(field).? == required_default);
 
-        if (@field(start, field.name) != null and !start.experimental) {
-            flags.fatal(
+        if (@field(start, field.name) != required_default and !start.experimental) {
+            vsr.fatal(
+                .cli,
                 "{s} is marked experimental, add `--experimental` to continue.",
                 .{flag_name},
             );
@@ -586,7 +615,7 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
         if (start.development) start_defaults_development else start_defaults_production;
 
     const start_limit_storage: flags.ByteSize = start.limit_storage orelse
-        .{ .value = constants.storage_size_limit_max };
+        .{ .value = constants.storage_size_limit_default };
     const start_memory_lsm_manifest: flags.ByteSize = start.memory_lsm_manifest orelse
         .{ .value = constants.lsm_manifest_memory_size_default };
 
@@ -594,21 +623,22 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
     const storage_size_limit_min = data_file_size_min;
     const storage_size_limit_max = constants.storage_size_limit_max;
     if (storage_size_limit > storage_size_limit_max) {
-        flags.fatal("--limit-storage: size {}{s} exceeds maximum: {}", .{
+        vsr.fatal(.cli, "--limit-storage: size {}{s} exceeds maximum: {}", .{
             start_limit_storage.value,
             start_limit_storage.suffix(),
             vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_max),
         });
     }
     if (storage_size_limit < storage_size_limit_min) {
-        flags.fatal("--limit-storage: size {}{s} is below minimum: {}", .{
+        vsr.fatal(.cli, "--limit-storage: size {}{s} is below minimum: {}", .{
             start_limit_storage.value,
             start_limit_storage.suffix(),
             vsr.stdx.fmt_int_size_bin_exact(storage_size_limit_min),
         });
     }
     if (storage_size_limit % constants.sector_size != 0) {
-        flags.fatal(
+        vsr.fatal(
+            .cli,
             "--limit-storage: size {}{s} must be a multiple of sector size ({})",
             .{
                 start_limit_storage.value,
@@ -623,13 +653,13 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
     const pipeline_limit_min = 0;
     const pipeline_limit_max = constants.pipeline_request_queue_max;
     if (pipeline_limit > pipeline_limit_max) {
-        flags.fatal("--limit-pipeline-requests: count {} exceeds maximum: {}", .{
+        vsr.fatal(.cli, "--limit-pipeline-requests: count {} exceeds maximum: {}", .{
             pipeline_limit,
             pipeline_limit_max,
         });
     }
     if (pipeline_limit < pipeline_limit_min) {
-        flags.fatal("--limit-pipeline-requests: count {} is below minimum: {}", .{
+        vsr.fatal(.cli, "--limit-pipeline-requests: count {} is below minimum: {}", .{
             pipeline_limit,
             pipeline_limit_min,
         });
@@ -640,14 +670,14 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
     const request_size_limit_min = 4096;
     const request_size_limit_max = constants.message_size_max;
     if (request_size_limit.bytes() > request_size_limit_max) {
-        flags.fatal("--limit-request: size {}{s} exceeds maximum: {}", .{
+        vsr.fatal(.cli, "--limit-request: size {}{s} exceeds maximum: {}", .{
             request_size_limit.value,
             request_size_limit.suffix(),
             vsr.stdx.fmt_int_size_bin_exact(request_size_limit_max),
         });
     }
     if (request_size_limit.bytes() < request_size_limit_min) {
-        flags.fatal("--limit-request: size {}{s} is below minimum: {}", .{
+        vsr.fatal(.cli, "--limit-request: size {}{s} is below minimum: {}", .{
             request_size_limit.value,
             request_size_limit.suffix(),
             vsr.stdx.fmt_int_size_bin_exact(request_size_limit_min),
@@ -659,21 +689,22 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
     const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
     const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
     if (lsm_manifest_memory > lsm_manifest_memory_max) {
-        flags.fatal("--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
+        vsr.fatal(.cli, "--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
             start_memory_lsm_manifest.value,
             start_memory_lsm_manifest.suffix(),
             vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_max),
         });
     }
     if (lsm_manifest_memory < lsm_manifest_memory_min) {
-        flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
+        vsr.fatal(.cli, "--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
             start_memory_lsm_manifest.value,
             start_memory_lsm_manifest.suffix(),
             vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_min),
         });
     }
     if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
-        flags.fatal(
+        vsr.fatal(
+            .cli,
             "--memory-lsm-manifest: size {}{s} must be a multiple of {}",
             .{
                 start_memory_lsm_manifest.value,
@@ -687,21 +718,22 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
         start.memory_lsm_compaction orelse defaults.memory_lsm_compaction;
     const lsm_compaction_block_memory_max = constants.compaction_block_memory_size_max;
     if (lsm_compaction_block_memory.bytes() > lsm_compaction_block_memory_max) {
-        flags.fatal("--memory-lsm-compaction: size {}{s} exceeds maximum: {}", .{
+        vsr.fatal(.cli, "--memory-lsm-compaction: size {}{s} exceeds maximum: {}", .{
             lsm_compaction_block_memory.value,
             lsm_compaction_block_memory.suffix(),
             vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_max),
         });
     }
     if (lsm_compaction_block_memory.bytes() < lsm_compaction_block_memory_min) {
-        flags.fatal("--memory-lsm-compaction: size {}{s} is below minimum: {}", .{
+        vsr.fatal(.cli, "--memory-lsm-compaction: size {}{s} is below minimum: {}", .{
             lsm_compaction_block_memory.value,
             lsm_compaction_block_memory.suffix(),
             vsr.stdx.fmt_int_size_bin_exact(lsm_compaction_block_memory_min),
         });
     }
     if (lsm_compaction_block_memory.bytes() % constants.block_size != 0) {
-        flags.fatal(
+        vsr.fatal(
+            .cli,
             "--memory-lsm-compaction: size {}{s} must be a multiple of {}",
             .{
                 lsm_compaction_block_memory.value,
@@ -756,17 +788,19 @@ fn parse_args_start(start: CliArgs.Start) Command.Start {
         .lsm_forest_node_count = lsm_forest_node_count,
         .development = start.development,
         .experimental = start.experimental,
+        .trace = start.trace,
+        .aof = start.aof,
         .path = start.positional.path,
     };
 }
 
-fn parse_args_version(version: CliArgs.Version) Command.Version {
+fn parse_args_version(version: CLIArgs.Version) Command.Version {
     return .{
         .verbose = version.verbose,
     };
 }
 
-fn parse_args_repl(repl: CliArgs.Repl) Command.Repl {
+fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
     const addresses = parse_addresses(repl.addresses);
 
     return .{
@@ -777,14 +811,14 @@ fn parse_args_repl(repl: CliArgs.Repl) Command.Repl {
     };
 }
 
-fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
+fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
         parse_addresses(addresses)
     else
         null;
 
     if (benchmark.addresses != null and benchmark.file != null) {
-        flags.fatal("--file: --addresses and --file are mutually exclusive", .{});
+        vsr.fatal(.cli, "--file: --addresses and --file are mutually exclusive", .{});
     }
 
     return .{
@@ -795,7 +829,9 @@ fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
         .cache_grid = benchmark.cache_grid,
         .account_count = benchmark.account_count,
         .account_count_hot = benchmark.account_count_hot,
-        .account_balances = benchmark.account_balances,
+        .account_distribution = benchmark.account_distribution,
+        .flag_history = benchmark.flag_history,
+        .flag_imported = benchmark.flag_imported,
         .account_batch_size = benchmark.account_batch_size,
         .transfer_count = benchmark.transfer_count,
         .transfer_hot_percent = benchmark.transfer_hot_percent,
@@ -808,13 +844,14 @@ fn parse_args_benchmark(benchmark: CliArgs.Benchmark) Command.Benchmark {
         .print_batch_timings = benchmark.print_batch_timings,
         .id_order = benchmark.id_order,
         .statsd = benchmark.statsd,
+        .trace = benchmark.trace,
         .file = benchmark.file,
         .addresses = addresses,
         .seed = benchmark.seed,
     };
 }
 
-fn parse_args_inspect(inspect: CliArgs.Inspect) Command.Inspect {
+fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
         inline else => |args| args.positional.path,
     };
@@ -844,7 +881,7 @@ fn parse_args_inspect(inspect: CliArgs.Inspect) Command.Inspect {
     };
 }
 
-fn parse_args_multiversion(multiversion: CliArgs.Multiversion) Command.Multiversion {
+fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multiversion {
     return .{
         .path = multiversion.positional.path,
     };
@@ -858,18 +895,20 @@ fn parse_addresses(raw_addresses: []const u8) Command.Addresses {
         raw_addresses,
         result.unused_capacity_slice(),
     ) catch |err| switch (err) {
-        error.AddressHasTrailingComma => flags.fatal("--addresses: invalid trailing comma", .{}),
+        error.AddressHasTrailingComma => {
+            vsr.fatal(.cli, "--addresses: invalid trailing comma", .{});
+        },
         error.AddressLimitExceeded => {
-            flags.fatal("--addresses: too many addresses, at most {d} are allowed", .{
+            vsr.fatal(.cli, "--addresses: too many addresses, at most {d} are allowed", .{
                 constants.members_max,
             });
         },
         error.AddressHasMoreThanOneColon => {
-            flags.fatal("--addresses: invalid address with more than one colon", .{});
+            vsr.fatal(.cli, "--addresses: invalid address with more than one colon", .{});
         },
-        error.PortOverflow => flags.fatal("--addresses: port exceeds 65535", .{}),
-        error.PortInvalid => flags.fatal("--addresses: invalid port", .{}),
-        error.AddressInvalid => flags.fatal("--addresses: invalid IPv4 or IPv6 address", .{}),
+        error.PortOverflow => vsr.fatal(.cli, "--addresses: port exceeds 65535", .{}),
+        error.PortInvalid => vsr.fatal(.cli, "--addresses: invalid port", .{}),
+        error.AddressInvalid => vsr.fatal(.cli, "--addresses: invalid IPv4 or IPv6 address", .{}),
     };
     assert(addresses_parsed.len > 0);
     assert(addresses_parsed.len <= constants.members_max);
@@ -894,7 +933,7 @@ fn parse_cache_size_to_count(
     ) * value_count_max_multiple;
 
     if (count_rounded > std.math.maxInt(u32)) {
-        flags.fatal("{s}: exceeds the limit", .{cli_flag});
+        vsr.fatal(.cli, "{s}: exceeds the limit", .{cli_flag});
     }
 
     const result: u32 = @intCast(count_rounded);

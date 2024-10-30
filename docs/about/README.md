@@ -62,7 +62,7 @@ reliable manner.
 ### ProtoBeetle - 400,000 Transfers per Second
 
 In the month of July 2020, we developed a prototype of TigerBeetle in Node as a performance sketch
-to measure the basic components of the design (batching, TCP protocol, cryptographic checksums
+to measure the basic components of the design (batching, TCP protocol, checksums
 everywhere, fsync journalling, in-memory business logic and hash table operations). **ProtoBeetle
 ran at 200,000 two-phase transfers per second on our office laptops**, supporting our
 back-of-the-envelope numbers.

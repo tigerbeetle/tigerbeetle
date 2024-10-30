@@ -209,6 +209,11 @@ public class TransferTest {
     }
 
     @Test
+    public void testAmountMax() {
+        assertEquals(BigInteger.TWO.pow(128).subtract(BigInteger.ONE), TransferBatch.AMOUNT_MAX);
+    }
+
+    @Test
     public void testPendingId() {
         var transfers = new TransferBatch(1);
         transfers.add();

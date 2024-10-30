@@ -2,7 +2,7 @@ name: CI
 
 concurrency:
   group: core-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 on:
   merge_group:
@@ -10,16 +10,19 @@ on:
   push:
     branches: ["main"]
 
+env:
+  CI: 1 # build.zig enables extra sanity checks if CI is set.
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck ./scripts/install_zig.sh
-      - run: ./scripts/install_zig.sh
+      - run: shellcheck ./zig/download.sh
+      - run: ./zig/download.sh
       - run: ./zig/zig fmt --check .
       - run: ./zig/zig build check
-      - run: ./zig/zig build check -Dconfig=test_min
       - run: ./.github/ci/docs_check.sh
 
   test_alpine:
@@ -29,15 +32,15 @@ jobs:
       # Docker restricts io_uring by default, running unconfined then.
       options: --security-opt seccomp=unconfined
     steps:
-      - run: apk add -U git
+      - run: apk add -U git github-cli
       # https://github.com/actions/checkout/issues/1169
       - run: git config --system --add safe.directory '*'
       - uses: actions/checkout@v4
         # Fetch the entire history of the commit in question for tidy.
         with:
           fetch-depth: 2147483647
-      - run: ./scripts/install_zig.sh
-      - run: zig/zig build test
+      - run: ./zig/download.sh
+      - run: ./zig/zig build test
 
   test_ubuntu:
     runs-on: ubuntu-latest
@@ -45,15 +48,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2147483647
-      - run: ./scripts/install_zig.sh
-      - run: zig/zig build test
-      - run: zig/zig build clients:c:sample -Drelease
-      - run: zig/zig build fuzz -- smoke
+      - run: ./zig/download.sh
+      - run: ./zig/zig build test
+      - run: ./zig/zig build clients:c:sample -Drelease
+      - run: ./zig/zig build fuzz -- smoke
       # Run simulator once for each state machine, using commit hash as a random, but also deterministic
       # seed.
-      - run: zig/zig build vopr -Dvopr-state-machine=accounting -Drelease -- ${{ github.sha }}
-      - run: zig/zig build vopr -Dvopr-state-machine=testing    -Drelease -- ${{ github.sha }}
-      - run: zig/zig build -Dtracer-backend=tracy
+      - run: ./zig/zig build vopr -Dvopr-state-machine=accounting -Drelease -- ${{ github.sha }}
+      - run: ./zig/zig build vopr -Dvopr-state-machine=testing    -Drelease -- ${{ github.sha }}
 
   test_aof:
     runs-on: ubuntu-latest
@@ -61,16 +63,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2147483647
-      - run: ./scripts/install_zig.sh
+      - run: ./zig/download.sh
       - run: ./.github/ci/test_aof.sh
 
   test_windows:
     runs-on: windows-latest
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2147483647
-      - run: .\scripts\install_zig.bat
+      - run: .\zig\download.bat
       - run: .\zig\zig build test
       - run: .\zig\zig build clients:c:sample
 
@@ -86,7 +89,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2147483647
-      - run: ./scripts/install_zig.sh
+      - run: ./zig/download.sh
       - run: ./zig/zig build test
       - run: ./zig/zig build clients:c:sample -Drelease
 
@@ -120,6 +123,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
 
       - if: matrix.language == 'dotnet'
@@ -143,7 +147,7 @@ jobs:
         with:
           node-version: ${{ matrix.language_version }}
 
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
+      - run: ./zig/download.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=${{ matrix.language }}
 
   devhub:
@@ -156,11 +160,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # Needed for llvm-objcopy.
-      - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
-
-      - run: ./scripts/install_zig.sh
+        with:
+          fetch-depth: 2147483647
+      - run: sudo apt install kcov
+      - run: ./zig/download.sh
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
@@ -171,21 +174,6 @@ jobs:
         with:
           path: ./src/devhub
       - uses: actions/deploy-pages@v4
-
-  kcov:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2147483647
-      - run: sudo apt install kcov
-      - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build scripts -- kcov
-      - uses: actions/upload-artifact@v4
-        with:
-          name: code-coverage-report
-          path: zig-out/kcov
 
   # Work around GitHub considering Skipped jobs success for "Require status checks before merging"
   # See also:
@@ -201,3 +189,35 @@ jobs:
         run: exit 0
       - if: ${{  (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
         run: exit 1
+
+  antithesis:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: antithesis
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+      - name: Install dependencies
+        run: sudo apt install -y jq curl
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+      - name: Login to Container Registry
+        run: docker login -u "$ANTITHESIS_DOCKER_USER" -p "$ANTITHESIS_DOCKER_PASS" us-central1-docker.pkg.dev
+        env:
+          ANTITHESIS_DOCKER_USER: ${{ secrets.ANTITHESIS_DOCKER_USER }} 
+          ANTITHESIS_DOCKER_PASS: ${{ secrets.ANTITHESIS_DOCKER_PASS }} 
+      - name: Download Zig
+        run: ./zig/download.sh
+      - name: Build and push
+        run: |
+          ./zig/zig build scripts -- antithesis \
+            --tag='antithesis-latest' \
+            --push --trigger-test \
+            --antithesis-user="$ANTITHESIS_USER" --antithesis-password="$ANTITHESIS_PASS"
+        env:
+          ANTITHESIS_USER: ${{ secrets.ANTITHESIS_USER }}
+          ANTITHESIS_PASS: ${{ secrets.ANTITHESIS_PASS }}

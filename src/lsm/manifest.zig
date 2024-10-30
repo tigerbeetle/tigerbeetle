@@ -19,7 +19,7 @@ const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
-const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableInfo = schema.ManifestNode.TableInfo;
 
 pub fn TreeTableInfoType(comptime Table: type) type {
@@ -165,9 +165,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const Level =
             ManifestLevelType(NodePool, Key, TreeTableInfo, table_count_max);
 
-        const Grid = GridType(Storage);
-        const Callback = *const fn (*Manifest) void;
-
         const CompactionTableRange = struct {
             table_a: TableInfoReference,
             range_b: CompactionRange,
@@ -195,19 +192,24 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
 
-        pub fn init(allocator: mem.Allocator, node_pool: *NodePool, config: TreeConfig) !Manifest {
-            var levels: [constants.lsm_levels]Level = undefined;
-            for (&levels, 0..) |*level, i| {
-                errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
-                level.* = try Level.init(allocator);
-            }
-            errdefer for (&levels) |*level| level.deinit(allocator, node_pool);
-
-            return Manifest{
+        pub fn init(
+            manifest: *Manifest,
+            allocator: mem.Allocator,
+            node_pool: *NodePool,
+            config: TreeConfig,
+        ) !void {
+            manifest.* = .{
                 .node_pool = node_pool,
                 .config = config,
-                .levels = levels,
+
+                .levels = undefined,
             };
+
+            for (&manifest.levels, 0..) |*level, i| {
+                errdefer for (manifest.levels[0..i]) |*l| l.deinit(allocator, node_pool);
+                try level.init(allocator);
+            }
+            errdefer for (&manifest.levels) |*level| level.deinit(allocator, node_pool);
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
@@ -645,7 +647,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn compaction_must_drop_tombstones(
             manifest: *const Manifest,
             level_b: u8,
-            range: CompactionRange,
+            range: *const CompactionRange,
         ) bool {
             assert(level_b < constants.lsm_levels);
             assert(range.key_min <= range.key_max);

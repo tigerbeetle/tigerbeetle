@@ -33,6 +33,16 @@ public enum AccountFlags : ushort
     /// </summary>
     History = 1 << 3,
 
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account#flagsimported
+    /// </summary>
+    Imported = 1 << 4,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account#flagsclosed
+    /// </summary>
+    Closed = 1 << 5,
+
 }
 
 [Flags]
@@ -69,6 +79,21 @@ public enum TransferFlags : ushort
     /// https://docs.tigerbeetle.com/reference/transfer#flagsbalancing_credit
     /// </summary>
     BalancingCredit = 1 << 5,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_debit
+    /// </summary>
+    ClosingDebit = 1 << 6,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsclosing_credit
+    /// </summary>
+    ClosingCredit = 1 << 7,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/transfer#flagsimported
+    /// </summary>
+    Imported = 1 << 8,
 
 }
 
@@ -110,6 +135,7 @@ public enum QueryFilterFlags : uint
 public struct Account
 {
     public const int SIZE = 128;
+
 
     private UInt128 id;
 
@@ -200,7 +226,7 @@ public struct Account
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/account#timestamp
     /// </summary>
-    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
 }
 
@@ -208,6 +234,8 @@ public struct Account
 public struct Transfer
 {
     public const int SIZE = 128;
+
+    public static UInt128 AmountMax => UInt128.MaxValue;
 
     private UInt128 id;
 
@@ -298,7 +326,7 @@ public struct Transfer
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/transfer#timestamp
     /// </summary>
-    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
 }
 
@@ -320,9 +348,29 @@ public enum CreateAccountResult : uint
     LinkedEventChainOpen = 2,
 
     /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_expected
+    /// </summary>
+    ImportedEventExpected = 22,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_not_expected
+    /// </summary>
+    ImportedEventNotExpected = 23,
+
+    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#timestamp_must_be_zero
     /// </summary>
     TimestampMustBeZero = 3,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_out_of_range
+    /// </summary>
+    ImportedEventTimestampOutOfRange = 24,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_advance
+    /// </summary>
+    ImportedEventTimestampMustNotAdvance = 25,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#reserved_field
@@ -343,6 +391,41 @@ public enum CreateAccountResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#id_must_not_be_int_max
     /// </summary>
     IdMustNotBeIntMax = 7,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_flags
+    /// </summary>
+    ExistsWithDifferentFlags = 15,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_128
+    /// </summary>
+    ExistsWithDifferentUserData128 = 16,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_64
+    /// </summary>
+    ExistsWithDifferentUserData64 = 17,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_32
+    /// </summary>
+    ExistsWithDifferentUserData32 = 18,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_ledger
+    /// </summary>
+    ExistsWithDifferentLedger = 19,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_code
+    /// </summary>
+    ExistsWithDifferentCode = 20,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists
+    /// </summary>
+    Exists = 21,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#flags_are_mutually_exclusive
@@ -380,39 +463,9 @@ public enum CreateAccountResult : uint
     CodeMustNotBeZero = 14,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_flags
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#imported_event_timestamp_must_not_regress
     /// </summary>
-    ExistsWithDifferentFlags = 15,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_128
-    /// </summary>
-    ExistsWithDifferentUserData128 = 16,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_64
-    /// </summary>
-    ExistsWithDifferentUserData64 = 17,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_user_data_32
-    /// </summary>
-    ExistsWithDifferentUserData32 = 18,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_ledger
-    /// </summary>
-    ExistsWithDifferentLedger = 19,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists_with_different_code
-    /// </summary>
-    ExistsWithDifferentCode = 20,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#exists
-    /// </summary>
-    Exists = 21,
+    ImportedEventTimestampMustNotRegress = 26,
 
 }
 
@@ -434,9 +487,29 @@ public enum CreateTransferResult : uint
     LinkedEventChainOpen = 2,
 
     /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_expected
+    /// </summary>
+    ImportedEventExpected = 56,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_not_expected
+    /// </summary>
+    ImportedEventNotExpected = 57,
+
+    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#timestamp_must_be_zero
     /// </summary>
     TimestampMustBeZero = 3,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_out_of_range
+    /// </summary>
+    ImportedEventTimestampOutOfRange = 58,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_advance
+    /// </summary>
+    ImportedEventTimestampMustNotAdvance = 59,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#reserved_flag
@@ -452,6 +525,71 @@ public enum CreateTransferResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#id_must_not_be_int_max
     /// </summary>
     IdMustNotBeIntMax = 6,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_flags
+    /// </summary>
+    ExistsWithDifferentFlags = 36,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id
+    /// </summary>
+    ExistsWithDifferentPendingId = 40,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout
+    /// </summary>
+    ExistsWithDifferentTimeout = 44,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_debit_account_id
+    /// </summary>
+    ExistsWithDifferentDebitAccountId = 37,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_credit_account_id
+    /// </summary>
+    ExistsWithDifferentCreditAccountId = 38,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_amount
+    /// </summary>
+    ExistsWithDifferentAmount = 39,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_128
+    /// </summary>
+    ExistsWithDifferentUserData128 = 41,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_64
+    /// </summary>
+    ExistsWithDifferentUserData64 = 42,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_32
+    /// </summary>
+    ExistsWithDifferentUserData32 = 43,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_ledger
+    /// </summary>
+    ExistsWithDifferentLedger = 67,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_code
+    /// </summary>
+    ExistsWithDifferentCode = 45,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists
+    /// </summary>
+    Exists = 46,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#id_already_failed
+    /// </summary>
+    IdAlreadyFailed = 68,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#flags_are_mutually_exclusive
@@ -507,6 +645,11 @@ public enum CreateTransferResult : uint
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#timeout_reserved_for_pending_transfer
     /// </summary>
     TimeoutReservedForPendingTransfer = 17,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#closing_transfer_must_be_pending
+    /// </summary>
+    ClosingTransferMustBePending = 64,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#amount_must_not_be_zero
@@ -599,59 +742,34 @@ public enum CreateTransferResult : uint
     PendingTransferExpired = 35,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_flags
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_not_regress
     /// </summary>
-    ExistsWithDifferentFlags = 36,
+    ImportedEventTimestampMustNotRegress = 60,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_debit_account_id
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_debit_account
     /// </summary>
-    ExistsWithDifferentDebitAccountId = 37,
+    ImportedEventTimestampMustPostdateDebitAccount = 61,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_credit_account_id
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timestamp_must_postdate_credit_account
     /// </summary>
-    ExistsWithDifferentCreditAccountId = 38,
+    ImportedEventTimestampMustPostdateCreditAccount = 62,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_amount
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#imported_event_timeout_must_be_zero
     /// </summary>
-    ExistsWithDifferentAmount = 39,
+    ImportedEventTimeoutMustBeZero = 63,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_pending_id
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#debit_account_already_closed
     /// </summary>
-    ExistsWithDifferentPendingId = 40,
+    DebitAccountAlreadyClosed = 65,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_128
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#credit_account_already_closed
     /// </summary>
-    ExistsWithDifferentUserData128 = 41,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_64
-    /// </summary>
-    ExistsWithDifferentUserData64 = 42,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_user_data_32
-    /// </summary>
-    ExistsWithDifferentUserData32 = 43,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_timeout
-    /// </summary>
-    ExistsWithDifferentTimeout = 44,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists_with_different_code
-    /// </summary>
-    ExistsWithDifferentCode = 45,
-
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#exists
-    /// </summary>
-    Exists = 46,
+    CreditAccountAlreadyClosed = 66,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#overflows_debits_pending
@@ -705,6 +823,7 @@ public struct CreateAccountsResult
 {
     public const int SIZE = 8;
 
+
     private uint index;
 
     private CreateAccountResult result;
@@ -720,6 +839,7 @@ public struct CreateTransfersResult
 {
     public const int SIZE = 8;
 
+
     private uint index;
 
     private CreateTransferResult result;
@@ -733,12 +853,13 @@ public struct CreateTransfersResult
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct AccountFilter
 {
-    public const int SIZE = 64;
+    public const int SIZE = 128;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
     {
-        public const int SIZE = 24;
+        public const int SIZE = 58;
 
         private fixed byte raw[SIZE];
 
@@ -767,6 +888,16 @@ public struct AccountFilter
 
     private UInt128 accountId;
 
+    private UInt128 userData128;
+
+    private ulong userData64;
+
+    private uint userData32;
+
+    private ushort code;
+
+    private ReservedData reserved;
+
     private ulong timestampMin;
 
     private ulong timestampMax;
@@ -775,12 +906,35 @@ public struct AccountFilter
 
     private AccountFilterFlags flags;
 
-    private ReservedData reserved;
-
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/account-filter#account_id
     /// </summary>
     public UInt128 AccountId { get => accountId; set => accountId = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#user_data_128
+    /// </summary>
+    public UInt128 UserData128 { get => userData128; set => userData128 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#user_data_64
+    /// </summary>
+    public ulong UserData64 { get => userData64; set => userData64 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#user_data_32
+    /// </summary>
+    public uint UserData32 { get => userData32; set => userData32 = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#code
+    /// </summary>
+    public ushort Code { get => code; set => code = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/account-filter#reserved
+    /// </summary>
+    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/account-filter#timestamp_min
@@ -802,17 +956,13 @@ public struct AccountFilter
     /// </summary>
     public AccountFilterFlags Flags { get => flags; set => flags = value; }
 
-    /// <summary>
-    /// https://docs.tigerbeetle.com/reference/account-filter#reserved
-    /// </summary>
-    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
-
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct AccountBalance
 {
     public const int SIZE = 128;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
@@ -892,6 +1042,7 @@ public struct AccountBalance
 public struct QueryFilter
 {
     public const int SIZE = 64;
+
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
@@ -1054,10 +1205,11 @@ internal unsafe struct TBPacket
 {
     public const int SIZE = 64;
 
+
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
     {
-        public const int SIZE = 8;
+        public const int SIZE = 7;
 
         private fixed byte raw[SIZE];
 
@@ -1101,6 +1253,8 @@ internal unsafe struct TBPacket
     public TBPacket* batchTail;
 
     public uint batchSize;
+
+    public byte batchAllowed;
 
     private ReservedData reserved;
 

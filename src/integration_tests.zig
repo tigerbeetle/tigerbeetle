@@ -8,19 +8,16 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const log = std.log;
+const assert = std.debug.assert;
 
 const Shell = @import("./shell.zig");
 const Snap = @import("./testing/snaptest.zig").Snap;
 const snap = Snap.snap;
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
-// TODO(Zig): inject executable name via build.zig:
-//    <https://ziggit.dev/t/how-to-write-integration-tests-for-cli-utilities/2806>
-fn tigerbeetle_exe(shell: *Shell) ![]const u8 {
-    const exe = comptime "tigerbeetle" ++ builtin.target.exeFileExt();
-    _ = try shell.project_root.statFile(exe);
-    return try shell.project_root.realpathAlloc(shell.arena.allocator(), exe);
-}
+const tigerbeetle: []const u8 = @import("test_options").tigerbeetle_exe;
+const tigerbeetle_past: []const u8 = @import("test_options").tigerbeetle_exe_past;
 
 test "repl integration" {
     const Context = struct {
@@ -33,8 +30,6 @@ test "repl integration" {
         fn init() !Context {
             const shell = try Shell.create(std.testing.allocator);
             errdefer shell.destroy();
-
-            const tigerbeetle = try tigerbeetle_exe(shell);
 
             var tmp_beetle = try TmpTigerBeetle.init(std.testing.allocator, .{
                 .prebuilt = tigerbeetle,
@@ -245,13 +240,11 @@ test "benchmark/inspect smoke" {
     const shell = try Shell.create(std.testing.allocator);
     defer shell.destroy();
 
-    const tigerbeetle = try tigerbeetle_exe(shell);
-    const status_ok_benchmark = try shell.exec_status_ok(
+    try shell.exec(
         "{tigerbeetle} benchmark --transfer-count=10_000 --transfer-batch-size=10 --validate " ++
             "--file={file}",
         .{ .tigerbeetle = tigerbeetle, .file = data_file },
     );
-    try std.testing.expect(status_ok_benchmark);
 
     inline for (.{
         "{tigerbeetle} inspect superblock              {path}",
@@ -262,19 +255,16 @@ test "benchmark/inspect smoke" {
         "{tigerbeetle} inspect manifest                {path}",
         "{tigerbeetle} inspect tables --tree=transfers {path}",
     }) |command| {
-        const status_ok_inspect = try shell.exec_status_ok(
+        try shell.exec(
             command,
             .{ .tigerbeetle = tigerbeetle, .path = data_file },
         );
-        try std.testing.expect(status_ok_inspect);
     }
 }
 
 test "help/version smoke" {
     const shell = try Shell.create(std.testing.allocator);
     defer shell.destroy();
-
-    const tigerbeetle = try tigerbeetle_exe(shell);
 
     // The substring is chosen to be mostly stable, but from (near) the end of the output, to catch
     // a missed buffer flush.
@@ -288,4 +278,222 @@ test "help/version smoke" {
         try std.testing.expect(output.len > 0);
         try std.testing.expect(std.mem.indexOf(u8, output, check.substring) != null);
     }
+}
+
+test "in-place upgrade" {
+    // Smoke test that in-place upgrades work.
+    //
+    // Starts a cluster of three replicas using the previous release of TigerBeetle and then
+    // replaces the binaries on disk with a new version.
+    //
+    // Against this upgrading cluster, we are running a benchmark load and checking that it finishes
+    // with a zero status.
+    //
+    // To spice things up, replicas are periodically killed and restarted.
+
+    if (builtin.target.os.tag != .linux) {
+        // For now, test in-place upgrades only on Linux.
+        return error.SkipZigTest;
+    }
+
+    const Context = struct {
+        const Context = @This();
+
+        const replica_count = 3;
+        // The test uses this hard-coded address, so only one instance can be running at a time.
+        const addresses = "127.0.0.1:7121,127.0.0.1:7122,127.0.0.1:7123";
+
+        shell: *Shell,
+        tmp: []const u8,
+
+        rng: std.rand.DefaultPrng,
+        replicas: [replica_count]?std.process.Child = .{null} ** replica_count,
+        replica_exe: [replica_count][]const u8,
+        replica_datafile: [replica_count][]const u8,
+        replica_upgraded: [replica_count]bool = .{false} ** replica_count,
+
+        fn init(options: struct { seed: u64 }) !Context {
+            const shell = try Shell.create(std.testing.allocator);
+            errdefer shell.destroy();
+
+            const tmp = try shell.fmt("./.zig-cache/tmp/{}", .{
+                std.crypto.random.int(u64),
+            });
+            errdefer shell.cwd.deleteTree(tmp) catch {};
+
+            try shell.cwd.makePath(tmp);
+
+            var replica_exe: [replica_count][]const u8 = .{""} ** replica_count;
+            var replica_datafile: [replica_count][]const u8 = .{""} ** replica_count;
+            for (0..replica_count) |replica_index| {
+                replica_exe[replica_index] = try shell.fmt("{s}/tigerbeetle{}{s}", .{
+                    tmp,
+                    replica_index,
+                    builtin.target.exeFileExt(),
+                });
+                replica_datafile[replica_index] = try shell.fmt("{s}/0_{}.tigerbeetle", .{
+                    tmp,
+                    replica_index,
+                });
+            }
+
+            const rng = std.rand.DefaultPrng.init(options.seed);
+            return .{
+                .shell = shell,
+                .tmp = tmp,
+                .rng = rng,
+                .replica_exe = replica_exe,
+                .replica_datafile = replica_datafile,
+            };
+        }
+
+        fn deinit(context: *Context) void {
+            for (&context.replicas) |*replica| {
+                if (replica.*) |*alive| {
+                    _ = alive.kill() catch {};
+                }
+            }
+
+            context.shell.cwd.deleteTree(context.tmp) catch {};
+            context.shell.destroy();
+            context.* = undefined;
+        }
+
+        fn run(context: *Context) !void {
+            const random = context.rng.random();
+
+            for (0..replica_count) |replica_index| {
+                try context.install_replica(context.replica_exe[replica_index], .past);
+            }
+            for (0..replica_count) |replica_index| {
+                try context.shell.exec(
+                    \\{tigerbeetle} format --cluster=0 --replica={replica} --replica-count=3
+                    \\    {datafile}
+                , .{
+                    .tigerbeetle = context.replica_exe[replica_index],
+                    .replica = replica_index,
+                    .datafile = context.replica_datafile[replica_index],
+                });
+            }
+
+            const tigerbeetle_load = try context.shell.fmt("{s}/tigerbeetle-load", .{context.tmp});
+            try context.install_replica(tigerbeetle_load, .past);
+
+            // Run workload in a separate thread, to collect it's stdout and stderr, and to
+            // forcefully terminate it after 10 minutes.
+            var workload_exit_ok: bool = false;
+            var workload_thread = try std.Thread.spawn(.{}, struct {
+                fn thread_main(workload_exit_ok_ptr: *bool, tigerbeetle_path: []const u8) !void {
+                    const shell = try Shell.create(std.testing.allocator);
+                    defer shell.destroy();
+
+                    try shell.exec_options(.{
+                        .timeout_ns = 10 * std.time.ns_per_min,
+                    },
+                        \\{tigerbeetle} benchmark
+                        \\    --print-batch-timings
+                        \\    --transfer-count=2_000_000
+                        \\    --addresses={addresses}
+                    , .{
+                        .tigerbeetle = tigerbeetle_path,
+                        .addresses = addresses,
+                    });
+                    workload_exit_ok_ptr.* = true;
+                }
+            }.thread_main, .{ &workload_exit_ok, tigerbeetle_load });
+            // Sadly, killing workload process is not easy, so, in case of an error, we'll wait
+            // for full timeout.
+            errdefer workload_thread.join();
+
+            for (0..replica_count) |replica_index| {
+                try context.spawn_replica(replica_index);
+            }
+
+            const ticks_max = 50;
+            var upgrade_tick: [replica_count]u8 = .{0} ** replica_count;
+            for (0..replica_count) |replica_index| {
+                upgrade_tick[replica_index] = random.uintLessThan(u8, ticks_max);
+            }
+
+            for (0..ticks_max) |tick| {
+                std.time.sleep(2 * std.time.ns_per_s);
+
+                for (0..replica_count) |replica_index| {
+                    if (tick == upgrade_tick[replica_index]) {
+                        assert(!context.replica_upgraded[replica_index]);
+                        try context.upgrade_replica(replica_index);
+                        assert(context.replica_upgraded[replica_index]);
+                    }
+                }
+
+                const replica_index = random.uintLessThan(u8, replica_count);
+                const crash = random.uintLessThan(u8, 4) == 0;
+                const restart = random.uintLessThan(u8, 2) == 0;
+
+                if (context.replicas[replica_index] == null and restart) {
+                    try context.spawn_replica(replica_index);
+                } else if (context.replicas[replica_index] != null and crash) {
+                    try context.kill_replica(replica_index);
+                }
+            }
+
+            for (0..replica_count) |replica_index| {
+                assert(context.replica_upgraded[replica_index]);
+                if (context.replicas[replica_index] == null) {
+                    try context.spawn_replica(replica_index);
+                }
+            }
+
+            workload_thread.join();
+            assert(workload_exit_ok);
+        }
+
+        fn install_replica(
+            context: *Context,
+            destination: []const u8,
+            version: enum { past, current },
+        ) !void {
+            try context.shell.cwd.copyFile(
+                switch (version) {
+                    .past => tigerbeetle_past,
+                    .current => tigerbeetle,
+                },
+                context.shell.cwd,
+                destination,
+                .{},
+            );
+            try context.shell.file_make_executable(destination);
+        }
+
+        fn upgrade_replica(context: *Context, replica_index: usize) !void {
+            assert(!context.replica_upgraded[replica_index]);
+            context.shell.cwd.deleteFile(context.replica_exe[replica_index]) catch {};
+            try context.install_replica(context.replica_exe[replica_index], .current);
+            context.replica_upgraded[replica_index] = true;
+        }
+
+        fn spawn_replica(context: *Context, replica_index: usize) !void {
+            assert(context.replicas[replica_index] == null);
+            context.replicas[replica_index] = try context.shell.spawn(.{},
+                \\{tigerbeetle} start --addresses={addresses} {datafile}
+            , .{
+                .tigerbeetle = context.replica_exe[replica_index],
+                .addresses = addresses,
+                .datafile = context.replica_datafile[replica_index],
+            });
+        }
+
+        fn kill_replica(context: *Context, replica_index: usize) !void {
+            assert(context.replicas[replica_index] != null);
+            _ = context.replicas[replica_index].?.kill() catch {};
+            context.replicas[replica_index] = null;
+        }
+    };
+
+    const seed = std.crypto.random.int(u64);
+    log.info("seed = {}", .{seed});
+    var context = try Context.init(.{ .seed = seed });
+    defer context.deinit();
+
+    try context.run();
 }

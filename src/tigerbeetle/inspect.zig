@@ -15,16 +15,12 @@ const log = std.log.scoped(.inspect);
 const cli = @import("cli.zig");
 const vsr = @import("vsr");
 const stdx = vsr.stdx;
-const fatal = vsr.flags.fatal;
 const schema = vsr.lsm.schema;
 const constants = vsr.constants;
-const tb = vsr.tigerbeetle;
 const Storage = vsr.storage.Storage(vsr.io.IO);
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
 const SuperBlockQuorums = vsr.superblock.Quorums;
-const SuperBlock = vsr.SuperBlockType(Storage);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
-const Grid = vsr.GridType(Storage);
 const BlockPtr = vsr.grid.BlockPtr;
 const BlockPtrConst = vsr.grid.BlockPtrConst;
 const allocate_block = vsr.grid.allocate_block;
@@ -44,7 +40,8 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
         .wal => |args| {
             if (args.slot) |slot| {
                 if (slot >= constants.journal_slot_count) {
-                    return fatal(
+                    return vsr.fatal(
+                        .cli,
                         "--slot: slot exceeds {}",
                         .{constants.journal_slot_count - 1},
                     );
@@ -57,7 +54,7 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
         .replies => |args| {
             if (args.slot) |slot| {
                 if (slot >= constants.clients_max) {
-                    return fatal("--slot: slot exceeds {}", .{constants.clients_max - 1});
+                    return vsr.fatal(.cli, "--slot: slot exceeds {}", .{constants.clients_max - 1});
                 }
                 try inspector.inspect_replies_slot(stdout, args.superblock_copy, slot);
             } else {
@@ -68,7 +65,8 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
             if (args.superblock_copy != null and
                 args.superblock_copy.? >= constants.superblock_copies)
             {
-                return fatal(
+                return vsr.fatal(
+                    .cli,
                     "--superblock-copy: copy exceeds {}",
                     .{constants.superblock_copies - 1},
                 );
@@ -84,7 +82,8 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
             if (args.superblock_copy != null and
                 args.superblock_copy.? >= constants.superblock_copies)
             {
-                return fatal(
+                return vsr.fatal(
+                    .cli,
                     "--superblock-copy: copy exceeds {}",
                     .{constants.superblock_copies - 1},
                 );
@@ -96,14 +95,15 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
             if (args.superblock_copy != null and
                 args.superblock_copy.? >= constants.superblock_copies)
             {
-                return fatal(
+                return vsr.fatal(
+                    .cli,
                     "--superblock-copy: copy exceeds {}",
                     .{constants.superblock_copies - 1},
                 );
             }
 
             const tree_id = parse_tree_id(args.tree) orelse {
-                return fatal("--tree: invalid tree name/id: {s}", .{args.tree});
+                return vsr.fatal(.cli, "--tree: invalid tree name/id: {s}", .{args.tree});
             };
             try inspector.inspect_tables(stdout, args.superblock_copy, .{
                 .tree_id = tree_id,
@@ -1170,8 +1170,8 @@ fn print_table_info(
         const Field = @TypeOf(f.field);
         const key_min_timestamp: u64 = @truncate(key_min & std.math.maxInt(u64));
         const key_max_timestamp: u64 = @truncate(key_max & std.math.maxInt(u64));
-        const key_min_field: Field = @intCast(key_min >> 64);
-        const key_max_field: Field = @intCast(key_max >> 64);
+        const key_min_field: Field = Value.key_prefix(key_min);
+        const key_max_field: Field = Value.key_prefix(key_max);
 
         try output.print(" K={:_>6}:{}..{:_>6}:{}", .{
             key_min_field,

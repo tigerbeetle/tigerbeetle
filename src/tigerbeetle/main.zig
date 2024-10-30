@@ -9,11 +9,9 @@ const log = std.log.scoped(.main);
 const vsr = @import("vsr");
 const constants = vsr.constants;
 const config = constants.config;
-const tracer = vsr.tracer;
 
 const benchmark_driver = @import("benchmark_driver.zig");
 const cli = @import("cli.zig");
-const fatal = vsr.flags.fatal;
 const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
@@ -26,8 +24,7 @@ const MessagePool = vsr.message_pool.MessagePool;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Grid = vsr.GridType(Storage);
 
-const AOFType = if (constants.aof_record) AOF else void;
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOFType);
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
@@ -44,9 +41,6 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-
-    try tracer.init(allocator);
-    defer tracer.deinit(allocator);
 
     var arg_iterator = try std.process.argsWithAllocator(allocator);
     defer arg_iterator.deinit();
@@ -114,10 +108,6 @@ const SigIllHandler = struct {
         std.log.err("These instructions can be unsupported on older processors, leading to", .{});
         std.log.err("\"illegal instruction\" panics.", .{});
         std.log.err("", .{});
-        std.log.err("If you'd like to try TigerBeetle on an older processor, you can", .{});
-        std.log.err("compile from source with the changes detailed at", .{});
-        std.log.err("https://github.com/tigerbeetle/tigerbeetle/issues/1592", .{});
-        std.log.err("", .{});
     }
 
     fn register() !void {
@@ -163,6 +153,11 @@ const Command = struct {
             development: bool,
         },
     ) !void {
+        // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
+        // is not available) there won't be a dangling file.
+        command.io = try IO.init(128, 0);
+        errdefer command.io.deinit();
+
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
         // TODO Handle physical volumes where there is no directory to fsync.
         const dirname = std.fs.path.dirname(path) orelse ".";
@@ -186,9 +181,6 @@ const Command = struct {
         );
         errdefer std.posix.close(command.fd);
 
-        command.io = try IO.init(128, 0);
-        errdefer command.io.deinit();
-
         command.storage = try Storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
 
@@ -199,9 +191,9 @@ const Command = struct {
     fn deinit(command: *Command, allocator: mem.Allocator) void {
         allocator.free(command.self_exe_path);
         command.storage.deinit();
-        command.io.deinit();
         std.posix.close(command.fd);
         std.posix.close(command.dir_fd);
+        command.io.deinit();
     }
 
     pub fn format(
@@ -236,16 +228,10 @@ const Command = struct {
 
     pub fn start(base_allocator: std.mem.Allocator, args: *const cli.Command.Start) !void {
         var counting_allocator = vsr.CountingAllocator.init(base_allocator);
-
-        var traced_allocator = if (constants.tracer_backend == .tracy)
-            tracer.TracyAllocator("tracy").init(counting_allocator.allocator())
-        else
-            &counting_allocator;
+        const allocator = counting_allocator.allocator();
 
         // TODO Panic if the data file's size is larger that args.storage_size_limit.
         // (Here or in Replica.open()?).
-
-        const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
         try command.init(allocator, args.path, .{
@@ -260,13 +246,13 @@ const Command = struct {
         } });
         defer message_pool.deinit(allocator);
 
-        var aof: AOFType = undefined;
-        if (constants.aof_record) {
+        var aof: ?AOF = if (args.aof) blk: {
             const aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
             defer allocator.free(aof_path);
 
-            aof = try AOF.from_absolute_path(aof_path);
-        }
+            break :blk try AOF.from_absolute_path(aof_path);
+        } else null;
+        defer if (aof != null) aof.?.close();
 
         const grid_cache_size = @as(u64, args.cache_grid_blocks) * constants.block_size;
         const grid_cache_size_min = constants.block_size * Grid.Cache.value_count_max_multiple;
@@ -276,11 +262,11 @@ const Command = struct {
         // and it may have been converted to zero if a smaller value is passed in.
         if (grid_cache_size == 0) {
             if (comptime (grid_cache_size_min >= 1024 * 1024)) {
-                fatal("Grid cache must be greater than {}MiB. See --cache-grid", .{
+                vsr.fatal(.cli, "Grid cache must be greater than {}MiB. See --cache-grid", .{
                     @divExact(grid_cache_size_min, 1024 * 1024),
                 });
             } else {
-                fatal("Grid cache must be greater than {}KiB. See --cache-grid", .{
+                vsr.fatal(.cli, "Grid cache must be greater than {}KiB. See --cache-grid", .{
                     @divExact(grid_cache_size_min, 1024),
                 });
             }
@@ -297,30 +283,27 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
-        var multiversion: ?vsr.multiversioning.Multiversion =
+        var multiversion: ?vsr.multiversioning.Multiversion = blk: {
             if (constants.config.process.release.value ==
-            vsr.multiversioning.Release.minimum.value)
-        blk: {
-            log.info(
-                "multiversioning: disabled for development ({}) release.",
-                .{constants.config.process.release},
+                vsr.multiversioning.Release.minimum.value)
+            {
+                log.info("multiversioning: upgrades disabled for development ({}) release.", .{
+                    constants.config.process.release,
+                });
+                break :blk null;
+            }
+            if (constants.aof_recovery) {
+                log.info("multiversioning: upgrades disabled due to aof_recovery.", .{});
+                break :blk null;
+            }
+
+            break :blk try vsr.multiversioning.Multiversion.init(
+                allocator,
+                &command.io,
+                command.self_exe_path,
+                .native,
             );
-            break :blk null;
-        } else if (args.development) blk: {
-            log.info("multiversioning: disabled due to --development.", .{});
-            break :blk null;
-        } else if (args.experimental) blk: {
-            log.info("multiversioning: disabled due to --experimental.", .{});
-            break :blk null;
-        } else if (constants.aof_recovery) blk: {
-            log.info("multiversioning: disabled due to aof_recovery.", .{});
-            break :blk null;
-        } else try vsr.multiversioning.Multiversion.init(
-            allocator,
-            &command.io,
-            command.self_exe_path,
-            .native,
-        );
+        };
 
         defer if (multiversion != null) multiversion.?.deinit(allocator);
 
@@ -343,6 +326,16 @@ const Command = struct {
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
+        const trace_file = if (args.trace) |trace_path|
+            std.fs.cwd().createFile(trace_path, .{ .exclusive = true }) catch |err| {
+                std.debug.panic("error creating trace file: {}", .{err});
+            }
+        else
+            null;
+        defer if (trace_file) |file| file.close();
+
+        const trace_writer = if (trace_file) |file| file.writer() else null;
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -350,11 +343,11 @@ const Command = struct {
             .release_client_min = config.process.release_client_min,
             .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
-            .multiversion = if (multiversion) |*multiversion_| multiversion_ else null,
+            .release_execute_context = if (multiversion) |*pointer| pointer else null,
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
-            .aof = &aof,
+            .aof = if (aof != null) &aof.? else null,
             .message_pool = &message_pool,
             .nonce = nonce,
             .time = .{},
@@ -373,15 +366,20 @@ const Command = struct {
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
+            .tracer_options = .{ .writer = if (trace_writer) |writer| writer.any() else null },
         }) catch |err| switch (err) {
-            error.NoAddress => fatal("all --addresses must be provided", .{}),
+            error.NoAddress => vsr.fatal(.cli, "all --addresses must be provided", .{}),
             else => |e| return e,
         };
 
-        // Enable checking for new binaries on disk after the replica has been opened. Only
-        // supported on Linux.
-        if (multiversion != null and builtin.target.os.tag == .linux) {
-            multiversion.?.timeout_enable();
+        if (multiversion != null) {
+            if (args.development) {
+                log.info("multiversioning: upgrade polling disabled due to --development.", .{});
+            } else if (args.experimental) {
+                log.info("multiversioning: upgrade polling disabled due to --experimental.", .{});
+            } else {
+                multiversion.?.timeout_start(replica.replica);
+            }
         }
 
         // Note that this does not account for the fact that any allocations will be rounded up to
@@ -411,8 +409,14 @@ const Command = struct {
         }
 
         if (constants.verify) {
-            log.warn("{}: started with constants.verify - expect reduced performance. " ++
-                "Recompile with -Dconfig=production if unexpected.", .{replica.replica});
+            log.info("{}: started with extra verification checks", .{replica.replica});
+        }
+
+        if (replica.aof != null) {
+            log.warn(
+                "{}: started with --aof - expect much reduced performance.",
+                .{replica.replica},
+            );
         }
 
         // It is possible to start tigerbeetle passing `0` as an address:
@@ -444,6 +448,7 @@ const Command = struct {
 
         while (true) {
             replica.tick();
+            if (multiversion != null) multiversion.?.tick();
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
     }
@@ -504,16 +509,18 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != replica.release.value);
     assert(release.value != vsr.Release.zero.value);
     assert(release.value != vsr.Release.minimum.value);
-
-    const multiversion = replica.multiversion orelse {
+    const release_execute_context = replica.release_execute_context orelse {
         @panic("replica_release_execute unsupported");
     };
+
+    const multiversion: *vsr.multiversioning.Multiversion =
+        @ptrCast(@alignCast(release_execute_context));
 
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
     } else {
         log.err("{}: release_execute: release {} is not available;" ++
-            "upgrade (or downgrade) the binary", .{
+            " upgrade (or downgrade) the binary", .{
             replica.replica,
             release,
         });
@@ -552,7 +559,7 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
         // For the upgrade case, re-run the latest binary in place. If we need something older
         // than the latest, that'll be handled when the case above is hit when re-execing:
         // (current version v1) -> (latest version v4) -> (desired version v2)
-        multiversion.exec_latest() catch |err| {
+        multiversion.exec_current(release) catch |err| {
             std.debug.panic("failed to execute latest release: {}", .{err});
         };
     }

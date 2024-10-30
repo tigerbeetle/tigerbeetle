@@ -1,0 +1,133 @@
+:root {
+    --light-gray: #EEEEEE;
+    --dark-gray: #6E6E6E;
+    --blue: #7DB8FF;
+    --light-blue: #8AE8FF;
+    --dark-blue: #124d91;
+    --cyan: #95F3D9;
+    --green: #C4F042;
+    --red: #FF847D;
+    --orange: #FFCB47;
+    --yellow: #FFEF5C;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: #fff;
+    color: #000;
+    font-family: Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-size: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px;
+}
+
+#top-section {
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+section#release {
+    min-width: 180px;
+}
+
+section#links {
+    min-width: 160px;
+}
+
+section#fuzz-failures {
+    flex: 1;
+}
+
+#seeds {
+    width: 100%;
+}
+
+h1 {
+    text-align: center;
+}
+
+h2 {
+    margin: 0.35em 0;
+}
+
+ul {
+    margin: 0.35em 0;
+    padding-inline-start: 1em;
+}
+
+a {
+    color: var(--dark-blue);
+    text-underline-offset: 0.1em;
+}
+
+code {
+    font-size: 14px;
+}
+
+table {
+    border-spacing: 1px;
+}
+
+tr.even {
+    background-color: #ddd;
+}
+
+tr.odd {
+    background-color: #eee;
+}
+
+tr.success {
+    background-color: var(--green);
+}
+
+th,
+td {
+    padding: 4px 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #000;
+        color: #fff;
+    }
+
+    #logo {
+        filter: invert(100%);
+    }
+
+    a {
+        color: var(--blue);
+    }
+
+    tr.even {
+        background-color: #444;
+    }
+
+    tr.odd {
+        background-color: #333;
+    }
+
+    tr.success {
+        background-color: var(--green);
+        color: black;
+    }
+
+    tr.success a {
+        color: var(--dark-blue);
+    }
+
+    #charts {
+        color: black;
+        filter: invert(100%);
+    }
+}

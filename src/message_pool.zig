@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 
@@ -113,8 +112,6 @@ pub const MessagePool = struct {
         pub const Eviction = MessageType(.eviction);
         pub const RequestBlocks = MessageType(.request_blocks);
         pub const Block = MessageType(.block);
-        pub const RequestSyncCheckpoint = MessageType(.request_sync_checkpoint);
-        pub const SyncCheckpoint = MessageType(.sync_checkpoint);
 
         // TODO Avoid the extra level of indirection.
         // (https://github.com/tigerbeetle/tigerbeetle/pull/1295#discussion_r1394265250)

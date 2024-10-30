@@ -75,6 +75,6 @@ fee for the transaction.
 
 | Ledger | Debit Account | Credit Account |  Amount | `flags.linked` |
 | -----: | ------------: | -------------: | ------: | -------------: |
-|    USD |          `L₁` |           `A₁` |   10000 |           true |
-|    USD |          `L₁` |           `A₁` |      10 |           true |
-|    INR |          `A₂` |           `L₂` | 8242135 |          false |
+|    USD |          `A₁` |           `L₁` |   10000 |           true |
+|    USD |          `A₁` |           `L₁` |      10 |           true |
+|    INR |          `L₂` |           `A₂` | 8242135 |          false |

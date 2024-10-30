@@ -108,18 +108,23 @@ reference](https://docs.tigerbeetle.com/reference/account).
 var accounts = new[] {
     new Account
     {
-        Id = 137,
-        UserData128 = Guid.NewGuid().ToUInt128(),
-        UserData64 = 1000,
-        UserData32 = 100,
+        Id = ID.Create(), // TigerBeetle time-based ID.
+        UserData128 = 0,
+        UserData64 = 0,
+        UserData32 = 0,
         Ledger = 1,
         Code = 718,
         Flags = AccountFlags.None,
+        Timestamp = 0,
     },
 };
 
-var createAccountsError = client.CreateAccounts(accounts);
+var accountErrors = client.CreateAccounts(accounts);
+// Error handling omitted.
 ```
+
+See details for the recommended ID scheme in
+[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
 
 The `UInt128` fields like `ID`, `UserData128`, `Amount` and
 account balances have a few extension methods to make it easier
@@ -148,11 +153,23 @@ For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```cs
-var account0 = new Account { /* ... account values ... */ };
-var account1 = new Account { /* ... account values ... */ };
-account0.Flags = AccountFlags.Linked;
+var account0 = new Account
+{
+    Id = 100,
+    Ledger = 1,
+    Code = 1,
+    Flags = AccountFlags.Linked | AccountFlags.DebitsMustNotExceedCredits,
+};
+var account1 = new Account
+{
+    Id = 101,
+    Ledger = 1,
+    Code = 1,
+    Flags = AccountFlags.History,
+};
 
-createAccountsError = client.CreateAccounts(new[] { account0, account1 });
+var accountErrors = client.CreateAccounts(new[] { account0, account1 });
+// Error handling omitted.
 ```
 
 ### Response and Errors
@@ -168,14 +185,40 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```cs
-var account2 = new Account { /* ... account values ... */ };
-var account3 = new Account { /* ... account values ... */ };
-var account4 = new Account { /* ... account values ... */ };
-
-createAccountsError = client.CreateAccounts(new[] { account2, account3, account4 });
-foreach (var error in createAccountsError)
+var account0 = new Account
 {
-    Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
+    Id = 102,
+    Ledger = 1,
+    Code = 1,
+    Flags = AccountFlags.None,
+};
+var account1 = new Account
+{
+    Id = 103,
+    Ledger = 1,
+    Code = 1,
+    Flags = AccountFlags.None,
+};
+var account2 = new Account
+{
+    Id = 104,
+    Ledger = 1,
+    Code = 1,
+    Flags = AccountFlags.None,
+};
+
+var accountErrors = client.CreateAccounts(new[] { account0, account1, account2 });
+foreach (var error in accountErrors)
+{
+    switch (error.Result)
+    {
+        case CreateAccountResult.Exists:
+            Console.WriteLine($"Batch account at ${error.Index} already exists.");
+            break;
+        default:
+            Console.WriteLine($"Batch account at ${error.Index} failed to create ${error.Result}");
+            break;
+    }
     return;
 }
 ```
@@ -192,7 +235,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```cs
-accounts = client.LookupAccounts(new UInt128[] { 137, 138 });
+Account[] accounts = client.LookupAccounts(new UInt128[] { 100, 101 });
 ```
 
 ## Create Transfers
@@ -206,22 +249,27 @@ reference](https://docs.tigerbeetle.com/reference/transfer).
 var transfers = new[] {
     new Transfer
     {
-        Id = 1,
-        DebitAccountId = 1,
-        CreditAccountId = 2,
+        Id = ID.Create(), // TigerBeetle time-based ID.
+        DebitAccountId = 102,
+        CreditAccountId = 103,
         Amount = 10,
-        UserData128 = 2000,
-        UserData64 = 200,
-        UserData32 = 2,
+        UserData128 = 0,
+        UserData64 = 0,
+        UserData32 = 0,
         Timeout = 0,
         Ledger = 1,
         Code = 1,
         Flags = TransferFlags.None,
+        Timestamp = 0,
     }
 };
 
-var createTransfersError = client.CreateTransfers(transfers);
+var transferErrors = client.CreateTransfers(transfers);
+// Error handling omitted.
 ```
+
+See details for the recommended ID scheme in
+[time-based identifiers](https://docs.tigerbeetle.com/coding/data-modeling#tigerbeetle-time-based-identifiers-recommended).
 
 ### Response and Errors
 
@@ -235,10 +283,51 @@ See all error conditions in the [create_transfers
 reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```cs
-foreach (var error in createTransfersError)
+var transfers = new[] {
+    new Transfer
+    {
+        Id = 1,
+        DebitAccountId = 102,
+        CreditAccountId = 103,
+        Amount = 10,
+        Ledger = 1,
+        Code = 1,
+        Flags = TransferFlags.None,
+    },
+    new Transfer
+    {
+        Id = 2,
+        DebitAccountId = 102,
+        CreditAccountId = 103,
+        Amount = 10,
+        Ledger = 1,
+        Code = 1,
+        Flags = TransferFlags.None,
+    },
+    new Transfer
+    {
+        Id = 3,
+        DebitAccountId = 102,
+        CreditAccountId = 103,
+        Amount = 10,
+        Ledger = 1,
+        Code = 1,
+        Flags = TransferFlags.None,
+    },
+};
+
+var transferErrors = client.CreateTransfers(transfers);
+foreach (var error in transferErrors)
 {
-    Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
-    return;
+    switch (error.Result)
+    {
+        case CreateTransferResult.Exists:
+            Console.WriteLine($"Batch transfer at ${error.Index} already exists.");
+            break;
+        default:
+            Console.WriteLine($"Batch transfer at ${error.Index} failed to create: ${error.Result}");
+            break;
+    }
 }
 ```
 
@@ -250,10 +339,11 @@ you. So, for example, you *can* insert 1 million transfers
 one at a time like so:
 
 ```cs
-foreach (var t in transfers)
+var batch = new Transfer[] { }; // Array of transfer to create.
+foreach (var t in batch)
 {
-    createTransfersError = client.CreateTransfers(new[] { t });
-    // error handling omitted
+    var transferErrors = client.CreateTransfer(t);
+    // Error handling omitted.
 }
 ```
 
@@ -264,16 +354,17 @@ The maximum batch size is set in the TigerBeetle server. The default
 is 8190.
 
 ```cs
+var batch = new Transfer[] { }; // Array of transfer to create.
 var BATCH_SIZE = 8190;
-for (int i = 0; i < transfers.Length; i += BATCH_SIZE)
+for (int i = 0; i < batch.Length; i += BATCH_SIZE)
 {
     var batchSize = BATCH_SIZE;
-    if (i + BATCH_SIZE > transfers.Length)
+    if (i + BATCH_SIZE > batch.Length)
     {
-        batchSize = transfers.Length - i;
+        batchSize = batch.Length - i;
     }
-    createTransfersError = client.CreateTransfers(transfers[i..batchSize]);
-    // error handling omitted
+    var transferErrors = client.CreateTransfers(batch[i..batchSize]);
+    // Error handling omitted.
 }
 ```
 
@@ -303,11 +394,29 @@ To toggle behavior for an account, combine enum values stored in the
 For example, to link `transfer0` and `transfer1`:
 
 ```cs
-var transfer0 = new Transfer { /* ... account values ... */ };
-var transfer1 = new Transfer { /* ... account values ... */ };
-transfer0.Flags = TransferFlags.Linked;
-createTransfersError = client.CreateTransfers(new Transfer[] { transfer0, transfer1 });
+var transfer0 = new Transfer
+{
+    Id = 4,
+    DebitAccountId = 102,
+    CreditAccountId = 103,
+    Amount = 10,
+    Ledger = 1,
+    Code = 1,
+    Flags = TransferFlags.Linked,
+};
+var transfer1 = new Transfer
+{
+    Id = 5,
+    DebitAccountId = 102,
+    CreditAccountId = 103,
+    Amount = 10,
+    Ledger = 1,
+    Code = 1,
+    Flags = TransferFlags.None,
+};
 
+var transferErrors = client.CreateTransfers(new[] { transfer0, transfer1 });
+// Error handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -327,15 +436,31 @@ appropriate accounts and apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```cs
-var transfer = new Transfer
+var transfer0 = new Transfer
 {
-    Id = 2,
-    PendingId = 1,
+    Id = 6,
+    DebitAccountId = 102,
+    CreditAccountId = 103,
+    Amount = 10,
+    Ledger = 1,
+    Code = 1,
+    Flags = TransferFlags.Pending,
+};
+
+var transferErrors = client.CreateTransfers(new[] { transfer0 });
+// Error handling omitted.
+
+var transfer1 = new Transfer
+{
+    Id = 7,
+    // Post the entire pending amount.
+    Amount = Transfer.AmountMax,
+    PendingId = 6,
     Flags = TransferFlags.PostPendingTransfer,
 };
 
-createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
-// error handling omitted
+transferErrors = client.CreateTransfers(new[] { transfer1 });
+// Error handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -347,15 +472,31 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```cs
-transfer = new Transfer
+var transfer0 = new Transfer
 {
-    Id = 2,
-    PendingId = 1,
-    Flags = TransferFlags.PostPendingTransfer,
+    Id = 8,
+    DebitAccountId = 102,
+    CreditAccountId = 103,
+    Amount = 10,
+    Ledger = 1,
+    Code = 1,
+    Flags = TransferFlags.Pending,
 };
 
-createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
-// error handling omitted
+var transferErrors = client.CreateTransfers(new[] { transfer0 });
+// Error handling omitted.
+
+var transfer1 = new Transfer
+{
+    Id = 9,
+    // Post the entire pending amount.
+    Amount = 0,
+    PendingId = 8,
+    Flags = TransferFlags.VoidPendingTransfer,
+};
+
+transferErrors = client.CreateTransfers(new[] { transfer1 });
+// Error handling omitted.
 ```
 
 ## Transfer Lookup
@@ -373,7 +514,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```cs
-transfers = client.LookupTransfers(new UInt128[] { 1, 2 });
+Transfer[] transfers = client.LookupTransfers(new UInt128[] { 1, 2 });
 ```
 
 ## Get Account Transfers
@@ -390,7 +531,11 @@ reverse-chronological order.
 ```cs
 var filter = new AccountFilter
 {
-    AccountId = 2,
+    AccountId = 101,
+    UserData128 = 0, // No filter by UserData.
+    UserData64 = 0,
+    UserData32 = 0,
+    Code = 0, // No filter by Code.
     TimestampMin = 0, // No filter by Timestamp.
     TimestampMax = 0, // No filter by Timestamp.
     Limit = 10, // Limit to ten transfers at most.
@@ -399,7 +544,7 @@ var filter = new AccountFilter
         AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 
-transfers = client.GetAccountTransfers(filter);
+Transfer[] transfers = client.GetAccountTransfers(filter);
 ```
 
 ## Get Account Balances
@@ -418,9 +563,13 @@ The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```cs
-filter = new AccountFilter
+var filter = new AccountFilter
 {
-    AccountId = 2,
+    AccountId = 101,
+    UserData128 = 0, // No filter by UserData.
+    UserData64 = 0,
+    UserData32 = 0,
+    Code = 0, // No filter by Code.
     TimestampMin = 0, // No filter by Timestamp.
     TimestampMax = 0, // No filter by Timestamp.
     Limit = 10, // Limit to ten balances at most.
@@ -429,7 +578,7 @@ filter = new AccountFilter
         AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 
-var account_balances = client.GetAccountBalances(filter);
+AccountBalance[] accountBalances = client.GetAccountBalances(filter);
 ```
 
 ## Query Accounts
@@ -443,7 +592,7 @@ The accounts in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```cs
-var query_filter = new QueryFilter
+var filter = new QueryFilter
 {
     UserData128 = 1000, // Filter by UserData.
     UserData64 = 100,
@@ -456,7 +605,7 @@ var query_filter = new QueryFilter
     Flags = QueryFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 
-var query_accounts = client.QueryAccounts(query_filter);
+Account[] accounts = client.QueryAccounts(filter);
 ```
 
 ## Query Transfers
@@ -470,7 +619,7 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```cs
-query_filter = new QueryFilter
+var filter = new QueryFilter
 {
     UserData128 = 1000, // Filter by UserData
     UserData64 = 100,
@@ -483,7 +632,7 @@ query_filter = new QueryFilter
     Flags = QueryFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 
-var query_transfers = client.QueryTransfers(query_filter);
+Transfer[] transfers = client.QueryTransfers(filter);
 ```
 
 ## Linked Events
@@ -528,6 +677,76 @@ batch.Add(new Transfer { Id = 3, /* ... rest of transfer ... */ });
 batch.Add(new Transfer { Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
 batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ });
 
-createTransfersError = client.CreateTransfers(batch.ToArray());
-// error handling omitted
+var transferErrors = client.CreateTransfers(batch.ToArray());
+// Error handling omitted.
+```
+
+## Imported Events
+
+When the `imported` flag is specified for an account when creating accounts or
+a transfer when creating transfers, it allows importing historical events with
+a user-defined timestamp.
+
+The entire batch of events must be set with the flag `imported`.
+
+It's recommended to submit the whole batch as a `linked` chain of events, ensuring that
+if any event fails, none of them are committed, preserving the last timestamp unchanged.
+This approach gives the application a chance to correct failed imported events, re-submitting
+the batch again with the same user-defined timestamps.
+
+```cs
+// External source of time
+ulong historicalTimestamp = 0UL;
+var historicalAccounts = new Account[] { /* Loaded from an external source */ };
+var historicalTransfers = new Transfer[] { /* Loaded from an external source */ };
+
+// First, load and import all accounts with their timestamps from the historical source.
+var accountsBatch = new System.Collections.Generic.List<Account>();
+for (var index = 0; index < historicalAccounts.Length; index++)
+{
+    var account = historicalAccounts[index];
+
+    // Set a unique and strictly increasing timestamp.
+    historicalTimestamp += 1;
+    account.Timestamp = historicalTimestamp;
+    // Set the account as `imported`.
+    account.Flags = AccountFlags.Imported;
+    // To ensure atomicity, the entire batch (except the last event in the chain)
+    // must be `linked`.
+    if (index < historicalAccounts.Length - 1)
+    {
+        account.Flags |= AccountFlags.Linked;
+    }
+
+    accountsBatch.Add(account);
+}
+
+var accountErrors = client.CreateAccounts(accountsBatch.ToArray());
+// Error handling omitted.
+
+// Then, load and import all transfers with their timestamps from the historical source.
+var transfersBatch = new System.Collections.Generic.List<Transfer>();
+for (var index = 0; index < historicalTransfers.Length; index++)
+{
+    var transfer = historicalTransfers[index];
+
+    // Set a unique and strictly increasing timestamp.
+    historicalTimestamp += 1;
+    transfer.Timestamp = historicalTimestamp;
+    // Set the account as `imported`.
+    transfer.Flags = TransferFlags.Imported;
+    // To ensure atomicity, the entire batch (except the last event in the chain)
+    // must be `linked`.
+    if (index < historicalTransfers.Length - 1)
+    {
+        transfer.Flags |= TransferFlags.Linked;
+    }
+
+    transfersBatch.Add(transfer);
+}
+
+var transferErrors = client.CreateTransfers(transfersBatch.ToArray());
+// Error handling omitted.
+// Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+// with the same historical timestamps without regressing the cluster timestamp.
 ```

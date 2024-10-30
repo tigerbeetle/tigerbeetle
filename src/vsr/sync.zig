@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 const vsr = @import("../vsr.zig");
-const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
 pub const Stage = union(enum) {
@@ -18,56 +17,27 @@ pub const Stage = union(enum) {
     /// Waiting for `Grid.cancel()`.
     canceling_grid,
 
-    /// We need to sync, but are waiting for a usable `sync_target_max`.
-    requesting_target,
+    /// We received an SV, decided to sync, but were committing at that point. So instead we
+    /// requested cancellation of the commit process and entered `awaiting_checkpoint` to get
+    /// a new SV in the future, while commit stage is idle.
+    ///
+    /// TODO: Right now this works by literally requesting a new SV from the primary, but it would
+    ///       be better to hold onto the original SV in memory and re-trigger `on_start_view` after
+    ///       cancellation is done.
+    awaiting_checkpoint,
 
-    requesting_checkpoint: RequestingCheckpoint,
-    updating_superblock: UpdatingSuperBlock,
-
-    pub const RequestingCheckpoint = struct {
-        target: Target,
-    };
-
-    pub const UpdatingSuperBlock = struct {
-        target: Target,
-        checkpoint_state: vsr.CheckpointState,
-    };
+    /// We received a new checkpoint and a log suffix are in process of writing them to disk.
+    updating_checkpoint: vsr.CheckpointState,
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
         return switch (from) {
             .idle => to == .canceling_commit or
                 to == .canceling_grid or
-                to == .requesting_target,
+                to == .awaiting_checkpoint,
             .canceling_commit => to == .canceling_grid,
-            .canceling_grid => to == .requesting_target,
-            .requesting_target => to == .requesting_target or
-                to == .requesting_checkpoint,
-            .requesting_checkpoint => to == .requesting_checkpoint or
-                to == .updating_superblock,
-            .updating_superblock => to == .requesting_checkpoint or
-                to == .idle,
+            .canceling_grid => to == .awaiting_checkpoint,
+            .awaiting_checkpoint => to == .awaiting_checkpoint or to == .updating_checkpoint,
+            .updating_checkpoint => to == .idle,
         };
     }
-
-    pub fn target(stage: *const Stage) ?Target {
-        return switch (stage.*) {
-            .idle,
-            .canceling_commit,
-            .canceling_grid,
-            .requesting_target,
-            => null,
-            .requesting_checkpoint => |s| s.target,
-            .updating_superblock => |s| s.target,
-        };
-    }
-};
-
-pub const Target = struct {
-    /// The target's checkpoint identifier.
-    checkpoint_id: u128,
-    /// The op_checkpoint() that corresponds to the checkpoint id.
-    checkpoint_op: u64,
-    /// The view where the target's checkpoint is committed.
-    /// It might be greater than `checkpoint.header.view`.
-    view: u32,
 };

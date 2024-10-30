@@ -5,6 +5,8 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 pub const BoundedArray = @import("./stdx/bounded_array.zig").BoundedArray;
+pub const ZipfianGenerator = @import("./stdx/zipfian.zig").ZipfianGenerator;
+pub const ZipfianShuffled = @import("./stdx/zipfian.zig").ZipfianShuffled;
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
@@ -161,6 +163,10 @@ pub fn zeroed(bytes: []const u8) bool {
 const Cut = struct {
     prefix: []const u8,
     suffix: []const u8,
+
+    pub fn unpack(self: Cut) struct { []const u8, []const u8 } {
+        return .{ self.prefix, self.suffix };
+    }
 };
 
 /// Splits the `haystack` around the first occurrence of `needle`, returning parts before and after.
@@ -231,6 +237,18 @@ const TimeIt = struct {
     }
 };
 
+/// Utility for print-if debugging, a-la Rust's dbg! macro.
+///
+/// dbg prints the value with the prefix, while also returning the value, which makes it convenient
+/// to drop it in the middle of a complex expression.
+pub fn dbg(prefix: []const u8, value: anytype) @TypeOf(value) {
+    std.debug.print("{s} = {any}\n", .{
+        prefix,
+        std.json.fmt(value, .{ .whitespace = .indent_2 }),
+    });
+    return value;
+}
+
 pub const log = if (builtin.is_test)
     // Downgrade `err` to `warn` for tests.
     // Zig fails any test that does `log.err`, but we want to test those code paths here.
@@ -262,7 +280,7 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     // Pick the biggest "word" for word-wise comparison, and don't try to early-return on the first
     // mismatch, so that a compiler can vectorize the loop.
 
-    const Word = inline for (.{ u64, u32, u16, u8 }) |Word| {
+    const Word = comptime for (.{ u64, u32, u16, u8 }) |Word| {
         if (@alignOf(T) >= @alignOf(Word) and @sizeOf(T) % @sizeOf(Word) == 0) break Word;
     } else unreachable;
 
@@ -271,8 +289,7 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     assert(a_words.len == b_words.len);
 
     var total: Word = 0;
-    for (a_words, 0..) |a_word, i| {
-        const b_word = b_words[i];
+    for (a_words, b_words) |a_word, b_word| {
         total |= a_word ^ b_word;
     }
 
@@ -300,6 +317,7 @@ fn has_pointers(comptime T: type) bool {
 /// Checks that a type does not have implicit padding.
 pub fn no_padding(comptime T: type) bool {
     comptime switch (@typeInfo(T)) {
+        .Void => return true,
         .Int => return @bitSizeOf(T) == 8 * @sizeOf(T),
         .Array => |info| return no_padding(info.child),
         .Struct => |info| {
@@ -796,3 +814,56 @@ test fmt_int_size_bin_exact {
         fmt_int_size_bin_exact(std.math.maxInt(u64) - 1023),
     });
 }
+
+// DateTime in UTC, intended primarily for logging.
+//
+// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
+// timezones or leap seconds is necessary.
+pub const DateTimeUTC = struct {
+    year: u16,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+
+    pub fn now() DateTimeUTC {
+        const timestamp_seconds = std.time.timestamp();
+        assert(timestamp_seconds > 0);
+        return DateTimeUTC.from_timestamp(@intCast(timestamp_seconds));
+    }
+
+    pub fn from_timestamp(timestamp: u64) DateTimeUTC {
+        const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = timestamp };
+        const year_day = epoch_seconds.getEpochDay().calculateYearDay();
+        const month_day = year_day.calculateMonthDay();
+        const time = epoch_seconds.getDaySeconds();
+
+        return DateTimeUTC{
+            .year = year_day.year,
+            .month = month_day.month.numeric(),
+            .day = month_day.day_index + 1,
+            .hour = time.getHoursIntoDay(),
+            .minute = time.getMinutesIntoHour(),
+            .second = time.getSecondsIntoMinute(),
+        };
+    }
+
+    pub fn format(
+        datetime: DateTimeUTC,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2} UTC", .{
+            datetime.year,
+            datetime.month,
+            datetime.day,
+            datetime.hour,
+            datetime.minute,
+            datetime.second,
+        });
+    }
+};

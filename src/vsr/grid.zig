@@ -17,7 +17,6 @@ const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing
 const FreeSet = @import("./free_set.zig").FreeSet;
 
 const log = stdx.log.scoped(.grid);
-const tracer = @import("../tracer.zig");
 
 pub const BlockPtr = *align(constants.sector_size) [constants.block_size]u8;
 pub const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
@@ -165,6 +164,7 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
+        trace: *vsr.trace.Tracer,
         free_set: FreeSet,
         free_set_checkpoint: CheckpointTrailer,
         blocks_missing: GridBlocksMissing,
@@ -174,13 +174,11 @@ pub fn GridType(comptime Storage: type) type {
         cache_blocks: []BlockPtr,
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
-        write_iop_tracer_slots: [write_iops_max]?tracer.SpanStart = .{null} ** write_iops_max,
         write_queue: FIFO(Write) = .{ .name = "grid_write" },
 
         // Each read_iops has a corresponding block.
         read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
-        read_iop_tracer_slots: [read_iops_max]?tracer.SpanStart = .{null} ** read_iops_max,
         read_queue: FIFO(Read) = .{ .name = "grid_read" },
 
         // List of Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
@@ -206,6 +204,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
+            trace: *vsr.trace.Tracer,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
             missing_blocks_max: usize,
             missing_tables_max: usize,
@@ -254,6 +253,7 @@ pub fn GridType(comptime Storage: type) type {
 
             return Grid{
                 .superblock = options.superblock,
+                .trace = options.trace,
                 .free_set = free_set,
                 .free_set_checkpoint = free_set_checkpoint,
                 .blocks_missing = blocks_missing,
@@ -265,9 +265,6 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
             for (&grid.read_iop_blocks) |block| allocator.free(block);
-
-            for (grid.read_iop_tracer_slots) |slot| assert(slot == null);
-            for (grid.write_iop_tracer_slots) |slot| assert(slot == null);
 
             for (grid.cache_blocks) |block| allocator.free(block);
             allocator.free(grid.cache_blocks);
@@ -468,10 +465,21 @@ pub fn GridType(comptime Storage: type) type {
             grid.superblock.storage.on_next_tick(.lsm, callback, next_tick);
         }
 
-        /// Returning null indicates that there are not enough free blocks to fill the reservation.
-        pub fn reserve(grid: *Grid, blocks_count: usize) ?Reservation {
+        /// Aborts if there are not enough free blocks to fill the reservation.
+        /// Should a use case arise where a null return would be preferred, this can be split
+        /// into panicking and non-panicking versions.
+        pub fn reserve(grid: *Grid, blocks_count: usize) Reservation {
             assert(grid.callback == .none);
-            return grid.free_set.reserve(blocks_count);
+            return grid.free_set.reserve(blocks_count) orelse vsr.fatal(
+                .storage_size_would_exceed_limit,
+                "data file would become too large size={} + reservation={} > limit={}, " ++
+                    "restart the replica increasing '--storage-size-limit'",
+                .{
+                    grid.superblock.working.vsr_state.checkpoint.storage_size,
+                    blocks_count * constants.block_size,
+                    grid.superblock.storage_size_limit,
+                },
+            );
         }
 
         /// Forfeit a reservation.
@@ -711,12 +719,7 @@ pub fn GridType(comptime Storage: type) type {
         fn write_block_with(grid: *Grid, iop: *WriteIOP, write: *Write) void {
             assert(!grid.free_set.is_free(write.address));
 
-            const write_iop_index = grid.write_iops.index(iop);
-            tracer.start(
-                &grid.write_iop_tracer_slots[write_iop_index],
-                .{ .grid_write_iop = .{ .index = write_iop_index } },
-                @src(),
-            );
+            grid.trace.start(.{ .grid_write = .{ .iop = grid.write_iops.index(iop) } }, .{});
 
             iop.* = .{
                 .grid = grid,
@@ -769,11 +772,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(cache_block_header.address == completed_write.address);
             grid.assert_coherent(completed_write.address, cache_block_header.checksum);
 
-            const write_iop_index = grid.write_iops.index(iop);
-            tracer.end(
-                &grid.write_iop_tracer_slots[write_iop_index],
-                .{ .grid_write_iop = .{ .index = write_iop_index } },
-            );
+            grid.trace.stop(.{ .grid_write = .{ .iop = grid.write_iops.index(iop) } }, .{});
 
             if (grid.callback == .cancel) {
                 assert(grid.write_queue.empty());
@@ -970,12 +969,7 @@ pub fn GridType(comptime Storage: type) type {
             // block.
             assert(!grid.read_resolving);
 
-            const read_iop_index = grid.read_iops.index(iop);
-            tracer.start(
-                &grid.read_iop_tracer_slots[read_iop_index],
-                .{ .grid_read_iop = .{ .index = read_iop_index } },
-                @src(),
-            );
+            grid.trace.start(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } }, .{});
 
             iop.* = .{
                 .completion = undefined,
@@ -997,6 +991,8 @@ pub fn GridType(comptime Storage: type) type {
             const read = iop.read;
             const grid = read.grid;
             const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
+
+            grid.trace.stop(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } }, .{});
 
             if (grid.callback == .cancel) {
                 grid.read_iops.release(iop);
@@ -1020,12 +1016,6 @@ pub fn GridType(comptime Storage: type) type {
                 }
             };
 
-            const read_iop_index = grid.read_iops.index(iop);
-            tracer.end(
-                &grid.read_iop_tracer_slots[read_iop_index],
-                .{ .grid_read_iop = .{ .index = read_iop_index } },
-            );
-
             // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {
                 const queued_read: *Read = @alignCast(@fieldParentPtr("pending", pending));
@@ -1045,7 +1035,7 @@ pub fn GridType(comptime Storage: type) type {
             if (result != .valid) {
                 const header =
                     mem.bytesAsValue(vsr.Header.Block, block.*[0..@sizeOf(vsr.Header)]);
-                log.err(
+                log.warn(
                     "{}: {s}: expected address={} checksum={}, found address={} checksum={}",
                     .{
                         grid.superblock.replica_index.?,

@@ -47,6 +47,17 @@ pub fn ContextType(
         const Context = @This();
 
         const StateMachine = Client.StateMachine;
+        const allowed_operations = [_]StateMachine.Operation{
+            .create_accounts,
+            .create_transfers,
+            .lookup_accounts,
+            .lookup_transfers,
+            .get_account_transfers,
+            .get_account_balances,
+            .query_accounts,
+            .query_transfers,
+        };
+
         const UserData = extern struct {
             self: *Context,
             packet: *Packet,
@@ -56,17 +67,7 @@ pub fn ContextType(
             assert(@sizeOf(UserData) == @sizeOf(u128));
         }
 
-        fn operation_from_int(op: u8) ?Client.StateMachine.Operation {
-            const allowed_operations = [_]Client.StateMachine.Operation{
-                .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-                .get_account_transfers,
-                .get_account_balances,
-                .query_accounts,
-                .query_transfers,
-            };
+        fn operation_from_int(op: u8) ?StateMachine.Operation {
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
                     return operation;
@@ -76,19 +77,9 @@ pub fn ContextType(
         }
 
         fn operation_event_size(op: u8) ?usize {
-            const allowed_operations = [_]Client.StateMachine.Operation{
-                .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-                .get_account_transfers,
-                .get_account_balances,
-                .query_accounts,
-                .query_transfers,
-            };
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
-                    return @sizeOf(Client.StateMachine.Event(operation));
+                    return @sizeOf(StateMachine.Event(operation));
                 }
             }
             return null;
@@ -172,7 +163,7 @@ pub fn ContextType(
             log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
                 context.client_id,
                 cluster_id,
-                context.addresses,
+                context.addresses.const_slice(),
             });
             context.client = try Client.init(
                 allocator,
@@ -305,20 +296,28 @@ pub fn ContextType(
         }
 
         fn request(self: *Context, packet: *Packet) void {
-            const operation = operation_from_int(packet.operation) orelse {
+            const operation: StateMachine.Operation = operation_from_int(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
             };
 
             // Get the size of each request structure in the packet.data:
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| blk: {
-                    break :blk @sizeOf(Client.StateMachine.Event(operation_comptime));
+                    break :blk @sizeOf(StateMachine.Event(operation_comptime));
                 },
             };
 
             // Make sure the packet.data size is correct:
-            const events = @as([*]const u8, @ptrCast(packet.data))[0..packet.data_size];
-            if (events.len == 0 or events.len % event_size != 0) {
+            const events: []const u8 = if (packet.data_size > 0) events: {
+                const data: [*]const u8 = @ptrCast(packet.data.?);
+                break :events data[0..packet.data_size];
+            } else empty: {
+                // It may be an empty array (null pointer)
+                // or a buffer with no elements (valid pointer and size == 0).
+                stdx.maybe(packet.data == null);
+                break :empty &[0]u8{};
+            };
+            if (events.len % event_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
 
@@ -340,6 +339,11 @@ pub fn ContextType(
             packet.batch_next = null;
             packet.batch_tail = packet;
             packet.batch_size = packet.data_size;
+            packet.batch_allowed = batch_logical_allowed(
+                operation,
+                packet.data,
+                packet.data_size,
+            );
 
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
             if (self.shutdown.load(.acquire)) {
@@ -351,14 +355,15 @@ pub fn ContextType(
                 return self.submit(packet);
             }
 
-            // Otherwise, try to batch the packet with another already in self.pending.
-            if (StateMachine.batch_logical_allowed.get(@enumFromInt(packet.operation))) {
+            // If allowed, try to batch the packet with another already in self.pending.
+            if (packet.batch_allowed) {
                 var it = self.pending.peek();
                 while (it) |root| {
                     it = root.next;
 
                     // Check for pending packets of the same operation which can be batched.
                     if (root.operation != packet.operation) continue;
+                    if (!root.batch_allowed) continue;
 
                     const merged_events = @divExact(root.batch_size + packet.data_size, event_size);
                     if (merged_events > events_batch_max) continue;
@@ -373,6 +378,39 @@ pub fn ContextType(
             // Couldn't batch with existing packet so push to pending directly.
             packet.next = null;
             self.pending.push(packet);
+        }
+
+        fn batch_logical_allowed(
+            operation: StateMachine.Operation,
+            data: ?*const anyopaque,
+            data_size: u32,
+        ) bool {
+            if (!StateMachine.batch_logical_allowed.get(operation)) return false;
+
+            // TODO(king): Remove this code once protocol batching is implemented.
+            //
+            // If the application submits an unclosed linked chain, it can inadvertently make
+            // the elements of the next batch part of it.
+            // To work around this issue, we don't allow unclosed linked chains to be batched.
+            if (data_size > 0) {
+                assert(data != null);
+                const linked_chain_open: bool = switch (operation) {
+                    inline .create_accounts,
+                    .create_transfers,
+                    => |tag| linked_chain_open: {
+                        const Event = StateMachine.Event(tag);
+                        // Packet data isn't necessarily aligned.
+                        const events: [*]align(@alignOf(u8)) const Event = @ptrCast(data.?);
+                        const events_count: usize = @divExact(data_size, @sizeOf(Event));
+                        break :linked_chain_open events[events_count - 1].flags.linked;
+                    },
+                    else => false,
+                };
+
+                if (linked_chain_open) return false;
+            }
+
+            return true;
         }
 
         fn submit(self: *Context, packet: *Packet) void {
@@ -402,9 +440,17 @@ pub fn ContextType(
             var offset: u32 = 0;
             var it: ?*Packet = packet;
             while (it) |batched| {
+                assert(batched.batch_next == null or batched.batch_allowed);
                 it = batched.batch_next;
 
-                const event_data = @as([*]const u8, @ptrCast(batched.data.?))[0..batched.data_size];
+                const event_data: []const u8 = if (batched.data_size > 0)
+                    @as([*]const u8, @ptrCast(batched.data.?))[0..batched.data_size]
+                else empty: {
+                    // It may be an empty array (null pointer)
+                    // or a buffer with no elements (valid pointer and size == 0).
+                    stdx.maybe(batched.data == null);
+                    break :empty &[0]u8{};
+                };
                 stdx.copy_disjoint(.inexact, u8, message.body()[offset..], event_data);
                 offset += @intCast(event_data.len);
             }
@@ -431,7 +477,8 @@ pub fn ContextType(
             assert(packet.next == null); // (previously) inflight packet should not be pending.
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
-            // The submit() call may complete it inline so keep submitting until theres an inflight.
+            // The submit() call may complete it inline so keep submitting until there's
+            // an inflight.
             while (self.pending.pop()) |packet_next| {
                 self.submit(packet_next);
                 if (self.client.request_inflight != null) break;
@@ -447,12 +494,13 @@ pub fn ContextType(
 
                     // Demuxer expects []u8 but VSR callback provides []const u8.
                     // The bytes are known to come from a Message body that will be soon discarded
-                    // therefor it's safe to @constCast and potentially modify the data in-place.
+                    // therefore it's safe to @constCast and potentially modify the data in-place.
                     var demuxer = Client.DemuxerType(operation).init(@constCast(reply));
 
                     var it: ?*Packet = packet;
                     var event_offset: u32 = 0;
                     while (it) |batched| {
+                        assert(batched.batch_next == null or batched.batch_allowed);
                         it = batched.batch_next;
 
                         const event_count = @divExact(
@@ -476,6 +524,7 @@ pub fn ContextType(
         fn cancel(self: *Context, packet: *Packet) void {
             var it: ?*Packet = packet;
             while (it) |batched| {
+                assert(batched.batch_next == null or batched.batch_allowed);
                 it = batched.batch_next;
                 self.on_complete(batched, error.ClientShutdown);
             }
@@ -521,6 +570,46 @@ pub fn ContextType(
         fn on_deinit(implementation: *ContextImplementation) void {
             const self = get_context(implementation);
             self.deinit();
+        }
+
+        test "client_batch_linked_chain" {
+            inline for ([_]StateMachine.Operation{
+                .create_accounts,
+                .create_transfers,
+            }) |operation| {
+                const Event = StateMachine.Event(operation);
+                var data = [_]Event{std.mem.zeroInit(Event, .{})} ** 3;
+
+                // Broken linked chain cannot be batched.
+                for (&data) |*item| item.flags.linked = true;
+                try std.testing.expect(!batch_logical_allowed(
+                    operation,
+                    data[0..],
+                    data.len * @sizeOf(Event),
+                ));
+
+                // Valid linked chain.
+                data[data.len - 1].flags.linked = false;
+                try std.testing.expect(batch_logical_allowed(
+                    operation,
+                    data[0..],
+                    data.len * @sizeOf(Event),
+                ));
+
+                // Single element.
+                try std.testing.expect(batch_logical_allowed(
+                    operation,
+                    &data[data.len - 1],
+                    1 * @sizeOf(Event),
+                ));
+
+                // No elements.
+                try std.testing.expect(batch_logical_allowed(
+                    operation,
+                    null,
+                    0,
+                ));
+            }
         }
     };
 }
