@@ -187,7 +187,6 @@ func (c *c_client) doRequest(
 	packet := new(C.tb_packet_t)
 	packet.user_data = unsafe.Pointer(&req)
 	packet.operation = C.uint8_t(op)
-	packet.status = C.TB_PACKET_OK
 	packet.data_size = C.uint32_t(count * int(getEventSize(op)))
 	packet.data = data
 

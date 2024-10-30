@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -1205,6 +1206,37 @@ public class IntegrationTest {
 
         } catch (Throwable any) {
             assertEquals(IllegalStateException.class, any.getClass());
+        }
+    }
+
+    /**
+     * Smoke test that concurrent close does not crash the JVM.
+     */
+    @Test
+    public void testCloseConcurrent() throws Throwable {
+        final int threadCount = 16;
+        final var clients = IntStream.range(0, threadCount)
+                .mapToObj((index) -> new Client(clusterId, new String[] {server.getAddress()}))
+                .collect(Collectors.toList());
+        final var threads = IntStream.range(0, threadCount).mapToObj((index) -> {
+            final var thread = new Thread(() -> {
+                final var client = clients.get(index);
+                for (int i = 0; i < 1000; i++) {
+                    try {
+                        client.createAccounts(generateAccounts(UInt128.id()));
+                    } catch (IllegalStateException e) {
+                        break;
+                    }
+                }
+            });
+            thread.start();
+            return thread;
+        }).collect(Collectors.toList());
+        for (var client : clients) {
+            client.close();
+        }
+        for (var thread : threads) {
+            thread.join();
         }
     }
 
