@@ -880,6 +880,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.peer = header_peer;
                 switch (connection.peer) {
                     .replica => |replica_index| {
+                        if (replica_index >= bus.configuration.len) {
+                            return false;
+                        }
+
                         // If there is a connection to this replica, terminate and replace it:
                         if (bus.replicas[replica_index]) |old| {
                             assert(old.peer == .replica);
