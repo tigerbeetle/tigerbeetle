@@ -227,7 +227,7 @@ pub fn ContextType(
             self.signal.notify();
             self.thread.join();
 
-            try self.io.cancel();
+            self.io.cancel_all();
 
             self.signal.deinit();
             self.client.deinit(self.allocator);

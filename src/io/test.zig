@@ -740,10 +740,10 @@ test "pipe data over socket" {
     }.run();
 }
 
-test "cancel" {
+test "cancel_all" {
     const checksum = @import("../vsr/checksum.zig").checksum;
     const allocator = std.testing.allocator;
-    const file_path = "test_cancel";
+    const file_path = "test_cancel_all";
     const read_count = 8;
     const read_size = 1024 * 16;
 
@@ -764,18 +764,12 @@ test "cancel" {
             defer context.io.deinit();
 
             {
-                // Initialize the file and fill it with test data.
-                const file = try std.fs.cwd().createFile(file_path, .{
-                    .read = true,
-                    .truncate = true,
-                });
-                defer file.close();
-
+                // Initialize a file filled with test data.
                 const file_buffer = try allocator.alloc(u8, read_size);
                 defer allocator.free(file_buffer);
                 for (file_buffer, 0..) |*b, i| b.* = @intCast(i % 256);
 
-                try file.writeAll(file_buffer);
+                try std.fs.cwd().writeFile(.{ .sub_path = file_path, .data = file_buffer });
             }
 
             var read_completions: [read_count]IO.Completion = undefined;
@@ -797,7 +791,7 @@ test "cancel" {
             //
             // The reason to re-open the file with DIRECT is that it slows down the reads enough to
             // actually test the interesting case -- cancelling an in-flight read and verifying that
-            // the buffer is not written to after `cancel()` completes.
+            // the buffer is not written to after `cancel_all()` completes.
             //
             // (Without DIRECT the reads all finish their callbacks even before io.tick() returns.)
             const file = try std.posix.open(file_path, .{ .DIRECT = true }, 0);
@@ -808,11 +802,11 @@ test "cancel" {
             }
             try context.io.tick();
 
-            // Set to true *before* calling cancel() to ensure that any farther callbacks from IO
-            // completion will panic.
+            // Set to true *before* calling cancel_all() to ensure that any farther callbacks from
+            // IO completion will panic.
             context.canceled = true;
 
-            try context.io.cancel();
+            context.io.cancel_all();
 
             // All of the in-flight reads are canceled at this point.
             // To verify, checksum all of the read buffer memory, then wait and make sure that there

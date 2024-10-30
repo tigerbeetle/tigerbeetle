@@ -283,8 +283,7 @@ pub const IO = struct {
         }
     }
 
-    pub fn cancel(self: *IO) !void {
-        _ = self;
+    pub fn cancel_all(_: *IO) void {
         // TODO Cancel in-flight async IO and wait for all completions.
     }
 
