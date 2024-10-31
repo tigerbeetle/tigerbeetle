@@ -5,6 +5,7 @@ const mem = std.mem;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
@@ -380,7 +381,7 @@ pub const IO = struct {
                         .BADF => error.FileDescriptorInvalid,
                         .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
                         .IO => error.InputOutput,
-                        else => |errno| posix.unexpectedErrno(errno),
+                        else => |errno| stdx.unexpectedErrno("close", errno),
                     };
                 }
             },
@@ -496,7 +497,7 @@ pub const IO = struct {
                             .OVERFLOW => error.Unseekable,
                             .SPIPE => error.Unseekable,
                             .TIMEDOUT => error.ConnectionTimedOut,
-                            else => |err| posix.unexpectedErrno(err),
+                            else => |err| stdx.unexpectedErrno("read", err),
                         };
                     }
                 }
@@ -847,7 +848,7 @@ pub const IO = struct {
 
             // not reported but need same error union
             .OPNOTSUPP => return error.OperationNotSupported,
-            else => |errno| return posix.unexpectedErrno(errno),
+            else => |errno| return stdx.unexpectedErrno("fs_allocate", errno),
         }
 
         // Now actually perform the allocation.
