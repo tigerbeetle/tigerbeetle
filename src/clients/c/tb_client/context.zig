@@ -471,12 +471,14 @@ pub fn ContextType(
         fn on_result(
             raw_user_data: u128,
             op: StateMachine.Operation,
+            timestamp: u64,
             reply: []u8,
         ) void {
             const user_data: UserData = @bitCast(raw_user_data);
             const self = user_data.self;
             const packet = user_data.packet;
             assert(packet.next == null); // (previously) inflight packet should not be pending.
+            assert(timestamp > 0);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             // The submit() call may complete it inline so keep submitting until there's

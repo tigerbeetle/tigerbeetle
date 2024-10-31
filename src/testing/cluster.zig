@@ -690,10 +690,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         fn request_callback(
             user_data: u128,
             operation: StateMachine.Operation,
+            timestamp: u64,
             result: []u8,
         ) void {
             _ = user_data;
             _ = operation;
+            _ = timestamp;
             _ = result;
         }
 

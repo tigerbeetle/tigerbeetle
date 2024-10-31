@@ -25,6 +25,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             pub const Callback = *const fn (
                 user_data: u128,
                 operation: StateMachine.Operation,
+                timestamp: u64,
                 results: []u8,
             ) void;
 
@@ -526,6 +527,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 inflight.callback.request(
                     inflight.user_data,
                     inflight_vsr_operation.cast(StateMachine),
+                    reply.header.timestamp,
                     reply.body(),
                 );
             }
