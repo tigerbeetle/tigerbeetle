@@ -110,10 +110,11 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             replica.destroy();
         }
     }
+
+    var datafile_buffers: [replica_count][std.fs.max_path_bytes]u8 = undefined;
     inline for (0..replica_count) |replica_index| {
-        var datafile_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const datafile = try std.fmt.bufPrint(
-            datafile_buffer[0..],
+            datafile_buffers[replica_index][0..],
             "{s}/{d}_{d}.tigerbeetle",
             .{ tmp_dir, cluster_id, replica_index },
         );
