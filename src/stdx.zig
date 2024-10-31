@@ -870,7 +870,7 @@ pub const DateTimeUTC = struct {
 
 /// Like std.posix's `unexpectedErrno()` but log unconditionally, not just when mode=Debug.
 /// The added `label` argument works around the absence of stack traces in ReleaseSafe builds.
-pub fn unexpectedErrno(label: []const u8, err: std.posix.system.E) std.posix.UnexpectedError {
+pub fn unexpected_errno(label: []const u8, err: std.posix.system.E) std.posix.UnexpectedError {
     log.scoped(.stdx).err("unexpected errno: {s}: code={d} name={?s}", .{
         label,
         @intFromEnum(err),

@@ -381,7 +381,7 @@ pub const IO = struct {
                         .BADF => error.FileDescriptorInvalid,
                         .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
                         .IO => error.InputOutput,
-                        else => |errno| stdx.unexpectedErrno("close", errno),
+                        else => |errno| stdx.unexpected_errno("close", errno),
                     };
                 }
             },
@@ -497,7 +497,7 @@ pub const IO = struct {
                             .OVERFLOW => error.Unseekable,
                             .SPIPE => error.Unseekable,
                             .TIMEDOUT => error.ConnectionTimedOut,
-                            else => |err| stdx.unexpectedErrno("read", err),
+                            else => |err| stdx.unexpected_errno("read", err),
                         };
                     }
                 }
@@ -848,7 +848,7 @@ pub const IO = struct {
 
             // not reported but need same error union
             .OPNOTSUPP => return error.OperationNotSupported,
-            else => |errno| return stdx.unexpectedErrno("fs_allocate", errno),
+            else => |errno| return stdx.unexpected_errno("fs_allocate", errno),
         }
 
         // Now actually perform the allocation.

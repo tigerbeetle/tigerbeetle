@@ -529,7 +529,7 @@ pub const IO = struct {
                                 .ALREADY => error.NotInterruptable,
                                 // SQE is invalid.
                                 .INVAL => unreachable,
-                                else => |errno| stdx.unexpectedErrno("cancel", errno),
+                                else => |errno| stdx.unexpected_errno("cancel", errno),
                             };
                         }
                     };
@@ -556,7 +556,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PERM => error.PermissionDenied,
                                 .PROTO => error.ProtocolFailure,
-                                else => |errno| stdx.unexpectedErrno("accept", errno),
+                                else => |errno| stdx.unexpected_errno("accept", errno),
                             };
                             break :blk err;
                         } else {
@@ -575,7 +575,7 @@ pub const IO = struct {
                                 .DQUOT => error.DiskQuota,
                                 .IO => error.InputOutput,
                                 .NOSPC => error.NoSpaceLeft,
-                                else => |errno| stdx.unexpectedErrno("close", errno),
+                                else => |errno| stdx.unexpected_errno("close", errno),
                             };
                             break :blk err;
                         } else {
@@ -609,7 +609,7 @@ pub const IO = struct {
                                 .PERM => error.PermissionDenied,
                                 .PROTOTYPE => error.ProtocolNotSupported,
                                 .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| stdx.unexpectedErrno("connect", errno),
+                                else => |errno| stdx.unexpected_errno("connect", errno),
                             };
                             break :blk err;
                         } else {
@@ -648,7 +648,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.FileLocksNotSupported,
                                 .AGAIN => error.WouldBlock,
                                 .TXTBSY => error.FileBusy,
-                                else => |errno| stdx.unexpectedErrno("openat", errno),
+                                else => |errno| stdx.unexpected_errno("openat", errno),
                             };
                             break :blk err;
                         } else {
@@ -678,7 +678,7 @@ pub const IO = struct {
                                 .OVERFLOW => error.Unseekable,
                                 .SPIPE => error.Unseekable,
                                 .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| stdx.unexpectedErrno("read", errno),
+                                else => |errno| stdx.unexpected_errno("read", errno),
                             };
                             break :blk err;
                         } else {
@@ -706,7 +706,7 @@ pub const IO = struct {
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .TIMEDOUT => error.ConnectionTimedOut,
                                 .OPNOTSUPP => error.OperationNotSupported,
-                                else => |errno| stdx.unexpectedErrno("recv", errno),
+                                else => |errno| stdx.unexpected_errno("recv", errno),
                             };
                             break :blk err;
                         } else {
@@ -741,7 +741,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
                                 .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| stdx.unexpectedErrno("send", errno),
+                                else => |errno| stdx.unexpected_errno("send", errno),
                             };
                             break :blk err;
                         } else {
@@ -767,7 +767,7 @@ pub const IO = struct {
                                 .NOENT => error.FileNotFound,
                                 .NOMEM => error.SystemResources,
                                 .NOTDIR => error.NotDir,
-                                else => |errno| stdx.unexpectedErrno("statx", errno),
+                                else => |errno| stdx.unexpected_errno("statx", errno),
                             };
                             break :blk err;
                         } else {
@@ -785,7 +785,7 @@ pub const IO = struct {
                         },
                         .CANCELED => error.Canceled,
                         .TIME => {}, // A success.
-                        else => |errno| stdx.unexpectedErrno("timeout", errno),
+                        else => |errno| stdx.unexpected_errno("timeout", errno),
                     };
                     const result: TimeoutError!void = err;
                     completion.callback(completion.context, completion, &result);
@@ -812,7 +812,7 @@ pub const IO = struct {
                                 .PERM => error.AccessDenied,
                                 .PIPE => error.BrokenPipe,
                                 .SPIPE => error.Unseekable,
-                                else => |errno| stdx.unexpectedErrno("write", errno),
+                                else => |errno| stdx.unexpected_errno("write", errno),
                             };
                             break :blk err;
                         } else {
@@ -1592,7 +1592,7 @@ pub const IO = struct {
                     .BADF => return error.InvalidFileDescriptor,
                     .NOTTY => return error.BadRequest,
                     .FAULT => return error.InvalidAddress,
-                    else => |err| return stdx.unexpectedErrno("open_file:ioctl", err),
+                    else => |err| return stdx.unexpected_errno("open_file:ioctl", err),
                 }
 
                 if (block_device_size < size) {
@@ -1652,7 +1652,7 @@ pub const IO = struct {
                     return statfs.f_type == stdx.TmpfsMagic;
                 },
                 .INTR => continue,
-                else => |err| return stdx.unexpectedErrno("fs_is_tmpfs", err),
+                else => |err| return stdx.unexpected_errno("fs_is_tmpfs", err),
             }
         }
     }
@@ -1679,7 +1679,7 @@ pub const IO = struct {
                 },
                 .INTR => continue,
                 .INVAL => return false,
-                else => |err| return stdx.unexpectedErrno("fs_supports_direct_io", err),
+                else => |err| return stdx.unexpected_errno("fs_supports_direct_io", err),
             }
         }
     }
@@ -1707,7 +1707,7 @@ pub const IO = struct {
                 .PERM => return error.PermissionDenied,
                 .SPIPE => return error.Unseekable,
                 .TXTBSY => return error.FileBusy,
-                else => |errno| return stdx.unexpectedErrno("fs_allocate", errno),
+                else => |errno| return stdx.unexpected_errno("fs_allocate", errno),
             }
         }
     }

@@ -126,7 +126,7 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
     }
 
     if (std.mem.indexOf(u8, source, "posix." ++ "unexpectedErrno(") != null) {
-        return "use stdx.unexpectedErrno instead of std version";
+        return "use stdx.unexpected_errno instead of std version";
     }
 
     // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on
