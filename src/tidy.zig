@@ -106,27 +106,27 @@ const SourceFile = struct { path: []const u8, text: [:0]const u8 };
 fn tidy_banned(source: []const u8) ?[]const u8 {
     // Note: must avoid banning ourselves!
     if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
-        return "use stdx." ++ "BoundedArray instead of std version";
+        return "use stdx.BoundedArray instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
-        return "use stdx." ++ "has_unique_representation instead of std version";
+        return "use stdx.has_unique_representation instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "mem." ++ "copy(") != null) {
-        return "use stdx." ++ "copy_disjoint instead of std version";
+        return "use stdx.copy_disjoint instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "mem." ++ "copyForwards(") != null) {
-        return "use stdx." ++ "copy_left instead of std version";
+        return "use stdx.copy_left instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "mem." ++ "copyBackwards(") != null) {
-        return "use stdx." ++ "copy_right instead of std version";
+        return "use stdx.copy_right instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "posix." ++ "unexpectedErrno(") != null) {
-        return "use stdx." ++ "unexpectedErrno instead of std version";
+        return "use stdx.unexpectedErrno instead of std version";
     }
 
     // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on
