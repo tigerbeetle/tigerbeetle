@@ -857,3 +857,56 @@ fn discover_project_root() !std.fs.Dir {
 
     return error.DiscoverProjectRootDepthExceeded;
 }
+
+pub const HttpOptions = struct {
+    pub const ContentType = enum {
+        json,
+
+        fn string(content_type: ContentType) []const u8 {
+            return switch (content_type) {
+                .json => "application/json",
+            };
+        }
+    };
+
+    content_type: ?ContentType,
+    authorization: ?[]const u8,
+};
+
+/// Issues an HTTP POST request with the given `body` to the given `url`.
+///
+/// If the response is not 200 OK, the response body is logged and an error is returned.
+pub fn http_post(shell: *Shell, url: []const u8, body: []const u8, options: HttpOptions) !void {
+    errdefer |err| log.err("failed to HTTP post to \"{s}\": {s}", .{ url, @errorName(err) });
+
+    const allocator = shell.arena.allocator();
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse(url);
+
+    var header_buffer: [4 << 10]u8 = undefined;
+    var request = try client.open(.POST, uri, .{ .server_header_buffer = &header_buffer });
+    defer request.deinit();
+    if (options.content_type) |content_type| {
+        request.headers.content_type = .{ .override = content_type.string() };
+    }
+    if (options.authorization) |authorization| {
+        request.headers.authorization = .{ .override = authorization };
+    }
+    request.transfer_encoding = .{ .content_length = body.len };
+
+    try request.send();
+    try request.writeAll(body);
+    try request.finish();
+    try request.wait();
+
+    if (request.response.status != std.http.Status.ok) {
+        const response_body_size_max = 512 << 10;
+        var response_body_buffer: [response_body_size_max]u8 = undefined;
+        const response_body_len = try request.readAll(&response_body_buffer);
+        const response_body = response_body_buffer[0..response_body_len];
+        log.err("response: {s}", .{response_body});
+        return error.WrongStatusResponse;
+    }
+}
