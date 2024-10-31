@@ -879,15 +879,14 @@ pub const HttpOptions = struct {
 pub fn http_post(shell: *Shell, url: []const u8, body: []const u8, options: HttpOptions) !void {
     errdefer |err| log.err("failed to HTTP post to \"{s}\": {s}", .{ url, @errorName(err) });
 
-    const allocator = shell.arena.allocator();
-    var client = std.http.Client{ .allocator = allocator };
+    var client = std.http.Client{ .allocator = shell.gpa };
     defer client.deinit();
 
     const uri = try std.Uri.parse(url);
-
     var header_buffer: [4 << 10]u8 = undefined;
     var request = try client.open(.POST, uri, .{ .server_header_buffer = &header_buffer });
     defer request.deinit();
+
     if (options.content_type) |content_type| {
         request.headers.content_type = .{ .override = content_type.string() };
     }
