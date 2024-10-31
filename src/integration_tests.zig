@@ -16,6 +16,7 @@ const Snap = @import("./testing/snaptest.zig").Snap;
 const snap = Snap.snap;
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
+const vortex_exe: []const u8 = @import("test_options").vortex_exe;
 const tigerbeetle: []const u8 = @import("test_options").tigerbeetle_exe;
 const tigerbeetle_past: []const u8 = @import("test_options").tigerbeetle_exe_past;
 
@@ -496,4 +497,26 @@ test "in-place upgrade" {
     defer context.deinit();
 
     try context.run();
+}
+
+test "vortex smoke" {
+    if (builtin.os.tag != .linux) {
+        log.info("skipping vortex on unsupported OS: {s}", .{@tagName(builtin.os.tag)});
+        return;
+    }
+
+    const shell = try Shell.create(std.testing.allocator);
+    defer shell.destroy();
+
+    log.info("running 1m vortex test...", .{});
+    try shell.exec(
+        \\ unshare --net --fork --map-root-user --pid
+        \\   {vortex} supervisor
+        \\      --test-duration-minutes=1 
+        \\      --tigerbeetle-executable={tigerbeetle} 
+    , .{
+        .vortex = vortex_exe,
+        .tigerbeetle = tigerbeetle,
+    });
+    log.info("vortex passed", .{});
 }
