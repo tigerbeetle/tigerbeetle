@@ -416,9 +416,11 @@ pub const AOFReplayClient = struct {
     fn replay_callback(
         user_data: u128,
         operation: StateMachine.Operation,
+        timestamp: u64,
         result: []u8,
     ) void {
         _ = operation;
+        _ = timestamp;
         _ = result;
 
         const self: *AOFReplayClient = @ptrFromInt(@as(usize, @intCast(user_data)));

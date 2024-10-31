@@ -52,6 +52,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         cluster: u128,
         release: vsr.Release = vsr.Release.minimum,
         request_number: u32 = 0,
+        reply_timestamp: u64 = 0, // Fake timestamp, just a counter.
         request_inflight: ?Request = null,
         message_pool: *MessagePool,
 
@@ -85,6 +86,9 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             const inflight = self.request_inflight orelse return;
             self.request_inflight = null;
 
+            self.reply_timestamp += 1;
+            const timestamp = self.reply_timestamp;
+
             // Allocate a reply message.
             const reply = self.get_message().build(.request);
             defer self.release_message(reply.base());
@@ -104,7 +108,12 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
             switch (inflight.callback) {
                 .request => |callback| {
-                    callback(inflight.user_data, operation.cast(Self.StateMachine), reply.body());
+                    callback(
+                        inflight.user_data,
+                        operation.cast(Self.StateMachine),
+                        timestamp,
+                        reply.body(),
+                    );
                 },
                 .register => |callback| {
                     const result = vsr.RegisterResult{
