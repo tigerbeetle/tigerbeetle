@@ -159,7 +159,13 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 }
             }
 
-            if (write_latest.?.message.header.checksum != session.header.checksum) {
+            // The reply being written to the target slot may not be for the client that we're
+            // looking for. For example, it may be an old reply for a different client.
+            maybe(write_latest == null);
+
+            if (write_latest == null or
+                write_latest.?.message.header.checksum != session.header.checksum)
+            {
                 // We are writing a reply, but that's a wrong reply according to `client_sessions`.
                 // This happens after state sync, where we update `client_sessions` without
                 // waiting for the in-flight write requests to complete.
@@ -444,8 +450,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 message.header.request,
             });
 
-            // Release the write *before* invoking the callback, so that if the callback
-            // checks .writes.available() we doesn't appear busy when we're not.
+            // Release the write *before* invoking the callback, so that if the callback checks
+            // .writes.available() we don't erroneously appear busy.
             client_replies.writing.unset(write.slot.index);
             client_replies.writes.release(write);
 
