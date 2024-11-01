@@ -11,6 +11,7 @@ const StateMachine = vsr.state_machine.StateMachineType(
     constants.state_machine_config,
 );
 const MessagePool = vsr.message_pool.MessagePool;
+const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 
 const tb = vsr.tigerbeetle;
 
@@ -457,8 +458,12 @@ pub const Parser = struct {
     }
 };
 
+const repl_history_entries = 256;
+const repl_history_entry_bytes_with_nul = 512;
+
 pub fn ReplType(comptime MessageBus: type) type {
     const Client = vsr.ClientType(StateMachine, MessageBus);
+    const HistoryBuffer = RingBufferType([repl_history_entry_bytes_with_nul]u8, .slice);
 
     return struct {
         event_loop_done: bool,
@@ -469,7 +474,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         client: *Client,
         terminal: *Terminal,
-        history: std.ArrayList([]const u8),
+        history: HistoryBuffer,
 
         const Repl = @This();
 
@@ -534,7 +539,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             var buffer = std.ArrayList(u8).init(allocator);
             var buffer_index: usize = 0;
-            var history_index = repl.history.items.len;
+            var history_index = repl.history.count;
             // Cache the buffer the user is typing into before navigating through history.
             var buffer_outside_history = std.ArrayList(u8).init(allocator);
 
@@ -624,7 +629,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                     },
                     .up => if (history_index > 0) {
                         const history_index_next = history_index - 1;
-                        const buffer_next = repl.history.items[history_index_next];
+                        const buffer_next_full = repl.history.get_ptr(history_index_next).?;
+                        const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
+                        assert(buffer_next.len < repl_history_entry_bytes_with_nul);
 
                         // Move to the beginning of the current buffer.
                         terminal_screen.update_cursor_position(
@@ -645,7 +652,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             terminal_screen.cursor_column,
                         });
 
-                        if (history_index == repl.history.items.len) {
+                        if (history_index == repl.history.count) {
                             buffer_outside_history.clearRetainingCapacity();
                             try buffer_outside_history.appendSlice(buffer.items);
                         }
@@ -655,12 +662,18 @@ pub fn ReplType(comptime MessageBus: type) type {
                         try buffer.appendSlice(buffer_next);
                         buffer_index = buffer.items.len;
                     },
-                    .down => if (history_index < repl.history.items.len) {
+                    .down => if (history_index < repl.history.count) {
                         const history_index_next = history_index + 1;
-                        const buffer_next = if (history_index_next == repl.history.items.len)
+
+                        const buffer_next = if (history_index_next == repl.history.count)
                             buffer_outside_history.items
-                        else
-                            repl.history.items[history_index_next];
+                        else brk: {
+                            const buffer_next_full = repl.history.get_ptr(history_index_next).?;
+                            const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
+                            assert(buffer_next.len < repl_history_entry_bytes_with_nul);
+                            break :brk buffer_next;
+                        };
+
                         history_index = history_index_next;
 
                         // Move to the beginning of the current buffer.
@@ -708,15 +721,21 @@ pub fn ReplType(comptime MessageBus: type) type {
             };
 
             if (input.len > 0) {
-                if (repl.history.items.len == 0 or
-                    !std.mem.eql(u8, repl.history.getLast(), input))
+                if (repl.history.empty() or
+                    !std.mem.eql(u8, repl.history.tail_ptr_const().?[0..input.len], input))
                 {
-                    const history_item_next = try repl.history.allocator.alloc(u8, input.len);
-                    @memcpy(history_item_next, input);
-                    repl.history.append(history_item_next) catch |err| {
-                        repl.event_loop_done = true;
-                        return err;
-                    };
+                    // NB: Avoiding big stack allocations below.
+
+                    assert(input.len < repl_history_entry_bytes_with_nul);
+
+                    if (repl.history.full()) {
+                        repl.history.advance_head();
+                    }
+                    const history_tail: *[repl_history_entry_bytes_with_nul]u8 =
+                        repl.history.next_tail_ptr().?;
+                    @memset(history_tail, '\x00');
+                    stdx.copy_left(.inexact, u8, history_tail, input);
+                    repl.history.advance_tail();
                 }
             }
 
@@ -797,7 +816,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .event_loop_done = false,
                 .interactive = statements.len == 0,
                 .terminal = undefined,
-                .history = std.ArrayList([]const u8).init(allocator),
+                .history = try HistoryBuffer.init(allocator, repl_history_entries),
             };
 
             var terminal = try Terminal.init(allocator, repl.interactive);
