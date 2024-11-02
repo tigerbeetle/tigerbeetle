@@ -683,7 +683,7 @@ pub const Simulator = struct {
         const cluster_commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
         var cluster_op_checkpoint: u64 = 0;
         for (simulator.cluster.replicas) |*replica| {
-            if (simulator.core.isSet(replica.replica)) {
+            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 cluster_op_checkpoint = @max(
                     cluster_op_checkpoint,
                     replica.superblock.working.vsr_state.checkpoint.header.op,
