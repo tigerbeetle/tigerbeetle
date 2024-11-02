@@ -173,8 +173,10 @@ pub const GridBlocksMissing = struct {
             }
         }
 
+        // +1 so we start from the next faulty block in the subsequent function invocation, thereby
+        // cycling through the faulty blocks in the queue.
         queue.faulty_blocks_repair_index =
-            (queue.faulty_blocks_repair_index + fault_offset) % faults_total;
+            (queue.faulty_blocks_repair_index + fault_offset + 1) % faults_total;
 
         assert(requests_count <= requests.len);
         assert(requests_count <= faults_total);
