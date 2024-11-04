@@ -475,7 +475,10 @@ test "in-place upgrade" {
 
         fn spawn_replica(context: *Context, replica_index: usize) !void {
             assert(context.replicas[replica_index] == null);
-            context.replicas[replica_index] = try context.shell.spawn(.{},
+            context.replicas[replica_index] = try context.shell.spawn(.{
+                .stdout_behavior = .Inherit,
+                .stderr_behavior = .Inherit,
+            },
                 \\{tigerbeetle} start --addresses={addresses} {datafile}
             , .{
                 .tigerbeetle = context.replica_exe[replica_index],
