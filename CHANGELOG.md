@@ -3,6 +3,60 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.12
+
+Released: 2024-11-04
+
+### Safety And Performance
+
+- [#2356](https://github.com/tigerbeetle/tigerbeetle/pull/2356)
+
+  Add "Vortex" – a full-system integration test.
+  Notably, unlike the VOPR this test suite covers the language clients.
+
+- [#2430](https://github.com/tigerbeetle/tigerbeetle/pull/2430)
+
+  Cancel in-flight async (Linux) IO before freeing memory. This was not an issue on the replica
+  side, as replicas only stop when their process stops. However, clients may be closed
+  without the process also ending. If IO is still in flight when this occurs, we must ensure that
+  all IO is cancelled before the client's buffers are freed, to guard against a use-after-free.
+
+  This PR also fixes an unrelated assertion failure that triggered when closing a client that
+  had already closed its socket.
+
+- [#2432](https://github.com/tigerbeetle/tigerbeetle/pull/2432)
+
+  On startup and after checkpoint, assert that number of blocks acquired by the free set is
+  consistent with the number of blocks we see acquired via the manifest and checkpoint trailers.
+
+- [#2436](https://github.com/tigerbeetle/tigerbeetle/pull/2436)
+
+  Reject connections from unknown replicas.
+
+- [#2438](https://github.com/tigerbeetle/tigerbeetle/pull/2438)
+
+  Fix multiversion builds on MacOS.
+
+- [#2442](https://github.com/tigerbeetle/tigerbeetle/pull/2442)
+
+  On an unrecognized error code from the OS, print that error before we panic.
+  (This was already the policy in `Debug` builds, but now it includes `ReleaseSafe` as well.)
+
+- [#2444](https://github.com/tigerbeetle/tigerbeetle/pull/2444)
+
+  Fix a panic involving an in-flight write to an old reply after state sync.
+
+### Internals
+
+- [#2440](https://github.com/tigerbeetle/tigerbeetle/pull/2440)
+
+  Expose reply timestamp from `vsr.Client`.
+  (Note that this is not yet surfaced by language clients).
+
+### TigerTracks 🎧
+
+- [Everything In Its Right Place](https://www.youtube.com/watch?v=onRk0sjSgFU)
+
 ## TigerBeetle 0.16.11
 
 Released: 2024-10-28
