@@ -139,3 +139,99 @@ pub fn DoublyLinkedListType(
         }
     };
 }
+
+test "DoublyLinkedList LIFO" {
+    const Node = struct { id: u32, back: ?*@This() = null, next: ?*@This() = null };
+    const List = DoublyLinkedListType(Node, .back, .next);
+
+    var nodes: [3]Node = undefined;
+    for (&nodes, 0..) |*node, i| node.* = .{ .id = @intCast(i) };
+
+    var list = List{};
+    list.push(&nodes[0]);
+    list.push(&nodes[1]);
+    list.push(&nodes[2]);
+
+    try std.testing.expectEqual(list.pop().?, &nodes[2]);
+    try std.testing.expectEqual(list.pop().?, &nodes[1]);
+    try std.testing.expectEqual(list.pop().?, &nodes[0]);
+    try std.testing.expectEqual(list.pop(), null);
+}
+
+test "DoublyLinkedList fuzz" {
+    // Ensure that The DoublyLinkedList's extra-verification is enabled.
+    comptime assert(constants.verify);
+
+    const fuzz = @import("testing/fuzz.zig");
+    const allocator = std.testing.allocator;
+
+    var prng = std.Random.DefaultPrng.init(0);
+    const random = prng.random();
+
+    const Node = struct { id: u32, back: ?*@This() = null, next: ?*@This() = null };
+    const List = DoublyLinkedListType(Node, .back, .next);
+
+    const nodes_count = 1024;
+    const events_max = 1 << 15;
+
+    const Event = enum { push, pop, remove };
+    const event_distribution = fuzz.Distribution(Event){ .push = 10, .pop = 1, .remove = 8 };
+
+    const nodes = try allocator.alloc(Node, nodes_count);
+    defer allocator.free(nodes);
+    for (nodes, 0..) |*node, i| node.* = .{ .id = @intCast(i) };
+
+    var nodes_free = try std.DynamicBitSetUnmanaged.initFull(allocator, nodes_count);
+    defer nodes_free.deinit(allocator);
+
+    var list = List{};
+    var list_model = stdx.BoundedArray(u32, nodes_count){};
+
+    for (0..events_max) |_| {
+        assert(list_model.count() <= nodes_count);
+        assert(list_model.count() == list.count);
+        assert(list_model.empty() == list.empty());
+
+        const event = fuzz.random_enum(random, Event, event_distribution);
+        switch (event) {
+            .push => {
+                const node_free = nodes_free.findFirstSet() orelse continue;
+                const node = &nodes[node_free];
+
+                list.push(node);
+                list_model.append_assume_capacity(node.id);
+                nodes_free.unset(node.id);
+            },
+            .pop => {
+                if (list.pop()) |node| {
+                    assert(node.back == null);
+                    assert(node.next == null);
+
+                    const node_id = list_model.pop();
+                    assert(node_id == node.id);
+                    assert(nodes_free.count() < nodes_count);
+                    assert(!nodes_free.isSet(node_id));
+
+                    nodes_free.set(node_id);
+                } else {
+                    assert(nodes_free.count() == nodes_count);
+                    assert(list_model.empty());
+                }
+            },
+            .remove => {
+                if (list_model.count() == 0) continue;
+
+                const list_index = random.uintLessThan(u32, list_model.count_as(u32));
+                const node_id = list_model.get(list_index);
+                assert(node_id == list_model.ordered_remove(list_index));
+                assert(!nodes_free.isSet(node_id));
+
+                list.remove(&nodes[node_id]);
+                assert(nodes[node_id].back == null);
+                assert(nodes[node_id].next == null);
+
+                nodes_free.set(node_id);
+            },
+        }
+    }
+}
