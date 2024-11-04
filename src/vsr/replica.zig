@@ -2235,12 +2235,19 @@ pub fn ReplicaType(
             assert(view_headers[0].op == message.header.op);
             assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
 
-            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit_max) and (
+            // Use the maximum commit_max the replica knows of to gauge checkpoint durability.
+            // This is important so that the result of `vsr.Checkpoint.durable` isn't flaky.
+            // Otherwise, a replica could transition to state sync using a start_view from one
+            // replica, but may never be able to transition out of it if subsequent start_view
+            // messages from another replica have a smaller commit_max.
+            const commit_max = @max(self.commit_max, message.header.commit_max);
+
+            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), commit_max) and (
             //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
             //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
             //  prepares in this replica's WAL are no longer needed.
                 vsr.Checkpoint.durable(self.op_checkpoint_next() +
-                constants.vsr_checkpoint_ops, message.header.commit_max) or
+                constants.vsr_checkpoint_ops, commit_max) or
                 // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
                 // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
                 // there's evidence that the repair can't be completed.
@@ -2251,7 +2258,7 @@ pub fn ReplicaType(
                 // State sync: at this point, we know we want to replace our checkpoint
                 // with the one from this SV.
 
-                assert(message.header.commit_max > self.op_checkpoint_next_trigger());
+                assert(commit_max > self.op_checkpoint_next_trigger());
                 assert(view_checkpoint.header.op > self.op_checkpoint());
 
                 if (self.syncing == .idle) {
@@ -2317,11 +2324,13 @@ pub fn ReplicaType(
                         {
                             self.set_op_and_commit_max(
                                 header.op,
-                                message.header.commit_max,
+                                commit_max,
                                 @src(),
                             );
                             assert(self.op == header.op);
                             assert(self.commit_max >= message.header.commit_max);
+                            assert(self.commit_max == commit_max);
+
                             break;
                         }
                     }
