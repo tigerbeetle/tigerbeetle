@@ -467,6 +467,8 @@ test "in-place upgrade" {
         }
 
         fn upgrade_replica(context: *Context, replica_index: usize) !void {
+            log.debug("upgrade replica: {}\n", .{replica_index});
+
             assert(!context.replica_upgraded[replica_index]);
             context.shell.cwd.deleteFile(context.replica_exe[replica_index]) catch {};
             try context.install_replica(context.replica_exe[replica_index], .current);
@@ -475,9 +477,14 @@ test "in-place upgrade" {
 
         fn spawn_replica(context: *Context, replica_index: usize) !void {
             assert(context.replicas[replica_index] == null);
+            log.debug("spawn replica: {} {s}\n", .{
+                replica_index,
+                context.replica_exe[replica_index],
+            });
+
             context.replicas[replica_index] = try context.shell.spawn(.{
-                .stdout_behavior = .Inherit,
-                .stderr_behavior = .Inherit,
+                //.stdout_behavior = .Inherit,
+                //.stderr_behavior = .Inherit,
             },
                 \\{tigerbeetle} start --addresses={addresses} {datafile}
             , .{
