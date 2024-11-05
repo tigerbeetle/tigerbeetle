@@ -88,6 +88,10 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
             return array.inner.swapRemove(index);
         }
 
+        pub inline fn ordered_remove(array: *Self, index: usize) T {
+            return array.inner.orderedRemove(index);
+        }
+
         pub inline fn truncate(array: *Self, count_new: usize) void {
             assert(count_new <= array.count());
             array.inner.len = @intCast(count_new); // can't overflow due to check above.

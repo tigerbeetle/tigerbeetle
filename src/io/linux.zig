@@ -13,10 +13,13 @@ const stdx = @import("../stdx.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
+const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
 const parse_dirty_semver = stdx.parse_dirty_semver;
 const maybe = stdx.maybe;
 
 pub const IO = struct {
+    const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
+
     ring: IO_Uring,
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
@@ -35,10 +38,7 @@ pub const IO = struct {
     /// - in the kernel, or
     /// - in the completion queue, or
     /// - in the `completed` list (excluding zero-duration timeouts)
-    awaiting: ?*Completion = null,
-    /// The number of Completions in the `awaiting` doubly-linked list.
-    /// This is only used for safety checks.
-    awaiting_count: u32 = 0,
+    awaiting: CompletionList = .{},
 
     // This is the completion that performs the cancellation.
     // This is *not* the completion that is being canceled.
@@ -153,8 +153,6 @@ pub const IO = struct {
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
-        if (constants.verify) self.verify_awaiting(null);
-
         // Flush any queued SQEs and reuse the same syscall to wait for completions if required:
         try self.flush_submissions(wait_nr, timeouts, etime);
         // We can now just peek for any CQEs without waiting and without another syscall:
@@ -181,32 +179,13 @@ pub const IO = struct {
                 completion.operation.timeout.timespec.tv_nsec == 0)
             {
                 // Zero-duration timeouts are a special case, and aren't listed in `awaiting`.
-                maybe(self.awaiting == null);
-                maybe(self.awaiting_count == 0);
+                maybe(self.awaiting.empty());
                 assert(completion.result == -@as(i32, @intFromEnum(posix.E.TIME)));
-                assert(completion.awaiting_previous == null);
+                assert(completion.awaiting_back == null);
                 assert(completion.awaiting_next == null);
             } else {
-                assert(self.awaiting != null);
-                assert(self.awaiting_count > 0);
-
-                // Remove the `completion` from `awaiting`.
-                if (completion == self.awaiting.?) {
-                    assert(completion.awaiting_previous == null);
-                    self.awaiting = completion.awaiting_next;
-                }
-                if (completion.awaiting_next) |next| {
-                    assert(next.awaiting_previous.? == completion);
-                    next.awaiting_previous = completion.awaiting_previous;
-                }
-                if (completion.awaiting_previous) |previous| {
-                    assert(previous.awaiting_next.? == completion);
-                    previous.awaiting_next = completion.awaiting_next;
-                }
-                completion.awaiting_previous = null;
-                completion.awaiting_next = null;
-                self.awaiting_count -= 1;
-                if (self.awaiting_count == 0) assert(self.awaiting == null);
+                assert(!self.awaiting.empty());
+                self.awaiting.remove(completion);
             }
 
             switch (self.cancel_status) {
@@ -284,8 +263,6 @@ pub const IO = struct {
     }
 
     fn enqueue(self: *IO, completion: *Completion) void {
-        if (constants.verify) self.verify_awaiting(completion);
-
         switch (self.cancel_status) {
             .inactive => {},
             .queued => assert(completion.operation == .cancel),
@@ -300,17 +277,7 @@ pub const IO = struct {
         };
         completion.prep(sqe);
 
-        if (self.awaiting) |first| {
-            assert(self.awaiting_count > 0);
-            assert(first.awaiting_previous == null);
-            first.awaiting_previous = completion;
-            completion.awaiting_next = first;
-        } else {
-            assert(self.awaiting_count == 0);
-        }
-        self.awaiting = completion;
-        self.awaiting_count += 1;
-
+        self.awaiting.push(completion);
         self.ios_queued += 1;
     }
 
@@ -335,7 +302,6 @@ pub const IO = struct {
     ///   cancellation stage.
     pub fn cancel_all(self: *IO) void {
         assert(self.cancel_status == .inactive);
-        self.verify_awaiting(null);
 
         // Even if we return early due to an io_uring error, IO won't allow more operations.
         defer self.cancel_status = .done;
@@ -345,9 +311,9 @@ pub const IO = struct {
         // Discard any operations that haven't started yet.
         while (self.unqueued.pop()) |_| {}
 
-        while (self.awaiting) |target| {
+        while (self.awaiting.tail) |target| {
+            assert(!self.awaiting.empty());
             assert(self.cancel_status == .next);
-            assert(self.awaiting_count > 0);
             assert(target.operation != .cancel);
 
             self.cancel(target);
@@ -360,7 +326,7 @@ pub const IO = struct {
             }
             assert(self.cancel_status == .next);
         }
-        assert(self.awaiting_count == 0);
+        assert(self.awaiting.empty());
         assert(self.ios_queued == 0);
         assert(self.ios_in_kernel == 0);
     }
@@ -410,27 +376,6 @@ pub const IO = struct {
         };
     }
 
-    fn verify_awaiting(self: *const IO, exclude: ?*const Completion) void {
-        var awaiting_count: u32 = 0;
-        var awaiting = self.awaiting;
-
-        if (awaiting) |completion| {
-            assert(completion.awaiting_previous == null);
-            if (exclude) |c| assert(completion != c);
-        }
-
-        while (awaiting) |completion| {
-            const awaiting_next = completion.awaiting_next;
-            if (awaiting_next) |next| {
-                if (exclude) |c| assert(next != c);
-                assert(next.awaiting_previous == completion);
-            }
-            awaiting_count += 1;
-            awaiting = awaiting_next;
-        }
-        assert(awaiting_count == self.awaiting_count);
-    }
-
     /// This struct holds the data needed for a single io_uring operation
     pub const Completion = struct {
         io: *IO,
@@ -445,7 +390,7 @@ pub const IO = struct {
         ) void,
 
         /// Used by the `IO.awaiting` doubly-linked list.
-        awaiting_previous: ?*Completion = null,
+        awaiting_back: ?*Completion = null,
         awaiting_next: ?*Completion = null,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
