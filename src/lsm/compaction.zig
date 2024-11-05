@@ -133,7 +133,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                 build_index_block,
                 build_value_block,
 
-                // Block is in the read queue
+                // Block is in the read queue.
                 read_index_block,
                 read_index_block_done,
                 read_value_block,
@@ -1513,15 +1513,16 @@ pub fn CompactionType(
 
             const values_in_a, const values_in_b = compaction.merge_inputs();
             assert(values_in_a != null or values_in_b != null);
-            inline for (.{ values_in_a, values_in_b }) |values_in| {
-                if (values_in) |values| {
+
+            const values_out = compaction.table_builder
+                .data_block_values()[compaction.table_builder.value_count..];
+
+            inline for ([_]?[]const Value{ values_in_a, values_in_b, values_out }) |values_maybe| {
+                if (values_maybe) |values| {
                     assert(values.len > 0);
                     assert(values.len <= Table.data.value_count_max);
                 }
             }
-
-            const values_out = compaction.table_builder
-                .data_block_values()[compaction.table_builder.value_count..];
 
             // Do the actual merge from inputs to the output (table builder).
             const merge_result: MergeResult = if (values_in_a == null) blk: {
@@ -1562,12 +1563,20 @@ pub fn CompactionType(
             compaction.table_builder.value_count += merge_result.produced;
 
             if (compaction.table_info_a.? == .immutable) {
+                assert(compaction.level_a_position.value <= Table.value_count_max);
+            } else {
+                assert(compaction.level_a_position.value <= Table.data.value_count_max);
+            }
+            assert(compaction.level_b_position.value <= Table.data.value_count_max);
+            assert(compaction.table_builder.value_count <= Table.data.value_count_max);
+
+            if (compaction.table_info_a.? == .immutable) {
                 compaction.counters.in += merge_result.consumed_a;
             }
             compaction.counters.dropped += merge_result.dropped;
 
             compaction.quotas.done += merge_result.consumed_a + merge_result.consumed_b;
-            assert(compaction.table_builder.value_count <= Table.data.value_count_max);
+            assert(compaction.quotas.done <= compaction.quotas.bar);
 
             compaction.merge_advance_position();
 
@@ -1900,7 +1909,7 @@ pub fn CompactionType(
                 const value_a = &values_in_a[index_in_a];
                 const value_b = &values_in_b[index_in_b];
                 switch (std.math.order(key_from_value(value_a), key_from_value(value_b))) {
-                    .lt => {
+                    .lt => { // Pick value from level a.
                         index_in_a += 1;
                         if (drop_tombstones and tombstone(value_a)) {
                             assert(Table.usage != .secondary_index);
@@ -1909,12 +1918,12 @@ pub fn CompactionType(
                         values_out[index_out] = value_a.*;
                         index_out += 1;
                     },
-                    .gt => {
+                    .gt => { // Pick value from level b.
                         index_in_b += 1;
                         values_out[index_out] = value_b.*;
                         index_out += 1;
                     },
-                    .eq => {
+                    .eq => { // Values have equal keys -- collapse them!
                         index_in_a += 1;
                         index_in_b += 1;
 
