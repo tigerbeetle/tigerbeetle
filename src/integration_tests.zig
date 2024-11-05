@@ -512,8 +512,8 @@ test "vortex smoke" {
     try shell.exec(
         \\ unshare --net --fork --map-root-user --pid
         \\   {vortex} supervisor
-        \\      --test-duration-minutes=1 
-        \\      --tigerbeetle-executable={tigerbeetle} 
+        \\      --test-duration-minutes=1
+        \\      --tigerbeetle-executable={tigerbeetle}
     , .{
         .vortex = vortex_exe,
         .tigerbeetle = tigerbeetle,

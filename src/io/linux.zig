@@ -1662,7 +1662,10 @@ pub const IO = struct {
     fn fs_supports_direct_io(dir_fd: fd_t) !bool {
         if (!@hasField(posix.O, "DIRECT")) return false;
 
-        const path = "fs_supports_direct_io";
+        var cookie: [16]u8 = .{'0'} ** 16;
+        _ = stdx.array_print(16, &cookie, "{0x}", .{std.crypto.random.int(u64)});
+
+        const path: [:0]const u8 = "fs_supports_direct_io-" ++ cookie ++ "";
         const dir = std.fs.Dir{ .fd = dir_fd };
         const flags: posix.O = .{ .CLOEXEC = true, .CREAT = true, .TRUNC = true };
         const fd = try posix.openatZ(dir_fd, path, flags, 0o666);
