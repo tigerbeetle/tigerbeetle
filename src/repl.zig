@@ -460,6 +460,7 @@ pub const Parser = struct {
 
 const repl_history_entries = 256;
 const repl_history_entry_bytes_with_nul = 512;
+const repl_history_entry_bytes_without_nul = 511;
 
 pub fn ReplType(comptime MessageBus: type) type {
     const Client = vsr.ClientType(StateMachine, MessageBus);
@@ -475,6 +476,11 @@ pub fn ReplType(comptime MessageBus: type) type {
         client: *Client,
         terminal: *Terminal,
         history: HistoryBuffer,
+
+        /// Fixed-capacity buffer for reading input strings.
+        buffer: std.ArrayList(u8),
+        /// Saved input string while navigating through history.
+        buffer_outside_history: std.ArrayList(u8),
 
         const Repl = @This();
 
@@ -526,24 +532,23 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         const prompt = "> ";
-        const single_repl_input_max = 10 * 4 * 1024;
 
         fn read_until_newline_or_eof_alloc(
             repl: *Repl,
             allocator: std.mem.Allocator,
         ) !?[]u8 {
+            repl.buffer.clearRetainingCapacity();
+            repl.buffer_outside_history.clearRetainingCapacity();
+
             try repl.terminal.prompt_mode_set();
             defer repl.terminal.prompt_mode_unset() catch {};
 
             var terminal_screen = try repl.terminal.get_screen(allocator);
 
-            var buffer = std.ArrayList(u8).init(allocator);
             var buffer_index: usize = 0;
             var history_index = repl.history.count;
-            // Cache the buffer the user is typing into before navigating through history.
-            var buffer_outside_history = std.ArrayList(u8).init(allocator);
 
-            while (buffer.items.len < single_repl_input_max) {
+            while (true) {
                 const user_input = try repl.terminal.read_user_input() orelse return null;
                 switch (user_input) {
                     .ctrlc => {
@@ -554,10 +559,14 @@ pub fn ReplType(comptime MessageBus: type) type {
                     },
                     .newline => {
                         try repl.terminal.print("\n", .{});
-                        return try buffer.toOwnedSlice();
+                        return repl.buffer.items;
                     },
                     .printable => |character| {
-                        const is_append = buffer_index == buffer.items.len;
+                        if (repl.buffer.items.len == repl.buffer.capacity) {
+                            continue;
+                        }
+
+                        const is_append = buffer_index == repl.buffer.items.len;
                         if (is_append) {
                             terminal_screen.update_cursor_position(1);
                             try repl.terminal.print("{c}", .{character});
@@ -577,7 +586,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             // the buffer after redrawing, and move it back to one position after
                             // the newly inserted character.
                             const buffer_redraw_len: isize = @intCast(
-                                buffer.items.len - buffer_index,
+                                repl.buffer.items.len - buffer_index,
                             );
                             // It's crucial to update in two steps because the terminal may have
                             // scrolled down as part of the text redraw.
@@ -585,13 +594,13 @@ pub fn ReplType(comptime MessageBus: type) type {
                             terminal_screen.update_cursor_position(1 - buffer_redraw_len);
                             try repl.terminal.print("{c}{s}\x1b[{};{}H", .{
                                 character,
-                                buffer.items[buffer_index..],
+                                repl.buffer.items[buffer_index..],
                                 terminal_screen.cursor_row,
                                 terminal_screen.cursor_column,
                             });
                         }
 
-                        try buffer.insert(buffer_index, character);
+                        repl.buffer.insertAssumeCapacity(buffer_index, character);
                         buffer_index += 1;
                     },
                     .backspace => if (buffer_index > 0) {
@@ -601,15 +610,15 @@ pub fn ReplType(comptime MessageBus: type) type {
                             terminal_screen.cursor_column,
                             // If we're deleting mid-buffer, we need to redraw everything that
                             // comes after as well.
-                            if (buffer_index < buffer.items.len)
-                                buffer.items[buffer_index..]
+                            if (buffer_index < repl.buffer.items.len)
+                                repl.buffer.items[buffer_index..]
                             else
                                 "",
                             terminal_screen.cursor_row,
                             terminal_screen.cursor_column,
                         });
                         buffer_index -= 1;
-                        _ = buffer.orderedRemove(buffer_index);
+                        _ = repl.buffer.orderedRemove(buffer_index);
                     },
                     .left => if (buffer_index > 0) {
                         terminal_screen.update_cursor_position(-1);
@@ -619,7 +628,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         });
                         buffer_index -= 1;
                     },
-                    .right => if (buffer_index < buffer.items.len) {
+                    .right => if (buffer_index < repl.buffer.items.len) {
                         terminal_screen.update_cursor_position(1);
                         try repl.terminal.print("\x1b[{};{}H", .{
                             terminal_screen.cursor_row,
@@ -653,20 +662,22 @@ pub fn ReplType(comptime MessageBus: type) type {
                         });
 
                         if (history_index == repl.history.count) {
-                            buffer_outside_history.clearRetainingCapacity();
-                            try buffer_outside_history.appendSlice(buffer.items);
+                            repl.buffer_outside_history.clearRetainingCapacity();
+                            repl.buffer_outside_history.appendSliceAssumeCapacity(
+                                repl.buffer.items,
+                            );
                         }
                         history_index = history_index_next;
 
-                        buffer.clearRetainingCapacity();
-                        try buffer.appendSlice(buffer_next);
-                        buffer_index = buffer.items.len;
+                        repl.buffer.clearRetainingCapacity();
+                        repl.buffer.appendSliceAssumeCapacity(buffer_next);
+                        buffer_index = repl.buffer.items.len;
                     },
                     .down => if (history_index < repl.history.count) {
                         const history_index_next = history_index + 1;
 
                         const buffer_next = if (history_index_next == repl.history.count)
-                            buffer_outside_history.items
+                            repl.buffer_outside_history.items
                         else brk: {
                             const buffer_next_full = repl.history.get_ptr(history_index_next).?;
                             const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
@@ -695,14 +706,14 @@ pub fn ReplType(comptime MessageBus: type) type {
                             terminal_screen.cursor_column,
                         });
 
-                        buffer.clearRetainingCapacity();
-                        try buffer.appendSlice(buffer_next);
-                        buffer_index = buffer.items.len;
+                        repl.buffer.clearRetainingCapacity();
+                        repl.buffer.appendSliceAssumeCapacity(buffer_next);
+                        buffer_index = repl.buffer.items.len;
                     },
                     .unhandled => {},
                 }
             }
-            return error.StreamTooLong;
+            unreachable;
         }
 
         fn do_repl(
@@ -817,6 +828,14 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .interactive = statements.len == 0,
                 .terminal = undefined,
                 .history = try HistoryBuffer.init(allocator, repl_history_entries),
+                .buffer = try std.ArrayList(u8).initCapacity(
+                    allocator,
+                    repl_history_entry_bytes_without_nul,
+                ),
+                .buffer_outside_history = try std.ArrayList(u8).initCapacity(
+                    allocator,
+                    repl_history_entry_bytes_without_nul,
+                ),
             };
 
             var terminal = try Terminal.init(allocator, repl.interactive);
