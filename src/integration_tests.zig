@@ -491,12 +491,14 @@ test "in-place upgrade" {
         }
     };
 
-    const seed = std.crypto.random.int(u64);
-    log.info("seed = {}", .{seed});
-    var context = try Context.init(.{ .seed = seed });
-    defer context.deinit();
+    for (0..10) |attempt| {
+        const seed = std.crypto.random.int(u64);
+        log.info("seed = {} attempt = {}", .{ seed, attempt });
+        var context = try Context.init(.{ .seed = seed });
+        defer context.deinit();
 
-    try context.run();
+        try context.run();
+    }
 }
 
 test "vortex smoke" {
