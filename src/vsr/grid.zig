@@ -1180,12 +1180,18 @@ pub fn GridType(comptime Storage: type) type {
             assert(requests.len == constants.grid_repair_reads_max);
 
             // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
-            // continue. We now divide the buffer up between `read_global_queue` and
+            // continue. We divide the buffer up between `read_global_queue` and
             // `blocks_missing.faulty_blocks` so that we always request blocks from both queues.
+            // Surplus from `blocks_missing.faulty_blocks` may be used by `read_global_queue`.
+            const request_faults_count_max = requests.len -
+                @min(@divFloor(requests.len, 2), grid.blocks_missing.faulty_blocks.count());
+            assert(request_faults_count_max > 0);
+            assert(request_faults_count_max <= requests.len);
+            assert(request_faults_count_max >= @divFloor(requests.len, 2));
+
             const request_faults_count = @min(
                 grid.read_global_queue.count,
-                // Surplus from `blocks_missing.faulty_blocks` may be used by `read_global_queue`.
-                requests.len / 2 + (requests.len / 2 -| grid.blocks_missing.faulty_blocks.count()),
+                request_faults_count_max,
             );
             // (Note that many – but not all – of these blocks are also in the GridBlocksMissing.
             // The `read_global_queue` is a FIFO, whereas the GridBlocksMissing has a fixed
