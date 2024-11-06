@@ -78,6 +78,7 @@ pub fn build(b: *std.Build) !void {
         .@"test" = b.step("test", "Run all tests"),
         .test_fmt = b.step("test:fmt", "Check formatting"),
         .test_integration = b.step("test:integration", "Run integration tests"),
+        .test_integration_build = b.step("test:integration:build", "Build integration tests"),
         .test_unit = b.step("test:unit", "Run unit tests"),
         .test_unit_build = b.step("test:unit:build", "Build unit tests"),
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
@@ -201,9 +202,10 @@ pub fn build(b: *std.Build) !void {
 
     // zig build test -- "test filter"
     build_test(b, .{
-        .test_unit_build = build_steps.test_unit_build,
         .test_unit = build_steps.test_unit,
+        .test_unit_build = build_steps.test_unit_build,
         .test_integration = build_steps.test_integration,
+        .test_integration_build = build_steps.test_integration_build,
         .test_fmt = build_steps.test_fmt,
         .@"test" = build_steps.@"test",
     }, .{
@@ -567,9 +569,10 @@ fn build_aof(
 fn build_test(
     b: *std.Build,
     steps: struct {
-        test_unit_build: *std.Build.Step,
         test_unit: *std.Build.Step,
+        test_unit_build: *std.Build.Step,
         test_integration: *std.Build.Step,
+        test_integration_build: *std.Build.Step,
         test_fmt: *std.Build.Step,
         @"test": *std.Build.Step,
     },
@@ -602,7 +605,10 @@ fn build_test(
     }
     steps.test_unit.dependOn(&run_unit_tests.step);
 
-    build_test_integration(b, steps.test_integration, .{
+    build_test_integration(b, .{
+        .test_integration = steps.test_integration,
+        .test_integration_build = steps.test_integration_build,
+    }, .{
         .tb_client_header = options.tb_client_header.path,
         .llvm_objcopy = options.llvm_objcopy,
         .target = options.target,
@@ -619,12 +625,19 @@ fn build_test(
     }
 }
 
-fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step, options: struct {
-    tb_client_header: std.Build.LazyPath,
-    llvm_objcopy: ?[]const u8,
-    target: std.Build.ResolvedTarget,
-    mode: std.builtin.OptimizeMode,
-}) void {
+fn build_test_integration(
+    b: *std.Build,
+    steps: struct {
+        test_integration: *std.Build.Step,
+        test_integration_build: *std.Build.Step,
+    },
+    options: struct {
+        tb_client_header: std.Build.LazyPath,
+        llvm_objcopy: ?[]const u8,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
     // For integration tests, we build an independent copy of TigerBeetle with "real" config and
     // multiversioning.
     const vsr_options, const vsr_module = build_vsr_module(b, .{
@@ -669,13 +682,14 @@ fn build_test_integration(b: *std.Build, step_test_integration: *std.Build.Step,
         .filters = b.args orelse &.{},
     });
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
+    steps.test_integration_build.dependOn(&b.addInstallArtifact(integration_tests, .{}).step);
 
     const run_integration_tests = b.addRunArtifact(integration_tests);
     if (b.args != null) { // Don't cache test results if running a specific test.
         run_integration_tests.has_side_effects = true;
     }
     run_integration_tests.has_side_effects = true;
-    step_test_integration.dependOn(&run_integration_tests.step);
+    steps.test_integration.dependOn(&run_integration_tests.step);
 }
 
 fn build_test_jni(
