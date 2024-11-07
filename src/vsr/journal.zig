@@ -941,7 +941,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            if (!message.header.valid_checksum_body(message.body())) {
+            if (!message.header.valid_checksum_body(message.body_used())) {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
@@ -1176,7 +1176,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // Check `valid_checksum_body` here rather than in `recover_done` so that we don't need
             // to hold onto the whole message (just the header).
             if (read.message.header.valid_checksum() and
-                read.message.header.valid_checksum_body(read.message.body()))
+                read.message.header.valid_checksum_body(read.message.body_used()))
             {
                 journal.headers[slot.index] = read.message.header.*;
             }

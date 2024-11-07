@@ -907,8 +907,8 @@ pub const Simulator = struct {
                         commit.client_index.?,
                         commit.reply.header.operation.cast(StateMachine),
                         commit.reply.header.timestamp,
-                        commit.prepare.body(),
-                        commit.reply.body(),
+                        commit.prepare.body_used(),
+                        commit.reply.body_used(),
                     );
                 }
             }

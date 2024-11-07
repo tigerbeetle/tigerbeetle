@@ -1451,7 +1451,7 @@ pub fn ReplicaType(
                         .releases = .{},
                     };
 
-                    const releases_all = std.mem.bytesAsSlice(vsr.Release, message.body());
+                    const releases_all = std.mem.bytesAsSlice(vsr.Release, message.body_used());
                     const releases = releases_all[0..message.header.release_count];
                     assert(releases.len == message.header.release_count);
                     vsr.verify_release_list(releases, message.header.release);
@@ -2547,7 +2547,7 @@ pub fn ReplicaType(
             }
 
             response.header.size = @intCast(@sizeOf(Header) * (1 + count));
-            response.header.set_checksum_body(response.body());
+            response.header.set_checksum_body(response.body_used());
             response.header.set_checksum();
 
             // Assert that the headers are valid.
@@ -2684,7 +2684,7 @@ pub fn ReplicaType(
 
             // TODO Rate limit replicas that keep requesting the same blocks (maybe via
             // checksum_body?) to avoid unnecessary work in the presence of an asymmetric partition.
-            const requests = std.mem.bytesAsSlice(vsr.BlockRequest, message.body());
+            const requests = std.mem.bytesAsSlice(vsr.BlockRequest, message.body_used());
             assert(requests.len > 0);
 
             next_request: for (requests, 0..) |*request, i| {
@@ -2907,7 +2907,7 @@ pub fn ReplicaType(
             // place if a new binary is available on disk.
             vsr.verify_release_list(self.releases_bundled.const_slice(), self.release);
 
-            const ping_versions = std.mem.bytesAsSlice(vsr.Release, message.body());
+            const ping_versions = std.mem.bytesAsSlice(vsr.Release, message.body_used());
             stdx.copy_disjoint(
                 .inexact,
                 vsr.Release,
@@ -2915,7 +2915,7 @@ pub fn ReplicaType(
                 self.releases_bundled.const_slice(),
             );
             @memset(ping_versions[self.releases_bundled.count()..], vsr.Release.zero);
-            message.header.set_checksum_body(message.body());
+            message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             assert(message.header.view <= self.view);
@@ -4002,7 +4002,7 @@ pub fn ReplicaType(
                     prepare.header.release,
                     prepare.header.op,
                     prepare_operation,
-                    prepare.body(),
+                    prepare.body_used(),
                 );
                 return .pending;
             } else {
@@ -4463,7 +4463,7 @@ pub fn ReplicaType(
                     prepare.header.op,
                     prepare.header.timestamp,
                     prepare.header.operation.cast(StateMachine),
-                    prepare.buffer[@sizeOf(Header)..prepare.header.size],
+                    prepare.body_used(),
                     reply.buffer[@sizeOf(Header)..],
                 ),
             };
@@ -4506,7 +4506,7 @@ pub fn ReplicaType(
             };
             assert(reply.header.epoch == 0);
 
-            reply.header.set_checksum_body(reply.body());
+            reply.header.set_checksum_body(reply.body_used());
             // See `send_reply_message_to_client` for why we compute the checksum twice.
             reply.header.context = reply.header.calculate_checksum();
             reply.header.set_checksum();
@@ -4589,7 +4589,7 @@ pub fn ReplicaType(
 
                 const register_request = std.mem.bytesAsValue(
                     vsr.RegisterRequest,
-                    prepare.body()[0..@sizeOf(vsr.RegisterRequest)],
+                    prepare.body_used()[0..@sizeOf(vsr.RegisterRequest)],
                 );
                 assert(register_request.batch_size_limit > 0);
                 assert(register_request.batch_size_limit <= constants.message_body_size_max);
@@ -4625,7 +4625,7 @@ pub fn ReplicaType(
 
             const reconfiguration_request = std.mem.bytesAsValue(
                 vsr.ReconfigurationRequest,
-                prepare.body()[0..@sizeOf(vsr.ReconfigurationRequest)],
+                prepare.body_used()[0..@sizeOf(vsr.ReconfigurationRequest)],
             );
             assert(reconfiguration_request.result != .reserved);
 
@@ -4657,7 +4657,7 @@ pub fn ReplicaType(
 
             const request = std.mem.bytesAsValue(
                 vsr.UpgradeRequest,
-                prepare.body()[0..@sizeOf(vsr.UpgradeRequest)],
+                prepare.body_used()[0..@sizeOf(vsr.UpgradeRequest)],
             );
             assert(request.release.value >= self.release.value);
             assert(stdx.zeroed(&request.reserved));
@@ -4851,17 +4851,17 @@ pub fn ReplicaType(
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                message.body()[0..@sizeOf(vsr.CheckpointState)],
+                message.body_used()[0..@sizeOf(vsr.CheckpointState)],
                 std.mem.asBytes(&self.superblock.working.vsr_state.checkpoint),
             );
             comptime assert(@sizeOf(vsr.CheckpointState) % @sizeOf(Header) == 0);
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                message.body()[@sizeOf(vsr.CheckpointState)..],
+                message.body_used()[@sizeOf(vsr.CheckpointState)..],
                 std.mem.sliceAsBytes(self.view_headers.array.const_slice()),
             );
-            message.header.set_checksum_body(message.body());
+            message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             return message.ref();
@@ -4962,7 +4962,7 @@ pub fn ReplicaType(
             defer self.message_bus.unref(message);
 
             message.header.* = header;
-            message.header.set_checksum_body(message.body());
+            message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             return message.ref();
@@ -5255,14 +5255,14 @@ pub fn ReplicaType(
                 if (!self.state_machine.input_valid(
                     message.header.release,
                     operation,
-                    message.body(),
+                    message.body_used(),
                 )) {
                     log.warn(
                         "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
                         .{
                             self.replica,
                             @tagName(operation),
-                            message.body().len,
+                            message.body_used().len,
                         },
                     );
                     self.send_eviction_message_to_client(
@@ -5293,7 +5293,7 @@ pub fn ReplicaType(
             if (message.header.operation == .upgrade) {
                 const upgrade_request = std.mem.bytesAsValue(
                     vsr.UpgradeRequest,
-                    message.body()[0..@sizeOf(vsr.UpgradeRequest)],
+                    message.body_used()[0..@sizeOf(vsr.UpgradeRequest)],
                 );
 
                 if (upgrade_request.release.value == self.release.value) {
@@ -6170,7 +6170,7 @@ pub fn ReplicaType(
                 .upgrade => {
                     const upgrade_request = std.mem.bytesAsValue(
                         vsr.UpgradeRequest,
-                        request.message.body()[0..@sizeOf(vsr.UpgradeRequest)],
+                        request.message.body_used()[0..@sizeOf(vsr.UpgradeRequest)],
                     );
 
                     if (self.release.value == upgrade_request.release.value) {
@@ -6183,7 +6183,7 @@ pub fn ReplicaType(
                     self.state_machine.prepare(
                         request.message.header.release,
                         request.message.header.operation.cast(StateMachine),
-                        request.message.body(),
+                        request.message.body_used(),
                     );
                 },
             }
@@ -6230,7 +6230,7 @@ pub fn ReplicaType(
                 .request = request_header.request,
                 .operation = request_header.operation,
             };
-            message.header.set_checksum_body(message.body());
+            message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             log.debug("{}: primary_pipeline_prepare: prepare {}", .{
@@ -6282,7 +6282,7 @@ pub fn ReplicaType(
 
                 const register_request = std.mem.bytesAsValue(
                     vsr.RegisterRequest,
-                    request.body()[0..@sizeOf(vsr.RegisterRequest)],
+                    request.body_used()[0..@sizeOf(vsr.RegisterRequest)],
                 );
                 assert(register_request.batch_size_limit == 0);
                 assert(stdx.zeroed(&register_request.reserved));
@@ -6305,7 +6305,7 @@ pub fn ReplicaType(
             );
             const reconfiguration_request = std.mem.bytesAsValue(
                 vsr.ReconfigurationRequest,
-                request.body()[0..@sizeOf(vsr.ReconfigurationRequest)],
+                request.body_used()[0..@sizeOf(vsr.ReconfigurationRequest)],
             );
             reconfiguration_request.*.result = reconfiguration_request.validate(.{
                 .members = &self.superblock.working.vsr_state.members,
@@ -7609,10 +7609,10 @@ pub fn ReplicaType(
             stdx.copy_disjoint(
                 .exact,
                 Header.Prepare,
-                std.mem.bytesAsSlice(Header.Prepare, message.body()),
+                std.mem.bytesAsSlice(Header.Prepare, message.body_used()),
                 self.view_headers.array.const_slice(),
             );
-            message.header.set_checksum_body(message.body());
+            message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             assert(message.header.op >= self.op);
@@ -7977,7 +7977,7 @@ pub fn ReplicaType(
                     }
                     assert(message.header.command != .do_view_change or std.mem.eql(
                         u8,
-                        message.body(),
+                        message.body_used(),
                         std.mem.sliceAsBytes(self.superblock.working.vsr_headers().slice),
                     ));
                 }
@@ -9674,7 +9674,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .size = @sizeOf(Header) + requests_count * @sizeOf(vsr.BlockRequest),
             };
-            message.header.set_checksum_body(message.body());
+            message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             self.send_message_to_replica(self.choose_any_other_replica(), message);
@@ -9782,10 +9782,10 @@ pub fn ReplicaType(
                 .session = 0,
             };
 
-            stdx.copy_disjoint(.exact, u8, request.body(), body);
+            stdx.copy_disjoint(.exact, u8, request.body_used(), body);
             @memset(request.buffer[request.header.size..vsr.sector_ceil(request.header.size)], 0);
 
-            request.header.set_checksum_body(request.body());
+            request.header.set_checksum_body(request.body_used());
             request.header.set_checksum();
 
             self.send_message_to_replica(self.replica, request);
@@ -10367,17 +10367,17 @@ fn message_body_as_headers_unchecked(message: *const Message) []const Header.Pre
 
     return std.mem.bytesAsSlice(
         Header.Prepare,
-        message.body(),
+        message.body_used(),
     );
 }
 
 fn start_view_message_checkpoint(message: *const Message.StartView) *const vsr.CheckpointState {
     assert(message.header.command == .start_view);
-    assert(message.body().len > @sizeOf(vsr.CheckpointState));
+    assert(message.body_used().len > @sizeOf(vsr.CheckpointState));
 
     const checkpoint = std.mem.bytesAsValue(
         vsr.CheckpointState,
-        message.body()[0..@sizeOf(vsr.CheckpointState)],
+        message.body_used()[0..@sizeOf(vsr.CheckpointState)],
     );
     assert(checkpoint.header.valid_checksum());
     assert(stdx.zeroed(&checkpoint.reserved));
@@ -10393,7 +10393,7 @@ fn start_view_message_headers(message: *const Message.StartView) []const Header.
     comptime assert(@sizeOf(vsr.CheckpointState) % @alignOf(vsr.Header) == 0);
     const headers: []const vsr.Header.Prepare = @alignCast(std.mem.bytesAsSlice(
         Header.Prepare,
-        message.body()[@sizeOf(vsr.CheckpointState)..],
+        message.body_used()[@sizeOf(vsr.CheckpointState)..],
     ));
     assert(headers.len > 0);
     vsr.Headers.ViewChangeSlice.verify(.{ .command = .start_view, .slice = headers });

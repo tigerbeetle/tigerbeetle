@@ -244,7 +244,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             std.mem.bytesAsValue(
                 vsr.RegisterRequest,
-                message.body()[0..@sizeOf(vsr.RegisterRequest)],
+                message.body_used()[0..@sizeOf(vsr.RegisterRequest)],
             ).* = .{
                 .batch_size_limit = 0,
             };
@@ -297,7 +297,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .size = @intCast(@sizeOf(Header) + events.len),
             };
 
-            stdx.copy_disjoint(.exact, u8, message.body(), events);
+            stdx.copy_disjoint(.exact, u8, message.body_used(), events);
             self.raw_request(callback, user_data, message);
         }
 
@@ -422,7 +422,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
             assert(reply.header.valid_checksum());
-            assert(reply.header.valid_checksum_body(reply.body()));
+            assert(reply.header.valid_checksum_body(reply.body_used()));
             assert(reply.header.command == .reply);
             assert(reply.header.release.value == self.release.value);
 
@@ -513,7 +513,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
                 const result = std.mem.bytesAsValue(
                     vsr.RegisterResult,
-                    reply.body()[0..@sizeOf(vsr.RegisterResult)],
+                    reply.body_used()[0..@sizeOf(vsr.RegisterResult)],
                 );
                 assert(result.batch_size_limit > 0);
                 assert(result.batch_size_limit <= constants.message_body_size_max);
@@ -523,12 +523,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 inflight.callback.register(inflight.user_data, result);
             } else {
                 // The message is the result of raw_request(), so invoke the user callback.
-                // NOTE: the callback is allowed to mutate `reply.body()` here.
+                // NOTE: the callback is allowed to mutate `reply.body_used()` here.
                 inflight.callback.request(
                     inflight.user_data,
                     inflight_vsr_operation.cast(StateMachine),
                     reply.header.timestamp,
-                    reply.body(),
+                    reply.body_used(),
                 );
             }
         }
@@ -578,7 +578,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             defer self.message_bus.unref(message);
 
             message.header.* = header;
-            message.header.set_checksum_body(message.body());
+            message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             return message.ref();
@@ -636,7 +636,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // to be sent for the first time. However, beyond that, it is not necessary to update
             // the view number again, for example if it should change between now and resending.
             message.header.view = self.view;
-            message.header.set_checksum_body(message.body());
+            message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             // The checksum of this request becomes the parent of our next reply:

@@ -129,7 +129,7 @@ pub const MessagePool = struct {
             return message;
         }
 
-        pub fn body(message: *const Message) []align(@sizeOf(Header)) u8 {
+        pub fn body_used(message: *const Message) []align(@sizeOf(Header)) u8 {
             return message.buffer[@sizeOf(Header)..message.header.size];
         }
 
@@ -316,8 +316,8 @@ fn MessageType(comptime command: vsr.Command) type {
             return @ptrCast(message.base().ref());
         }
 
-        pub fn body(message: *const CommandMessage) []align(@sizeOf(Header)) u8 {
-            return message.base_const().body();
+        pub fn body_used(message: *const CommandMessage) []align(@sizeOf(Header)) u8 {
+            return message.base_const().body_used();
         }
     };
 }

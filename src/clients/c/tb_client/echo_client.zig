@@ -112,7 +112,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                         inflight.user_data,
                         operation.cast(Self.StateMachine),
                         timestamp,
-                        reply.body(),
+                        reply.body_used(),
                     );
                 },
                 .register => |callback| {
@@ -181,7 +181,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .size = @intCast(@sizeOf(Header) + events.len),
             };
 
-            stdx.copy_disjoint(.exact, u8, message.body(), events);
+            stdx.copy_disjoint(.exact, u8, message.body_used(), events);
             self.raw_request(callback, user_data, message);
         }
 

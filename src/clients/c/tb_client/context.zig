@@ -453,7 +453,7 @@ pub fn ContextType(
                     stdx.maybe(batched.data == null);
                     break :empty &[0]u8{};
                 };
-                stdx.copy_disjoint(.inexact, u8, message.body()[offset..], event_data);
+                stdx.copy_disjoint(.inexact, u8, message.body_used()[offset..], event_data);
                 offset += @intCast(event_data.len);
             }
 
