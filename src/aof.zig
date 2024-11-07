@@ -654,7 +654,7 @@ test "aof write / read" {
         .size = @intCast(@sizeOf(Header) + demo_payload.len),
     };
 
-    stdx.copy_disjoint(.exact, u8, demo_message.body(), demo_payload);
+    stdx.copy_disjoint(.exact, u8, demo_message.body_used(), demo_payload);
     demo_message.header.set_checksum_body(demo_payload);
     demo_message.header.set_checksum();
 
