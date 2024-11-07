@@ -85,7 +85,7 @@ pub fn SetAssociativeCacheType(
     assert(clock_hands_per_line > 0);
 
     return struct {
-        const BitIterator = @This();
+        const SetAssociativeCache = @This();
 
         const Tag = meta.Int(.unsigned, layout.tag_bits);
         const Count = meta.Int(.unsigned, layout.clock_bits);
@@ -143,7 +143,11 @@ pub fn SetAssociativeCacheType(
 
         pub const Options = struct { name: []const u8 };
 
-        pub fn init(allocator: mem.Allocator, value_count_max: u64, options: Options) !BitIterator {
+        pub fn init(
+            allocator: mem.Allocator,
+            value_count_max: u64,
+            options: Options,
+        ) !SetAssociativeCache {
             const sets = @divExact(value_count_max, layout.ways);
 
             assert(value_count_max > 0);
@@ -183,11 +187,11 @@ pub fn SetAssociativeCacheType(
             const clocks = try allocator.alloc(u64, div_ceil(clocks_size, @sizeOf(u64)));
             errdefer allocator.free(clocks);
 
-            // Explicitly allocated so that get / get_index can be `*const BitIterator`.
+            // Explicitly allocated so that get / get_index can be `*const SetAssociativeCache`.
             const metrics = try allocator.create(Metrics);
             errdefer allocator.destroy(metrics);
 
-            var self = BitIterator{
+            var self = SetAssociativeCache{
                 .name = options.name,
                 .sets = sets,
                 .tags = tags,
@@ -202,7 +206,7 @@ pub fn SetAssociativeCacheType(
             return self;
         }
 
-        pub fn deinit(self: *BitIterator, allocator: mem.Allocator) void {
+        pub fn deinit(self: *SetAssociativeCache, allocator: mem.Allocator) void {
             assert(self.sets > 0);
             self.sets = 0;
 
@@ -213,14 +217,14 @@ pub fn SetAssociativeCacheType(
             allocator.destroy(self.metrics);
         }
 
-        pub fn reset(self: *BitIterator) void {
+        pub fn reset(self: *SetAssociativeCache) void {
             @memset(self.tags, 0);
             @memset(self.counts.words, 0);
             @memset(self.clocks.words, 0);
             self.metrics.* = .{};
         }
 
-        pub fn get_index(self: *const BitIterator, key: Key) ?usize {
+        pub fn get_index(self: *const SetAssociativeCache, key: Key) ?usize {
             const set = self.associate(key);
             if (self.search(set, key)) |way| {
                 self.metrics.hits += 1;
@@ -233,14 +237,14 @@ pub fn SetAssociativeCacheType(
             }
         }
 
-        pub fn get(self: *const BitIterator, key: Key) ?*align(value_alignment) Value {
+        pub fn get(self: *const SetAssociativeCache, key: Key) ?*align(value_alignment) Value {
             const index = self.get_index(key) orelse return null;
             return @alignCast(&self.values[index]);
         }
 
         /// Remove a key from the set associative cache if present.
         /// Returns the removed value, if any.
-        pub fn remove(self: *BitIterator, key: Key) ?Value {
+        pub fn remove(self: *SetAssociativeCache, key: Key) ?Value {
             const set = self.associate(key);
             const way = self.search(set, key) orelse return null;
 
@@ -253,7 +257,7 @@ pub fn SetAssociativeCacheType(
 
         /// Hint that the key is less likely to be accessed in the future, without actually removing
         /// it from the cache.
-        pub fn demote(self: *BitIterator, key: Key) void {
+        pub fn demote(self: *SetAssociativeCache, key: Key) void {
             const set = self.associate(key);
             const way = self.search(set, key) orelse return;
 
@@ -261,7 +265,7 @@ pub fn SetAssociativeCacheType(
         }
 
         /// If the key is present in the set, returns the way. Otherwise returns null.
-        inline fn search(self: *const BitIterator, set: Set, key: Key) ?usize {
+        inline fn search(self: *const SetAssociativeCache, set: Set, key: Key) ?usize {
             const ways = search_tags(set.tags, set.tag);
 
             var it = BitIteratorType(Ways){ .bits = ways };
@@ -288,7 +292,7 @@ pub fn SetAssociativeCacheType(
 
         /// Upsert a value, evicting an older entry if needed. The evicted value, if an update or
         /// insert was performed and the index at which the value was inserted is returned.
-        pub fn upsert(self: *BitIterator, value: *const Value) struct {
+        pub fn upsert(self: *SetAssociativeCache, value: *const Value) struct {
             index: usize,
             updated: UpdateOrInsert,
             evicted: ?Value,
@@ -357,7 +361,7 @@ pub fn SetAssociativeCacheType(
             tags: *[layout.ways]Tag,
             values: *[layout.ways]Value,
 
-            fn inspect(set: Set, sac: BitIterator) void {
+            fn inspect(set: Set, sac: SetAssociativeCache) void {
                 const clock_index = @divExact(set.offset, layout.ways);
                 std.debug.print(
                     \\{{
@@ -386,7 +390,7 @@ pub fn SetAssociativeCacheType(
             }
         };
 
-        inline fn associate(self: *const BitIterator, key: Key) Set {
+        inline fn associate(self: *const SetAssociativeCache, key: Key) Set {
             const entropy = hash(key);
 
             const tag = @as(Tag, @truncate(entropy >> math.log2_int(u64, self.sets)));
@@ -695,11 +699,11 @@ test "PackedUnsignedIntegerArray: unit" {
     );
 }
 
-fn PackedUnsignedIntegerArrayFuzzTest(comptime UInt: type) type {
+fn ContextType(comptime UInt: type) type {
     const testing = std.testing;
 
     return struct {
-        const BitIterator = @This();
+        const Context = @This();
 
         const Array = PackedUnsignedIntegerArray(UInt);
         random: std.rand.Random,
@@ -707,7 +711,7 @@ fn PackedUnsignedIntegerArrayFuzzTest(comptime UInt: type) type {
         array: Array,
         reference: []UInt,
 
-        fn init(random: std.rand.Random, len: usize) !BitIterator {
+        fn init(random: std.rand.Random, len: usize) !Context {
             const words = try testing.allocator.alloc(u64, @divExact(len * @bitSizeOf(UInt), 64));
             errdefer testing.allocator.free(words);
 
@@ -717,19 +721,19 @@ fn PackedUnsignedIntegerArrayFuzzTest(comptime UInt: type) type {
             @memset(words, 0);
             @memset(reference, 0);
 
-            return BitIterator{
+            return .{
                 .random = random,
                 .array = Array{ .words = words },
                 .reference = reference,
             };
         }
 
-        fn deinit(context: *BitIterator) void {
+        fn deinit(context: *Context) void {
             testing.allocator.free(context.array.words);
             testing.allocator.free(context.reference);
         }
 
-        fn run(context: *BitIterator) !void {
+        fn run(context: *Context) !void {
             var iterations: usize = 0;
             while (iterations < 10_000) : (iterations += 1) {
                 const index = context.random.uintLessThanBiased(usize, context.reference.len);
@@ -742,7 +746,7 @@ fn PackedUnsignedIntegerArrayFuzzTest(comptime UInt: type) type {
             }
         }
 
-        fn verify(context: *BitIterator) !void {
+        fn verify(context: *Context) !void {
             for (context.reference, 0..) |value, index| {
                 try testing.expectEqual(value, context.array.get(index));
             }
@@ -757,7 +761,7 @@ test "PackedUnsignedIntegerArray: fuzz" {
     const random = prng.random();
 
     inline for (.{ u1, u2, u4 }) |UInt| {
-        const Context = PackedUnsignedIntegerArrayFuzzTest(UInt);
+        const Context = ContextType(UInt);
 
         var context = try Context.init(random, 1024);
         defer context.deinit();
