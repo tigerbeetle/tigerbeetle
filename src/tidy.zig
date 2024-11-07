@@ -144,6 +144,10 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         }
     }
 
+    if (std.mem.indexOf(u8, source, "Self = " ++ "@This()") != null) {
+        return "use a type name instead of Self";
+    }
+
     return null;
 }
 
