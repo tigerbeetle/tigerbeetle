@@ -111,20 +111,20 @@ pub const Time = struct {
 
     fn realtime_windows() i64 {
         assert(is_windows);
-        const kernel32 = struct {
-            const GetSystemTimePreciseAsFileTime = @extern(
-                *const fn (
-                    lpFileTime: *os.windows.FILETIME,
-                ) callconv(os.windows.WINAPI) void,
-                .{
-                    .library_name = "kernel32",
-                    .name = "GetSystemTimePreciseAsFileTime",
-                },
-            );
-        };
+        // Declaring the function with an alternative name because `CamelCase` functions are
+        // by convention, used for building generic types.
+        const get_system_time_precise_as_file_time = @extern(
+            *const fn (
+                lpFileTime: *os.windows.FILETIME,
+            ) callconv(os.windows.WINAPI) void,
+            .{
+                .library_name = "kernel32",
+                .name = "GetSystemTimePreciseAsFileTime",
+            },
+        );
 
         var ft: os.windows.FILETIME = undefined;
-        kernel32.GetSystemTimePreciseAsFileTime(&ft);
+        get_system_time_precise_as_file_time(&ft);
         const ft64 = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
 
         // FileTime is in units of 100 nanoseconds

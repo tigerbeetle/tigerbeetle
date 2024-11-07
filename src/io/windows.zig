@@ -1157,7 +1157,9 @@ pub const IO = struct {
             const LOCKFILE_EXCLUSIVE_LOCK = 0x2;
             const LOCKFILE_FAIL_IMMEDIATELY = 0x1;
 
-            const LockFileEx = @extern(
+            // Declaring the function with an alternative name because `CamelCase` functions are
+            // by convention, used for building generic types.
+            const lock_file_ex = @extern(
                 *const fn (
                     hFile: os.windows.HANDLE,
                     dwFlags: os.windows.DWORD,
@@ -1181,7 +1183,7 @@ pub const IO = struct {
         lock_flags |= kernel32.LOCKFILE_EXCLUSIVE_LOCK;
         lock_flags |= kernel32.LOCKFILE_FAIL_IMMEDIATELY;
 
-        const locked = kernel32.LockFileEx(
+        const locked = kernel32.lock_file_ex(
             handle,
             lock_flags,
             0, // reserved param is always zero

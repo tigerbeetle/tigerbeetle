@@ -1304,8 +1304,10 @@ const FailStep = struct {
 fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     comptime std.debug.assert(builtin.os.tag == .windows);
 
+    // Declaring the function with an alternative name because `CamelCase` functions are
+    // by convention, used for building generic types.
     const set_dll_directory = @extern(
-        fn (path: [*:0]const u8) callconv(.C) std.os.windows.BOOL,
+        *const fn (path: [*:0]const u8) callconv(.C) std.os.windows.BOOL,
         .{
             .library_name = "kernel32",
             .name = "SetDllDirectoryA",
