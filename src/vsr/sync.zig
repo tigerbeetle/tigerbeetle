@@ -17,26 +17,20 @@ pub const Stage = union(enum) {
     /// Waiting for `Grid.cancel()`.
     canceling_grid,
 
-    /// We received an SV, decided to sync, but were committing at that point. So instead we
-    /// requested cancellation of the commit process and entered `awaiting_checkpoint` to get
-    /// a new SV in the future, while commit stage is idle.
-    ///
-    /// TODO: Right now this works by literally requesting a new SV from the primary, but it would
-    ///       be better to hold onto the original SV in memory and re-trigger `on_start_view` after
-    ///       cancellation is done.
-    awaiting_checkpoint,
+    /// There is no outstanding work that can conflict with the state sync. Superblock update will
+    /// start later, in the same turn of the main event loop.
+    ready_to_update_checkpoint,
 
-    /// We received a new checkpoint and a log suffix are in process of writing them to disk.
+    /// Superblock is being updated with the new checkpoint and log suffix (view headers).
     updating_checkpoint: vsr.CheckpointState,
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
         return switch (from) {
             .idle => to == .canceling_commit or
-                to == .canceling_grid or
-                to == .awaiting_checkpoint,
+                to == .canceling_grid,
             .canceling_commit => to == .canceling_grid,
-            .canceling_grid => to == .awaiting_checkpoint,
-            .awaiting_checkpoint => to == .awaiting_checkpoint or to == .updating_checkpoint,
+            .canceling_grid => to == .ready_to_update_checkpoint,
+            .ready_to_update_checkpoint => to == .updating_checkpoint,
             .updating_checkpoint => to == .idle,
         };
     }
