@@ -78,7 +78,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         /// `encode_chunks()`/`decode_chunks()` return slices into this memory.
         block_bodies: [][]align(@sizeOf(u256)) u8,
 
-        // SoA representation of block references holding the trailer itCheckpointTrailer.
+        // SoA representation of block references holding the trailer itself.
         //
         // After the set is read from disk and decoded, these blocks are manually marked as
         // acquired.

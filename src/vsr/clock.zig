@@ -568,7 +568,6 @@ const DeterministicTime = @import("../testing/time.zig").Time;
 const DeterministicClock = ClockType(DeterministicTime);
 
 const ClockUnitTestContainer = struct {
-    const Clock = @This();
     time: DeterministicTime,
     clock: DeterministicClock,
     rtt: u64 = 300 * std.time.ns_per_ms,
@@ -576,7 +575,7 @@ const ClockUnitTestContainer = struct {
     learn_interval: u64 = 5,
 
     pub fn init(
-        self: *Clock,
+        self: *ClockUnitTestContainer,
         allocator: std.mem.Allocator,
         offset_type: OffsetType,
         offset_coefficient_A: i64,
@@ -598,7 +597,7 @@ const ClockUnitTestContainer = struct {
         };
     }
 
-    pub fn run_till_tick(self: *Clock, tick: u64) void {
+    pub fn run_till_tick(self: *ClockUnitTestContainer, tick: u64) void {
         while (self.clock.time.ticks < tick) {
             self.clock.time.tick();
 
@@ -619,7 +618,7 @@ const ClockUnitTestContainer = struct {
         tick: u64,
         expected_offset: i64,
     };
-    pub fn ticks_to_perform_assertions(self: *Clock) [3]AssertionPoint {
+    pub fn ticks_to_perform_assertions(self: *ClockUnitTestContainer) [3]AssertionPoint {
         var ret: [3]AssertionPoint = undefined;
         switch (self.clock.time.offset_type) {
             .linear => {
