@@ -581,7 +581,6 @@ const ClockUnitTestContainer = struct {
         offset_coefficient_A: i64,
         offset_coefficient_B: i64,
     ) !void {
-        // TODO(Zig) Use @returnAddress() when available.
         self.* = .{
             .time = .{
                 .resolution = std.time.ns_per_s / 2,
