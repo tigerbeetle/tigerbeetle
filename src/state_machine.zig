@@ -1107,7 +1107,7 @@ pub fn StateMachineType(
             //     user_data_32=? AND
             //     code=?
             // ```
-            var scan_conditions: stdx.BoundedArray(*TransfersGroove.ScanBuilder.Scan, 5) = .{};
+            var scan_conditions: stdx.BoundedArrayType(*TransfersGroove.ScanBuilder.Scan, 5) = .{};
             const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
 
             // Adding the condition for `debit_account_id = $account_id`.
@@ -1329,7 +1329,7 @@ pub fn StateMachineType(
             };
             comptime assert(indexes.len <= global_constants.lsm_scans_max);
 
-            var scan_conditions: stdx.BoundedArray(*Groove.ScanBuilder.Scan, indexes.len) = .{};
+            var scan_conditions: stdx.BoundedArrayType(*Groove.ScanBuilder.Scan, indexes.len) = .{};
             inline for (indexes) |index| {
                 if (@field(filter, @tagName(index)) != 0) {
                     scan_conditions.append_assume_capacity(groove.scan_builder.scan_prefix(
@@ -5952,7 +5952,7 @@ test "StateMachine: Demuxer" {
 
 test "StateMachine: ref all decls" {
     const IO = @import("io.zig").IO;
-    const Storage = @import("storage.zig").Storage(IO);
+    const Storage = @import("storage.zig").StorageType(IO);
 
     const StateMachine = StateMachineType(Storage, .{
         .release = vsr.Release.minimum,

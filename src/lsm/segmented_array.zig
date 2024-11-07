@@ -21,16 +21,16 @@ const Direction = @import("../direction.zig").Direction;
 ///
 /// An absolute index is offset from the start of the segmented array.
 /// A relative index is offset from the start of a node.
-pub fn SegmentedArray(
+pub fn SegmentedArrayType(
     comptime T: type,
     comptime NodePool: type,
     comptime element_count_max: u32,
     comptime options: Options,
 ) type {
-    return SegmentedArrayType(T, NodePool, element_count_max, null, {}, options);
+    return SegmentedArrayType_(T, NodePool, element_count_max, null, {}, options);
 }
 
-pub fn SortedSegmentedArray(
+pub fn SortedSegmentedArrayType(
     comptime T: type,
     comptime NodePool: type,
     comptime element_count_max: u32,
@@ -38,7 +38,7 @@ pub fn SortedSegmentedArray(
     comptime key_from_value: fn (*const T) callconv(.Inline) Key,
     comptime options: Options,
 ) type {
-    return SegmentedArrayType(T, NodePool, element_count_max, Key, key_from_value, options);
+    return SegmentedArrayType_(T, NodePool, element_count_max, Key, key_from_value, options);
 }
 
 pub const Options = struct {
@@ -47,7 +47,7 @@ pub const Options = struct {
     verify: bool = false,
 };
 
-fn SegmentedArrayType(
+fn SegmentedArrayType_(
     comptime T: type,
     comptime NodePool: type,
     comptime element_count_max: u32,
@@ -59,7 +59,7 @@ fn SegmentedArrayType(
     comptime assert(Key == null or @typeInfo(Key.?) == .Int or @typeInfo(Key.?) == .ComptimeInt);
 
     return struct {
-        const Self = @This();
+        const SegmentedArray = @This();
 
         pub const Cursor = struct {
             node: u32,
@@ -128,7 +128,7 @@ fn SegmentedArrayType(
         /// length by 1 and store the total element count in the last slot.
         indexes: *[node_count_max + 1]u32,
 
-        pub fn init(allocator: mem.Allocator) !Self {
+        pub fn init(allocator: mem.Allocator) !SegmentedArray {
             const nodes = try allocator.create([node_count_max]?*[node_capacity]T);
             errdefer allocator.destroy(nodes);
 
@@ -138,7 +138,7 @@ fn SegmentedArrayType(
             @memset(nodes, null);
             indexes[0] = 0;
 
-            const array = Self{
+            const array = SegmentedArray{
                 .nodes = nodes,
                 .indexes = indexes,
             };
@@ -148,7 +148,7 @@ fn SegmentedArrayType(
             return array;
         }
 
-        pub fn deinit(array: Self, allocator: mem.Allocator, node_pool: ?*NodePool) void {
+        pub fn deinit(array: SegmentedArray, allocator: mem.Allocator, node_pool: ?*NodePool) void {
             if (options.verify) array.verify();
 
             for (array.nodes[0..array.node_count]) |node| {
@@ -158,7 +158,7 @@ fn SegmentedArrayType(
             allocator.free(array.indexes);
         }
 
-        pub fn reset(array: *Self) void {
+        pub fn reset(array: *SegmentedArray) void {
             @memset(array.nodes, null);
             array.indexes[0] = 0;
 
@@ -170,7 +170,7 @@ fn SegmentedArrayType(
             if (options.verify) array.verify();
         }
 
-        pub fn verify(array: Self) void {
+        pub fn verify(array: SegmentedArray) void {
             assert(array.node_count <= node_count_max);
             for (array.nodes, 0..) |node, node_index| {
                 if (node_index < array.node_count) {
@@ -209,7 +209,7 @@ fn SegmentedArrayType(
         pub usingnamespace if (Key) |_| struct {
             /// Returns the absolute index of the element being inserted.
             pub fn insert_element(
-                array: *Self,
+                array: *SegmentedArray,
                 node_pool: *NodePool,
                 element: T,
             ) u32 {
@@ -230,7 +230,7 @@ fn SegmentedArrayType(
             }
         } else struct {
             pub fn insert_elements(
-                array: *Self,
+                array: *SegmentedArray,
                 node_pool: *NodePool,
                 absolute_index: u32,
                 elements: []const T,
@@ -253,7 +253,7 @@ fn SegmentedArrayType(
         };
 
         fn insert_elements_at_absolute_index(
-            array: *Self,
+            array: *SegmentedArray,
             node_pool: *NodePool,
             absolute_index: u32,
             elements: []const T,
@@ -275,7 +275,7 @@ fn SegmentedArrayType(
         }
 
         fn insert_elements_batch(
-            array: *Self,
+            array: *SegmentedArray,
             node_pool: *NodePool,
             absolute_index: u32,
             elements: []const T,
@@ -415,7 +415,7 @@ fn SegmentedArrayType(
         }
 
         /// Insert an empty node at index `node`.
-        fn insert_empty_node_at(array: *Self, node_pool: *NodePool, node: u32) void {
+        fn insert_empty_node_at(array: *SegmentedArray, node_pool: *NodePool, node: u32) void {
             assert(node <= array.node_count);
             assert(array.node_count + 1 <= node_count_max);
 
@@ -444,7 +444,7 @@ fn SegmentedArrayType(
         }
 
         pub fn remove_elements(
-            array: *Self,
+            array: *SegmentedArray,
             node_pool: *NodePool,
             absolute_index: u32,
             remove_count: u32,
@@ -469,7 +469,7 @@ fn SegmentedArrayType(
         }
 
         fn remove_elements_batch(
-            array: *Self,
+            array: *SegmentedArray,
             node_pool: *NodePool,
             absolute_index: u32,
             remove_count: u32,
@@ -554,7 +554,7 @@ fn SegmentedArrayType(
         }
 
         fn maybe_remove_or_merge_node_with_next(
-            array: *Self,
+            array: *SegmentedArray,
             node_pool: *NodePool,
             node: u32,
         ) void {
@@ -572,7 +572,7 @@ fn SegmentedArrayType(
         }
 
         fn maybe_merge_nodes(
-            array: *Self,
+            array: *SegmentedArray,
             node_pool: *NodePool,
             node: u32,
             elements_next_node: []T,
@@ -632,7 +632,7 @@ fn SegmentedArrayType(
         }
 
         /// Remove an empty node at index `node`.
-        fn remove_empty_node_at(array: *Self, node_pool: *NodePool, node: u32) void {
+        fn remove_empty_node_at(array: *SegmentedArray, node_pool: *NodePool, node: u32) void {
             assert(array.node_count > 0);
             assert(node < array.node_count);
             assert(array.count(node) == 0);
@@ -657,41 +657,41 @@ fn SegmentedArrayType(
             array.indexes[array.node_count + 1] = undefined;
         }
 
-        inline fn count(array: Self, node: u32) u32 {
+        inline fn count(array: SegmentedArray, node: u32) u32 {
             const result = array.indexes[node + 1] - array.indexes[node];
             assert(result <= node_capacity);
             return result;
         }
 
-        inline fn increment_indexes_after(array: *Self, node: u32, delta: u32) void {
+        inline fn increment_indexes_after(array: *SegmentedArray, node: u32, delta: u32) void {
             for (array.indexes[node + 1 .. array.node_count + 1]) |*i| i.* += delta;
         }
 
-        inline fn decrement_indexes_after(array: *Self, node: u32, delta: u32) void {
+        inline fn decrement_indexes_after(array: *SegmentedArray, node: u32, delta: u32) void {
             for (array.indexes[node + 1 .. array.node_count + 1]) |*i| i.* -= delta;
         }
 
-        pub inline fn node_elements(array: Self, node: u32) []T {
+        pub inline fn node_elements(array: SegmentedArray, node: u32) []T {
             assert(node < array.node_count);
             return array.nodes[node].?[0..array.count(node)];
         }
 
-        pub inline fn node_last_element(array: Self, node: u32) T {
+        pub inline fn node_last_element(array: SegmentedArray, node: u32) T {
             return array.node_elements(node)[array.count(node) - 1];
         }
 
-        pub inline fn element_at_cursor(array: Self, cursor: Cursor) T {
+        pub inline fn element_at_cursor(array: SegmentedArray, cursor: Cursor) T {
             return array.node_elements(cursor.node)[cursor.relative_index];
         }
 
-        pub inline fn first(_: Self) Cursor {
+        pub inline fn first(_: SegmentedArray) Cursor {
             return .{
                 .node = 0,
                 .relative_index = 0,
             };
         }
 
-        pub inline fn last(array: Self) Cursor {
+        pub inline fn last(array: SegmentedArray) Cursor {
             if (array.node_count == 0) return array.first();
 
             return .{
@@ -700,14 +700,14 @@ fn SegmentedArrayType(
             };
         }
 
-        pub inline fn len(array: Self) u32 {
+        pub inline fn len(array: SegmentedArray) u32 {
             const result = array.indexes[array.node_count];
             assert(result <= element_count_max);
             return result;
         }
 
         // TODO Consider enabling ReleaseFast for this once tested.
-        pub fn absolute_index_for_cursor(array: Self, cursor: Cursor) u32 {
+        pub fn absolute_index_for_cursor(array: SegmentedArray, cursor: Cursor) u32 {
             if (array.node_count == 0) {
                 assert(cursor.node == 0);
                 assert(cursor.relative_index == 0);
@@ -723,7 +723,7 @@ fn SegmentedArrayType(
             return array.indexes[cursor.node] + cursor.relative_index;
         }
 
-        fn cursor_for_absolute_index(array: Self, absolute_index: u32) Cursor {
+        fn cursor_for_absolute_index(array: SegmentedArray, absolute_index: u32) Cursor {
             // This function could handle node_count == 0 by returning a zero Cursor.
             // However, this is an internal function and we don't require this behavior.
             assert(array.node_count > 0);
@@ -760,7 +760,7 @@ fn SegmentedArrayType(
         }
 
         pub const Iterator = struct {
-            array: *const Self,
+            array: *const SegmentedArray,
             direction: Direction,
 
             cursor: Cursor,
@@ -809,7 +809,7 @@ fn SegmentedArrayType(
         };
 
         pub fn iterator_from_cursor(
-            array: *const Self,
+            array: *const SegmentedArray,
             /// First element of iteration.
             cursor: Cursor,
             direction: Direction,
@@ -856,7 +856,7 @@ fn SegmentedArrayType(
         }
 
         pub fn iterator_from_index(
-            array: *const Self,
+            array: *const SegmentedArray,
             /// First element of iteration.
             absolute_index: u32,
             direction: Direction,
@@ -886,7 +886,7 @@ fn SegmentedArrayType(
         pub usingnamespace if (Key) |K| struct {
             /// Returns a cursor to the index of the key either exactly equal to the target key or,
             /// if there is no exact match, the next greatest key.
-            pub fn search(array: *const Self, key: K) Cursor {
+            pub fn search(array: *const SegmentedArray, key: K) Cursor {
                 if (array.node_count == 0) {
                     return .{
                         .node = 0,
@@ -954,7 +954,7 @@ test "SortedSegmentedArray duplicate elements" {
 
     const NodePoolType = @import("node_pool.zig").NodePoolType;
     const TestPool = NodePoolType(128 * @sizeOf(u32), 2 * @alignOf(u32));
-    const TestArray = SortedSegmentedArray(
+    const TestArray = SortedSegmentedArrayType(
         u32,
         TestPool,
         1024,
@@ -1057,7 +1057,7 @@ fn FuzzContextType(
         // Test overaligned nodes to catch compile errors for missing @alignCast()
         const TestPool = NodePoolType(node_size, 2 * @alignOf(T));
         const TestArray = switch (element_order) {
-            .sorted => SortedSegmentedArray(
+            .sorted => SortedSegmentedArrayType(
                 T,
                 TestPool,
                 element_count_max,
@@ -1065,7 +1065,7 @@ fn FuzzContextType(
                 key_from_value,
                 options,
             ),
-            .unsorted => SegmentedArray(T, TestPool, element_count_max, options),
+            .unsorted => SegmentedArrayType(T, TestPool, element_count_max, options),
         };
 
         random: std.rand.Random,

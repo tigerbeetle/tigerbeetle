@@ -106,7 +106,7 @@ const SourceFile = struct { path: []const u8, text: [:0]const u8 };
 fn tidy_banned(source: []const u8) ?[]const u8 {
     // Note: must avoid banning ourselves!
     if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
-        return "use stdx.BoundedArray instead of std version";
+        return "use stdx.BoundedArrayType instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
@@ -349,7 +349,7 @@ fn tidy_long_functions(
         }
     };
 
-    var function_stack = stdx.BoundedArray(Function, 32).from_slice(&.{}) catch unreachable;
+    var function_stack = stdx.BoundedArrayType(Function, 32).from_slice(&.{}) catch unreachable;
 
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);

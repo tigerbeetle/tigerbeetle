@@ -12,7 +12,8 @@ const log = std.log.scoped(.logged_process);
 
 const assert = std.debug.assert;
 
-const Self = @This();
+const LoggedProcess = @This();
+
 pub const State = enum(u8) { running, stopped, terminated };
 const AtomicState = std.atomic.Value(State);
 
@@ -27,8 +28,8 @@ current_state: AtomicState,
 pub fn spawn(
     allocator: std.mem.Allocator,
     argv: []const []const u8,
-) !*Self {
-    const self = try allocator.create(Self);
+) !*LoggedProcess {
+    const self = try allocator.create(LoggedProcess);
     errdefer allocator.destroy(self);
 
     self.* = .{
@@ -59,7 +60,7 @@ pub fn spawn(
     self.stdin_thread = try std.Thread.spawn(
         .{},
         struct {
-            fn poll_broken_pipe(stdin: std.fs.File, process: *Self) void {
+            fn poll_broken_pipe(stdin: std.fs.File, process: *LoggedProcess) void {
                 while (process.state() == .running) {
                     std.time.sleep(1 * std.time.ns_per_s);
                     _ = stdin.write(&.{1}) catch |err| {
@@ -91,17 +92,17 @@ pub fn spawn(
     return self;
 }
 
-pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
+pub fn destroy(self: *LoggedProcess, allocator: std.mem.Allocator) void {
     assert(self.state() == .terminated);
     allocator.destroy(self);
 }
 
-pub fn state(self: *Self) State {
+pub fn state(self: *LoggedProcess) State {
     return self.current_state.load(.seq_cst);
 }
 
 pub fn stop(
-    self: *Self,
+    self: *LoggedProcess,
 ) !void {
     assert(builtin.os.tag != .windows);
     try std.posix.kill(self.child.id, std.posix.SIG.STOP);
@@ -109,7 +110,7 @@ pub fn stop(
 }
 
 pub fn cont(
-    self: *Self,
+    self: *LoggedProcess,
 ) !void {
     assert(builtin.os.tag != .windows);
     try std.posix.kill(self.child.id, std.posix.SIG.CONT);
@@ -117,7 +118,7 @@ pub fn cont(
 }
 
 pub fn terminate(
-    self: *Self,
+    self: *LoggedProcess,
 ) !std.process.Child.Term {
     self.expect_state_in(.{ .running, .stopped });
     defer self.expect_state_in(.{.terminated});
@@ -152,7 +153,7 @@ pub fn terminate(
 }
 
 pub fn wait(
-    self: *Self,
+    self: *LoggedProcess,
 ) !std.process.Child.Term {
     self.expect_state_in(.{ .running, .terminated });
     defer self.expect_state_in(.{.terminated});
@@ -168,7 +169,7 @@ pub fn wait(
     return term;
 }
 
-fn expect_state_in(self: *Self, comptime valid_states: anytype) void {
+fn expect_state_in(self: *LoggedProcess, comptime valid_states: anytype) void {
     const actual_state = self.state();
 
     inline for (valid_states) |valid| {
@@ -241,7 +242,7 @@ test "LoggedProcess: starts and stops" {
 
     const argv: []const []const u8 = &.{test_exe};
 
-    var process = try Self.spawn(allocator, argv);
+    var process = try LoggedProcess.spawn(allocator, argv);
     defer process.destroy(allocator);
 
     std.time.sleep(10 * std.time.ns_per_ms);

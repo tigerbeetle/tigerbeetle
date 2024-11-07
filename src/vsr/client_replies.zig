@@ -26,8 +26,8 @@ const log = std.log.scoped(.client_replies);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const IOPS = @import("../iops.zig").IOPS;
+const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
+const IOPSType = @import("../iops.zig").IOPSType;
 const vsr = @import("../vsr.zig");
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessagePool = @import("../message_pool.zig").MessagePool;
@@ -69,7 +69,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             message: *Message.Reply,
         };
 
-        const WriteQueue = RingBuffer(*Write, .{
+        const WriteQueue = RingBufferType(*Write, .{
             .array = constants.client_replies_iops_write_max,
         });
 
@@ -77,8 +77,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         message_pool: *MessagePool,
         replica: u8,
 
-        reads: IOPS(Read, constants.client_replies_iops_read_max) = .{},
-        writes: IOPS(Write, constants.client_replies_iops_write_max) = .{},
+        reads: IOPSType(Read, constants.client_replies_iops_read_max) = .{},
+        writes: IOPSType(Write, constants.client_replies_iops_write_max) = .{},
 
         /// Track which slots have a write currently in progress.
         writing: std.StaticBitSet(constants.clients_max) =

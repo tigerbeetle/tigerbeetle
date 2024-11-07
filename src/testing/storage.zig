@@ -29,7 +29,7 @@ const panic = std.debug.panic;
 const math = std.math;
 const mem = std.mem;
 
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
@@ -159,7 +159,7 @@ pub const Storage = struct {
     writes: PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
-    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
+    next_tick_queue: FIFOType(NextTick) = .{ .name = "storage_next_tick" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(size <= constants.storage_size_limit_max);

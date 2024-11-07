@@ -96,7 +96,7 @@ const Marzullo = @import("marzullo.zig").Marzullo;
 
 pub fn ClockType(comptime Time: type) type {
     return struct {
-        const Self = @This();
+        const Clock = @This();
 
         const Sample = struct {
             /// The relative difference between our wall clock reading and that of the remote clock
@@ -135,11 +135,11 @@ pub fn ClockType(comptime Time: type) type {
             /// A guard to prevent synchronizing too often without having learned any new samples.
             learned: bool = false,
 
-            fn elapsed(epoch: *Epoch, clock: *Self) u64 {
+            fn elapsed(epoch: *Epoch, clock: *Clock) u64 {
                 return clock.monotonic() - epoch.monotonic;
             }
 
-            fn reset(epoch: *Epoch, clock: *Self) void {
+            fn reset(epoch: *Epoch, clock: *Clock) void {
                 @memset(epoch.sources, null);
                 // A replica always has zero clock offset and network delay to its own system time
                 // reading:
@@ -196,7 +196,7 @@ pub fn ClockType(comptime Time: type) type {
                 replica: u8,
                 quorum: u8,
             },
-        ) !Self {
+        ) !Clock {
             assert(options.replica_count > 0);
             assert(options.replica < options.replica_count);
             assert(options.quorum > 0);
@@ -215,7 +215,7 @@ pub fn ClockType(comptime Time: type) type {
             const marzullo_tuples = try allocator.alloc(Marzullo.Tuple, options.replica_count * 2);
             errdefer allocator.free(marzullo_tuples);
 
-            var self = Self{
+            var self = Clock{
                 .replica = options.replica,
                 .quorum = options.quorum,
                 .time = time,
@@ -234,7 +234,7 @@ pub fn ClockType(comptime Time: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *Clock, allocator: std.mem.Allocator) void {
             allocator.free(self.epoch.sources);
             allocator.free(self.window.sources);
             allocator.free(self.marzullo_tuples);
@@ -246,7 +246,7 @@ pub fn ClockType(comptime Time: type) type {
         ///   into this pong,
         /// * the remote replica's `realtime()` timestamp `t1`, and
         /// * our monotonic timestamp `m2` as captured by our `Replica.on_pong()` handler.
-        pub fn learn(self: *Self, replica: u8, m0: u64, t1: i64, m2: u64) void {
+        pub fn learn(self: *Clock, replica: u8, m0: u64, t1: i64, m2: u64) void {
             assert(replica != self.replica);
 
             if (self.synchronization_disabled) return;
@@ -336,13 +336,13 @@ pub fn ClockType(comptime Time: type) type {
         /// Called by `Replica.on_pong()` to provide `m2` when we receive a pong.
         /// Called by `Replica.on_commit_message_timeout()` to allow backups to discard
         /// duplicate/misdirected heartbeats.
-        pub fn monotonic(self: *Self) u64 {
+        pub fn monotonic(self: *Clock) u64 {
             return self.time.monotonic();
         }
 
         /// Called by `Replica.on_ping()` when responding to a ping with a pong.
         /// This should never be used by the state machine, only for measuring clock offsets.
-        pub fn realtime(self: *Self) i64 {
+        pub fn realtime(self: *Clock) i64 {
             return self.time.realtime();
         }
 
@@ -353,7 +353,7 @@ pub fn ClockType(comptime Time: type) type {
         /// This is complementary to NTP and allows clusters with very accurate time to make use of
         /// it, while providing guard rails for when NTP is partitioned or unable to correct quickly
         /// enough.
-        pub fn realtime_synchronized(self: *Self) ?i64 {
+        pub fn realtime_synchronized(self: *Clock) ?i64 {
             if (self.synchronization_disabled) {
                 return self.realtime();
             } else if (self.epoch.synchronized) |interval| {
@@ -368,7 +368,7 @@ pub fn ClockType(comptime Time: type) type {
             }
         }
 
-        pub fn tick(self: *Self) void {
+        pub fn tick(self: *Clock) void {
             self.time.tick();
 
             if (self.synchronization_disabled) return;
@@ -388,7 +388,7 @@ pub fn ClockType(comptime Time: type) type {
         /// according to Algorithm 1 from Section 4.2,
         /// "A System for Clock Synchronization in an Internet of Things".
         fn estimate_asymmetric_delay(
-            self: *Self,
+            self: *Clock,
             replica: u8,
             one_way_delay: u64,
             clock_offset: i64,
@@ -414,7 +414,7 @@ pub fn ClockType(comptime Time: type) type {
             }
         }
 
-        fn synchronize(self: *Self) void {
+        fn synchronize(self: *Clock) void {
             assert(self.window.synchronized == null);
 
             // Wait until the window has enough accurate samples:
@@ -477,7 +477,7 @@ pub fn ClockType(comptime Time: type) type {
             self.after_synchronization();
         }
 
-        fn after_synchronization(self: *Self) void {
+        fn after_synchronization(self: *Clock) void {
             const new_interval = self.epoch.synchronized.?;
 
             log.debug("{}: synchronized: truechimers={}/{} clock_offset={}..{} accuracy={}", .{
@@ -527,7 +527,7 @@ pub fn ClockType(comptime Time: type) type {
             }
         }
 
-        fn window_tuples(self: *Self, tolerance: u64) []Marzullo.Tuple {
+        fn window_tuples(self: *Clock, tolerance: u64) []Marzullo.Tuple {
             assert(self.window.sources[self.replica].?.clock_offset == 0);
             assert(self.window.sources[self.replica].?.one_way_delay == 0);
             var count: usize = 0;
@@ -568,7 +568,7 @@ const DeterministicTime = @import("../testing/time.zig").Time;
 const DeterministicClock = ClockType(DeterministicTime);
 
 const ClockUnitTestContainer = struct {
-    const Self = @This();
+    const Clock = @This();
     time: DeterministicTime,
     clock: DeterministicClock,
     rtt: u64 = 300 * std.time.ns_per_ms,
@@ -576,7 +576,7 @@ const ClockUnitTestContainer = struct {
     learn_interval: u64 = 5,
 
     pub fn init(
-        self: *Self,
+        self: *Clock,
         allocator: std.mem.Allocator,
         offset_type: OffsetType,
         offset_coefficient_A: i64,
@@ -598,7 +598,7 @@ const ClockUnitTestContainer = struct {
         };
     }
 
-    pub fn run_till_tick(self: *Self, tick: u64) void {
+    pub fn run_till_tick(self: *Clock, tick: u64) void {
         while (self.clock.time.ticks < tick) {
             self.clock.time.tick();
 
@@ -619,7 +619,7 @@ const ClockUnitTestContainer = struct {
         tick: u64,
         expected_offset: i64,
     };
-    pub fn ticks_to_perform_assertions(self: *Self) [3]AssertionPoint {
+    pub fn ticks_to_perform_assertions(self: *Clock) [3]AssertionPoint {
         var ret: [3]AssertionPoint = undefined;
         switch (self.clock.time.offset_type) {
             .linear => {

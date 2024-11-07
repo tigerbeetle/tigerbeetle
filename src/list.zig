@@ -185,7 +185,7 @@ test "DoublyLinkedList fuzz" {
     defer nodes_free.deinit(allocator);
 
     var list = List{};
-    var list_model = stdx.BoundedArray(u32, nodes_count){};
+    var list_model = stdx.BoundedArrayType(u32, nodes_count){};
 
     for (0..events_max) |_| {
         assert(list_model.count() <= nodes_count);

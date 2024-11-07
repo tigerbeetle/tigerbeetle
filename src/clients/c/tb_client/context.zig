@@ -13,7 +13,7 @@ const stdx = vsr.stdx;
 const Header = vsr.Header;
 
 const IO = vsr.io.IO;
-const FIFO = vsr.fifo.FIFO;
+const FIFOType = vsr.fifo.FIFOType;
 const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
@@ -95,7 +95,7 @@ pub fn ContextType(
         allocator: std.mem.Allocator,
         client_id: u128,
 
-        addresses: stdx.BoundedArray(std.net.Address, constants.replicas_max),
+        addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
         message_pool: MessagePool,
         client: Client,
@@ -106,7 +106,7 @@ pub fn ContextType(
 
         signal: Signal,
         submitted: Packet.SubmissionStack,
-        pending: FIFO(Packet),
+        pending: FIFOType(Packet),
         shutdown: Atomic(bool),
         thread: std.Thread,
 

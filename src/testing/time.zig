@@ -9,8 +9,6 @@ pub const OffsetType = enum {
 };
 
 pub const Time = struct {
-    const Self = @This();
-
     /// The duration of a single tick in nanoseconds.
     resolution: u64,
 
@@ -37,15 +35,15 @@ pub const Time = struct {
     /// The instant in time chosen as the origin of this time source.
     epoch: i64 = 0,
 
-    pub fn monotonic(self: *Self) u64 {
+    pub fn monotonic(self: *Time) u64 {
         return self.ticks * self.resolution;
     }
 
-    pub fn realtime(self: *Self) i64 {
+    pub fn realtime(self: *Time) i64 {
         return self.epoch + @as(i64, @intCast(self.monotonic())) - self.offset(self.ticks);
     }
 
-    pub fn offset(self: *Self, ticks: u64) i64 {
+    pub fn offset(self: *Time, ticks: u64) i64 {
         switch (self.offset_type) {
             .linear => {
                 const drift_per_tick = self.offset_coefficient_A;
@@ -79,7 +77,7 @@ pub const Time = struct {
         }
     }
 
-    pub fn tick(self: *Self) void {
+    pub fn tick(self: *Time) void {
         self.ticks += 1;
     }
 };

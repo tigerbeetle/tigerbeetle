@@ -43,14 +43,14 @@ pub fn format(
 fn ReplicaFormatType(comptime Storage: type) type {
     const SuperBlock = vsr.SuperBlockType(Storage);
     return struct {
-        const Self = @This();
+        const ReplicaFormat = @This();
 
         formatting: bool = false,
         superblock_context: SuperBlock.Context = undefined,
         write: Storage.Write = undefined,
 
         fn format_wal(
-            self: *Self,
+            self: *ReplicaFormat,
             allocator: std.mem.Allocator,
             cluster: u128,
             storage: *Storage,
@@ -138,7 +138,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         fn format_replies(
-            self: *Self,
+            self: *ReplicaFormat,
             allocator: std.mem.Allocator,
             storage: *Storage,
         ) !void {
@@ -164,7 +164,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         fn format_grid_padding(
-            self: *Self,
+            self: *ReplicaFormat,
             allocator: std.mem.Allocator,
             storage: *Storage,
         ) !void {
@@ -196,13 +196,13 @@ fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         fn write_sectors_callback(write: *Storage.Write) void {
-            const self: *Self = @alignCast(@fieldParentPtr("write", write));
+            const self: *ReplicaFormat = @alignCast(@fieldParentPtr("write", write));
             assert(self.formatting);
             self.formatting = false;
         }
 
         fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
-            const self: *Self =
+            const self: *ReplicaFormat =
                 @alignCast(@fieldParentPtr("superblock_context", superblock_context));
             assert(self.formatting);
             self.formatting = false;

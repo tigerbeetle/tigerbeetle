@@ -1464,7 +1464,7 @@ fn tree_name(comptime Object: type) []const u8 {
 test "Groove" {
     const Transfer = @import("../tigerbeetle.zig").Transfer;
     const IO = @import("../io.zig").IO;
-    const Storage = @import("../storage.zig").Storage(IO);
+    const Storage = @import("../storage.zig").StorageType(IO);
 
     const Groove = GrooveType(
         Storage,

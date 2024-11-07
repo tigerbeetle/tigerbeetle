@@ -12,7 +12,7 @@ const binary_search = @import("binary_search.zig");
 
 const Direction = @import("../direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
-const SortedSegmentedArray = @import("segmented_array.zig").SortedSegmentedArray;
+const SortedSegmentedArrayType = @import("segmented_array.zig").SortedSegmentedArrayType;
 
 pub fn ManifestLevelType(
     comptime NodePool: type,
@@ -25,7 +25,7 @@ pub fn ManifestLevelType(
     return struct {
         const ManifestLevel = @This();
 
-        pub const Keys = SortedSegmentedArray(
+        pub const Keys = SortedSegmentedArrayType(
             Key,
             NodePool,
             table_count_max,
@@ -38,7 +38,7 @@ pub fn ManifestLevelType(
             .{},
         );
 
-        pub const Tables = SortedSegmentedArray(
+        pub const Tables = SortedSegmentedArrayType(
             TableInfo,
             NodePool,
             table_count_max,
@@ -85,7 +85,7 @@ pub fn ManifestLevelType(
             /// The maximum key across both levels.
             key_max: Key,
             // References to tables in level B that intersect with the chosen table in level A.
-            tables: stdx.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
+            tables: stdx.BoundedArrayType(TableInfoReference, constants.lsm_growth_factor),
         };
 
         pub const LevelKeyRange = struct {
@@ -818,8 +818,8 @@ pub fn TestContextType(
         level: TestLevel,
 
         snapshot_max: u64 = 1,
-        snapshots: stdx.BoundedArray(u64, 8) = .{},
-        snapshot_tables: stdx.BoundedArray(std.ArrayList(TableInfo), 8) = .{},
+        snapshots: stdx.BoundedArrayType(u64, 8) = .{},
+        snapshot_tables: stdx.BoundedArrayType(std.ArrayList(TableInfo), 8) = .{},
 
         /// Contains only tables with snapshot_max == lsm.snapshot_latest
         reference: std.ArrayList(TableInfo),

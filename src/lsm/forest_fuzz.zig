@@ -451,13 +451,13 @@ const Environment = struct {
         );
 
         return struct {
-            const Self = @This();
+            const ScannerIndex = @This();
 
             lookup: ScanLookup = undefined,
             result: ?[]const tb.Account = null,
 
             fn scan(
-                self: *Self,
+                self: *ScannerIndex,
                 env: *Environment,
                 params: ScanParams,
             ) ![]const tb.Account {
@@ -511,7 +511,7 @@ const Environment = struct {
             }
 
             fn scan_lookup_callback(lookup: *ScanLookup, result: []const tb.Account) void {
-                const self: *Self = @fieldParentPtr("lookup", lookup);
+                const self: *ScannerIndex = @fieldParentPtr("lookup", lookup);
                 assert(self.result == null);
                 self.result = result;
             }

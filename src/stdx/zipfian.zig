@@ -54,7 +54,6 @@ const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const Random = std.Random;
 const math = std.math;
-const BoundedArray = stdx.BoundedArray;
 
 /// The default "skew" of the distribution.
 const theta_default = 0.99; // per YCSB
@@ -228,7 +227,7 @@ fn zeta_incremental(
 /// a single sentence, and YCSB does not use it, so we are
 /// inventing the details here in a way that seems efficient.
 pub const ZipfianShuffled = struct {
-    const HotArray = BoundedArray(u64, hot_items_limit);
+    const HotArray = stdx.BoundedArrayType(u64, hot_items_limit);
 
     /// We prefer to store enough hot items to fill the cumulative probablity here.
     /// Other items have uniform probability. In practice though most uses of this

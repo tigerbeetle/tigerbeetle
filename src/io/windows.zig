@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 const constants = @import("../constants.zig");
 
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
@@ -13,8 +13,8 @@ pub const IO = struct {
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
-    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
-    completed: FIFO(Completion) = .{ .name = "io_completed" },
+    timeouts: FIFOType(Completion) = .{ .name = "io_timeouts" },
+    completed: FIFOType(Completion) = .{ .name = "io_completed" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;

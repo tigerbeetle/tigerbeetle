@@ -78,7 +78,7 @@ pub const PartitionSymmetry = enum { symmetric, asymmetric };
 
 pub fn PacketSimulatorType(comptime Packet: type) type {
     return struct {
-        const Self = @This();
+        const PacketSimulator = @This();
 
         const LinkPacket = struct {
             expiry: u64,
@@ -135,7 +135,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         auto_partition_nodes: []u8,
         auto_partition_stability: u32,
 
-        pub fn init(allocator: std.mem.Allocator, options: PacketSimulatorOptions) !Self {
+        pub fn init(
+            allocator: std.mem.Allocator,
+            options: PacketSimulatorOptions,
+        ) !PacketSimulator {
             assert(options.node_count > 0);
             assert(options.one_way_delay_mean >= options.one_way_delay_min);
 
@@ -163,7 +166,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             errdefer allocator.free(auto_partition_nodes);
             for (auto_partition_nodes, 0..) |*node, i| node.* = @intCast(i);
 
-            return Self{
+            return PacketSimulator{
                 .options = options,
                 .prng = std.rand.DefaultPrng.init(options.seed),
                 .links = links,
@@ -177,7 +180,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             };
         }
 
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *PacketSimulator, allocator: std.mem.Allocator) void {
             for (self.links) |*link| {
                 while (link.queue.peek()) |_| link.queue.remove().packet.deinit();
                 link.queue.deinit();
@@ -192,26 +195,26 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         }
 
         /// Drop all pending packets.
-        pub fn link_clear(self: *Self, path: Path) void {
+        pub fn link_clear(self: *PacketSimulator, path: Path) void {
             const link = &self.links[self.path_index(path)];
             while (link.queue.peek()) |_| {
                 link.queue.remove().packet.deinit();
             }
         }
 
-        pub fn link_filter(self: *Self, path: Path) *LinkFilter {
+        pub fn link_filter(self: *PacketSimulator, path: Path) *LinkFilter {
             return &self.links[self.path_index(path)].filter;
         }
 
-        pub fn link_drop_packet_fn(self: *Self, path: Path) *?LinkDropPacketFn {
+        pub fn link_drop_packet_fn(self: *PacketSimulator, path: Path) *?LinkDropPacketFn {
             return &self.links[self.path_index(path)].drop_packet_fn;
         }
 
-        pub fn link_record(self: *Self, path: Path) *LinkFilter {
+        pub fn link_record(self: *PacketSimulator, path: Path) *LinkFilter {
             return &self.links[self.path_index(path)].record;
         }
 
-        pub fn replay_recorded(self: *Self) void {
+        pub fn replay_recorded(self: *PacketSimulator) void {
             assert(self.recorded.items.len > 0);
 
             var recording = false;
@@ -232,32 +235,32 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return math.order(a.expiry, b.expiry);
         }
 
-        fn process_count(self: Self) usize {
+        fn process_count(self: PacketSimulator) usize {
             return self.options.node_count + self.options.client_count;
         }
 
-        fn path_index(self: Self, path: Path) usize {
+        fn path_index(self: PacketSimulator, path: Path) usize {
             assert(path.source < self.process_count());
             assert(path.target < self.process_count());
 
             return @as(usize, path.source) * self.process_count() + path.target;
         }
 
-        fn should_drop(self: *Self) bool {
+        fn should_drop(self: *PacketSimulator) bool {
             return self.prng.random().uintAtMost(u8, 100) < self.options.packet_loss_probability;
         }
 
-        fn is_clogged(self: *Self, path: Path) bool {
+        fn is_clogged(self: *PacketSimulator, path: Path) bool {
             return self.links[self.path_index(path)].clogged_till > self.ticks;
         }
 
-        fn should_clog(self: *Self, path: Path) bool {
+        fn should_clog(self: *PacketSimulator, path: Path) bool {
             _ = path;
 
             return self.prng.random().uintAtMost(u8, 100) < self.options.path_clog_probability;
         }
 
-        fn clog_for(self: *Self, path: Path, ticks: u64) void {
+        fn clog_for(self: *PacketSimulator, path: Path, ticks: u64) void {
             const clog_expiry = &self.links[self.path_index(path)].clogged_till;
             clog_expiry.* = self.ticks + ticks;
             log.debug("Path path.source={} path.target={} clogged for ticks={}", .{
@@ -267,28 +270,28 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             });
         }
 
-        fn should_replay(self: *Self) bool {
+        fn should_replay(self: *PacketSimulator) bool {
             return self.prng.random().uintAtMost(u8, 100) < self.options.packet_replay_probability;
         }
 
-        fn should_partition(self: *Self) bool {
+        fn should_partition(self: *PacketSimulator) bool {
             return self.prng.random().uintAtMost(u8, 100) < self.options.partition_probability;
         }
 
-        fn should_unpartition(self: *Self) bool {
+        fn should_unpartition(self: *PacketSimulator) bool {
             return self.prng.random().uintAtMost(u8, 100) < self.options.unpartition_probability;
         }
 
         /// Return a value produced using an exponential distribution with
         /// the minimum and mean specified in self.options
-        fn one_way_delay(self: *Self) u64 {
+        fn one_way_delay(self: *PacketSimulator) u64 {
             const min = self.options.one_way_delay_min;
             const mean = self.options.one_way_delay_mean;
             return min + fuzz.random_int_exponential(self.prng.random(), u64, mean - min);
         }
 
         /// Partitions the network. Guaranteed to isolate at least one replica.
-        fn auto_partition_network(self: *Self) void {
+        fn auto_partition_network(self: *PacketSimulator) void {
             assert(self.options.node_count > 1);
 
             const random = self.prng.random();
@@ -348,7 +351,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
         }
 
-        pub fn tick(self: *Self) void {
+        pub fn tick(self: *PacketSimulator) void {
             self.ticks += 1;
 
             if (self.auto_partition_stability > 0) {
@@ -425,7 +428,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         }
 
         pub fn submit_packet(
-            self: *Self,
+            self: *PacketSimulator,
             packet: Packet, // Callee owned.
             callback: *const fn (packet: Packet, path: Path) void,
             path: Path,

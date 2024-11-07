@@ -140,7 +140,7 @@ fn ScanMergeType(
             /// The scan was aborted and will not yield any more values.
             aborted,
         },
-        streams: stdx.BoundedArray(MergeScanStream, constants.lsm_scans_max),
+        streams: stdx.BoundedArrayType(MergeScanStream, constants.lsm_scans_max),
 
         merge_iterator: ?switch (merge) {
             .merge_union => KWayMergeIterator,

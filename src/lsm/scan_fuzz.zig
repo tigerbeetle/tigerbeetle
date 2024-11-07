@@ -238,7 +238,7 @@ const QueryPart = union(enum) {
 
 /// The query is represented non-recursively in reverse polish notation as an array of `QueryPart`.
 /// Example: `(a OR b) AND (c OR d OR e)` == `[{AND;2}, {OR;2}, {a}, {b}, {OR;3}, {c}, {d}, {e}]`.
-const Query = stdx.BoundedArray(
+const Query = stdx.BoundedArrayType(
     QueryPart,
     query_part_max,
 );
@@ -273,7 +273,7 @@ const QuerySpec = struct {
         _: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        var stack: stdx.BoundedArray(QueryPart.Merge, index_max - 1) = .{};
+        var stack: stdx.BoundedArrayType(QueryPart.Merge, index_max - 1) = .{};
         var print_operator: bool = false;
         for (0..self.query.count()) |index| {
             // Reverse the RPN array in order to print in the natual order.
@@ -351,8 +351,8 @@ const QuerySpecFuzzer = struct {
 
     fn generate_fuzz_query_specs(
         random: std.rand.Random,
-    ) stdx.BoundedArray(QuerySpec, query_spec_max) {
-        var query_specs = stdx.BoundedArray(QuerySpec, query_spec_max){};
+    ) stdx.BoundedArrayType(QuerySpec, query_spec_max) {
+        var query_specs = stdx.BoundedArrayType(QuerySpec, query_spec_max){};
         const query_spec_count = random.intRangeAtMostBiased(
             usize,
             2,
@@ -422,7 +422,7 @@ const QuerySpecFuzzer = struct {
         }
 
         // Multi field queries must start with a merge.
-        var stack: stdx.BoundedArray(MergeStack, index_max - 1) = .{};
+        var stack: stdx.BoundedArrayType(MergeStack, index_max - 1) = .{};
         stack.append_assume_capacity(.{
             .index = 0,
             .operand_count = 0,
@@ -905,7 +905,7 @@ const Environment = struct {
         const things_groove = &env.forest.grooves.things;
         const scan_builder: *ThingsGroove.ScanBuilder = &things_groove.scan_builder;
 
-        var stack = stdx.BoundedArray(*Scan, index_max){};
+        var stack = stdx.BoundedArrayType(*Scan, index_max){};
         for (query.const_slice()) |query_part| {
             switch (query_part) {
                 .field => |field| {

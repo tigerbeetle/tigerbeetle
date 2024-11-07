@@ -7,7 +7,7 @@ const log = std.log.scoped(.io);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
@@ -16,9 +16,9 @@ pub const IO = struct {
     kq: fd_t,
     time: Time = .{},
     io_inflight: usize = 0,
-    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
-    completed: FIFO(Completion) = .{ .name = "io_completed" },
-    io_pending: FIFO(Completion) = .{ .name = "io_pending" },
+    timeouts: FIFOType(Completion) = .{ .name = "io_timeouts" },
+    completed: FIFOType(Completion) = .{ .name = "io_completed" },
+    io_pending: FIFOType(Completion) = .{ .name = "io_pending" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
