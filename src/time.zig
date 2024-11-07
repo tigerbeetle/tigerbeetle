@@ -112,9 +112,15 @@ pub const Time = struct {
     fn realtime_windows() i64 {
         assert(is_windows);
         const kernel32 = struct {
-            extern "kernel32" fn GetSystemTimePreciseAsFileTime(
-                lpFileTime: *os.windows.FILETIME,
-            ) callconv(os.windows.WINAPI) void;
+            const GetSystemTimePreciseAsFileTime = @extern(
+                *const fn (
+                    lpFileTime: *os.windows.FILETIME,
+                ) callconv(os.windows.WINAPI) void,
+                .{
+                    .library_name = "kernel32",
+                    .name = "GetSystemTimePreciseAsFileTime",
+                },
+            );
         };
 
         var ft: os.windows.FILETIME = undefined;

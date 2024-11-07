@@ -275,7 +275,9 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             events: []const u8,
         ) void {
             const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
+                inline else => |operation_comptime| @sizeOf(
+                    StateMachine.EventType(operation_comptime),
+                ),
             };
             assert(!self.evicted);
             assert(self.request_inflight == null);

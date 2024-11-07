@@ -125,7 +125,7 @@ pub fn SetAssociativeCacheType(
         /// * A Count is decremented when a cache write to the value's Set misses.
         /// * The value is evicted when its Count reaches zero.
         ///
-        counts: PackedUnsignedIntegerArray(Count),
+        counts: PackedUnsignedIntegerArrayType(Count),
 
         /// Each set has a Clock: a counter that cycles between each of the set's ways (i.e. slots).
         ///
@@ -139,7 +139,7 @@ pub fn SetAssociativeCacheType(
         ///   "Kangaroo: Caching Billions of Tiny Objects on Flash".
         /// * For more general information on CLOCK algorithms, see:
         ///   https://en.wikipedia.org/wiki/Page_replacement_algorithm.
-        clocks: PackedUnsignedIntegerArray(Clock),
+        clocks: PackedUnsignedIntegerArrayType(Clock),
 
         pub const Options = struct { name: []const u8 };
 
@@ -595,7 +595,7 @@ test "SetAssociativeCache: hash collision" {
 
 /// A little simpler than PackedIntArray in the std lib, restricted to little endian 64-bit words,
 /// and using words exactly without padding.
-fn PackedUnsignedIntegerArray(comptime UInt: type) type {
+fn PackedUnsignedIntegerArrayType(comptime UInt: type) type {
     const Word = u64;
 
     assert(builtin.target.cpu.arch.endian() == .little);
@@ -659,7 +659,7 @@ test "PackedUnsignedIntegerArray: unit" {
 
     var words = [8]u64{ 0, 0b10110010, 0, 0, 0, 0, 0, 0 };
 
-    var p: PackedUnsignedIntegerArray(u2) = .{
+    var p: PackedUnsignedIntegerArrayType(u2) = .{
         .words = &words,
     };
 
@@ -705,7 +705,7 @@ fn ContextType(comptime UInt: type) type {
     return struct {
         const Context = @This();
 
-        const Array = PackedUnsignedIntegerArray(UInt);
+        const Array = PackedUnsignedIntegerArrayType(UInt);
         random: std.rand.Random,
 
         array: Array,

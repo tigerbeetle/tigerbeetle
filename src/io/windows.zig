@@ -1157,16 +1157,21 @@ pub const IO = struct {
             const LOCKFILE_EXCLUSIVE_LOCK = 0x2;
             const LOCKFILE_FAIL_IMMEDIATELY = 0x1;
 
-            extern "kernel32" fn LockFileEx(
-                hFile: os.windows.HANDLE,
-                dwFlags: os.windows.DWORD,
-                dwReserved: os.windows.DWORD,
-                nNumberOfBytesToLockLow: os.windows.DWORD,
-                nNumberOfBytesToLockHigh: os.windows.DWORD,
-                lpOverlapped: ?*os.windows.OVERLAPPED,
-            ) callconv(os.windows.WINAPI) os.windows.BOOL;
+            const LockFileEx = @extern(
+                *const fn (
+                    hFile: os.windows.HANDLE,
+                    dwFlags: os.windows.DWORD,
+                    dwReserved: os.windows.DWORD,
+                    nNumberOfBytesToLockLow: os.windows.DWORD,
+                    nNumberOfBytesToLockHigh: os.windows.DWORD,
+                    lpOverlapped: ?*os.windows.OVERLAPPED,
+                ) callconv(os.windows.WINAPI) os.windows.BOOL,
+                .{
+                    .library_name = "kernel32",
+                    .name = "LockFileEx",
+                },
+            );
         };
-
         // hEvent = null
         // Offset & OffsetHigh = 0
         var lock_overlapped = std.mem.zeroes(os.windows.OVERLAPPED);

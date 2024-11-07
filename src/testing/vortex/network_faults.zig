@@ -76,7 +76,9 @@ pub fn execute(allocator: std.mem.Allocator, random: std.Random, action: Action)
 }
 
 /// Zeroes out the weights of actions that are not enabled.
-pub fn adjusted_weights(weights: arbitrary.EnumWeights(Action)) arbitrary.EnumWeights(Action) {
+pub fn adjusted_weights(
+    weights: arbitrary.EnumWeightsType(Action),
+) arbitrary.EnumWeightsType(Action) {
     return .{
         .network_delay_add = if (netem_rules.delay != null) 0 else weights.network_delay_add,
         .network_delay_remove = if (netem_rules.delay == null) 0 else weights.network_delay_remove,

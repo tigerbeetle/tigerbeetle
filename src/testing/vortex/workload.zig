@@ -77,7 +77,7 @@ const Command = union(enum) {
     lookup_all_accounts: []u128,
 };
 
-const CommandBuffers = FixedSizeBuffers(Command);
+const CommandBuffers = FixedSizeBuffersType(Command);
 var command_buffers: CommandBuffers = std.mem.zeroes(CommandBuffers);
 
 const Result = union(enum) {
@@ -85,7 +85,7 @@ const Result = union(enum) {
     create_transfers: []tb.CreateTransfersResult,
     lookup_all_accounts: []tb.Account,
 };
-const ResultBuffers = FixedSizeBuffers(Result);
+const ResultBuffers = FixedSizeBuffersType(Result);
 var result_buffers: ResultBuffers = std.mem.zeroes(ResultBuffers);
 
 fn execute(command: Command, driver: *const DriverStdio) !?Result {
@@ -355,7 +355,7 @@ fn lookup_all_accounts(model: *const Model) Command {
 /// Converts a union type, where each field is of a slice type, into a struct of arrays of the
 /// corresponding type, with the maximum count of driver events as its len. These buffers are used
 /// to hold commands and results in the workload loop.
-fn FixedSizeBuffers(Union: type) type {
+fn FixedSizeBuffersType(Union: type) type {
     const union_fields = @typeInfo(Union).Union.fields;
     var struct_fields: [union_fields.len]std.builtin.Type.StructField = undefined;
 
@@ -384,7 +384,7 @@ fn FixedSizeBuffers(Union: type) type {
 pub fn send(
     driver: *const DriverStdio,
     comptime op: StateMachine.Operation,
-    events: []const StateMachine.Event(op),
+    events: []const StateMachine.EventType(op),
 ) !void {
     assert(events.len <= events_count_max);
 
@@ -400,8 +400,8 @@ pub fn send(
 pub fn receive(
     driver: *const DriverStdio,
     comptime op: StateMachine.Operation,
-    results: []StateMachine.Result(op),
-) ![]StateMachine.Result(op) {
+    results: []StateMachine.ResultType(op),
+) ![]StateMachine.ResultType(op) {
     assert(results.len <= events_count_max);
     const reader = driver.output.reader();
 

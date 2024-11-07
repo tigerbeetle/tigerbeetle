@@ -353,7 +353,7 @@ pub const AccountingAuditor = struct {
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_accounts;
-        var results_iterator = IteratorForCreate(tb.CreateAccountsResult).init(results);
+        var results_iterator = IteratorForCreateType(tb.CreateAccountsResult).init(results);
         defer assert(results_iterator.results.len == 0);
 
         for (accounts, 0..) |*account, i| {
@@ -406,7 +406,7 @@ pub const AccountingAuditor = struct {
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_transfers;
-        var results_iterator = IteratorForCreate(tb.CreateTransfersResult).init(results);
+        var results_iterator = IteratorForCreateType(tb.CreateTransfersResult).init(results);
         defer assert(results_iterator.results.len == 0);
 
         for (transfers, 0..) |*transfer, i| {
@@ -516,7 +516,7 @@ pub const AccountingAuditor = struct {
         assert(self.timestamp < timestamp);
         defer self.timestamp = timestamp;
 
-        var results_iterator = IteratorForLookup(tb.Account).init(results);
+        var results_iterator = IteratorForLookupType(tb.Account).init(results);
         defer assert(results_iterator.results.len == 0);
 
         for (ids) |account_id| {
@@ -567,7 +567,7 @@ pub const AccountingAuditor = struct {
         assert(self.timestamp < timestamp);
         defer self.timestamp = timestamp;
 
-        var results_iterator = IteratorForLookup(tb.Transfer).init(results);
+        var results_iterator = IteratorForLookupType(tb.Transfer).init(results);
         defer assert(results_iterator.results.len == 0);
 
         for (ids) |id| {
@@ -653,7 +653,7 @@ pub const AccountingAuditor = struct {
     }
 };
 
-pub fn IteratorForCreate(comptime Result: type) type {
+pub fn IteratorForCreateType(comptime Result: type) type {
     assert(Result == tb.CreateAccountsResult or Result == tb.CreateTransfersResult);
 
     return struct {
@@ -676,7 +676,7 @@ pub fn IteratorForCreate(comptime Result: type) type {
     };
 }
 
-pub fn IteratorForLookup(comptime Result: type) type {
+pub fn IteratorForLookupType(comptime Result: type) type {
     assert(Result == tb.Account or Result == tb.Transfer);
 
     return struct {

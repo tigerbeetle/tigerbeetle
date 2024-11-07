@@ -1074,8 +1074,8 @@ const operation_schemas = list: {
         if (operation == .pulse) continue;
         list = list ++ [_]OperationSchema{.{
             .operation = vsr.Operation.from(StateMachine, operation),
-            .Event = StateMachine.Event(operation),
-            .Result = StateMachine.Result(operation),
+            .Event = StateMachine.EventType(operation),
+            .Result = StateMachine.ResultType(operation),
         }};
     }
     break :list list;

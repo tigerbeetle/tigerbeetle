@@ -27,7 +27,7 @@ pub fn SegmentedArrayType(
     comptime element_count_max: u32,
     comptime options: Options,
 ) type {
-    return SegmentedArrayType_(T, NodePool, element_count_max, null, {}, options);
+    return SegmentedArrayBaseType(T, NodePool, element_count_max, null, {}, options);
 }
 
 pub fn SortedSegmentedArrayType(
@@ -38,7 +38,7 @@ pub fn SortedSegmentedArrayType(
     comptime key_from_value: fn (*const T) callconv(.Inline) Key,
     comptime options: Options,
 ) type {
-    return SegmentedArrayType_(T, NodePool, element_count_max, Key, key_from_value, options);
+    return SegmentedArrayBaseType(T, NodePool, element_count_max, Key, key_from_value, options);
 }
 
 pub const Options = struct {
@@ -47,7 +47,7 @@ pub const Options = struct {
     verify: bool = false,
 };
 
-fn SegmentedArrayType_(
+fn SegmentedArrayBaseType(
     comptime T: type,
     comptime NodePool: type,
     comptime element_count_max: u32,

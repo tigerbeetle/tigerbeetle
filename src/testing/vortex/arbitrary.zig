@@ -71,7 +71,7 @@ test flags {
 pub fn weighted(
     random: std.rand.Random,
     comptime E: type,
-    weights: EnumWeights(E),
+    weights: EnumWeightsType(E),
 ) ?E {
     const s = @typeInfo(@TypeOf(weights)).Struct;
     var total: u64 = 0;
@@ -110,7 +110,7 @@ pub fn weighted(
 
 /// Given an enum type, returns a struct type where each field is an enum value mapped to an u32
 /// weight. Used together with `weighted`.
-pub fn EnumWeights(comptime E: type) type {
+pub fn EnumWeightsType(comptime E: type) type {
     return std.enums.EnumFieldStruct(E, u32, null);
 }
 

@@ -135,10 +135,10 @@ pub const Header = extern struct {
     }
 
     pub const AnyHeaderPointer = stdx.EnumUnionType(Command, struct {
-        fn PointerForCommand(comptime variant: Command) type {
+        fn PointerForCommandType(comptime variant: Command) type {
             return *const Type(variant);
         }
-    }.PointerForCommand);
+    }.PointerForCommandType);
 
     pub fn into_any(self: *const Header) AnyHeaderPointer {
         switch (self.command) {
@@ -231,7 +231,7 @@ pub const Header = extern struct {
         }
     }
 
-    fn HeaderFunctions(comptime CommandHeader: type) type {
+    fn HeaderFunctionsType(comptime CommandHeader: type) type {
         return struct {
             pub fn frame(header: *CommandHeader) *Header {
                 return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
@@ -274,7 +274,7 @@ pub const Header = extern struct {
     /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header
     /// type for each command.
     pub const Reserved = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128,
         checksum_padding: u128 = 0,
@@ -300,7 +300,7 @@ pub const Header = extern struct {
     };
 
     pub const Ping = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -348,7 +348,7 @@ pub const Header = extern struct {
     };
 
     pub const Pong = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -385,7 +385,7 @@ pub const Header = extern struct {
     };
 
     pub const PingClient = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -419,7 +419,7 @@ pub const Header = extern struct {
     };
 
     pub const PongClient = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -449,7 +449,7 @@ pub const Header = extern struct {
     };
 
     pub const Request = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -566,7 +566,7 @@ pub const Header = extern struct {
     };
 
     pub const Prepare = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -734,7 +734,7 @@ pub const Header = extern struct {
     };
 
     pub const PrepareOk = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -816,7 +816,7 @@ pub const Header = extern struct {
     };
 
     pub const Reply = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -883,7 +883,7 @@ pub const Header = extern struct {
     };
 
     pub const Commit = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -930,7 +930,7 @@ pub const Header = extern struct {
     };
 
     pub const StartViewChange = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -960,7 +960,7 @@ pub const Header = extern struct {
     };
 
     pub const DoViewChange = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1006,7 +1006,7 @@ pub const Header = extern struct {
     };
 
     pub const StartView = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1044,7 +1044,7 @@ pub const Header = extern struct {
     };
 
     pub const RequestStartView = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1076,7 +1076,7 @@ pub const Header = extern struct {
     };
 
     pub const RequestHeaders = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1112,7 +1112,7 @@ pub const Header = extern struct {
     };
 
     pub const RequestPrepare = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1147,7 +1147,7 @@ pub const Header = extern struct {
     };
 
     pub const RequestReply = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1184,7 +1184,7 @@ pub const Header = extern struct {
     };
 
     pub const Headers = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1213,7 +1213,7 @@ pub const Header = extern struct {
     };
 
     pub const Eviction = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1270,7 +1270,7 @@ pub const Header = extern struct {
     };
 
     pub const RequestBlocks = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
 
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
@@ -1303,7 +1303,7 @@ pub const Header = extern struct {
     };
 
     pub const Block = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
+        pub usingnamespace HeaderFunctionsType(@This());
         pub const metadata_size = 96;
 
         checksum: u128 = 0,

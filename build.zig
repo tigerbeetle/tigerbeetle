@@ -1303,11 +1303,14 @@ const FailStep = struct {
 /// Set the JVM DLL directory on Windows.
 fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     comptime std.debug.assert(builtin.os.tag == .windows);
-    const set_dll_directory = struct {
-        pub extern "kernel32" fn SetDllDirectoryA(
-            path: [*:0]const u8,
-        ) callconv(.C) std.os.windows.BOOL;
-    }.SetDllDirectoryA;
+
+    const set_dll_directory = @extern(
+        fn (path: [*:0]const u8) callconv(.C) std.os.windows.BOOL,
+        .{
+            .library_name = "kernel32",
+            .name = "SetDllDirectoryA",
+        },
+    );
 
     const java_bin_path = std.fs.path.joinZ(
         allocator,

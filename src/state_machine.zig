@@ -142,12 +142,12 @@ pub fn StateMachineType(
         });
 
         pub fn DemuxerType(comptime operation: Operation) type {
-            assert(@bitSizeOf(Event(operation)) > 0);
-            assert(@bitSizeOf(Result(operation)) > 0);
+            assert(@bitSizeOf(EventType(operation)) > 0);
+            assert(@bitSizeOf(ResultType(operation)) > 0);
 
             return struct {
                 const Demuxer = @This();
-                const DemuxerResult = Result(operation);
+                const DemuxerResult = ResultType(operation);
 
                 results: []DemuxerResult,
 
@@ -492,7 +492,7 @@ pub fn StateMachineType(
         ) !void {
             assert(options.batch_size_limit <= config.message_body_size_max);
             inline for (comptime std.enums.values(Operation)) |operation| {
-                assert(options.batch_size_limit >= @sizeOf(Event(operation)));
+                assert(options.batch_size_limit >= @sizeOf(EventType(operation)));
             }
 
             self.* = .{
@@ -541,7 +541,7 @@ pub fn StateMachineType(
             };
         }
 
-        pub fn Event(comptime operation: Operation) type {
+        pub fn EventType(comptime operation: Operation) type {
             return switch (operation) {
                 .pulse => void,
                 .create_accounts => Account,
@@ -555,7 +555,7 @@ pub fn StateMachineType(
             };
         }
 
-        pub fn Result(comptime operation: Operation) type {
+        pub fn ResultType(comptime operation: Operation) type {
             return switch (operation) {
                 .pulse => void,
                 .create_accounts => CreateAccountsResult,
@@ -609,7 +609,7 @@ pub fn StateMachineType(
                     if (input.len != @sizeOf(QueryFilter)) return false;
                 },
                 inline else => |comptime_operation| {
-                    const event_size = @sizeOf(Event(comptime_operation));
+                    const event_size = @sizeOf(EventType(comptime_operation));
                     comptime assert(event_size > 0);
 
                     const batch_limit: u32 =
@@ -1580,8 +1580,8 @@ pub fn StateMachineType(
         ) usize {
             comptime assert(operation == .create_accounts or operation == .create_transfers);
 
-            const events = mem.bytesAsSlice(Event(operation), input);
-            var results = mem.bytesAsSlice(Result(operation), output);
+            const events = mem.bytesAsSlice(EventType(operation), input);
+            var results = mem.bytesAsSlice(ResultType(operation), output);
             var count: usize = 0;
 
             var chain: ?usize = null;
@@ -1684,7 +1684,7 @@ pub fn StateMachineType(
             assert(chain == null);
             assert(chain_broken == false);
 
-            return @sizeOf(Result(operation)) * count;
+            return @sizeOf(ResultType(operation)) * count;
         }
 
         fn transient_error(
@@ -2911,8 +2911,8 @@ pub fn StateMachineType(
         pub fn operation_batch_max(comptime operation: Operation, batch_size_limit: u32) u32 {
             assert(batch_size_limit <= constants.message_body_size_max);
 
-            const event_size = @sizeOf(Event(operation));
-            const result_size = @sizeOf(Result(operation));
+            const event_size = @sizeOf(EventType(operation));
+            const result_size = @sizeOf(ResultType(operation));
             comptime assert(event_size > 0);
             comptime assert(result_size > 0);
 
@@ -3888,7 +3888,9 @@ fn check(test_table: []const u8) !void {
 
                 switch (commit_operation) {
                     inline else => |commit_operation_comptime| {
-                        const Result = TestContext.StateMachine.Result(commit_operation_comptime);
+                        const Result = TestContext.StateMachine.ResultType(
+                            commit_operation_comptime,
+                        );
                         try testing.expectEqualSlices(
                             Result,
                             mem.bytesAsSlice(Result, reply.items),
@@ -5909,7 +5911,7 @@ test "StateMachine: Demuxer" {
     }) |operation| {
         try expect(StateMachine.batch_logical_allowed.get(operation));
 
-        const Result = StateMachine.Result(operation);
+        const Result = StateMachine.ResultType(operation);
         var results: [@divExact(global_constants.message_body_size_max, @sizeOf(Result))]Result =
             undefined;
 

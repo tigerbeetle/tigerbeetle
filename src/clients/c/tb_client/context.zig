@@ -79,7 +79,7 @@ pub fn ContextType(
         fn operation_event_size(op: u8) ?usize {
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
-                    return @sizeOf(StateMachine.Event(operation));
+                    return @sizeOf(StateMachine.EventType(operation));
                 }
             }
             return null;
@@ -305,7 +305,7 @@ pub fn ContextType(
             // Get the size of each request structure in the packet.data:
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| blk: {
-                    break :blk @sizeOf(StateMachine.Event(operation_comptime));
+                    break :blk @sizeOf(StateMachine.EventType(operation_comptime));
                 },
             };
 
@@ -400,7 +400,7 @@ pub fn ContextType(
                     inline .create_accounts,
                     .create_transfers,
                     => |tag| linked_chain_open: {
-                        const Event = StateMachine.Event(tag);
+                        const Event = StateMachine.EventType(tag);
                         // Packet data isn't necessarily aligned.
                         const events: [*]align(@alignOf(u8)) const Event = @ptrCast(data.?);
                         const events_count: usize = @divExact(data_size, @sizeOf(Event));
@@ -509,7 +509,7 @@ pub fn ContextType(
 
                         const event_count = @divExact(
                             batched.data_size,
-                            @sizeOf(StateMachine.Event(operation)),
+                            @sizeOf(StateMachine.EventType(operation)),
                         );
                         const results = demuxer.decode(event_offset, event_count);
                         event_offset += event_count;
@@ -583,7 +583,7 @@ pub fn ContextType(
                 .create_accounts,
                 .create_transfers,
             }) |operation| {
-                const Event = StateMachine.Event(operation);
+                const Event = StateMachine.EventType(operation);
                 var data = [_]Event{std.mem.zeroInit(Event, .{})} ** 3;
 
                 // Broken linked chain cannot be batched.

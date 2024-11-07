@@ -20,7 +20,7 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
         pub const StateMachine = VSRClient.StateMachine;
         pub const Request = VSRClient.Request;
 
-        /// Custom Demuxer which treats Event(operation)s as results and echoes them back.
+        /// Custom Demuxer which treats EventType(operation)s as results and echoes them back.
         pub fn DemuxerType(comptime operation: StateMachine.Operation) type {
             return struct {
                 const Demuxer = @This();
@@ -38,7 +38,7 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
                     self.events_decoded += event_count;
 
                     // Double check the results has enough event bytes to echo back.
-                    const byte_count = @sizeOf(StateMachine.Event(operation)) * event_count;
+                    const byte_count = @sizeOf(StateMachine.EventType(operation)) * event_count;
                     assert(self.results.len >= byte_count);
 
                     // Echo back the result bytes and consume the events.
@@ -163,7 +163,9 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
             events: []const u8,
         ) void {
             const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
+                inline else => |operation_comptime| @sizeOf(
+                    StateMachine.EventType(operation_comptime),
+                ),
             };
             assert(events.len <= constants.message_body_size_max);
             assert(events.len % event_size == 0);
@@ -232,7 +234,7 @@ test "Echo Demuxer" {
         .create_accounts,
         .create_transfers,
     }) |operation| {
-        const Event = StateMachine.Event(operation);
+        const Event = StateMachine.EventType(operation);
         var events: [@divExact(constants.message_body_size_max, @sizeOf(Event))]Event = undefined;
         prng.fill(std.mem.asBytes(&events));
 
