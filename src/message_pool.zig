@@ -91,27 +91,27 @@ pub const Options = union(vsr.ProcessType) {
 /// initialization and reused thereafter. The messages_max values determine the size of this pool.
 pub const MessagePool = struct {
     pub const Message = extern struct {
-        pub const Reserved = MessageType(.reserved);
-        pub const Ping = MessageType(.ping);
-        pub const Pong = MessageType(.pong);
-        pub const PingClient = MessageType(.ping_client);
-        pub const PongClient = MessageType(.pong_client);
-        pub const Request = MessageType(.request);
-        pub const Prepare = MessageType(.prepare);
-        pub const PrepareOk = MessageType(.prepare_ok);
-        pub const Reply = MessageType(.reply);
-        pub const Commit = MessageType(.commit);
-        pub const StartViewChange = MessageType(.start_view_change);
-        pub const DoViewChange = MessageType(.do_view_change);
-        pub const StartView = MessageType(.start_view);
-        pub const RequestStartView = MessageType(.request_start_view);
-        pub const RequestHeaders = MessageType(.request_headers);
-        pub const RequestPrepare = MessageType(.request_prepare);
-        pub const RequestReply = MessageType(.request_reply);
-        pub const Headers = MessageType(.headers);
-        pub const Eviction = MessageType(.eviction);
-        pub const RequestBlocks = MessageType(.request_blocks);
-        pub const Block = MessageType(.block);
+        pub const Reserved = CommandMessageType(.reserved);
+        pub const Ping = CommandMessageType(.ping);
+        pub const Pong = CommandMessageType(.pong);
+        pub const PingClient = CommandMessageType(.ping_client);
+        pub const PongClient = CommandMessageType(.pong_client);
+        pub const Request = CommandMessageType(.request);
+        pub const Prepare = CommandMessageType(.prepare);
+        pub const PrepareOk = CommandMessageType(.prepare_ok);
+        pub const Reply = CommandMessageType(.reply);
+        pub const Commit = CommandMessageType(.commit);
+        pub const StartViewChange = CommandMessageType(.start_view_change);
+        pub const DoViewChange = CommandMessageType(.do_view_change);
+        pub const StartView = CommandMessageType(.start_view);
+        pub const RequestStartView = CommandMessageType(.request_start_view);
+        pub const RequestHeaders = CommandMessageType(.request_headers);
+        pub const RequestPrepare = CommandMessageType(.request_prepare);
+        pub const RequestReply = CommandMessageType(.request_reply);
+        pub const Headers = CommandMessageType(.headers);
+        pub const Eviction = CommandMessageType(.eviction);
+        pub const RequestBlocks = CommandMessageType(.request_blocks);
+        pub const Block = CommandMessageType(.block);
 
         // TODO Avoid the extra level of indirection.
         // (https://github.com/tigerbeetle/tigerbeetle/pull/1295#discussion_r1394265250)
@@ -136,12 +136,18 @@ pub const MessagePool = struct {
         /// NOTE:
         /// - Does *not* alter the reference count.
         /// - Does *not* verify the command. (Use this function for constructing the message.)
-        pub fn build(message: *Message, comptime command: vsr.Command) *MessageType(command) {
+        pub fn build(
+            message: *Message,
+            comptime command: vsr.Command,
+        ) *CommandMessageType(command) {
             return @ptrCast(message);
         }
 
         /// NOTE: Does *not* alter the reference count.
-        pub fn into(message: *Message, comptime command: vsr.Command) ?*MessageType(command) {
+        pub fn into(
+            message: *Message,
+            comptime command: vsr.Command,
+        ) ?*CommandMessageType(command) {
             if (message.header.command != command) return null;
             return @ptrCast(message);
         }
@@ -149,7 +155,7 @@ pub const MessagePool = struct {
         pub const AnyMessage = stdx.EnumUnionType(vsr.Command, MessagePointerType);
 
         fn MessagePointerType(comptime command: vsr.Command) type {
-            return *MessageType(command);
+            return *CommandMessageType(command);
         }
 
         /// NOTE: Does *not* alter the reference count.
@@ -218,7 +224,7 @@ pub const MessagePool = struct {
 
     pub fn GetMessageType(comptime command: ?vsr.Command) type {
         if (command) |c| {
-            return *MessageType(c);
+            return *CommandMessageType(c);
         } else {
             return *Message;
         }
@@ -276,7 +282,7 @@ pub const MessagePool = struct {
     }
 };
 
-fn MessageType(comptime command: vsr.Command) type {
+fn CommandMessageType(comptime command: vsr.Command) type {
     return extern struct {
         const CommandMessage = @This();
         const CommandHeader = Header.Type(command);
