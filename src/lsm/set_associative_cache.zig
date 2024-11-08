@@ -618,18 +618,18 @@ fn PackedUnsignedIntegerArrayType(comptime UInt: type) type {
     assert(math.maxInt(BitsIndex) == uint_bits * (math.maxInt(WordIndex) + 1) - 1);
 
     return struct {
-        const BitIterator = @This();
+        const PackedUnsignedIntegerArray = @This();
 
         words: []Word,
 
         /// Returns the unsigned integer at `index`.
-        pub inline fn get(self: BitIterator, index: u64) UInt {
+        pub inline fn get(self: PackedUnsignedIntegerArray, index: u64) UInt {
             // This truncate is safe since we want to mask the right-shifted word by exactly a UInt:
             return @as(UInt, @truncate(self.word(index).* >> bits_index(index)));
         }
 
         /// Sets the unsigned integer at `index` to `value`.
-        pub inline fn set(self: BitIterator, index: u64, value: UInt) void {
+        pub inline fn set(self: PackedUnsignedIntegerArray, index: u64, value: UInt) void {
             const w = self.word(index);
             w.* &= ~mask(index);
             w.* |= @as(Word, value) << bits_index(index);
@@ -639,7 +639,7 @@ fn PackedUnsignedIntegerArrayType(comptime UInt: type) type {
             return @as(Word, math.maxInt(UInt)) << bits_index(index);
         }
 
-        inline fn word(self: BitIterator, index: u64) *Word {
+        inline fn word(self: PackedUnsignedIntegerArray, index: u64) *Word {
             return &self.words[@divFloor(index, uints_per_word)];
         }
 

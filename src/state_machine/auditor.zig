@@ -657,15 +657,18 @@ pub fn IteratorForCreateType(comptime Result: type) type {
     assert(Result == tb.CreateAccountsResult or Result == tb.CreateTransfersResult);
 
     return struct {
-        const Iterator = @This();
+        const IteratorForCreate = @This();
 
         results: []const Result,
 
-        pub fn init(results: []const Result) Iterator {
+        pub fn init(results: []const Result) IteratorForCreate {
             return .{ .results = results };
         }
 
-        pub fn take(self: *Iterator, event_index: usize) ?std.meta.fieldInfo(Result, .result).type {
+        pub fn take(
+            self: *IteratorForCreate,
+            event_index: usize,
+        ) ?std.meta.fieldInfo(Result, .result).type {
             if (self.results.len > 0 and self.results[0].index == event_index) {
                 defer self.results = self.results[1..];
                 return self.results[0].result;
@@ -680,15 +683,15 @@ pub fn IteratorForLookupType(comptime Result: type) type {
     assert(Result == tb.Account or Result == tb.Transfer);
 
     return struct {
-        const Iterator = @This();
+        const IteratorForLookup = @This();
 
         results: []const Result,
 
-        pub fn init(results: []const Result) Iterator {
+        pub fn init(results: []const Result) IteratorForLookup {
             return .{ .results = results };
         }
 
-        pub fn take(self: *Iterator, id: u128) ?*const Result {
+        pub fn take(self: *IteratorForLookup, id: u128) ?*const Result {
             if (self.results.len > 0 and self.results[0].id == id) {
                 defer self.results = self.results[1..];
                 return &self.results[0];

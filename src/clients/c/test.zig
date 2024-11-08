@@ -61,13 +61,11 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
 
 // Notifies the main thread when all pending requests are completed.
 const Completion = struct {
-    const RequestContext = @This();
-
     pending: usize,
     mutex: Mutex = .{},
     cond: Condition = .{},
 
-    pub fn complete(self: *RequestContext) void {
+    pub fn complete(self: *Completion) void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -76,7 +74,7 @@ const Completion = struct {
         self.cond.signal();
     }
 
-    pub fn wait_pending(self: *RequestContext) void {
+    pub fn wait_pending(self: *Completion) void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
