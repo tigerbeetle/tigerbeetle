@@ -925,7 +925,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 //     this entry it turns out not to have the right op.
                 //   (This case (and the accompanying unnecessary read) could be prevented by
                 //   storing the op along with the checksum in `prepare_checksums`.)
-                assert(slot == null);
+                if (slot) |s| {
+                    journal.faulty.set(s);
+                    journal.dirty.set(s);
+                }
 
                 journal.read_prepare_log(op, checksum, "op changed during read");
                 callback(replica, null, null);
@@ -934,7 +937,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             if (message.header.checksum != checksum) {
                 // This can also be caused by a misdirected read/write.
-                assert(slot == null);
+                if (slot) |s| {
+                    journal.faulty.set(s);
+                    journal.dirty.set(s);
+                }
 
                 journal.read_prepare_log(op, checksum, "checksum changed during read");
                 callback(replica, null, null);
