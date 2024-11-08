@@ -535,7 +535,6 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn read_until_newline_or_eof_alloc(
             repl: *Repl,
-            allocator: std.mem.Allocator,
         ) !?[]u8 {
             repl.buffer.clearRetainingCapacity();
             repl.buffer_outside_history.clearRetainingCapacity();
@@ -543,7 +542,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             try repl.terminal.prompt_mode_set();
             defer repl.terminal.prompt_mode_unset() catch {};
 
-            var terminal_screen = try repl.terminal.get_screen(allocator);
+            var terminal_screen = try repl.terminal.get_screen();
 
             var buffer_index: usize = 0;
             var history_index = repl.history.count;
@@ -721,7 +720,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             arena: *std.heap.ArenaAllocator,
         ) !void {
             try repl.terminal.print(prompt, .{});
-            const input = repl.read_until_newline_or_eof_alloc(arena.allocator()) catch |err| {
+            const input = repl.read_until_newline_or_eof_alloc() catch |err| {
                 repl.event_loop_done = true;
                 return err;
             } orelse {
@@ -1158,6 +1157,7 @@ const null_terminal = Terminal{
     .stdin = undefined,
     .stderr = null,
     .stdout = null,
+    .buffer_in = undefined,
 };
 
 test "repl.zig: Parser single transfer successfully" {

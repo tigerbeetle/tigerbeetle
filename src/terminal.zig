@@ -5,12 +5,18 @@ const windows = std.os.windows;
 
 const builtin = @import("builtin");
 
+/// The terminal needs to read control codes, but the exact input capacity
+/// is unknown; this should be more than enough.
+const buffer_in_capacity = 256;
+
 pub const Terminal = struct {
     mode_start: ?*const anyopaque,
     stdin: std.io.BufferedReader(4096, std.fs.File.Reader),
     // These are made optional so that printing on failure can be disabled in tests expecting them.
     stdout: ?std.fs.File.Writer,
     stderr: ?std.fs.File.Writer,
+
+    buffer_in: std.ArrayList(u8),
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -52,6 +58,7 @@ pub const Terminal = struct {
             .stdin = std.io.bufferedReader(stdin.reader()),
             .stdout = stdout.writer(),
             .stderr = std.io.getStdErr().writer(),
+            .buffer_in = try std.ArrayList(u8).initCapacity(allocator, buffer_in_capacity),
         };
     }
 
@@ -167,26 +174,51 @@ pub const Terminal = struct {
 
     fn get_cursor_position(
         self: *Terminal,
-        allocator: std.mem.Allocator,
     ) !struct { row: usize, column: usize } {
         // Obtaining the cursor's position relies on sending a request payload to stdout. The
         // response is read from stdin, but it may have been altered by user input, so we keep
         // retrying until successful.
         const stdin = self.stdin.reader().any();
-        var buffer = std.ArrayList(u8).init(allocator);
         while (true) {
             // The response is of the form `<ESC>[{row};{col}R`.
             try self.print("\x1b[6n", .{});
-            buffer.clearRetainingCapacity();
-            try stdin.streamUntilDelimiter(buffer.writer(), '[', null);
+            self.buffer_in.clearRetainingCapacity();
+            stdin.streamUntilDelimiter(
+                self.buffer_in.writer(),
+                '[',
+                buffer_in_capacity,
+            ) catch |err| {
+                switch (err) {
+                    anyerror.StreamTooLong => continue,
+                    else => return err,
+                }
+            };
 
-            buffer.clearRetainingCapacity();
-            try stdin.streamUntilDelimiter(buffer.writer(), ';', null);
-            const row = std.fmt.parseInt(usize, buffer.items, 10) catch continue;
+            self.buffer_in.clearRetainingCapacity();
+            stdin.streamUntilDelimiter(
+                self.buffer_in.writer(),
+                ';',
+                buffer_in_capacity,
+            ) catch |err| {
+                switch (err) {
+                    anyerror.StreamTooLong => continue,
+                    else => return err,
+                }
+            };
+            const row = std.fmt.parseInt(usize, self.buffer_in.items, 10) catch continue;
 
-            buffer.clearRetainingCapacity();
-            try stdin.streamUntilDelimiter(buffer.writer(), 'R', null);
-            const column = std.fmt.parseInt(usize, buffer.items, 10) catch continue;
+            self.buffer_in.clearRetainingCapacity();
+            stdin.streamUntilDelimiter(
+                self.buffer_in.writer(),
+                'R',
+                buffer_in_capacity,
+            ) catch |err| {
+                switch (err) {
+                    anyerror.StreamTooLong => continue,
+                    else => return err,
+                }
+            };
+            const column = std.fmt.parseInt(usize, self.buffer_in.items, 10) catch continue;
 
             return .{
                 .row = row,
@@ -197,15 +229,14 @@ pub const Terminal = struct {
 
     pub fn get_screen(
         self: *Terminal,
-        allocator: std.mem.Allocator,
     ) !Screen {
         // We move the cursor to a location that is unlikely to exist (2^16th row and column).
         // Terminals usually handle this by placing the cursor at their end position, which we can
         // use to obtain its resolution/size.
-        const cursor_start = try self.get_cursor_position(allocator);
+        const cursor_start = try self.get_cursor_position();
         try self.print("\x1b[{};{}H", .{ std.math.maxInt(u16), std.math.maxInt(u16) });
 
-        const cursor_end = try self.get_cursor_position(allocator);
+        const cursor_end = try self.get_cursor_position();
         try self.print("\x1b[{};{}H", .{ cursor_start.row, cursor_start.column });
 
         return Screen{
