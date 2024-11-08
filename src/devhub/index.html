@@ -6,6 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TigerBeetle DevHub</title>
   <script src="./devhub.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/apexcharts/3.45.2/apexcharts.min.js"
+    integrity="sha512-vIqZt7ReO939RQssENNbZ+Iu3j0CSsgk41nP3AYabLiIFajyebORlk7rKPjGddmO1FQkbuOb2EVK6rJkiHsmag=="
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -87,11 +90,9 @@
       <h2>Metrics
         <a href="https://nyrkio.com/public/https%3A%2F%2Fgithub.com%2Ftigerbeetle%2Ftigerbeetle/main/devhub"
           target="_blank">Nyrkiö</a>
+        <a href="https://github.com/tigerbeetle/devhubdb/tree/main/devhub">Raw data</a>
       </h2>
-      <div>
-        <iframe
-          src="https://nyrkio.com/public/https%3A%2F%2Fgithub.com%2Ftigerbeetle%2Ftigerbeetle/main/devhub?embed=yes"></iframe>
-      </div>
+      <div id="charts"></div>
     </section>
   </main>
 </body>

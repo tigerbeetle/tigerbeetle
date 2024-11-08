@@ -11,6 +11,7 @@ window.onload = () =>
   Promise.all([
     mainReleaseRotation(),
     mainSeeds(),
+    mainMetrics(),
   ]);
 
 function assert(condition) {
@@ -151,6 +152,21 @@ async function mainSeeds() {
     .toLocaleString();
 }
 
+async function mainMetrics() {
+  const dataUrl =
+    "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
+  const data = await (await fetch(dataUrl)).text();
+  const maxBatches = 200;
+  const batches = data.split("\n")
+    .filter((it) => it.length > 0)
+    .map((it) => JSON.parse(it))
+    .slice(-1 * maxBatches)
+    .reverse();
+
+  const series = batchesToSeries(batches);
+  plotSeries(series, document.querySelector("#charts"), batches.length);
+}
+
 function pullRequestNumber(record) {
   const prPrefix = "https://github.com/tigerbeetle/tigerbeetle/pull/";
   if (record.branch.startsWith(prPrefix)) {
@@ -209,4 +225,155 @@ function getWeek(date) {
     ((date.getTime() - week1.getTime()) / 86400000 -
       3 + (week1.getDay() + 6) % 7) / 7,
   );
+}
+
+// The input data is array of runs, where a single run contains many measurements (eg, file size,
+// build time).
+//
+// This function "transposes" the data, such that measurements with identical labels are merged to
+// form a single array which is what we want to plot.
+//
+// This doesn't depend on particular plotting library though.
+function batchesToSeries(batches) {
+  const results = new Map();
+  for (const [index, batch] of batches.entries()) {
+    for (const metric of batch.metrics) {
+      if (!results.has(metric.name)) {
+        results.set(metric.name, {
+          name: metric.name,
+          unit: undefined,
+          value: [],
+          git_commit: [],
+          timestamp: [],
+        });
+      }
+
+      const series = results.get(metric.name);
+      assert(series.name == metric.name);
+
+      if (series.unit) {
+        assert(series.unit == metric.unit);
+      } else {
+        series.unit = metric.unit;
+      }
+
+      // Even though our x-axis is time, we want to spread things out evenly by batch, rather than
+      // group according to time. Apex charts is much quicker when given an x value, even though it
+      // isn't strictly needed.
+      series.value.push([batches.length - index, metric.value]);
+      series.git_commit.push(batch.attributes.git_commit);
+      series.timestamp.push(batch.timestamp);
+    }
+  }
+
+  return results;
+}
+
+// Plot time series using <https://apexcharts.com>.
+function plotSeries(seriesList, rootNode, batchCount) {
+  for (const series of seriesList.values()) {
+    let options = {
+      title: {
+        text: series.name,
+      },
+      chart: {
+        type: "line",
+        height: "400px",
+        animations: {
+          enabled: false,
+        },
+        events: {
+          dataPointSelection: (event, chartContext, { dataPointIndex }) => {
+            window.open(
+              "https://github.com/tigerbeetle/tigerbeetle/commit/" +
+                series.git_commit[dataPointIndex],
+            );
+          },
+        },
+      },
+      markers: {
+        size: 4,
+      },
+      series: [{
+        name: series.name,
+        data: series.value,
+      }],
+      xaxis: {
+        categories: Array(series.value[series.value.length - 1][0]).fill("")
+          .concat(
+            series.timestamp.map((timestamp) =>
+              new Date(timestamp * 1000).toLocaleDateString()
+            ).reverse(),
+          ),
+        min: 0,
+        max: batchCount,
+        tickAmount: 15,
+        axisTicks: {
+          show: false,
+        },
+        tooltip: {
+          enabled: false,
+        },
+      },
+      tooltip: {
+        enabled: true,
+        shared: false,
+        intersect: true,
+        x: {
+          formatter: function (val, { dataPointIndex }) {
+            const timestamp = new Date(series.timestamp[dataPointIndex] * 1000);
+            const formattedDate = timestamp.toLocaleString();
+            return `<div>${
+              series.git_commit[dataPointIndex]
+            }</div><div>${formattedDate}</div>`;
+          },
+        },
+      },
+    };
+
+    if (series.unit === "bytes") {
+      options.yaxis = {
+        labels: {
+          formatter: formatBytes,
+        },
+      };
+    }
+
+    if (series.unit === "ms") {
+      options.yaxis = {
+        labels: {
+          formatter: formatDuration,
+        },
+      };
+    }
+
+    const div = document.createElement("div");
+    rootNode.append(div);
+    const chart = new ApexCharts(div, options);
+    chart.render();
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return "0 Bytes";
+
+  const k = 1024;
+  const sizes = [
+    "Bytes",
+    "KiB",
+    "MiB",
+    "GiB",
+    "TiB",
+    "PiB",
+    "EiB",
+    "ZiB",
+    "YiB",
+  ];
+
+  let i = 0;
+  while (i != sizes.length - 1 && Math.pow(k, i + 1) < bytes) {
+    i += 1;
+  }
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
