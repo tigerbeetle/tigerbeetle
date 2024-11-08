@@ -485,12 +485,8 @@ pub const Storage = struct {
                     });
 
                     const overlay_buffer = storage.overlay_buffers[storage.overlays.index(overlay)];
-                    stdx.copy_disjoint(
-                        .inexact,
-                        u8,
-                        read.buffer,
-                        overlay_buffer[0..@min(overlay.size, read.buffer.len)],
-                    );
+                    const overlay_target = overlay_buffer[0..@min(overlay.size, read.buffer.len)];
+                    stdx.copy_disjoint(.inexact, u8, read.buffer, overlay_target);
                 }
             }
         }
@@ -574,18 +570,13 @@ pub const Storage = struct {
             overlay_intended.* =
                 .{ .zone = write.zone, .offset = write.offset, .size = overlay_size };
 
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                storage.overlay_buffers[overlay_mistaken_index],
-                write.buffer,
-            );
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                storage.overlay_buffers[overlay_intended_index],
-                storage.memory[write.zone.offset(write.offset)..][0..write.buffer.len],
-            );
+            const overlay_mistaken_buffer = storage.overlay_buffers[overlay_mistaken_index];
+            const overlay_intended_buffer = storage.overlay_buffers[overlay_intended_index];
+            const target_intended_buffer =
+                storage.memory[write.zone.offset(write.offset)..][0..write.buffer.len];
+
+            stdx.copy_disjoint(.inexact, u8, overlay_mistaken_buffer, write.buffer);
+            stdx.copy_disjoint(.inexact, u8, overlay_intended_buffer, target_intended_buffer);
         }
 
         const offset_in_storage = write.zone.offset(write.offset);
@@ -961,13 +952,10 @@ pub const ClusterFaultAtlas = struct {
         faulty_grid: bool,
     };
 
-    const ZoneSet = std.enums.EnumSet(vsr.Zone);
     const ReplicaSet = std.StaticBitSet(constants.replicas_max);
     const headers_per_sector = @divExact(constants.sector_size, @sizeOf(vsr.Header));
-    const header_sectors = @divExact(constants.journal_slot_count, headers_per_sector);
     const members_max = constants.members_max;
 
-    faulty_zones: ZoneSet,
     faulty_wal_header_sectors: [members_max]std.DynamicBitSetUnmanaged,
     faulty_client_reply_slots: [members_max]std.DynamicBitSetUnmanaged,
     /// Bit 0 corresponds to address 1.
@@ -988,6 +976,9 @@ pub const ClusterFaultAtlas = struct {
             assert(!options.faulty_grid);
         }
 
+        // Currently these faulty areas are coupled together, so they should match.
+        assert(options.faulty_wal_headers == options.faulty_wal_prepares);
+
         const fault_bitset_sizes = [3]u32{
             @divExact(constants.journal_size_headers, constants.sector_size), // WAL headers.
             constants.clients_max, // Client replies.
@@ -1005,16 +996,9 @@ pub const ClusterFaultAtlas = struct {
         }
 
         var atlas = ClusterFaultAtlas{
-            .faulty_zones = ZoneSet.init(.{
-                .superblock = options.faulty_superblock,
-                .wal_headers = options.faulty_wal_headers,
-                .wal_prepares = options.faulty_wal_prepares,
-                .client_replies = options.faulty_client_replies,
-                .grid = options.faulty_grid,
-            }),
-            .faulty_wal_header_sectors = fault_bitsets[0 * members_max..][0..members_max].*,
-            .faulty_client_reply_slots = fault_bitsets[1 * members_max..][0..members_max].*,
-            .faulty_grid_blocks = fault_bitsets[2 * members_max..][0..members_max].*,
+            .faulty_wal_header_sectors = fault_bitsets[0 * members_max ..][0..members_max].*,
+            .faulty_client_reply_slots = fault_bitsets[1 * members_max ..][0..members_max].*,
+            .faulty_grid_blocks = fault_bitsets[2 * members_max ..][0..members_max].*,
         };
 
         const quorums = vsr.quorums(replica_count);
@@ -1024,32 +1008,29 @@ pub const ClusterFaultAtlas = struct {
         assert(faults_max < quorums.view_change);
         assert(faults_max > 0 or replica_count == 1);
 
-        var sector: usize = 0;
-        while (sector < header_sectors) : (sector += 1) {
-            var wal_header_sector = ReplicaSet.initEmpty();
-            while (wal_header_sector.count() < faults_max) {
-                const replica_index = random.uintLessThan(u8, replica_count);
-                if (atlas.faulty_wal_header_sectors[replica_index].count() + 1 <
-                    atlas.faulty_wal_header_sectors[replica_index].capacity())
-                {
-                    atlas.faulty_wal_header_sectors[replica_index].set(sector);
-                    wal_header_sector.set(replica_index);
-                } else {
-                    // Don't add a fault to this replica, to avoid error.WALInvalid.
+        for ([_]struct { bool, *[members_max]std.DynamicBitSetUnmanaged }{
+            .{ options.faulty_wal_headers, &atlas.faulty_wal_header_sectors },
+            .{ options.faulty_client_replies, &atlas.faulty_client_reply_slots },
+            .{ options.faulty_grid, &atlas.faulty_grid_blocks },
+        }) |zone| {
+            const faulty = zone.@"0";
+            const chunks = zone.@"1";
+            if (!faulty) continue;
+
+            for (0..chunks[0].bit_length) |chunk| {
+                var replicas = ReplicaSet.initEmpty();
+                while (replicas.count() < faults_max) {
+                    const replica_index = random.uintLessThan(u8, replica_count);
+                    if (chunks[replica_index].count() + 1 <
+                        chunks[replica_index].capacity())
+                    {
+                        chunks[replica_index].set(chunk);
+                        replicas.set(replica_index);
+                    } else {
+                        // Never corrupt all chunks of a particular replica.
+                        // (For the WAL, this can cause error.WALInvalid).
+                    }
                 }
-            }
-        }
-
-        var block: usize = 0;
-        while (block < Storage.grid_blocks_max) : (block += 1) {
-            var replicas = std.StaticBitSet(members_max).initEmpty();
-            while (replicas.count() < faults_max) {
-                replicas.set(random.uintLessThan(usize, replica_count));
-            }
-
-            var replicas_iterator = replicas.iterator(.{});
-            while (replicas_iterator.next()) |replica| {
-                atlas.faulty_grid_blocks[replica].set(block);
             }
         }
 
@@ -1066,8 +1047,6 @@ pub const ClusterFaultAtlas = struct {
         chunk_size: u32,
         faulty: *const [members_max]std.DynamicBitSetUnmanaged,
     } {
-        if (!atlas.faulty_zones.contains(zone)) return null;
-
         return switch (zone) {
             // Don't inject additional read/write/misdirect faults into superblock headers.
             // This prevents the quorum from being lost like so:
