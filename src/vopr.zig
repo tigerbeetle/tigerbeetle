@@ -176,6 +176,7 @@ pub fn main() !void {
             .write_latency_mean = 3 + random.uintLessThan(u16, 100),
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
+            .write_misdirect_probability = random.uintLessThan(u8, 10),
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
         },
         .storage_fault_atlas = .{
