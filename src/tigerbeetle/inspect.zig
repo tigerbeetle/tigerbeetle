@@ -17,7 +17,7 @@ const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const schema = vsr.lsm.schema;
 const constants = vsr.constants;
-const Storage = vsr.storage.Storage(vsr.io.IO);
+const Storage = vsr.storage.StorageType(vsr.io.IO);
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
 const SuperBlockQuorums = vsr.superblock.Quorums;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
@@ -1074,8 +1074,8 @@ const operation_schemas = list: {
         if (operation == .pulse) continue;
         list = list ++ [_]OperationSchema{.{
             .operation = vsr.Operation.from(StateMachine, operation),
-            .Event = StateMachine.Event(operation),
-            .Result = StateMachine.Result(operation),
+            .Event = StateMachine.EventType(operation),
+            .Result = StateMachine.ResultType(operation),
         }};
     }
     break :list list;

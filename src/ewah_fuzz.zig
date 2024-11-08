@@ -88,13 +88,13 @@ fn generate_bits(random: std.rand.Random, data: []u8, bits_set_total: usize) voi
 
 fn ContextType(comptime Word: type) type {
     return struct {
-        const Self = @This();
+        const Context = @This();
         const Codec = ewah.ewah(Word);
 
         decoded_actual: []Word,
         encoded_actual: []align(@alignOf(Word)) u8,
 
-        fn init(allocator: std.mem.Allocator, size_max: usize) !Self {
+        fn init(allocator: std.mem.Allocator, size_max: usize) !Context {
             const decoded_actual = try allocator.alloc(Word, size_max);
             errdefer allocator.free(decoded_actual);
 
@@ -105,13 +105,13 @@ fn ContextType(comptime Word: type) type {
             );
             errdefer allocator.free(encoded_actual);
 
-            return Self{
+            return Context{
                 .decoded_actual = decoded_actual,
                 .encoded_actual = encoded_actual,
             };
         }
 
-        fn deinit(context: *Self, allocator: std.mem.Allocator) void {
+        fn deinit(context: *Context, allocator: std.mem.Allocator) void {
             allocator.free(context.decoded_actual);
             allocator.free(context.encoded_actual);
         }
@@ -122,7 +122,7 @@ fn ContextType(comptime Word: type) type {
         };
 
         fn test_encode_decode(
-            context: Self,
+            context: Context,
             decoded_expect: []const Word,
             options: TestOptions,
         ) !usize {

@@ -230,11 +230,11 @@ pub fn KWayMergeIteratorType(
     };
 }
 
-fn TestContext(comptime streams_max: u32) type {
+fn TestContextType(comptime streams_max: u32) type {
     const testing = std.testing;
 
     return struct {
-        const KWayMergeIterator = @This();
+        const TestContext = @This();
 
         const log = false;
 
@@ -250,7 +250,7 @@ fn TestContext(comptime streams_max: u32) type {
         streams: [streams_max][]const Value,
 
         fn stream_peek(
-            context: *const KWayMergeIterator,
+            context: *const TestContext,
             stream_index: u32,
         ) error{ Empty, Drained }!u32 {
             // TODO: test for Drained somehow as well.
@@ -259,13 +259,13 @@ fn TestContext(comptime streams_max: u32) type {
             return stream[0].key;
         }
 
-        fn stream_pop(context: *KWayMergeIterator, stream_index: u32) Value {
+        fn stream_pop(context: *TestContext, stream_index: u32) Value {
             const stream = context.streams[stream_index];
             context.streams[stream_index] = stream[1..];
             return stream[0];
         }
 
-        fn stream_precedence(context: *const KWayMergeIterator, a: u32, b: u32) bool {
+        fn stream_precedence(context: *const TestContext, a: u32, b: u32) bool {
             _ = context;
 
             // Higher streams have higher precedence.
@@ -278,7 +278,7 @@ fn TestContext(comptime streams_max: u32) type {
             expect: []const Value,
         ) !void {
             const KWay = KWayMergeIteratorType(
-                KWayMergeIterator,
+                TestContext,
                 u32,
                 Value,
                 Value.to_key,
@@ -304,7 +304,7 @@ fn TestContext(comptime streams_max: u32) type {
             }
             defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
 
-            var context: KWayMergeIterator = .{ .streams = streams };
+            var context: TestContext = .{ .streams = streams };
             var kway = KWay.init(&context, @intCast(streams_keys.len), direction);
 
             while (try kway.pop()) |value| {
@@ -423,38 +423,38 @@ fn TestContext(comptime streams_max: u32) type {
 }
 
 test "k_way_merge: unit" {
-    try TestContext(1).merge(
+    try TestContextType(1).merge(
         .ascending,
         &[_][]const u32{
             &[_]u32{ 0, 3, 4, 8 },
         },
-        &[_]TestContext(1).Value{
+        &[_]TestContextType(1).Value{
             .{ .key = 0, .version = 0 },
             .{ .key = 3, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 8, .version = 0 },
         },
     );
-    try TestContext(1).merge(
+    try TestContextType(1).merge(
         .descending,
         &[_][]const u32{
             &[_]u32{ 8, 4, 3, 0 },
         },
-        &[_]TestContext(1).Value{
+        &[_]TestContextType(1).Value{
             .{ .key = 8, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 3, .version = 0 },
             .{ .key = 0, .version = 0 },
         },
     );
-    try TestContext(3).merge(
+    try TestContextType(3).merge(
         .ascending,
         &[_][]const u32{
             &[_]u32{ 0, 3, 4, 8, 11 },
             &[_]u32{ 2, 11, 12, 13, 15 },
             &[_]u32{ 1, 2, 11 },
         },
-        &[_]TestContext(3).Value{
+        &[_]TestContextType(3).Value{
             .{ .key = 0, .version = 0 },
             .{ .key = 1, .version = 2 },
             .{ .key = 2, .version = 2 },
@@ -467,14 +467,14 @@ test "k_way_merge: unit" {
             .{ .key = 15, .version = 1 },
         },
     );
-    try TestContext(3).merge(
+    try TestContextType(3).merge(
         .descending,
         &[_][]const u32{
             &[_]u32{ 11, 8, 4, 3, 0 },
             &[_]u32{ 15, 13, 12, 11, 2 },
             &[_]u32{ 11, 2, 1 },
         },
-        &[_]TestContext(3).Value{
+        &[_]TestContextType(3).Value{
             .{ .key = 15, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 12, .version = 1 },
@@ -496,5 +496,5 @@ test "k_way_merge: fuzz" {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    try TestContext(32).fuzz(random, 256);
+    try TestContextType(32).fuzz(random, 256);
 }

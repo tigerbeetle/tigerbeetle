@@ -361,7 +361,6 @@ fn create_tmp_dir(allocator: std.mem.Allocator) ![]const u8 {
 }
 
 const Replica = struct {
-    const Self = @This();
     pub const State = enum(u8) { initial, running, stopped, terminated };
 
     allocator: std.mem.Allocator,
@@ -373,8 +372,8 @@ const Replica = struct {
         allocator: std.mem.Allocator,
         executable_path: []const u8,
         datafile: []const u8,
-    ) !*Self {
-        const self = try allocator.create(Self);
+    ) !*Replica {
+        const self = try allocator.create(Replica);
         errdefer allocator.destroy(self);
 
         self.* = .{
@@ -386,7 +385,7 @@ const Replica = struct {
         return self;
     }
 
-    pub fn destroy(self: *Self) void {
+    pub fn destroy(self: *Replica) void {
         assert(self.state() == .initial or self.state() == .terminated);
         const allocator = self.allocator;
         if (self.process) |process| {
@@ -395,7 +394,7 @@ const Replica = struct {
         allocator.destroy(self);
     }
 
-    pub fn state(self: *Self) State {
+    pub fn state(self: *Replica) State {
         if (self.process) |process| {
             switch (process.state()) {
                 .running => return .running,
@@ -405,7 +404,7 @@ const Replica = struct {
         } else return .initial;
     }
 
-    pub fn start(self: *Self) !void {
+    pub fn start(self: *Replica) !void {
         assert(self.state() != .running);
         defer assert(self.state() == .running);
 
@@ -424,7 +423,7 @@ const Replica = struct {
     }
 
     pub fn terminate(
-        self: *Self,
+        self: *Replica,
     ) !std.process.Child.Term {
         assert(self.state() == .running or self.state() == .stopped);
         defer assert(self.state() == .terminated);
@@ -434,7 +433,7 @@ const Replica = struct {
     }
 
     pub fn stop(
-        self: *Self,
+        self: *Replica,
     ) !void {
         assert(self.state() == .running);
         defer assert(self.state() == .stopped);
@@ -444,7 +443,7 @@ const Replica = struct {
     }
 
     pub fn cont(
-        self: *Self,
+        self: *Replica,
     ) !void {
         assert(self.state() == .stopped);
         defer assert(self.state() == .running);

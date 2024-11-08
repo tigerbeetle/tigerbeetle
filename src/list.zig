@@ -175,7 +175,7 @@ test "DoublyLinkedList fuzz" {
     const events_max = 1 << 15;
 
     const Event = enum { push, pop, remove };
-    const event_distribution = fuzz.Distribution(Event){ .push = 10, .pop = 1, .remove = 8 };
+    const event_distribution = fuzz.DistributionType(Event){ .push = 10, .pop = 1, .remove = 8 };
 
     const nodes = try allocator.alloc(Node, nodes_count);
     defer allocator.free(nodes);
@@ -185,7 +185,7 @@ test "DoublyLinkedList fuzz" {
     defer nodes_free.deinit(allocator);
 
     var list = List{};
-    var list_model = stdx.BoundedArray(u32, nodes_count){};
+    var list_model = stdx.BoundedArrayType(u32, nodes_count){};
 
     for (0..events_max) |_| {
         assert(list_model.count() <= nodes_count);

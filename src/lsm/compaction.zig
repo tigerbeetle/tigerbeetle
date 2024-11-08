@@ -42,7 +42,8 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 const trace = @import("../trace.zig");
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
+const IOPSType = @import("../iops.zig").IOPSType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
@@ -50,8 +51,7 @@ const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const IOPS = @import("../iops.zig").IOPS;
+const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
 
 /// The upper-bound count of input tables to a single tree's compaction.
 ///
@@ -82,11 +82,11 @@ const half_bar_beat_count = @divExact(constants.lsm_compaction_ops, 2);
 /// ResourcePool is a singleton owned by the Forest, but it doesn't depend on Forest type.
 pub fn ResourcePoolType(comptime Grid: type) type {
     return struct {
-        reads: IOPS(BlockRead, constants.lsm_compaction_iops_read_max) = .{},
-        writes: IOPS(BlockWrite, constants.lsm_compaction_iops_write_max) = .{},
-        cpus: IOPS(CPU, 1) = .{},
+        reads: IOPSType(BlockRead, constants.lsm_compaction_iops_read_max) = .{},
+        writes: IOPSType(BlockWrite, constants.lsm_compaction_iops_write_max) = .{},
+        cpus: IOPSType(CPU, 1) = .{},
         // Use FIFO instead of IOPS here because blocks are allocated at runtime.
-        blocks: FIFO(Block),
+        blocks: FIFOType(Block),
         blocks_backing_storage: []Block,
 
         const ResourcePool = @This();
@@ -177,7 +177,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             }
             assert(blocks_allocated == block_count);
 
-            var blocks: FIFO(Block) = .{
+            var blocks: FIFOType(Block) = .{
                 .name = "compaction_blocks",
                 .verify_push = false,
             };
@@ -397,7 +397,7 @@ pub fn CompactionType(
         /// they are applied deterministically relative to other concurrent compactions.
         // Worst-case manifest updates:
         // See docs/about/internals/lsm.md "Compaction Table Overlap" for more detail.
-        manifest_entries: stdx.BoundedArray(struct {
+        manifest_entries: stdx.BoundedArrayType(struct {
             operation: enum {
                 insert_to_level_b,
                 move_to_level_b,
@@ -449,27 +449,27 @@ pub fn CompactionType(
         // In addition to static max size, the queues are additionally limited at runtime by the
         // number of available free blocks. The queues are not limited by IOPS --- it is assumed
         // that there are enough IOPS to fill up all the queues.
-        level_a_index_block: RingBuffer(*ResourcePool.Block, .{
+        level_a_index_block: RingBufferType(*ResourcePool.Block, .{
             .array = 1,
         }) = .{ .buffer = undefined },
         level_a_index_block_next: u32 = 0,
 
-        level_a_value_block: RingBuffer(*ResourcePool.Block, .{
+        level_a_value_block: RingBufferType(*ResourcePool.Block, .{
             .array = @divExact(constants.lsm_compaction_queue_read_max, 2),
         }) = .{ .buffer = undefined },
         level_a_value_block_next: u32 = 0,
 
-        level_b_index_block: RingBuffer(*ResourcePool.Block, .{
+        level_b_index_block: RingBufferType(*ResourcePool.Block, .{
             .array = 1,
         }) = .{ .buffer = undefined },
         level_b_index_block_next: u32 = 0,
 
-        level_b_value_block: RingBuffer(*ResourcePool.Block, .{
+        level_b_value_block: RingBufferType(*ResourcePool.Block, .{
             .array = @divExact(constants.lsm_compaction_queue_read_max, 2),
         }) = .{ .buffer = undefined },
         level_b_value_block_next: u32 = 0,
 
-        output_blocks: RingBuffer(void, .{
+        output_blocks: RingBufferType(void, .{
             .array = constants.lsm_compaction_queue_write_max,
         }) = .{ .buffer = undefined },
 

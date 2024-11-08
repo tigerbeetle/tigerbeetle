@@ -48,7 +48,7 @@ pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const SyncStage = @import("vsr/sync.zig").Stage;
 pub const SyncTarget = @import("vsr/sync.zig").Target;
-pub const Client = @import("vsr/client.zig").Client;
+pub const ClientType = @import("vsr/client.zig").ClientType;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const GridType = @import("vsr/grid.zig").GridType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
@@ -1229,7 +1229,7 @@ pub fn verify_release_list(releases: []const Release, release_included: Release)
 }
 
 pub const Headers = struct {
-    pub const Array = stdx.BoundedArray(Header.Prepare, constants.view_change_headers_max);
+    pub const Array = stdx.BoundedArrayType(Header.Prepare, constants.view_change_headers_max);
     /// The SuperBlock's persisted VSR headers.
     /// One of the following:
     ///

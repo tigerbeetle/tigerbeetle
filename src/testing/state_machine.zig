@@ -37,11 +37,11 @@ pub fn StateMachineType(
             .echo = false,
         });
 
-        pub fn Event(comptime _: Operation) type {
+        pub fn EventType(comptime _: Operation) type {
             return u8; // Must be non-zero-sized for sliceAsBytes().
         }
 
-        pub fn Result(comptime _: Operation) type {
+        pub fn ResultType(comptime _: Operation) type {
             return u8; // Must be non-zero-sized for sliceAsBytes().
         }
 
@@ -50,11 +50,16 @@ pub fn StateMachineType(
             return struct {
                 const Demuxer = @This();
 
-                reply: []Result(operation),
+                reply: []ResultType(operation),
                 offset: u32 = 0,
 
                 pub fn init(reply: []u8) Demuxer {
-                    return .{ .reply = @alignCast(std.mem.bytesAsSlice(Result(operation), reply)) };
+                    return .{
+                        .reply = @alignCast(std.mem.bytesAsSlice(
+                            ResultType(operation),
+                            reply,
+                        )),
+                    };
                 }
 
                 pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {

@@ -11,16 +11,16 @@ const RingBuffer = vsr.ring_buffer.RingBuffer;
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 
-pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type {
+pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {
-        const Self = @This();
+        const EchoClient = @This();
 
         // Exposing the same types the real client does:
-        const VSRClient = vsr.Client(StateMachine_, MessageBus);
+        const VSRClient = vsr.ClientType(StateMachine_, MessageBus);
         pub const StateMachine = VSRClient.StateMachine;
         pub const Request = VSRClient.Request;
 
-        /// Custom Demuxer which treats Event(operation)s as results and echoes them back.
+        /// Custom Demuxer which treats EventType(operation)s as results and echoes them back.
         pub fn DemuxerType(comptime operation: StateMachine.Operation) type {
             return struct {
                 const Demuxer = @This();
@@ -38,7 +38,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                     self.events_decoded += event_count;
 
                     // Double check the results has enough event bytes to echo back.
-                    const byte_count = @sizeOf(StateMachine.Event(operation)) * event_count;
+                    const byte_count = @sizeOf(StateMachine.EventType(operation)) * event_count;
                     assert(self.results.len >= byte_count);
 
                     // Echo back the result bytes and consume the events.
@@ -65,24 +65,24 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 message_pool: *MessagePool,
                 message_bus_options: MessageBus.Options,
             },
-        ) !Self {
+        ) !EchoClient {
             _ = allocator;
             _ = options.replica_count;
             _ = options.message_bus_options;
 
-            return Self{
+            return EchoClient{
                 .id = options.id,
                 .cluster = options.cluster,
                 .message_pool = options.message_pool,
             };
         }
 
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *EchoClient, allocator: std.mem.Allocator) void {
             _ = allocator;
             if (self.request_inflight) |inflight| self.release_message(inflight.message.base());
         }
 
-        pub fn tick(self: *Self) void {
+        pub fn tick(self: *EchoClient) void {
             const inflight = self.request_inflight orelse return;
             self.request_inflight = null;
 
@@ -110,7 +110,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .request => |callback| {
                     callback(
                         inflight.user_data,
-                        operation.cast(Self.StateMachine),
+                        operation.cast(EchoClient.StateMachine),
                         timestamp,
                         reply.body_used(),
                     );
@@ -125,7 +125,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         pub fn register(
-            self: *Self,
+            self: *EchoClient,
             callback: Request.RegisterCallback,
             user_data: u128,
         ) void {
@@ -156,14 +156,16 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         pub fn request(
-            self: *Self,
+            self: *EchoClient,
             callback: Request.Callback,
             user_data: u128,
             operation: StateMachine.Operation,
             events: []const u8,
         ) void {
             const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
+                inline else => |operation_comptime| @sizeOf(
+                    StateMachine.EventType(operation_comptime),
+                ),
             };
             assert(events.len <= constants.message_body_size_max);
             assert(events.len % event_size == 0);
@@ -186,7 +188,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         pub fn raw_request(
-            self: *Self,
+            self: *EchoClient,
             callback: Request.Callback,
             user_data: u128,
             message: *Message.Request,
@@ -209,11 +211,11 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             };
         }
 
-        pub fn get_message(self: *Self) *Message {
+        pub fn get_message(self: *EchoClient) *Message {
             return self.message_pool.get_message(null);
         }
 
-        pub fn release_message(self: *Self, message: *Message) void {
+        pub fn release_message(self: *EchoClient, message: *Message) void {
             self.message_pool.unref(message);
         }
     };
@@ -225,14 +227,14 @@ test "Echo Demuxer" {
         constants.state_machine_config,
     );
     const MessageBus = vsr.message_bus.MessageBusClient;
-    const Client = EchoClient(StateMachine, MessageBus);
+    const Client = EchoClientType(StateMachine, MessageBus);
 
     var prng = std.rand.DefaultPrng.init(42);
     inline for ([_]StateMachine.Operation{
         .create_accounts,
         .create_transfers,
     }) |operation| {
-        const Event = StateMachine.Event(operation);
+        const Event = StateMachine.EventType(operation);
         var events: [@divExact(constants.message_body_size_max, @sizeOf(Event))]Event = undefined;
         prng.fill(std.mem.asBytes(&events));
 

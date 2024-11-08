@@ -4,7 +4,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-pub const BoundedArray = @import("./stdx/bounded_array.zig").BoundedArray;
+pub const BoundedArrayType = @import("./stdx/bounded_array.zig").BoundedArrayType;
 pub const ZipfianGenerator = @import("./stdx/zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("./stdx/zipfian.zig").ZipfianShuffled;
 

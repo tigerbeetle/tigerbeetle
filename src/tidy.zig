@@ -77,6 +77,18 @@ test "tidy" {
                 (try tidy_long_functions(source_file, &tree)).function_line_count_longest,
             );
 
+            if (tidy_generic_functions(source_file)) |function| {
+                std.debug.print(
+                    "{s}:{d} error: '{s}' should end with the 'Type' suffix\n",
+                    .{
+                        source_file.path,
+                        function.line,
+                        function.name,
+                    },
+                );
+                return error.GenericFunctionWithoutType;
+            }
+
             try dead_files_detector.visit(source_file);
         }
 
@@ -106,7 +118,7 @@ const SourceFile = struct { path: []const u8, text: [:0]const u8 };
 fn tidy_banned(source: []const u8) ?[]const u8 {
     // Note: must avoid banning ourselves!
     if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
-        return "use stdx.BoundedArray instead of std version";
+        return "use stdx.BoundedArrayType instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
@@ -142,6 +154,10 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         if (std.mem.indexOf(u8, source, "fn dbg(") == null) {
             return "dbg" ++ "() must be removed before getting to main";
         }
+    }
+
+    if (std.mem.indexOf(u8, source, "Self = " ++ "@This()") != null) {
+        return "use a type name instead of Self";
     }
 
     return null;
@@ -298,7 +314,7 @@ fn tidy_dead_declarations(
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 412; // fn check in state_machine.zig
+const function_line_count_max = 414; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -349,7 +365,7 @@ fn tidy_long_functions(
         }
     };
 
-    var function_stack = stdx.BoundedArray(Function, 32).from_slice(&.{}) catch unreachable;
+    var function_stack = stdx.BoundedArrayType(Function, 32).from_slice(&.{}) catch unreachable;
 
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
@@ -408,6 +424,51 @@ fn tidy_long_functions(
     return .{
         .function_line_count_longest = function_line_count_longest,
     };
+}
+
+/// All functions using the `CamelCase` naming convention return a type,
+/// so we enforce that the function name also ends with the `Type` suffix.
+fn tidy_generic_functions(
+    file: SourceFile,
+) ?struct {
+    line: usize,
+    name: []const u8,
+} {
+    var line_count: u32 = 0;
+    var it = std.mem.split(u8, file.text, "\n");
+    while (it.next()) |line| {
+        line_count += 1;
+        // Zig fmt enforces that the pattern `fn Foo(` is not split across multiple lines.
+        const function_name = function_name: {
+            const fn_prefix = "fn ";
+            const index = std.mem.indexOf(u8, line, fn_prefix) orelse continue;
+            // Not all `fn ` tokens are functions, some may be `callback_fn` for example.
+            // They should appear at the beginning of a line or after a whitespace.
+            if (index == 0 or std.ascii.isWhitespace(line[index - 1])) {
+                const begin = index + fn_prefix.len;
+                const end = std.mem.indexOf(u8, line[begin..], "(") orelse continue;
+                if (end == 0) continue;
+
+                assert(begin + end < line.len);
+                break :function_name line[begin..][0..end];
+            }
+            continue;
+        };
+
+        // Skipping naming convetions that requires upper-case functions.
+        if (std.mem.startsWith(u8, function_name, "JNI_")) continue;
+
+        if (std.ascii.isUpper(function_name[0])) {
+            if (!std.mem.endsWith(u8, function_name, "Type")) {
+                return .{
+                    .line = line_count,
+                    .name = function_name,
+                };
+            }
+        }
+    }
+
+    return null;
 }
 
 /// Checks that each markdown document has exactly one h1.

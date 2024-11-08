@@ -23,7 +23,7 @@ pub fn random_int_exponential(random: std.rand.Random, comptime T: type, avg: T)
     return std.math.lossyCast(T, exp);
 }
 
-pub fn Distribution(comptime Enum: type) type {
+pub fn DistributionType(comptime Enum: type) type {
     return std.enums.EnumFieldStruct(Enum, f64, null);
 }
 
@@ -31,9 +31,9 @@ pub fn Distribution(comptime Enum: type) type {
 pub fn random_enum_distribution(
     random: std.rand.Random,
     comptime Enum: type,
-) Distribution(Enum) {
-    const fields = @typeInfo(Distribution(Enum)).Struct.fields;
-    var distribution: Distribution(Enum) = undefined;
+) DistributionType(Enum) {
+    const fields = @typeInfo(DistributionType(Enum)).Struct.fields;
+    var distribution: DistributionType(Enum) = undefined;
     var total: f64 = 0;
     inline for (fields) |field| {
         const p = @as(f64, @floatFromInt(random.uintLessThan(u8, 10)));
@@ -51,7 +51,7 @@ pub fn random_enum_distribution(
 pub fn random_enum(
     random: std.rand.Random,
     comptime Enum: type,
-    distribution: Distribution(Enum),
+    distribution: DistributionType(Enum),
 ) Enum {
     const fields = @typeInfo(Enum).Enum.fields;
     var total: f64 = 0;

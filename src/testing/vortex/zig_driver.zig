@@ -15,7 +15,7 @@ const events_count_max = 8190;
 const events_buffer_size_max = size: {
     var event_size_max = 0;
     for (std.enums.values(StateMachine.Operation)) |operation| {
-        event_size_max = @max(event_size_max, @sizeOf(StateMachine.Event(operation)));
+        event_size_max = @max(event_size_max, @sizeOf(StateMachine.EventType(operation)));
     }
     break :size event_size_max * events_count_max;
 };
@@ -129,7 +129,7 @@ fn write_results(
 ) !void {
     switch (operation) {
         inline else => |comptime_operation| {
-            const size = @sizeOf(StateMachine.Result(comptime_operation));
+            const size = @sizeOf(StateMachine.ResultType(comptime_operation));
             if (size > 0) {
                 const count = @divExact(result.len, size);
                 try writer.writeInt(u32, @intCast(count), .little);
@@ -153,7 +153,7 @@ fn receive(reader: std.io.AnyReader, buffer: []u8) !struct { StateMachine.Operat
         inline else => |comptime_operation| {
             assert(count <= events_count_max);
 
-            const events_size = @sizeOf(StateMachine.Event(comptime_operation)) * count;
+            const events_size = @sizeOf(StateMachine.EventType(comptime_operation)) * count;
             assert(buffer.len >= events_size);
             assert(try reader.readAtLeast(buffer, events_size) == events_size);
 

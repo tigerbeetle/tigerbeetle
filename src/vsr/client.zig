@@ -15,9 +15,9 @@ const FIFO = @import("../fifo.zig").FIFO;
 
 const log = stdx.log.scoped(.client);
 
-pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
+pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {
-        const Self = @This();
+        const Client = @This();
 
         pub const StateMachine = StateMachine_;
         pub const DemuxerType = StateMachine.DemuxerType;
@@ -105,14 +105,14 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         on_reply_context: ?*anyopaque = null,
         /// Used for testing. Called for replies to all operations (including `register`).
         on_reply_callback: ?*const fn (
-            client: *Self,
+            client: *Client,
             request: *Message.Request,
             reply: *Message.Reply,
         ) void = null,
 
         evicted: bool = false,
         on_eviction_callback: ?*const fn (
-            client: *Self,
+            client: *Client,
             eviction: *const Message.Eviction,
         ) void = null,
 
@@ -129,11 +129,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 /// When eviction_callback is non-null, it must `deinit()` the Client.
                 /// After eviction, the client must not send or process any additional messages.
                 eviction_callback: ?*const fn (
-                    client: *Self,
+                    client: *Client,
                     eviction: *const Message.Eviction,
                 ) void = null,
             },
-        ) !Self {
+        ) !Client {
             assert(options.id > 0);
             assert(options.replica_count > 0);
 
@@ -142,12 +142,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 options.cluster,
                 .{ .client = options.id },
                 options.message_pool,
-                Self.on_message,
+                Client.on_message,
                 options.message_bus_options,
             );
             errdefer message_bus.deinit(allocator);
 
-            var self = Self{
+            var self = Client{
                 .allocator = allocator,
                 .message_bus = message_bus,
                 .id = options.id,
@@ -172,13 +172,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *Client, allocator: std.mem.Allocator) void {
             if (self.request_inflight) |inflight| self.release_message(inflight.message.base());
             self.message_bus.deinit(allocator);
         }
 
         pub fn on_message(message_bus: *MessageBus, message: *Message) void {
-            const self: *Self = @fieldParentPtr("message_bus", message_bus);
+            const self: *Client = @fieldParentPtr("message_bus", message_bus);
             assert(!self.evicted);
 
             log.debug("{}: on_message: {}", .{ self.id, message.header });
@@ -208,7 +208,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
         }
 
-        pub fn tick(self: *Self) void {
+        pub fn tick(self: *Client) void {
             assert(!self.evicted);
 
             self.ticks += 1;
@@ -223,7 +223,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         /// Registers a session with the cluster for the client, if this has not yet been done.
-        pub fn register(self: *Self, callback: Request.RegisterCallback, user_data: u128) void {
+        pub fn register(self: *Client, callback: Request.RegisterCallback, user_data: u128) void {
             assert(!self.evicted);
             assert(self.request_inflight == null);
             assert(self.request_number == 0);
@@ -268,14 +268,16 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Sends a request message with the operation and events payload to the replica.
         /// There must be no other request message currently inflight.
         pub fn request(
-            self: *Self,
+            self: *Client,
             callback: Request.Callback,
             user_data: u128,
             operation: StateMachine.Operation,
             events: []const u8,
         ) void {
             const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
+                inline else => |operation_comptime| @sizeOf(
+                    StateMachine.EventType(operation_comptime),
+                ),
             };
             assert(!self.evicted);
             assert(self.request_inflight == null);
@@ -304,7 +306,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Sends a request, only setting request_number in the header.
         /// There must be no other request message currently inflight.
         pub fn raw_request(
-            self: *Self,
+            self: *Client,
             callback: Request.Callback,
             user_data: u128,
             message: *Message.Request,
@@ -356,16 +358,16 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Either use it in `client.raw_request()` or discard via `client.release_message()`,
         /// the reference is not guaranteed to be valid after both actions.
         /// Do NOT use the reference counter function `message.ref()` for storing the message.
-        pub fn get_message(self: *Self) *Message {
+        pub fn get_message(self: *Client) *Message {
             return self.message_bus.get_message(null);
         }
 
         /// Releases a message back to the message bus.
-        pub fn release_message(self: *Self, message: *Message) void {
+        pub fn release_message(self: *Client, message: *Message) void {
             self.message_bus.unref(message);
         }
 
-        fn on_eviction(self: *Self, eviction: *const Message.Eviction) void {
+        fn on_eviction(self: *Client, eviction: *const Message.Eviction) void {
             assert(!self.evicted);
             assert(eviction.header.command == .eviction);
             assert(eviction.header.cluster == self.cluster);
@@ -404,7 +406,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
         }
 
-        fn on_pong_client(self: *Self, pong: *const Message.PongClient) void {
+        fn on_pong_client(self: *Client, pong: *const Message.PongClient) void {
             assert(pong.header.command == .pong_client);
             assert(pong.header.cluster == self.cluster);
 
@@ -418,7 +420,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
         }
 
-        fn on_reply(self: *Self, reply: *Message.Reply) void {
+        fn on_reply(self: *Client, reply: *Message.Reply) void {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
             assert(reply.header.valid_checksum());
@@ -533,7 +535,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
         }
 
-        fn on_ping_timeout(self: *Self) void {
+        fn on_ping_timeout(self: *Client) void {
             self.ping_timeout.reset();
 
             const ping = Header.PingClient{
@@ -547,7 +549,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.send_header_to_replicas(ping.frame_const().*);
         }
 
-        fn on_request_timeout(self: *Self) void {
+        fn on_request_timeout(self: *Client) void {
             self.request_timeout.backoff(self.prng.random());
 
             const message = self.request_inflight.?.message;
@@ -570,7 +572,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_message_from_header(self: *Self, header: Header) *Message {
+        fn create_message_from_header(self: *Client, header: Header) *Message {
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
@@ -584,7 +586,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             return message.ref();
         }
 
-        fn send_header_to_replicas(self: *Self, header: Header) void {
+        fn send_header_to_replicas(self: *Client, header: Header) void {
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
@@ -594,7 +596,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
         }
 
-        fn send_message_to_replica(self: *Self, replica: u8, message: *Message) void {
+        fn send_message_to_replica(self: *Client, replica: u8, message: *Message) void {
             log.debug("{}: sending {s} to replica {}: {}", .{
                 self.id,
                 @tagName(message.header.command),
@@ -616,7 +618,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.message_bus.send_message_to_replica(replica, message);
         }
 
-        fn send_request_for_the_first_time(self: *Self, message: *Message.Request) void {
+        fn send_request_for_the_first_time(self: *Client, message: *Message.Request) void {
             assert(self.request_inflight.?.message == message);
             assert(self.request_number > 0);
 

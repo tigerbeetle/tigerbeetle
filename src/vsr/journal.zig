@@ -10,7 +10,7 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
-const IOPS = @import("../iops.zig").IOPS;
+const IOPSType = @import("../iops.zig").IOPSType;
 
 const log = std.log.scoped(.journal);
 
@@ -247,14 +247,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         header_chunks_recovered: HeaderChunks = HeaderChunks.initEmpty(),
 
         /// Statically allocated read IO operation context data.
-        reads: IOPS(Read, constants.journal_iops_read_max) = .{},
+        reads: IOPSType(Read, constants.journal_iops_read_max) = .{},
         /// Count of reads currently acquired on the repair path.
         reads_repair_count: u6 = 0,
         /// Count of reads currently acquired on the commit path.
         reads_commit_count: u6 = 0,
 
         /// Statically allocated write IO operation context data.
-        writes: IOPS(Write, constants.journal_iops_write_max) = .{},
+        writes: IOPSType(Write, constants.journal_iops_write_max) = .{},
 
         /// Whether an entry is in memory only and needs to be written or is being written:
         /// We use this in the same sense as a dirty bit in the kernel page cache.
@@ -1375,7 +1375,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn torn_prepares(
             journal: *const Journal,
             cases: []const *const Case,
-        ) stdx.BoundedArray(Slot, constants.journal_iops_write_max) {
+        ) stdx.BoundedArrayType(Slot, constants.journal_iops_write_max) {
             const replica: *const Replica = @alignCast(@fieldParentPtr("journal", journal));
 
             assert(journal.status == .recovering);
@@ -1420,7 +1420,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // We only consider journal_iops_write_max torn slots, as that is the maximum number of
             // prepare writes that could be concurrently underway. If we find more (due to
             // corruptions), we err on the side of caution and don't truncate any prepares.
-            var torn_slots: stdx.BoundedArray(Slot, constants.journal_iops_write_max) = .{};
+            var torn_slots: stdx.BoundedArrayType(Slot, constants.journal_iops_write_max) = .{};
 
             // We now search for torn prepares between op_max and op_prepare_max. A torn prepare
             // manifests as a prepare with an *invalid checksum* and a *valid* header from any

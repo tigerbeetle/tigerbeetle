@@ -125,7 +125,7 @@ pub fn main() !void {
     const batch_size_limit_min = comptime batch_size_limit_min: {
         var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
         for (std.enums.values(StateMachine.Operation)) |operation| {
-            const event_size = @sizeOf(StateMachine.Event(operation));
+            const event_size = @sizeOf(StateMachine.EventType(operation));
             event_size_max = @max(event_size_max, event_size);
         }
         break :batch_size_limit_min event_size_max;

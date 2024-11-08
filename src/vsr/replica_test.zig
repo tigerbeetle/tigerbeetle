@@ -1911,7 +1911,7 @@ const TestContext = struct {
 
     pub fn replica(t: *TestContext, selector: ProcessSelector) TestReplicas {
         const replica_processes = t.processes(selector);
-        var replica_indexes = stdx.BoundedArray(u8, constants.members_max){};
+        var replica_indexes = stdx.BoundedArrayType(u8, constants.members_max){};
         for (replica_processes.const_slice()) |p| replica_indexes.append_assume_capacity(p.replica);
         return TestReplicas{
             .context = t,
@@ -1921,7 +1921,7 @@ const TestContext = struct {
     }
 
     pub fn clients(t: *TestContext, index: usize, count: usize) TestClients {
-        var client_indexes = stdx.BoundedArray(usize, constants.clients_max){};
+        var client_indexes = stdx.BoundedArrayType(usize, constants.clients_max){};
         for (index..index + count) |i| client_indexes.append_assume_capacity(i);
         return TestClients{
             .context = t,
@@ -1970,7 +1970,10 @@ const TestContext = struct {
         t.client_replies[client] += 1;
     }
 
-    const ProcessList = stdx.BoundedArray(Process, constants.members_max + constants.clients_max);
+    const ProcessList = stdx.BoundedArrayType(
+        Process,
+        constants.members_max + constants.clients_max,
+    );
 
     fn processes(t: *const TestContext, selector: ProcessSelector) ProcessList {
         const replica_count = t.cluster.options.replica_count;
@@ -2031,7 +2034,7 @@ const TestContext = struct {
 const TestReplicas = struct {
     context: *TestContext,
     cluster: *Cluster,
-    replicas: stdx.BoundedArray(u8, constants.members_max),
+    replicas: stdx.BoundedArrayType(u8, constants.members_max),
 
     pub fn stop(t: *const TestReplicas) void {
         for (t.replicas.const_slice()) |r| {
@@ -2371,8 +2374,8 @@ const TestReplicas = struct {
         t: *const TestReplicas,
         peer: ProcessSelector,
         direction: LinkDirection,
-    ) stdx.BoundedArray(Network.Path, paths_max) {
-        var paths = stdx.BoundedArray(Network.Path, paths_max){};
+    ) stdx.BoundedArrayType(Network.Path, paths_max) {
+        var paths = stdx.BoundedArrayType(Network.Path, paths_max){};
         const peers = t.context.processes(peer);
         for (t.replicas.const_slice()) |a| {
             const process_a = Process{ .replica = a };
@@ -2434,7 +2437,7 @@ const TestReplicas = struct {
 const TestClients = struct {
     context: *TestContext,
     cluster: *Cluster,
-    clients: stdx.BoundedArray(usize, constants.clients_max),
+    clients: stdx.BoundedArrayType(usize, constants.clients_max),
     requests: usize = 0,
 
     pub fn request(t: *TestClients, requests: usize, expect_replies: usize) !void {
