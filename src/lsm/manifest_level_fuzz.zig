@@ -106,7 +106,7 @@ fn generate_fuzz_ops(
     errdefer allocator.free(fuzz_ops);
 
     // TODO: These seem good enough, but we should find proper distributions.
-    const fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
+    const fuzz_op_distribution = fuzz.DistributionType(FuzzOpTag){
         .insert_tables = 8,
         .update_tables = 5,
         .take_snapshot = 3,

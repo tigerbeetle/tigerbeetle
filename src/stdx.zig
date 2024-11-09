@@ -4,7 +4,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-pub const BoundedArray = @import("./stdx/bounded_array.zig").BoundedArray;
+pub const BoundedArrayType = @import("./stdx/bounded_array.zig").BoundedArrayType;
 pub const ZipfianGenerator = @import("./stdx/zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("./stdx/zipfian.zig").ZipfianShuffled;
 
@@ -815,6 +815,35 @@ test fmt_int_size_bin_exact {
     });
 }
 
+/// Like std.fmt.bufPrint, but checks, at compile time, that the buffer is sufficiently large.
+pub fn array_print(
+    comptime n: usize,
+    buffer: *[n]u8,
+    comptime fmt: []const u8,
+    args: anytype,
+) []const u8 {
+    const Args = @TypeOf(args);
+    const ArgsStruct = @typeInfo(Args).Struct;
+    comptime assert(ArgsStruct.is_tuple);
+
+    comptime {
+        var args_worst_case: Args = undefined;
+        for (ArgsStruct.fields, 0..) |field, index| {
+            const arg_worst_case = switch (field.type) {
+                u64 => std.math.maxInt(field.type),
+                else => @compileError("array_print: unhandled type"),
+            };
+            args_worst_case[index] = arg_worst_case;
+        }
+        const buffer_size = std.fmt.count(fmt, args_worst_case);
+        assert(n >= buffer_size); // array_print buffer too small
+    }
+
+    return std.fmt.bufPrint(buffer, fmt, args) catch |err| switch (err) {
+        error.NoSpaceLeft => unreachable,
+    };
+}
+
 // DateTime in UTC, intended primarily for logging.
 //
 // NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
@@ -867,3 +896,18 @@ pub const DateTimeUTC = struct {
         });
     }
 };
+
+/// Like std.posix's `unexpectedErrno()` but log unconditionally, not just when mode=Debug.
+/// The added `label` argument works around the absence of stack traces in ReleaseSafe builds.
+pub fn unexpected_errno(label: []const u8, err: std.posix.system.E) std.posix.UnexpectedError {
+    log.scoped(.stdx).err("unexpected errno: {s}: code={d} name={?s}", .{
+        label,
+        @intFromEnum(err),
+        std.enums.tagName(std.posix.system.E, err),
+    });
+
+    if (builtin.mode == .Debug) {
+        std.debug.dumpCurrentStackTrace(null);
+    }
+    return error.Unexpected;
+}

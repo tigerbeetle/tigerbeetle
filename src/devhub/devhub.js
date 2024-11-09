@@ -10,8 +10,8 @@
 window.onload = () =>
   Promise.all([
     mainReleaseRotation(),
-    mainMetrics(),
     mainSeeds(),
+    mainMetrics(),
   ]);
 
 function assert(condition) {
@@ -48,21 +48,6 @@ function mainReleaseRotation() {
   }
 }
 
-async function mainMetrics() {
-  const dataUrl =
-    "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
-  const data = await (await fetch(dataUrl)).text();
-  const maxBatches = 200;
-  const batches = data.split("\n")
-    .filter((it) => it.length > 0)
-    .map((it) => JSON.parse(it))
-    .slice(-1 * maxBatches)
-    .reverse();
-
-  const series = batchesToSeries(batches);
-  plotSeries(series, document.querySelector("#charts"), batches.length);
-}
-
 async function mainSeeds() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
@@ -87,10 +72,8 @@ async function mainSeeds() {
   const query_all = query.get("all") !== null;
   const fuzzersWithFailures = new Set();
 
-  const seedsDom = document.querySelector("#seeds");
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
-  let commit_count = 0;
 
   for (const record of records) {
     let include = undefined;
@@ -112,11 +95,6 @@ async function mainSeeds() {
 
     if (!include) continue;
 
-    if (record.commit_sha != commit_previous) {
-      commit_previous = record.commit_sha;
-      commit_count += 1;
-    }
-
     const seedDuration = formatDuration(
       (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
     );
@@ -127,7 +105,10 @@ async function mainSeeds() {
 
     const seedSuccess = record.fuzzer === "canary" ? !record.ok : record.ok;
     if (seedSuccess) rowDom.classList.add("success");
-    rowDom.classList.add(commit_count % 2 == 0 ? "even" : "odd");
+    if (record.commit_sha != commit_previous) {
+      commit_previous = record.commit_sha;
+      rowDom.classList.add("group-start");
+    }
 
     const pull = pullsByURL.get(record.branch);
     const prLink = pullRequestNumber(record)
@@ -164,9 +145,26 @@ async function mainSeeds() {
       }
     }
   }
-  seedsDom.parentElement.append(
-    `main branch ok=${mainBranchOk} fail=${mainBranchFail} canary=${mainBranchCanary}`,
-  );
+  document.querySelector("#fuzz-ok").innerText = mainBranchOk.toLocaleString();
+  document.querySelector("#fuzz-fail").innerText = mainBranchFail
+    .toLocaleString();
+  document.querySelector("#fuzz-canary").innerText = mainBranchCanary
+    .toLocaleString();
+}
+
+async function mainMetrics() {
+  const dataUrl =
+    "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
+  const data = await (await fetch(dataUrl)).text();
+  const maxBatches = 200;
+  const batches = data.split("\n")
+    .filter((it) => it.length > 0)
+    .map((it) => JSON.parse(it))
+    .slice(-1 * maxBatches)
+    .reverse();
+
+  const series = batchesToSeries(batches);
+  plotSeries(series, document.querySelector("#charts"), batches.length);
 }
 
 function pullRequestNumber(record) {
@@ -179,6 +177,54 @@ function pullRequestNumber(record) {
     return parseInt(prNumber, 10);
   }
   return undefined;
+}
+
+function formatDuration(durationInMilliseconds) {
+  const milliseconds = durationInMilliseconds % 1000;
+  const seconds = Math.floor((durationInMilliseconds / 1000) % 60);
+  const minutes = Math.floor((durationInMilliseconds / (1000 * 60)) % 60);
+  const hours = Math.floor((durationInMilliseconds / (1000 * 60 * 60)) % 24);
+  const days = Math.floor(durationInMilliseconds / (1000 * 60 * 60 * 24));
+  const parts = [];
+
+  if (days > 0) {
+    parts.push(`${days}d`);
+  }
+  if (hours > 0) {
+    parts.push(`${hours}h`);
+  }
+  if (minutes > 0) {
+    parts.push(`${minutes}m`);
+  }
+  if (days == 0) {
+    if (seconds > 0 || parts.length === 0) {
+      parts.push(`${seconds}s`);
+    }
+    if (hours == 0 && minutes == 0) {
+      if (milliseconds > 0) {
+        parts.push(`${milliseconds}ms`);
+      }
+    }
+  }
+
+  return parts.join(" ");
+}
+
+// Returns the ISO week of the date.
+//
+// Source: https://weeknumber.com/how-to/javascript
+function getWeek(date) {
+  date = new Date(date.getTime());
+  date.setHours(0, 0, 0, 0);
+  // Thursday in current week decides the year.
+  date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+  // January 4 is always in week 1.
+  const week1 = new Date(date.getFullYear(), 0, 4);
+  // Adjust to Thursday in week 1 and count number of weeks from date to week1.
+  return 1 + Math.round(
+    ((date.getTime() - week1.getTime()) / 86400000 -
+      3 + (week1.getDay() + 6) % 7) / 7,
+  );
 }
 
 // The input data is array of runs, where a single run contains many measurements (eg, file size,
@@ -330,52 +376,4 @@ function formatBytes(bytes) {
   }
 
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-}
-
-function formatDuration(durationInMilliseconds) {
-  const milliseconds = durationInMilliseconds % 1000;
-  const seconds = Math.floor((durationInMilliseconds / 1000) % 60);
-  const minutes = Math.floor((durationInMilliseconds / (1000 * 60)) % 60);
-  const hours = Math.floor((durationInMilliseconds / (1000 * 60 * 60)) % 24);
-  const days = Math.floor(durationInMilliseconds / (1000 * 60 * 60 * 24));
-  const parts = [];
-
-  if (days > 0) {
-    parts.push(`${days}d`);
-  }
-  if (hours > 0) {
-    parts.push(`${hours}h`);
-  }
-  if (minutes > 0) {
-    parts.push(`${minutes}m`);
-  }
-  if (days == 0) {
-    if (seconds > 0 || parts.length === 0) {
-      parts.push(`${seconds}s`);
-    }
-    if (hours == 0 && minutes == 0) {
-      if (milliseconds > 0) {
-        parts.push(`${milliseconds}ms`);
-      }
-    }
-  }
-
-  return parts.join(" ");
-}
-
-// Returns the ISO week of the date.
-//
-// Source: https://weeknumber.com/how-to/javascript
-function getWeek(date) {
-  date = new Date(date.getTime());
-  date.setHours(0, 0, 0, 0);
-  // Thursday in current week decides the year.
-  date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
-  // January 4 is always in week 1.
-  const week1 = new Date(date.getFullYear(), 0, 4);
-  // Adjust to Thursday in week 1 and count number of weeks from date to week1.
-  return 1 + Math.round(
-    ((date.getTime() - week1.getTime()) / 86400000 -
-      3 + (week1.getDay() + 6) % 7) / 7,
-  );
 }

@@ -176,7 +176,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             /// The maximum key across both levels.
             key_max: Key,
             // References to tables in level B that intersect with the chosen table in level A.
-            tables: stdx.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
+            tables: stdx.BoundedArrayType(TableInfoReference, constants.lsm_growth_factor),
         };
 
         node_pool: *NodePool,

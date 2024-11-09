@@ -94,7 +94,7 @@ pub fn ScanBuilderType(
             comptime index: std.meta.FieldEnum(Groove.IndexTrees),
             buffer: *const ScanBuffer,
             snapshot: u64,
-            prefix: CompositeKeyPrefix(index),
+            prefix: CompositeKeyPrefixType(index),
             timestamp_range: TimestampRange,
             direction: Direction,
         ) *Scan {
@@ -269,7 +269,7 @@ pub fn ScanBuilderType(
             return IndexTree.Table.Value;
         }
 
-        fn CompositeKeyPrefix(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
+        fn CompositeKeyPrefixType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
             const CompositeKey = CompositeKeyType(index);
             return std.meta.fieldInfo(CompositeKey, .field).type;
         }
@@ -280,7 +280,7 @@ pub fn ScanBuilderType(
 
         fn key_from_value(
             comptime field: std.meta.FieldEnum(Groove.IndexTrees),
-            prefix: CompositeKeyPrefix(field),
+            prefix: CompositeKeyPrefixType(field),
             timestamp: u64,
         ) CompositeKeyType(field).Key {
             return CompositeKeyType(field).key_from_value(&.{

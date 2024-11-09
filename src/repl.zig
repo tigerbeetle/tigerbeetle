@@ -5,7 +5,7 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
-const Storage = vsr.storage.Storage(IO);
+const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,
     constants.state_machine_config,
@@ -458,7 +458,7 @@ pub const Parser = struct {
 };
 
 pub fn ReplType(comptime MessageBus: type) type {
-    const Client = vsr.Client(StateMachine, MessageBus);
+    const Client = vsr.ClientType(StateMachine, MessageBus);
 
     return struct {
         event_loop_done: bool,
@@ -1004,11 +1004,12 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn client_request_callback_error(
             user_data: u128,
             operation: StateMachine.Operation,
+            timestamp: u64,
             result: []const u8,
         ) !void {
             const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(repl.request_done == false);
-            try repl.debug("Operation completed: {}.\n", .{operation});
+            try repl.debug("Operation completed: {} timestamp={}.\n", .{ operation, timestamp });
 
             defer {
                 repl.request_done = true;
@@ -1098,11 +1099,13 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn client_request_callback(
             user_data: u128,
             operation: StateMachine.Operation,
+            timestamp: u64,
             result: []u8,
         ) void {
             client_request_callback_error(
                 user_data,
                 operation,
+                timestamp,
                 result,
             ) catch |err| {
                 const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));

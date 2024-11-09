@@ -20,7 +20,7 @@ const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
-fn ObjectTreeHelpers(comptime Object: type) type {
+fn ObjectTreeHelperType(comptime Object: type) type {
     assert(@hasField(Object, "timestamp"));
     assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
 
@@ -280,16 +280,18 @@ pub fn GrooveType(
         }
     }
 
+    const ObjectTreeHelper = ObjectTreeHelperType(Object);
+
     const _ObjectTree = blk: {
         const table_value_count_max = constants.lsm_compaction_ops *
             groove_options.batch_value_count_max.timestamp;
         const Table = TableType(
             u64, // key = timestamp
             Object,
-            ObjectTreeHelpers(Object).key_from_value,
-            ObjectTreeHelpers(Object).sentinel_key,
-            ObjectTreeHelpers(Object).tombstone,
-            ObjectTreeHelpers(Object).tombstone_from_key,
+            ObjectTreeHelper.key_from_value,
+            ObjectTreeHelper.sentinel_key,
+            ObjectTreeHelper.tombstone,
+            ObjectTreeHelper.tombstone_from_key,
             table_value_count_max,
             .general,
         );
@@ -899,7 +901,7 @@ pub fn GrooveType(
                         unreachable,
                 },
                 .positive => |object| {
-                    assert(!ObjectTreeHelpers(Object).tombstone(object));
+                    assert(!ObjectTreeHelper.tombstone(object));
                     switch (destination) {
                         .objects_cache => groove.objects_cache.upsert(object),
                         .timestamps => if (has_id)
@@ -1175,7 +1177,7 @@ pub fn GrooveType(
                 worker.current = null;
 
                 if (result) |object| {
-                    assert(!ObjectTreeHelpers(Object).tombstone(object));
+                    assert(!ObjectTreeHelper.tombstone(object));
                     switch (entry.key) {
                         .id => |key| {
                             assert((if (has_id) object.id else object.timestamp) == key);
@@ -1275,8 +1277,8 @@ pub fn GrooveType(
             // Unlike the index trees, the new and old values in the object tree share the same
             // key. Therefore put() is sufficient to overwrite the old value.
             if (constants.verify) {
-                const tombstone = ObjectTreeHelpers(Object).tombstone;
-                const key_from_value = ObjectTreeHelpers(Object).key_from_value;
+                const tombstone = ObjectTreeHelper.tombstone;
+                const key_from_value = ObjectTreeHelper.key_from_value;
 
                 assert(!stdx.equal_bytes(Object, old, new));
                 assert(key_from_value(old) == key_from_value(new));
@@ -1464,7 +1466,7 @@ fn tree_name(comptime Object: type) []const u8 {
 test "Groove" {
     const Transfer = @import("../tigerbeetle.zig").Transfer;
     const IO = @import("../io.zig").IO;
-    const Storage = @import("../storage.zig").Storage(IO);
+    const Storage = @import("../storage.zig").StorageType(IO);
 
     const Groove = GrooveType(
         Storage,

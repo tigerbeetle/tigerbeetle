@@ -507,7 +507,7 @@ pub const QueryFilterFlags = packed struct(u32) {
     }
 };
 
-/// Filter used in both `get_account_transfer` and `get_account_balances`.
+/// Filter used in both `get_account_transfers` and `get_account_balances`.
 pub const AccountFilter = extern struct {
     /// The account id.
     account_id: u128,

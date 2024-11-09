@@ -41,10 +41,14 @@ fn devhub_coverage(shell: *Shell) !void {
     try shell.project_root.makePath("./src/devhub/coverage");
 
     const kcov: []const []const u8 = &.{ "kcov", "--include-path=./src", "./src/devhub/coverage" };
-    try shell.exec("{kcov} ./zig-out/bin/test", .{ .kcov = kcov });
-    try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_tree 92", .{ .kcov = kcov });
-    try shell.exec("{kcov} ./zig-out/bin/fuzz lsm_forest 92", .{ .kcov = kcov });
-    try shell.exec("{kcov} ./zig-out/bin/vopr 92", .{ .kcov = kcov });
+    inline for (.{
+        "{kcov} ./zig-out/bin/test",
+        "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_tree 92",
+        "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_forest 92",
+        "{kcov} ./zig-out/bin/vopr 92",
+    }) |command| {
+        try shell.exec(command, .{ .kcov = kcov });
+    }
 
     var coverage_dir = try shell.cwd.openDir("./src/devhub/coverage", .{ .iterate = true });
     defer coverage_dir.close();
@@ -72,7 +76,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     try shell.project_root.deleteFile("tigerbeetle");
 
     // When doing a release, the latest release in the changelog on main will be newer than the
-    // latest release on GitHub. In this case, don't pass in --no-changelog - as doing that casuses
+    // latest release on GitHub. In this case, don't pass in --no-changelog - as doing that causes
     // the release code to try and look for a version which doesn't yet exist!
     const no_changelog_flag = blk: {
         const changelog_text = try shell.project_root.readFileAlloc(
@@ -231,21 +235,15 @@ const MetricBatch = struct {
 };
 
 fn upload_nyrkio(shell: *Shell, batch: *const MetricBatch) !void {
+    const url = "https://nyrkio.com/api/v0/result/devhub";
     const token = try shell.env_get("NYRKIO_TOKEN");
     const payload = try std.json.stringifyAlloc(
         shell.arena.allocator(),
         [_]*const MetricBatch{batch}, // Nyrkiö needs an _array_ of batches.
         .{},
     );
-    try shell.exec(
-        \\curl -s -X POST --fail-with-body
-        \\    -H {content_type}
-        \\    -H {authorization}
-        \\    https://nyrkio.com/api/v0/result/devhub
-        \\    -d {payload}
-    , .{
-        .content_type = "Content-type: application/json",
-        .authorization = try shell.fmt("Authorization: Bearer {s}", .{token}),
-        .payload = payload,
+    try shell.http_post(url, payload, .{
+        .content_type = .json,
+        .authorization = try shell.fmt("Bearer {s}", .{token}),
     });
 }

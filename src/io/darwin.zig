@@ -5,8 +5,9 @@ const mem = std.mem;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
@@ -15,9 +16,9 @@ pub const IO = struct {
     kq: fd_t,
     time: Time = .{},
     io_inflight: usize = 0,
-    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
-    completed: FIFO(Completion) = .{ .name = "io_completed" },
-    io_pending: FIFO(Completion) = .{ .name = "io_pending" },
+    timeouts: FIFOType(Completion) = .{ .name = "io_timeouts" },
+    completed: FIFOType(Completion) = .{ .name = "io_completed" },
+    io_pending: FIFOType(Completion) = .{ .name = "io_pending" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -288,6 +289,10 @@ pub const IO = struct {
         }
     }
 
+    pub fn cancel_all(_: *IO) void {
+        // TODO Cancel in-flight async IO and wait for all completions.
+    }
+
     pub const AcceptError = posix.AcceptError || posix.SetSockOptError;
 
     pub fn accept(
@@ -376,7 +381,7 @@ pub const IO = struct {
                         .BADF => error.FileDescriptorInvalid,
                         .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
                         .IO => error.InputOutput,
-                        else => |errno| posix.unexpectedErrno(errno),
+                        else => |errno| stdx.unexpected_errno("close", errno),
                     };
                 }
             },
@@ -492,7 +497,7 @@ pub const IO = struct {
                             .OVERFLOW => error.Unseekable,
                             .SPIPE => error.Unseekable,
                             .TIMEDOUT => error.ConnectionTimedOut,
-                            else => |err| posix.unexpectedErrno(err),
+                            else => |err| stdx.unexpected_errno("read", err),
                         };
                     }
                 }
@@ -843,7 +848,7 @@ pub const IO = struct {
 
             // not reported but need same error union
             .OPNOTSUPP => return error.OperationNotSupported,
-            else => |errno| return posix.unexpectedErrno(errno),
+            else => |errno| return stdx.unexpected_errno("fs_allocate", errno),
         }
 
         // Now actually perform the allocation.

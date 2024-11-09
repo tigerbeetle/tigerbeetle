@@ -123,7 +123,7 @@ fn generate_events(allocator: std.mem.Allocator, random: std.rand.Random, option
     blocks_count: usize,
     events_count: usize,
 }) ![]const FreeSetEvent {
-    const event_distribution = fuzz.Distribution(FreeSetEventType){
+    const event_distribution = fuzz.DistributionType(FreeSetEventType){
         .reserve = 1 + random.float(f64) * 100,
         .forfeit = 1,
         .acquire = random.float(f64) * 1000,

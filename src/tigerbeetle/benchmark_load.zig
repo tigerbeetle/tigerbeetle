@@ -20,11 +20,11 @@ const stdx = vsr.stdx;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
-const Storage = vsr.storage.Storage(IO);
+const Storage = vsr.storage.StorageType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
-const Client = vsr.Client(StateMachine, MessageBus);
+const Client = vsr.ClientType(StateMachine, MessageBus);
 const tb = vsr.tigerbeetle;
 const StatsD = vsr.statsd.StatsD;
 const IdPermutation = vsr.testing.IdPermutation;
@@ -305,7 +305,7 @@ const Benchmark = struct {
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
-    callback: ?*const fn (*Benchmark, StateMachine.Operation, []const u8) void,
+    callback: ?*const fn (*Benchmark, StateMachine.Operation, u64, []const u8) void,
     done: bool,
     statsd: ?*StatsD,
     print_batch_timings: bool,
@@ -364,9 +364,11 @@ const Benchmark = struct {
     fn create_accounts_finish(
         b: *Benchmark,
         operation: StateMachine.Operation,
+        timestamp: u64,
         result: []const u8,
     ) void {
         assert(operation == .create_accounts);
+        assert(timestamp > 0);
         const create_accounts_results = std.mem.bytesAsSlice(
             tb.CreateAccountsResult,
             result,
@@ -493,9 +495,11 @@ const Benchmark = struct {
     fn create_transfers_finish(
         b: *Benchmark,
         operation: StateMachine.Operation,
+        timestamp: u64,
         result: []const u8,
     ) void {
         assert(operation == .create_transfers);
+        assert(timestamp > 0);
         const create_transfers_results = std.mem.bytesAsSlice(
             tb.CreateTransfersResult,
             result,
@@ -600,9 +604,11 @@ const Benchmark = struct {
     fn query_account_transfers_finish(
         b: *Benchmark,
         operation: StateMachine.Operation,
+        timestamp: u64,
         result: []const u8,
     ) void {
         assert(operation == .get_account_transfers);
+        assert(timestamp > 0);
 
         const batch_end_ns = b.timer.read();
         const transfers = std.mem.bytesAsSlice(tb.Transfer, result);
@@ -662,9 +668,11 @@ const Benchmark = struct {
     fn validate_accounts_finish(
         b: *Benchmark,
         operation: StateMachine.Operation,
+        timestamp: u64,
         result: []const u8,
     ) void {
         assert(operation == .lookup_accounts);
+        assert(timestamp > 0);
 
         const accounts = std.mem.bytesAsSlice(tb.Account, result);
 
@@ -713,9 +721,11 @@ const Benchmark = struct {
     fn validate_transfers_finish(
         b: *Benchmark,
         operation: StateMachine.Operation,
+        timestamp: u64,
         result: []const u8,
     ) void {
         assert(operation == .lookup_transfers);
+        assert(timestamp > 0);
 
         const transfers = std.mem.bytesAsSlice(tb.Transfer, result);
 
@@ -750,7 +760,7 @@ const Benchmark = struct {
 
     fn send(
         b: *Benchmark,
-        callback: *const fn (*Benchmark, StateMachine.Operation, []const u8) void,
+        callback: *const fn (*Benchmark, StateMachine.Operation, u64, []const u8) void,
         operation: StateMachine.Operation,
         payload: []u8,
     ) void {
@@ -766,13 +776,14 @@ const Benchmark = struct {
     fn send_complete(
         user_data: u128,
         operation: StateMachine.Operation,
+        timestamp: u64,
         result: []u8,
     ) void {
         const b: *Benchmark = @ptrFromInt(@as(usize, @intCast(user_data)));
         const callback = b.callback.?;
         b.callback = null;
 
-        callback(b, operation, result);
+        callback(b, operation, timestamp, result);
     }
 
     fn register_callback(

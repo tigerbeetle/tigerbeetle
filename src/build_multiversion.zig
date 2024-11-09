@@ -264,7 +264,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
         .llvm_objcopy = options.llvm_objcopy,
         .tmp_path = options.tmp_path,
         .target = .macos,
-        .arch = .x86_64,
+        .arch = .aarch64,
         .tigerbeetle_past = options.tigerbeetle_past,
         .output = sections.aarch64.body,
     });
@@ -273,7 +273,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
         .llvm_objcopy = options.llvm_objcopy,
         .tmp_path = options.tmp_path,
         .target = .macos,
-        .arch = .aarch64,
+        .arch = .x86_64,
         .tigerbeetle_past = options.tigerbeetle_past,
         .output = sections.x86_64.body,
     });

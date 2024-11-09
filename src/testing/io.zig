@@ -7,7 +7,7 @@ const log = std.log.scoped(.io);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
@@ -35,7 +35,7 @@ pub const IO = struct {
     options: Options,
     prng: std.rand.DefaultPrng,
 
-    completed: FIFO(Completion) = .{ .name = "io_completed" },
+    completed: FIFOType(Completion) = .{ .name = "io_completed" },
 
     pub fn init(files: []const File, options: Options) IO {
         return .{

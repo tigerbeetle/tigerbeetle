@@ -26,8 +26,8 @@ const log = std.log.scoped(.client_replies);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const IOPS = @import("../iops.zig").IOPS;
+const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
+const IOPSType = @import("../iops.zig").IOPSType;
 const vsr = @import("../vsr.zig");
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessagePool = @import("../message_pool.zig").MessagePool;
@@ -69,7 +69,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             message: *Message.Reply,
         };
 
-        const WriteQueue = RingBuffer(*Write, .{
+        const WriteQueue = RingBufferType(*Write, .{
             .array = constants.client_replies_iops_write_max,
         });
 
@@ -77,8 +77,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         message_pool: *MessagePool,
         replica: u8,
 
-        reads: IOPS(Read, constants.client_replies_iops_read_max) = .{},
-        writes: IOPS(Write, constants.client_replies_iops_write_max) = .{},
+        reads: IOPSType(Read, constants.client_replies_iops_read_max) = .{},
+        writes: IOPSType(Write, constants.client_replies_iops_write_max) = .{},
 
         /// Track which slots have a write currently in progress.
         writing: std.StaticBitSet(constants.clients_max) =
@@ -159,7 +159,13 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 }
             }
 
-            if (write_latest.?.message.header.checksum != session.header.checksum) {
+            // The reply being written to the target slot may not be for the client that we're
+            // looking for. For example, it may be an old reply for a different client.
+            maybe(write_latest == null);
+
+            if (write_latest == null or
+                write_latest.?.message.header.checksum != session.header.checksum)
+            {
                 // We are writing a reply, but that's a wrong reply according to `client_sessions`.
                 // This happens after state sync, where we update `client_sessions` without
                 // waiting for the in-flight write requests to complete.
@@ -250,7 +256,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             };
 
             if (!message.header.valid_checksum() or
-                !message.header.valid_checksum_body(message.body()))
+                !message.header.valid_checksum_body(message.body_used()))
             {
                 log.warn("{}: read_reply: corrupt reply (client={} reply={})", .{
                     client_replies.replica,
@@ -444,8 +450,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 message.header.request,
             });
 
-            // Release the write *before* invoking the callback, so that if the callback
-            // checks .writes.available() we doesn't appear busy when we're not.
+            // Release the write *before* invoking the callback, so that if the callback checks
+            // .writes.available() we don't erroneously appear busy.
             client_replies.writing.unset(write.slot.index);
             client_replies.writes.release(write);
 

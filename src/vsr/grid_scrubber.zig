@@ -28,8 +28,8 @@ const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
-const FIFO = @import("../fifo.zig").FIFO;
-const IOPS = @import("../iops.zig").IOPS;
+const FIFOType = @import("../fifo.zig").FIFOType;
+const IOPSType = @import("../iops.zig").IOPSType;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 const allocate_block = @import("./grid.zig").allocate_block;
@@ -88,12 +88,12 @@ pub fn GridScrubberType(comptime Forest: type) type {
         forest: *Forest,
         client_sessions_checkpoint: *const CheckpointTrailer,
 
-        reads: IOPS(Read, constants.grid_scrubber_reads_max) = .{},
+        reads: IOPSType(Read, constants.grid_scrubber_reads_max) = .{},
 
         /// A list of reads that are in progress.
-        reads_busy: FIFO(Read) = .{ .name = "grid_scrubber_reads_busy" },
+        reads_busy: FIFOType(Read) = .{ .name = "grid_scrubber_reads_busy" },
         /// A list of reads that are ready to be released.
-        reads_done: FIFO(Read) = .{ .name = "grid_scrubber_reads_done" },
+        reads_done: FIFOType(Read) = .{ .name = "grid_scrubber_reads_done" },
 
         /// Track the progress through the grid.
         ///
@@ -211,7 +211,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         pub fn cancel(scrubber: *GridScrubber) void {
-            for ([_]FIFO(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
+            for ([_]FIFOType(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
                 var reads_iterator = reads_fifo.peek();
                 while (reads_iterator) |read| : (reads_iterator = read.next) {
                     read.status = .canceled;
@@ -232,7 +232,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             // All released blocks are about to be freed.
             assert(scrubber.forest.grid.callback == .none);
 
-            for ([_]FIFO(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
+            for ([_]FIFOType(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
                 var reads_iterator = reads_fifo.peek();
                 while (reads_iterator) |read| : (reads_iterator = read.next) {
                     if (read.status == .repair) {

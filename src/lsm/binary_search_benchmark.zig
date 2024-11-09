@@ -56,7 +56,7 @@ test "benchmark: binary search" {
 
 fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !void {
     assert(blob.len == layout.blob_size);
-    const V = Value(layout);
+    const V = ValueType(layout);
     const K = V.Key;
     const Page = struct {
         values: [layout.values_count]V,
@@ -117,20 +117,20 @@ const Layout = struct {
     searches: usize,
 };
 
-fn Value(comptime layout: Layout) type {
+fn ValueType(comptime layout: Layout) type {
     return struct {
         pub const max_key = 1 << (8 * layout.key_size) - 1;
         pub const Key = math.IntFittingRange(0, max_key);
-        const Self = @This();
+        const Value = @This();
         key: Key,
         body: [layout.value_size - layout.key_size]u8,
 
         comptime {
             assert(@sizeOf(Key) == layout.key_size);
-            assert(@sizeOf(Self) == layout.value_size);
+            assert(@sizeOf(Value) == layout.value_size);
         }
 
-        inline fn key_from_value(self: *const Self) Key {
+        inline fn key_from_value(self: *const Value) Key {
             return self.key;
         }
     };

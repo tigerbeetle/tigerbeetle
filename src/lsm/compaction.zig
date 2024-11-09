@@ -42,7 +42,8 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 const trace = @import("../trace.zig");
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
+const IOPSType = @import("../iops.zig").IOPSType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
@@ -50,8 +51,7 @@ const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const IOPS = @import("../iops.zig").IOPS;
+const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
 
 /// The upper-bound count of input tables to a single tree's compaction.
 ///
@@ -82,11 +82,11 @@ const half_bar_beat_count = @divExact(constants.lsm_compaction_ops, 2);
 /// ResourcePool is a singleton owned by the Forest, but it doesn't depend on Forest type.
 pub fn ResourcePoolType(comptime Grid: type) type {
     return struct {
-        reads: IOPS(BlockRead, constants.lsm_compaction_iops_read_max) = .{},
-        writes: IOPS(BlockWrite, constants.lsm_compaction_iops_write_max) = .{},
-        cpus: IOPS(CPU, 1) = .{},
+        reads: IOPSType(BlockRead, constants.lsm_compaction_iops_read_max) = .{},
+        writes: IOPSType(BlockWrite, constants.lsm_compaction_iops_write_max) = .{},
+        cpus: IOPSType(CPU, 1) = .{},
         // Use FIFO instead of IOPS here because blocks are allocated at runtime.
-        blocks: FIFO(Block),
+        blocks: FIFOType(Block),
         blocks_backing_storage: []Block,
 
         const ResourcePool = @This();
@@ -133,7 +133,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                 build_index_block,
                 build_value_block,
 
-                // Block is in the read queue
+                // Block is in the read queue.
                 read_index_block,
                 read_index_block_done,
                 read_value_block,
@@ -177,7 +177,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             }
             assert(blocks_allocated == block_count);
 
-            var blocks: FIFO(Block) = .{
+            var blocks: FIFOType(Block) = .{
                 .name = "compaction_blocks",
                 .verify_push = false,
             };
@@ -397,7 +397,7 @@ pub fn CompactionType(
         /// they are applied deterministically relative to other concurrent compactions.
         // Worst-case manifest updates:
         // See docs/about/internals/lsm.md "Compaction Table Overlap" for more detail.
-        manifest_entries: stdx.BoundedArray(struct {
+        manifest_entries: stdx.BoundedArrayType(struct {
             operation: enum {
                 insert_to_level_b,
                 move_to_level_b,
@@ -449,27 +449,27 @@ pub fn CompactionType(
         // In addition to static max size, the queues are additionally limited at runtime by the
         // number of available free blocks. The queues are not limited by IOPS --- it is assumed
         // that there are enough IOPS to fill up all the queues.
-        level_a_index_block: RingBuffer(*ResourcePool.Block, .{
+        level_a_index_block: RingBufferType(*ResourcePool.Block, .{
             .array = 1,
         }) = .{ .buffer = undefined },
         level_a_index_block_next: u32 = 0,
 
-        level_a_value_block: RingBuffer(*ResourcePool.Block, .{
+        level_a_value_block: RingBufferType(*ResourcePool.Block, .{
             .array = @divExact(constants.lsm_compaction_queue_read_max, 2),
         }) = .{ .buffer = undefined },
         level_a_value_block_next: u32 = 0,
 
-        level_b_index_block: RingBuffer(*ResourcePool.Block, .{
+        level_b_index_block: RingBufferType(*ResourcePool.Block, .{
             .array = 1,
         }) = .{ .buffer = undefined },
         level_b_index_block_next: u32 = 0,
 
-        level_b_value_block: RingBuffer(*ResourcePool.Block, .{
+        level_b_value_block: RingBufferType(*ResourcePool.Block, .{
             .array = @divExact(constants.lsm_compaction_queue_read_max, 2),
         }) = .{ .buffer = undefined },
         level_b_value_block_next: u32 = 0,
 
-        output_blocks: RingBuffer(void, .{
+        output_blocks: RingBufferType(void, .{
             .array = constants.lsm_compaction_queue_write_max,
         }) = .{ .buffer = undefined },
 
@@ -1513,15 +1513,16 @@ pub fn CompactionType(
 
             const values_in_a, const values_in_b = compaction.merge_inputs();
             assert(values_in_a != null or values_in_b != null);
-            inline for (.{ values_in_a, values_in_b }) |values_in| {
-                if (values_in) |values| {
+
+            const values_out = compaction.table_builder
+                .data_block_values()[compaction.table_builder.value_count..];
+
+            inline for ([_]?[]const Value{ values_in_a, values_in_b, values_out }) |values_maybe| {
+                if (values_maybe) |values| {
                     assert(values.len > 0);
                     assert(values.len <= Table.data.value_count_max);
                 }
             }
-
-            const values_out = compaction.table_builder
-                .data_block_values()[compaction.table_builder.value_count..];
 
             // Do the actual merge from inputs to the output (table builder).
             const merge_result: MergeResult = if (values_in_a == null) blk: {
@@ -1562,12 +1563,20 @@ pub fn CompactionType(
             compaction.table_builder.value_count += merge_result.produced;
 
             if (compaction.table_info_a.? == .immutable) {
+                assert(compaction.level_a_position.value <= Table.value_count_max);
+            } else {
+                assert(compaction.level_a_position.value <= Table.data.value_count_max);
+            }
+            assert(compaction.level_b_position.value <= Table.data.value_count_max);
+            assert(compaction.table_builder.value_count <= Table.data.value_count_max);
+
+            if (compaction.table_info_a.? == .immutable) {
                 compaction.counters.in += merge_result.consumed_a;
             }
             compaction.counters.dropped += merge_result.dropped;
 
             compaction.quotas.done += merge_result.consumed_a + merge_result.consumed_b;
-            assert(compaction.table_builder.value_count <= Table.data.value_count_max);
+            assert(compaction.quotas.done <= compaction.quotas.bar);
 
             compaction.merge_advance_position();
 
@@ -1900,7 +1909,7 @@ pub fn CompactionType(
                 const value_a = &values_in_a[index_in_a];
                 const value_b = &values_in_b[index_in_b];
                 switch (std.math.order(key_from_value(value_a), key_from_value(value_b))) {
-                    .lt => {
+                    .lt => { // Pick value from level a.
                         index_in_a += 1;
                         if (drop_tombstones and tombstone(value_a)) {
                             assert(Table.usage != .secondary_index);
@@ -1909,12 +1918,12 @@ pub fn CompactionType(
                         values_out[index_out] = value_a.*;
                         index_out += 1;
                     },
-                    .gt => {
+                    .gt => { // Pick value from level b.
                         index_in_b += 1;
                         values_out[index_out] = value_b.*;
                         index_out += 1;
                     },
-                    .eq => {
+                    .eq => { // Values have equal keys -- collapse them!
                         index_in_a += 1;
                         index_in_b += 1;
 

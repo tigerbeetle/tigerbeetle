@@ -10,24 +10,52 @@ const log = std.log.scoped(.io);
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
+const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
 const parse_dirty_semver = stdx.parse_dirty_semver;
+const maybe = stdx.maybe;
 
 pub const IO = struct {
+    const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
+
     ring: IO_Uring,
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: FIFO(Completion) = .{ .name = "io_unqueued" },
+    unqueued: FIFOType(Completion) = .{ .name = "io_unqueued" },
 
     /// Completions that are ready to have their callbacks run.
-    completed: FIFO(Completion) = .{ .name = "io_completed" },
+    completed: FIFOType(Completion) = .{ .name = "io_completed" },
 
     // TODO Track these as metrics:
-    ios_queued: u64 = 0,
-    ios_in_kernel: u64 = 0,
+    ios_queued: u32 = 0,
+    ios_in_kernel: u32 = 0,
+
+    /// The head of a doubly-linked list of all operations that are:
+    /// - in the submission queue, or
+    /// - in the kernel, or
+    /// - in the completion queue, or
+    /// - in the `completed` list (excluding zero-duration timeouts)
+    awaiting: CompletionList = .{},
+
+    // This is the completion that performs the cancellation.
+    // This is *not* the completion that is being canceled.
+    cancel_completion: Completion = undefined,
+
+    cancel_status: union(enum) {
+        // Not canceling.
+        inactive,
+        // Waiting to start canceling the next awaiting operation.
+        next,
+        // The target's cancellation SQE is queued; waiting for the cancellation's completion.
+        queued: struct { target: *Completion },
+        // Currently canceling the target operation.
+        wait: struct { target: *Completion },
+        // All operations have been canceled.
+        done,
+    } = .inactive,
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
@@ -59,6 +87,8 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn tick(self: *IO) !void {
+        assert(self.cancel_status != .done);
+
         // We assume that all timeouts submitted by `run_for_ns()` will be reaped by `run_for_ns()`
         // and that `tick()` and `run_for_ns()` cannot be run concurrently.
         // Therefore `timeouts` here will never be decremented and `etime` will always be false.
@@ -84,6 +114,8 @@ pub const IO = struct {
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
+        assert(self.cancel_status != .done);
+
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
@@ -141,7 +173,31 @@ pub const IO = struct {
         // and extend the duration of the loop, but this is fine as it 1) executes completions
         // that become ready without going through another syscall from flush_submissions() and
         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
-        while (self.completed.pop()) |completion| completion.complete();
+        while (self.completed.pop()) |completion| {
+            if (completion.operation == .timeout and
+                completion.operation.timeout.timespec.tv_sec == 0 and
+                completion.operation.timeout.timespec.tv_nsec == 0)
+            {
+                // Zero-duration timeouts are a special case, and aren't listed in `awaiting`.
+                maybe(self.awaiting.empty());
+                assert(completion.result == -@as(i32, @intFromEnum(posix.E.TIME)));
+                assert(completion.awaiting_back == null);
+                assert(completion.awaiting_next == null);
+            } else {
+                assert(!self.awaiting.empty());
+                self.awaiting.remove(completion);
+            }
+
+            switch (self.cancel_status) {
+                .inactive => completion.complete(),
+                .next => {},
+                .queued => if (completion.operation == .cancel) completion.complete(),
+                .wait => |wait| if (wait.target == completion) {
+                    self.cancel_status = .next;
+                },
+                .done => unreachable,
+            }
+        }
 
         // At this point, unqueued could have completions either by 1) those who didn't get an SQE
         // during the popping of unqueued or 2) completion.complete() which start new IO. These
@@ -207,6 +263,12 @@ pub const IO = struct {
     }
 
     fn enqueue(self: *IO, completion: *Completion) void {
+        switch (self.cancel_status) {
+            .inactive => {},
+            .queued => assert(completion.operation == .cancel),
+            else => unreachable,
+        }
+
         const sqe = self.ring.get_sqe() catch |err| switch (err) {
             error.SubmissionQueueFull => {
                 self.unqueued.push(completion);
@@ -215,7 +277,103 @@ pub const IO = struct {
         };
         completion.prep(sqe);
 
+        self.awaiting.push(completion);
         self.ios_queued += 1;
+    }
+
+    /// Cancel should be invoked at most once, before any of the memory owned by read/recv buffers
+    /// is freed (so that lingering async operations do not write to them).
+    ///
+    /// After this function is invoked:
+    /// - No more completion callbacks will be called.
+    /// - No more IO may be submitted.
+    ///
+    /// This function doesn't return until either:
+    /// - All events submitted to io_uring have completed.
+    ///   (They may complete with `error.Canceled`).
+    /// - Or, an io_uring error occurs.
+    ///
+    /// TODO(Linux):
+    /// - Linux kernel ≥5.19 supports the IORING_ASYNC_CANCEL_ALL and IORING_ASYNC_CANCEL_ANY flags,
+    ///   which would allow all events to be cancelled simultaneously with a single "cancel"
+    ///   operation, without IO needing to maintain the `awaiting` doubly-linked list and the `next`
+    ///   cancellation stage.
+    /// - Linux kernel ≥6.0 supports `io_uring_register_sync_cancel` which would remove the `queued`
+    ///   cancellation stage.
+    pub fn cancel_all(self: *IO) void {
+        assert(self.cancel_status == .inactive);
+
+        // Even if we return early due to an io_uring error, IO won't allow more operations.
+        defer self.cancel_status = .done;
+
+        self.cancel_status = .next;
+
+        // Discard any operations that haven't started yet.
+        while (self.unqueued.pop()) |_| {}
+
+        while (self.awaiting.tail) |target| {
+            assert(!self.awaiting.empty());
+            assert(self.cancel_status == .next);
+            assert(target.operation != .cancel);
+
+            self.cancel(target);
+            assert(self.cancel_status == .queued);
+
+            while (self.cancel_status == .queued or self.cancel_status == .wait) {
+                self.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
+                    std.debug.panic("IO.cancel_all: run_for_ns error: {}", .{err});
+                };
+            }
+            assert(self.cancel_status == .next);
+        }
+        assert(self.awaiting.empty());
+        assert(self.ios_queued == 0);
+        assert(self.ios_in_kernel == 0);
+    }
+
+    fn cancel(self: *IO, target: *Completion) void {
+        self.cancel_completion = .{
+            .io = self,
+            .context = self,
+            .callback = struct {
+                fn wrapper(
+                    ctx: ?*anyopaque,
+                    comp: *Completion,
+                    res: *const anyopaque,
+                ) void {
+                    const io: *IO = @ptrCast(@alignCast(ctx.?));
+                    const result =
+                        @as(*const CancelError!void, @ptrCast(@alignCast(res))).*;
+                    io.cancel_callback(comp, result);
+                }
+            }.wrapper,
+            .operation = .{ .cancel = .{ .target = target } },
+        };
+
+        self.cancel_status = .{ .queued = .{ .target = target } };
+        self.enqueue(&self.cancel_completion);
+    }
+
+    const CancelError = error{
+        NotRunning,
+        NotInterruptable,
+    } || posix.UnexpectedError;
+
+    fn cancel_callback(self: *IO, completion: *Completion, result: CancelError!void) void {
+        assert(self.cancel_status == .queued);
+        assert(completion == &self.cancel_completion);
+        assert(completion.operation == .cancel);
+        assert(completion.operation.cancel.target == self.cancel_status.queued.target);
+
+        self.cancel_status = status: {
+            result catch |err| switch (err) {
+                error.NotRunning => break :status .next,
+                error.NotInterruptable => {},
+                error.Unexpected => unreachable,
+            };
+            // Wait for the target operation to complete or abort.
+            break :status .{ .wait = .{ .target = self.cancel_status.queued.target } };
+        };
     }
 
     /// This struct holds the data needed for a single io_uring operation
@@ -231,8 +389,15 @@ pub const IO = struct {
             result: *const anyopaque,
         ) void,
 
+        /// Used by the `IO.awaiting` doubly-linked list.
+        awaiting_back: ?*Completion = null,
+        awaiting_next: ?*Completion = null,
+
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
+                .cancel => |op| {
+                    sqe.prep_cancel(@intFromPtr(op.target), 0);
+                },
                 .accept => |*op| {
                     sqe.prep_accept(
                         op.socket,
@@ -297,8 +462,26 @@ pub const IO = struct {
 
         fn complete(completion: *Completion) void {
             switch (completion.operation) {
+                .cancel => {
+                    const result: CancelError!void = result: {
+                        if (completion.result < 0) {
+                            break :result switch (@as(posix.E, @enumFromInt(-completion.result))) {
+                                // No operation matching the completion is queued, so there is
+                                // nothing to cancel.
+                                .NOENT => error.NotRunning,
+                                // The operation as far enough along that it cannot be canceled.
+                                // It should complete soon.
+                                .ALREADY => error.NotInterruptable,
+                                // SQE is invalid.
+                                .INVAL => unreachable,
+                                else => |errno| stdx.unexpected_errno("cancel", errno),
+                            };
+                        }
+                    };
+                    completion.callback(completion.context, completion, &result);
+                },
                 .accept => {
-                    const result: anyerror!posix.socket_t = blk: {
+                    const result: AcceptError!posix.socket_t = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -318,7 +501,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PERM => error.PermissionDenied,
                                 .PROTO => error.ProtocolFailure,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("accept", errno),
                             };
                             break :blk err;
                         } else {
@@ -328,7 +511,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .close => {
-                    const result: anyerror!void = blk: {
+                    const result: CloseError!void = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 // A success, see https://github.com/ziglang/zig/issues/2425
@@ -337,7 +520,7 @@ pub const IO = struct {
                                 .DQUOT => error.DiskQuota,
                                 .IO => error.InputOutput,
                                 .NOSPC => error.NoSpaceLeft,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("close", errno),
                             };
                             break :blk err;
                         } else {
@@ -347,7 +530,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .connect => {
-                    const result: anyerror!void = blk: {
+                    const result: ConnectError!void = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -366,12 +549,13 @@ pub const IO = struct {
                                 .FAULT => unreachable,
                                 .ISCONN => error.AlreadyConnected,
                                 .NETUNREACH => error.NetworkUnreachable,
+                                .HOSTUNREACH => error.HostUnreachable,
                                 .NOENT => error.FileNotFound,
                                 .NOTSOCK => error.FileDescriptorNotASocket,
                                 .PERM => error.PermissionDenied,
                                 .PROTOTYPE => error.ProtocolNotSupported,
                                 .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("connect", errno),
                             };
                             break :blk err;
                         } else {
@@ -381,7 +565,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .openat => {
-                    const result: anyerror!fd_t = blk: {
+                    const result: OpenatError!fd_t = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -410,7 +594,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.FileLocksNotSupported,
                                 .AGAIN => error.WouldBlock,
                                 .TXTBSY => error.FileBusy,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("openat", errno),
                             };
                             break :blk err;
                         } else {
@@ -420,7 +604,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .read => {
-                    const result: anyerror!usize = blk: {
+                    const result: ReadError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -440,7 +624,7 @@ pub const IO = struct {
                                 .OVERFLOW => error.Unseekable,
                                 .SPIPE => error.Unseekable,
                                 .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("read", errno),
                             };
                             break :blk err;
                         } else {
@@ -450,7 +634,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .recv => {
-                    const result: anyerror!usize = blk: {
+                    const result: RecvError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -468,7 +652,7 @@ pub const IO = struct {
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .TIMEDOUT => error.ConnectionTimedOut,
                                 .OPNOTSUPP => error.OperationNotSupported,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("recv", errno),
                             };
                             break :blk err;
                         } else {
@@ -478,7 +662,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .send => {
-                    const result: anyerror!usize = blk: {
+                    const result: SendError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -503,7 +687,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
                                 .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("send", errno),
                             };
                             break :blk err;
                         } else {
@@ -513,7 +697,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .statx => {
-                    const result: anyerror!void = blk: {
+                    const result: StatxError!void = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -529,7 +713,7 @@ pub const IO = struct {
                                 .NOENT => error.FileNotFound,
                                 .NOMEM => error.SystemResources,
                                 .NOTDIR => error.NotDir,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("statx", errno),
                             };
                             break :blk err;
                         } else {
@@ -547,13 +731,13 @@ pub const IO = struct {
                         },
                         .CANCELED => error.Canceled,
                         .TIME => {}, // A success.
-                        else => |errno| posix.unexpectedErrno(errno),
+                        else => |errno| stdx.unexpected_errno("timeout", errno),
                     };
-                    const result: anyerror!void = err;
+                    const result: TimeoutError!void = err;
                     completion.callback(completion.context, completion, &result);
                 },
                 .write => {
-                    const result: anyerror!usize = blk: {
+                    const result: WriteError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -574,7 +758,7 @@ pub const IO = struct {
                                 .PERM => error.AccessDenied,
                                 .PIPE => error.BrokenPipe,
                                 .SPIPE => error.Unseekable,
-                                else => |errno| posix.unexpectedErrno(errno),
+                                else => |errno| stdx.unexpected_errno("write", errno),
                             };
                             break :blk err;
                         } else {
@@ -589,6 +773,9 @@ pub const IO = struct {
 
     /// This union encodes the set of operations supported as well as their arguments.
     const Operation = union(enum) {
+        cancel: struct {
+            target: *Completion,
+        },
         accept: struct {
             socket: posix.socket_t,
             address: posix.sockaddr = undefined,
@@ -733,8 +920,10 @@ pub const IO = struct {
         OpenAlreadyInProgress,
         FileDescriptorInvalid,
         ConnectionRefused,
+        ConnectionResetByPeer,
         AlreadyConnected,
         NetworkUnreachable,
+        HostUnreachable,
         FileNotFound,
         FileDescriptorNotASocket,
         PermissionDenied,
@@ -878,6 +1067,7 @@ pub const IO = struct {
         SystemResources,
         SocketNotConnected,
         FileDescriptorNotASocket,
+        ConnectionResetByPeer,
         ConnectionTimedOut,
         OperationNotSupported,
     } || posix.UnexpectedError;
@@ -968,7 +1158,12 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
-    pub const StatxError = std.fs.File.StatError || posix.UnexpectedError;
+    pub const StatxError = error{
+        SymLinkLoop,
+        FileNotFound,
+        NameTooLong,
+        NotDir,
+    } || std.fs.File.StatError || posix.UnexpectedError;
 
     pub fn statx(
         self: *IO,
@@ -1344,7 +1539,7 @@ pub const IO = struct {
                     .BADF => return error.InvalidFileDescriptor,
                     .NOTTY => return error.BadRequest,
                     .FAULT => return error.InvalidAddress,
-                    else => |err| return posix.unexpectedErrno(err),
+                    else => |err| return stdx.unexpected_errno("open_file:ioctl", err),
                 }
 
                 if (block_device_size < size) {
@@ -1404,7 +1599,7 @@ pub const IO = struct {
                     return statfs.f_type == stdx.TmpfsMagic;
                 },
                 .INTR => continue,
-                else => |err| return posix.unexpectedErrno(err),
+                else => |err| return stdx.unexpected_errno("fs_is_tmpfs", err),
             }
         }
     }
@@ -1414,7 +1609,10 @@ pub const IO = struct {
     fn fs_supports_direct_io(dir_fd: fd_t) !bool {
         if (!@hasField(posix.O, "DIRECT")) return false;
 
-        const path = "fs_supports_direct_io";
+        var cookie: [16]u8 = .{'0'} ** 16;
+        _ = stdx.array_print(16, &cookie, "{0x}", .{std.crypto.random.int(u64)});
+
+        const path: [:0]const u8 = "fs_supports_direct_io-" ++ cookie ++ "";
         const dir = std.fs.Dir{ .fd = dir_fd };
         const flags: posix.O = .{ .CLOEXEC = true, .CREAT = true, .TRUNC = true };
         const fd = try posix.openatZ(dir_fd, path, flags, 0o666);
@@ -1431,7 +1629,7 @@ pub const IO = struct {
                 },
                 .INTR => continue,
                 .INVAL => return false,
-                else => |err| return posix.unexpectedErrno(err),
+                else => |err| return stdx.unexpected_errno("fs_supports_direct_io", err),
             }
         }
     }
@@ -1459,7 +1657,7 @@ pub const IO = struct {
                 .PERM => return error.PermissionDenied,
                 .SPIPE => return error.Unseekable,
                 .TXTBSY => return error.FileBusy,
-                else => |errno| return posix.unexpectedErrno(errno),
+                else => |errno| return stdx.unexpected_errno("fs_allocate", errno),
             }
         }
     }

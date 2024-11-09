@@ -10,8 +10,6 @@ const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
 
 pub const Time = struct {
-    const Self = @This();
-
     /// Hardware and/or software bugs can mean that the monotonic clock may regress.
     /// One example (of many): https://bugzilla.redhat.com/show_bug.cgi?id=448449
     /// We crash the process for safety if this ever happens, to protect against infinite loops.
@@ -22,7 +20,7 @@ pub const Time = struct {
     /// Always use a monotonic timestamp if the goal is to measure elapsed time.
     /// This clock is not affected by discontinuous jumps in the system time, for example if the
     /// system administrator manually changes the clock.
-    pub fn monotonic(self: *Self) u64 {
+    pub fn monotonic(self: *Time) u64 {
         const m = blk: {
             if (is_windows) break :blk monotonic_windows();
             if (is_darwin) break :blk monotonic_darwin();
@@ -103,7 +101,7 @@ pub const Time = struct {
 
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
     /// This clock is affected by discontinuous jumps in the system time.
-    pub fn realtime(_: *Self) i64 {
+    pub fn realtime(_: *Time) i64 {
         if (is_windows) return realtime_windows();
         // macos has supported clock_gettime() since 10.12:
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
@@ -113,14 +111,20 @@ pub const Time = struct {
 
     fn realtime_windows() i64 {
         assert(is_windows);
-        const kernel32 = struct {
-            extern "kernel32" fn GetSystemTimePreciseAsFileTime(
+        // Declaring the function with an alternative name because `CamelCase` functions are
+        // by convention, used for building generic types.
+        const get_system_time_precise_as_file_time = @extern(
+            *const fn (
                 lpFileTime: *os.windows.FILETIME,
-            ) callconv(os.windows.WINAPI) void;
-        };
+            ) callconv(os.windows.WINAPI) void,
+            .{
+                .library_name = "kernel32",
+                .name = "GetSystemTimePreciseAsFileTime",
+            },
+        );
 
         var ft: os.windows.FILETIME = undefined;
-        kernel32.GetSystemTimePreciseAsFileTime(&ft);
+        get_system_time_precise_as_file_time(&ft);
         const ft64 = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
 
         // FileTime is in units of 100 nanoseconds
@@ -136,5 +140,5 @@ pub const Time = struct {
         return @as(i64, ts.tv_sec) * std.time.ns_per_s + ts.tv_nsec;
     }
 
-    pub fn tick(_: *Self) void {}
+    pub fn tick(_: *Time) void {}
 };

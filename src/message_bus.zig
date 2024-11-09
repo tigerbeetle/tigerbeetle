@@ -14,7 +14,7 @@ const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
 const stdx = @import("stdx.zig");
-const RingBuffer = @import("ring_buffer.zig").RingBuffer;
+const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -23,7 +23,7 @@ pub const MessageBusReplica = MessageBusType(.replica);
 pub const MessageBusClient = MessageBusType(.client);
 
 fn MessageBusType(comptime process_type: vsr.ProcessType) type {
-    const SendQueue = RingBuffer(*Message, .{
+    const SendQueue = RingBufferType(*Message, .{
         .array = switch (process_type) {
             .replica => constants.connection_send_queue_max_replica,
             // A client has at most 1 in-flight request, plus pings.
@@ -42,7 +42,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
     };
 
     return struct {
-        const Self = @This();
+        const MessageBus = @This();
 
         pool: *MessagePool,
         io: *IO,
@@ -74,7 +74,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         },
 
         /// The callback to be called when a message is received.
-        on_message_callback: *const fn (message_bus: *Self, message: *Message) void,
+        on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
@@ -105,9 +105,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             cluster: u128,
             process_id: ProcessID,
             message_pool: *MessagePool,
-            on_message_callback: *const fn (message_bus: *Self, message: *Message) void,
+            on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
             options: Options,
-        ) !Self {
+        ) !MessageBus {
             assert(@as(vsr.ProcessType, process_id) == process_type);
 
             switch (process_type) {
@@ -151,7 +151,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 .client => {},
             };
 
-            var bus: Self = .{
+            var bus: MessageBus = .{
                 .pool = message_pool,
                 .io = options.io,
                 .cluster = cluster,
@@ -172,14 +172,17 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             return bus;
         }
 
-        pub fn deinit(bus: *Self, allocator: std.mem.Allocator) void {
+        pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
             if (process_type == .replica) {
                 bus.process.clients.deinit(allocator);
                 bus.io.close_socket(bus.process.accept_fd);
             }
 
             for (bus.connections) |*connection| {
-                connection.terminate(bus, .shutdown);
+                if (connection.fd != IO.INVALID_SOCKET) {
+                    bus.io.close_socket(connection.fd);
+                }
+
                 if (connection.recv_message) |message| bus.unref(message);
                 while (connection.send_queue.pop()) |message| bus.unref(message);
             }
@@ -269,7 +272,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             return .{ .fd = fd, .address = address_resolved };
         }
 
-        pub fn tick(bus: *Self) void {
+        pub fn tick(bus: *MessageBus) void {
             switch (process_type) {
                 .replica => {
                     // Each replica is responsible for connecting to replicas that come
@@ -293,7 +296,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
         }
 
-        fn maybe_connect_to_replica(bus: *Self, replica: u8) void {
+        fn maybe_connect_to_replica(bus: *MessageBus, replica: u8) void {
             // We already have a connection to the given replica.
             if (bus.replicas[replica] != null) {
                 assert(bus.connections_used > 0);
@@ -346,7 +349,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             unreachable;
         }
 
-        fn maybe_accept(bus: *Self) void {
+        fn maybe_accept(bus: *MessageBus) void {
             comptime assert(process_type == .replica);
 
             if (bus.process.accept_connection != null) return;
@@ -361,7 +364,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 }
             } else unreachable;
             bus.io.accept(
-                *Self,
+                *MessageBus,
                 bus,
                 on_accept,
                 &bus.process.accept_completion,
@@ -370,7 +373,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         }
 
         fn on_accept(
-            bus: *Self,
+            bus: *MessageBus,
             completion: *IO.Completion,
             result: IO.AcceptError!posix.socket_t,
         ) void {
@@ -389,7 +392,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         }
 
         pub fn get_message(
-            bus: *Self,
+            bus: *MessageBus,
             comptime command: ?vsr.Command,
         ) MessagePool.GetMessageType(command) {
             return bus.pool.get_message(command);
@@ -398,11 +401,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         /// `@TypeOf(message)` is one of:
         /// - `*Message`
         /// - `MessageType(command)` for any `command`.
-        pub fn unref(bus: *Self, message: anytype) void {
+        pub fn unref(bus: *MessageBus, message: anytype) void {
             bus.pool.unref(message);
         }
 
-        pub fn send_message_to_replica(bus: *Self, replica: u8, message: *Message) void {
+        pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
             // Messages sent by a replica to itself should never be passed to the message bus.
             if (process_type == .replica) assert(replica != bus.process.replica);
 
@@ -416,7 +419,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
         /// Try to send the message to the client with the given id.
         /// If the client is not currently connected, the message is silently dropped.
-        pub fn send_message_to_client(bus: *Self, client_id: u128, message: *Message) void {
+        pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *Message) void {
             comptime assert(process_type == .replica);
 
             if (bus.process.clients.get(client_id)) |connection| {
@@ -493,7 +496,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// Attempt to connect to a replica.
             /// The slot in the Message.replicas slices is immediately reserved.
             /// Failure is silent and returns the connection to an unused state.
-            pub fn connect_to_replica(connection: *Connection, bus: *Self, replica: u8) void {
+            pub fn connect_to_replica(connection: *Connection, bus: *MessageBus, replica: u8) void {
                 if (process_type == .replica) assert(replica != bus.process.replica);
 
                 assert(connection.peer == .none);
@@ -527,7 +530,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.recv_submitted = true;
 
                 bus.io.timeout(
-                    *Self,
+                    *MessageBus,
                     bus,
                     on_connect_with_exponential_backoff,
                     // We use `recv_completion` for the connection `timeout()` and `connect()` calls
@@ -537,7 +540,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             fn on_connect_with_exponential_backoff(
-                bus: *Self,
+                bus: *MessageBus,
                 completion: *IO.Completion,
                 result: IO.TimeoutError!void,
             ) void {
@@ -559,7 +562,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.recv_submitted = true;
 
                 bus.io.connect(
-                    *Self,
+                    *MessageBus,
                     bus,
                     on_connect,
                     // We use `recv_completion` for the connection `timeout()` and `connect()` calls
@@ -570,7 +573,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             fn on_connect(
-                bus: *Self,
+                bus: *MessageBus,
                 completion: *IO.Completion,
                 result: IO.ConnectError!void,
             ) void {
@@ -608,7 +611,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             /// Given a newly accepted fd, start receiving messages on it.
             /// Callbacks will be continuously re-registered until terminate() is called.
-            pub fn on_accept(connection: *Connection, bus: *Self, fd: posix.socket_t) void {
+            pub fn on_accept(connection: *Connection, bus: *MessageBus, fd: posix.socket_t) void {
                 assert(connection.peer == .none);
                 assert(connection.state == .accepting);
                 assert(connection.fd == IO.INVALID_SOCKET);
@@ -623,7 +626,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.send_queue.empty());
             }
 
-            fn assert_recv_send_initial_state(connection: *Connection, bus: *Self) void {
+            fn assert_recv_send_initial_state(connection: *Connection, bus: *MessageBus) void {
                 assert(bus.connections_used > 0);
 
                 assert(connection.peer == .unknown or connection.peer == .replica);
@@ -641,7 +644,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             /// Add a message to the connection's send queue, starting a send operation
             /// if the queue was previously empty.
-            pub fn send_message(connection: *Connection, bus: *Self, message: *Message) void {
+            pub fn send_message(connection: *Connection, bus: *MessageBus, message: *Message) void {
                 assert(connection.peer == .client or connection.peer == .replica);
                 switch (connection.state) {
                     .connected, .connecting => {},
@@ -674,7 +677,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// I'll be back! (when the Connection is reused after being fully closed)
             pub fn terminate(
                 connection: *Connection,
-                bus: *Self,
+                bus: *MessageBus,
                 how: enum { shutdown, close },
             ) void {
                 assert(connection.peer != .none);
@@ -720,7 +723,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.maybe_close(bus);
             }
 
-            fn parse_messages(connection: *Connection, bus: *Self) void {
+            fn parse_messages(connection: *Connection, bus: *MessageBus) void {
                 assert(connection.peer != .none);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
@@ -732,7 +735,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 }
             }
 
-            fn parse_message(connection: *Connection, bus: *Self) ?*Message {
+            fn parse_message(connection: *Connection, bus: *MessageBus) ?*Message {
                 const data = connection.recv_message.?
                     .buffer[connection.recv_parsed..connection.recv_progress];
                 if (data.len < @sizeOf(Header)) {
@@ -826,7 +829,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             /// Forward a received message to `Process.on_message()`.
             /// Zero any `.prepare` sector padding up to the nearest sector multiple after the body.
-            fn on_message(connection: *Connection, bus: *Self, message: *Message) void {
+            fn on_message(connection: *Connection, bus: *MessageBus, message: *Message) void {
                 if (message == connection.recv_message.?) {
                     assert(connection.recv_parsed == message.header.size);
                     assert(connection.recv_parsed == connection.recv_progress);
@@ -851,7 +854,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             fn set_and_verify_peer(
                 connection: *Connection,
-                bus: *Self,
+                bus: *MessageBus,
                 header: *const Header,
             ) bool {
                 comptime assert(process_type == .replica);
@@ -876,16 +879,20 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 connection.peer = header_peer;
                 switch (connection.peer) {
-                    .replica => {
+                    .replica => |replica_index| {
+                        if (replica_index >= bus.configuration.len) {
+                            return false;
+                        }
+
                         // If there is a connection to this replica, terminate and replace it:
-                        if (bus.replicas[connection.peer.replica]) |old| {
+                        if (bus.replicas[replica_index]) |old| {
                             assert(old.peer == .replica);
-                            assert(old.peer.replica == connection.peer.replica);
+                            assert(old.peer.replica == replica_index);
                             assert(old.state != .free);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         }
-                        bus.replicas[connection.peer.replica] = connection;
-                        log.info("connection from replica {}", .{connection.peer.replica});
+                        bus.replicas[replica_index] = connection;
+                        log.info("connection from replica {}", .{replica_index});
                     },
                     .client => {
                         assert(connection.peer.client != 0);
@@ -912,7 +919,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// at pole position then calls `recv()` immediately, otherwise copies any
             /// partially received message into a new Message and sets `recv_message`,
             /// releasing the old one.
-            fn get_recv_message_and_recv(connection: *Connection, bus: *Self) void {
+            fn get_recv_message_and_recv(connection: *Connection, bus: *MessageBus) void {
                 if (connection.recv_message != null and connection.recv_parsed == 0) {
                     connection.recv(bus);
                     return;
@@ -940,7 +947,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.recv(bus);
             }
 
-            fn recv(connection: *Connection, bus: *Self) void {
+            fn recv(connection: *Connection, bus: *MessageBus) void {
                 assert(connection.peer != .none);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
@@ -951,7 +958,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.recv_progress < constants.message_size_max);
 
                 bus.io.recv(
-                    *Self,
+                    *MessageBus,
                     bus,
                     on_recv,
                     &connection.recv_completion,
@@ -961,7 +968,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 );
             }
 
-            fn on_recv(bus: *Self, completion: *IO.Completion, result: IO.RecvError!usize) void {
+            fn on_recv(
+                bus: *MessageBus,
+                completion: *IO.Completion,
+                result: IO.RecvError!usize,
+            ) void {
                 const connection: *Connection = @alignCast(
                     @fieldParentPtr("recv_completion", completion),
                 );
@@ -988,7 +999,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.parse_messages(bus);
             }
 
-            fn send(connection: *Connection, bus: *Self) void {
+            fn send(connection: *Connection, bus: *MessageBus) void {
                 assert(connection.peer == .client or connection.peer == .replica);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
@@ -996,7 +1007,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(!connection.send_submitted);
                 connection.send_submitted = true;
                 bus.io.send(
-                    *Self,
+                    *MessageBus,
                     bus,
                     on_send,
                     &connection.send_completion,
@@ -1005,7 +1016,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 );
             }
 
-            fn on_send(bus: *Self, completion: *IO.Completion, result: IO.SendError!usize) void {
+            fn on_send(
+                bus: *MessageBus,
+                completion: *IO.Completion,
+                result: IO.SendError!usize,
+            ) void {
                 const connection: *Connection = @alignCast(
                     @fieldParentPtr("send_completion", completion),
                 );
@@ -1036,7 +1051,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.send(bus);
             }
 
-            fn maybe_close(connection: *Connection, bus: *Self) void {
+            fn maybe_close(connection: *Connection, bus: *MessageBus) void {
                 assert(connection.peer != .none);
                 assert(connection.state == .terminating);
                 // If a recv or send operation is currently submitted to the kernel,
@@ -1057,10 +1072,20 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 defer connection.fd = IO.INVALID_SOCKET;
                 // It's OK to use the send completion here as we know that no send
                 // operation is currently in progress.
-                bus.io.close(*Self, bus, on_close, &connection.send_completion, connection.fd);
+                bus.io.close(
+                    *MessageBus,
+                    bus,
+                    on_close,
+                    &connection.send_completion,
+                    connection.fd,
+                );
             }
 
-            fn on_close(bus: *Self, completion: *IO.Completion, result: IO.CloseError!void) void {
+            fn on_close(
+                bus: *MessageBus,
+                completion: *IO.Completion,
+                result: IO.CloseError!void,
+            ) void {
                 const connection: *Connection = @alignCast(
                     @fieldParentPtr("send_completion", completion),
                 );

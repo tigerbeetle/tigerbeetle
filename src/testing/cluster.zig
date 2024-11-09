@@ -53,7 +53,7 @@ const client_id_permutation_shift = constants.members_max;
 // fn (comptime Storage: type, comptime constants: anytype) type.
 pub fn ClusterType(comptime StateMachineType: anytype) type {
     return struct {
-        const Self = @This();
+        const Cluster = @This();
 
         pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
         pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
@@ -64,7 +64,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             TimePointer,
             AOF,
         );
-        pub const Client = vsr.Client(StateMachine, MessageBus);
+        pub const Client = vsr.ClientType(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
 
@@ -92,7 +92,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             /// Includes operation=register messages.
             /// `client` is null when the prepare does not originate from a client.
             on_cluster_reply: ?*const fn (
-                cluster: *Self,
+                cluster: *Cluster,
                 client: ?usize,
                 prepare: *const Message.Prepare,
                 reply: *const Message.Reply,
@@ -101,7 +101,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             /// Invoked when a client receives a reply.
             /// Includes operation=register messages.
             on_client_reply: ?*const fn (
-                cluster: *Self,
+                cluster: *Cluster,
                 client: usize,
                 request: *const Message.Request,
                 reply: *const Message.Reply,
@@ -144,7 +144,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         context: ?*anyopaque = null,
 
-        pub fn init(allocator: mem.Allocator, options: Options) !*Self {
+        pub fn init(allocator: mem.Allocator, options: Options) !*Cluster {
             assert(options.replica_count >= 1);
             assert(options.replica_count <= 6);
             assert(options.client_count > 0);
@@ -336,10 +336,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             // We must heap-allocate the cluster since its pointer will be attached to the replica.
             // TODO(Zig) @returnAddress().
-            var cluster = try allocator.create(Self);
+            var cluster = try allocator.create(Cluster);
             errdefer allocator.destroy(cluster);
 
-            cluster.* = Self{
+            cluster.* = Cluster{
                 .allocator = allocator,
                 .options = options,
                 .network = network,
@@ -393,7 +393,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             return cluster;
         }
 
-        pub fn deinit(cluster: *Self) void {
+        pub fn deinit(cluster: *Cluster) void {
             cluster.manifest_checker.deinit();
             cluster.storage_checker.deinit(cluster.allocator);
             cluster.state_checker.deinit();
@@ -429,7 +429,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.destroy(cluster);
         }
 
-        pub fn tick(cluster: *Self) void {
+        pub fn tick(cluster: *Cluster) void {
             cluster.network.tick();
 
             for (cluster.clients, cluster.client_eviction_reasons) |*client, eviction_reason| {
@@ -462,7 +462,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         /// Returns an error when the replica was unable to recover (open).
         pub fn restart_replica(
-            cluster: *Self,
+            cluster: *Cluster,
             replica_index: u8,
             releases_bundled: *const vsr.ReleaseList,
         ) !void {
@@ -492,7 +492,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// Reset a replica to its initial state, simulating a random crash/panic.
         /// Leave the persistent storage untouched, and leave any currently
         /// inflight messages to/from the replica in the network.
-        pub fn crash_replica(cluster: *Self, replica_index: u8) void {
+        pub fn crash_replica(cluster: *Cluster, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .up);
 
             // Reset the storage before the replica so that pending writes can (partially) finish.
@@ -513,7 +513,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(messages_in_pool == message_bus.pool.messages_max);
         }
 
-        fn replica_enable(cluster: *Self, replica_index: u8) void {
+        fn replica_enable(cluster: *Cluster, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .down);
 
             cluster.network.process_enable(.{ .replica = replica_index });
@@ -521,7 +521,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.log_replica(.recover, replica_index);
         }
 
-        fn replica_open(cluster: *Self, replica_index: u8, options: struct {
+        fn replica_open(cluster: *Cluster, replica_index: u8, options: struct {
             nonce: u128,
             release: vsr.Release,
             releases_bundled: *const vsr.ReleaseList,
@@ -569,7 +569,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         fn replica_release_execute_soon(replica: *Replica, release: vsr.Release) void {
             assert(replica.release.value != release.value);
 
-            const cluster: *Self = @ptrCast(@alignCast(replica.test_context.?));
+            const cluster: *Cluster = @ptrCast(@alignCast(replica.test_context.?));
             assert(cluster.replica_upgrades[replica.replica] == null);
 
             log.debug("{}: release_execute_soon: release={}..{}", .{
@@ -595,7 +595,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// immediately in replica_release_execute_soon()). Since we don't actually exec() to a new
         /// version, this allows the replica to clean up properly (e.g. release Message's via
         /// `defer`).
-        fn replica_release_execute(cluster: *Self, replica_index: u8) void {
+        fn replica_release_execute(cluster: *Cluster, replica_index: u8) void {
             const replica = cluster.replicas[replica_index];
             assert(cluster.replica_health[replica_index] == .up);
 
@@ -638,7 +638,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
         }
 
-        pub fn register(cluster: *Self, client_index: usize) void {
+        pub fn register(cluster: *Cluster, client_index: usize) void {
             const client = &cluster.clients[client_index];
             client.register(register_callback, undefined);
         }
@@ -653,7 +653,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         pub fn request(
-            cluster: *Self,
+            cluster: *Cluster,
             client_index: usize,
             request_operation: StateMachine.Operation,
             request_message: *Message,
@@ -690,10 +690,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         fn request_callback(
             user_data: u128,
             operation: StateMachine.Operation,
+            timestamp: u64,
             result: []u8,
         ) void {
             _ = user_data;
             _ = operation;
+            _ = timestamp;
             _ = result;
         }
 
@@ -702,7 +704,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             request_message: *Message.Request,
             reply_message: *Message.Reply,
         ) void {
-            const cluster: *Self = @ptrCast(@alignCast(client.on_reply_context.?));
+            const cluster: *Cluster = @ptrCast(@alignCast(client.on_reply_context.?));
             assert(reply_message.header.invalid() == null);
             assert(reply_message.header.cluster == cluster.options.cluster_id);
             assert(reply_message.header.client == client.id);
@@ -720,7 +722,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
         }
 
-        fn cluster_on_eviction(cluster: *Self, client_id: u128) void {
+        fn cluster_on_eviction(cluster: *Cluster, client_id: u128) void {
             _ = client_id;
             // Disable checking of `Client.request_inflight`, to guard against the following panic:
             // 1. Client `A` sends an `operation=register` to a fresh cluster. (`A₁`)
@@ -736,7 +738,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn client_on_eviction(client: *Client, eviction: *const Message.Eviction) void {
-            const cluster: *Self = @ptrCast(@alignCast(client.on_reply_context.?));
+            const cluster: *Cluster = @ptrCast(@alignCast(client.on_reply_context.?));
             assert(eviction.header.invalid() == null);
             assert(eviction.header.cluster == cluster.options.cluster_id);
             assert(eviction.header.client == client.id);
@@ -752,7 +754,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
-            const cluster: *Self = @ptrCast(@alignCast(replica.test_context.?));
+            const cluster: *Cluster = @ptrCast(@alignCast(replica.test_context.?));
             assert(cluster.replica_health[replica.replica] == .up);
 
             switch (event) {
@@ -809,7 +811,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         /// Print the current state of the cluster, intended for printf debugging.
-        pub fn log_cluster(cluster: *const Self) void {
+        pub fn log_cluster(cluster: *const Cluster) void {
             var replica: u8 = 0;
             while (replica < cluster.replicas.len) : (replica += 1) {
                 cluster.log_replica(.commit, replica);
@@ -817,7 +819,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn log_replica(
-            cluster: *const Self,
+            cluster: *const Cluster,
             event: enum(u8) {
                 crash = '!',
                 recover = '^',

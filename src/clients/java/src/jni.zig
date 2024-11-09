@@ -723,7 +723,7 @@ pub const JNIEnv = opaque {
         get_module = 233,
     };
 
-    usingnamespace JniInterface(JNIEnv);
+    usingnamespace JniInterfaceType(JNIEnv);
 
     /// Returns the major version number in the higher 16 bits
     /// and the minor version number in the lower 16 bits.
@@ -3137,7 +3137,7 @@ pub const JavaVM = opaque {
         ) callconv(.C) JNIResultType;
     }.JNI_CreateJavaVM;
 
-    usingnamespace JniInterface(JavaVM);
+    usingnamespace JniInterfaceType(JavaVM);
 
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/invocation.html#destroyjavavm.
     pub inline fn destroy_java_vm(
@@ -3205,9 +3205,9 @@ pub const JavaVM = opaque {
 /// without the need to declare a VTable layout, where the ordering of fields defines the ABI.
 /// The function index is stored within T.FunctionTable enum, which only holds the index value.
 /// The function signature is declared as an inline function within the T opaque type.
-fn JniInterface(comptime T: type) type {
+fn JniInterfaceType(comptime T: type) type {
     return struct {
-        fn JniFn(comptime function: T.FunctionTable) type {
+        fn JniFnType(comptime function: T.FunctionTable) type {
             const Fn = @TypeOf(@field(T, @tagName(function)));
             var fn_info = @typeInfo(Fn);
             switch (fn_info) {
@@ -3224,10 +3224,10 @@ fn JniInterface(comptime T: type) type {
             comptime function: T.FunctionTable,
             args: anytype,
         ) return_type: {
-            const type_info = @typeInfo(JniFn(function));
+            const type_info = @typeInfo(JniFnType(function));
             break :return_type type_info.Fn.return_type.?;
         } {
-            const Fn = JniFn(function);
+            const Fn = JniFnType(function);
             const VTable = extern struct {
                 functions: [*]const *const anyopaque,
             };

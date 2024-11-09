@@ -1065,7 +1065,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             self.auditor.on_lookup_transfers(client_index, timestamp, ids, results);
 
-            var transfers = accounting_auditor.IteratorForLookup(tb.Transfer).init(results);
+            var transfers = accounting_auditor.IteratorForLookupType(tb.Transfer).init(results);
             for (ids) |transfer_id| {
                 const transfer_index = self.transfer_id_to_index(transfer_id);
                 const transfer_outcome = self.transfer_index_to_plan(transfer_index).outcome();
