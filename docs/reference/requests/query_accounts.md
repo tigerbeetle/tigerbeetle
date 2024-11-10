@@ -25,3 +25,4 @@ For language-specific docs see:
 - [Java library](/src/clients/java/README.md#query-accounts)
 - [Go library](/src/clients/go/README.md#query-accounts)
 - [Node.js library](/src/clients/node/README.md#query-accounts)
+- [Python library](/src/clients/python/README.md#query-accounts)

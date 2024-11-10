@@ -654,6 +654,7 @@ For language-specific docs see:
 - [Java library](/src/clients/java/README.md#create-transfers)
 - [Go library](/src/clients/go/README.md#create-transfers)
 - [Node.js library](/src/clients/node/README.md#create-transfers)
+- [Python library](/src/clients/python/README.md#create-transfers)
 
 ## Internals
 

@@ -25,3 +25,4 @@ For language-specific docs see:
 - [Java library](/src/clients/java/README.md#query-transfers)
 - [Go library](/src/clients/go/README.md#query-transfers)
 - [Node.js library](/src/clients/node/README.md#query-transfers)
+- [Python library](/src/clients/python/README.md#query-transfers)

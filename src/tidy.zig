@@ -584,6 +584,7 @@ const DeadFilesDetector = struct {
             "go_bindings.zig",
             "node_bindings.zig",
             "java_bindings.zig",
+            "python_bindings.zig",
             "build.zig",
             "build_multiversion.zig",
             "vortex.zig",
@@ -666,10 +667,10 @@ test "tidy no large blobs" {
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
-        .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"},  .{".css"},  .{".go"},
-        .{".h"},   .{".hcl"},   .{".java"}, .{".js"},      .{".json"}, .{".md"},
-        .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sln"},  .{".sum"},
-        .{".ts"},  .{".txt"},   .{".xml"},  .{".yml"},     .{".zig"},
+        .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"}, .{".css"},     .{".go"},
+        .{".h"},   .{".hcl"},   .{".java"}, .{".js"},     .{".json"},    .{".md"},
+        .{".mod"}, .{".props"}, .{".ps1"},  .{".py"},     .{".service"}, .{".sln"},
+        .{".sum"}, .{".ts"},    .{".txt"},  .{".xml"},    .{".yml"},     .{".zig"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
@@ -692,6 +693,7 @@ test "tidy extensions" {
         .{"src/docs_website/scripts/build.sh"},
         .{".github/ci/docs_check.sh"},
         .{".github/ci/test_aof.sh"},
+        .{"src/clients/python/pyproject.toml"},
     });
 
     const allocator = std.testing.allocator;
