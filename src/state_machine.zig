@@ -1480,14 +1480,14 @@ pub fn StateMachineType(
 
             const result = switch (operation) {
                 .pulse => self.execute_expire_pending_transfers(timestamp),
-                .create_accounts => self.execute(
+                .create_accounts => self.execute_create(
                     .create_accounts,
                     client_release,
                     timestamp,
                     input,
                     output,
                 ),
-                .create_transfers => self.execute(
+                .create_transfers => self.execute_create(
                     .create_transfers,
                     client_release,
                     timestamp,
@@ -1570,7 +1570,7 @@ pub fn StateMachineType(
             }
         }
 
-        fn execute(
+        fn execute_create(
             self: *StateMachine,
             comptime operation: Operation,
             client_release: vsr.Release,
