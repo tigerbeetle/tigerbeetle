@@ -21,12 +21,10 @@ internal abstract class NativeRequest
         AssertTrue(packetHandle == null, "Submitting from an already pending NativeRequest");
         packetHandle = GCHandle.Alloc(new TBPacket
         {
-            next = null,
             userData = GCHandle.ToIntPtr(requestHandle),
             operation = (byte)operation,
             data = (IntPtr)data,
             dataSize = (uint)len,
-            status = PacketStatus.Ok,
         }, GCHandleType.Pinned);
 
         nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
