@@ -87,7 +87,16 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             };
         } else {
             const changelog_current = changelog_iteratator.next_changelog().?;
-            const changelog_previous = changelog_iteratator.next_changelog().?;
+            if (changelog_current.release == null) {
+                @panic("The last changelog entry must have a release version.");
+            }
+            const changelog_previous =
+                changelog_previous: while (changelog_iteratator.next_changelog()) |entry|
+            {
+                // The release number can be null if it was tagged as "unreleased".
+                if (entry.release == null) continue;
+                break :changelog_previous entry;
+            } else unreachable;
             break :blk .{
                 changelog_current.release.?,
                 changelog_previous.release.?,
