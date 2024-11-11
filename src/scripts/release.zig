@@ -90,12 +90,10 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             if (changelog_current.release == null) {
                 @panic("The last changelog entry must have a release version.");
             }
-            const changelog_previous =
-                changelog_previous: while (changelog_iteratator.next_changelog()) |entry|
-            {
+            const changelog_previous = while (changelog_iteratator.next_changelog()) |entry| {
                 // The release number can be null if it was tagged as "unreleased".
                 if (entry.release == null) continue;
-                break :changelog_previous entry;
+                break entry;
             } else unreachable;
             break :blk .{
                 changelog_current.release.?,
