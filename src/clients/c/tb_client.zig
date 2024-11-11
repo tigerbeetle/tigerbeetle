@@ -16,6 +16,11 @@ pub const tb_status_t = enum(c_int) {
     system_resources,
     network_subsystem,
 };
+pub const tb_register_log_callback_status_t = enum(c_int) {
+    success = 0,
+    already_registered,
+    not_registered,
+};
 
 pub const tb_operation_t = StateMachine.Operation;
 pub const tb_completion_t = *const fn (
@@ -48,6 +53,86 @@ const TestingContext = blk: {
     const EchoClient = EchoClientType(StateMachine, MessageBus);
     break :blk ContextType(EchoClient);
 };
+
+/// Logging is global per application; it would be nice to be able to define a different logger for
+/// each client instance, though.
+var logging: Logging = .{};
+
+pub const Logging = struct {
+    const Callback = *const fn (
+        message_level: u8,
+        message_ptr: [*]const u8,
+        message_len: usize,
+    ) callconv(.C) void;
+
+    const log_line_max = 8192;
+
+    /// A logger which defers to an application provided handler.
+    pub fn application_logger(
+        comptime message_level: std.log.Level,
+        comptime scope: @Type(.EnumLiteral),
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        // Messages are silently dropped if no logging callback is specified - unless they're warn
+        // or err. The value in having those for debugging is too high to silence them, even until
+        // client libraries catch up and implement a callback handler.
+        const callback = logging.callback orelse {
+            if (message_level == .warn or message_level == .err) {
+                std.log.defaultLog(message_level, scope, format, args);
+            }
+            return;
+        };
+
+        // Protect everything with a mutex - logging can be called from different threads
+        // simultaneously, and there's only one buffer for now.
+        logging.mutex.lock();
+        defer logging.mutex.unlock();
+
+        const prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+        const output = std.fmt.bufPrint(
+            &logging.buffer,
+            prefix ++ format,
+            args,
+        ) catch |err| switch (err) {
+            error.NoSpaceLeft => blk: {
+                // Print an error indicating the log message has been truncated, before the
+                // truncated log itself.
+                const message = "the following log message has been truncated:";
+                callback(@intFromEnum(std.log.Level.err), message.ptr, message.len);
+
+                break :blk &logging.buffer;
+            },
+            else => unreachable,
+        };
+
+        callback(@intFromEnum(message_level), output.ptr, output.len);
+    }
+
+    callback: ?Callback = null,
+    mutex: std.Thread.Mutex = .{},
+    buffer: [log_line_max]u8 = undefined,
+};
+
+pub fn register_log_callback(
+    callback_maybe: ?Logging.Callback,
+) callconv(.C) tb_register_log_callback_status_t {
+    if (logging.callback == null) {
+        if (callback_maybe) |callback| {
+            logging.callback = callback;
+            return .success;
+        } else {
+            return .not_registered;
+        }
+    } else {
+        if (callback_maybe == null) {
+            logging.callback = null;
+            return .success;
+        } else {
+            return .already_registered;
+        }
+    }
+}
 
 pub fn context_to_client(implementation: *ContextImplementation) tb_client_t {
     return @ptrCast(implementation);
