@@ -6,7 +6,7 @@ const vsr = @import("vsr.zig");
 const tb = vsr.tb_client;
 
 pub const std_options = .{
-    .log_level = vsr.constants.log_level,
+    .log_level = .debug,
     .logFn = tb.Logging.application_logger,
 };
 

@@ -13,7 +13,6 @@ const assert = std.debug.assert;
 const root = @import("root");
 
 const BuildOptions = struct {
-    config_log_level: std.log.Level,
     config_verify: bool,
     hash_log_mode: HashLogMode,
     git_commit: ?[40]u8,
@@ -302,7 +301,6 @@ pub const configs = struct {
             vsr.Release.minimum;
 
         // TODO Use additional build options to overwrite other fields.
-        base.process.log_level = build_options.config_log_level;
         base.process.hash_log_mode = build_options.hash_log_mode;
         base.process.release = release;
         base.process.release_client_min = release_client_min;

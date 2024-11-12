@@ -106,7 +106,6 @@ pub fn build(b: *std.Build) !void {
             "config-aof-recovery",
             "Enable AOF Recovery mode.",
         ) orelse false,
-        .config_log_level = b.option(std.log.Level, "config-log-level", "Log level.") orelse .info,
         .config_release = b.option([]const u8, "config-release", "Release triple."),
         .config_release_client_min = b.option(
             []const u8,
@@ -153,7 +152,6 @@ pub fn build(b: *std.Build) !void {
         .config_verify = build_options.config_verify,
         .config_release = build_options.config_release,
         .config_release_client_min = build_options.config_release_client_min,
-        .config_log_level = build_options.config_log_level,
         .config_aof_recovery = build_options.config_aof_recovery,
         .hash_log_mode = build_options.hash_log_mode,
     });
@@ -309,7 +307,6 @@ fn build_vsr_module(b: *std.Build, options: struct {
     config_verify: bool,
     config_release: ?[]const u8,
     config_release_client_min: ?[]const u8,
-    config_log_level: std.log.Level,
     config_aof_recovery: bool,
     hash_log_mode: config.HashLogMode,
 }) struct { *std.Build.Step.Options, *std.Build.Module } {
@@ -328,7 +325,6 @@ fn build_vsr_module(b: *std.Build, options: struct {
         "release_client_min",
         options.config_release_client_min,
     );
-    vsr_options.addOption(std.log.Level, "config_log_level", options.config_log_level);
     vsr_options.addOption(bool, "config_aof_recovery", options.config_aof_recovery);
     vsr_options.addOption(config.HashLogMode, "hash_log_mode", options.hash_log_mode);
 
@@ -653,7 +649,6 @@ fn build_test_integration(
         .config_verify = true,
         .config_release = "0.16.99",
         .config_release_client_min = "0.15.3",
-        .config_log_level = .info,
         .config_aof_recovery = false,
         .hash_log_mode = .none,
     });
