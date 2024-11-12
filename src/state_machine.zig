@@ -2801,7 +2801,8 @@ pub fn StateMachineType(
                 },
                 .account_balances = .{
                     .prefetch_entries_for_read_max = 0,
-                    .prefetch_entries_for_update_max = batch_transfers_limit,
+                    // We don't need to update the history, it's append only.
+                    .prefetch_entries_for_update_max = 0,
                     .cache_entries_max = options.cache_entries_account_balances,
                     .tree_options_object = .{
                         .batch_value_count_limit = batch_values_limit.account_balances.timestamp,
