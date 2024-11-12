@@ -452,7 +452,7 @@ fn lookup_latest_transfers(model: *const Model) Command {
     // While the model's array should live long enough for the command to execute, we keep it
     // uniform here and use the command buffer as usual.
     const buffer = command_buffers.lookup_latest_transfers[0..ids.len];
-    @memcpy(buffer, ids);
+    stdx.copy_disjoint(.exact, u128, buffer, ids);
     return .{ .lookup_latest_transfers = buffer };
 }
 
