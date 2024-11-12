@@ -179,7 +179,6 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                 if (transfer_index > 0) {
                     const preceeding_transfer = transfers[transfer_index - 1];
                     if (preceeding_transfer.flags.linked) {
-                        try testing.expect(transfer_index > 0);
                         const preceeding_entry = entries[transfer_index - 1];
                         try testing.expect(preceeding_entry.index == transfer_index - 1);
                         try testing.expect(preceeding_entry.result != .ok);
