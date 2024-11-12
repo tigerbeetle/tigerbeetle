@@ -10,7 +10,13 @@ const builtin = @import("builtin");
 const buffer_in_capacity = 256;
 
 pub const Terminal = struct {
-    mode_start: ?*const anyopaque,
+    const ModeStart = switch (builtin.os.tag) {
+        .linux, .macos => posix.termios,
+        .windows => WindowsConsoleMode,
+        else => unreachable,
+    };
+
+    mode_start: ?*const ModeStart,
     stdin: std.io.BufferedReader(4096, std.fs.File.Reader),
     // These are made optional so that printing on failure can be disabled in tests expecting them.
     stdout: ?std.fs.File.Writer,
@@ -19,9 +25,10 @@ pub const Terminal = struct {
     buffer_in: std.ArrayList(u8),
 
     pub fn init(
+        self: *Terminal,
         allocator: std.mem.Allocator,
         interactive: bool,
-    ) !Terminal {
+    ) !void {
         const stdout = std.io.getStdOut();
         if (interactive and !stdout.getOrEnableAnsiEscapeSupport()) {
             std.debug.print("ANSI escape sequences not supported.\n", .{});
@@ -29,7 +36,7 @@ pub const Terminal = struct {
         }
 
         const stdin = std.io.getStdIn();
-        var mode_start: ?*const anyopaque = null;
+        var mode_start: ?*const ModeStart = null;
         if (interactive) {
             if (builtin.os.tag == .windows) {
                 var mode_stdin: u32 = 0;
@@ -53,7 +60,7 @@ pub const Terminal = struct {
             }
         }
 
-        return Terminal{
+        self.* = Terminal{
             .mode_start = mode_start,
             .stdin = std.io.bufferedReader(stdin.reader()),
             .stdout = stdout.writer(),
@@ -84,7 +91,7 @@ pub const Terminal = struct {
 
     pub fn read_user_input(self: *Terminal) !?UserInput {
         assert(self.mode_start != null);
-        const stdin = self.stdin.reader().any();
+        const stdin = self.stdin.reader();
 
         switch (try stdin.readByte()) {
             std.ascii.control_code.eot => return null,
@@ -178,7 +185,7 @@ pub const Terminal = struct {
         // Obtaining the cursor's position relies on sending a request payload to stdout. The
         // response is read from stdin, but it may have been altered by user input, so we keep
         // retrying until successful.
-        const stdin = self.stdin.reader().any();
+        const stdin = self.stdin.reader();
         while (true) {
             // The response is of the form `<ESC>[{row};{col}R`.
             try self.print("\x1b[6n", .{});

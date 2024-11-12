@@ -474,7 +474,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         debug_logs: bool,
 
         client: *Client,
-        terminal: *Terminal,
+        terminal: Terminal,
         history: HistoryBuffer,
 
         /// Fixed-capacity buffer for reading input strings.
@@ -752,7 +752,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             const statement = Parser.parse_statement(
                 arena,
                 input,
-                repl.terminal,
+                &repl.terminal,
             ) catch |err| {
                 switch (err) {
                     // These are parsing errors, so the REPL should
@@ -837,8 +837,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 ),
             };
 
-            var terminal = try Terminal.init(allocator, repl.interactive);
-            repl.terminal = &terminal;
+            try Terminal.init(&repl.terminal, allocator, repl.interactive);
 
             try repl.debug("Connecting to '{any}'.\n", .{addresses});
 
@@ -893,7 +892,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         const statement = Parser.parse_statement(
                             &execution_arena,
                             statement_string,
-                            repl.terminal,
+                            &repl.terminal,
                         ) catch |err| {
                             switch (err) {
                                 // These are parsing errors and since this
