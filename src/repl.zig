@@ -16,6 +16,7 @@ const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 const tb = vsr.tigerbeetle;
 
 const Terminal = @import("terminal.zig").Terminal;
+const Completion = @import("completion.zig").Completion;
 
 pub const Parser = struct {
     input: []const u8,
@@ -484,25 +485,6 @@ pub fn ReplType(comptime MessageBus: type) type {
         [repl_history_entry_bytes_with_nul]u8,
         .{ .array = repl_history_entries },
     );
-    const keywords = [_][]const u8{
-        "create_accounts",
-        "create_transfers",
-        "lookup_accounts",
-        "lookup_transfers",
-        "get_account_transfers",
-        "get_account_balances",
-        "query_accounts",
-        "query_transfers",
-        "help",
-        "id",
-        "code",
-        "ledger",
-        "flags",
-        "account_id",
-        "debit_account_id",
-        "credit_account_id",
-        "amount",
-    };
 
     return struct {
         event_loop_done: bool,
@@ -513,6 +495,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         client: Client,
         terminal: Terminal,
+        completion: *Completion,
         history: HistoryBuffer,
 
         /// Fixed-capacity buffer for reading input strings.
@@ -577,7 +560,6 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn read_until_newline_or_eof(
             repl: *Repl,
-            allocator: std.mem.Allocator,
         ) !?[]const u8 {
             repl.buffer.clear();
             repl.buffer_outside_history.clear();
@@ -590,21 +572,14 @@ pub fn ReplType(comptime MessageBus: type) type {
             var buffer_index: usize = 0;
             var history_index = repl.history.count;
 
-            var matches = std.ArrayList([]const u8).init(allocator);
-            var match_index: usize = 0;
-            var current_match: []const u8 = "";
-            // Split the current buffer into prefix, query and suffix before getting the matches.
-            var match_prefix = std.ArrayList(u8).init(allocator);
-            var match_query = std.ArrayList(u8).init(allocator);
-            var match_suffix = std.ArrayList(u8).init(allocator);
+            var current_completion: []const u8 = "";
 
             while (true) {
                 const user_input = try repl.terminal.read_user_input() orelse return null;
 
                 // Clear the completion menu when a match is selected or another key is pressed.
-                if (user_input != .tab and matches.items.len > 0) {
-                    matches.clearRetainingCapacity();
-                    match_index = 0;
+                if (user_input != .tab and repl.completion.count() > 0) {
+                    repl.completion.clear();
                     try repl.terminal.print("\x1b[{};1H\x1b[J\x1b[{};{}H", .{
                         terminal_screen.cursor_row + 1,
                         terminal_screen.cursor_row,
@@ -683,51 +658,22 @@ pub fn ReplType(comptime MessageBus: type) type {
                         _ = repl.buffer.ordered_remove(buffer_index);
                     },
                     .tab => {
-                        var match_start_index = buffer_index;
+                        try repl.completion.split_and_complete(repl.buffer.const_slice(), buffer_index);
 
-                        // Split the buffer into 3 parts -
-                        // match_prefix: Everything before the word being completed.
-                        // match_query: Partial word that needs completion, from last whitespace to
-                        //              buffer index
-                        // match_suffix: Everything after the cursor position
-                        while (match_start_index > 0 and
-                            !std.ascii.isWhitespace(repl.buffer.const_slice()[match_start_index - 1]))
-                        {
-                            match_start_index -= 1;
-                        }
-
-                        match_prefix.clearRetainingCapacity();
-                        try match_prefix.appendSlice(repl.buffer.const_slice()[0..match_start_index]);
-
-                        match_suffix.clearRetainingCapacity();
-                        try match_suffix.appendSlice(repl.buffer.const_slice()[buffer_index..]);
-
-                        if (matches.items.len == 0) {
-                            match_query.clearRetainingCapacity();
-                            try match_query.appendSlice(
-                                repl.buffer.const_slice()[match_start_index..buffer_index],
-                            );
-
-                            matches = get_completions(allocator, match_query.items);
-                        }
-
-                        if (matches.items.len > 0) {
-                            current_match = matches.items[match_index];
-                            match_index = (match_index + 1) % matches.items.len;
-                        } else {
-                            current_match = match_query.items;
-                        }
+                        current_completion = try repl.completion.get_next_completion();
 
                         // Move cursor to the start of the current row, clear the screen from start
                         // to end. Then print the leading buffer, currently selected completion and
                         // trailing buffer(if any).
-                        terminal_screen.update_cursor_position(
-                            -@as(isize, @intCast(buffer_index)),
-                        );
+                        terminal_screen.update_cursor_position(-@as(isize, @intCast(buffer_index)));
+
                         const buffer_row = terminal_screen.cursor_row;
 
                         terminal_screen.update_cursor_position(
-                            @as(isize, @intCast(match_prefix.items.len + current_match.len)),
+                            @as(
+                                isize,
+                                @intCast(repl.completion.prefix.count() + current_completion.len),
+                            ),
                         );
 
                         // \x1b[n;mH - Moves the cursor to row n, column m.
@@ -735,9 +681,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                         try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}{s}{s}\x20\x08", .{
                             buffer_row,
                             prompt,
-                            match_prefix.items,
-                            current_match,
-                            match_suffix.items,
+                            repl.completion.prefix.const_slice(),
+                            current_completion,
+                            repl.completion.suffix.const_slice(),
                         });
 
                         // When cursor reaches the last row of terminal, scroll content upward
@@ -748,27 +694,40 @@ pub fn ReplType(comptime MessageBus: type) type {
                             try repl.terminal.print("\x1b[S\x1b[A", .{});
                         }
 
-                        // Position cursor for completion menu.
-                        try repl.terminal.print("\x1b[{};1H", .{buffer_row + 1});
+                        // Position cursor for completion menu. If the current buffer overflows to
+                        // the next line after printing the prefix, selected completion and suffix,
+                        // the completion menu should effectively be placed `row_delta` lines below
+                        // the current buffer row.
+                        const buffer_width =
+                            repl.completion.prefix.count() +
+                            repl.completion.suffix.count() +
+                            current_completion.len + 1;
+                        const row_delta = @divFloor(buffer_width, terminal_screen.columns) + 1;
+                        try repl.terminal.print("\x1b[{};1H", .{buffer_row + row_delta});
 
                         // Display completion menu in the next line and highlight the currently
                         // selected completion.
                         var menu_width: usize = 0;
-                        for (matches.items) |match| {
-                            menu_width += match.len + 2;
+                        var match_itr = repl.completion.matches.iterator();
+
+                        while (match_itr.next()) |match| {
+                            const match_len = std.mem.indexOf(u8, match[0..], &[_]u8{'\x00'}).?;
+                            menu_width += match_len + 2;
 
                             // \x1b[7m - Highlights the text by inverting the color. Inverts
                             //           the text and background color.
                             // \x1b[0m - Reset the style property of text. In this case, resets
                             //           the effect of \x1b[7m - color inversion.
-                            if (std.mem.eql(u8, match, current_match)) {
-                                try repl.terminal.print("\x20\x1b[7m{s}\x1b[0m\x20", .{match});
+                            if (std.mem.eql(u8, match[0..match_len], current_completion)) {
+                                try repl.terminal.print("\x20\x1b[7m{s}\x1b[0m\x20", .{
+                                    match[0..match_len],
+                                });
                             } else {
-                                try repl.terminal.print("\x20{s}\x20", .{match});
+                                try repl.terminal.print("\x20{s}\x20", .{match[0..match_len]});
                             }
                         }
 
-                        // If the completion menu overflow past the last row of terminal screen,
+                        // If the completion menu overflows past the last row of terminal screen,
                         // move the cursor up by number of rows that would be overflown.
                         const menu_rows = @divFloor(menu_width, terminal_screen.columns) + 1;
                         const required_rows = terminal_screen.cursor_row + menu_rows;
@@ -793,10 +752,10 @@ pub fn ReplType(comptime MessageBus: type) type {
                         // Re-fill the buffer with prefix, current match and suffix. Set the
                         // buffer index where the current selected match ends.
                         repl.buffer.clear();
-                        repl.buffer.append_slice_assume_capacity(match_prefix.items);
-                        repl.buffer.append_slice_assume_capacity(current_match);
-                        repl.buffer.append_slice_assume_capacity(match_suffix.items);
-                        buffer_index = repl.buffer.count() - match_suffix.items.len;
+                        repl.buffer.append_slice_assume_capacity(repl.completion.prefix.const_slice());
+                        repl.buffer.append_slice_assume_capacity(current_completion);
+                        repl.buffer.append_slice_assume_capacity(repl.completion.suffix.const_slice());
+                        buffer_index = repl.buffer.count() - repl.completion.suffix.count();
                     },
                     .left => if (buffer_index > 0) {
                         terminal_screen.update_cursor_position(-1);
@@ -894,31 +853,12 @@ pub fn ReplType(comptime MessageBus: type) type {
             unreachable;
         }
 
-        fn get_completions(
-            allocator: std.mem.Allocator,
-            input: []const u8,
-        ) std.ArrayList([]const u8) {
-            var completions = std.ArrayList([]const u8).init(allocator);
-
-            if (std.mem.eql(u8, input, "")) {
-                return completions;
-            }
-
-            for (keywords) |kw| {
-                if (std.mem.startsWith(u8, kw, input)) {
-                    completions.append(kw) catch continue;
-                }
-            }
-            return completions;
-        }
-
         fn do_repl(
             repl: *Repl,
             arguments: *std.ArrayListUnmanaged(u8),
-            allocator: std.mem.Allocator,
         ) !void {
             try repl.terminal.print(prompt, .{});
-            const input = repl.read_until_newline_or_eof(allocator) catch |err| {
+            const input = repl.read_until_newline_or_eof() catch |err| {
                 repl.event_loop_done = true;
                 return err;
             } orelse {
@@ -1057,6 +997,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .event_loop_done = false,
                 .interactive = false,
                 .terminal = undefined, // Init on run.
+                .completion = undefined, // Init on run.
                 .history = HistoryBuffer.init(), // No corresponding deinit.
                 .buffer = .{},
                 .buffer_outside_history = .{},
@@ -1078,6 +1019,10 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl.interactive = statements.len == 0;
             try Terminal.init(&repl.terminal, repl.interactive); // No corresponding deinit.
 
+            var completion: Completion = undefined;
+            try completion.init(allocator);
+            repl.completion = &completion;
+
             repl.client.register(register_callback, @intCast(@intFromPtr(repl)));
             while (!repl.event_loop_done) {
                 repl.client.tick();
@@ -1098,7 +1043,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 if (repl.request_done) {
                     repl.arguments.clearRetainingCapacity();
                     if (repl.interactive) {
-                        try repl.do_repl(&repl.arguments, allocator);
+                        try repl.do_repl(&repl.arguments);
                     } else blk: {
                         const statement_string = statements_iterator.?.next() orelse break :blk;
 
