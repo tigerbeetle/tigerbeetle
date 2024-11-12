@@ -92,6 +92,28 @@ pub fn ContextType(
             InvalidDataSize,
         };
 
+        const BatchIterator = struct {
+            current: ?*Packet,
+            count: usize,
+
+            fn init(packet: *Packet) BatchIterator {
+                return .{
+                    .current = packet,
+                    .count = packet.batch_count_packets,
+                };
+            }
+
+            fn next(self: *BatchIterator) ?*Packet {
+                const batched = self.current orelse {
+                    assert(self.count == 0);
+                    return null;
+                };
+                self.current = batched.batch_next;
+                self.count -= 1;
+                return batched;
+            }
+        };
+
         allocator: std.mem.Allocator,
         client_id: u128,
 
@@ -395,39 +417,6 @@ pub fn ContextType(
             self.pending.push(packet);
         }
 
-        fn batch_logical_allowed(
-            operation: StateMachine.Operation,
-            data: ?*const anyopaque,
-            data_size: u32,
-        ) bool {
-            if (!StateMachine.batch_logical_allowed.get(operation)) return false;
-
-            // TODO(king): Remove this code once protocol batching is implemented.
-            //
-            // If the application submits an unclosed linked chain, it can inadvertently make
-            // the elements of the next batch part of it.
-            // To work around this issue, we don't allow unclosed linked chains to be batched.
-            if (data_size > 0) {
-                assert(data != null);
-                const linked_chain_open: bool = switch (operation) {
-                    inline .create_accounts,
-                    .create_transfers,
-                    => |tag| linked_chain_open: {
-                        const Event = StateMachine.EventType(tag);
-                        // Packet data isn't necessarily aligned.
-                        const events: [*]align(@alignOf(u8)) const Event = @ptrCast(data.?);
-                        const events_count: usize = @divExact(data_size, @sizeOf(Event));
-                        break :linked_chain_open events[events_count - 1].flags.linked;
-                    },
-                    else => false,
-                };
-
-                if (linked_chain_open) return false;
-            }
-
-            return true;
-        }
-
         fn submit(self: *Context, packet: *Packet) void {
             assert(self.client.request_inflight == null);
 
@@ -459,9 +448,8 @@ pub fn ContextType(
                         StateMachine.Event(operation_comptime),
                     ).init(message.buffer[@sizeOf(vsr.Header)..]);
 
-                    var it: ?*Packet = packet;
-                    while (it) |batched| {
-                        it = batched.batch_next;
+                    var it = BatchIterator.init(packet);
+                    while (it.next()) |batched| {
                         writer.write(@as([*]u8, @ptrCast(batched.data.?))[0..batched.data_size]);
                     }
 
@@ -511,12 +499,9 @@ pub fn ContextType(
                         StateMachine.Result(operation),
                     ).init(reply);
 
-                    var it: ?*Packet = packet;
+                    var it = BatchIterator.init(packet);
                     var event_count: usize = packet.batch_count_events;
-                    while (it) |batched| {
-                        assert(batched.batch_next == null or batched.batch_allowed);
-                        it = batched.batch_next;
-
+                    while (it.next()) |batched| {
                         const results = reader.next() orelse {
                             @panic("client received invalid batched response");
                         };
@@ -531,12 +516,8 @@ pub fn ContextType(
         }
 
         fn cancel(self: *Context, packet: *Packet) void {
-            var it: ?*Packet = packet;
-            while (it) |batched| {
-                assert(batched.batch_next == null or batched.batch_allowed);
-                it = batched.batch_next;
-                self.on_complete(batched, error.ClientShutdown);
-            }
+            assert(packet.batch_next == null);
+            self.on_complete(packet, error.ClientShutdown);
         }
 
         fn on_complete(
@@ -597,46 +578,6 @@ pub fn ContextType(
             self.deinit() catch |err| {
                 std.debug.panic("deinit error: {}", .{err});
             };
-        }
-
-        test "client_batch_linked_chain" {
-            inline for ([_]StateMachine.Operation{
-                .create_accounts,
-                .create_transfers,
-            }) |operation| {
-                const Event = StateMachine.EventType(operation);
-                var data = [_]Event{std.mem.zeroInit(Event, .{})} ** 3;
-
-                // Broken linked chain cannot be batched.
-                for (&data) |*item| item.flags.linked = true;
-                try std.testing.expect(!batch_logical_allowed(
-                    operation,
-                    data[0..],
-                    data.len * @sizeOf(Event),
-                ));
-
-                // Valid linked chain.
-                data[data.len - 1].flags.linked = false;
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    data[0..],
-                    data.len * @sizeOf(Event),
-                ));
-
-                // Single element.
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    &data[data.len - 1],
-                    1 * @sizeOf(Event),
-                ));
-
-                // No elements.
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    null,
-                    0,
-                ));
-            }
         }
     };
 }

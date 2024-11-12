@@ -121,9 +121,6 @@ pub const Event = union(enum) {
     grid_read: struct { iop: usize },
     grid_write: struct { iop: usize },
 
-    grid_read: struct { iop: usize },
-    grid_write: struct { iop: usize },
-
     pub fn format(
         event: *const Event,
         comptime fmt: []const u8,
