@@ -16,7 +16,7 @@ pub const Terminal = struct {
         else => unreachable,
     };
 
-    mode_start: ?*const ModeStart,
+    mode_start: ?ModeStart,
     stdin: std.io.BufferedReader(4096, std.fs.File.Reader),
     // These are made optional so that printing on failure can be disabled in tests expecting them.
     stdout: ?std.fs.File.Writer,
@@ -36,7 +36,7 @@ pub const Terminal = struct {
         }
 
         const stdin = std.io.getStdIn();
-        var mode_start: ?*const ModeStart = null;
+        var mode_start: ?ModeStart = null;
         if (interactive) {
             if (builtin.os.tag == .windows) {
                 var mode_stdin: u32 = 0;
@@ -49,14 +49,12 @@ pub const Terminal = struct {
                     return windows.unexpectedError(windows.kernel32.GetLastError());
                 }
 
-                const windows_console_mode = try allocator.create(WindowsConsoleMode);
-                windows_console_mode.*.stdin = mode_stdin;
-                windows_console_mode.*.stdout = mode_stdout;
-                mode_start = @ptrCast(windows_console_mode);
+                mode_start = WindowsConsoleMode{
+                    .stdin = mode_stdin,
+                    .stdout = mode_stdout,
+                };
             } else {
-                const termios = try allocator.create(posix.termios);
-                termios.* = try posix.tcgetattr(stdin.handle);
-                mode_start = @ptrCast(termios);
+                mode_start = try posix.tcgetattr(stdin.handle);
             }
         }
 
@@ -127,9 +125,9 @@ pub const Terminal = struct {
         assert(self.mode_start != null);
         const stdin = std.io.getStdIn();
         if (builtin.os.tag == .windows) {
-            const console_mode: *const WindowsConsoleMode = @alignCast(@ptrCast(self.mode_start));
+            const console_mode = self.mode_start.?;
 
-            var mode_stdin: u32 = console_mode.*.stdin;
+            var mode_stdin: u32 = console_mode.stdin;
             mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_processed_input);
             mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_line_input);
             mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_echo_input);
@@ -138,7 +136,7 @@ pub const Terminal = struct {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
 
-            var mode_stdout: u32 = console_mode.*.stdout;
+            var mode_stdout: u32 = console_mode.stdout;
             mode_stdout |= @intFromEnum(WindowsConsoleMode.Output.enable_processed_output);
             mode_stdout |= @intFromEnum(WindowsConsoleMode.Output.enable_wrap_at_eol_output);
             mode_stdout |= @intFromEnum(
@@ -149,9 +147,7 @@ pub const Terminal = struct {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
         } else {
-            const termios_start: *const posix.termios = @alignCast(@ptrCast(self.mode_start));
-
-            var termios_new = termios_start.*;
+            var termios_new = self.mode_start.?;
             termios_new.lflag.ECHO = false;
             termios_new.lflag.ISIG = false;
             termios_new.lflag.ICANON = false;
@@ -165,7 +161,7 @@ pub const Terminal = struct {
         assert(self.mode_start != null);
         const stdin = std.io.getStdIn();
         if (builtin.os.tag == .windows) {
-            const console_mode: *const WindowsConsoleMode = @alignCast(@ptrCast(self.mode_start));
+            const console_mode = self.mode_start.?;
             if (windows.kernel32.SetConsoleMode(stdin.handle, console_mode.stdin) == 0) {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
@@ -174,8 +170,8 @@ pub const Terminal = struct {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
         } else {
-            const termios: *const posix.termios = @alignCast(@ptrCast(self.mode_start));
-            try posix.tcsetattr(std.io.getStdIn().handle, .NOW, termios.*);
+            const termios = self.mode_start.?;
+            try posix.tcsetattr(std.io.getStdIn().handle, .NOW, termios);
         }
     }
 
