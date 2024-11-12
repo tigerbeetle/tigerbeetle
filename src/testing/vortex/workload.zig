@@ -168,7 +168,7 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
             }
 
             // Collect all successful transfer IDs.
-            var successful_transfer_ids: stdx.BoundedArray(u128, events_count_max) = .{};
+            var successful_transfer_ids: stdx.BoundedArrayType(u128, events_count_max) = .{};
 
             for (
                 transfers,
