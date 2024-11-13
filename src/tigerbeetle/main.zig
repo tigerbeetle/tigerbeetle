@@ -529,6 +529,7 @@ const Command = struct {
                     log.warn(lock_mem_err, .{std.unicode.fmtUtf16Le(buf_wstr[0..len])});
                 }
             },
+            else => @compileError("unsupported platform"),
         }
 
         while (true) {
