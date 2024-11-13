@@ -7,6 +7,7 @@ const os = std.os;
 const log = std.log.scoped(.main);
 
 const vsr = @import("vsr");
+const stdx = vsr.stdx;
 const constants = vsr.constants;
 const config = constants.config;
 
@@ -462,7 +463,7 @@ const Command = struct {
                     .NOMEM => log.warn(lock_mem_err, .{"total memory would exceed RLIMIT_MEMLOCK"}),
                     .PERM => log.warn(lock_mem_err, .{"not enough privileges to lock memory"}),
                     .INVAL => unreachable, // MCL_ONFAULT specified with MCL_CURRENT.
-                    else => |err| return std.posix.unexpectedErrno(err),
+                    else => |err| return stdx.unexpected_errno(err),
                 }
             },
             .macos => {
