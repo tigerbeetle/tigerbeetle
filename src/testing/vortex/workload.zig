@@ -30,6 +30,7 @@ const arbitrary = @import("./arbitrary.zig");
 const tb = @import("../../tigerbeetle.zig");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
+const RingBufferType = @import("../../ring_buffer.zig").RingBufferType;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
@@ -206,7 +207,12 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                 try testing.expect(model.account_exists(transfer.credit_account_id));
             }
 
-            model.latest_transfers.append(successful_transfer_ids.const_slice());
+            // Drop the oldest transfer IDs and add new ones.
+            for (0..@min(successful_transfer_ids.count(), model.latest_transfers.count)) |_| {
+                model.latest_transfers.retreat_tail();
+            }
+            try model.latest_transfers.push_slice(successful_transfer_ids.const_slice());
+
             model.transfers_created += transfers.len;
         },
         .lookup_all_accounts => |accounts_found| {
@@ -256,53 +262,13 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
     }
 }
 
-/// A bounded array of transfer IDs, which appends at the end, dropping items at the start when
-/// necessary. Like a constrained /deque/.
-const LatestsTransfers = struct {
-    buffer: [events_count_max]u128 = undefined,
-    count: usize = 0,
-
-    fn slice(self: *const @This()) []const u128 {
-        return self.buffer[0..self.count];
-    }
-
-    fn append(self: *@This(), ids: []const u128) void {
-        if (ids.len == 0) return;
-        assert(ids.len <= self.buffer.len);
-
-        // Calculate how many of the original items should be preserved (at the start) after this
-        // operation.
-        const preserved_count = @min(
-            self.buffer.len - ids.len,
-            self.count,
-        );
-        assert(preserved_count >= 0);
-
-        // This might mean that we drop a number of old items, which is done by overwriting with
-        // the preserved ones:
-        const removals_count = @max(0, self.count - preserved_count);
-        if (removals_count > 0) {
-            stdx.copy_left(
-                .exact,
-                u128,
-                self.buffer[0..preserved_count],
-                self.buffer[removals_count .. removals_count + preserved_count],
-            );
-        }
-
-        // Finally, we write the new ones and update the count.
-        const total_count = preserved_count + ids.len;
-        assert(total_count <= self.buffer.len);
-        stdx.copy_left(.exact, u128, self.buffer[preserved_count..total_count], ids);
-        self.count = total_count;
-    }
-};
+const LatestTransfers = RingBufferType(u128, .{ .array = events_count_max });
 
 /// Tracks information about the accounts and transfers created by the workload.
 const Model = struct {
     accounts: std.ArrayListUnmanaged(tb.Account),
     transfers_created: u64 = 0,
-    latest_transfers: LatestsTransfers = .{},
+    latest_transfers: LatestTransfers = LatestTransfers.init(),
     pending_transfers: std.AutoHashMapUnmanaged(u128, void) = .{},
 
     // O(n) lookup, but it's limited by `accounts_count_max`, so it's OK for this test.
@@ -448,11 +414,13 @@ fn lookup_all_accounts(model: *const Model) Command {
 }
 
 fn lookup_latest_transfers(model: *const Model) Command {
-    const ids = model.latest_transfers.slice();
-    // While the model's array should live long enough for the command to execute, we keep it
-    // uniform here and use the command buffer as usual.
-    const buffer = command_buffers.lookup_latest_transfers[0..ids.len];
-    stdx.copy_disjoint(.exact, u128, buffer, ids);
+    const buffer = command_buffers.lookup_latest_transfers[0..model.latest_transfers.count];
+    var ids = model.latest_transfers.iterator();
+    var count: usize = 0;
+    while (ids.next()) |id| {
+        buffer[count] = id;
+        count += 1;
+    }
     return .{ .lookup_latest_transfers = buffer };
 }
 
