@@ -1104,7 +1104,20 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         .none => unreachable,
                         .unknown => {},
                         .client => switch (process_type) {
-                            .replica => assert(bus.process.clients.remove(connection.peer.client)),
+                            .replica => {
+                                // A newer client connection may have replaced this one:
+                                if (bus.process.clients.get(
+                                    connection.peer.client,
+                                )) |existing_connection| {
+                                    if (existing_connection == connection) {
+                                        assert(bus.process.clients.remove(connection.peer.client));
+                                    }
+                                } else {
+                                    // A newer client connection may even leapfrog this connection
+                                    // and then be terminated and set to null before we can get
+                                    // here.
+                                }
+                            },
                             .client => unreachable,
                         },
                         .replica => {
@@ -1114,8 +1127,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                             } else {
                                 // A newer replica connection may even leapfrog this connection and
                                 // then be terminated and set to null before we can get here:
-                                assert(bus.replicas[connection.peer.replica] != null or
-                                    bus.replicas[connection.peer.replica] == null);
+                                stdx.maybe(bus.replicas[connection.peer.replica] == null);
                             }
                         },
                     }
