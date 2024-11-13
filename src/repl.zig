@@ -533,7 +533,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         const prompt = "> ";
 
-        fn read_until_newline_or_eof_alloc(
+        fn read_until_newline_or_eof(
             repl: *Repl,
         ) !?[]u8 {
             repl.buffer.clearRetainingCapacity();
@@ -720,7 +720,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             arena: *std.heap.ArenaAllocator,
         ) !void {
             try repl.terminal.print(prompt, .{});
-            const input = repl.read_until_newline_or_eof_alloc() catch |err| {
+            const input = repl.read_until_newline_or_eof() catch |err| {
                 repl.event_loop_done = true;
                 return err;
             } orelse {
