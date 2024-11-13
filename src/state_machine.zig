@@ -1480,14 +1480,14 @@ pub fn StateMachineType(
 
             const result = switch (operation) {
                 .pulse => self.execute_expire_pending_transfers(timestamp),
-                .create_accounts => self.execute(
+                .create_accounts => self.execute_create(
                     .create_accounts,
                     client_release,
                     timestamp,
                     input,
                     output,
                 ),
-                .create_transfers => self.execute(
+                .create_transfers => self.execute_create(
                     .create_transfers,
                     client_release,
                     timestamp,
@@ -1570,7 +1570,7 @@ pub fn StateMachineType(
             }
         }
 
-        fn execute(
+        fn execute_create(
             self: *StateMachine,
             comptime operation: Operation,
             client_release: vsr.Release,
@@ -2801,7 +2801,8 @@ pub fn StateMachineType(
                 },
                 .account_balances = .{
                     .prefetch_entries_for_read_max = 0,
-                    .prefetch_entries_for_update_max = batch_transfers_limit,
+                    // We don't need to update the history, it's append only.
+                    .prefetch_entries_for_update_max = 0,
                     .cache_entries_max = options.cache_entries_account_balances,
                     .tree_options_object = .{
                         .batch_value_count_limit = batch_values_limit.account_balances.timestamp,

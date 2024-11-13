@@ -230,10 +230,10 @@ fn request(
     };
 
     packet.* = .{
-        .next = null,
+        .next = undefined,
         .user_data = callback_ref,
         .operation = @intFromEnum(operation),
-        .status = .ok,
+        .status = undefined,
         .data_size = @intCast(packet_data.len),
         .data = packet_data.ptr,
         .batch_next = undefined,

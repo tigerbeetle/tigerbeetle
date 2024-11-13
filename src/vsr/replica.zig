@@ -1884,7 +1884,7 @@ pub fn ReplicaType(
             if (self.journal.header_with_op(message.header.commit)) |commit_entry| {
                 if (commit_entry.checksum == message.header.commit_checksum) {
                     log.debug("{}: on_commit: checksum verified", .{self.replica});
-                } else if (self.valid_hash_chain(@src())) {
+                } else if (self.valid_hash_chain_between(message.header.commit, self.op)) {
                     @panic("commit checksum verification failed");
                 } else {
                     // We may still be repairing after receiving the start_view message.
