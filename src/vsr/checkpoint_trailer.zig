@@ -24,7 +24,7 @@ const BlockType = schema.BlockType;
 ///
 ///   The blocks holding free set itself are marked as free in the on-disk encoding, because the
 ///   number of blocks required to store the compressed bitset becomes known only after encoding.
-///   This might or might not be related to Russel's paradox.
+///   This might or might not be related to Russell's paradox.
 ///
 /// - Client sessions is stored as a linked list of blocks containing reply headers and session
 ///   numbers.
