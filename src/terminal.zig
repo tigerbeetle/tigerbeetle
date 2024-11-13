@@ -26,7 +26,7 @@ pub const Terminal = struct {
 
     pub fn init(
         self: *Terminal,
-        allocator: std.mem.Allocator,
+        arena: *std.heap.ArenaAllocator,
         interactive: bool,
     ) !void {
         const stdout = std.io.getStdOut();
@@ -63,7 +63,7 @@ pub const Terminal = struct {
             .stdin = std.io.bufferedReader(stdin.reader()),
             .stdout = stdout.writer(),
             .stderr = std.io.getStdErr().writer(),
-            .buffer_in = try std.ArrayList(u8).initCapacity(allocator, buffer_in_capacity),
+            .buffer_in = try std.ArrayList(u8).initCapacity(arena.allocator(), buffer_in_capacity),
         };
     }
 

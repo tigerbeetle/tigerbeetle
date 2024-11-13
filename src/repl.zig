@@ -837,7 +837,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 ),
             };
 
-            try Terminal.init(&repl.terminal, allocator, repl.interactive);
+            try Terminal.init(&repl.terminal, arena, repl.interactive);
 
             try repl.debug("Connecting to '{any}'.\n", .{addresses});
 
