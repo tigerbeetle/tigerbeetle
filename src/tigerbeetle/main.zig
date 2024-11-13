@@ -457,7 +457,7 @@ const Command = struct {
                 const MCL_CURRENT = 1; // Lock all currently mapped pages.
                 const MCL_ONFAULT = 3; // Lock all pages faulted in (i.e. stack space).
                 const rc = os.linux.syscall1(.mlockall, MCL_CURRENT | MCL_ONFAULT);
-                switch (os.linux.E.errnoFromSyscall(rc)) {
+                switch (os.linux.E.init(rc)) {
                     .AGAIN => log.warn(lock_mem_err, .{"some addresses could not be locked"}),
                     .NOMEM => log.warn(lock_mem_err, .{"total memory would exceed RLIMIT_MEMLOCK"}),
                     .PERM => log.warn(lock_mem_err, .{"not enough privileges to lock memory"}),
