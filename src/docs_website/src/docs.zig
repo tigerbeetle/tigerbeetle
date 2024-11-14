@@ -237,7 +237,3 @@ fn path_exists(path: []const u8) !bool {
     };
     return true;
 }
-
-fn replace_extension(allocator: Allocator, path: []const u8, old_ext: []const u8, new_ext: []const u8) ![]const u8 {
-    return try std.mem.concat(allocator, u8, &.{ path[0 .. path.len - old_ext.len], new_ext });
-}
