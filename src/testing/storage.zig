@@ -453,13 +453,30 @@ pub const Storage = struct {
             }
         }
 
+        const faulty = storage.faulty and faulty: {
+            if (read.zone != .wal_prepares) break :faulty true;
+
+            // Don't corrupt a WAL prepare if the corresponding WAL header write was misdirected, to
+            // avoid a double-fault which the journal interprets as a torn prepare.
+            const header_slot = @divExact(read.offset, constants.message_size_max);
+            const header_offset = vsr.sector_floor(header_slot * @sizeOf(vsr.Header));
+
+            var overlays_iterator = storage.overlays.iterate();
+            while (overlays_iterator.next()) |overlay| {
+                if (overlay.zone == .wal_headers and overlay.offset == header_offset) {
+                    break :faulty false;
+                }
+            }
+            break :faulty true;
+        };
+
         // Fill faulty or uninitialized sectors with random data.
         var sectors = SectorRange.from_zone(read.zone, read.offset, read.buffer.len);
         const sectors_min = sectors.min;
         while (sectors.next()) |sector| {
-            const faulty = storage.faulty and storage.faults.isSet(sector);
+            const faulty_sector = faulty and storage.faults.isSet(sector);
             const uninit = !storage.memory_written.isSet(sector);
-            if (faulty or uninit) {
+            if (faulty_sector or uninit) {
                 const sector_offset = (sector - sectors_min) * constants.sector_size;
                 const sector_bytes = read.buffer[sector_offset..][0..constants.sector_size];
                 storage.prng.random().bytes(sector_bytes);
