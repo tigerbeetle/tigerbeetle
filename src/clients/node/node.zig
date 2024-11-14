@@ -238,12 +238,11 @@ fn request(
         .data = packet_data.ptr,
         .batch_next = undefined,
         .batch_tail = undefined,
-        .batch_size = undefined,
-        .batch_allowed = undefined,
+        .batch_count_packets = undefined,
+        .batch_count_events = undefined,
+        .batch_count_results = undefined,
         .reserved = undefined,
     };
-
-    tb_client.submit(client, packet);
 }
 
 // Packet only has one size field which normally tracks `BufferType(op).events().len`.
