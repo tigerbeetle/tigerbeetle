@@ -1,0 +1,29 @@
+:root {
+  --default-text: #EEEEEE;
+  --comment-gray: #6E6E6E;
+}
+
+code {
+  color: var(--default-text);
+}
+code .co {
+  color: var(--comment-gray);
+}
+code .kw, code .at, code .cf {
+  color: var(--red);
+}
+code .op {
+  color: var(--red);
+}
+code .dt {
+  color: var(--orange);
+}
+code .st {
+  color: var(--green);
+}
+code .dv, code .fl {
+  color: var(--light-blue);
+}
+code .bu {
+  color: var(--blue);
+}
