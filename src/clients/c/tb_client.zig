@@ -22,6 +22,7 @@ pub const tb_completion_t = *const fn (
     context: usize,
     client: tb_client_t,
     packet: *tb_packet_t,
+    timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void;

@@ -22,7 +22,7 @@ internal sealed class NativeClient : IDisposable
                 byte* address_ptr,
                 uint address_len,
                 IntPtr on_completion_ctx,
-                delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+                delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, ulong, byte*, uint, void> on_completion_fn
             );
 
 
@@ -140,8 +140,10 @@ internal sealed class NativeClient : IDisposable
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint resultLen)
+    private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, ulong timestamp, byte* result, uint resultLen)
     {
+        _ = timestamp;
+
         try
         {
             AssertTrue(ctx == IntPtr.Zero);

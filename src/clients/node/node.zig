@@ -259,10 +259,12 @@ fn on_completion(
     completion_ctx: usize,
     client: tb_client.tb_client_t,
     packet: *tb_client.tb_packet_t,
+    timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void {
     _ = client;
+    _ = timestamp;
 
     switch (packet.status) {
         .ok, .client_shutdown => {}, // Handled on the JS side to throw exception.

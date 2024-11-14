@@ -146,6 +146,7 @@ const NativeClient = struct {
         context_ptr: usize,
         client: tb.tb_client_t,
         packet: *tb.tb_packet_t,
+        timestamp: u64,
         result_ptr: ?[*]const u8,
         result_len: u32,
     ) callconv(.C) void {
@@ -162,6 +163,12 @@ const NativeClient = struct {
         const packet_operation = packet.operation;
         const packet_status = packet.status;
         global_allocator.destroy(packet);
+
+        if (packet_status != .ok) {
+            assert(timestamp == 0);
+            assert(result_ptr == null);
+            assert(result_len == 0);
+        }
 
         if (result_len > 0) {
             switch (packet_status) {

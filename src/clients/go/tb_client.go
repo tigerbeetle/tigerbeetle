@@ -22,6 +22,7 @@ extern __declspec(dllexport) void onGoPacketCompletion(
 	uintptr_t ctx,
 	tb_client_t client,
 	tb_packet_t* packet,
+	uint64_t timestamp,
 	tb_result_bytes_t result_ptr,
 	uint32_t result_len
 );
@@ -244,11 +245,13 @@ func onGoPacketCompletion(
 	_context C.uintptr_t,
 	client C.tb_client_t,
 	packet *C.tb_packet_t,
+	timestamp C.uint64_t,
 	result_ptr C.tb_result_bytes_t,
 	result_len C.uint32_t,
 ) {
 	_ = _context
 	_ = client
+	_ = timestamp
 
 	// Get the request from the packet user data.
 	req := (*request)(unsafe.Pointer(packet.user_data))
