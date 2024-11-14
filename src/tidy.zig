@@ -612,6 +612,8 @@ const DeadFilesDetector = struct {
             "build.zig",
             "build_multiversion.zig",
             "vortex.zig",
+            "file_checker.zig",
+            "page_writer.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -691,30 +693,23 @@ test "tidy no large blobs" {
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
-        .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"}, .{".css"},     .{".go"},
-        .{".h"},   .{".hcl"},   .{".java"}, .{".js"},     .{".json"},    .{".md"},
-        .{".mod"}, .{".props"}, .{".ps1"},  .{".py"},     .{".service"}, .{".sln"},
-        .{".sum"}, .{".ts"},    .{".txt"},  .{".xml"},    .{".yml"},     .{".zig"},
+        .{".bat"}, .{".c"},   .{".cs"},    .{".csproj"}, .{".css"}, .{".go"},
+        .{".h"},   .{".hcl"}, .{".html"},  .{".java"},   .{".js"},  .{".json"},
+        .{".md"},  .{".mod"}, .{".props"}, .{".ps1"},    .{".py"},  .{".service"},
+        .{".sln"}, .{".sum"}, .{".svg"},   .{".ts"},     .{".txt"}, .{".xml"},
+        .{".yml"}, .{".zig"}, .{".zon"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
         .{".editorconfig"},
         .{".gitignore"},
-        .{".nojekyll"},
-        .{"CNAME"},
         .{"exclude-pmd.properties"},
-        .{"favicon.ico"},
         .{"favicon.png"},
         .{"LICENSE"},
         .{"module-info.test"},
-        .{"index.html"},
-        .{"style.css"},
-        .{"logo.svg"},
-        .{"logo-white.svg"},
-        .{"logo-with-text-white.svg"},
+        .{"anchor-links.lua"},
         .{"zig/download.sh"},
         .{"src/scripts/cfo_supervisor.sh"},
-        .{"src/docs_website/scripts/build.sh"},
         .{".github/ci/docs_check.sh"},
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
