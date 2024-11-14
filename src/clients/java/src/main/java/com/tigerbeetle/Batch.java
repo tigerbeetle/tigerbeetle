@@ -13,6 +13,24 @@ import static com.tigerbeetle.AssertionError.assertTrue;
  * {@link #next}, {@link #add}, or {@link #setPosition} prior to reading or writing an element.
  */
 public abstract class Batch {
+    /**
+     * Information about the protocol header for debugging and diagnostic purposes. This is a
+     * temporary API and may be removed without notice.
+     */
+    public static class Header {
+        private final long timestamp;
+
+        Header(final long timestamp) {
+            this.timestamp = timestamp;
+        }
+
+        /**
+         * Gets the cluster timestamp when the reply was generated.
+         */
+        public final long getTimestamp() {
+            return this.timestamp;
+        }
+    }
 
     // @formatter:off
     /*
@@ -47,6 +65,8 @@ public abstract class Batch {
     private int position;
     private CursorStatus cursorStatus;
     private int length;
+
+    private Header header = null;
 
     private final int capacity;
     private final ByteBuffer buffer;
@@ -90,6 +110,21 @@ public abstract class Batch {
         this.cursorStatus = CursorStatus.Begin;
 
         this.buffer = buffer.order(BYTE_ORDER);
+    }
+
+    /**
+     * Retrieves information about the protocol header for debugging and diagnostic purposes.
+     * This is a temporary API and may be removed without notice.
+     *
+     * @return may return null if this batch wasn't generated in response to a VSR operation.
+     */
+    public final Header getHeader() {
+        return this.header;
+    }
+
+    void setHeader(Header header) {
+        Objects.requireNonNull(header);
+        this.header = header;
     }
 
     /**

@@ -82,7 +82,7 @@ abstract class Request<TResponse extends Batch> {
     // Unchecked: Since we just support a limited set of operations, it is safe to cast the
     // result to T[]
     @SuppressWarnings("unchecked")
-    void endRequest(final byte receivedOperation, final byte status) {
+    void endRequest(final byte receivedOperation, final byte status, final long timestamp) {
 
         // This method is called from the JNI side, on the tb_client thread
         // We CAN'T throw any exception here, any event must be stored and
@@ -176,6 +176,7 @@ abstract class Request<TResponse extends Batch> {
 
         try {
             if (exception == null) {
+                result.setHeader(new Batch.Header(timestamp));
                 setResult((TResponse) result);
             } else {
                 setException(exception);

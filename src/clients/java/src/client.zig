@@ -177,6 +177,7 @@ const NativeClient = struct {
                     ReflectionHelper.set_reply_buffer(
                         env,
                         request_obj,
+                        timestamp,
                         ptr[0..@as(usize, @intCast(result_len))],
                     );
                 },
@@ -189,6 +190,7 @@ const NativeClient = struct {
             request_obj,
             packet_operation,
             packet_status,
+            timestamp,
         );
     }
 };
@@ -357,7 +359,7 @@ const ReflectionHelper = struct {
             env,
             request_class,
             "endRequest",
-            "(BB)V",
+            "(BBJ)V",
         );
 
         // Asserting we are full initialized:
@@ -449,10 +451,16 @@ const ReflectionHelper = struct {
         return direct_buffer[0..@as(usize, @intCast(buffer_len))];
     }
 
-    pub fn set_reply_buffer(env: *jni.JNIEnv, this_obj: jni.JObject, reply: []const u8) void {
+    pub fn set_reply_buffer(
+        env: *jni.JNIEnv,
+        this_obj: jni.JObject,
+        timestamp: u64,
+        reply: []const u8,
+    ) void {
         assert(this_obj != null);
         assert(request_reply_buffer_field_id != null);
         assert(reply.len > 0);
+        assert(timestamp > 0);
 
         const reply_buffer_obj = env.new_byte_array(
             @intCast(reply.len),
@@ -519,6 +527,7 @@ const ReflectionHelper = struct {
         this_obj: jni.JObject,
         packet_operation: u8,
         packet_status: tb.tb_packet_status_t,
+        timestamp: u64,
     ) void {
         assert(this_obj != null);
         assert(request_class != null);
@@ -531,6 +540,7 @@ const ReflectionHelper = struct {
             &[_]jni.JValue{
                 jni.JValue.to_jvalue(@as(jni.JByte, @bitCast(packet_operation))),
                 jni.JValue.to_jvalue(@as(jni.JByte, @bitCast(@intFromEnum(packet_status)))),
+                jni.JValue.to_jvalue(@as(jni.JLong, @bitCast(timestamp))),
             },
         );
 
