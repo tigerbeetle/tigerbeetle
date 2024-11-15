@@ -513,15 +513,18 @@ pub fn ContextType(
                             batched.data_size,
                             @sizeOf(StateMachine.EventType(operation)),
                         );
-                        const results = demuxer.decode(event_offset, event_count);
+                        const batched_reply = demuxer.decode(event_offset, event_count);
                         event_offset += event_count;
 
                         if (!StateMachine.batch_logical_allowed.get(operation)) {
-                            assert(results.len == reply.len);
+                            assert(batched_reply.len == reply.len);
                         }
 
                         assert(batched.operation == @intFromEnum(operation));
-                        self.on_complete(batched, results);
+                        self.on_complete(batched, .{
+                            .timestamp = timestamp,
+                            .reply = batched_reply,
+                        });
                     }
                 },
             }
@@ -539,24 +542,34 @@ pub fn ContextType(
         fn on_complete(
             self: *Context,
             packet: *Packet,
-            result: PacketError![]const u8,
+            completion: PacketError!struct {
+                timestamp: u64,
+                reply: []const u8,
+            },
         ) void {
             const completion_ctx = self.implementation.completion_ctx;
             const tb_client = api.context_to_client(&self.implementation);
-            const bytes = result catch |err| {
+            const result = completion catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
                     error.ClientShutdown => .client_shutdown,
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,
                 };
-                (self.completion_fn)(completion_ctx, tb_client, packet, null, 0);
+                (self.completion_fn)(completion_ctx, tb_client, packet, 0, null, 0);
                 return;
             };
 
             // The packet completed normally.
             packet.status = .ok;
-            (self.completion_fn)(completion_ctx, tb_client, packet, bytes.ptr, @intCast(bytes.len));
+            (self.completion_fn)(
+                completion_ctx,
+                tb_client,
+                packet,
+                result.timestamp,
+                result.reply.ptr,
+                @intCast(result.reply.len),
+            );
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {

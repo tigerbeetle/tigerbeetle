@@ -208,7 +208,7 @@ pub fn main() !void {
         \\    const char* address_ptr,
         \\    uint32_t address_len,
         \\    uintptr_t on_completion_ctx,
-        \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
+        \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
         \\);
         \\
         \\// Initialize a new TigerBeetle client which echos back any data submitted.
@@ -218,7 +218,7 @@ pub fn main() !void {
         \\    const char* address_ptr,
         \\    uint32_t address_len,
         \\    uintptr_t on_completion_ctx,
-        \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
+        \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
         \\);
         \\
         \\// Retrieve the callback context initially passed into `tb_client_init` or
