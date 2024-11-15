@@ -796,6 +796,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn display_help(repl: *Repl) !void {
             try repl.terminal.print("TigerBeetle CLI Client {}\n" ++
                 \\  Hit enter after a semicolon to run a command.
+                \\  Ctrl+D to exit.
                 \\
                 \\Examples:
                 \\  create_accounts id=1 code=10 ledger=700 flags=linked|history,
