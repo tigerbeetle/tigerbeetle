@@ -607,11 +607,12 @@ pub const IO = struct {
                     const result: ReadError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
-                                .INTR => {
+                                .INTR, .AGAIN => {
+                                    // Some file systems, like XFS, can return EAGAIN even when
+                                    // reading from a blocking file without flags like RWF_NOWAIT.
                                     completion.io.enqueue(completion);
                                     return;
                                 },
-                                .AGAIN => error.WouldBlock,
                                 .BADF => error.NotOpenForReading,
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .FAULT => unreachable,

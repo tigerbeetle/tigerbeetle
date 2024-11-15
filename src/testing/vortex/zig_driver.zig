@@ -103,11 +103,13 @@ pub fn on_complete(
     tb_context: usize,
     tb_client: c.tb_client_t,
     tb_packet: [*c]c.tb_packet_t,
+    timestamp: u64,
     result_ptr: [*c]const u8,
     result_len: u32,
 ) callconv(.C) void {
     _ = tb_context;
     _ = tb_client;
+    _ = timestamp;
     const context: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
 
     context.lock.lock();

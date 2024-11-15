@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -66,20 +67,20 @@ public class BlockingRequestTest {
         assert false;
     }
 
+    @Test
     public void testConstructorWithZeroCapacityBatch() {
         var client = getDummyClient();
         var batch = new AccountBatch(0);
 
         BlockingRequest.createAccounts(client, batch);
-        assert false;
     }
 
+    @Test
     public void testConstructorWithZeroItemsBatch() {
         var client = getDummyClient();
         var batch = new AccountBatch(1);
 
         BlockingRequest.createAccounts(client, batch);
-        assert false;
     }
 
     @Test(expected = AssertionError.class)
@@ -93,7 +94,8 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         // Invalid operation, should be CREATE_TRANSFERS
-        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, PacketStatus.Ok.value,
+                System.nanoTime());
 
         assertTrue(request.isDone());
 
@@ -114,7 +116,7 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         // Unknown operation
-        request.endRequest(UNKNOWN, PacketStatus.Ok.value);
+        request.endRequest(UNKNOWN, PacketStatus.Ok.value, System.nanoTime());
 
         assertTrue(request.isDone());
 
@@ -132,12 +134,15 @@ public class BlockingRequestTest {
 
         assertFalse(request.isDone());
 
-        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value,
+                System.nanoTime());
 
         assertTrue(request.isDone());
 
         var result = request.waitForResult();
         assertEquals(0, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
     }
 
     @Test(expected = AssertionError.class)
@@ -152,7 +157,8 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         request.setReplyBuffer(invalidBuffer.array());
-        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value,
+                System.nanoTime());
 
         assertTrue(request.isDone());
 
@@ -187,7 +193,7 @@ public class BlockingRequestTest {
         var dummyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE);
         request.setReplyBuffer(dummyBuffer.array());
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value,
-                PacketStatus.TooMuchData.value);
+                PacketStatus.TooMuchData.value, 0L);
 
         assertTrue(request.isDone());
 
@@ -213,7 +219,8 @@ public class BlockingRequestTest {
 
         var request = BlockingRequest.createAccounts(client, batch);
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value,
+                System.nanoTime());
 
         assertTrue(request.isDone());
         request.waitForResult();
@@ -238,7 +245,8 @@ public class BlockingRequestTest {
 
         // First completion is OK, registering the exception.
         try {
-            request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+            request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value,
+                    System.nanoTime());
         } catch (Throwable any) {
             // No exception is expected in the first call.
             assert false;
@@ -273,11 +281,14 @@ public class BlockingRequestTest {
         dummyReplyBuffer.putInt(CreateAccountResult.Exists.value);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value,
+                System.nanoTime());
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(0, result.getIndex());
@@ -306,11 +317,14 @@ public class BlockingRequestTest {
         dummyReplyBuffer.putInt(CreateTransferResult.Exists.value);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value,
+                System.nanoTime());
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(0, result.getIndex());
@@ -337,11 +351,14 @@ public class BlockingRequestTest {
         dummyReplyBuffer.position(AccountBatch.Struct.SIZE).putLong(200).putLong(2000);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, PacketStatus.Ok.value,
+                System.nanoTime());
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -368,11 +385,14 @@ public class BlockingRequestTest {
         dummyReplyBuffer.position(TransferBatch.Struct.SIZE).putLong(200).putLong(2000);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
-        request.endRequest(Request.Operations.LOOKUP_TRANSFERS.value, PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.LOOKUP_TRANSFERS.value, PacketStatus.Ok.value,
+                System.nanoTime());
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -407,6 +427,8 @@ public class BlockingRequestTest {
         // Wait for completion
         var result = callback.request.waitForResult();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -468,7 +490,7 @@ public class BlockingRequestTest {
                 if (buffer != null) {
                     request.setReplyBuffer(buffer.array());
                 }
-                request.endRequest(receivedOperation, status);
+                request.endRequest(receivedOperation, status, System.nanoTime());
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }

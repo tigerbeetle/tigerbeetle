@@ -391,18 +391,21 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
 
-            log.err("{}: session evicted: reason={s} (cluster_release={})", .{
-                self.id,
-                @tagName(eviction.header.reason),
-                eviction.header.release,
-            });
-
             if (self.on_eviction_callback) |callback| {
+                log.err("{}: session evicted: reason={?s} (cluster_release={})", .{
+                    self.id,
+                    std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
+                    eviction.header.release,
+                });
+
                 self.evicted = true;
                 self.on_eviction_callback = null;
                 callback(self, eviction);
             } else {
-                @panic("session evicted");
+                std.debug.panic("session evicted: {?s} (cluster_release={})", .{
+                    std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
+                    eviction.header.release,
+                });
             }
         }
 

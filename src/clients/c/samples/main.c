@@ -52,6 +52,7 @@ void on_completion(
     uintptr_t context,
     tb_client_t client,
     tb_packet_t *packet,
+    uint64_t timestamp,
     const uint8_t *data,
     uint32_t size
 );
@@ -246,9 +247,12 @@ void on_completion(
     uintptr_t context,
     tb_client_t client,
     tb_packet_t *packet,
+    uint64_t timestamp,
     const uint8_t *data,
     uint32_t size
 ) {
+    (void)timestamp; // Not used.
+
     // The user_data gives context to a request:
     completion_context_t* ctx = (completion_context_t*)packet->user_data;
 
@@ -324,9 +328,11 @@ void on_completion(
     uintptr_t context,
     tb_client_t client,
     tb_packet_t *packet,
+    uint64_t timestamp,
     const uint8_t *data,
     uint32_t size
 ) {
+    (void)timestamp; // Not used.
     // The user_data gives context to a request:
     completion_context_t* ctx = (completion_context_t*)packet->user_data;
 

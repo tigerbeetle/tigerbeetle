@@ -74,12 +74,14 @@ public class AsyncRequestTest {
         assert false;
     }
 
+    @Test
     public void testConstructorWithZeroCapacityBatch() {
         var client = getDummyClient();
         var batch = new AccountBatch(0);
         AsyncRequest.createAccounts(client, batch);
     }
 
+    @Test
     public void testConstructorWithZeroItemsBatch() {
         var client = getDummyClient();
         var batch = new AccountBatch(1);
@@ -155,6 +157,8 @@ public class AsyncRequestTest {
 
         var result = future.get();
         assertEquals(0, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
     }
 
     @Test(expected = AssertionError.class)
@@ -267,6 +271,8 @@ public class AsyncRequestTest {
 
         var result = future.get();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(0, result.getIndex());
@@ -303,6 +309,8 @@ public class AsyncRequestTest {
 
         var result = future.get();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(0, result.getIndex());
@@ -337,6 +345,8 @@ public class AsyncRequestTest {
 
         var result = future.get();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -371,6 +381,8 @@ public class AsyncRequestTest {
 
         var result = future.get();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -416,6 +428,8 @@ public class AsyncRequestTest {
         // Wait for completion
         var result = future.get();
         assertEquals(2, result.getLength());
+        assertNotNull(result.getHeader());
+        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -454,6 +468,8 @@ public class AsyncRequestTest {
             // to avoid flaky results due to thread scheduling.
             var result = future.get(5000, TimeUnit.MILLISECONDS);
             assertEquals(2, result.getLength());
+            assertNotNull(result.getHeader());
+            assertTrue(result.getHeader().getTimestamp() != 0L);
 
             assertTrue(result.next());
             assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -570,7 +586,7 @@ public class AsyncRequestTest {
                 if (buffer != null) {
                     request.setReplyBuffer(buffer.array());
                 }
-                request.endRequest(receivedOperation, status);
+                request.endRequest(receivedOperation, status, System.nanoTime());
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }

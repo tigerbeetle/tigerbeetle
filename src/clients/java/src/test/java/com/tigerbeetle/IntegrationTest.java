@@ -23,6 +23,8 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -149,6 +151,7 @@ public class IntegrationTest {
 
         final var createAccountErrors = client.createAccounts(accounts);
         assertTrue(createAccountErrors.getLength() == 0);
+        assertHeader(accounts, createAccountErrors);
 
         final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
         assertEquals(2, lookupAccounts.getLength());
@@ -168,6 +171,8 @@ public class IntegrationTest {
         zeroedAccounts.add();
 
         final var createAccountErrors = client.createAccounts(zeroedAccounts);
+        assertHeader(zeroedAccounts, createAccountErrors);
+
         assertTrue(createAccountErrors.getLength() == 1);
         assertTrue(createAccountErrors.next());
         assertEquals(CreateAccountResult.IdMustNotBeZero, createAccountErrors.getResult());
@@ -184,6 +189,7 @@ public class IntegrationTest {
 
         final var createAccountErrors = accountsFuture.get();
         assertTrue(createAccountErrors.getLength() == 0);
+        assertHeader(accounts, createAccountErrors);
 
         CompletableFuture<AccountBatch> lookupFuture =
                 client.lookupAccountsAsync(new IdBatch(account1Id, account2Id));
@@ -227,6 +233,7 @@ public class IntegrationTest {
 
         final var createTransferErrors = client.createTransfers(transfers);
         assertTrue(createTransferErrors.getLength() == 0);
+        assertHeader(transfers, createTransferErrors);
 
         // Looking up the accounts.
         final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -296,6 +303,7 @@ public class IntegrationTest {
                 client.createTransfersAsync(transfers);
         final var createTransferErrors = transfersFuture.get();
         assertTrue(createTransferErrors.getLength() == 0);
+        assertHeader(transfers, createTransferErrors);
 
         // Looking up the accounts.
         CompletableFuture<AccountBatch> lookupAccountsFuture =
@@ -346,6 +354,7 @@ public class IntegrationTest {
 
         final var createTransfersErrors = client.createTransfers(zeroedTransfers);
         assertTrue(createTransfersErrors.getLength() == 1);
+        assertHeader(zeroedTransfers, createTransfersErrors);
         assertTrue(createTransfersErrors.next());
         assertEquals(CreateTransferResult.IdMustNotBeZero, createTransfersErrors.getResult());
     }
@@ -945,6 +954,7 @@ public class IntegrationTest {
         final var accounts = new AccountBatch(1); // Capacity 1 but zero items.
         final var createAccountErrors = client.createAccounts(accounts);
         assertTrue(createAccountErrors.getLength() == 0);
+        assertHeader(accounts, createAccountErrors);
     }
 
     @Test
@@ -953,6 +963,7 @@ public class IntegrationTest {
         final var createAccountErrorsFuture = client.createAccountsAsync(accounts);
         final var createAccountErrors = createAccountErrorsFuture.get();
         assertTrue(createAccountErrors.getLength() == 0);
+        assertHeader(accounts, createAccountErrors);
     }
 
     @Test
@@ -960,6 +971,7 @@ public class IntegrationTest {
         final var transfers = new TransferBatch(0);
         final var createTransfersErrors = client.createTransfers(transfers);
         assertTrue(createTransfersErrors.getLength() == 0);
+        assertHeader(transfers, createTransfersErrors);
     }
 
     @Test
@@ -968,6 +980,7 @@ public class IntegrationTest {
         final var createTransfersErrorsFuture = client.createTransfersAsync(transfers);
         final var createTransfersErrors = createTransfersErrorsFuture.get();
         assertTrue(createTransfersErrors.getLength() == 0);
+        assertHeader(transfers, createTransfersErrors);
     }
 
     @Test
@@ -975,6 +988,7 @@ public class IntegrationTest {
         final var ids = new IdBatch(0);
         final var accounts = client.lookupAccounts(ids);
         assertTrue(accounts.getLength() == 0);
+        assertHeader(ids, accounts);
     }
 
     @Test
@@ -983,6 +997,7 @@ public class IntegrationTest {
         final var accountsFuture = client.lookupAccountsAsync(ids);
         final var accounts = accountsFuture.get();
         assertTrue(accounts.getLength() == 0);
+        assertHeader(ids, accounts);
     }
 
     @Test
@@ -990,6 +1005,7 @@ public class IntegrationTest {
         final var ids = new IdBatch(0);
         final var transfers = client.lookupTransfers(ids);
         assertTrue(transfers.getLength() == 0);
+        assertHeader(ids, transfers);
     }
 
     @Test
@@ -998,6 +1014,7 @@ public class IntegrationTest {
         final var transfersFuture = client.lookupTransfersAsync(ids);
         final var transfers = transfersFuture.get();
         assertTrue(transfers.getLength() == 0);
+        assertHeader(ids, transfers);
     }
 
     /**
@@ -1028,6 +1045,8 @@ public class IntegrationTest {
             for (int i = 0; i < TASKS_COUNT; i++) {
                 tasks[i].join();
                 assertTrue(tasks[i].result.getLength() == 0);
+                assertNotNull(tasks[i].result.getHeader());
+                assertTrue(tasks[i].result.getHeader().getTimestamp() != 0L);
             }
 
             // Asserting if all transfers were submitted correctly.
@@ -1289,6 +1308,8 @@ public class IntegrationTest {
                 final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
                 final var result = future.get();
                 assertEquals(0, result.getLength());
+                assertNotNull(result.getHeader());
+                assertTrue(result.getHeader().getTimestamp() != 0L);
             }
 
             // Asserting if all transfers were submitted correctly.
@@ -2171,6 +2192,12 @@ public class IntegrationTest {
         assertEquals(transfer1.getLedger(), transfer2.getLedger());
         assertEquals(transfer1.getCode(), transfer2.getCode());
         assertEquals(transfer1.getFlags(), transfer2.getFlags());
+    }
+
+    private static void assertHeader(Batch request, Batch response) {
+        assertNull(request.getHeader());
+        assertNotNull(response.getHeader());
+        assertTrue(response.getHeader().getTimestamp() != 0L);
     }
 
     private static class TransferTask extends Thread {

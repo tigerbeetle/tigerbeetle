@@ -27,6 +27,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
             tb_context: usize,
             tb_client: c.tb_client_t,
             tb_packet: *c.tb_packet_t,
+            timestamp: u64,
             result: ?[request_size_max]u8,
             result_len: u32,
         } = null,
@@ -35,6 +36,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
             tb_context: usize,
             tb_client: c.tb_client_t,
             tb_packet: [*c]c.tb_packet_t,
+            timestamp: u64,
             result_ptr: [*c]const u8,
             result_len: u32,
         ) callconv(.C) void {
@@ -45,6 +47,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
                 .tb_context = tb_context,
                 .tb_client = tb_client,
                 .tb_packet = tb_packet,
+                .timestamp = timestamp,
                 .result = if (result_ptr != null and result_len > 0) blk: {
                     // Copy the message's body to the context buffer:
                     assert(result_len <= request_size_max);
