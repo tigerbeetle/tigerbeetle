@@ -9,26 +9,23 @@ hardware.
 
 ## Storage
 
-NVMe is preferred to SSD for high performance deployments.
+Local NVMe drives are highly recommended for production deployments, and there's no requirement for
+RAID.
 
-However, spinning rust is perfectly acceptable, especially where a cluster is expected to be long
-lived, and the data file is expected to be large. There is no requirement for NVMe or SSD.
+In cloud or more complex deployments, remote block storage (eg, EBS, NVMe-oF) may be used but will
+be slower and care must be taken to ensure
+[independent fault domains](./deploy.md#hardware-fault-tolerance) across replicas.
 
-A 20 TiB disk containing a replica's data file is enough to address on the order of 50 billion
-accounts or transfers. It is more important to provision sufficient storage space for a replica’s
-data file than to provision high performance storage. The data file is created before the server is
-initially run and grows automatically.
+Currently, TigerBeetle uses around 16TiB for 40 billion transfers. If you wish to use more capacity
+than a single disk, RAID 10 / RAID 0 is recommended over parity RAID levels.
 
-A replica's data file may reside on local storage or else on remote storage. The most important
-concern is to ensure [independent fault domains](./deploy.md#hardware-fault-tolerance) across
-replicas.
-
-The operator may consider the use of RAID 10 to reduce the need for remote recovery if a replica's
-disk fails.
+The data file is created before the server is initially run and grows automatically. TigerBeetle has
+been more extensively tested on ext4, but ext4 only supports data files up to 16TiB. XFS is
+supported, but has seen less testing. TigerBeetle can also be run against the raw block device.
 
 ## Memory
 
-ECC memory is recommended for production deployments.
+ECC memory is required for production deployments.
 
 A replica requires at least 6 GiB RAM per machine. Between 16 GiB and 32 GiB or more (depending on
 budget) is recommended to be allocated to each replica for caching. TigerBeetle uses static
@@ -39,6 +36,12 @@ command line argument.
 
 TigerBeetle requires only a single core per replica machine. TigerBeetle at present [does not
 utilize more cores](../about/performance.md#single-core-by-design), but may in future.
+
+It's recommended to have at least one additional core free for the operating system.
+
+## Network
+
+A minimum of a 1Gbps network connection is recommended.
 
 ## Multitenancy
 
