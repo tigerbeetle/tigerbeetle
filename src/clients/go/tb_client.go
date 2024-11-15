@@ -222,6 +222,8 @@ func (c *c_client) doRequest(
 		switch status {
 		case C.TB_PACKET_TOO_MUCH_DATA:
 			return 0, errors.ErrMaximumBatchSizeExceeded{}
+		case C.TB_PACKET_CLIENT_EVICTED:
+			return 0, errors.ErrClientEvicted{}
 		case C.TB_PACKET_CLIENT_SHUTDOWN:
 			return 0, errors.ErrClientClosed{}
 		case C.TB_PACKET_INVALID_OPERATION:
