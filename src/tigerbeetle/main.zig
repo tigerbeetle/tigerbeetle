@@ -451,25 +451,39 @@ const Command = struct {
         // potentially introducting undetectable disk corruption into memory.
         // This is a best-effort attempt not a hard rule (as it may not cover all memory edge cases)
         // so warn on error to notify the operator that they should disable swap if possible.
-        const lock_mem_err = "Unable to lock pages in memory ({s}) " ++
-            " - swap paging may trigger undetectable IO to disk";
+        const lock_mem_err = "Unable to lock pages in memory ({s})" ++
+            " - kernel swapping may bypass TigerBeetle's storage fault tolerance. ";
         switch (builtin.os.tag) {
-            .linux => {
+            .linux => blk: {
                 const MCL_CURRENT = 1; // Lock all currently mapped pages.
                 const MCL_ONFAULT = 3; // Lock all pages faulted in (i.e. stack space).
                 const rc = os.linux.syscall1(.mlockall, MCL_CURRENT | MCL_ONFAULT);
                 switch (os.linux.E.init(rc)) {
+                    .SUCCESS => break :blk,
                     .AGAIN => log.warn(lock_mem_err, .{"some addresses could not be locked"}),
                     .NOMEM => log.warn(lock_mem_err, .{"total memory would exceed RLIMIT_MEMLOCK"}),
                     .PERM => log.warn(lock_mem_err, .{"not enough privileges to lock memory"}),
                     .INVAL => unreachable, // MCL_ONFAULT specified with MCL_CURRENT.
                     else => |err| return stdx.unexpected_errno("mlockall", err),
                 }
+                log.warn(
+                    "If this is a production replica, consider either " ++
+                        "increasing the MEMLOCK process limit, " ++
+                        "running the replica with CAP_IPC_LOCK privilege, " ++
+                        "or disabling swap system-wide.",
+                    .{},
+                );
             },
             .macos => {
-                // macOS has mlock() but not mlockall().
+                // macOS has mlock() but not mlockall(). mlock() requires an address range which
+                // would be difficult to gather for non-heap memory that is also faulted in, such as
+                // the stack, globals, etc.
             },
             .windows => {
+                // Windows has VirtualLock but it works similarly to mlock with an address range.
+                // It would be difficult to gather the addresses of non-heap memory that is also
+                // faulted in, such as the stack, globals, etc. Instead, SetProcessWorkingSetSize
+                // can be used to lock all existing pages into memory to avoid swapping.
                 const set_process_working_set_size = @extern(
                     *const fn (
                         hProcess: os.windows.HANDLE,
@@ -527,6 +541,7 @@ const Command = struct {
                         buf_wstr.len,
                         null,
                     );
+
                     log.warn(lock_mem_err, .{std.unicode.fmtUtf16Le(buf_wstr[0..len])});
                 }
             },
