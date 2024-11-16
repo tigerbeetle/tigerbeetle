@@ -37,7 +37,7 @@ pub const Completion = struct {
     match_index: usize = 0,
 
     pub fn init(self: *Completion, allocator: std.mem.Allocator) !void {
-        self.* = .{
+        self.* = Completion{
             .matches = try CompletionList.init(allocator, completion_entry_bytes),
             .prefix = BoundedArray(u8, completion_entry_bytes){},
             .suffix = BoundedArray(u8, completion_entry_bytes){},

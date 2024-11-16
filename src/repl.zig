@@ -476,7 +476,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         client: *Client,
         terminal: Terminal,
-        completion: *Completion,
+        completion: Completion,
         history: HistoryBuffer,
 
         /// Fixed-capacity buffer for reading input strings.
@@ -956,9 +956,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             try Terminal.init(&repl.terminal, arena, repl.interactive);
 
-            var completion: Completion = undefined;
-            try completion.init(allocator);
-            repl.completion = &completion;
+            try Completion.init(&repl.completion, allocator);
 
             try repl.debug("Connecting to '{any}'.\n", .{addresses});
 
