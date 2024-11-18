@@ -25,10 +25,12 @@
 //!    .ok results.
 
 const std = @import("std");
+const stdx = @import("../../stdx.zig");
 const arbitrary = @import("./arbitrary.zig");
 const tb = @import("../../tigerbeetle.zig");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
+const RingBufferType = @import("../../ring_buffer.zig").RingBufferType;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
@@ -67,7 +69,10 @@ pub fn main(
         const query_result = try execute(query, driver) orelse break;
         try reconcile(query_result, &query, &model);
 
-        log.info("accounts created = {d}, commands run = {d}", .{ model.accounts.items.len, i });
+        log.info(
+            "accounts={d}, transfers={d}, commands={d}",
+            .{ model.accounts.items.len, model.transfers_created, i },
+        );
     }
 }
 
@@ -75,6 +80,7 @@ const Command = union(enum) {
     create_accounts: []tb.Account,
     create_transfers: []tb.Transfer,
     lookup_all_accounts: []u128,
+    lookup_latest_transfers: []u128,
 };
 
 const CommandBuffers = FixedSizeBuffersType(Command);
@@ -84,6 +90,7 @@ const Result = union(enum) {
     create_accounts: []tb.CreateAccountsResult,
     create_transfers: []tb.CreateTransfersResult,
     lookup_all_accounts: []tb.Account,
+    lookup_latest_transfers: []tb.Transfer,
 };
 const ResultBuffers = FixedSizeBuffersType(Result);
 var result_buffers: ResultBuffers = std.mem.zeroes(ResultBuffers);
@@ -111,6 +118,7 @@ fn execute(command: Command, driver: *const DriverStdio) !?Result {
 fn operation_from_command(tag: std.meta.Tag(Command)) StateMachine.Operation {
     return switch (tag) {
         .lookup_all_accounts => .lookup_accounts,
+        .lookup_latest_transfers => .lookup_transfers,
         else => std.enums.nameCast(StateMachine.Operation, tag),
     };
 }
@@ -123,9 +131,7 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
             // Track results for all new accounts, assuming `.ok` if response from driver is
             // omitted.
             var accounts_results: [accounts_count_max]tb.CreateAccountResult = undefined;
-            for (accounts_results[0..accounts_new.len]) |*account_result| {
-                account_result.* = .ok;
-            }
+            @memset(accounts_results[0..accounts_new.len], .ok);
 
             // Fill in non-ok results.
             for (entries) |entry| {
@@ -152,24 +158,40 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
         .create_transfers => |entries| {
             const transfers = command.create_transfers;
 
-            for (entries, 0..) |entry, e| {
-                const transfer = transfers[entry.index];
+            // Track results for all new transfers, assuming `.ok` if response from driver is
+            // omitted.
+            var transfers_results: [events_count_max]tb.CreateTransferResult = undefined;
+            @memset(transfers_results[0..transfers.len], .ok);
 
+            // Fill in non-ok results.
+            for (entries) |entry| {
+                transfers_results[entry.index] = entry.result;
+            }
+
+            // Collect all successful transfer IDs.
+            var successful_transfer_ids: stdx.BoundedArrayType(u128, events_count_max) = .{};
+
+            for (
+                transfers,
+                transfers_results[0..transfers.len],
+                0..,
+            ) |transfer, transfer_result, transfer_index| {
                 // Check that linked transfers fail together.
-                if (entry.index > 0) {
-                    const preceeding_transfer = transfers[entry.index - 1];
+                if (transfer_index > 0) {
+                    const preceeding_transfer = transfers[transfer_index - 1];
                     if (preceeding_transfer.flags.linked) {
-                        try testing.expect(e > 0);
-                        const preceeding_entry = entries[e - 1];
-                        try testing.expect(preceeding_entry.index == entry.index - 1);
+                        const preceeding_entry = entries[transfer_index - 1];
+                        try testing.expect(preceeding_entry.index == transfer_index - 1);
                         try testing.expect(preceeding_entry.result != .ok);
                     }
                 }
 
                 // No further validation needed for failed transfers.
-                if (entry.result != .ok) {
+                if (transfer_result != .ok) {
                     continue;
                 }
+
+                successful_transfer_ids.append_assume_capacity(transfer.id);
 
                 if (transfer.flags.pending) {
                     try testing.expect(!model.pending_transfers.contains(transfer.id));
@@ -184,11 +206,32 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                 try testing.expect(model.account_exists(transfer.debit_account_id));
                 try testing.expect(model.account_exists(transfer.credit_account_id));
             }
+
+            // Drop the oldest transfer IDs and add new ones.
+            for (0..@min(successful_transfer_ids.count(), model.latest_transfers.count)) |_| {
+                model.latest_transfers.retreat_tail();
+            }
+            try model.latest_transfers.push_slice(successful_transfer_ids.const_slice());
+
+            model.transfers_created += transfers.len;
         },
         .lookup_all_accounts => |accounts_found| {
-            // Get all known account ids (sorted).
+            // Get all known account ids.
             var id_buffer: [accounts_count_max]u128 = undefined;
             const account_ids_known = model.account_ids(id_buffer[0..]);
+
+            // Check that timestamps are monotonically increasing.
+            var timestamp_max: u64 = 0;
+            for (accounts_found) |account| {
+                if (account.timestamp <= timestamp_max) {
+                    log.err(
+                        "account {d} timestamp {d} is not greater than previous timestamp {d}",
+                        .{ account.id, account.timestamp, timestamp_max },
+                    );
+                    return error.TestFailed;
+                }
+                timestamp_max = account.timestamp;
+            }
 
             // Extract and sort all found account ids.
             var account_ids_found_buffer: [accounts_count_max]u128 = undefined;
@@ -196,19 +239,36 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                 account_ids_found_buffer[i] = account.id;
             }
             const account_ids_found = account_ids_found_buffer[0..accounts_found.len];
-            std.mem.sort(u128, account_ids_found, {}, std.sort.asc(u128));
 
             // All known accounts are found by the query, and no others.
             try testing.expectEqualSlices(u128, account_ids_known, account_ids_found);
 
             try testing.expectEqual(0, debits_credits_difference(accounts_found));
         },
+        .lookup_latest_transfers => |transfers_found| {
+            // Check that timestamps are monotonically increasing.
+            var timestamp_max: u64 = 0;
+            for (transfers_found) |transfer| {
+                if (transfer.timestamp <= timestamp_max) {
+                    log.err(
+                        "transfer {d} timestamp {d} is not greater than previous timestamp {d}",
+                        .{ transfer.id, transfer.timestamp, timestamp_max },
+                    );
+                    return error.TestFailed;
+                }
+                timestamp_max = transfer.timestamp;
+            }
+        },
     }
 }
+
+const LatestTransfers = RingBufferType(u128, .{ .array = events_count_max });
 
 /// Tracks information about the accounts and transfers created by the workload.
 const Model = struct {
     accounts: std.ArrayListUnmanaged(tb.Account),
+    transfers_created: u64 = 0,
+    latest_transfers: LatestTransfers = LatestTransfers.init(),
     pending_transfers: std.AutoHashMapUnmanaged(u128, void) = .{},
 
     // O(n) lookup, but it's limited by `accounts_count_max`, so it's OK for this test.
@@ -219,15 +279,13 @@ const Model = struct {
         return false;
     }
 
-    /// Returns a sorted slice of the account ids known by the model.
+    /// Returns a slice of the account ids known by the model.
     fn account_ids(model: @This(), buffer: []u128) []u128 {
         assert(buffer.len >= model.accounts.items.len);
         const ids = buffer[0..model.accounts.items.len];
-
         for (model.accounts.items, 0..) |account, i| {
             ids[i] = account.id;
         }
-        std.mem.sort(u128, ids, {}, std.sort.asc(u128));
         return ids;
     }
 };
@@ -246,10 +304,12 @@ fn random_command(random: std.Random, model: *const Model) Command {
         .create_accounts = if (model.accounts.items.len < accounts_count_max) 1 else 0,
         .create_transfers = if (model.accounts.items.len > 2) 10 else 0,
         .lookup_all_accounts = 0,
+        .lookup_latest_transfers = 5,
     }).?;
     switch (command_tag) {
         .create_accounts => return random_create_accounts(random, model),
         .create_transfers => return random_create_transfers(random, model),
+        .lookup_latest_transfers => return lookup_latest_transfers(model),
         .lookup_all_accounts => unreachable,
     }
 }
@@ -330,7 +390,8 @@ fn random_create_transfers(random: std.Random, model: *const Model) Command {
         }
 
         event.* = std.mem.zeroInit(tb.Transfer, .{
-            .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
+            // Use monotonically increasing IDs from 1 for easier debugging.
+            .id = model.transfers_created + i + 1,
             .ledger = 1,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
@@ -350,6 +411,17 @@ fn lookup_all_accounts(model: *const Model) Command {
         event.* = account.id;
     }
     return .{ .lookup_all_accounts = buffer[0..events_count] };
+}
+
+fn lookup_latest_transfers(model: *const Model) Command {
+    const buffer = command_buffers.lookup_latest_transfers[0..model.latest_transfers.count];
+    var ids = model.latest_transfers.iterator();
+    var count: usize = 0;
+    while (ids.next()) |id| {
+        buffer[count] = id;
+        count += 1;
+    }
+    return .{ .lookup_latest_transfers = buffer };
 }
 
 /// Converts a union type, where each field is of a slice type, into a struct of arrays of the
