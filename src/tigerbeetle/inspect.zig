@@ -842,7 +842,7 @@ fn print_struct(
 
     const Type = @typeInfo(@TypeOf(value)).Pointer.child;
     // Print structs *without* a custom format() function.
-    if (@typeInfo(Type) == .Struct and !comptime std.meta.hasFn(Type, "format")) {
+    if (comptime @typeInfo(Type) == .Struct and !std.meta.hasFn(Type, "format")) {
         if (@typeInfo(Type).Struct.is_tuple) {
             try output.writeAll(label);
             // Print tuples as a single line.

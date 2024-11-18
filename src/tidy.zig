@@ -160,6 +160,10 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use a type name instead of Self";
     }
 
+    if (std.mem.indexOf(u8, source, "!" ++ "comptime") != null) {
+        return "use ! inside comptime";
+    }
+
     return null;
 }
 
