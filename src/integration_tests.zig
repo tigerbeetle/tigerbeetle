@@ -256,6 +256,8 @@ test "benchmark/inspect smoke" {
         "{tigerbeetle} inspect manifest                {path}",
         "{tigerbeetle} inspect tables --tree=transfers {path}",
     }) |command| {
+        log.debug("{s}", .{command});
+
         try shell.exec(
             command,
             .{ .tigerbeetle = tigerbeetle, .path = data_file },
