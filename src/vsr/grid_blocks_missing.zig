@@ -20,7 +20,7 @@ const schema = @import("../lsm/schema.zig");
 const vsr = @import("../vsr.zig");
 
 const GridType = @import("./grid.zig").GridType;
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const IOPS = @import("../iops.zig").IOPS;
 const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
@@ -105,8 +105,8 @@ pub const GridBlocksMissing = struct {
 
     /// Invariants:
     /// - For every index address in faulty_tables: ¬free_set.is_free(address).
-    faulty_tables: FIFO(RepairTable) = .{ .name = "grid_missing_blocks_tables" },
-    faulty_tables_free: FIFO(RepairTable) = .{ .name = "grid_missing_blocks_tables_free" },
+    faulty_tables: FIFOType(RepairTable) = .{ .name = "grid_missing_blocks_tables" },
+    faulty_tables_free: FIFOType(RepairTable) = .{ .name = "grid_missing_blocks_tables_free" },
 
     checkpointing: ?struct {
         /// The number of faulty_blocks with state=aborting.
@@ -173,8 +173,10 @@ pub const GridBlocksMissing = struct {
             }
         }
 
+        // +1 so we start from the next faulty block in the subsequent function invocation, thereby
+        // cycling through the faulty blocks in the queue.
         queue.faulty_blocks_repair_index =
-            (queue.faulty_blocks_repair_index + fault_offset) % faults_total;
+            (queue.faulty_blocks_repair_index + fault_offset + 1) % faults_total;
 
         assert(requests_count <= requests.len);
         assert(requests_count <= faults_total);
@@ -475,7 +477,7 @@ pub const GridBlocksMissing = struct {
             }
         }
 
-        var tables: FIFO(RepairTable) = .{ .name = queue.faulty_tables.name };
+        var tables: FIFOType(RepairTable) = .{ .name = queue.faulty_tables.name };
         while (queue.faulty_tables.pop()) |table| {
             assert(!free_set.is_free(table.index_address));
 

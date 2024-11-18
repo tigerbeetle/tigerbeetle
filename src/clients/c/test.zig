@@ -17,7 +17,7 @@ const Condition = std.Thread.Condition;
 
 fn RequestContextType(comptime request_size_max: comptime_int) type {
     return struct {
-        const Self = @This();
+        const RequestContext = @This();
 
         completion: *Completion,
         packet: c.tb_packet_t,
@@ -27,6 +27,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
             tb_context: usize,
             tb_client: c.tb_client_t,
             tb_packet: *c.tb_packet_t,
+            timestamp: u64,
             result: ?[request_size_max]u8,
             result_len: u32,
         } = null,
@@ -35,16 +36,18 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
             tb_context: usize,
             tb_client: c.tb_client_t,
             tb_packet: [*c]c.tb_packet_t,
+            timestamp: u64,
             result_ptr: [*c]const u8,
             result_len: u32,
         ) callconv(.C) void {
-            var self: *Self = @ptrCast(@alignCast(tb_packet.*.user_data.?));
+            var self: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
             defer self.completion.complete();
 
             self.reply = .{
                 .tb_context = tb_context,
                 .tb_client = tb_client,
                 .tb_packet = tb_packet,
+                .timestamp = timestamp,
                 .result = if (result_ptr != null and result_len > 0) blk: {
                     // Copy the message's body to the context buffer:
                     assert(result_len <= request_size_max);
@@ -61,13 +64,11 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
 
 // Notifies the main thread when all pending requests are completed.
 const Completion = struct {
-    const Self = @This();
-
     pending: usize,
     mutex: Mutex = .{},
     cond: Condition = .{},
 
-    pub fn complete(self: *Self) void {
+    pub fn complete(self: *Completion) void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -76,7 +77,7 @@ const Completion = struct {
         self.cond.signal();
     }
 
-    pub fn wait_pending(self: *Self) void {
+    pub fn wait_pending(self: *Completion) void {
         self.mutex.lock();
         defer self.mutex.unlock();
 

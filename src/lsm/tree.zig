@@ -620,7 +620,7 @@ test "TreeType" {
     );
 
     const IO = @import("../io.zig").IO;
-    const Storage = @import("../storage.zig").Storage(IO);
+    const Storage = @import("../storage.zig").StorageType(IO);
 
     std.testing.refAllDecls(TreeType(Table, Storage));
 }

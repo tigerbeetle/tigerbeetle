@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 const constants = @import("../constants.zig");
 
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
@@ -13,8 +13,8 @@ pub const IO = struct {
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
-    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
-    completed: FIFO(Completion) = .{ .name = "io_completed" },
+    timeouts: FIFOType(Completion) = .{ .name = "io_timeouts" },
+    completed: FIFOType(Completion) = .{ .name = "io_completed" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -1157,16 +1157,23 @@ pub const IO = struct {
             const LOCKFILE_EXCLUSIVE_LOCK = 0x2;
             const LOCKFILE_FAIL_IMMEDIATELY = 0x1;
 
-            extern "kernel32" fn LockFileEx(
-                hFile: os.windows.HANDLE,
-                dwFlags: os.windows.DWORD,
-                dwReserved: os.windows.DWORD,
-                nNumberOfBytesToLockLow: os.windows.DWORD,
-                nNumberOfBytesToLockHigh: os.windows.DWORD,
-                lpOverlapped: ?*os.windows.OVERLAPPED,
-            ) callconv(os.windows.WINAPI) os.windows.BOOL;
+            // Declaring the function with an alternative name because `CamelCase` functions are
+            // by convention, used for building generic types.
+            const lock_file_ex = @extern(
+                *const fn (
+                    hFile: os.windows.HANDLE,
+                    dwFlags: os.windows.DWORD,
+                    dwReserved: os.windows.DWORD,
+                    nNumberOfBytesToLockLow: os.windows.DWORD,
+                    nNumberOfBytesToLockHigh: os.windows.DWORD,
+                    lpOverlapped: ?*os.windows.OVERLAPPED,
+                ) callconv(os.windows.WINAPI) os.windows.BOOL,
+                .{
+                    .library_name = "kernel32",
+                    .name = "LockFileEx",
+                },
+            );
         };
-
         // hEvent = null
         // Offset & OffsetHigh = 0
         var lock_overlapped = std.mem.zeroes(os.windows.OVERLAPPED);
@@ -1176,7 +1183,7 @@ pub const IO = struct {
         lock_flags |= kernel32.LOCKFILE_EXCLUSIVE_LOCK;
         lock_flags |= kernel32.LOCKFILE_FAIL_IMMEDIATELY;
 
-        const locked = kernel32.LockFileEx(
+        const locked = kernel32.lock_file_ex(
             handle,
             lock_flags,
             0, // reserved param is always zero

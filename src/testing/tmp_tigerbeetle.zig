@@ -15,7 +15,7 @@ const TmpTigerBeetle = @This();
 /// Port the TigerBeetle instance is listening on.
 port: u16,
 /// For convenience, the same port pre-converted to string.
-port_str: stdx.BoundedArray(u8, 8),
+port_str: stdx.BoundedArrayType(u8, 8),
 
 tmp_dir: std.testing.TmpDir,
 
@@ -111,7 +111,7 @@ pub fn init(
         break :port try std.fmt.parseInt(u16, port_buf[0 .. port_buf_len - 1], 10);
     };
 
-    var port_str: stdx.BoundedArray(u8, 8) = .{};
+    var port_str: stdx.BoundedArrayType(u8, 8) = .{};
     std.fmt.formatInt(port, 10, .lower, .{}, port_str.writer()) catch unreachable;
 
     return TmpTigerBeetle{

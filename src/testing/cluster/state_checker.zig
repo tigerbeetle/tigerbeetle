@@ -26,7 +26,7 @@ const log = std.log.scoped(.state_checker);
 
 pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
     return struct {
-        const Self = @This();
+        const StateChecker = @This();
 
         node_count: u8,
         replica_count: u8,
@@ -48,7 +48,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             replica_count: u8,
             replicas: []const Replica,
             clients: []const Client,
-        }) !Self {
+        }) !StateChecker {
             const root_prepare = vsr.Header.Prepare.root(options.cluster_id);
 
             var commits = Commits.init(allocator);
@@ -66,7 +66,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
 
-            return Self{
+            return StateChecker{
                 .node_count = @intCast(options.replicas.len),
                 .replica_count = options.replica_count,
                 .commits = commits,
@@ -76,13 +76,13 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             };
         }
 
-        pub fn deinit(state_checker: *Self) void {
+        pub fn deinit(state_checker: *StateChecker) void {
             const allocator = state_checker.commits.allocator;
             state_checker.commits.deinit();
             allocator.free(state_checker.replica_head_max);
         }
 
-        pub fn on_message(state_checker: *Self, message: *const Message) void {
+        pub fn on_message(state_checker: *StateChecker, message: *const Message) void {
             if (message.header.into_const(.prepare_ok)) |header| {
                 const head = &state_checker.replica_head_max[header.replica];
                 if (header.view > head.view or
@@ -95,7 +95,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         }
 
         /// Returns whether the replica's state changed since the last check_state().
-        pub fn check_state(state_checker: *Self, replica_index: u8) !void {
+        pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
             const replica = &state_checker.replicas[replica_index];
             if (replica.syncing == .updating_checkpoint) {
                 // Allow a syncing replica to fast-forward its commit.
@@ -227,13 +227,13 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             state_checker.commits.items[header_b.?.op].replicas.set(replica_index);
         }
 
-        pub fn replica_convergence(state_checker: *Self, replica_index: u8) bool {
+        pub fn replica_convergence(state_checker: *StateChecker, replica_index: u8) bool {
             const a = state_checker.commits.items.len - 1;
             const b = state_checker.commit_mins[replica_index];
             return a == b;
         }
 
-        pub fn assert_cluster_convergence(state_checker: *Self) void {
+        pub fn assert_cluster_convergence(state_checker: *StateChecker) void {
             for (state_checker.commits.items, 0..) |commit, i| {
                 assert(commit.replicas.count() > 0);
                 assert(commit.header.command == .prepare);
@@ -246,7 +246,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
         }
 
-        pub fn header_with_op(state_checker: *Self, op: u64) vsr.Header.Prepare {
+        pub fn header_with_op(state_checker: *StateChecker, op: u64) vsr.Header.Prepare {
             const commit = &state_checker.commits.items[op];
             assert(commit.header.op == op);
             assert(commit.replicas.count() > 0);

@@ -5,7 +5,7 @@ const log = std.log.scoped(.fuzz_storage);
 const vsr = @import("vsr.zig");
 const constants = @import("constants.zig");
 const IO = @import("testing/io.zig").IO;
-const Storage = @import("storage.zig").Storage(IO);
+const Storage = @import("storage.zig").StorageType(IO);
 const fuzz = @import("testing/fuzz.zig");
 
 pub fn main(args: fuzz.FuzzArgs) !void {

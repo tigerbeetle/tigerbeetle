@@ -13,61 +13,88 @@
 </head>
 
 <body>
-  <h1><img id="logo" src="logo.svg" height="40px" alt="TigerBeetle DevHub"></h1>
+  <nav><img id="logo" src="logo.svg" height="24" alt="TigerBeetle DevHub"></nav>
 
-  <div id="top-section">
+  <main>
+    <section id="top">
+      <section id="release">
+        <h3>Release manager</h3>
+        <table>
+          <tr>
+            <td style="padding-right: 16px;">Last week:</td>
+            <td><span id="release-previous">N/A</span></td>
+          </tr>
+          <tr>
+            <td style="padding-right: 16px;"><strong>This week:</strong></td>
+            <td><strong><span id="release-current">N/A</span></strong></td>
+          </tr>
+          <tr>
+            <td style="padding-right: 16px;">Next week:</td>
+            <td><span id="release-next">N/A</span></td>
+          </tr>
+        </table>
+      </section>
 
-    <section id="release">
-      <h2>Release</h2>
+      <section id="links">
+        <h3>Links</h3>
+        <div>
+          <p><a href="https://github.com/tigerbeetle/tigerbeetle/pulls/assigned/@me">My code review</a></p>
+          <p><a href="https://github.com/tigerbeetle/tigerbeetle/issues?q=is%3Aissue+is%3Aopen+-label%3Atriaged">Issue
+              triage</a></p>
+          <p><a href="./coverage/index.html">Coverage</a></p>
+        </div>
+      </section>
 
-      Release Manager for:
-      <ul>
-        <li>last week: <span id="release-previous">N/A</span> </li>
-        <li><strong>this week: <span id="release-current">N/A</span></strong></li>
-        <li>next week: <span id="release-next">N/A</span></li>
-      </ul>
+      <section id="fuzz-totals">
+        <h3>Main branch fuzzes</h3>
+        <table>
+          <tr>
+            <td class="ok" style="padding-right: 16px;">ok</td>
+            <td><span id="fuzz-ok">N/A</span></td>
+          </tr>
+          <tr>
+            <td class="fail" style="padding-right: 16px;">fail</td>
+            <td><span id="fuzz-fail">N/A</span></td>
+          </tr>
+          <tr>
+            <td class="canary" style="padding-right: 16px;">canary</td>
+            <td><span id="fuzz-canary">N/A</span></td>
+          </tr>
+        </table>
+      </section>
     </section>
 
-    <section id="links">
-      <h2>Links</h2>
-      <ul>
-        <li><a href="https://github.com/tigerbeetle/tigerbeetle/pulls/assigned/@me">My Code Review</a></li>
-        <li><a href="https://github.com/tigerbeetle/tigerbeetle/issues?q=is%3Aissue+is%3Aopen+-label%3Atriaged">Issue Triage</a></li>
-        <li><a href="./coverage/index.html">Coverage</a></li>
-      </ul>
-    </section>
-
-    <section id="fuzz-failures">
-      <h2>Fuzz failures (<a href="?all">show all</a>,
-        <a href="https://github.com/tigerbeetle/devhubdb/tree/main/fuzzing">raw data</a>)
+    <section id="fuzz-runs">
+      <h2>Fuzz runs
+        <a href="?all">Show all</a>
+        <a href="https://github.com/tigerbeetle/devhubdb/tree/main/fuzzing">Raw data</a>
       </h2>
       <table id="seeds">
         <thead>
           <tr>
-            <th>commit</th>
-            <th>author</th>
-            <th>fuzzer</th>
-            <th>command</th>
-            <th>duration</th>
-            <th>freshness</th>
-            <th>count</th>
+            <th>Commit</th>
+            <th>Author</th>
+            <th>Fuzzer</th>
+            <th>Command</th>
+            <th>Duration</th>
+            <th>Freshness</th>
+            <th>Count</th>
           </tr>
         </thead>
         <tbody>
-
         </tbody>
       </table>
     </section>
-  </div>
 
-  <section>
-    <h2>Metrics (on
-      <a href="https://nyrkio.com/public/https%3A%2F%2Fgithub.com%2Ftigerbeetle%2Ftigerbeetle/main/devhub">Nyrkiö</a>,
-      <a href="https://github.com/tigerbeetle/devhubdb/tree/main/devhub">raw data</a>)
-    </h2>
-    <div id="charts" style="display: flex; flex-direction: column;">
-    </div>
-  </section>
+    <section id="metrics">
+      <h2>Metrics
+        <a href="https://nyrkio.com/public/https%3A%2F%2Fgithub.com%2Ftigerbeetle%2Ftigerbeetle/main/devhub"
+          target="_blank">Nyrkiö</a>
+        <a href="https://github.com/tigerbeetle/devhubdb/tree/main/devhub">Raw data</a>
+      </h2>
+      <div id="charts"></div>
+    </section>
+  </main>
 </body>
 
 </html>

@@ -20,7 +20,7 @@ const QueryFilter = tb.QueryFilter;
 const QueryFilterFlags = tb.QueryFilterFlags;
 
 const vsr = @import("vsr");
-const Storage = vsr.storage.Storage(vsr.io.IO);
+const Storage = vsr.storage.StorageType(vsr.io.IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 const constants = vsr.constants;
@@ -221,7 +221,7 @@ fn request(
             errdefer buffer.free();
 
             const events = buffer.events();
-            try decode_array(StateMachine.Event(op), env, array, events);
+            try decode_array(StateMachine.EventType(op), env, array, events);
 
             const packet = buffer.packet();
             break :blk .{ packet, std.mem.sliceAsBytes(events) };
@@ -230,10 +230,10 @@ fn request(
     };
 
     packet.* = .{
-        .next = null,
+        .next = undefined,
         .user_data = callback_ref,
         .operation = @intFromEnum(operation),
-        .status = .ok,
+        .status = undefined,
         .data_size = @intCast(packet_data.len),
         .data = packet_data.ptr,
         .batch_next = undefined,
@@ -259,13 +259,16 @@ fn on_completion(
     completion_ctx: usize,
     client: tb_client.tb_client_t,
     packet: *tb_client.tb_packet_t,
+    timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void {
     _ = client;
+    _ = timestamp;
 
     switch (packet.status) {
-        .ok, .client_shutdown => {}, // Handled on the JS side to throw exception.
+        .ok => {},
+        .client_evicted, .client_shutdown => {}, // Handled on the JS side to throw exception.
         .too_much_data => unreachable, // We limit packet data size during request().
         .invalid_operation => unreachable, // We check the operation during request().
         .invalid_data_size => unreachable, // We set correct data size during request().
@@ -273,13 +276,13 @@ fn on_completion(
 
     switch (@as(Operation, @enumFromInt(packet.operation))) {
         inline else => |op| {
-            const event_count = @divExact(packet.data_size, @sizeOf(StateMachine.Event(op)));
+            const event_count = @divExact(packet.data_size, @sizeOf(StateMachine.EventType(op)));
             const buffer: BufferType(op) = .{
                 .ptr = @ptrCast(packet),
                 .count = event_count,
             };
 
-            const Result = StateMachine.Result(op);
+            const Result = StateMachine.ResultType(op);
             const results: []const Result = @alignCast(std.mem.bytesAsSlice(
                 Result,
                 result_ptr.?[0..result_len],
@@ -331,10 +334,13 @@ fn on_completion_js(
             switch (packet.status) {
                 .ok => {
                     const results = buffer.results()[0..buffer_size.result_count];
-                    break :blk encode_array(StateMachine.Result(op), env, results);
+                    break :blk encode_array(StateMachine.ResultType(op), env, results);
                 },
                 .client_shutdown => {
                     break :blk translate.throw(env, "Client was shutdown.");
+                },
+                .client_evicted => {
+                    break :blk translate.throw(env, "Client was evicted.");
                 },
                 else => unreachable, // all other packet status' handled in previous callback.
             }
@@ -481,8 +487,8 @@ fn BufferType(comptime op: Operation) type {
 
     return struct {
         const Buffer = @This();
-        const Event = StateMachine.Event(op);
-        const Result = StateMachine.Result(op);
+        const Event = StateMachine.EventType(op);
+        const Result = StateMachine.ResultType(op);
 
         const body_align = @max(@alignOf(Event), @alignOf(Result));
         const body_offset = std.mem.alignForward(usize, @sizeOf(tb_client.tb_packet_t), body_align);

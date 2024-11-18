@@ -11,13 +11,13 @@ const IO = @import("io.zig").IO;
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;
-const Storage = vsr.storage.Storage(IO);
+const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 
 const Header = vsr.Header;
 const Account = tb.Account;
 const Transfer = tb.Transfer;
-const Client = vsr.Client(StateMachine, MessageBus);
+const Client = vsr.ClientType(StateMachine, MessageBus);
 const log = std.log.scoped(.aof);
 
 const magic_number: u128 = 312960301372567410560647846651901451202;
@@ -112,6 +112,93 @@ pub const AOFEntry = extern struct {
     }
 };
 
+pub fn IteratorType(comptime File: type) type {
+    return struct {
+        const Iterator = @This();
+
+        file: File,
+        size: u64,
+        offset: u64 = 0,
+
+        validate_chain: bool = true,
+        last_checksum: ?u128 = null,
+
+        pub fn next(it: *Iterator, target: *AOFEntry) !?*AOFEntry {
+            if (it.offset >= it.size) return null;
+
+            try it.file.seekTo(it.offset);
+
+            const buf = std.mem.asBytes(target);
+            const bytes_read = try it.file.readAll(buf);
+
+            if (bytes_read < target.calculate_disk_size()) {
+                return error.AOFShortRead;
+            }
+
+            if (target.magic_number != magic_number) {
+                return error.AOFMagicNumberMismatch;
+            }
+
+            const header = target.header();
+            if (!header.valid_checksum()) {
+                return error.AOFChecksumMismatch;
+            }
+
+            if (!header.valid_checksum_body(target.message[@sizeOf(Header)..header.size])) {
+                return error.AOFBodyChecksumMismatch;
+            }
+
+            // Ensure this file has a consistent hash chain
+            if (it.validate_chain) {
+                if (it.last_checksum != null and it.last_checksum.? != header.parent) {
+                    return error.AOFChecksumChainMismatch;
+                }
+            }
+
+            it.last_checksum = header.checksum;
+
+            it.offset += target.calculate_disk_size();
+
+            return target;
+        }
+
+        pub fn reset(it: *Iterator) !void {
+            it.offset = 0;
+        }
+
+        pub fn close(it: *Iterator) void {
+            it.file.close();
+        }
+
+        /// Try skip ahead to the next entry in a potentially corrupted AOF file
+        /// by searching from our current position for the next magic_number, seeking
+        /// to it, and setting our internal position correctly.
+        pub fn skip(it: *Iterator, allocator: std.mem.Allocator, count: usize) !void {
+            var skip_buffer = try allocator.alloc(u8, 1024 * 1024);
+            defer allocator.free(skip_buffer);
+
+            try it.file.seekTo(it.offset);
+
+            while (it.offset < it.size) {
+                const bytes_read = try it.file.readAll(skip_buffer);
+                const offset = std.mem.indexOfPos(
+                    u8,
+                    skip_buffer[0..bytes_read],
+                    count,
+                    std.mem.asBytes(&magic_number),
+                );
+
+                if (offset) |offset_bytes| {
+                    it.offset += offset_bytes;
+                    break;
+                } else {
+                    it.offset += skip_buffer.len;
+                }
+            }
+        }
+    };
+}
+
 /// The AOF itself is simple and deterministic - but it logs data like the client's id
 /// which make things trickier. If you want to compare AOFs between runs, the `debug`
 /// CLI command does it by hashing together all checksum_body, operation and timestamp
@@ -198,93 +285,6 @@ pub const AOF = struct {
         assert(bytes_written == disk_size);
     }
 
-    pub fn IteratorType(comptime File: type) type {
-        return struct {
-            const Self = @This();
-
-            file: File,
-            size: u64,
-            offset: u64 = 0,
-
-            validate_chain: bool = true,
-            last_checksum: ?u128 = null,
-
-            pub fn next(it: *Self, target: *AOFEntry) !?*AOFEntry {
-                if (it.offset >= it.size) return null;
-
-                try it.file.seekTo(it.offset);
-
-                const buf = std.mem.asBytes(target);
-                const bytes_read = try it.file.readAll(buf);
-
-                if (bytes_read < target.calculate_disk_size()) {
-                    return error.AOFShortRead;
-                }
-
-                if (target.magic_number != magic_number) {
-                    return error.AOFMagicNumberMismatch;
-                }
-
-                const header = target.header();
-                if (!header.valid_checksum()) {
-                    return error.AOFChecksumMismatch;
-                }
-
-                if (!header.valid_checksum_body(target.message[@sizeOf(Header)..header.size])) {
-                    return error.AOFBodyChecksumMismatch;
-                }
-
-                // Ensure this file has a consistent hash chain
-                if (it.validate_chain) {
-                    if (it.last_checksum != null and it.last_checksum.? != header.parent) {
-                        return error.AOFChecksumChainMismatch;
-                    }
-                }
-
-                it.last_checksum = header.checksum;
-
-                it.offset += target.calculate_disk_size();
-
-                return target;
-            }
-
-            pub fn reset(it: *Self) !void {
-                it.offset = 0;
-            }
-
-            pub fn close(it: *Self) void {
-                it.file.close();
-            }
-
-            /// Try skip ahead to the next entry in a potentially corrupted AOF file
-            /// by searching from our current position for the next magic_number, seeking
-            /// to it, and setting our internal position correctly.
-            pub fn skip(it: *Self, allocator: std.mem.Allocator, count: usize) !void {
-                var skip_buffer = try allocator.alloc(u8, 1024 * 1024);
-                defer allocator.free(skip_buffer);
-
-                try it.file.seekTo(it.offset);
-
-                while (it.offset < it.size) {
-                    const bytes_read = try it.file.readAll(skip_buffer);
-                    const offset = std.mem.indexOfPos(
-                        u8,
-                        skip_buffer[0..bytes_read],
-                        count,
-                        std.mem.asBytes(&magic_number),
-                    );
-
-                    if (offset) |offset_bytes| {
-                        it.offset += offset_bytes;
-                        break;
-                    } else {
-                        it.offset += skip_buffer.len;
-                    }
-                }
-            }
-        };
-    }
-
     pub const Iterator = IteratorType(std.fs.File);
 
     /// Return an iterator into an AOF, to read entries one by one. This also validates
@@ -301,14 +301,12 @@ pub const AOF = struct {
 };
 
 pub const AOFReplayClient = struct {
-    const Self = @This();
-
     client: *Client,
     io: *IO,
     message_pool: *MessagePool,
     inflight_message: ?*Message.Request = null,
 
-    pub fn init(allocator: std.mem.Allocator, addresses: []std.net.Address) !Self {
+    pub fn init(allocator: std.mem.Allocator, addresses: []std.net.Address) !AOFReplayClient {
         assert(addresses.len > 0);
         assert(addresses.len <= constants.replicas_max);
 
@@ -348,14 +346,14 @@ pub const AOFReplayClient = struct {
             try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
 
-        return Self{
+        return .{
             .io = io,
             .message_pool = message_pool,
             .client = client,
         };
     }
 
-    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *AOFReplayClient, allocator: std.mem.Allocator) void {
         self.client.deinit(allocator);
         self.message_pool.deinit(allocator);
         self.io.deinit();
@@ -365,7 +363,7 @@ pub const AOFReplayClient = struct {
         allocator.destroy(self.io);
     }
 
-    pub fn replay(self: *Self, aof: *AOF.Iterator) !void {
+    pub fn replay(self: *AOFReplayClient, aof: *AOF.Iterator) !void {
         var target: AOFEntry = undefined;
 
         while (try aof.next(&target)) |entry| {
@@ -654,7 +652,7 @@ test "aof write / read" {
         .size = @intCast(@sizeOf(Header) + demo_payload.len),
     };
 
-    stdx.copy_disjoint(.exact, u8, demo_message.body(), demo_payload);
+    stdx.copy_disjoint(.exact, u8, demo_message.body_used(), demo_payload);
     demo_message.header.set_checksum_body(demo_payload);
     demo_message.header.set_checksum();
 

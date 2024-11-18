@@ -3,6 +3,182 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.13
+
+Released: 2024-11-18
+
+### Safety And Performance
+
+- [#2461](https://github.com/tigerbeetle/tigerbeetle/pull/2461)
+
+  Fix a broken assert when a recently-state-synced replica that has not completed journal repair
+  receives an old `commit` message.
+
+- [#2474](https://github.com/tigerbeetle/tigerbeetle/pull/2474)
+
+  Retry `EAGAIN` on (disk) reads. This is essential for running TigerBeetle on XFS, since XFS
+  returns `EAGAIN` unexpectedly.
+
+- [#2476](https://github.com/tigerbeetle/tigerbeetle/pull/2476)
+
+  Fix a message bus crash when a client reconnects to a replica without the replica receiving a
+  disconnect for the first connection.
+
+- [#2475](https://github.com/tigerbeetle/tigerbeetle/pull/2475)
+
+  Save 256KiB of RAM by not having a prefetch cache for historical balances.
+  (Historical balances are never prefetched, so this cache was unused.)
+
+- [#2482](https://github.com/tigerbeetle/tigerbeetle/pull/2482)
+
+  Update hardware requirements in the documentation to include the recommended network bandwidth,
+  advice for very large data files, and farther emphasis on the importance of ECC RAM.
+
+- [#2484](https://github.com/tigerbeetle/tigerbeetle/pull/2484)
+
+  Don't panic the client when the client's session is
+  [evicted](https://docs.tigerbeetle.com/reference/sessions/#eviction).
+  Instead, report an error any time a new batch is submitted to the evicted client.
+  (How the error is reported depends on the client language – e.g. Java throws an exception, whereas
+  Node.js rejects the `Promise`).
+
+  Note that if running clients are evicted, that typically indicates that there are too many clients
+  running – check out the
+  [suggested system architecture](https://docs.tigerbeetle.com/coding/system-architecture/).
+
+### Features
+
+- [#2464](https://github.com/tigerbeetle/tigerbeetle/pull/2464)
+
+  Add REPL interactivity. Also change the REPL from dynamic to static allocation.
+  Thanks @wpaulino!
+
+### Internals
+
+- [#2481](https://github.com/tigerbeetle/tigerbeetle/pull/2481)
+
+  Expose the VSR timestamp to the client. (This is an experimental feature which will be removed
+  soon – don't use this!)
+
+### TigerTracks 🎧
+
+- [Olympic Airways](https://www.youtube.com/watch?v=4BcNLA2KB2c)
+
+## TigerBeetle 0.16.12
+
+Released: 2024-11-11
+
+### Safety And Performance
+
+- [#2435](https://github.com/tigerbeetle/tigerbeetle/pull/2435)
+
+  Fix an attempt to access uninitialized fields of `tb_packet_t` when `tb_client_deinit` aborts
+  pending requests. Also add Java unit tests to reproduce the problem and validate the fix.
+
+- [#2437](https://github.com/tigerbeetle/tigerbeetle/pull/2437)
+
+  Fix a liveness issue where the cluster gets stuck despite sufficient durability, caused by buggy
+  logic for cycling through faulty blocks during repair. Now, we divide the request buffer between
+  the `read_global_queue` and `faulty_blocks`, ensuring that we always request blocks from both.
+
+### Features
+
+- [#2462](https://github.com/tigerbeetle/tigerbeetle/pull/2462)
+
+  Update DevHub styling.
+
+- [#2424](https://github.com/tigerbeetle/tigerbeetle/pull/2424)
+
+  Vortex can now not only crash replicas (by killing and restarting the process) but also stop and
+  resume them.
+
+### Internals
+
+- [#2458](https://github.com/tigerbeetle/tigerbeetle/pull/2458)
+
+  Fix the Dotnet walkthrough example that misused `length` instead of the final index when slicing
+  an array. Thanks @tenatus for reporting it!
+
+- [#2453](https://github.com/tigerbeetle/tigerbeetle/pull/2453)
+
+  Fix a CI failure caused by concurrent processes trying to create the `fs_supports_direct_io`
+  probe file in the same path.
+
+- [#2441](https://github.com/tigerbeetle/tigerbeetle/pull/2441)
+
+  Replace curl shell invocation with Zig's http client. 😎
+
+- [#2454](https://github.com/tigerbeetle/tigerbeetle/pull/2454)
+
+  Properly handle "host unreachable" (`EHOSTUNREACH`) on Linux, instead of returning unexpected
+  error.
+
+- [#2443](https://github.com/tigerbeetle/tigerbeetle/pull/2443),
+  [#2451](https://github.com/tigerbeetle/tigerbeetle/pull/2451),
+  [#2459](https://github.com/tigerbeetle/tigerbeetle/pull/2459),
+  [#2460](https://github.com/tigerbeetle/tigerbeetle/pull/2460),
+  [#2465](https://github.com/tigerbeetle/tigerbeetle/pull/2465)
+
+  Various code refactorings to improve naming conventions, readability, and organization.
+
+### TigerTracks 🎧
+
+- [Scatman (Ski-ba-bop-ba-dop-bop)](https://www.youtube.com/watch?v=ZhSY7vYbXkk&t=106s)
+
+## TigerBeetle (unreleased)
+
+Released: 2024-11-04
+
+### Safety And Performance
+
+- [#2356](https://github.com/tigerbeetle/tigerbeetle/pull/2356)
+
+  Add "Vortex" – a full-system integration test.
+  Notably, unlike the VOPR this test suite covers the language clients.
+
+- [#2430](https://github.com/tigerbeetle/tigerbeetle/pull/2430)
+
+  Cancel in-flight async (Linux) IO before freeing memory. This was not an issue on the replica
+  side, as replicas only stop when their process stops. However, clients may be closed
+  without the process also ending. If IO is still in flight when this occurs, we must ensure that
+  all IO is cancelled before the client's buffers are freed, to guard against a use-after-free.
+
+  This PR also fixes an unrelated assertion failure that triggered when closing a client that
+  had already closed its socket.
+
+- [#2432](https://github.com/tigerbeetle/tigerbeetle/pull/2432)
+
+  On startup and after checkpoint, assert that number of blocks acquired by the free set is
+  consistent with the number of blocks we see acquired via the manifest and checkpoint trailers.
+
+- [#2436](https://github.com/tigerbeetle/tigerbeetle/pull/2436)
+
+  Reject connections from unknown replicas.
+
+- [#2438](https://github.com/tigerbeetle/tigerbeetle/pull/2438)
+
+  Fix multiversion builds on MacOS.
+
+- [#2442](https://github.com/tigerbeetle/tigerbeetle/pull/2442)
+
+  On an unrecognized error code from the OS, print that error before we panic.
+  (This was already the policy in `Debug` builds, but now it includes `ReleaseSafe` as well.)
+
+- [#2444](https://github.com/tigerbeetle/tigerbeetle/pull/2444)
+
+  Fix a panic involving an in-flight write to an old reply after state sync.
+
+### Internals
+
+- [#2440](https://github.com/tigerbeetle/tigerbeetle/pull/2440)
+
+  Expose reply timestamp from `vsr.Client`.
+  (Note that this is not yet surfaced by language clients).
+
+### TigerTracks 🎧
+
+- [Everything In Its Right Place](https://www.youtube.com/watch?v=onRk0sjSgFU)
+
 ## TigerBeetle 0.16.11
 
 Released: 2024-10-28

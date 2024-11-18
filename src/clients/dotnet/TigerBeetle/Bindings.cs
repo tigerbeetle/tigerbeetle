@@ -1170,11 +1170,13 @@ public enum PacketStatus : byte
 
     TooMuchData = 1,
 
-    ClientShutdown = 2,
+    ClientEvicted = 2,
 
-    InvalidOperation = 3,
+    ClientShutdown = 3,
 
-    InvalidDataSize = 4,
+    InvalidOperation = 4,
+
+    InvalidDataSize = 5,
 
 }
 
@@ -1271,7 +1273,9 @@ internal static class TBClient
         byte* address_ptr,
         uint address_len,
         IntPtr on_completion_ctx,
-        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+        delegate* unmanaged[Cdecl]<IntPtr, IntPtr,
+                                   TBPacket*, ulong,
+                                   byte*, uint, void> on_completion_fn
     );
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -1281,7 +1285,9 @@ internal static class TBClient
         byte* address_ptr,
         uint address_len,
         IntPtr on_completion_ctx,
-        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+        delegate* unmanaged[Cdecl]<IntPtr, IntPtr,
+                                   TBPacket*, ulong,
+                                   byte*, uint, void> on_completion_fn
     );
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

@@ -16,7 +16,7 @@ const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const Storage = vsr.storage.Storage(IO);
+const Storage = vsr.storage.StorageType(IO);
 const AOF = vsr.aof.AOF;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;

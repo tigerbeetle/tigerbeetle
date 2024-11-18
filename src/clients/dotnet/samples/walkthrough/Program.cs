@@ -220,14 +220,14 @@ using (var client = new Client(clusterID, addresses))
         // section:batch
         var batch = new Transfer[] { }; // Array of transfer to create.
         var BATCH_SIZE = 8190;
-        for (int i = 0; i < batch.Length; i += BATCH_SIZE)
+        for (int firstIndex = 0; firstIndex < batch.Length; firstIndex += BATCH_SIZE)
         {
-            var batchSize = BATCH_SIZE;
-            if (i + BATCH_SIZE > batch.Length)
+            var lastIndex = firstIndex + BATCH_SIZE;
+            if (lastIndex > batch.Length)
             {
-                batchSize = batch.Length - i;
+                lastIndex = batch.Length;
             }
-            var transferErrors = client.CreateTransfers(batch[i..batchSize]);
+            var transferErrors = client.CreateTransfers(batch[firstIndex..lastIndex]);
             // Error handling omitted.
         }
         // endsection:batch

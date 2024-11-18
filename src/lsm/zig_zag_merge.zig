@@ -233,11 +233,11 @@ pub fn ZigZagMergeIteratorType(
     };
 }
 
-fn TestContext(comptime streams_max: u32) type {
+fn TestContextType(comptime streams_max: u32) type {
     const testing = std.testing;
 
     return struct {
-        const ZigZagMergeIterator = @This();
+        const TestContext = @This();
 
         // Using `u128` simplifies the fuzzer, avoiding undesirable matches
         // and duplicate elements when generating random values.
@@ -252,7 +252,7 @@ fn TestContext(comptime streams_max: u32) type {
         direction: Direction,
 
         fn stream_peek(
-            context: *const ZigZagMergeIterator,
+            context: *const TestContext,
             stream_index: u32,
         ) error{ Empty, Drained }!Key {
             const stream = context.streams[stream_index];
@@ -263,7 +263,7 @@ fn TestContext(comptime streams_max: u32) type {
             };
         }
 
-        fn stream_pop(context: *ZigZagMergeIterator, stream_index: u32) Value {
+        fn stream_pop(context: *TestContext, stream_index: u32) Value {
             const stream = context.streams[stream_index];
 
             switch (context.direction) {
@@ -278,7 +278,7 @@ fn TestContext(comptime streams_max: u32) type {
             }
         }
 
-        fn stream_probe(context: *ZigZagMergeIterator, stream_index: u32, probe_key: Key) void {
+        fn stream_probe(context: *TestContext, stream_index: u32, probe_key: Key) void {
             while (true) {
                 const key = stream_peek(context, stream_index) catch |err| {
                     switch (err) {
@@ -302,7 +302,7 @@ fn TestContext(comptime streams_max: u32) type {
             expect: []const Value,
         ) !void {
             const ZigZagMerge = ZigZagMergeIteratorType(
-                ZigZagMergeIterator,
+                TestContext,
                 Key,
                 Value,
                 key_from_value,
@@ -316,7 +316,7 @@ fn TestContext(comptime streams_max: u32) type {
                 var actual = std.ArrayList(Value).init(testing.allocator);
                 defer actual.deinit();
 
-                var context: ZigZagMergeIterator = .{
+                var context: TestContext = .{
                     .streams = undefined,
                     .direction = direction,
                 };
@@ -436,7 +436,7 @@ fn TestContext(comptime streams_max: u32) type {
 }
 
 test "zig_zag_merge: unit" {
-    const Context = TestContext(10);
+    const Context = TestContextType(10);
 
     // Equal streams:
     try Context.merge(
@@ -561,5 +561,5 @@ test "zig_zag_merge: fuzz" {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    try TestContext(32).fuzz(random, 256);
+    try TestContextType(32).fuzz(random, 256);
 }

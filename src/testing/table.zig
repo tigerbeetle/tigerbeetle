@@ -5,8 +5,8 @@ const stdx = @import("../stdx.zig");
 
 /// Parse a "table" of data with the specified schema.
 /// See test cases for example usage.
-pub fn parse(comptime Row: type, table_string: []const u8) stdx.BoundedArray(Row, 128) {
-    var rows = stdx.BoundedArray(Row, 128){};
+pub fn parse(comptime Row: type, table_string: []const u8) stdx.BoundedArrayType(Row, 128) {
+    var rows = stdx.BoundedArrayType(Row, 128){};
     var row_strings = std.mem.tokenizeAny(u8, table_string, "\n");
     while (row_strings.next()) |row_string| {
         // Ignore blank line.

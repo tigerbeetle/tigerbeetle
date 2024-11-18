@@ -22,13 +22,14 @@ pub const tb_completion_t = *const fn (
     context: usize,
     client: tb_client_t,
     packet: *tb_packet_t,
+    timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void;
 
 const constants = @import("../../constants.zig");
 const IO = @import("../../io.zig").IO;
-const Storage = @import("../../storage.zig").Storage(IO);
+const Storage = @import("../../storage.zig").StorageType(IO);
 const MessageBus = @import("../../message_bus.zig").MessageBusClient;
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const StateMachine = StateMachineType(Storage, constants.state_machine_config);
@@ -38,12 +39,14 @@ const ContextImplementation = @import("tb_client/context.zig").ContextImplementa
 pub const InitError = @import("tb_client/context.zig").Error;
 
 const DefaultContext = blk: {
-    const Client = @import("../../vsr/client.zig").Client(StateMachine, MessageBus);
+    const ClientType = @import("../../vsr/client.zig").ClientType;
+    const Client = ClientType(StateMachine, MessageBus);
     break :blk ContextType(Client);
 };
 
 const TestingContext = blk: {
-    const EchoClient = @import("tb_client/echo_client.zig").EchoClient(StateMachine, MessageBus);
+    const EchoClientType = @import("tb_client/echo_client.zig").EchoClientType;
+    const EchoClient = EchoClientType(StateMachine, MessageBus);
     break :blk ContextType(EchoClient);
 };
 

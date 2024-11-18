@@ -31,6 +31,10 @@ public final class RequestException extends RuntimeException {
             return "Invalid operation.";
         else if (status == PacketStatus.InvalidDataSize.value)
             return "Invalid data size.";
+        else if (status == PacketStatus.ClientEvicted.value)
+            return "Client was evicted";
+        else if (status == PacketStatus.ClientShutdown.value)
+            return "Client was closed";
         else
             return "Unknown error status " + status;
     }

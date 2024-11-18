@@ -8,8 +8,8 @@ const vsr = @import("../vsr.zig");
 const schema = @import("../lsm/schema.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
-const FIFO = @import("../fifo.zig").FIFO;
-const IOPS = @import("../iops.zig").IOPS;
+const FIFOType = @import("../fifo.zig").FIFOType;
+const IOPSType = @import("../iops.zig").IOPSType;
 const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
 const stdx = @import("../stdx.zig");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
@@ -100,7 +100,7 @@ pub fn GridType(comptime Storage: type) type {
             cache_read: bool,
             cache_write: bool,
             pending: ReadPending = .{},
-            resolves: FIFO(ReadPending) = .{ .name = null },
+            resolves: FIFOType(ReadPending) = .{ .name = null },
 
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
@@ -173,22 +173,22 @@ pub fn GridType(comptime Storage: type) type {
         /// Each entry in cache has a corresponding block.
         cache_blocks: []BlockPtr,
 
-        write_iops: IOPS(WriteIOP, write_iops_max) = .{},
-        write_queue: FIFO(Write) = .{ .name = "grid_write" },
+        write_iops: IOPSType(WriteIOP, write_iops_max) = .{},
+        write_queue: FIFOType(Write) = .{ .name = "grid_write" },
 
         // Each read_iops has a corresponding block.
         read_iop_blocks: [read_iops_max]BlockPtr,
-        read_iops: IOPS(ReadIOP, read_iops_max) = .{},
-        read_queue: FIFO(Read) = .{ .name = "grid_read" },
+        read_iops: IOPSType(ReadIOP, read_iops_max) = .{},
+        read_queue: FIFOType(Read) = .{ .name = "grid_read" },
 
         // List of Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
-        read_pending_queue: FIFO(ReadPending) = .{ .name = "grid_read_pending" },
+        read_pending_queue: FIFOType(ReadPending) = .{ .name = "grid_read_pending" },
         /// List of `Read`s which are waiting for a block repair from another replica.
         /// (Reads in this queue have already failed locally).
         ///
         /// Invariants:
         /// - For each read, read.callback=from_local_or_global_storage.
-        read_global_queue: FIFO(Read) = .{ .name = "grid_read_global" },
+        read_global_queue: FIFOType(Read) = .{ .name = "grid_read_global" },
         // True if there's a read that is resolving callbacks.
         // If so, the read cache must not be invalidated.
         read_resolving: bool = false,
@@ -554,7 +554,7 @@ pub fn GridType(comptime Storage: type) type {
         fn assert_not_reading(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
             assert(address > 0);
 
-            for ([_]*const FIFO(Read){
+            for ([_]*const FIFOType(Read){
                 &grid.read_queue,
                 &grid.read_global_queue,
             }) |queue| {
@@ -911,7 +911,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(read.address > 0);
 
             // Check if a read is already processing/recovering and merge with it.
-            for ([_]*const FIFO(Read){
+            for ([_]*const FIFOType(Read){
                 &grid.read_queue,
                 &grid.read_global_queue,
             }) |queue| {
@@ -1110,7 +1110,7 @@ pub fn GridType(comptime Storage: type) type {
                 assert(header.checksum == read.checksum);
             }
 
-            var read_remote_resolves: FIFO(ReadPending) = .{ .name = read.resolves.name };
+            var read_remote_resolves: FIFOType(ReadPending) = .{ .name = read.resolves.name };
 
             // Resolve all reads queued to the address with the block.
             while (read.resolves.pop()) |pending| {
@@ -1177,10 +1177,22 @@ pub fn GridType(comptime Storage: type) type {
         pub fn next_batch_of_block_requests(grid: *Grid, requests: []vsr.BlockRequest) usize {
             assert(grid.callback != .cancel);
             assert(requests.len > 0);
+            assert(requests.len == constants.grid_repair_reads_max);
 
             // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
-            // continue.
-            const request_faults_count = @min(grid.read_global_queue.count, requests.len);
+            // continue. We divide the buffer up between `read_global_queue` and
+            // `blocks_missing.faulty_blocks` so that we always request blocks from both queues.
+            // Surplus from `blocks_missing.faulty_blocks` may be used by `read_global_queue`.
+            const request_faults_count_max = requests.len -
+                @min(@divFloor(requests.len, 2), grid.blocks_missing.faulty_blocks.count());
+            assert(request_faults_count_max > 0);
+            assert(request_faults_count_max <= requests.len);
+            assert(request_faults_count_max >= @divFloor(requests.len, 2));
+
+            const request_faults_count = @min(
+                grid.read_global_queue.count,
+                request_faults_count_max,
+            );
             // (Note that many – but not all – of these blocks are also in the GridBlocksMissing.
             // The `read_global_queue` is a FIFO, whereas the GridBlocksMissing has a fixed
             // capacity.)

@@ -22,6 +22,7 @@ extern __declspec(dllexport) void onGoPacketCompletion(
 	uintptr_t ctx,
 	tb_client_t client,
 	tb_packet_t* packet,
+	uint64_t timestamp,
 	tb_result_bytes_t result_ptr,
 	uint32_t result_len
 );
@@ -187,7 +188,6 @@ func (c *c_client) doRequest(
 	packet := new(C.tb_packet_t)
 	packet.user_data = unsafe.Pointer(&req)
 	packet.operation = C.uint8_t(op)
-	packet.status = C.TB_PACKET_OK
 	packet.data_size = C.uint32_t(count * int(getEventSize(op)))
 	packet.data = data
 
@@ -223,6 +223,8 @@ func (c *c_client) doRequest(
 		switch status {
 		case C.TB_PACKET_TOO_MUCH_DATA:
 			return 0, errors.ErrMaximumBatchSizeExceeded{}
+		case C.TB_PACKET_CLIENT_EVICTED:
+			return 0, errors.ErrClientEvicted{}
 		case C.TB_PACKET_CLIENT_SHUTDOWN:
 			return 0, errors.ErrClientClosed{}
 		case C.TB_PACKET_INVALID_OPERATION:
@@ -245,11 +247,13 @@ func onGoPacketCompletion(
 	_context C.uintptr_t,
 	client C.tb_client_t,
 	packet *C.tb_packet_t,
+	timestamp C.uint64_t,
 	result_ptr C.tb_result_bytes_t,
 	result_len C.uint32_t,
 ) {
 	_ = _context
 	_ = client
+	_ = timestamp
 
 	// Get the request from the packet user data.
 	req := (*request)(unsafe.Pointer(packet.user_data))

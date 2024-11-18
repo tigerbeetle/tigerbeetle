@@ -17,10 +17,10 @@ pub const multiversion_binary_size_max = constants.multiversion_binary_size_max;
 pub const multiversion_binary_platform_size_max = constants.multiversion_binary_platform_size_max;
 
 // Useful for test code, or constructing releases in release.zig.
-pub const ListU32 = stdx.BoundedArray(u32, constants.vsr_releases_max);
-pub const ListU128 = stdx.BoundedArray(u128, constants.vsr_releases_max);
-pub const ListGitCommit = stdx.BoundedArray([20]u8, constants.vsr_releases_max);
-pub const ListFlag = stdx.BoundedArray(MultiversionHeader.Flags, constants.vsr_releases_max);
+pub const ListU32 = stdx.BoundedArrayType(u32, constants.vsr_releases_max);
+pub const ListU128 = stdx.BoundedArrayType(u128, constants.vsr_releases_max);
+pub const ListGitCommit = stdx.BoundedArrayType([20]u8, constants.vsr_releases_max);
+pub const ListFlag = stdx.BoundedArrayType(MultiversionHeader.Flags, constants.vsr_releases_max);
 
 /// In order to embed multiversion headers and bodies inside a universal binary, we repurpose some
 /// old CPU Type IDs.
@@ -63,7 +63,7 @@ fn execveat(
 }
 
 /// A ReleaseList is ordered from lowest-to-highest.
-pub const ReleaseList = stdx.BoundedArray(Release, constants.vsr_releases_max);
+pub const ReleaseList = stdx.BoundedArrayType(Release, constants.vsr_releases_max);
 
 pub const Release = extern struct {
     value: u32,

@@ -38,7 +38,7 @@ const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const BlockType = @import("schema.zig").BlockType;
 const tree = @import("tree.zig");
 const compaction = @import("compaction.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
 const schema = @import("schema.zig");
 const TableInfo = schema.ManifestNode.TableInfo;
 const BlockReference = vsr.BlockReference;
@@ -89,12 +89,12 @@ pub fn ManifestLogType(comptime Storage: type) type {
         /// - blocks that are being flushed
         ///
         /// Entries are ordered from oldest to newest.
-        log_block_checksums: RingBuffer(u128, .slice),
-        log_block_addresses: RingBuffer(u64, .slice),
+        log_block_checksums: RingBufferType(u128, .slice),
+        log_block_addresses: RingBufferType(u64, .slice),
 
         /// The head block accumulates a full block, to be written at the next flush.
         /// The remaining blocks must accommodate all further appends.
-        blocks: RingBuffer(BlockPtr, .slice),
+        blocks: RingBufferType(BlockPtr, .slice),
 
         /// The number of blocks that have been appended to, filled up, and then closed.
         blocks_closed: u8 = 0,
@@ -179,11 +179,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
             }
 
             manifest_log.log_block_checksums =
-                try RingBuffer(u128, .slice).init(allocator, manifest_log.pace.log_blocks_max);
+                try RingBufferType(u128, .slice).init(allocator, manifest_log.pace.log_blocks_max);
             errdefer manifest_log.log_block_checksums.deinit(allocator);
 
             manifest_log.log_block_addresses =
-                try RingBuffer(u64, .slice).init(allocator, manifest_log.pace.log_blocks_max);
+                try RingBufferType(u64, .slice).init(allocator, manifest_log.pace.log_blocks_max);
             errdefer manifest_log.log_block_addresses.deinit(allocator);
 
             // The upper-bound of manifest blocks we must buffer.
@@ -198,7 +198,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             // TODO RingBuffer for .slice should be extended to take care of alignment:
             manifest_log.blocks =
-                try RingBuffer(BlockPtr, .slice).init(allocator, half_bar_buffer_blocks_max);
+                try RingBufferType(BlockPtr, .slice).init(allocator, half_bar_buffer_blocks_max);
             errdefer manifest_log.blocks.deinit(allocator);
 
             for (manifest_log.blocks.buffer, 0..) |*block, i| {

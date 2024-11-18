@@ -32,7 +32,7 @@ const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
-const SortedSegmentedArray = @import("./segmented_array.zig").SortedSegmentedArray;
+const SortedSegmentedArrayType = @import("./segmented_array.zig").SortedSegmentedArrayType;
 
 const Value = packed struct(u128) {
     id: u64,
@@ -620,7 +620,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 // one in Zig's standard library. Use a SortedSegmentedArray instead which is essentially a stunted
 // B-tree one-level deep.
 const Model = struct {
-    const Array = SortedSegmentedArray(
+    const Array = SortedSegmentedArrayType(
         Value,
         NodePool,
         events_max,
@@ -761,7 +761,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    const fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
+    const fuzz_op_distribution = fuzz.DistributionType(FuzzOpTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (random.boolean()) 0 else 1,
         // Always do puts, and always more puts than removes.

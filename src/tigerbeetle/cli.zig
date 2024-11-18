@@ -22,7 +22,7 @@ const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
-const Storage = vsr.storage.Storage(vsr.io.IO);
+const Storage = vsr.storage.StorageType(vsr.io.IO);
 const Grid = vsr.GridType(Storage);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,
@@ -374,7 +374,7 @@ const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constan
 /// arguments are properly validated and desugared (e.g, sizes converted to counts where
 ///  appropriate).
 pub const Command = union(enum) {
-    const Addresses = stdx.BoundedArray(std.net.Address, constants.members_max);
+    const Addresses = stdx.BoundedArrayType(std.net.Address, constants.members_max);
 
     pub const Format = struct {
         cluster: u128,

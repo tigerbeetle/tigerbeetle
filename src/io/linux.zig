@@ -10,7 +10,7 @@ const log = std.log.scoped(.io);
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
-const FIFO = @import("../fifo.zig").FIFO;
+const FIFOType = @import("../fifo.zig").FIFOType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
@@ -24,10 +24,10 @@ pub const IO = struct {
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: FIFO(Completion) = .{ .name = "io_unqueued" },
+    unqueued: FIFOType(Completion) = .{ .name = "io_unqueued" },
 
     /// Completions that are ready to have their callbacks run.
-    completed: FIFO(Completion) = .{ .name = "io_completed" },
+    completed: FIFOType(Completion) = .{ .name = "io_completed" },
 
     // TODO Track these as metrics:
     ios_queued: u32 = 0,
@@ -607,11 +607,12 @@ pub const IO = struct {
                     const result: ReadError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
-                                .INTR => {
+                                .INTR, .AGAIN => {
+                                    // Some file systems, like XFS, can return EAGAIN even when
+                                    // reading from a blocking file without flags like RWF_NOWAIT.
                                     completion.io.enqueue(completion);
                                     return;
                                 },
-                                .AGAIN => error.WouldBlock,
                                 .BADF => error.NotOpenForReading,
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .FAULT => unreachable,

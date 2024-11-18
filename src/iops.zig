@@ -2,51 +2,51 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 /// Take a u6 to limit to 64 items max (2^6 = 64)
-pub fn IOPS(comptime T: type, comptime size: u6) type {
+pub fn IOPSType(comptime T: type, comptime size: u6) type {
     const Map = std.StaticBitSet(size);
     return struct {
-        const Self = @This();
+        const IOPS = @This();
 
         items: [size]T = undefined,
         /// 1 bits are free items.
         free: Map = Map.initFull(),
 
-        pub fn acquire(self: *Self) ?*T {
+        pub fn acquire(self: *IOPS) ?*T {
             const i = self.free.findFirstSet() orelse return null;
             self.free.unset(i);
             return &self.items[i];
         }
 
-        pub fn release(self: *Self, item: *T) void {
+        pub fn release(self: *IOPS, item: *T) void {
             item.* = undefined;
             const i = self.index(item);
             assert(!self.free.isSet(i));
             self.free.set(i);
         }
 
-        pub fn index(self: *Self, item: *T) usize {
+        pub fn index(self: *IOPS, item: *T) usize {
             const i = (@intFromPtr(item) - @intFromPtr(&self.items)) / @sizeOf(T);
             assert(i < size);
             return i;
         }
 
         /// Returns the count of IOPs available.
-        pub fn available(self: *const Self) usize {
+        pub fn available(self: *const IOPS) usize {
             return self.free.count();
         }
 
-        pub fn total(self: *const Self) usize {
+        pub fn total(self: *const IOPS) usize {
             _ = self;
             return size;
         }
 
         /// Returns the count of IOPs in use.
-        pub fn executing(self: *const Self) usize {
+        pub fn executing(self: *const IOPS) usize {
             return self.total() - self.available();
         }
 
         pub const Iterator = struct {
-            iops: *Self,
+            iops: *IOPS,
             bitset_iterator: Map.Iterator(.{ .kind = .unset }),
 
             pub fn next(iterator: *@This()) ?*T {
@@ -55,7 +55,7 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
             }
         };
 
-        pub fn iterate(self: *Self) Iterator {
+        pub fn iterate(self: *IOPS) Iterator {
             return .{
                 .iops = self,
                 .bitset_iterator = self.free.iterator(.{ .kind = .unset }),
@@ -66,7 +66,7 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
 
 test "IOPS" {
     const testing = std.testing;
-    var iops = IOPS(u32, 4){};
+    var iops = IOPSType(u32, 4){};
 
     try testing.expectEqual(@as(usize, 4), iops.available());
     try testing.expectEqual(@as(usize, 0), iops.executing());

@@ -241,9 +241,10 @@ typedef enum TB_OPERATION {
 typedef enum TB_PACKET_STATUS {
     TB_PACKET_OK = 0,
     TB_PACKET_TOO_MUCH_DATA = 1,
-    TB_PACKET_CLIENT_SHUTDOWN = 2,
-    TB_PACKET_INVALID_OPERATION = 3,
-    TB_PACKET_INVALID_DATA_SIZE = 4,
+    TB_PACKET_CLIENT_EVICTED = 2,
+    TB_PACKET_CLIENT_SHUTDOWN = 3,
+    TB_PACKET_INVALID_OPERATION = 4,
+    TB_PACKET_INVALID_DATA_SIZE = 5,
 } TB_PACKET_STATUS;
 
 typedef struct tb_packet_t {
@@ -280,7 +281,7 @@ TB_STATUS tb_client_init(
     const char* address_ptr,
     uint32_t address_len,
     uintptr_t on_completion_ctx,
-    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
+    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
 );
 
 // Initialize a new TigerBeetle client which echos back any data submitted.
@@ -290,7 +291,7 @@ TB_STATUS tb_client_init_echo(
     const char* address_ptr,
     uint32_t address_len,
     uintptr_t on_completion_ctx,
-    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
+    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
 );
 
 // Retrieve the callback context initially passed into `tb_client_init` or

@@ -5,7 +5,7 @@ const constants = @import("../constants.zig");
 const NodePoolType = @import("node_pool.zig").NodePoolType;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const table_count_max_for_tree = @import("tree.zig").table_count_max_for_tree;
-const SortedSegmentedArray = @import("segmented_array.zig").SortedSegmentedArray;
+const SortedSegmentedArrayType = @import("segmented_array.zig").SortedSegmentedArrayType;
 
 const log = std.log;
 
@@ -76,7 +76,7 @@ test "benchmark: segmented array" {
         };
 
         const NodePool = NodePoolType(options.node_size, @alignOf(Value));
-        const SegmentedArray = SortedSegmentedArray(
+        const SegmentedArray = SortedSegmentedArrayType(
             Value,
             NodePool,
             // Must be max of both to avoid hitting SegmentedArray's assertion:

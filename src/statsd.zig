@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const IO = @import("io.zig").IO;
-const FIFO = @import("fifo.zig").FIFO;
+const FIFOType = @import("fifo.zig").FIFOType;
 
 const BufferCompletion = struct {
     next: ?*BufferCompletion = null,
@@ -13,7 +13,7 @@ pub const StatsD = struct {
     socket: std.posix.socket_t,
     io: *IO,
     buffer_completions: []BufferCompletion,
-    buffer_completions_fifo: FIFO(BufferCompletion) = .{ .name = "statsd" },
+    buffer_completions_fifo: FIFOType(BufferCompletion) = .{ .name = "statsd" },
 
     /// Creates a statsd instance, which will send UDP packets via the IO instance provided.
     pub fn init(allocator: std.mem.Allocator, io: *IO, address: std.net.Address) !StatsD {

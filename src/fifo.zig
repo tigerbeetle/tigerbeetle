@@ -5,9 +5,9 @@ const constants = @import("./constants.zig");
 
 /// An intrusive first in/first out linked list.
 /// The element type T must have a field called "next" of type ?*T
-pub fn FIFO(comptime T: type) type {
+pub fn FIFOType(comptime T: type) type {
     return struct {
-        const Self = @This();
+        const FIFO = @This();
 
         in: ?*T = null,
         out: ?*T = null,
@@ -20,7 +20,7 @@ pub fn FIFO(comptime T: type) type {
         // expensive. Allow the user to gate it. Could also be a comptime param?
         verify_push: bool = true,
 
-        pub fn push(self: *Self, elem: *T) void {
+        pub fn push(self: *FIFO, elem: *T) void {
             if (constants.verify and self.verify_push) assert(!self.contains(elem));
 
             assert(elem.next == null);
@@ -35,7 +35,7 @@ pub fn FIFO(comptime T: type) type {
             self.count += 1;
         }
 
-        pub fn pop(self: *Self) ?*T {
+        pub fn pop(self: *FIFO) ?*T {
             const ret = self.out orelse return null;
             self.out = ret.next;
             ret.next = null;
@@ -44,20 +44,20 @@ pub fn FIFO(comptime T: type) type {
             return ret;
         }
 
-        pub fn peek_last(self: Self) ?*T {
+        pub fn peek_last(self: FIFO) ?*T {
             return self.in;
         }
 
-        pub fn peek(self: Self) ?*T {
+        pub fn peek(self: FIFO) ?*T {
             return self.out;
         }
 
-        pub fn empty(self: Self) bool {
+        pub fn empty(self: FIFO) bool {
             return self.peek() == null;
         }
 
         /// Returns whether the linked list contains the given *exact element* (pointer comparison).
-        pub fn contains(self: *const Self, elem_needle: *const T) bool {
+        pub fn contains(self: *const FIFO, elem_needle: *const T) bool {
             var iterator = self.peek();
             while (iterator) |elem| : (iterator = elem.next) {
                 if (elem == elem_needle) return true;
@@ -68,7 +68,7 @@ pub fn FIFO(comptime T: type) type {
         /// Remove an element from the FIFO. Asserts that the element is
         /// in the FIFO. This operation is O(N), if this is done often you
         /// probably want a different data structure.
-        pub fn remove(self: *Self, to_remove: *T) void {
+        pub fn remove(self: *FIFO, to_remove: *T) void {
             if (to_remove == self.out) {
                 _ = self.pop();
                 return;
@@ -85,7 +85,7 @@ pub fn FIFO(comptime T: type) type {
             } else unreachable;
         }
 
-        pub fn reset(self: *Self) void {
+        pub fn reset(self: *FIFO) void {
             self.* = .{ .name = self.name };
         }
     };
@@ -100,7 +100,7 @@ test "FIFO: push/pop/peek/remove/empty" {
     var two: Foo = .{};
     var three: Foo = .{};
 
-    var fifo: FIFO(Foo) = .{ .name = null };
+    var fifo: FIFOType(Foo) = .{ .name = null };
     try testing.expect(fifo.empty());
 
     fifo.push(&one);

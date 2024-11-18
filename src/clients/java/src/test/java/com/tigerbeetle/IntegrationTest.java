@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -22,6 +23,8 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -53,7 +56,7 @@ public class IntegrationTest {
 
     @BeforeClass
     public static void initialize() throws Exception {
-        server = new Server();
+        server = new Server("tests");
         client = new Client(clusterId, new String[] {server.address});
     }
 
@@ -148,6 +151,7 @@ public class IntegrationTest {
 
         final var createAccountErrors = client.createAccounts(accounts);
         assertTrue(createAccountErrors.getLength() == 0);
+        assertHeader(accounts, createAccountErrors);
 
         final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
         assertEquals(2, lookupAccounts.getLength());
@@ -167,6 +171,8 @@ public class IntegrationTest {
         zeroedAccounts.add();
 
         final var createAccountErrors = client.createAccounts(zeroedAccounts);
+        assertHeader(zeroedAccounts, createAccountErrors);
+
         assertTrue(createAccountErrors.getLength() == 1);
         assertTrue(createAccountErrors.next());
         assertEquals(CreateAccountResult.IdMustNotBeZero, createAccountErrors.getResult());
@@ -183,6 +189,7 @@ public class IntegrationTest {
 
         final var createAccountErrors = accountsFuture.get();
         assertTrue(createAccountErrors.getLength() == 0);
+        assertHeader(accounts, createAccountErrors);
 
         CompletableFuture<AccountBatch> lookupFuture =
                 client.lookupAccountsAsync(new IdBatch(account1Id, account2Id));
@@ -226,6 +233,7 @@ public class IntegrationTest {
 
         final var createTransferErrors = client.createTransfers(transfers);
         assertTrue(createTransferErrors.getLength() == 0);
+        assertHeader(transfers, createTransferErrors);
 
         // Looking up the accounts.
         final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -295,6 +303,7 @@ public class IntegrationTest {
                 client.createTransfersAsync(transfers);
         final var createTransferErrors = transfersFuture.get();
         assertTrue(createTransferErrors.getLength() == 0);
+        assertHeader(transfers, createTransferErrors);
 
         // Looking up the accounts.
         CompletableFuture<AccountBatch> lookupAccountsFuture =
@@ -345,6 +354,7 @@ public class IntegrationTest {
 
         final var createTransfersErrors = client.createTransfers(zeroedTransfers);
         assertTrue(createTransfersErrors.getLength() == 1);
+        assertHeader(zeroedTransfers, createTransfersErrors);
         assertTrue(createTransfersErrors.next());
         assertEquals(CreateTransferResult.IdMustNotBeZero, createTransfersErrors.getResult());
     }
@@ -940,10 +950,42 @@ public class IntegrationTest {
     }
 
     @Test
+    public void testClientEvicted() throws Throwable {
+        final int CLIENTS_MAX = 64;
+
+        // Use a separate server to avoid evicting the test's shared client.
+        try (final var server = new Server("testClientEvicted")) {
+            try (final var client_evict =
+                    new Client(clusterId, new String[] {server.getAddress()})) {
+                var accounts_first = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
+                assertTrue(accounts_first.getLength() == 0);
+
+
+                for (int i = 0; i < CLIENTS_MAX; i++) {
+                    try (final var client =
+                            new Client(clusterId, new String[] {server.getAddress()})) {
+                        var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
+                        assertTrue(accounts.getLength() == 0);
+                    }
+                }
+
+                try {
+                    var accounts = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
+                    assertTrue(accounts.getLength() == 0);
+                    assert false;
+                } catch (RequestException requestException) {
+                    assertEquals(PacketStatus.ClientEvicted.value, requestException.getStatus());
+                }
+            }
+        }
+    }
+
+    @Test
     public void testZeroLengthCreateAccounts() throws Throwable {
         final var accounts = new AccountBatch(1); // Capacity 1 but zero items.
         final var createAccountErrors = client.createAccounts(accounts);
         assertTrue(createAccountErrors.getLength() == 0);
+        assertHeader(accounts, createAccountErrors);
     }
 
     @Test
@@ -952,6 +994,7 @@ public class IntegrationTest {
         final var createAccountErrorsFuture = client.createAccountsAsync(accounts);
         final var createAccountErrors = createAccountErrorsFuture.get();
         assertTrue(createAccountErrors.getLength() == 0);
+        assertHeader(accounts, createAccountErrors);
     }
 
     @Test
@@ -959,6 +1002,7 @@ public class IntegrationTest {
         final var transfers = new TransferBatch(0);
         final var createTransfersErrors = client.createTransfers(transfers);
         assertTrue(createTransfersErrors.getLength() == 0);
+        assertHeader(transfers, createTransfersErrors);
     }
 
     @Test
@@ -967,6 +1011,7 @@ public class IntegrationTest {
         final var createTransfersErrorsFuture = client.createTransfersAsync(transfers);
         final var createTransfersErrors = createTransfersErrorsFuture.get();
         assertTrue(createTransfersErrors.getLength() == 0);
+        assertHeader(transfers, createTransfersErrors);
     }
 
     @Test
@@ -974,6 +1019,7 @@ public class IntegrationTest {
         final var ids = new IdBatch(0);
         final var accounts = client.lookupAccounts(ids);
         assertTrue(accounts.getLength() == 0);
+        assertHeader(ids, accounts);
     }
 
     @Test
@@ -982,6 +1028,7 @@ public class IntegrationTest {
         final var accountsFuture = client.lookupAccountsAsync(ids);
         final var accounts = accountsFuture.get();
         assertTrue(accounts.getLength() == 0);
+        assertHeader(ids, accounts);
     }
 
     @Test
@@ -989,6 +1036,7 @@ public class IntegrationTest {
         final var ids = new IdBatch(0);
         final var transfers = client.lookupTransfers(ids);
         assertTrue(transfers.getLength() == 0);
+        assertHeader(ids, transfers);
     }
 
     @Test
@@ -997,6 +1045,7 @@ public class IntegrationTest {
         final var transfersFuture = client.lookupTransfersAsync(ids);
         final var transfers = transfersFuture.get();
         assertTrue(transfers.getLength() == 0);
+        assertHeader(ids, transfers);
     }
 
     /**
@@ -1027,6 +1076,8 @@ public class IntegrationTest {
             for (int i = 0; i < TASKS_COUNT; i++) {
                 tasks[i].join();
                 assertTrue(tasks[i].result.getLength() == 0);
+                assertNotNull(tasks[i].result.getHeader());
+                assertTrue(tasks[i].result.getHeader().getTimestamp() != 0L);
             }
 
             // Asserting if all transfers were submitted correctly.
@@ -1209,6 +1260,37 @@ public class IntegrationTest {
     }
 
     /**
+     * Smoke test that concurrent close does not crash the JVM.
+     */
+    @Test
+    public void testCloseConcurrent() throws Throwable {
+        final int threadCount = 16;
+        final var clients = IntStream.range(0, threadCount)
+                .mapToObj((index) -> new Client(clusterId, new String[] {server.getAddress()}))
+                .collect(Collectors.toList());
+        final var threads = IntStream.range(0, threadCount).mapToObj((index) -> {
+            final var thread = new Thread(() -> {
+                final var client = clients.get(index);
+                for (int i = 0; i < 1000; i++) {
+                    try {
+                        client.createAccounts(generateAccounts(UInt128.id()));
+                    } catch (IllegalStateException e) {
+                        break;
+                    }
+                }
+            });
+            thread.start();
+            return thread;
+        }).collect(Collectors.toList());
+        for (var client : clients) {
+            client.close();
+        }
+        for (var thread : threads) {
+            thread.join();
+        }
+    }
+
+    /**
      * This test asserts that async tasks will respect client's concurrencyMax.
      */
     @Test
@@ -1257,6 +1339,8 @@ public class IntegrationTest {
                 final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
                 final var result = future.get();
                 assertEquals(0, result.getLength());
+                assertNotNull(result.getHeader());
+                assertTrue(result.getHeader().getTimestamp() != 0L);
             }
 
             // Asserting if all transfers were submitted correctly.
@@ -2141,6 +2225,12 @@ public class IntegrationTest {
         assertEquals(transfer1.getFlags(), transfer2.getFlags());
     }
 
+    private static void assertHeader(Batch request, Batch response) {
+        assertNull(request.getHeader());
+        assertNotNull(response.getHeader());
+        assertTrue(response.getHeader().getTimestamp() != 0L);
+    }
+
     private static class TransferTask extends Thread {
         public final Client client;
         public CreateTransferResultBatch result;
@@ -2191,13 +2281,14 @@ public class IntegrationTest {
 
     private static class Server implements AutoCloseable {
 
-        public static final String TB_FILE = "./0_0.tigerbeetle.tests";
         public static final String TB_SERVER = "../../../zig-out/bin/tigerbeetle";
 
+        public final String tb_file;
         private final Process process;
         private String address;
 
-        public Server() throws IOException, Exception, InterruptedException {
+        public Server(final String label) throws IOException, Exception, InterruptedException {
+            this.tb_file = "./0_0.tigerbeetle." + label;
 
             cleanUp();
 
@@ -2212,7 +2303,7 @@ public class IntegrationTest {
             }
 
             final var format = Runtime.getRuntime().exec(new String[] {exe, "format", "--cluster=0",
-                    "--replica=0", "--replica-count=1", "--development", TB_FILE});
+                    "--replica=0", "--replica-count=1", "--development", tb_file});
             if (format.waitFor() != 0) {
                 final var reader =
                         new BufferedReader(new InputStreamReader(format.getErrorStream()));
@@ -2221,7 +2312,7 @@ public class IntegrationTest {
             }
 
             this.process = new ProcessBuilder()
-                    .command(new String[] {exe, "start", "--addresses=0", "--development", TB_FILE})
+                    .command(new String[] {exe, "start", "--addresses=0", "--development", tb_file})
                     .redirectOutput(Redirect.PIPE).redirectError(Redirect.INHERIT).start();
 
             final var stdout = process.getInputStream();
@@ -2245,7 +2336,7 @@ public class IntegrationTest {
                     process.destroy();
                 }
 
-                final var file = new File("./" + TB_FILE);
+                final var file = new File("./" + tb_file);
                 file.delete();
             } catch (Throwable any) {
                 throw new Exception("Cleanup has failed");

@@ -6,12 +6,12 @@ const log = std.log.scoped(.storage);
 
 const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
-const FIFO = vsr.fifo.FIFO;
+const FIFOType = vsr.fifo.FIFOType;
 const constants = vsr.constants;
 
-pub fn Storage(comptime IO: type) type {
+pub fn StorageType(comptime IO: type) type {
     return struct {
-        const Self = @This();
+        const Storage = @This();
 
         /// See usage in Journal.write_sectors() for details.
         pub const synchronicity: enum {
@@ -21,7 +21,7 @@ pub fn Storage(comptime IO: type) type {
 
         pub const Read = struct {
             completion: IO.Completion,
-            callback: *const fn (read: *Self.Read) void,
+            callback: *const fn (read: *Storage.Read) void,
 
             /// The buffer to read into, re-sliced and re-assigned
             /// as we go, e.g. after partial reads.
@@ -75,7 +75,7 @@ pub fn Storage(comptime IO: type) type {
 
         pub const Write = struct {
             completion: IO.Completion,
-            callback: *const fn (write: *Self.Write) void,
+            callback: *const fn (write: *Storage.Write) void,
             buffer: []const u8,
             offset: u64,
         };
@@ -91,24 +91,24 @@ pub fn Storage(comptime IO: type) type {
         io: *IO,
         fd: IO.fd_t,
 
-        next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
+        next_tick_queue: FIFOType(NextTick) = .{ .name = "storage_next_tick" },
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 
-        pub fn init(io: *IO, fd: IO.fd_t) !Self {
+        pub fn init(io: *IO, fd: IO.fd_t) !Storage {
             return .{
                 .io = io,
                 .fd = fd,
             };
         }
 
-        pub fn deinit(storage: *Self) void {
+        pub fn deinit(storage: *Storage) void {
             assert(storage.next_tick_queue.empty());
             assert(storage.fd != IO.INVALID_FILE);
             storage.fd = IO.INVALID_FILE;
         }
 
-        pub fn tick(storage: *Self) void {
+        pub fn tick(storage: *Storage) void {
             storage.io.tick() catch |err| {
                 log.warn("tick: {}", .{err});
                 std.debug.panic("io.tick(): {}", .{err});
@@ -116,10 +116,10 @@ pub fn Storage(comptime IO: type) type {
         }
 
         pub fn on_next_tick(
-            storage: *Self,
+            storage: *Storage,
             source: NextTickSource,
-            callback: *const fn (next_tick: *Self.NextTick) void,
-            next_tick: *Self.NextTick,
+            callback: *const fn (next_tick: *Storage.NextTick) void,
+            next_tick: *Storage.NextTick,
         ) void {
             next_tick.* = .{
                 .source = source,
@@ -131,7 +131,7 @@ pub fn Storage(comptime IO: type) type {
             if (!storage.next_tick_completion_scheduled) {
                 storage.next_tick_completion_scheduled = true;
                 storage.io.timeout(
-                    *Self,
+                    *Storage,
                     storage,
                     timeout_callback,
                     &storage.next_tick_completion,
@@ -140,7 +140,7 @@ pub fn Storage(comptime IO: type) type {
             }
         }
 
-        pub fn reset_next_tick_lsm(storage: *Self) void {
+        pub fn reset_next_tick_lsm(storage: *Storage) void {
             var next_tick_iterator = storage.next_tick_queue;
             storage.next_tick_queue.reset();
 
@@ -150,7 +150,7 @@ pub fn Storage(comptime IO: type) type {
         }
 
         fn timeout_callback(
-            storage: *Self,
+            storage: *Storage,
             completion: *IO.Completion,
             result: IO.TimeoutError!void,
         ) void {
@@ -173,9 +173,9 @@ pub fn Storage(comptime IO: type) type {
         }
 
         pub fn read_sectors(
-            self: *Self,
-            callback: *const fn (read: *Self.Read) void,
-            read: *Self.Read,
+            self: *Storage,
+            callback: *const fn (read: *Storage.Read) void,
+            read: *Storage.Read,
             buffer: []u8,
             zone: vsr.Zone,
             offset_in_zone: u64,
@@ -196,7 +196,7 @@ pub fn Storage(comptime IO: type) type {
             assert(read.target().len > 0);
         }
 
-        fn start_read(self: *Self, read: *Self.Read, bytes_read: ?usize) void {
+        fn start_read(self: *Storage, read: *Storage.Read, bytes_read: ?usize) void {
             assert(read.offset % constants.sector_size == 0);
             maybe(bytes_read == 0); // Retrying erroneous read; same offset with smaller window.
 
@@ -219,7 +219,7 @@ pub fn Storage(comptime IO: type) type {
 
             self.assert_bounds(target, read.offset);
             self.io.read(
-                *Self,
+                *Storage,
                 self,
                 on_read,
                 &read.completion,
@@ -229,8 +229,8 @@ pub fn Storage(comptime IO: type) type {
             );
         }
 
-        fn on_read(self: *Self, completion: *IO.Completion, result: IO.ReadError!usize) void {
-            const read: *Self.Read = @fieldParentPtr("completion", completion);
+        fn on_read(self: *Storage, completion: *IO.Completion, result: IO.ReadError!usize) void {
+            const read: *Storage.Read = @fieldParentPtr("completion", completion);
 
             const bytes_read = result catch |err| switch (err) {
                 error.InputOutput => {
@@ -337,9 +337,9 @@ pub fn Storage(comptime IO: type) type {
         }
 
         pub fn write_sectors(
-            self: *Self,
-            callback: *const fn (write: *Self.Write) void,
-            write: *Self.Write,
+            self: *Storage,
+            callback: *const fn (write: *Storage.Write) void,
+            write: *Storage.Write,
             buffer: []const u8,
             zone: vsr.Zone,
             offset_in_zone: u64,
@@ -360,12 +360,12 @@ pub fn Storage(comptime IO: type) type {
             assert(write.buffer.len > 0);
         }
 
-        fn start_write(self: *Self, write: *Self.Write) void {
+        fn start_write(self: *Storage, write: *Storage.Write) void {
             assert(write.offset % constants.sector_size == 0);
             self.assert_bounds(write.buffer, write.offset);
 
             self.io.write(
-                *Self,
+                *Storage,
                 self,
                 on_write,
                 &write.completion,
@@ -375,8 +375,8 @@ pub fn Storage(comptime IO: type) type {
             );
         }
 
-        fn on_write(self: *Self, completion: *IO.Completion, result: IO.WriteError!usize) void {
-            const write: *Self.Write = @fieldParentPtr("completion", completion);
+        fn on_write(self: *Storage, completion: *IO.Completion, result: IO.WriteError!usize) void {
+            const write: *Storage.Write = @fieldParentPtr("completion", completion);
 
             const bytes_written = result catch |err| switch (err) {
                 // We assume that the disk will attempt to reallocate a spare sector for any LSE.
@@ -423,7 +423,7 @@ pub fn Storage(comptime IO: type) type {
         }
 
         /// Ensures that the read or write is within bounds and intends to read or write some bytes.
-        fn assert_bounds(self: *Self, buffer: []const u8, offset: u64) void {
+        fn assert_bounds(self: *Storage, buffer: []const u8, offset: u64) void {
             _ = self;
             _ = offset;
 

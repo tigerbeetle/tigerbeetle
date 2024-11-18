@@ -10,10 +10,11 @@ const constants = vsr.constants;
 const log = std.log.scoped(.tb_client_context);
 
 const stdx = vsr.stdx;
+const maybe = stdx.maybe;
 const Header = vsr.Header;
 
 const IO = vsr.io.IO;
-const FIFO = vsr.fifo.FIFO;
+const FIFOType = vsr.fifo.FIFOType;
 const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
@@ -79,7 +80,7 @@ pub fn ContextType(
         fn operation_event_size(op: u8) ?usize {
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
-                    return @sizeOf(StateMachine.Event(operation));
+                    return @sizeOf(StateMachine.EventType(operation));
                 }
             }
             return null;
@@ -88,6 +89,7 @@ pub fn ContextType(
         const PacketError = error{
             TooMuchData,
             ClientShutdown,
+            ClientEvicted,
             InvalidOperation,
             InvalidDataSize,
         };
@@ -95,7 +97,7 @@ pub fn ContextType(
         allocator: std.mem.Allocator,
         client_id: u128,
 
-        addresses: stdx.BoundedArray(std.net.Address, constants.replicas_max),
+        addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
         message_pool: MessagePool,
         client: Client,
@@ -104,9 +106,12 @@ pub fn ContextType(
         completion_fn: tb_completion_t,
         implementation: ContextImplementation,
 
+        canceled: bool,
+        evicted: bool,
+
         signal: Signal,
         submitted: Packet.SubmissionStack,
-        pending: FIFO(Packet),
+        pending: FIFOType(Packet),
         shutdown: Atomic(bool),
         thread: std.Thread,
 
@@ -176,6 +181,7 @@ pub fn ContextType(
                         .configuration = context.addresses.const_slice(),
                         .io = &context.io,
                     },
+                    .eviction_callback = client_eviction_callback,
                 },
             );
             errdefer context.client.deinit(context.allocator);
@@ -190,6 +196,8 @@ pub fn ContextType(
             context.submitted = .{};
             context.shutdown = Atomic(bool).init(false);
             context.pending = .{ .name = null };
+            context.canceled = false;
+            context.evicted = false;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.on_signal);
@@ -248,8 +256,18 @@ pub fn ContextType(
             on_signal(&self.signal);
         }
 
+        fn client_eviction_callback(client: *Client, _: *const Message.Eviction) void {
+            const self: *Context = @fieldParentPtr("client", client);
+            assert(!self.evicted);
+
+            self.evicted = true;
+            self.cancel_all();
+        }
+
         pub fn tick(self: *Context) void {
-            self.client.tick();
+            if (!self.evicted) {
+                self.client.tick();
+            }
         }
 
         pub fn run(self: *Context) void {
@@ -263,23 +281,7 @@ pub fn ContextType(
                     @panic("IO.run() failed");
                 };
             }
-
-            // Cancel the request_inflight packet if any.
-            //
-            // TODO: Look into completing the inflight packet with a different error than
-            // `error.ClientShutdown`, allow the client user to make a more informed decision
-            // e.g. retrying the inflight packet and just abandoning the ClientShutdown ones.
-            if (self.client.request_inflight) |*inflight| {
-                if (inflight.message.header.operation != .register) {
-                    const packet = @as(UserData, @bitCast(inflight.user_data)).packet;
-                    assert(packet.next == null); // Inflight packet should not be pending.
-                    self.cancel(packet);
-                }
-            }
-
-            // Cancel pending and submitted packets.
-            while (self.pending.pop()) |packet| self.cancel(packet);
-            while (self.submitted.pop()) |packet| self.cancel(packet);
+            self.cancel_all();
         }
 
         fn on_signal(signal: *Signal) void {
@@ -298,6 +300,12 @@ pub fn ContextType(
         }
 
         fn request(self: *Context, packet: *Packet) void {
+            assert(self.batch_size_limit != null);
+
+            if (self.evicted) {
+                return self.on_complete(packet, error.ClientEvicted);
+            }
+
             const operation: StateMachine.Operation = operation_from_int(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
             };
@@ -305,7 +313,7 @@ pub fn ContextType(
             // Get the size of each request structure in the packet.data:
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| blk: {
-                    break :blk @sizeOf(StateMachine.Event(operation_comptime));
+                    break :blk @sizeOf(StateMachine.EventType(operation_comptime));
                 },
             };
 
@@ -400,7 +408,7 @@ pub fn ContextType(
                     inline .create_accounts,
                     .create_transfers,
                     => |tag| linked_chain_open: {
-                        const Event = StateMachine.Event(tag);
+                        const Event = StateMachine.EventType(tag);
                         // Packet data isn't necessarily aligned.
                         const events: [*]align(@alignOf(u8)) const Event = @ptrCast(data.?);
                         const events_count: usize = @divExact(data_size, @sizeOf(Event));
@@ -453,7 +461,7 @@ pub fn ContextType(
                     stdx.maybe(batched.data == null);
                     break :empty &[0]u8{};
                 };
-                stdx.copy_disjoint(.inexact, u8, message.body()[offset..], event_data);
+                stdx.copy_disjoint(.inexact, u8, message.body_used()[offset..], event_data);
                 offset += @intCast(event_data.len);
             }
 
@@ -509,52 +517,91 @@ pub fn ContextType(
 
                         const event_count = @divExact(
                             batched.data_size,
-                            @sizeOf(StateMachine.Event(operation)),
+                            @sizeOf(StateMachine.EventType(operation)),
                         );
-                        const results = demuxer.decode(event_offset, event_count);
+                        const batched_reply = demuxer.decode(event_offset, event_count);
                         event_offset += event_count;
 
                         if (!StateMachine.batch_logical_allowed.get(operation)) {
-                            assert(results.len == reply.len);
+                            assert(batched_reply.len == reply.len);
                         }
 
                         assert(batched.operation == @intFromEnum(operation));
-                        self.on_complete(batched, results);
+                        self.on_complete(batched, .{
+                            .timestamp = timestamp,
+                            .reply = batched_reply,
+                        });
                     }
                 },
             }
         }
 
+        fn cancel_all(self: *Context) void {
+            maybe(self.canceled);
+            defer self.canceled = true;
+
+            // Cancel the request_inflight packet if any.
+            //
+            // TODO: Look into completing the inflight packet with a different error than
+            // `error.ClientShutdown`, allow the client user to make a more informed decision
+            // e.g. retrying the inflight packet and just abandoning the ClientShutdown ones.
+            if (!self.canceled) {
+                if (self.client.request_inflight) |*inflight| {
+                    if (inflight.message.header.operation != .register) {
+                        const packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                        assert(packet.next == null); // Inflight packet should not be pending.
+                        self.cancel(packet);
+                    }
+                }
+            }
+
+            // Cancel pending and submitted packets.
+            while (self.pending.pop()) |packet| self.cancel(packet);
+            while (self.submitted.pop()) |packet| self.cancel(packet);
+        }
+
         fn cancel(self: *Context, packet: *Packet) void {
+            const result = if (self.evicted) error.ClientEvicted else error.ClientShutdown;
             var it: ?*Packet = packet;
             while (it) |batched| {
                 assert(batched.batch_next == null or batched.batch_allowed);
                 it = batched.batch_next;
-                self.on_complete(batched, error.ClientShutdown);
+                self.on_complete(batched, result);
             }
         }
 
         fn on_complete(
             self: *Context,
             packet: *Packet,
-            result: PacketError![]const u8,
+            completion: PacketError!struct {
+                timestamp: u64,
+                reply: []const u8,
+            },
         ) void {
             const completion_ctx = self.implementation.completion_ctx;
             const tb_client = api.context_to_client(&self.implementation);
-            const bytes = result catch |err| {
+            const result = completion catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
+                    error.ClientEvicted => .client_evicted,
                     error.ClientShutdown => .client_shutdown,
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,
                 };
-                (self.completion_fn)(completion_ctx, tb_client, packet, null, 0);
+                (self.completion_fn)(completion_ctx, tb_client, packet, 0, null, 0);
                 return;
             };
 
             // The packet completed normally.
             packet.status = .ok;
-            (self.completion_fn)(completion_ctx, tb_client, packet, bytes.ptr, @intCast(bytes.len));
+            (self.completion_fn)(
+                completion_ctx,
+                tb_client,
+                packet,
+                result.timestamp,
+                result.reply.ptr,
+                @intCast(result.reply.len),
+            );
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {
@@ -562,6 +609,22 @@ pub fn ContextType(
         }
 
         fn on_submit(implementation: *ContextImplementation, packet: *Packet) void {
+            // Packet is caller-allocated to enable elastic intrusive-link-list-based memory
+            // management. However, some of Packet's fields are essentially private. Initialize
+            // them here to avoid threading default fields through FFI boundary.
+            packet.* = .{
+                .next = null,
+                .user_data = packet.user_data,
+                .operation = packet.operation,
+                .status = .ok,
+                .data_size = packet.data_size,
+                .data = packet.data,
+                .batch_next = null,
+                .batch_tail = null,
+                .batch_size = 0,
+                .batch_allowed = false,
+                .reserved = [_]u8{0} ** 7,
+            };
             const self = get_context(implementation);
 
             const already_shutdown = self.shutdown.load(.acquire);
@@ -583,7 +646,7 @@ pub fn ContextType(
                 .create_accounts,
                 .create_transfers,
             }) |operation| {
-                const Event = StateMachine.Event(operation);
+                const Event = StateMachine.EventType(operation);
                 var data = [_]Event{std.mem.zeroInit(Event, .{})} ** 3;
 
                 // Broken linked chain cannot be batched.

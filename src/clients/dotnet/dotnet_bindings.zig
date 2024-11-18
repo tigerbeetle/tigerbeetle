@@ -484,7 +484,9 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        byte* address_ptr,
         \\        uint address_len,
         \\        IntPtr on_completion_ctx,
-        \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+        \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr,
+        \\                                   TBPacket*, ulong,
+        \\                                   byte*, uint, void> on_completion_fn
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -494,7 +496,9 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        byte* address_ptr,
         \\        uint address_len,
         \\        IntPtr on_completion_ctx,
-        \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+        \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr,
+        \\                                   TBPacket*, ulong,
+        \\                                   byte*, uint, void> on_completion_fn
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

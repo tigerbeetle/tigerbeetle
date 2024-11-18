@@ -4,7 +4,7 @@ const maybe = stdx.maybe;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const OriginalAOF = @import("../aof.zig").AOF;
+const AOFIteratorType = @import("../aof.zig").IteratorType;
 const AOFEntry = @import("../aof.zig").AOFEntry;
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -14,16 +14,14 @@ const log = std.log.scoped(.aof);
 const backing_size = 32 * 1024 * 1024;
 
 const InMemoryAOF = struct {
-    const Self = @This();
-
     backing_store: []align(constants.sector_size) u8,
     index: usize,
 
-    pub fn seekTo(self: *Self, to: usize) !void {
+    pub fn seekTo(self: *InMemoryAOF, to: usize) !void {
         self.index = to;
     }
 
-    pub fn readAll(self: *Self, buf: []u8) !usize {
+    pub fn readAll(self: *InMemoryAOF, buf: []u8) !usize {
         // Limit the reads to the end of the buffer and return the count of
         // bytes read, to have the same behavior as fs's readAll.
         const end = @min(self.index + buf.len, self.backing_store.len);
@@ -134,7 +132,7 @@ pub const AOF = struct {
         log.debug("wrote {} bytes, {} used / {}", .{ disk_size, self.index, backing_size });
     }
 
-    pub const Iterator = OriginalAOF.IteratorType(InMemoryAOF);
+    pub const Iterator = AOFIteratorType(InMemoryAOF);
 
     pub fn iterator(self: *AOF) Iterator {
         const in_memory_aof = InMemoryAOF{ .backing_store = self.backing_store, .index = 0 };
