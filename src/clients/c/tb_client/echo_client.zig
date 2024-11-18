@@ -64,6 +64,10 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
                 replica_count: u8,
                 message_pool: *MessagePool,
                 message_bus_options: MessageBus.Options,
+                eviction_callback: ?*const fn (
+                    client: *EchoClient,
+                    eviction: *const Message.Eviction,
+                ) void = null,
             },
         ) !EchoClient {
             _ = allocator;

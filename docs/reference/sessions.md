@@ -51,8 +51,6 @@ The cluster sends a message to notify the evicted session that it has ended. Typ
 client is no longer active (already terminated), but if it is active, the eviction message causes it
 to self-terminate, bubbling up to the application as an `session evicted` error.
 
-(TODO: Right now evicted clients panic — fix that so this is accurate.)
-
 If active clients are terminating with `session evicted` errors, it most likely indicates that the
 application is trying to run too many concurrent clients. For performance reasons, it is recommended
 to [batch](./requests/README.md#batching-events) as many events as possible into each request sent

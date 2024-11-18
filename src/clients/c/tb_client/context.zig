@@ -10,6 +10,7 @@ const constants = vsr.constants;
 const log = std.log.scoped(.tb_client_context);
 
 const stdx = vsr.stdx;
+const maybe = stdx.maybe;
 const Header = vsr.Header;
 
 const IO = vsr.io.IO;
@@ -88,6 +89,7 @@ pub fn ContextType(
         const PacketError = error{
             TooMuchData,
             ClientShutdown,
+            ClientEvicted,
             InvalidOperation,
             InvalidDataSize,
         };
@@ -103,6 +105,9 @@ pub fn ContextType(
 
         completion_fn: tb_completion_t,
         implementation: ContextImplementation,
+
+        canceled: bool,
+        evicted: bool,
 
         signal: Signal,
         submitted: Packet.SubmissionStack,
@@ -176,6 +181,7 @@ pub fn ContextType(
                         .configuration = context.addresses.const_slice(),
                         .io = &context.io,
                     },
+                    .eviction_callback = client_eviction_callback,
                 },
             );
             errdefer context.client.deinit(context.allocator);
@@ -190,6 +196,8 @@ pub fn ContextType(
             context.submitted = .{};
             context.shutdown = Atomic(bool).init(false);
             context.pending = .{ .name = null };
+            context.canceled = false;
+            context.evicted = false;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.on_signal);
@@ -248,8 +256,18 @@ pub fn ContextType(
             on_signal(&self.signal);
         }
 
+        fn client_eviction_callback(client: *Client, _: *const Message.Eviction) void {
+            const self: *Context = @fieldParentPtr("client", client);
+            assert(!self.evicted);
+
+            self.evicted = true;
+            self.cancel_all();
+        }
+
         pub fn tick(self: *Context) void {
-            self.client.tick();
+            if (!self.evicted) {
+                self.client.tick();
+            }
         }
 
         pub fn run(self: *Context) void {
@@ -263,23 +281,7 @@ pub fn ContextType(
                     @panic("IO.run() failed");
                 };
             }
-
-            // Cancel the request_inflight packet if any.
-            //
-            // TODO: Look into completing the inflight packet with a different error than
-            // `error.ClientShutdown`, allow the client user to make a more informed decision
-            // e.g. retrying the inflight packet and just abandoning the ClientShutdown ones.
-            if (self.client.request_inflight) |*inflight| {
-                if (inflight.message.header.operation != .register) {
-                    const packet = @as(UserData, @bitCast(inflight.user_data)).packet;
-                    assert(packet.next == null); // Inflight packet should not be pending.
-                    self.cancel(packet);
-                }
-            }
-
-            // Cancel pending and submitted packets.
-            while (self.pending.pop()) |packet| self.cancel(packet);
-            while (self.submitted.pop()) |packet| self.cancel(packet);
+            self.cancel_all();
         }
 
         fn on_signal(signal: *Signal) void {
@@ -299,6 +301,10 @@ pub fn ContextType(
 
         fn request(self: *Context, packet: *Packet) void {
             assert(self.batch_size_limit != null);
+
+            if (self.evicted) {
+                return self.on_complete(packet, error.ClientEvicted);
+            }
 
             const operation: StateMachine.Operation = operation_from_int(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
@@ -530,12 +536,37 @@ pub fn ContextType(
             }
         }
 
+        fn cancel_all(self: *Context) void {
+            maybe(self.canceled);
+            defer self.canceled = true;
+
+            // Cancel the request_inflight packet if any.
+            //
+            // TODO: Look into completing the inflight packet with a different error than
+            // `error.ClientShutdown`, allow the client user to make a more informed decision
+            // e.g. retrying the inflight packet and just abandoning the ClientShutdown ones.
+            if (!self.canceled) {
+                if (self.client.request_inflight) |*inflight| {
+                    if (inflight.message.header.operation != .register) {
+                        const packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                        assert(packet.next == null); // Inflight packet should not be pending.
+                        self.cancel(packet);
+                    }
+                }
+            }
+
+            // Cancel pending and submitted packets.
+            while (self.pending.pop()) |packet| self.cancel(packet);
+            while (self.submitted.pop()) |packet| self.cancel(packet);
+        }
+
         fn cancel(self: *Context, packet: *Packet) void {
+            const result = if (self.evicted) error.ClientEvicted else error.ClientShutdown;
             var it: ?*Packet = packet;
             while (it) |batched| {
                 assert(batched.batch_next == null or batched.batch_allowed);
                 it = batched.batch_next;
-                self.on_complete(batched, error.ClientShutdown);
+                self.on_complete(batched, result);
             }
         }
 
@@ -552,6 +583,7 @@ pub fn ContextType(
             const result = completion catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
+                    error.ClientEvicted => .client_evicted,
                     error.ClientShutdown => .client_shutdown,
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,
