@@ -79,8 +79,7 @@ fn build_docs(shell: *Shell) !void {
     try shell.pushd("./src/docs_website");
     defer shell.popd();
 
-    try shell.exec("npm install", .{});
-    try shell.exec("npm run build", .{});
+    try shell.exec_zig("build", .{});
 }
 
 fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Language) !void {
