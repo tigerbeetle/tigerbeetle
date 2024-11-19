@@ -22,12 +22,12 @@ pub fn build(b: *std.Build) !void {
     file_checker_run.step.dependOn(&install_assets.step);
 
     const docs_dir = try docs.build(b, website, "../../docs");
-    const install_blog = b.addInstallDirectory(.{
+    const install_docs = b.addInstallDirectory(.{
         .source_dir = docs_dir,
         .install_dir = .prefix,
         .install_subdir = ".",
     });
-    file_checker_run.step.dependOn(&install_blog.step);
+    file_checker_run.step.dependOn(&install_docs.step);
 
     file_checker_run.addArg("zig-out");
 

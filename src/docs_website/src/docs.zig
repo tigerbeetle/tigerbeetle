@@ -1,16 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-const log = std.log.scoped(.blog);
+const log = std.log.scoped(.docs);
 const Website = @import("website.zig").Website;
 const assets = @import("assets.zig");
 const Html = @import("html.zig").Html;
 
-const Redirect = struct {
-    old: []const u8,
-    new: []const u8,
-};
-const redirects = [_]Redirect{};
+const enforce_readme_md = false;
 
 pub fn build(
     b: *std.Build,
@@ -18,35 +14,56 @@ pub fn build(
     source_dir: []const u8,
 ) !std.Build.LazyPath {
     const arena = b.allocator;
-    const blog = b.addWriteFiles();
+    const docs = b.addWriteFiles();
 
-    const posts = try DocPage.find_all(arena, source_dir);
-    std.mem.sort(DocPage, posts, {}, DocPage.desc);
+    const menu = try DocPage.find_all(arena, "TigerBeetle Docs", source_dir);
 
-    for (posts, 0..) |post, i| {
-        const post_prev = if (i < posts.len - 1) posts[i + 1] else null;
-        const post_next = if (i > 0) posts[i - 1] else null;
-        try post.install(b, website, blog, post_prev, post_next);
+    var nav_html = try Html.create(arena);
+    try menu.write_links(nav_html);
+    _ = docs.add("nav.html", nav_html.string());
+
+    for (menu.pages, 0..) |page, i| {
+        const page_prev = if (i < menu.pages.len - 1) menu.pages[i + 1] else null;
+        const page_next = if (i > 0) menu.pages[i - 1] else null;
+        try page.install(b, website, docs, page_prev, page_next);
     }
 
-    // Handle redirects by writing a redirect HTML file to the old directory name.
-    for (redirects) |redirect| {
-        const redirect_target_exists = for (posts) |post| {
-            if (std.mem.eql(u8, post.id, redirect.new)) break true;
-        } else false;
-        assert(redirect_target_exists);
-
-        const url_new = try std.mem.concat(arena, u8, &.{
-            website.url_prefix,
-            "/blog/",
-            redirect.new,
-        });
-        const path_old = b.pathJoin(&.{ redirect.old, "index.html" });
-        _ = blog.add(path_old, try Html.redirect(arena, url_new));
-    }
-
-    return blog.getDirectory();
+    return docs.getDirectory();
 }
+
+const Menu = struct {
+    title: []const u8,
+    path: []const u8,
+    index_page: ?DocPage,
+    menus: []Menu,
+    pages: []DocPage,
+
+    fn asc(context: void, lhs: Menu, rhs: Menu) bool {
+        _ = context;
+        assert(!std.mem.eql(u8, lhs.title, rhs.title));
+        return std.mem.lessThan(u8, lhs.title, rhs.title);
+    }
+
+    fn write_links(self: Menu, html: *Html) !void {
+        try html.write("<ul>", .{});
+        for (self.menus) |menu| {
+            const sub_html = try html.child();
+            try menu.write_links(sub_html);
+            try html.write("<li><a href=\"$url\">$title</a>$menu</li>", .{
+                .url = menu.path,
+                .title = try html.from_md(menu.title),
+                .menu = sub_html,
+            });
+        }
+        for (self.pages) |page| {
+            try html.write("<li><a href=\"$url\">$title</a></li>", .{
+                .url = page.path,
+                .title = try html.from_md(page.title),
+            });
+        }
+        try html.write("</ul>", .{});
+    }
+};
 
 const DocPage = struct {
     path: []const u8,
@@ -84,21 +101,23 @@ const DocPage = struct {
         }
         self.title = title_line[2..];
 
-        // Cut off title and "by" line.
+        // Cut off title line.
         self.content = source[line_it.index..];
     }
 
-    fn desc(context: void, lhs: DocPage, rhs: DocPage) bool {
+    fn asc(context: void, lhs: DocPage, rhs: DocPage) bool {
         _ = context;
         assert(!std.mem.eql(u8, lhs.title, rhs.title));
-        return !std.mem.lessThan(u8, lhs.title, rhs.title);
+        return std.mem.lessThan(u8, lhs.title, rhs.title);
     }
 
-    fn find_all(arena: Allocator, base_path: []const u8) ![]DocPage {
-        var doc_pages = std.ArrayList(DocPage).init(arena);
+    fn find_all(arena: Allocator, title: []const u8, path: []const u8) !Menu {
+        var index_page: ?DocPage = null;
+        var pages = std.ArrayList(DocPage).init(arena);
+        var menus = std.ArrayList(Menu).init(arena);
 
-        var dir = std.fs.cwd().openDir(base_path, .{ .iterate = true }) catch |err| {
-            log.err("unable to open path '{s}'", .{base_path});
+        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
+            log.err("unable to open path '{s}'", .{path});
             return err;
         };
         defer dir.close();
@@ -106,13 +125,36 @@ const DocPage = struct {
         var it = dir.iterate();
         while (try it.next()) |entry| {
             if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".md")) {
-                const path = try std.fs.path.join(arena, &.{ base_path, entry.name });
-                const doc_page = try DocPage.init(arena, path);
-                try doc_pages.append(doc_page);
+                const page_path = try std.fs.path.join(arena, &.{ path, entry.name });
+                const page = try DocPage.init(arena, page_path);
+                if (std.mem.eql(u8, entry.name, "README.md")) {
+                    assert(index_page == null);
+                    index_page = page;
+                } else {
+                    try pages.append(page);
+                }
+            } else if (entry.kind == .directory) {
+                const menu_path = try std.fs.path.join(arena, &.{ path, entry.name });
+                const menu_title = try make_title(arena, entry.name);
+                try menus.append(try find_all(arena, menu_title, menu_path));
             }
         }
 
-        return doc_pages.items;
+        if (enforce_readme_md and index_page == null) {
+            log.err("README.md not found in '{s}'", .{path});
+            return error.MissingReadmeMd;
+        }
+
+        std.mem.sort(DocPage, pages.items, {}, DocPage.asc);
+        std.mem.sort(Menu, menus.items, {}, Menu.asc);
+
+        return .{
+            .title = title,
+            .path = path,
+            .index_page = index_page,
+            .menus = menus.items,
+            .pages = pages.items,
+        };
     }
 
     fn install(
@@ -163,19 +205,19 @@ const DocPage = struct {
         }
     }
 
-    fn header(post: DocPage, arena: Allocator, url_prefix: []const u8) ![]const u8 {
+    fn header(self: DocPage, arena: Allocator, url_prefix: []const u8) ![]const u8 {
         _ = url_prefix;
-        errdefer log.err("error while rendering '{s}' header", .{post.path});
+        errdefer log.err("error while rendering '{s}' header", .{self.path});
 
         var html = try Html.create(arena);
         try html.write(
-            \\<article id="DocPage">
+            \\<article>
             \\  <div class="header">
             \\    <h1>$title</h1>
             \\  </div>
             \\  <div class="content">
         , .{
-            .title = post.title,
+            .title = self.title,
         });
 
         return html.string();
@@ -213,7 +255,7 @@ const DocPage = struct {
         return html.string();
     }
 
-    fn nav_button(post: DocPage, html: *Html, label: []const u8) ![]const u8 {
+    fn nav_button(self: DocPage, html: *Html, label: []const u8) ![]const u8 {
         try html.write(
             \\<a class="button" href="../$id">
             \\  <div class="vstack">
@@ -222,13 +264,29 @@ const DocPage = struct {
             \\  </div>
             \\</a>
         , .{
-            .id = post.id,
+            .id = self.id,
             .label = label,
-            .title = post.title,
+            .title = self.title,
         });
         return html.string();
     }
 };
+
+fn make_title(arena: Allocator, input: []const u8) ![]const u8 {
+    const output = try arena.dupe(u8, input);
+    var needs_upper = true;
+    for (output) |*c| {
+        if (needs_upper) {
+            c.* = std.ascii.toUpper(c.*);
+            needs_upper = false;
+        }
+        switch (c.*) {
+            ' ' => needs_upper = true,
+            else => {},
+        }
+    }
+    return output;
+}
 
 fn path_exists(path: []const u8) !bool {
     std.fs.cwd().access(path, .{}) catch |err| switch (err) {
