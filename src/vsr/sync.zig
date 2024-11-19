@@ -17,10 +17,6 @@ pub const Stage = union(enum) {
     /// Waiting for `Grid.cancel()`.
     canceling_grid,
 
-    /// There is no outstanding work that can conflict with the state sync. Superblock update will
-    /// start later, in the same turn of the main event loop.
-    ready_to_update_checkpoint,
-
     /// Superblock is being updated with the new checkpoint and log suffix (view headers).
     updating_checkpoint: vsr.CheckpointState,
 
@@ -29,8 +25,7 @@ pub const Stage = union(enum) {
             .idle => to == .canceling_commit or
                 to == .canceling_grid,
             .canceling_commit => to == .canceling_grid,
-            .canceling_grid => to == .ready_to_update_checkpoint,
-            .ready_to_update_checkpoint => to == .updating_checkpoint,
+            .canceling_grid => to == .updating_checkpoint,
             .updating_checkpoint => to == .idle,
         };
     }
