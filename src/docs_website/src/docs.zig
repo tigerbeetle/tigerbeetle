@@ -16,7 +16,7 @@ pub fn build(
     const arena = b.allocator;
     const docs = b.addWriteFiles();
 
-    const menu = try DocPage.find_all(arena, "TigerBeetle Docs", source_dir);
+    const menu = try DocPage.find_all(arena, "TigerBeetle Docs", source_dir, source_dir);
 
     var nav_html = try Html.create(arena);
     try menu.write_links(nav_html);
@@ -48,10 +48,10 @@ const Menu = struct {
         try html.write("<ul>", .{});
         for (self.menus) |menu| {
             try html.write("<li><details open>", .{});
-            if (menu.index_page) |_| {
+            if (menu.index_page) |page| {
                 try html.write("<summary><a href=\"$url\">$title</a></summary>", .{
-                    .url = menu.path,
-                    .title = try html.from_md(menu.title),
+                    .url = page.path_target,
+                    .title = try html.from_md(menu.title), // Fabio: index page titles are too long
                 });
             } else {
                 try html.write("<summary>$title</summary>", .{
@@ -63,7 +63,7 @@ const Menu = struct {
         }
         for (self.pages) |page| {
             try html.write("<li><a href=\"$url\">$title</a></li>", .{
-                .url = page.path,
+                .url = page.path_target,
                 .title = try html.from_md(page.title),
             });
         }
@@ -72,22 +72,20 @@ const Menu = struct {
 };
 
 const DocPage = struct {
-    path: []const u8,
-
-    // Derived from path name.
-    id: []const u8,
+    path_source: []const u8,
+    path_target: []const u8,
 
     // Parsed from Markdown content.
     title: []const u8,
     content: []const u8,
 
-    fn init(arena: Allocator, path: []const u8) !DocPage {
-        assert(std.mem.endsWith(u8, path, ".md"));
-        const name = std.fs.path.basename(path);
-        const id = name[0 .. name.len - ".md".len];
+    fn init(arena: Allocator, base_path: []const u8, path_source: []const u8) !DocPage {
+        assert(std.mem.endsWith(u8, path_source, ".md"));
+        var path_target = path_source[base_path.len + 1 ..];
+        path_target = path_target[0 .. path_target.len - ".md".len];
         var post: DocPage = .{
-            .path = path,
-            .id = id,
+            .path_source = path_source,
+            .path_target = path_target,
             .title = undefined,
             .content = undefined,
         };
@@ -96,9 +94,9 @@ const DocPage = struct {
     }
 
     fn load(self: *DocPage, arena: Allocator) !void {
-        errdefer log.err("error while loading '{s}'", .{self.path});
+        errdefer log.err("error while loading '{s}'", .{self.path_source});
 
-        const source = try std.fs.cwd().readFileAlloc(arena, self.path, Website.file_size_max);
+        const source = try std.fs.cwd().readFileAlloc(arena, self.path_source, Website.file_size_max);
         var line_it = std.mem.tokenizeScalar(u8, source, '\n');
 
         const title_line = line_it.next().?;
@@ -117,7 +115,7 @@ const DocPage = struct {
         return std.mem.lessThan(u8, lhs.title, rhs.title);
     }
 
-    fn find_all(arena: Allocator, title: []const u8, path: []const u8) !Menu {
+    fn find_all(arena: Allocator, title: []const u8, base_path: []const u8, path: []const u8) !Menu {
         var index_page: ?DocPage = null;
         var pages = std.ArrayList(DocPage).init(arena);
         var menus = std.ArrayList(Menu).init(arena);
@@ -132,7 +130,7 @@ const DocPage = struct {
         while (try it.next()) |entry| {
             if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".md")) {
                 const page_path = try std.fs.path.join(arena, &.{ path, entry.name });
-                const page = try DocPage.init(arena, page_path);
+                const page = try DocPage.init(arena, base_path, page_path);
                 if (std.mem.eql(u8, entry.name, "README.md")) {
                     assert(index_page == null);
                     index_page = page;
@@ -142,7 +140,7 @@ const DocPage = struct {
             } else if (entry.kind == .directory) {
                 const menu_path = try std.fs.path.join(arena, &.{ path, entry.name });
                 const menu_title = try make_title(arena, entry.name);
-                try menus.append(try find_all(arena, menu_title, menu_path));
+                try menus.append(try find_all(arena, menu_title, base_path, menu_path));
             }
         }
 
@@ -164,18 +162,18 @@ const DocPage = struct {
     }
 
     fn install(
-        page: DocPage,
+        self: DocPage,
         b: *std.Build,
         website: Website,
-        blog: *std.Build.Step.WriteFile,
+        docs: *std.Build.Step.WriteFile,
         page_prev: ?DocPage,
         page_next: ?DocPage,
     ) !void {
         const arena = b.allocator;
         const temp = b.addWriteFiles();
-        const header_path = temp.add("header.html", try page.header(arena, website.url_prefix));
-        const content_path = temp.add("content.md", page.content);
-        const footer_path = temp.add("footer.html", try page.footer(
+        const header_path = temp.add("header.html", try self.header(arena, website.url_prefix));
+        const content_path = temp.add("content.md", self.content);
+        const footer_path = temp.add("footer.html", try self.footer(
             arena,
             page_prev,
             page_next,
@@ -197,15 +195,15 @@ const DocPage = struct {
         const combined = cat_step.captureStdOut();
 
         const page_path = website.write_page(.{
-            .title = page.title,
+            .title = self.title,
             .content = combined,
         });
-        _ = blog.addCopyFile(page_path, b.pathJoin(&.{ page.id, "index.html" }));
+        _ = docs.addCopyFile(page_path, b.pathJoin(&.{ self.path_target, "index.html" }));
 
         // If it exists, copy the page's asset directory.
-        const page_dir = page.path[0 .. page.path.len - ".md".len];
+        const page_dir = self.path_source[0 .. self.path_source.len - ".md".len];
         if (try path_exists(b.pathFromRoot(page_dir))) {
-            _ = blog.addCopyDirectory(b.path(page_dir), page.id, .{
+            _ = docs.addCopyDirectory(b.path(page_dir), self.path_target, .{
                 .include_extensions = &assets.supported_file_types,
             });
         }
@@ -213,7 +211,7 @@ const DocPage = struct {
 
     fn header(self: DocPage, arena: Allocator, url_prefix: []const u8) ![]const u8 {
         _ = url_prefix;
-        errdefer log.err("error while rendering '{s}' header", .{self.path});
+        errdefer log.err("error while rendering '{s}' header", .{self.path_target});
 
         var html = try Html.create(arena);
         try html.write(
@@ -235,7 +233,7 @@ const DocPage = struct {
         post_prev: ?DocPage,
         post_next: ?DocPage,
     ) ![]const u8 {
-        errdefer log.err("error while rendering '{s}' footer", .{self.path});
+        errdefer log.err("error while rendering '{s}' footer", .{self.path_target});
 
         var html = try Html.create(arena);
         try html.write(
@@ -263,14 +261,14 @@ const DocPage = struct {
 
     fn nav_button(self: DocPage, html: *Html, label: []const u8) ![]const u8 {
         try html.write(
-            \\<a class="button" href="../$id">
+            \\<a class="button" href="../$url">
             \\  <div class="vstack">
             \\    <p class="label">$label</p>
             \\    <h2>$title</h2>
             \\  </div>
             \\</a>
         , .{
-            .id = self.id,
+            .url = self.path_target,
             .label = label,
             .title = self.title,
         });
