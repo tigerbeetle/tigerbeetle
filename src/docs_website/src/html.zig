@@ -34,7 +34,7 @@ pub fn write(html: *Html, template: []const u8, replacements: anytype) !void {
     }
 
     var it = std.mem.tokenizeScalar(u8, template, '$');
-    if (it.next()) |prefix| try html.writer.writeAll(prefix);
+    if (template[0] != '$') if (it.next()) |prefix| try html.writer.writeAll(prefix);
     while (it.next()) |chunk| {
         const identifier_len = for (chunk, 0..) |c, index| {
             switch (c) {

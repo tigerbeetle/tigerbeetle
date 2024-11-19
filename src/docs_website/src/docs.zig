@@ -47,13 +47,19 @@ const Menu = struct {
     fn write_links(self: Menu, html: *Html) !void {
         try html.write("<ul>", .{});
         for (self.menus) |menu| {
-            const sub_html = try html.child();
-            try menu.write_links(sub_html);
-            try html.write("<li><a href=\"$url\">$title</a>$menu</li>", .{
-                .url = menu.path,
-                .title = try html.from_md(menu.title),
-                .menu = sub_html,
-            });
+            try html.write("<li><details open>", .{});
+            if (menu.index_page) |_| {
+                try html.write("<summary><a href=\"$url\">$title</a></summary>", .{
+                    .url = menu.path,
+                    .title = try html.from_md(menu.title),
+                });
+            } else {
+                try html.write("<summary>$title</summary>", .{
+                    .title = try html.from_md(menu.title),
+                });
+            }
+            try menu.write_links(html);
+            try html.write("</details></li>", .{});
         }
         for (self.pages) |page| {
             try html.write("<li><a href=\"$url\">$title</a></li>", .{
