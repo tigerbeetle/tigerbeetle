@@ -22,11 +22,7 @@ pub fn build(
     try menu.write_links(nav_html);
     _ = docs.add("nav.html", nav_html.string());
 
-    for (menu.pages, 0..) |page, i| {
-        const page_prev = if (i < menu.pages.len - 1) menu.pages[i + 1] else null;
-        const page_next = if (i > 0) menu.pages[i - 1] else null;
-        try page.install(b, website, docs, page_prev, page_next);
-    }
+    try menu.install(b, website, docs);
 
     return docs.getDirectory();
 }
@@ -69,6 +65,25 @@ const Menu = struct {
         }
         try html.write("</ul>", .{});
     }
+
+    fn install(
+        self: Menu,
+        b: *std.Build,
+        website: Website,
+        docs: *std.Build.Step.WriteFile,
+    ) !void {
+        if (self.index_page) |index_page| {
+            try index_page.install(b, website, docs, null, null);
+        }
+        for (self.menus) |menu| {
+            try menu.install(b, website, docs);
+        }
+        for (self.pages, 0..) |page, i| {
+            const page_prev = if (i < self.pages.len - 1) self.pages[i + 1] else null;
+            const page_next = if (i > 0) self.pages[i - 1] else null;
+            try page.install(b, website, docs, page_prev, page_next);
+        }
+    }
 };
 
 const DocPage = struct {
@@ -82,7 +97,11 @@ const DocPage = struct {
     fn init(arena: Allocator, base_path: []const u8, path_source: []const u8) !DocPage {
         assert(std.mem.endsWith(u8, path_source, ".md"));
         var path_target = path_source[base_path.len + 1 ..];
-        path_target = path_target[0 .. path_target.len - ".md".len];
+        if (std.mem.endsWith(u8, path_target, "/README.md")) {
+            path_target = path_target[0 .. path_target.len - "/README.md".len];
+        } else {
+            path_target = path_target[0 .. path_target.len - ".md".len];
+        }
         var post: DocPage = .{
             .path_source = path_source,
             .path_target = path_target,
