@@ -67,7 +67,10 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             completion: Storage.Write,
             slot: Slot,
             message: *Message.Reply,
+            trigger: WriteTrigger,
         };
+
+        const WriteTrigger = enum { commit, repair };
 
         const WriteQueue = RingBufferType(*Write, .{
             .array = constants.client_replies_iops_write_max,
@@ -298,6 +301,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
 
         pub fn ready_sync(client_replies: *ClientReplies) bool {
             maybe(client_replies.ready_callback == null);
+            assert(client_replies.writing.count() + client_replies.write_queue.count ==
+                client_replies.writes.executing());
 
             return client_replies.writes.available() > 0;
         }
@@ -311,6 +316,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             assert(client_replies.ready_callback == null);
             assert(!client_replies.ready_sync());
             assert(client_replies.writes.available() == 0);
+            assert(client_replies.writing.count() + client_replies.write_queue.count ==
+                client_replies.writes.executing());
 
             // ready_callback will be called the next time a write completes.
             client_replies.ready_callback = callback;
@@ -328,12 +335,14 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             message: *Message.Reply,
-            trigger: enum { commit, repair },
+            trigger: WriteTrigger,
         ) void {
             assert(client_replies.ready_sync());
             assert(client_replies.ready_callback == null);
             assert(client_replies.writes.available() > 0);
             maybe(client_replies.writing.isSet(slot.index));
+            assert(client_replies.writing.count() + client_replies.write_queue.count ==
+                client_replies.writes.executing());
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
             // stored safely in the `client_sessions` trailer.
@@ -381,6 +390,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 .completion = undefined,
                 .message = message.ref(),
                 .slot = slot,
+                .trigger = trigger,
             };
 
             // If there is already a write to the same slot queued (but not started), replace it.
@@ -464,12 +474,14 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             }
 
             if (client_replies.checkpoint_callback != null and
-                client_replies.writes.executing() == 0)
+                client_replies.writes_executing_by_trigger(.commit) == 0)
             {
                 client_replies.checkpoint_done();
             }
         }
 
+        // Wait until all writes with trigger=commit are done, and then invoke the callback.
+        // (Writes with trigger=repair may still be in progress.)
         pub fn checkpoint(
             client_replies: *ClientReplies,
             callback: *const fn (*ClientReplies) void,
@@ -477,9 +489,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             assert(client_replies.checkpoint_callback == null);
             client_replies.checkpoint_callback = callback;
 
-            if (client_replies.writes.executing() == 0) {
-                assert(client_replies.writing.count() == 0);
-                assert(client_replies.write_queue.count == 0);
+            if (client_replies.writes_executing_by_trigger(.commit) == 0) {
                 client_replies.storage.on_next_tick(
                     .vsr,
                     checkpoint_next_tick_callback,
@@ -491,18 +501,38 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         fn checkpoint_next_tick_callback(next_tick: *Storage.NextTick) void {
             const client_replies: *ClientReplies =
                 @alignCast(@fieldParentPtr("checkpoint_next_tick", next_tick));
-            client_replies.checkpoint_done();
+
+            if (client_replies.checkpoint_callback != null) {
+                client_replies.checkpoint_done();
+            }
         }
 
         fn checkpoint_done(client_replies: *ClientReplies) void {
-            assert(client_replies.writes.executing() == 0);
-            assert(client_replies.writing.count() == 0);
-            assert(client_replies.write_queue.count == 0);
+            assert(client_replies.writes_executing_by_trigger(.commit) == 0);
+
+            const repairing = client_replies.writes_executing_by_trigger(.repair);
+            assert(client_replies.writes.executing() == repairing);
+            assert(client_replies.writing.count() + client_replies.write_queue.count == repairing);
 
             const callback = client_replies.checkpoint_callback.?;
             client_replies.checkpoint_callback = null;
 
             callback(client_replies);
+        }
+
+        fn writes_executing_by_trigger(
+            client_replies: *ClientReplies,
+            trigger: WriteTrigger,
+        ) u32 {
+            assert(client_replies.writing.count() + client_replies.write_queue.count ==
+                client_replies.writes.executing());
+
+            var writes = client_replies.writes.iterate();
+            var writes_by_trigger: u32 = 0;
+            while (writes.next()) |write| {
+                writes_by_trigger += @intFromBool(write.trigger == trigger);
+            }
+            return writes_by_trigger;
         }
     };
 }
