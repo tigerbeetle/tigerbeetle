@@ -29,6 +29,7 @@ pub fn init(b: *std.Build, url_prefix: []const u8, pandoc_bin: LazyPath) Website
 pub fn write_page(self: Website, options: struct {
     title: []const u8 = "TigerBeetle",
     author: []const u8 = "TigerBeetle Team",
+    nav: LazyPath,
     content: LazyPath,
 }) LazyPath {
     const b = self.page_writer_exe.step.owner;
@@ -36,6 +37,7 @@ pub fn write_page(self: Website, options: struct {
     page_writer_run.addArg(options.title);
     page_writer_run.addArg(options.author);
     page_writer_run.addArg(self.url_prefix);
+    page_writer_run.addFileArg(options.nav);
     page_writer_run.addFileArg(options.content);
     return page_writer_run.addOutputFileArg("page.html");
 }
