@@ -20,9 +20,10 @@ pub fn build(
 
     var nav_html = try Html.create(arena);
     try menu.write_links(nav_html);
-    _ = docs.add("nav.html", nav_html.string());
+    const temp = b.addWriteFiles();
+    const nav = temp.add("nav.html", nav_html.string());
 
-    try menu.install(b, website, docs);
+    try menu.install(b, website, nav, docs);
 
     return docs.getDirectory();
 }
@@ -70,18 +71,19 @@ const Menu = struct {
         self: Menu,
         b: *std.Build,
         website: Website,
+        nav: std.Build.LazyPath,
         docs: *std.Build.Step.WriteFile,
     ) !void {
         if (self.index_page) |index_page| {
-            try index_page.install(b, website, docs, null, null);
+            try index_page.install(b, website, nav, docs, null, null);
         }
         for (self.menus) |menu| {
-            try menu.install(b, website, docs);
+            try menu.install(b, website, nav, docs);
         }
         for (self.pages, 0..) |page, i| {
             const page_prev = if (i < self.pages.len - 1) self.pages[i + 1] else null;
             const page_next = if (i > 0) self.pages[i - 1] else null;
-            try page.install(b, website, docs, page_prev, page_next);
+            try page.install(b, website, nav, docs, page_prev, page_next);
         }
     }
 };
@@ -96,12 +98,16 @@ const DocPage = struct {
 
     fn init(arena: Allocator, base_path: []const u8, path_source: []const u8) !DocPage {
         assert(std.mem.endsWith(u8, path_source, ".md"));
+
         var path_target = path_source[base_path.len + 1 ..];
-        if (std.mem.endsWith(u8, path_target, "/README.md")) {
+        if (std.mem.eql(u8, path_target, "README.md")) {
+            path_target = ".";
+        } else if (std.mem.endsWith(u8, path_target, "/README.md")) {
             path_target = path_target[0 .. path_target.len - "/README.md".len];
         } else {
             path_target = path_target[0 .. path_target.len - ".md".len];
         }
+
         var post: DocPage = .{
             .path_source = path_source,
             .path_target = path_target,
@@ -109,6 +115,7 @@ const DocPage = struct {
             .content = undefined,
         };
         try post.load(arena);
+
         return post;
     }
 
@@ -184,6 +191,7 @@ const DocPage = struct {
         self: DocPage,
         b: *std.Build,
         website: Website,
+        nav: std.Build.LazyPath,
         docs: *std.Build.Step.WriteFile,
         page_prev: ?DocPage,
         page_next: ?DocPage,
@@ -215,6 +223,7 @@ const DocPage = struct {
 
         const page_path = website.write_page(.{
             .title = self.title,
+            .nav = nav,
             .content = combined,
         });
         _ = docs.addCopyFile(page_path, b.pathJoin(&.{ self.path_target, "index.html" }));
