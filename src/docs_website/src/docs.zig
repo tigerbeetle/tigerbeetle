@@ -19,7 +19,7 @@ pub fn build(
     const menu = try DocPage.find_all(arena, "TigerBeetle Docs", source_dir, source_dir);
 
     var nav_html = try Html.create(arena);
-    try menu.write_links(nav_html);
+    try menu.write_links(website, nav_html);
     const temp = b.addWriteFiles();
     const nav = temp.add("nav.html", nav_html.string());
 
@@ -41,30 +41,36 @@ const Menu = struct {
         return std.mem.lessThan(u8, lhs.title, rhs.title);
     }
 
-    fn write_links(self: Menu, html: *Html) !void {
-        try html.write("<ul>", .{});
+    fn write_links(self: Menu, website: Website, html: *Html) !void {
+        try html.write("<div class=\"menu\">", .{});
         for (self.menus) |menu| {
-            try html.write("<li><details open>", .{});
+            try html.write("<div class=\"item menu-head\">", .{});
             if (menu.index_page) |page| {
-                try html.write("<summary><a href=\"$url\">$title</a></summary>", .{
+                try html.write(
+                    \\<a href="$url_prefix/$url">$title</a>
+                , .{
+                    .url_prefix = website.url_prefix,
                     .url = page.path_target,
                     .title = try html.from_md(menu.title), // Fabio: index page titles are too long
                 });
             } else {
-                try html.write("<summary>$title</summary>", .{
+                try html.write("$title", .{
                     .title = try html.from_md(menu.title),
                 });
             }
-            try menu.write_links(html);
-            try html.write("</details></li>", .{});
+            try html.write("</div>", .{});
+            try menu.write_links(website, html);
         }
         for (self.pages) |page| {
-            try html.write("<li><a href=\"$url\">$title</a></li>", .{
+            try html.write(
+                \\<div class="item"><a href="$url_prefix/$url">$title</a></div>
+            , .{
+                .url_prefix = website.url_prefix,
                 .url = page.path_target,
                 .title = try html.from_md(page.title),
             });
         }
-        try html.write("</ul>", .{});
+        try html.write("</div>", .{});
     }
 
     fn install(
@@ -75,15 +81,13 @@ const Menu = struct {
         docs: *std.Build.Step.WriteFile,
     ) !void {
         if (self.index_page) |index_page| {
-            try index_page.install(b, website, nav, docs, null, null);
+            try index_page.install(b, website, nav, docs);
         }
         for (self.menus) |menu| {
             try menu.install(b, website, nav, docs);
         }
-        for (self.pages, 0..) |page, i| {
-            const page_prev = if (i < self.pages.len - 1) self.pages[i + 1] else null;
-            const page_next = if (i > 0) self.pages[i - 1] else null;
-            try page.install(b, website, nav, docs, page_prev, page_next);
+        for (self.pages) |page| {
+            try page.install(b, website, nav, docs);
         }
     }
 };
@@ -94,7 +98,6 @@ const DocPage = struct {
 
     // Parsed from Markdown content.
     title: []const u8,
-    content: []const u8,
 
     fn init(arena: Allocator, base_path: []const u8, path_source: []const u8) !DocPage {
         assert(std.mem.endsWith(u8, path_source, ".md"));
@@ -112,7 +115,6 @@ const DocPage = struct {
             .path_source = path_source,
             .path_target = path_target,
             .title = undefined,
-            .content = undefined,
         };
         try post.load(arena);
 
@@ -134,9 +136,6 @@ const DocPage = struct {
             return error.TitleInvalid;
         }
         self.title = title_line[2..];
-
-        // Cut off title line.
-        self.content = source[line_it.index..];
     }
 
     fn asc(context: void, lhs: DocPage, rhs: DocPage) bool {
@@ -202,19 +201,7 @@ const DocPage = struct {
         website: Website,
         nav: std.Build.LazyPath,
         docs: *std.Build.Step.WriteFile,
-        page_prev: ?DocPage,
-        page_next: ?DocPage,
     ) !void {
-        const arena = b.allocator;
-        const temp = b.addWriteFiles();
-        const header_path = temp.add("header.html", try self.header(arena, website.url_prefix));
-        const content_path = temp.add("content.md", self.content);
-        const footer_path = temp.add("footer.html", try self.footer(
-            arena,
-            page_prev,
-            page_next,
-        ));
-
         const pandoc_step = std.Build.Step.Run.create(b, "run pandoc");
         pandoc_step.addFileArg(website.pandoc_bin);
         pandoc_step.addArgs(&.{ "--from", "gfm", "--to", "html5" });
@@ -222,18 +209,12 @@ const DocPage = struct {
         pandoc_step.addFileArg(b.path("pandoc/anchor-links.lua"));
         pandoc_step.addArg("--output");
         const pandoc_out = pandoc_step.addOutputFileArg("pandoc-out.html");
-        pandoc_step.addFileArg(content_path);
-
-        const cat_step = b.addSystemCommand(&.{"cat"});
-        cat_step.addFileArg(header_path);
-        cat_step.addFileArg(pandoc_out);
-        cat_step.addFileArg(footer_path);
-        const combined = cat_step.captureStdOut();
+        pandoc_step.addFileArg(b.path(self.path_source));
 
         const page_path = website.write_page(.{
             .title = self.title,
             .nav = nav,
-            .content = combined,
+            .content = pandoc_out,
         });
         _ = docs.addCopyFile(page_path, b.pathJoin(&.{ self.path_target, "index.html" }));
 
@@ -244,72 +225,6 @@ const DocPage = struct {
                 .include_extensions = &assets.supported_file_types,
             });
         }
-    }
-
-    fn header(self: DocPage, arena: Allocator, url_prefix: []const u8) ![]const u8 {
-        _ = url_prefix;
-        errdefer log.err("error while rendering '{s}' header", .{self.path_target});
-
-        var html = try Html.create(arena);
-        try html.write(
-            \\<article>
-            \\  <div class="header">
-            \\    <h1>$title</h1>
-            \\  </div>
-            \\  <div class="content">
-        , .{
-            .title = self.title,
-        });
-
-        return html.string();
-    }
-
-    fn footer(
-        self: DocPage,
-        arena: Allocator,
-        post_prev: ?DocPage,
-        post_next: ?DocPage,
-    ) ![]const u8 {
-        errdefer log.err("error while rendering '{s}' footer", .{self.path_target});
-
-        var html = try Html.create(arena);
-        try html.write(
-            \\  </div>
-            \\</article>
-            \\<nav id="navigation-buttons">
-            \\  $button_next
-            \\  $button_prev
-            \\</nav>
-        , .{
-            .button_next = if (post_next) |post| try nav_button(
-                post,
-                try html.child(),
-                "← Next",
-            ) else "",
-            .button_prev = if (post_prev) |post| try nav_button(
-                post,
-                try html.child(),
-                "Previous →",
-            ) else "",
-        });
-
-        return html.string();
-    }
-
-    fn nav_button(self: DocPage, html: *Html, label: []const u8) ![]const u8 {
-        try html.write(
-            \\<a class="button" href="../$url">
-            \\  <div class="vstack">
-            \\    <p class="label">$label</p>
-            \\    <h2>$title</h2>
-            \\  </div>
-            \\</a>
-        , .{
-            .url = self.path_target,
-            .label = label,
-            .title = self.title,
-        });
-        return html.string();
     }
 };
 
