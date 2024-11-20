@@ -447,105 +447,108 @@ const Command = struct {
             watchdog.detach();
         }
 
-        // Try to lock all memory in the process to avoid the kernel swapping pages to disk and
-        // potentially introducting undetectable disk corruption into memory.
-        // This is a best-effort attempt not a hard rule (as it may not cover all memory edge cases)
-        // so warn on error to notify the operator that they should disable swap if possible.
-        const lock_mem_err = "Unable to lock pages in memory ({s})" ++
-            " - kernel swapping may bypass TigerBeetle's storage fault tolerance. ";
-        switch (builtin.os.tag) {
-            .linux => blk: {
-                const MCL_CURRENT = 1; // Lock all currently mapped pages.
-                const MCL_ONFAULT = 3; // Lock all pages faulted in (i.e. stack space).
-                const rc = os.linux.syscall1(.mlockall, MCL_CURRENT | MCL_ONFAULT);
-                switch (os.linux.E.init(rc)) {
-                    .SUCCESS => break :blk,
-                    .AGAIN => log.warn(lock_mem_err, .{"some addresses could not be locked"}),
-                    .NOMEM => log.warn(lock_mem_err, .{"total memory would exceed RLIMIT_MEMLOCK"}),
-                    .PERM => log.warn(lock_mem_err, .{"not enough privileges to lock memory"}),
-                    .INVAL => unreachable, // MCL_ONFAULT specified with MCL_CURRENT.
-                    else => |err| return stdx.unexpected_errno("mlockall", err),
-                }
-                log.warn(
-                    "If this is a production replica, consider either " ++
-                        "increasing the MEMLOCK process limit, " ++
-                        "running the replica with CAP_IPC_LOCK privilege, " ++
-                        "or disabling swap system-wide.",
-                    .{},
-                );
-            },
-            .macos => {
-                // macOS has mlock() but not mlockall(). mlock() requires an address range which
-                // would be difficult to gather for non-heap memory that is also faulted in, such as
-                // the stack, globals, etc.
-            },
-            .windows => {
-                // Windows has VirtualLock but it works similarly to mlock with an address range.
-                // It would be difficult to gather the addresses of non-heap memory that is also
-                // faulted in, such as the stack, globals, etc. Instead, SetProcessWorkingSetSize
-                // can be used to lock all existing pages into memory to avoid swapping.
-                const set_process_working_set_size = @extern(
-                    *const fn (
-                        hProcess: os.windows.HANDLE,
-                        dwMinimumWorkingSetSize: os.windows.SIZE_T,
-                        dwMaximumWorkingSetSize: os.windows.SIZE_T,
-                    ) callconv(os.windows.WINAPI) os.windows.BOOL,
-                    .{
-                        .library_name = "kernel32",
-                        .name = "SetProcessWorkingSetSize",
-                    },
-                );
-                const get_process_working_set_size = @extern(
-                    *const fn (
-                        hProcess: os.windows.HANDLE,
-                        lpMinimumWorkingSetSize: *os.windows.SIZE_T,
-                        lpMaximumWorkingSetSize: *os.windows.SIZE_T,
-                    ) callconv(os.windows.WINAPI) os.windows.BOOL,
-                    .{
-                        .library_name = "kernel32",
-                        .name = "GetProcessWorkingSetSize",
-                    },
-                );
+        if (!args.development) {
+            // Try to lock all memory in the process to avoid the kernel swapping pages to disk and
+            // potentially introducting undetectable disk corruption into memory.
+            // This is a best-effort attempt and not a hard rule as it may not cover all memory edge
+            // case. So warn on error to notify the operator to adjust conditions if possible.
+            const lock_mem_err = "Unable to lock pages in memory ({s})" ++
+                " - kernel swapping may bypass TigerBeetle's storage fault tolerance. ";
 
-                const process_handle = os.windows.kernel32.GetCurrentProcess();
-                var working_set_min: os.windows.SIZE_T = 0;
-                var working_set_max: os.windows.SIZE_T = 0;
-
-                if (get_process_working_set_size(
-                    process_handle,
-                    &working_set_min,
-                    &working_set_max,
-                ) == os.windows.FALSE) {
-                    working_set_min = counting_allocator.size; // Count bytes allocated so far.
-                    working_set_min += 64 * 1024 * 1024; // 64mb buffer room for stack/globals.
-                    working_set_max = working_set_min * 2; // Buffer room for new page faults.
-                }
-
-                if (set_process_working_set_size(
-                    process_handle,
-                    working_set_min,
-                    working_set_max,
-                ) == os.windows.FALSE) {
-                    // From std.os.windows.unexpectedError():
-                    const fmt_flags = os.windows.FORMAT_MESSAGE_FROM_SYSTEM |
-                        os.windows.FORMAT_MESSAGE_IGNORE_INSERTS;
-
-                    // 614 is the length of the longest windows error description
-                    var buf_wstr: [614:0]os.windows.WCHAR = undefined;
-                    const len = os.windows.kernel32.FormatMessageW(
-                        fmt_flags,
-                        null,
-                        os.windows.kernel32.GetLastError(),
-                        os.windows.LANG.NEUTRAL | (os.windows.SUBLANG.DEFAULT << 10),
-                        &buf_wstr,
-                        buf_wstr.len,
-                        null,
+            switch (builtin.os.tag) {
+                .linux => blk: {
+                    const MCL_CURRENT = 1; // Lock all currently mapped pages.
+                    const MCL_ONFAULT = 3; // Lock all pages faulted in (i.e. stack space).
+                    const rc = os.linux.syscall1(.mlockall, MCL_CURRENT | MCL_ONFAULT);
+                    switch (os.linux.E.init(rc)) {
+                        .SUCCESS => break :blk,
+                        .AGAIN => log.warn(lock_mem_err, .{"some addresses could not be locked"}),
+                        .NOMEM => log.warn(lock_mem_err, .{"memory would exceed RLIMIT_MEMLOCK"}),
+                        .PERM => log.warn(lock_mem_err, .{"not enough privileges to lock memory"}),
+                        .INVAL => unreachable, // MCL_ONFAULT specified with MCL_CURRENT.
+                        else => |err| return stdx.unexpected_errno("mlockall", err),
+                    }
+                    log.warn(
+                        "If this is a production replica, consider either " ++
+                            "increasing the MEMLOCK process limit, " ++
+                            "running the replica with CAP_IPC_LOCK privilege, " ++
+                            "or disabling swap system-wide.",
+                        .{},
+                    );
+                },
+                .macos => {
+                    // macOS has mlock() but not mlockall(). mlock() requires an address range which
+                    // would be difficult to gather for non-heap memory that is also faulted in,
+                    // such as the stack, globals, etc.
+                },
+                .windows => {
+                    // Windows has VirtualLock which works similar to mlock with an address range.
+                    // It would be difficult to gather the addresses of non-heap memory that is also
+                    // faulted in, such as the stack, globals, etc. SetProcessWorkingSetSize can be
+                    // used instead to lock all existing pages into memory to avoid swapping.
+                    const set_process_working_set_size = @extern(
+                        *const fn (
+                            hProcess: os.windows.HANDLE,
+                            dwMinimumWorkingSetSize: os.windows.SIZE_T,
+                            dwMaximumWorkingSetSize: os.windows.SIZE_T,
+                        ) callconv(os.windows.WINAPI) os.windows.BOOL,
+                        .{
+                            .library_name = "kernel32",
+                            .name = "SetProcessWorkingSetSize",
+                        },
+                    );
+                    const get_process_working_set_size = @extern(
+                        *const fn (
+                            hProcess: os.windows.HANDLE,
+                            lpMinimumWorkingSetSize: *os.windows.SIZE_T,
+                            lpMaximumWorkingSetSize: *os.windows.SIZE_T,
+                        ) callconv(os.windows.WINAPI) os.windows.BOOL,
+                        .{
+                            .library_name = "kernel32",
+                            .name = "GetProcessWorkingSetSize",
+                        },
                     );
 
-                    log.warn(lock_mem_err, .{std.unicode.fmtUtf16Le(buf_wstr[0..len])});
-                }
-            },
-            else => @compileError("unsupported platform"),
+                    const process_handle = os.windows.kernel32.GetCurrentProcess();
+                    var working_set_min: os.windows.SIZE_T = 0;
+                    var working_set_max: os.windows.SIZE_T = 0;
+
+                    if (get_process_working_set_size(
+                        process_handle,
+                        &working_set_min,
+                        &working_set_max,
+                    ) == os.windows.FALSE) {
+                        working_set_min = counting_allocator.size; // Count bytes allocated so far.
+                        working_set_min += 64 * 1024 * 1024; // 64mb buffer room for stack/globals.
+                        working_set_max = working_set_min * 2; // Buffer room for new page faults.
+                    }
+
+                    if (set_process_working_set_size(
+                        process_handle,
+                        working_set_min,
+                        working_set_max,
+                    ) == os.windows.FALSE) {
+                        // From std.os.windows.unexpectedError():
+                        const fmt_flags = os.windows.FORMAT_MESSAGE_FROM_SYSTEM |
+                            os.windows.FORMAT_MESSAGE_IGNORE_INSERTS;
+
+                        // 614 is the length of the longest windows error description
+                        var buf_wstr: [614:0]os.windows.WCHAR = undefined;
+                        const len = os.windows.kernel32.FormatMessageW(
+                            fmt_flags,
+                            null,
+                            os.windows.kernel32.GetLastError(),
+                            os.windows.LANG.NEUTRAL | (os.windows.SUBLANG.DEFAULT << 10),
+                            &buf_wstr,
+                            buf_wstr.len,
+                            null,
+                        );
+
+                        log.warn(lock_mem_err, .{std.unicode.fmtUtf16Le(buf_wstr[0..len])});
+                    }
+                },
+                else => @compileError("unsupported platform"),
+            }
         }
 
         while (true) {
