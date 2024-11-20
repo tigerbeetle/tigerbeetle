@@ -19,107 +19,38 @@
     <link rel="icon" href="$url_prefix/img/favicon.png">
     <link rel="alternate" type="application/atom+xml" href="$url_prefix/blog/atom.xml">
     <link rel="stylesheet" type="text/css" href="$url_prefix/style/style.css">
-    <link rel="stylesheet" type="text/css" href="$url_prefix/style/fonts.css">
     <link rel="stylesheet" type="text/css" href="$url_prefix/style/highlight.css">
     <script defer data-domain="tigerbeetle.com" src="https://plausible.io/js/script.js"></script>
   </head>
   <body>
-    <nav>
+    <nav class="top">
       <div class="logo">
-        <a href="/" style="height: 26px;">
-          <img src="$url_prefix/img/tigerbeetle-logo.svg" alt="TigerBeetle logo" width="137" height="26">
-        </a>
-        <a id="toggle-button" onclick="toggleMenu();">
-          <img id="hamburger-menu-icon" src="$url_prefix/img/hambuger-menu.svg" alt="Expand menu" width="24" height="24">
-          <img id="close-icon" style="display: none;" src="$url_prefix/img/close.svg" alt="Close menu" width="24" height="24">
+        <a href="https://tigerbeetle.com">
+          <img src="$url_prefix/img/tigerbeetle-logo.svg" alt="TigerBeetle logo" width="127" height="24">
         </a>
       </div>
-      <div class="links hidden" id="toggle-menu">
-        <div class="spacer"></div>
-        <a href="https://docs.tigerbeetle.com">Docs</a>
-        <a href="/blog">Blog</a>
-        <a href="https://join.slack.com/t/tigerbeetle/shared_invite/zt-21xk62q7l-p~~G7~H01zQb88rQn7tWfQ">
-          <img src="$url_prefix/img/icon-slack.svg" alt="Slack icon" width="20">
-          Slack
-        </a>
-        <div class="spacer"></div>
-        <a href="https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle" target="_blank" class="button primary">
-          Subscribe
-        </a>
-      </div>
-    </nav>
-    <nav class="side">
-      $nav
+      <div class="line"></div>
+      <a href="$url_prefix/">Docs</a>
+      <div class="spacer"></div>
+      <input type="search" placeholder="Search" />
+      <div class="spacer"></div>
+      <a href="https://github.com/tigerbeetle/tigerbeetle">GitHub</a>
     </nav>
     <main>
-      $content
+      <nav class="side">
+        $nav
+      </nav>
+      <article>
+        <div class="content">
+          $content
+        </div>
+      </article>
     </main>
-    <footer id="sitemap">
-      <div class="wrapper">
-        <div class="logo column">
-          <a href="/" style="display: block; width: 118px; height: 24px;">
-            <img src="$url_prefix/img/tigerbeetle-logo.svg" alt="TigerBeetle logo" width="118" height="24">
-          </a>
-        </div>
-        <div class="column">
-          <h3>Product</h3>
-          <a href="$url_prefix/"><p>Home</p></a>
-          <a href="https://www.youtube.com/watch?v=32LMicc0gRA"><p>QCon SF Talk</p></a>
-          <a href="https://sim.tigerbeetle.com/"><p>Simulator</p></a>
-          <a href="https://github.com/tigerbeetle/tigerbeetle/releases"><p>Latest Release</p></a>
-        </div>
-        <div class="column">
-          <h3>Resources</h3>
-          <a href="https://docs.tigerbeetle.com/"><p>Docs</p></a>
-          <a href="/blog"><p>Blog</p></a>
-          <a href="https://github.com/tigerbeetle/tigerbeetle"><p>GitHub</p></a>
-        </div>
-        <div class="column">
-          <h3>Connect</h3>
-          <a href="https://join.slack.com/t/tigerbeetle/shared_invite/zt-21xk62q7l-p~~G7~H01zQb88rQn7tWfQ"><p>Slack</p></a>
-          <a href="https://twitter.com/TigerBeetleDB"><p>X</p></a>
-          <a href="https://www.youtube.com/channel/UC3TlyQ3h6lC_jSWust2leGg"><p>YouTube</p></a>
-          <a href="https://www.linkedin.com/company/tigerbeetle/"><p>LinkedIn</p></a>
-          <a href="mailto:info@tigerbeetle.com"><p>Contact Us</p></a>
-        </div>
-        <div id="newsletter" class="column">
-          <h3>Newsletter</h3>
-          <p>Get monthly highlights and carefully crafted updates.</p>
-          <a class="button" href="https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle">Subscribe</a>
-          <a href="https://us13.campaign-archive.com/home/?u=32cd932058e988b44c838f7bc&id=fca295a96e"><p>Past Newsletters →</p></a>
-        </div>
-        <p id="copyright">
-          Copyright &copy; 2024 TigerBeetle, Inc.
-          <br>
-          All Rights Reserved.
-        </p>
-      </div>
-    </footer>
     <script>
-      function toggleMenu() {
-        const menu = document.getElementById('toggle-menu');
-        const hamburgerMenuIcon = document.getElementById('hamburger-menu-icon');
-        const closeIcon = document.getElementById('close-icon');
-        if (menu.classList.contains('hidden')) {
-          menu.classList.remove('hidden');
-          hamburgerMenuIcon.style.display = 'none';
-          closeIcon.style.display = 'block';
-        } else {
-          menu.classList.add('hidden');
-          hamburgerMenuIcon.style.display = 'block';
-          closeIcon.style.display = 'none';
-        }
-      }
-
-      function greet() {
-        const beetleHi = document.getElementById('beetle-hi');
-        beetleHi.classList.add('visible');
-        setTimeout(() => beetleHi.classList.remove('visible'), 3000);
-      }
-
-      document.body.classList.add('fonts-loading');
-      document.fonts.ready.finally(() => {
-        document.body.classList.remove('fonts-loading');
+      document.querySelectorAll(".menu-head").forEach(e => {
+        e.addEventListener("click", () => {
+          e.classList.toggle("expanded");
+        });
       });
     </script>
   </body>
