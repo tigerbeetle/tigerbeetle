@@ -122,7 +122,11 @@ const DocPage = struct {
     fn load(self: *DocPage, arena: Allocator) !void {
         errdefer log.err("error while loading '{s}'", .{self.path_source});
 
-        const source = try std.fs.cwd().readFileAlloc(arena, self.path_source, Website.file_size_max);
+        const source = try std.fs.cwd().readFileAlloc(
+            arena,
+            self.path_source,
+            Website.file_size_max,
+        );
         var line_it = std.mem.tokenizeScalar(u8, source, '\n');
 
         const title_line = line_it.next().?;
@@ -141,7 +145,12 @@ const DocPage = struct {
         return std.mem.lessThan(u8, lhs.title, rhs.title);
     }
 
-    fn find_all(arena: Allocator, title: []const u8, base_path: []const u8, path: []const u8) !Menu {
+    fn find_all(
+        arena: Allocator,
+        title: []const u8,
+        base_path: []const u8,
+        path: []const u8,
+    ) !Menu {
         var index_page: ?DocPage = null;
         var pages = std.ArrayList(DocPage).init(arena);
         var menus = std.ArrayList(Menu).init(arena);
