@@ -56,7 +56,7 @@ public class IntegrationTest {
 
     @BeforeClass
     public static void initialize() throws Exception {
-        server = new Server();
+        server = new Server("tests");
         client = new Client(clusterId, new String[] {server.address});
     }
 
@@ -946,6 +946,37 @@ public class IntegrationTest {
 
             final var requestException = (RequestException) executionException.getCause();
             assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
+        }
+    }
+
+    @Test
+    public void testClientEvicted() throws Throwable {
+        final int CLIENTS_MAX = 64;
+
+        // Use a separate server to avoid evicting the test's shared client.
+        try (final var server = new Server("testClientEvicted")) {
+            try (final var client_evict =
+                    new Client(clusterId, new String[] {server.getAddress()})) {
+                var accounts_first = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
+                assertTrue(accounts_first.getLength() == 0);
+
+
+                for (int i = 0; i < CLIENTS_MAX; i++) {
+                    try (final var client =
+                            new Client(clusterId, new String[] {server.getAddress()})) {
+                        var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
+                        assertTrue(accounts.getLength() == 0);
+                    }
+                }
+
+                try {
+                    var accounts = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
+                    assertTrue(accounts.getLength() == 0);
+                    assert false;
+                } catch (RequestException requestException) {
+                    assertEquals(PacketStatus.ClientEvicted.value, requestException.getStatus());
+                }
+            }
         }
     }
 
@@ -2250,13 +2281,14 @@ public class IntegrationTest {
 
     private static class Server implements AutoCloseable {
 
-        public static final String TB_FILE = "./0_0.tigerbeetle.tests";
         public static final String TB_SERVER = "../../../zig-out/bin/tigerbeetle";
 
+        public final String tb_file;
         private final Process process;
         private String address;
 
-        public Server() throws IOException, Exception, InterruptedException {
+        public Server(final String label) throws IOException, Exception, InterruptedException {
+            this.tb_file = "./0_0.tigerbeetle." + label;
 
             cleanUp();
 
@@ -2271,7 +2303,7 @@ public class IntegrationTest {
             }
 
             final var format = Runtime.getRuntime().exec(new String[] {exe, "format", "--cluster=0",
-                    "--replica=0", "--replica-count=1", "--development", TB_FILE});
+                    "--replica=0", "--replica-count=1", "--development", tb_file});
             if (format.waitFor() != 0) {
                 final var reader =
                         new BufferedReader(new InputStreamReader(format.getErrorStream()));
@@ -2280,7 +2312,7 @@ public class IntegrationTest {
             }
 
             this.process = new ProcessBuilder()
-                    .command(new String[] {exe, "start", "--addresses=0", "--development", TB_FILE})
+                    .command(new String[] {exe, "start", "--addresses=0", "--development", tb_file})
                     .redirectOutput(Redirect.PIPE).redirectError(Redirect.INHERIT).start();
 
             final var stdout = process.getInputStream();
@@ -2304,7 +2336,7 @@ public class IntegrationTest {
                     process.destroy();
                 }
 
-                final var file = new File("./" + TB_FILE);
+                final var file = new File("./" + tb_file);
                 file.delete();
             } catch (Throwable any) {
                 throw new Exception("Cleanup has failed");

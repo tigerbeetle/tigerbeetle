@@ -141,6 +141,15 @@ Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code fore
     also why **tests must test exhaustively**, not only with valid data but also with invalid data,
     and as valid data becomes invalid.
 
+  - Assertions are a safety net, not a substitute for human understanding. With simulation testing,
+    there is the temptation to trust the fuzzer. But a fuzzer can prove only the presence of bugs,
+    not their absence. Therefore:
+    - Build a precise mental model of the code first,
+    - encode your understanding in the form of assertions,
+    - write the code and comments to explain and justify the mental model to your reviewer,
+    - and use VOPR as the final line of defense, to find bugs in your and reviewer's understanding
+      of code.
+
 - All memory must be statically allocated at startup. **No memory may be dynamically allocated (or
   freed and reallocated) after initialization.** This avoids unpredictable behavior that can
   significantly affect performance, and avoids use-after-free. As a second-order effect, it is our

@@ -1170,11 +1170,13 @@ public enum PacketStatus : byte
 
     TooMuchData = 1,
 
-    ClientShutdown = 2,
+    ClientEvicted = 2,
 
-    InvalidOperation = 3,
+    ClientShutdown = 3,
 
-    InvalidDataSize = 4,
+    InvalidOperation = 4,
+
+    InvalidDataSize = 5,
 
 }
 

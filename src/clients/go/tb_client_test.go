@@ -61,6 +61,9 @@ func WithClient(t testing.TB, withClient func(Client)) {
 	}
 
 	tbStart := exec.Command(tigerbeetlePath, "start", addressArg, cacheSizeArg, fileName)
+	if testing.Verbose() {
+		tbStart.Stderr = os.Stderr
+	}
 	if err := tbStart.Start(); err != nil {
 		t.Fatal(err)
 	}

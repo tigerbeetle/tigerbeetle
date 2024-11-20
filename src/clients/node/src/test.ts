@@ -1431,7 +1431,7 @@ async function main () {
   const start = new Date().getTime()
   try {
     for (let i = 0; i < tests.length; i++) {
-        await tests[i].fn().then(() => {
+      await tests[i].fn().then(() => {
         console.log(tests[i].name + ": PASSED")
       }).catch(error => {
         console.log(tests[i].name + ": FAILED")

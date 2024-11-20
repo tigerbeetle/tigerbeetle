@@ -37,12 +37,20 @@ Release artifacts are uploaded to appropriate package registries. GitHub release
 is used for synchronization:
 
 - a draft release is created at the start of the publishing process,
-- artifacts are uploaded to GitHub releases, npm, Maven Central, and Nuget. For
-  Go, a new commit is pushed to <https://github.com/tigerbeetle/tigerbeetle-go>
+- artifacts are uploaded to GitHub releases, npm, Maven Central, and Nuget. For Go, a new commit is
+  pushed to <https://github.com/tigerbeetle/tigerbeetle-go>. Similarly, docs are uploaded to
+  <https://github.com/tigerbeetle/docs>.
 - if publishing to all registries were successfully, the release is marked as
   non-draft.
 
-All publishing keys are stored as GitHub Actions in the `release` environment.
+All publishing keys are stored as GitHub Actions in the `release` environment. For Go and docs,
+a personal access token is used. These tokens expire after a year, to refresh a token:
+
+- Create fine grained personal access token, PAT, using your personal GitHub account ([GitHub
+  documentation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token))
+- Scope the token to the tigerbeetle github organization.
+- Grant write access to the relevant repo (use separate tokens for different repositories).
+- Update the token in the `release` environment in the `tigerbeetle` repository.
 
 ## Versioning
 

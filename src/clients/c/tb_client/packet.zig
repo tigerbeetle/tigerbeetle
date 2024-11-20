@@ -23,6 +23,7 @@ pub const Packet = extern struct {
     pub const Status = enum(u8) {
         ok,
         too_much_data,
+        client_evicted,
         client_shutdown,
         invalid_operation,
         invalid_data_size,

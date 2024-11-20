@@ -41,7 +41,7 @@ A client session ends when either:
 
 When a client session is registering and the number of active sessions in the cluster is already at
 the cluster's concurrent client session
-[limit](https://tigerbeetle.com/blog/a-database-without-dynamic-memory/) (`config.clients_max`, 32
+[limit](https://tigerbeetle.com/blog/a-database-without-dynamic-memory/) (`config.clients_max`, 64
 by default), an existing client session must be evicted to make space for the new session.
 
 - After a session is evicted by the cluster, no future requests from that session will ever execute.
@@ -50,8 +50,6 @@ by default), an existing client session must be evicted to make space for the ne
 The cluster sends a message to notify the evicted session that it has ended. Typically the evicted
 client is no longer active (already terminated), but if it is active, the eviction message causes it
 to self-terminate, bubbling up to the application as an `session evicted` error.
-
-(TODO: Right now evicted clients panic — fix that so this is accurate.)
 
 If active clients are terminating with `session evicted` errors, it most likely indicates that the
 application is trying to run too many concurrent clients. For performance reasons, it is recommended

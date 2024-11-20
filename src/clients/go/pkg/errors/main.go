@@ -30,6 +30,10 @@ type ErrInvalidAddress struct{}
 
 func (s ErrInvalidAddress) Error() string { return "Invalid client cluster address." }
 
+type ErrClientEvicted struct{}
+
+func (s ErrClientEvicted) Error() string { return "Client was evicted." }
+
 type ErrClientClosed struct{}
 
 func (s ErrClientClosed) Error() string { return "Client was closed." }

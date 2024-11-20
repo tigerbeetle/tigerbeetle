@@ -3,6 +3,67 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.13
+
+Released: 2024-11-18
+
+### Safety And Performance
+
+- [#2461](https://github.com/tigerbeetle/tigerbeetle/pull/2461)
+
+  Fix a broken assert when a recently-state-synced replica that has not completed journal repair
+  receives an old `commit` message.
+
+- [#2474](https://github.com/tigerbeetle/tigerbeetle/pull/2474)
+
+  Retry `EAGAIN` on (disk) reads. This is essential for running TigerBeetle on XFS, since XFS
+  returns `EAGAIN` unexpectedly.
+
+- [#2476](https://github.com/tigerbeetle/tigerbeetle/pull/2476)
+
+  Fix a message bus crash when a client reconnects to a replica without the replica receiving a
+  disconnect for the first connection.
+
+- [#2475](https://github.com/tigerbeetle/tigerbeetle/pull/2475)
+
+  Save 256KiB of RAM by not having a prefetch cache for historical balances.
+  (Historical balances are never prefetched, so this cache was unused.)
+
+- [#2482](https://github.com/tigerbeetle/tigerbeetle/pull/2482)
+
+  Update hardware requirements in the documentation to include the recommended network bandwidth,
+  advice for very large data files, and farther emphasis on the importance of ECC RAM.
+
+- [#2484](https://github.com/tigerbeetle/tigerbeetle/pull/2484)
+
+  Don't panic the client when the client's session is
+  [evicted](https://docs.tigerbeetle.com/reference/sessions/#eviction).
+  Instead, report an error any time a new batch is submitted to the evicted client.
+  (How the error is reported depends on the client language – e.g. Java throws an exception, whereas
+  Node.js rejects the `Promise`).
+
+  Note that if running clients are evicted, that typically indicates that there are too many clients
+  running – check out the
+  [suggested system architecture](https://docs.tigerbeetle.com/coding/system-architecture/).
+
+### Features
+
+- [#2464](https://github.com/tigerbeetle/tigerbeetle/pull/2464)
+
+  Add REPL interactivity. Also change the REPL from dynamic to static allocation.
+  Thanks @wpaulino!
+
+### Internals
+
+- [#2481](https://github.com/tigerbeetle/tigerbeetle/pull/2481)
+
+  Expose the VSR timestamp to the client. (This is an experimental feature which will be removed
+  soon – don't use this!)
+
+### TigerTracks 🎧
+
+- [Olympic Airways](https://www.youtube.com/watch?v=4BcNLA2KB2c)
+
 ## TigerBeetle 0.16.12
 
 Released: 2024-11-11

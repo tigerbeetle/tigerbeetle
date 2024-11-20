@@ -267,7 +267,8 @@ fn on_completion(
     _ = timestamp;
 
     switch (packet.status) {
-        .ok, .client_shutdown => {}, // Handled on the JS side to throw exception.
+        .ok => {},
+        .client_evicted, .client_shutdown => {}, // Handled on the JS side to throw exception.
         .too_much_data => unreachable, // We limit packet data size during request().
         .invalid_operation => unreachable, // We check the operation during request().
         .invalid_data_size => unreachable, // We set correct data size during request().
@@ -337,6 +338,9 @@ fn on_completion_js(
                 },
                 .client_shutdown => {
                     break :blk translate.throw(env, "Client was shutdown.");
+                },
+                .client_evicted => {
+                    break :blk translate.throw(env, "Client was evicted.");
                 },
                 else => unreachable, // all other packet status' handled in previous callback.
             }
