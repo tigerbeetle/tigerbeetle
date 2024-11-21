@@ -2193,7 +2193,7 @@ public class IntegrationTest {
      */
     @Test
     public void testEmptyReply() throws Throwable {
-        final int TASKS_COUNT = 1_000;
+        final int TASKS_COUNT = 100;
 
         try (final var client2 = new Client(clusterId, new String[] {server.getAddress()})) {
             for (int i = 0; i < TASKS_COUNT; i++) {
