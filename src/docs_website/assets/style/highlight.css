@@ -3,7 +3,7 @@
   --comment-gray: #6E6E6E;
 }
 
-.content {
+.content .source-code {
   code {
     color: var(--default-text);
   }
