@@ -7,9 +7,9 @@
   --gray-11: #646464;
   --gray-12: #202020;
   --yellow-10: #FFDC00;
-  --indigo-10: #3358D4;
+  --blue-10: #0588F0;
 
-  --primary: var(--indigo-10);
+  --primary: var(--blue-10);
 }
 
 @media (prefers-color-scheme: dark) {
