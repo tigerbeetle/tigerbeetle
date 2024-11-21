@@ -5,7 +5,7 @@ function Header (h)
       h.content,           -- content
       '#' .. h.identifier, -- href
       '',                  -- title
-      {class = 'anchor', ['aria-hidden'] = 'true'} -- attributes
+      {class = 'anchor'}   -- attributes
     )
     h.content = {anchor_link}
     return h

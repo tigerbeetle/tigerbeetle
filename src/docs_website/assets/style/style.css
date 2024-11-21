@@ -131,6 +131,7 @@ nav.side {
   font-size: 14px;
   line-height: 20px;
   color: var(--gray-11);
+  user-select: none;
 
   a {
     color: var(--gray-11);
