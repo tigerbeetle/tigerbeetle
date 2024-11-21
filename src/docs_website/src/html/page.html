@@ -61,6 +61,13 @@
           e.classList.toggle("expanded");
         });
       });
+      addEventListener("load", () => {
+        let path = location.pathname;
+        if (path.endsWith('/')) path = path.slice(0, -1);
+        document.querySelectorAll("nav.side a").forEach(a => {
+          if (a.href.endsWith(path)) a.classList.add("target");
+        })
+      })
     </script>
   </body>
 </html>

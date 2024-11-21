@@ -139,6 +139,11 @@ nav.side {
     &:hover {
       color: var(--gray-12);
     }
+
+    &.target {
+      font-weight: bold;
+      color: var(--gray-12);
+    }
   }
 
   .item {
@@ -243,6 +248,7 @@ article {
     a {
       color: var(--primary);
       text-underline-offset: 0.2em;
+      text-decoration-thickness: 1px;
     }
 
     h1 {
@@ -285,6 +291,10 @@ article {
     :target .anchor::after {
       content: url("../img/link-active.svg");
       opacity: 1;
+    }
+
+    li {
+      margin-left: 16px;
     }
   }
 }
