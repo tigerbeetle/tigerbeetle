@@ -141,8 +141,17 @@ In case you want to use this service for development as well, you may need to ad
 
 ### Memory Locking
 
-TigerBeetle relies on `RLIMIT_MEMLOCK` being adequate enough to initialize io_uring. It also locks all allocated memory to avoid the kernel swapping pages to disk and bypassing TigerBeetle's storage determinism. If enough memory cannot be locked, the environment can be appropriately modified either by disabling swap, adding the `CAP_IPC_LOCK` capability (provided by the systemd service), or raising the `memlock` value under `/etc/security/limits.conf`.
+TigerBeetle requires `RLIMIT_MEMLOCK` to be set high enough to:
 
-Memory locking is disabled for development environments using the `--development` flag.
+1. initialize io_uring, which requires memory shared with the kernel to be locked, as well as
+2. lock all allocated memory, and so prevent the kernel from swapping any pages to disk, which would not only affect performance but also bypass TigerBeetle's storage fault-tolerance.
 
-For linux running under Docker, refer to [Allowing MEMLOCK](docker.md#allowing-memlock).
+If the required memory cannot be locked, then the environment should be modified either by (in order of preference):
+
+1. giving the local `tigerbeetle` binary the `CAP_IPC_LOCK` capability, or
+2. raising the global `memlock` value under `/etc/security/limits.conf`, or else
+3. disabling swap (io_uring may still require an RLIMIT increase).
+
+Memory locking is disabled for development environments when using the `--development` flag.
+
+For Linux running under Docker, refer to [Allowing MEMLOCK](docker.md#allowing-memlock).

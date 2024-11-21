@@ -170,8 +170,8 @@ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle:deb
 #### `error: SystemResources`
 
 If you get `error: SystemResources` when running TigerBeetle in Docker on macOS,
-the container is blocking tigerbeetle from locking memory which is necessary for io_uring
-and optionally to avoid kernel swap bypassing TigerBeetle's storage fault tolerance.
+the container may be blocking TigerBeetle from locking memory, which is necessary both for io_uring
+and to prevent the kernel's use of swap from bypassing TigerBeetle's storage fault tolerance.
 
 #### Allowing MEMLOCK 
 
