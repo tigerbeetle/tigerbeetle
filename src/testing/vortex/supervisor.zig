@@ -61,7 +61,11 @@ const replica_count = 3;
 const replica_ports = [replica_count]u16{ 3000, 3001, 3002 };
 const replica_addresses = comma_separate_ports(&replica_ports);
 
-pub const CLIArgs = struct { tigerbeetle_executable: []const u8, test_duration_minutes: u16 = 10, driver_command: ?[]const u8 = null };
+pub const CLIArgs = struct {
+    tigerbeetle_executable: []const u8,
+    test_duration_minutes: u16 = 10,
+    driver_command: ?[]const u8 = null,
+};
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
