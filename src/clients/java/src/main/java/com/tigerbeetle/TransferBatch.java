@@ -30,8 +30,6 @@ public final class TransferBatch extends Batch {
         int Timestamp = 120;
     }
 
-    static final TransferBatch EMPTY = new TransferBatch(0);
-
     /**
      * Creates an empty batch with the desired maximum capacity.
      * <p>
