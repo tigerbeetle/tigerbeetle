@@ -61,10 +61,7 @@ const replica_count = 3;
 const replica_ports = [replica_count]u16{ 3000, 3001, 3002 };
 const replica_addresses = comma_separate_ports(&replica_ports);
 
-pub const CLIArgs = struct {
-    tigerbeetle_executable: []const u8,
-    test_duration_minutes: u16 = 10,
-};
+pub const CLIArgs = struct { tigerbeetle_executable: []const u8, test_duration_minutes: u16 = 10, driver_command: ?[]const u8 = null };
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
@@ -151,7 +148,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         replicas[replica_index] = replica;
     }
 
-    const workload = try start_workload(allocator);
+    const workload = try start_workload(allocator, args);
     defer {
         if (workload.state() == .running) {
             _ = workload.terminate() catch {};
@@ -311,15 +308,25 @@ fn random_replica_in_state(
     }
 }
 
-fn start_workload(allocator: std.mem.Allocator) !*LoggedProcess {
+fn start_workload(allocator: std.mem.Allocator, args: CLIArgs) !*LoggedProcess {
     var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
     const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
 
-    var driver_command_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const driver_command = try std.fmt.bufPrint(
-        &driver_command_buffer,
-        "--driver-command={s} driver",
+    var driver_command_default_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const driver_command_default = try std.fmt.bufPrint(
+        &driver_command_default_buffer,
+        "{s} driver",
         .{vortex_path},
+    );
+
+    const driver_command_selected = args.driver_command orelse driver_command_default;
+    log.info("launching workload with driver: {s}", .{driver_command_selected});
+
+    var driver_command_arg_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const driver_command_arg = try std.fmt.bufPrint(
+        &driver_command_arg_buffer,
+        "--driver-command={s}",
+        .{driver_command_selected},
     );
 
     const argv = &.{
@@ -327,7 +334,7 @@ fn start_workload(allocator: std.mem.Allocator) !*LoggedProcess {
         "workload",
         std.fmt.comptimePrint("--cluster-id={d}", .{cluster_id}),
         std.fmt.comptimePrint("--addresses={s}", .{replica_addresses}),
-        driver_command,
+        driver_command_arg,
     };
 
     return try LoggedProcess.spawn(allocator, argv);
