@@ -346,8 +346,8 @@ pub fn ClockType(comptime Time: type) type {
             return self.time.realtime();
         }
 
-        /// Called by `StateMachine.prepare_timestamp()` when the primary wants to timestamp a
-        /// batch. If the primary's clock is not synchronized with the cluster, it must wait until
+        /// Called by `Replica.on_request()` when the primary wants to timestamp a batch. If the
+        /// primary's clock is not synchronized with the cluster, it must wait until it is.
         /// it is.
         /// Returns the system time clamped to be within our synchronized lower and upper bounds.
         /// This is complementary to NTP and allows clusters with very accurate time to make use of
@@ -376,7 +376,7 @@ pub fn ClockType(comptime Time: type) type {
             // Expire the current epoch if successive windows failed to synchronize:
             // Gradual clock drift prevents us from using an epoch for more than a few seconds.
             if (self.epoch.elapsed(self) >= epoch_max) {
-                log.warn(
+                log.err(
                     "{}: no agreement on cluster time (partitioned or too many clock faults)",
                     .{self.replica},
                 );
@@ -468,6 +468,16 @@ pub fn ClockType(comptime Time: type) type {
 
             // Wait for more accurate samples or until we timeout the window for lack of quorum:
             if (self.window.synchronized == null) return;
+
+            // Transitioning from not being synchronized to being synchronized - log out a message
+            // for the operator, as the counterpoint to `no agreement on cluster time`.
+            if (self.epoch.synchronized == null and self.window.synchronized != null) {
+                const new_interval = self.window.synchronized.?;
+                log.info("{}: synchronized: accuracy={}", .{
+                    self.replica,
+                    fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
+                });
+            }
 
             var new_window = self.epoch;
             new_window.reset(self);
