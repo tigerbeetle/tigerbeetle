@@ -24,6 +24,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -2184,6 +2185,33 @@ public class IntegrationTest {
         assertTrue(lookupTransfers.next());
         assertTransfers(transfers, lookupTransfers);
         assertEquals(timestamp + accounts.getLength() + 1, lookupTransfers.getTimestamp());
+    }
+
+    /**
+     * Asserts that empty replies are not shared.
+     * https://github.com/tigerbeetle/tigerbeetle/pull/2495
+     */
+    @Test
+    public void testEmptyReply() throws Throwable {
+        final int TASKS_COUNT = 1_000;
+
+        try (final var client2 = new Client(clusterId, new String[] {server.getAddress()})) {
+            for (int i = 0; i < TASKS_COUNT; i++) {
+                var request1 = client.lookupAccountsAsync(new IdBatch(UInt128.id()));
+                var request2 = client2.lookupAccountsAsync(new IdBatch(UInt128.id()));
+
+                var reply1 = request1.get();
+                var reply2 = request2.get();
+                assertTrue(reply1.getLength() == 0);
+                assertTrue(reply1.isReadOnly());
+                assertTrue(reply2.getLength() == 0);
+                assertTrue(reply2.isReadOnly());
+
+                assertNotSame(reply1, reply2);
+                assertNotEquals(reply1.getHeader().getTimestamp(),
+                        reply2.getHeader().getTimestamp());
+            }
+        }
     }
 
     private long getTimestampLast() {
