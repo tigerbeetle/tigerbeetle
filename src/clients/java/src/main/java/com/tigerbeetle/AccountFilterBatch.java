@@ -26,8 +26,6 @@ final class AccountFilterBatch extends Batch {
         int Flags = 124;
     }
 
-    static final AccountFilterBatch EMPTY = new AccountFilterBatch(0);
-
     /**
      * Creates an empty batch with the desired maximum capacity.
      * <p>

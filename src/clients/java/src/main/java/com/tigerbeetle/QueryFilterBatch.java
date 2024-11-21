@@ -26,8 +26,6 @@ final class QueryFilterBatch extends Batch {
         int Flags = 60;
     }
 
-    static final QueryFilterBatch EMPTY = new QueryFilterBatch(0);
-
     /**
      * Creates an empty batch with the desired maximum capacity.
      * <p>

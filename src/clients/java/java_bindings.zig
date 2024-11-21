@@ -446,8 +446,6 @@ fn emit_batch(
     try buffer.writer().print(
         \\    }}
         \\
-        \\    static final {[name]s} EMPTY = new {[name]s}(0);
-        \\
         \\    /**
         \\     * Creates an empty batch with the desired maximum capacity.
         \\     * <p>

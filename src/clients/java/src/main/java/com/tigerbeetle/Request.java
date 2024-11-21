@@ -48,6 +48,8 @@ abstract class Request<TResponse extends Batch> {
         }
     }
 
+    static final ByteBuffer REPLY_EMPTY = ByteBuffer.allocate(0).asReadOnlyBuffer();
+
     // Used only by the JNI side
     @Native
     private final ByteBuffer sendBuffer;
@@ -111,56 +113,56 @@ abstract class Request<TResponse extends Batch> {
 
                 switch (operation) {
                     case CREATE_ACCOUNTS: {
-                        result = replyBuffer == null ? CreateAccountResultBatch.EMPTY
-                                : new CreateAccountResultBatch(ByteBuffer.wrap(replyBuffer));
+                        result = new CreateAccountResultBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         exception = checkResultLength(result);
                         break;
                     }
 
                     case CREATE_TRANSFERS: {
-                        result = replyBuffer == null ? CreateTransferResultBatch.EMPTY
-                                : new CreateTransferResultBatch(ByteBuffer.wrap(replyBuffer));
+                        result = new CreateTransferResultBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         exception = checkResultLength(result);
                         break;
                     }
 
                     case ECHO_ACCOUNTS:
                     case LOOKUP_ACCOUNTS: {
-                        result = replyBuffer == null ? AccountBatch.EMPTY
-                                : new AccountBatch(ByteBuffer.wrap(replyBuffer));
+                        result = new AccountBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         exception = checkResultLength(result);
                         break;
                     }
 
                     case ECHO_TRANSFERS:
                     case LOOKUP_TRANSFERS: {
-                        result = replyBuffer == null ? TransferBatch.EMPTY
-                                : new TransferBatch(ByteBuffer.wrap(replyBuffer));
+                        result = new TransferBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         exception = checkResultLength(result);
                         break;
                     }
 
                     case GET_ACCOUNT_TRANSFERS: {
-                        result = replyBuffer == null ? TransferBatch.EMPTY
-                                : new TransferBatch(ByteBuffer.wrap(replyBuffer));
+                        result = new TransferBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         break;
                     }
 
                     case GET_ACCOUNT_BALANCES: {
-                        result = replyBuffer == null ? AccountBalanceBatch.EMPTY
-                                : new AccountBalanceBatch(ByteBuffer.wrap(replyBuffer));
+                        result = new AccountBalanceBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         break;
                     }
 
                     case QUERY_ACCOUNTS: {
-                        result = replyBuffer == null ? AccountBatch.EMPTY
-                                : new AccountBatch(ByteBuffer.wrap(replyBuffer));
+                        result = new AccountBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         break;
                     }
 
                     case QUERY_TRANSFERS: {
-                        result = replyBuffer == null ? TransferBatch.EMPTY
-                                : new TransferBatch(ByteBuffer.wrap(replyBuffer));
+                        result = new TransferBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         break;
                     }
 

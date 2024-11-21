@@ -177,7 +177,6 @@ const NativeClient = struct {
                     ReflectionHelper.set_reply_buffer(
                         env,
                         request_obj,
-                        timestamp,
                         ptr[0..@as(usize, @intCast(result_len))],
                     );
                 },
@@ -454,13 +453,11 @@ const ReflectionHelper = struct {
     pub fn set_reply_buffer(
         env: *jni.JNIEnv,
         this_obj: jni.JObject,
-        timestamp: u64,
         reply: []const u8,
     ) void {
         assert(this_obj != null);
         assert(request_reply_buffer_field_id != null);
         assert(reply.len > 0);
-        assert(timestamp > 0);
 
         const reply_buffer_obj = env.new_byte_array(
             @intCast(reply.len),
@@ -532,6 +529,7 @@ const ReflectionHelper = struct {
         assert(this_obj != null);
         assert(request_class != null);
         assert(request_end_request_method_id != null);
+        assert((timestamp > 0) == (packet_status == .ok));
 
         env.call_nonvirtual_void_method(
             this_obj,

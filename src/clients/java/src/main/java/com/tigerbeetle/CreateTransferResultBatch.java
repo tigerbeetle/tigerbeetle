@@ -18,8 +18,6 @@ public final class CreateTransferResultBatch extends Batch {
         int Result = 4;
     }
 
-    static final CreateTransferResultBatch EMPTY = new CreateTransferResultBatch(0);
-
     /**
      * Creates an empty batch with the desired maximum capacity.
      * <p>
