@@ -1,43 +1,54 @@
+:root {
+  --gray-0: #FFFFFF;
+  --gray-1: #FCFCFC;
+  --gray-3: #F0F0F0;
+  --gray-4: #E8E8E8;
+  --gray-6: #D9D9D9;
+  --gray-11: #646464;
+  --gray-12: #202020;
+  --yellow-10: #FFDC00;
+  --indigo-10: #3358D4;
+
+  --primary: var(--indigo-10);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --gray-0: #000000;
+    --gray-1: #111111;
+    --gray-3: #222222;
+    --gray-4: #2A2A2A;
+    --gray-6: #3A3A3A;
+    --gray-11: #B4B4B4;
+    --gray-12: #EEEEEE;
+    /* --yellow-10: #FFFF57; */
+    --yellow-10: #FFEF5C;
+
+    --primary: var(--yellow-10);
+  }
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-html {
-  scroll-behavior: smooth;
+*::-webkit-scrollbar-thumb {
+  background-color: #00000040;
+  border: 1px solid #ffffff40;
+  border-radius: 24px;
 }
 
-:root {
-  --Bright-Lime-10: rgba(147, 201, 38, 1);
-  --Bright-Amber-10: rgba(255, 160, 28, 1);
-  --Colors-Indigo-10: rgba(51, 88, 212, 1);
-  --Grays-Gray-0: rgba(255, 255, 255, 1);
-  --Grays-Gray-1: rgba(252, 252, 252, 1);
-  --Grays-Gray-4: rgba(232, 232, 232, 1);
-  --Grays-Gray-11: rgba(100, 100, 100, 1);
-  --Grays-Gray-12: rgba(32, 32, 32, 1);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --Bright-Lime-10: rgba(204, 255, 0, 1);
-    --Bright-Yellow-10: #FFEF5C;
-    --Bright-Amber-10: rgba(255, 203, 71, 1);
-    --Colors-Indigo-10: rgba(84, 114, 228, 1);
-    --Grays-Gray-0: rgba(0, 0, 0, 1);
-    --Grays-Gray-1: rgba(17, 17, 17, 1);
-    --Grays-Gray-3: #222222;
-    --Grays-Gray-4: rgba(42, 42, 42, 1);
-    --Grays-Gray-6: #3A3A3A;
-    --Grays-Gray-11: rgba(180, 180, 180, 1);
-    --Grays-Gray-12: #EEEEEE;
-  }
+*::-webkit-scrollbar {
+  background-color: #00000000;
+  display: block;
+  width: 8px;
 }
 
 body {
-  background-color: var(--Grays-Gray-0);
+  background-color: var(--gray-0);
   font-family: Arial, Helvetica, sans-serif, sans-serif;
   -webkit-font-smoothing: antialiased;
   display: flex;
@@ -49,10 +60,10 @@ nav.top {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: var(--Grays-Gray-12);
+  color: var(--gray-12);
   padding: 8px 16px;
   height: 56px;
-  border-bottom: 1px solid var(--Grays-Gray-4);
+  border-bottom: 1px solid var(--gray-4);
   font-size: 14px;
   line-height: 16px;
 
@@ -67,18 +78,18 @@ nav.top {
   }
 
   a {
-    color: var(--Grays-Gray-11);
+    color: var(--gray-11);
     text-decoration: none;
 
     &:hover {
-      color: var(--Grays-Gray-12);
+      color: var(--gray-12);
     }
   }
 
   .line {
     width: 1px;
     height: 20px;
-    background-color: var(--Grays-Gray-6);
+    background-color: var(--gray-6);
   }
 
   .spacer {
@@ -90,11 +101,18 @@ nav.top {
     width: 290px;
     height: 34px;
     padding: 12px 9px 12px 8px;
-    background-color: var(--Grays-Gray-1);
-    border: 1px solid var(--Grays-Gray-4);
+    background-color: var(--gray-1);
+    border: 1px solid var(--gray-4);
     border-radius: 6px;
+    outline: none;
     font-size: 14px;
     line-height: 16px;
+
+    &:focus {
+      padding-left: 7px;
+      border-width: 2px;
+      border-color: var(--primary);
+    }
   }
 }
 
@@ -112,14 +130,14 @@ nav.side {
   padding: 16px;
   font-size: 14px;
   line-height: 20px;
-  color: var(--Grays-Gray-11);
+  color: var(--gray-11);
 
   a {
-    color: var(--Grays-Gray-11);
+    color: var(--gray-11);
     text-decoration: none;
 
     &:hover {
-      color: var(--Grays-Gray-12);
+      color: var(--gray-12);
     }
   }
 
@@ -132,7 +150,7 @@ nav.side {
 
     &:hover {
       cursor: pointer;
-      background-color: var(--Grays-Gray-3);
+      background-color: var(--gray-3);
     }
 
     a {
@@ -200,6 +218,7 @@ article {
   flex: 1;
   height: 100%;
   overflow-y: auto;
+  scroll-behavior: smooth;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -211,7 +230,7 @@ article {
     max-width: 858px;
     padding: 48px 64px;
 
-    color: var(--Grays-Gray-11);
+    color: var(--gray-11);
     font-size: 16px;
     line-height: 24px;
 
@@ -222,7 +241,8 @@ article {
     } */
 
     a {
-      color: var(--Bright-Yellow-10);
+      color: var(--primary);
+      text-underline-offset: 0.2em;
     }
 
     h1 {
@@ -246,7 +266,7 @@ article {
     h1 a,
     h2 a,
     h3 a {
-      color: var(--Grays-Gray-12);
+      color: var(--gray-12);
       text-decoration: none;
     }
 
