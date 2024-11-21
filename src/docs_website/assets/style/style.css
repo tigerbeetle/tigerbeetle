@@ -131,6 +131,7 @@ nav.side {
   font-size: 14px;
   line-height: 20px;
   color: var(--gray-11);
+  -webkit-user-select: none;
   user-select: none;
 
   a {
@@ -290,8 +291,19 @@ article {
     }
 
     :target .anchor::after {
-      content: url("../img/link-active.svg");
+      /* computed using https://codepen.io/sosuke/pen/Pjoqqp */
+      filter: invert(26%) sepia(79%) saturate(1801%) hue-rotate(212deg) brightness(96%) contrast(88%);
       opacity: 1;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .anchor::after {
+        filter: invert(100%);
+      }
+
+      :target .anchor::after {
+        filter: invert(91%) sepia(89%) saturate(569%) hue-rotate(332deg) brightness(104%) contrast(103%);
+      }
     }
 
     li {
