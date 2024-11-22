@@ -747,31 +747,28 @@ const JNIHelper = struct {
 /// when the JNI layer is unaware of when the native thread exits.
 /// https://developer.android.com/training/articles/perf-jni#threads
 const JNIThreadHelper = struct {
-    var tls_key: tls.Key = 0;
-    var mutex: std.Thread.Mutex = .{};
+    var tls_key: tls.Key = undefined;
+    var create_key_once = std.once(create_key);
 
     /// This function calls `AttachCurrentThreadAsDaemon` to attach the current native thread to
     /// the JVM as a daemon thread. It also registers a callback to call `DetachCurrentThread`
     /// when the thread exits (e.g., when the client is closed or evicted).
     pub fn attach_current_thread_with_cleanup(jvm: *jni.JavaVM) *jni.JNIEnv {
-        // Create the thread-local storage key and the corresponding destructor
-        // function pointer **once** per JVM (may be concurrent).
-        if (@atomicLoad(tls.Key, &tls_key, .acquire) == 0) {
-            mutex.lock();
-            defer mutex.unlock();
+        // Create the tls key once per JVM.
+        create_key_once.call();
 
-            if (tls_key == 0) {
-                // The destructor function will be called before the thread exits.
-                const key = tls.create_key(&destructor_callback);
-                assert(key != 0);
-                @atomicStore(tls.Key, &tls_key, key, .release);
-            }
-        }
-
-        // Set the JVM handler to the thread-local storage key for the native thread.
+        // Set the JVM handler to the thread-local storage slot for each time a native
+        // thread is started.
         tls.set_key(tls_key, jvm);
 
         return JNIHelper.attach_current_thread(jvm);
+    }
+
+    /// Create the thread-local storage key and the corresponding destructor callback.
+    /// Note: We don't need to delete the key because the JNI module cannot be unloaded,
+    /// so it will always be available for the duration of the JVM process.
+    fn create_key() void {
+        tls_key = tls.create_key(&destructor_callback);
     }
 
     // Will be called by the OS with the JVM handler when the thread finalizes.
@@ -808,13 +805,10 @@ const JNIThreadHelper = struct {
                     @panic("JNI: " ++ message);
                 }
 
-                assert(key != 0);
                 return key;
             }
 
             fn set_key(key: Key, value: *anyopaque) void {
-                assert(key != 0);
-
                 const ret = c.pthread_setspecific(key, value);
                 if (ret != 0) {
                     const message = "Unexpected result calling pthread_setspecific";
@@ -863,14 +857,10 @@ const JNIThreadHelper = struct {
                     @panic("JNI: " ++ message);
                 }
 
-                // FLS index 0 is prohibited.
-                assert(key != 0);
                 return key;
             }
 
             fn set_key(key: Key, value: *anyopaque) void {
-                assert(key != 0);
-
                 const ret = windows.fls_set_value(key, value);
                 if (ret == std.os.windows.FALSE) {
                     const message = "Unexpected result calling FlsSetValue";
@@ -888,11 +878,22 @@ test "JNIThreadHelper:tls" {
     const TestContext = struct {
         const TestContext = @This();
 
-        counter: u32 = 0,
+        var tls_key: ?tls.Key = null;
+
+        counter: u32,
+
+        fn init() TestContext {
+            if (tls_key == null) {
+                tls_key = tls.create_key(&destructor_callback);
+            }
+
+            return .{
+                .counter = 0,
+            };
+        }
 
         fn thread_main(self: *TestContext) void {
-            const key = tls.create_key(&destructor_callback);
-            tls.set_key(key, self);
+            tls.set_key(tls_key.?, self);
         }
 
         fn destructor_callback(value: *anyopaque) callconv(.C) void {
@@ -901,7 +902,7 @@ test "JNIThreadHelper:tls" {
         }
     };
 
-    var context = TestContext{};
+    var context = TestContext.init();
     var threads: [10]std.Thread = undefined;
     for (&threads) |*thread| {
         thread.* = try std.Thread.spawn(.{}, TestContext.thread_main, .{&context});
