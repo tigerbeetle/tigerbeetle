@@ -1,15 +1,19 @@
 :root {
-  --default-text: #EEEEEE;
-  --comment-gray: #6E6E6E;
 }
 
-.content .source-code {
+.content pre {
+  border-radius: 15px;
+  padding: 30px;
+  background-color: var(--gray-1);
+  border: 1px solid var(--gray-4);
+  overflow: auto;
+
   code {
-    color: var(--default-text);
+    color: var(--gray-12);
   }
 
   code .co {
-    color: var(--comment-gray);
+    color: var(--gray-10);
   }
 
   code .kw,
