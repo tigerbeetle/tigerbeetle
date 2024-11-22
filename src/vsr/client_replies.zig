@@ -521,13 +521,13 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         fn writes_executing_by_trigger(
-            client_replies: *ClientReplies,
+            client_replies: *const ClientReplies,
             trigger: WriteTrigger,
         ) u32 {
             assert(client_replies.writing.count() + client_replies.write_queue.count ==
                 client_replies.writes.executing());
 
-            var writes = client_replies.writes.iterate();
+            var writes = client_replies.writes.iterate_const();
             var writes_by_trigger: u32 = 0;
             while (writes.next()) |write| {
                 writes_by_trigger += @intFromBool(write.trigger == trigger);
