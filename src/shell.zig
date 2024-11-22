@@ -589,7 +589,7 @@ pub fn spawn(
     options: struct {
         stdin_behavior: std.process.Child.StdIo = .Ignore,
         stdout_behavior: std.process.Child.StdIo = .Ignore,
-        stderr_behavior: std.process.Child.StdIo = .Ignore,
+        stderr_behavior: std.process.Child.StdIo = .Inherit,
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
