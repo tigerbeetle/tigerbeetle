@@ -11,7 +11,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const jni = @import("jni.zig");
-const vsr = @import("vsr");
+
+// When referenced from unit_test.zig, there is no vsr import module. So use relative path instead.
+pub const vsr = if (builtin.is_test) @import("../../../vsr.zig") else @import("vsr");
+
 const tb = vsr.tb_client;
 
 const log = std.log.scoped(.tb_client_jni);
@@ -152,7 +155,9 @@ const NativeClient = struct {
     ) callconv(.C) void {
         _ = client;
         const context: *Context = @ptrFromInt(context_ptr);
-        var env = JNIHelper.attach_current_thread(context.jvm);
+
+        const env = JNIHelper.try_get_env(context.jvm) orelse
+            JNIThreadHelper.attach_current_thread_with_cleanup(context.jvm);
 
         // Retrieves the request instance, and drops the GC reference.
         assert(packet.user_data != null);
@@ -571,6 +576,23 @@ const JNIHelper = struct {
         return env;
     }
 
+    pub inline fn try_get_env(vm: *jni.JavaVM) ?*jni.JNIEnv {
+        var env: *jni.JNIEnv = undefined;
+        const jni_result = vm.get_env(&env, jni_version);
+        return switch (jni_result) {
+            .ok => env,
+            .thread_detached => null,
+            else => {
+                const message = "Unexpected result calling JavaVM.GetEnv";
+                log.err(
+                    message ++ "; Error = {} ({s})",
+                    .{ @intFromEnum(jni_result), @tagName(jni_result) },
+                );
+                @panic("JNI: " ++ message);
+            },
+        };
+    }
+
     pub inline fn attach_current_thread(jvm: *jni.JavaVM) *jni.JNIEnv {
         var env: *jni.JNIEnv = undefined;
         const jni_result = jvm.attach_current_thread_as_daemon(&env, null);
@@ -584,6 +606,18 @@ const JNIHelper = struct {
         }
 
         return env;
+    }
+
+    pub inline fn dettach_current_thread(jvm: *jni.JavaVM) void {
+        const jni_result = jvm.detach_current_thread();
+        if (jni_result != .ok) {
+            const message = "Unexpected result calling JavaVM.DetachCurrentThread";
+            log.err(
+                message ++ "; Error = {} ({s})",
+                .{ @intFromEnum(jni_result), @tagName(jni_result) },
+            );
+            @panic("JNI: " ++ message);
+        }
     }
 
     pub inline fn get_java_vm(env: *jni.JNIEnv) *jni.JavaVM {
@@ -708,3 +742,165 @@ const JNIHelper = struct {
         return @ptrCast(address[0..@as(usize, @intCast(length))]);
     }
 };
+
+/// Helper for managing the `AttachCurrentThread`/`DetachCurrentThread` lifecycle
+/// when the JNI layer is unaware of when the native thread exits.
+/// https://developer.android.com/training/articles/perf-jni#threads
+const JNIThreadHelper = struct {
+    var tls_key: tls.Key = 0;
+    var mutex: std.Thread.Mutex = .{};
+
+    /// This function calls `AttachCurrentThreadAsDaemon` to attach the current native thread to
+    /// the JVM as a daemon thread. It also registers a callback to call `DetachCurrentThread`
+    /// when the thread exits (e.g., when the client is closed or evicted).
+    pub fn attach_current_thread_with_cleanup(jvm: *jni.JavaVM) *jni.JNIEnv {
+        // Create the thread-local storage key and the corresponding destructor
+        // function pointer **once** per JVM (may be concurrent).
+        if (@atomicLoad(tls.Key, &tls_key, .acquire) == 0) {
+            mutex.lock();
+            defer mutex.unlock();
+
+            if (tls_key == 0) {
+                // The destructor function will be called before the thread exits.
+                const key = tls.create_key(&destructor_callback);
+                @atomicStore(tls.Key, &tls_key, key, .release);
+            }
+        }
+
+        // Set the JVM handler to the thread-local storage key for the native thread.
+        tls.set_key(tls_key, jvm);
+
+        return JNIHelper.attach_current_thread(jvm);
+    }
+
+    // Will be called by the OS with the JVM handler when the thread finalizes.
+    fn destructor_callback(value: *anyopaque) callconv(.C) void {
+        JNIHelper.dettach_current_thread(@ptrCast(value));
+    }
+
+    /// Thread-local storage abstraction,
+    /// based on `pthread_key_create` for Linux/MacOS and `FlsAlloc` for Windows.
+    const tls = switch (builtin.os.tag) {
+        .linux, .macos => struct {
+            /// TODO(zig) Should use `std.c` instead, redeclaring because of macos.
+            /// https://github.com/ziglang/zig/issues/13950.
+            const c = struct {
+                const pthread_key_t = c_uint;
+                extern "c" fn pthread_key_create(
+                    key: *pthread_key_t,
+                    destructor: ?*const fn (value: *anyopaque) callconv(.C) void,
+                ) std.c.E;
+                extern "c" fn pthread_setspecific(key: pthread_key_t, value: ?*anyopaque) c_int;
+            };
+
+            const Key = c.pthread_key_t;
+
+            fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.C) void) Key {
+                var key: Key = undefined;
+                const ret = c.pthread_key_create(&key, destructor);
+                if (ret != .SUCCESS) {
+                    const message = "Unexpected result calling pthread_key_create";
+                    log.err(message ++ "; Error = {} ({s})", .{
+                        @intFromEnum(ret),
+                        @tagName(ret),
+                    });
+                    @panic("JNI: " ++ message);
+                }
+
+                return key;
+            }
+
+            fn set_key(key: Key, value: *anyopaque) void {
+                const ret = c.pthread_setspecific(key, value);
+                if (ret != 0) {
+                    const message = "Unexpected result calling pthread_setspecific";
+                    log.err(message ++ "; Error = {}", .{ret});
+                    @panic("JNI: " ++ message);
+                }
+            }
+        },
+        .windows => struct {
+            const windows = struct {
+                const FLS_OUT_OF_INDEXES: std.os.windows.DWORD = 0xffffffff;
+
+                // Declaring the function with an alternative name because `CamelCase` functions are
+                // by convention, used for building generic types.
+                const fls_alloc = @extern(
+                    *const fn (
+                        ?*const fn (value: *anyopaque) callconv(.C) void,
+                    ) callconv(.C) std.os.windows.DWORD,
+                    .{
+                        .library_name = "kernel32",
+                        // https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsalloc
+                        .name = "FlsAlloc",
+                    },
+                );
+
+                const fls_set_value = @extern(
+                    *const fn (
+                        std.os.windows.DWORD,
+                        *anyopaque,
+                    ) callconv(.C) std.os.windows.BOOL,
+                    .{
+                        .library_name = "kernel32",
+                        // https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flssetvalue
+                        .name = "FlsSetValue",
+                    },
+                );
+            };
+
+            const Key = std.os.windows.DWORD;
+
+            fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.C) void) Key {
+                const key = windows.fls_alloc(destructor);
+                if (key == windows.FLS_OUT_OF_INDEXES) {
+                    const message = "Unexpected result calling FlsAlloc";
+                    log.err(message ++ "; Error = {}", .{key});
+                    @panic("JNI: " ++ message);
+                }
+
+                return key;
+            }
+
+            fn set_key(key: Key, value: *anyopaque) void {
+                const ret = windows.fls_set_value(key, value);
+                if (ret == std.os.windows.FALSE) {
+                    const message = "Unexpected result calling FlsSetValue";
+                    log.err(message ++ "; Error = {}", .{ret});
+                    @panic("JNI: " ++ message);
+                }
+            }
+        },
+        else => unreachable,
+    };
+};
+
+test "JNIThreadHelper:tls" {
+    const tls = JNIThreadHelper.tls;
+    const TestContext = struct {
+        const TestContext = @This();
+
+        counter: u32 = 0,
+
+        fn thread_main(self: *TestContext) void {
+            const key = tls.create_key(&destructor_callback);
+            tls.set_key(key, self);
+        }
+
+        fn destructor_callback(value: *anyopaque) callconv(.C) void {
+            const self: *TestContext = @alignCast(@ptrCast(value));
+            self.counter += 1;
+        }
+    };
+
+    var context = TestContext{};
+    var threads: [10]std.Thread = undefined;
+    for (&threads) |*thread| {
+        thread.* = try std.Thread.spawn(.{}, TestContext.thread_main, .{&context});
+    }
+    for (&threads) |*thread| {
+        thread.join();
+    }
+
+    try std.testing.expect(context.counter == threads.len);
+}
