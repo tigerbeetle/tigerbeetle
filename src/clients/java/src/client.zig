@@ -747,7 +747,7 @@ const JNIHelper = struct {
 /// when the JNI layer is unaware of when the native thread exits.
 /// https://developer.android.com/training/articles/perf-jni#threads
 const JNIThreadHelper = struct {
-    var tls_key: tls.Key = undefined;
+    var tls_key: ?tls.Key = null;
     var create_key_once = std.once(create_key);
 
     /// This function calls `AttachCurrentThreadAsDaemon` to attach the current native thread to
@@ -759,7 +759,7 @@ const JNIThreadHelper = struct {
 
         // Set the JVM handler to the thread-local storage slot for each time a native
         // thread is started.
-        tls.set_key(tls_key, jvm);
+        tls.set_key(tls_key.?, jvm);
 
         return JNIHelper.attach_current_thread(jvm);
     }
@@ -768,12 +768,14 @@ const JNIThreadHelper = struct {
     /// Note: We don't need to delete the key because the JNI module cannot be unloaded,
     /// so it will always be available for the duration of the JVM process.
     fn create_key() void {
+        assert(tls_key == null);
         tls_key = tls.create_key(&destructor_callback);
     }
 
     // Will be called by the OS with the JVM handler when the thread finalizes.
-    fn destructor_callback(value: *anyopaque) callconv(.C) void {
-        JNIHelper.detach_current_thread(@ptrCast(value));
+    fn destructor_callback(tls_value: *anyopaque) callconv(.C) void {
+        assert(tls_key != null);
+        JNIHelper.detach_current_thread(@ptrCast(tls_value));
     }
 
     /// Thread-local storage abstraction,
@@ -899,6 +901,8 @@ test "JNIThreadHelper:tls" {
         }
 
         fn destructor_callback(value: *anyopaque) callconv(.C) void {
+            assert(tls_key != null);
+
             const self: *TestContext = @alignCast(@ptrCast(value));
             _ = self.counter.fetchAdd(1, .monotonic);
         }
