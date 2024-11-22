@@ -311,6 +311,10 @@ article {
       color: var(--gray-12);
     }
 
+    img {
+      max-width: 100%;
+    }
+
     @media (prefers-color-scheme: dark) {
       .anchor::after {
         filter: invert(100%);
