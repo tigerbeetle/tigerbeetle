@@ -225,7 +225,7 @@ nav.side {
   }
 
   .menu-head::before {
-    content: "▶";
+    content: "\25b6";
     flex-shrink: 0;
     font-size: 8px;
     line-height: 8px;
@@ -240,7 +240,7 @@ nav.side {
   }
 
   .menu-head.expanded::before {
-    content: "▼";
+    content: "\25bc";
   }
 }
 
