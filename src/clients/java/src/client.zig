@@ -879,8 +879,9 @@ test "JNIThreadHelper:tls" {
         const TestContext = @This();
 
         var tls_key: ?tls.Key = null;
+        var event: std.Thread.ResetEvent = .{};
 
-        counter: u32,
+        counter: std.atomic.Value(u32),
 
         fn init() TestContext {
             if (tls_key == null) {
@@ -888,17 +889,18 @@ test "JNIThreadHelper:tls" {
             }
 
             return .{
-                .counter = 0,
+                .counter = std.atomic.Value(u32).init(0),
             };
         }
 
         fn thread_main(self: *TestContext) void {
             tls.set_key(tls_key.?, self);
+            event.wait();
         }
 
         fn destructor_callback(value: *anyopaque) callconv(.C) void {
             const self: *TestContext = @alignCast(@ptrCast(value));
-            self.counter += 1;
+            _ = self.counter.fetchAdd(1, .monotonic);
         }
     };
 
@@ -907,9 +909,16 @@ test "JNIThreadHelper:tls" {
     for (&threads) |*thread| {
         thread.* = try std.Thread.spawn(.{}, TestContext.thread_main, .{&context});
     }
+
+    // Assert that the callback only fires when the thread finishes.
+    try std.testing.expect(context.counter.load(.monotonic) == 0);
+
+    // Signal all threads to complete and wait for them.
+    TestContext.event.set();
     for (&threads) |*thread| {
         thread.join();
     }
 
-    try std.testing.expect(context.counter == threads.len);
+    // Assert that all callbacks have fired.
+    try std.testing.expect(context.counter.load(.monotonic) == threads.len);
 }
