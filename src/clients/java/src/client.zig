@@ -773,9 +773,9 @@ const JNIThreadHelper = struct {
     }
 
     // Will be called by the OS with the JVM handler when the thread finalizes.
-    fn destructor_callback(tls_value: *anyopaque) callconv(.C) void {
+    fn destructor_callback(jvm: *anyopaque) callconv(.C) void {
         assert(tls_key != null);
-        JNIHelper.detach_current_thread(@ptrCast(tls_value));
+        JNIHelper.detach_current_thread(@ptrCast(jvm));
     }
 
     /// Thread-local storage abstraction,
@@ -900,10 +900,10 @@ test "JNIThreadHelper:tls" {
             event.wait();
         }
 
-        fn destructor_callback(value: *anyopaque) callconv(.C) void {
+        fn destructor_callback(tls_value: *anyopaque) callconv(.C) void {
             assert(tls_key != null);
 
-            const self: *TestContext = @alignCast(@ptrCast(value));
+            const self: *TestContext = @alignCast(@ptrCast(tls_value));
             _ = self.counter.fetchAdd(1, .monotonic);
         }
     };
