@@ -608,7 +608,7 @@ const JNIHelper = struct {
         return env;
     }
 
-    pub inline fn dettach_current_thread(jvm: *jni.JavaVM) void {
+    pub inline fn detach_current_thread(jvm: *jni.JavaVM) void {
         const jni_result = jvm.detach_current_thread();
         if (jni_result != .ok) {
             const message = "Unexpected result calling JavaVM.DetachCurrentThread";
@@ -763,6 +763,7 @@ const JNIThreadHelper = struct {
             if (tls_key == 0) {
                 // The destructor function will be called before the thread exits.
                 const key = tls.create_key(&destructor_callback);
+                assert(key != 0);
                 @atomicStore(tls.Key, &tls_key, key, .release);
             }
         }
@@ -775,7 +776,7 @@ const JNIThreadHelper = struct {
 
     // Will be called by the OS with the JVM handler when the thread finalizes.
     fn destructor_callback(value: *anyopaque) callconv(.C) void {
-        JNIHelper.dettach_current_thread(@ptrCast(value));
+        JNIHelper.detach_current_thread(@ptrCast(value));
     }
 
     /// Thread-local storage abstraction,
@@ -807,10 +808,13 @@ const JNIThreadHelper = struct {
                     @panic("JNI: " ++ message);
                 }
 
+                assert(key != 0);
                 return key;
             }
 
             fn set_key(key: Key, value: *anyopaque) void {
+                assert(key != 0);
+
                 const ret = c.pthread_setspecific(key, value);
                 if (ret != 0) {
                     const message = "Unexpected result calling pthread_setspecific";
@@ -859,10 +863,14 @@ const JNIThreadHelper = struct {
                     @panic("JNI: " ++ message);
                 }
 
+                // FLS index 0 is prohibited.
+                assert(key != 0);
                 return key;
             }
 
             fn set_key(key: Key, value: *anyopaque) void {
+                assert(key != 0);
+
                 const ret = windows.fls_set_value(key, value);
                 if (ret == std.os.windows.FALSE) {
                     const message = "Unexpected result calling FlsSetValue";
