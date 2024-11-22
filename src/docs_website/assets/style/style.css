@@ -22,7 +22,6 @@
     --gray-6: #3A3A3A;
     --gray-11: #B4B4B4;
     --gray-12: #EEEEEE;
-    /* --yellow-10: #FFFF57; */
     --yellow-10: #FFEF5C;
 
     --primary: var(--yellow-10);
@@ -170,6 +169,7 @@ nav.side {
       width: 100%;
       margin: -6px -8px;
       padding: 6px 8px;
+      box-sizing: content-box;
     }
   }
 
@@ -184,7 +184,7 @@ nav.side {
   }
 
   .menu-head.expanded+.menu {
-    display: block;
+    display: flex;
   }
 
   .menu .item {
@@ -216,9 +216,14 @@ nav.side {
     flex-shrink: 0;
     font-size: 8px;
     line-height: 8px;
+    color: var(--gray-11);
     display: block;
     width: 8px;
     height: 8px;
+  }
+
+  .menu-head:hover:not(:has(a:hover))::before {
+    color: var(--gray-12);
   }
 
   .menu-head.expanded::before {
