@@ -165,7 +165,7 @@ nav.side {
       }
 
       &.target {
-        font-weight: bold;
+        font-weight: 600;
         color: var(--gray-12);
       }
     }
@@ -174,7 +174,6 @@ nav.side {
   .menu {
     display: flex;
     flex-direction: column;
-    gap: 4px;
   }
 
   .menu-head+.menu {
@@ -264,11 +263,19 @@ article {
     font-size: 16px;
     line-height: 24px;
 
-    /* p {
+    p {
+      text-wrap: pretty;
+      /* 
       &:not(:last-child) {
         margin-bottom: 16px;
       }
-    } */
+      */
+    }
+
+    strong {
+      font-weight: 500;
+      color: var(--gray-12);
+    }
 
     a {
       color: var(--primary);
