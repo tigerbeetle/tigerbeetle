@@ -1102,6 +1102,7 @@ pub const Simulator = struct {
             for (0..header_sector_count) |header_sector_index| {
                 replica_storage.faults.unset(header_sector_offset + header_sector_index);
             }
+            // TODO Clear misdirects? Waiting for a seed to confirm.
         }
 
         var header_prepare_view_mismatch: bool = false;
