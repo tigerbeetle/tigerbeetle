@@ -148,7 +148,7 @@ TigerBeetle requires `RLIMIT_MEMLOCK` to be set high enough to:
 
 If the required memory cannot be locked, then the environment should be modified either by (in order of preference):
 
-1. giving the local `tigerbeetle` binary the `CAP_IPC_LOCK` capability, or
+1. giving the local `tigerbeetle` binary the `CAP_IPC_LOCK` capability (`sudo setcap "cap_ipc_lock=+ep" ./tigerbeetle`), or
 2. raising the global `memlock` value under `/etc/security/limits.conf`, or else
 3. disabling swap (io_uring may still require an RLIMIT increase).
 
