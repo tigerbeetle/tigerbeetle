@@ -721,7 +721,14 @@ pub const Storage = struct {
         while (sector < sectors.max) : (sector += 1) {
             faulty = faulty or storage.faults.isSet(sector);
         }
-        return faulty;
+
+        var misdirected: bool = false;
+        var overlays = storage.overlays.iterate_const();
+        while (overlays.next()) |overlay| {
+            misdirected = misdirected or
+                (overlay.zone == area and overlay.offset == area.offset_in_zone());
+        }
+        return faulty or misdirected;
     }
 
     pub fn superblock_header(
@@ -870,41 +877,34 @@ pub const Storage = struct {
     }
 };
 
-pub const Area = union(enum) {
+pub const Area = union(vsr.Zone) {
     superblock: struct { copy: u8 },
     wal_headers: struct { sector: usize },
     wal_prepares: struct { slot: usize },
     client_replies: struct { slot: usize },
+    grid_padding,
     grid: struct { address: u64 },
 
-    fn sectors(area: Area) SectorRange {
+    fn offset_in_zone(area: Area) u64 {
         return switch (area) {
-            .superblock => |data| SectorRange.from_zone(
-                .superblock,
-                vsr.superblock.superblock_copy_size * @as(u64, data.copy),
-                vsr.superblock.superblock_copy_size,
-            ),
-            .wal_headers => |data| SectorRange.from_zone(
-                .wal_headers,
-                constants.sector_size * data.sector,
-                constants.sector_size,
-            ),
-            .wal_prepares => |data| SectorRange.from_zone(
-                .wal_prepares,
-                constants.message_size_max * data.slot,
-                constants.message_size_max,
-            ),
-            .client_replies => |data| SectorRange.from_zone(
-                .client_replies,
-                constants.message_size_max * data.slot,
-                constants.message_size_max,
-            ),
-            .grid => |data| SectorRange.from_zone(
-                .grid,
-                constants.block_size * (data.address - 1),
-                constants.block_size,
-            ),
+            .superblock => |data| vsr.superblock.superblock_copy_size * @as(u64, data.copy),
+            .wal_headers => |data| constants.sector_size * data.sector,
+            .wal_prepares => |data| constants.message_size_max * data.slot,
+            .client_replies => |data| constants.message_size_max * data.slot,
+            .grid_padding => unreachable,
+            .grid => |data| constants.block_size * (data.address - 1),
         };
+    }
+
+    fn sectors(area: Area) SectorRange {
+        return SectorRange.from_zone(area, area.offset_in_zone(), switch (area) {
+            .superblock => vsr.superblock.superblock_copy_size,
+            .wal_headers => constants.sector_size,
+            .wal_prepares => constants.message_size_max,
+            .client_replies => constants.message_size_max,
+            .grid_padding => unreachable,
+            .grid => constants.block_size,
+        });
     }
 };
 
