@@ -139,20 +139,6 @@ nav.side {
   -webkit-user-select: none;
   user-select: none;
 
-  a {
-    color: var(--gray-11);
-    text-decoration: none;
-
-    &:hover {
-      color: var(--gray-12);
-    }
-
-    &.target {
-      font-weight: bold;
-      color: var(--gray-12);
-    }
-  }
-
   .item {
     display: flex;
     gap: 8px;
@@ -166,11 +152,22 @@ nav.side {
     }
 
     a {
+      color: var(--gray-11);
+      text-decoration: none;
       display: block;
       width: 100%;
-      margin: -6px -8px;
-      padding: 6px 8px;
+      margin: -6px -8px -6px -4px;
+      padding: 6px 8px 6px 4px;
       box-sizing: content-box;
+
+      &:hover {
+        color: var(--gray-12);
+      }
+
+      &.target {
+        font-weight: bold;
+        color: var(--gray-12);
+      }
     }
   }
 
@@ -191,6 +188,11 @@ nav.side {
   .menu .item {
     padding-left: 24px;
 
+    &:not(.menu-head) a {
+      margin-left: -24px;
+      padding-left: 24px;
+    }
+
     &.menu-head {
       padding-left: 8px;
     }
@@ -199,6 +201,11 @@ nav.side {
   .menu .menu .item {
     padding-left: 32px;
 
+    &:not(.menu-head) a {
+      margin-left: -32px;
+      padding-left: 32px;
+    }
+
     &.menu-head {
       padding-left: 16px;
     }
@@ -206,6 +213,11 @@ nav.side {
 
   .menu .menu .menu .item {
     padding-left: 40px;
+
+    &:not(.menu-head) a {
+      margin-left: -40px;
+      padding-left: 40px;
+    }
 
     &.menu-head {
       padding-left: 24px;
