@@ -113,8 +113,6 @@ jobs:
           - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
 
           # Limited matrix for macOS - runners are concurrency limited.
-          # TODO: Go build is currently failing:
-          # https://github.com/tigerbeetle/tigerbeetle/actions/runs/10088474857/job/27894324584?pr=2137
           - { os: 'macos-latest',   language: 'go',      language_version: '1.21'  }
           - { os: 'macos-latest',   language: 'node',    language_version: '20.x'  }
 
@@ -208,8 +206,8 @@ jobs:
       - name: Login to Container Registry
         run: docker login -u "$ANTITHESIS_DOCKER_USER" -p "$ANTITHESIS_DOCKER_PASS" us-central1-docker.pkg.dev
         env:
-          ANTITHESIS_DOCKER_USER: ${{ secrets.ANTITHESIS_DOCKER_USER }} 
-          ANTITHESIS_DOCKER_PASS: ${{ secrets.ANTITHESIS_DOCKER_PASS }} 
+          ANTITHESIS_DOCKER_USER: ${{ secrets.ANTITHESIS_DOCKER_USER }}
+          ANTITHESIS_DOCKER_PASS: ${{ secrets.ANTITHESIS_DOCKER_PASS }}
       - name: Download Zig
         run: ./zig/download.sh
       - name: Build and push
