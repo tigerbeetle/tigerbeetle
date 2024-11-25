@@ -70,6 +70,9 @@ async function mainSeeds() {
   );
   document.querySelector("#untriaged-issues-count").innerText =
     untriagedIssues.length;
+  if (untriagedIssues.length) {
+    document.querySelector("#untriaged-issues-count").classList.add("untriaged");
+  }
 
   // Filtering:
   // - By default, show one seed per fuzzer per commit; exclude successes for the main branch and

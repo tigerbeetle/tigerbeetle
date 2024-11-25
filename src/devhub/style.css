@@ -110,6 +110,10 @@ section#top {
             line-height: 24px;
         }
     }
+
+    #untriaged-issues-count.untriaged {
+         color: var(--Bright-Amber-10);
+    }
 }
 
 section#fuzz-runs {
