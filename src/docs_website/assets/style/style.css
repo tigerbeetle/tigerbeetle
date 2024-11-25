@@ -281,6 +281,10 @@ article {
       color: var(--primary);
       text-underline-offset: 0.2em;
       text-decoration-thickness: 1px;
+
+      code {
+        color: var(--primary);
+      }
     }
 
     h1 {
