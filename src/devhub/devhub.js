@@ -51,17 +51,18 @@ function mainReleaseRotation() {
 async function mainSeeds() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
-  const pullsURL = "https://api.github.com/repos/tigerbeetle/tigerbeetle/pulls";
   const issuesURL =
     "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
 
-  const [records, pulls, issues] = await Promise.all([
+  const [records, issues] = await Promise.all([
     (async () => await (await fetch(dataUrl)).json())(),
-    (async () => await (await fetch(pullsURL)).json())(),
     (async () => await (await fetch(issuesURL)).json())(),
   ]);
 
-  const pullsByURL = new Map(pulls.map((pull) => [pull.html_url, pull]));
+  const pulls = issues.filter((issue) => issue.pull_request);
+  const pullsByURL = new Map(
+    pulls.map((pull) => [pull.pull_request.html_url, pull]),
+  );
   const openPullRequests = new Set(pulls.map((it) => it.number));
   const untriagedIssues = issues.filter((issue) =>
     !issue.pull_request &&
