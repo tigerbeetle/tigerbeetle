@@ -51,15 +51,25 @@ function mainReleaseRotation() {
 async function mainSeeds() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
-  const pullsURL = "https://api.github.com/repos/tigerbeetle/tigerbeetle/pulls";
+  const issuesURL =
+    "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
 
-  const [records, pulls] = await Promise.all([
+  const [records, issues] = await Promise.all([
     (async () => await (await fetch(dataUrl)).json())(),
-    (async () => await (await fetch(pullsURL)).json())(),
+    (async () => await (await fetch(issuesURL)).json())(),
   ]);
 
-  const pullsByURL = new Map(pulls.map((pull) => [pull.html_url, pull]));
+  const pulls = issues.filter((issue) => issue.pull_request);
+  const pullsByURL = new Map(
+    pulls.map((pull) => [pull.pull_request.html_url, pull]),
+  );
   const openPullRequests = new Set(pulls.map((it) => it.number));
+  const untriagedIssues = issues.filter((issue) =>
+    !issue.pull_request &&
+    !issue.labels.map((label) => label.name).includes("triaged")
+  );
+  document.querySelector("#untriaged-issues-count").innerText =
+    untriagedIssues.length;
 
   // Filtering:
   // - By default, show one seed per fuzzer per commit; exclude successes for the main branch and
@@ -74,6 +84,7 @@ async function mainSeeds() {
 
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
+  let seedFailCount = 0;
 
   for (const record of records) {
     let include = undefined;
@@ -104,7 +115,11 @@ async function mainSeeds() {
     const rowDom = document.createElement("tr");
 
     const seedSuccess = record.fuzzer === "canary" ? !record.ok : record.ok;
-    if (seedSuccess) rowDom.classList.add("success");
+    if (seedSuccess) {
+      rowDom.classList.add("success");
+    } else {
+      seedFailCount++;
+    }
     if (record.commit_sha != commit_previous) {
       commit_previous = record.commit_sha;
       rowDom.classList.add("group-start");
@@ -145,11 +160,11 @@ async function mainSeeds() {
       }
     }
   }
-  document.querySelector("#fuzz-ok").innerText = mainBranchOk.toLocaleString();
-  document.querySelector("#fuzz-fail").innerText = mainBranchFail
-    .toLocaleString();
-  document.querySelector("#fuzz-canary").innerText = mainBranchCanary
-    .toLocaleString();
+  if (mainBranchFail > 0 && !query_commit && !query_fuzzer) {
+    // When there are failures on main and we don't query for a specific commit/fuzzer,
+    // there should be failing seeds in our table.
+    assert(seedFailCount > 0);
+  }
 }
 
 async function mainMetrics() {
