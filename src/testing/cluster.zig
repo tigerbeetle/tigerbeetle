@@ -632,7 +632,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// version, this allows the replica to clean up properly (e.g. release Message's via
         /// `defer`).
         fn replica_release_execute(cluster: *Cluster, replica_index: u8) void {
-            const replica = cluster.replicas[replica_index];
+            const replica = &cluster.replicas[replica_index];
             assert(cluster.replica_health[replica_index] == .up);
 
             const release = cluster.replica_upgrades[replica_index].?;
