@@ -52,7 +52,8 @@ async function mainSeeds() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
   const pullsURL = "https://api.github.com/repos/tigerbeetle/tigerbeetle/pulls";
-  const issuesURL = "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
+  const issuesURL =
+    "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
 
   const [records, pulls, issues] = await Promise.all([
     (async () => await (await fetch(dataUrl)).json())(),
@@ -62,8 +63,12 @@ async function mainSeeds() {
 
   const pullsByURL = new Map(pulls.map((pull) => [pull.html_url, pull]));
   const openPullRequests = new Set(pulls.map((it) => it.number));
-  const untriagedIssues = issues.filter(issue => !issue.pull_request && !issue.labels.map(label => label.name).includes("triaged"));
-  document.querySelector("#untriaged-issues-count").innerText = untriagedIssues.length;
+  const untriagedIssues = issues.filter((issue) =>
+    !issue.pull_request &&
+    !issue.labels.map((label) => label.name).includes("triaged")
+  );
+  document.querySelector("#untriaged-issues-count").innerText =
+    untriagedIssues.length;
 
   // Filtering:
   // - By default, show one seed per fuzzer per commit; exclude successes for the main branch and
