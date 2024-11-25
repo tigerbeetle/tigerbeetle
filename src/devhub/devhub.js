@@ -84,6 +84,7 @@ async function mainSeeds() {
 
   const tableDom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
+  let seedFailCount = 0;
 
   for (const record of records) {
     let include = undefined;
@@ -114,7 +115,11 @@ async function mainSeeds() {
     const rowDom = document.createElement("tr");
 
     const seedSuccess = record.fuzzer === "canary" ? !record.ok : record.ok;
-    if (seedSuccess) rowDom.classList.add("success");
+    if (seedSuccess) {
+      rowDom.classList.add("success");
+    } else {
+      seedFailCount++;
+    }
     if (record.commit_sha != commit_previous) {
       commit_previous = record.commit_sha;
       rowDom.classList.add("group-start");
@@ -155,11 +160,9 @@ async function mainSeeds() {
       }
     }
   }
-  document.querySelector("#fuzz-ok").innerText = mainBranchOk.toLocaleString();
-  document.querySelector("#fuzz-fail").innerText = mainBranchFail
-    .toLocaleString();
-  document.querySelector("#fuzz-canary").innerText = mainBranchCanary
-    .toLocaleString();
+  if (mainBranchFail > 0) {
+    assert(seedFailCount > 0);
+  }
 }
 
 async function mainMetrics() {
