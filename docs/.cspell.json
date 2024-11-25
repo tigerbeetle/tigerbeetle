@@ -166,6 +166,7 @@
         "seccomp",
         "sentientwaffle",
         "serializability",
+        "setcap",
         "shellcheck",
         "Sidenote",
         "SIGTERM",
