@@ -6,9 +6,8 @@ const vsr = @import("vsr.zig");
 const tb = vsr.tb_client;
 
 pub const std_options = .{
-    // Since this is running in application space, log only critical messages to reduce noise.
-    .log_level = std.log.Level.err,
-    .logFn = vsr.constants.log_nop,
+    .log_level = vsr.constants.log_level,
+    .logFn = tb.Logging.application_logger,
 };
 
 comptime {
@@ -16,6 +15,10 @@ comptime {
         @compileError("Must be built with libc to export tb_client symbols");
     }
 
+    @export(
+        tb.register_log_callback,
+        .{ .name = "tb_client_register_log_callback", .linkage = .strong },
+    );
     @export(init, .{ .name = "tb_client_init", .linkage = .strong });
     @export(init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
     @export(tb.completion_context, .{ .name = "tb_client_completion_context", .linkage = .strong });
