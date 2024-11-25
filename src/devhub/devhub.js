@@ -160,7 +160,9 @@ async function mainSeeds() {
       }
     }
   }
-  if (mainBranchFail > 0) {
+  if (mainBranchFail > 0 && !query_commit && !query_fuzzer) {
+    // When there are failures on main and we don't query for a specific commit/fuzzer,
+    // there should be failing seeds in our table.
     assert(seedFailCount > 0);
   }
 }
