@@ -334,7 +334,8 @@ article {
 
     h1 a,
     h2 a,
-    h3 a {
+    h3 a,
+    h4 a {
       color: var(--gray-12);
       text-decoration: none;
 
