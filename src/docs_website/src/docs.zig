@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const LazyPath = std.Build.LazyPath;
 const log = std.log.scoped(.docs);
 const Website = @import("website.zig").Website;
 const assets = @import("assets.zig");
@@ -8,11 +9,17 @@ const Html = @import("html.zig").Html;
 
 const enforce_readme_md = false;
 
+const SearchIndexEntry = struct {
+    page_path: []const u8,
+    html_path: LazyPath,
+};
+const SearchIndex = std.ArrayList(SearchIndexEntry);
+
 pub fn build(
     b: *std.Build,
     website: Website,
     source_dir: []const u8,
-) !std.Build.LazyPath {
+) !LazyPath {
     const arena = b.allocator;
     const docs = b.addWriteFiles();
 
@@ -23,7 +30,22 @@ pub fn build(
     const temp = b.addWriteFiles();
     const nav = temp.add("nav.html", nav_html.string());
 
-    try menu.install(b, website, nav, docs);
+    var search_index = SearchIndex.init(arena);
+
+    try menu.install(b, website, nav, docs, &search_index);
+
+    const search_index_writer_exe = b.addExecutable(.{
+        .name = "search_index_writer",
+        .root_source_file = b.path("src/search_index_writer.zig"),
+        .target = b.graph.host,
+    });
+    const run_search_index_writer = b.addRunArtifact(search_index_writer_exe);
+    const search_index_output = run_search_index_writer.addOutputFileArg("search_index.json");
+    _ = docs.addCopyFile(search_index_output, "search_index.json");
+    for (search_index.items) |entry| {
+        run_search_index_writer.addArg(entry.page_path);
+        run_search_index_writer.addFileArg(entry.html_path);
+    }
 
     return docs.getDirectory();
 }
@@ -77,17 +99,18 @@ const Menu = struct {
         self: Menu,
         b: *std.Build,
         website: Website,
-        nav: std.Build.LazyPath,
+        nav: LazyPath,
         docs: *std.Build.Step.WriteFile,
+        search_index: *SearchIndex,
     ) !void {
         if (self.index_page) |index_page| {
-            try index_page.install(b, website, nav, docs);
+            try index_page.install(b, website, nav, docs, search_index);
         }
         for (self.menus) |menu| {
-            try menu.install(b, website, nav, docs);
+            try menu.install(b, website, nav, docs, search_index);
         }
         for (self.pages) |page| {
-            try page.install(b, website, nav, docs);
+            try page.install(b, website, nav, docs, search_index);
         }
     }
 };
@@ -199,8 +222,9 @@ const DocPage = struct {
         self: DocPage,
         b: *std.Build,
         website: Website,
-        nav: std.Build.LazyPath,
+        nav: LazyPath,
         docs: *std.Build.Step.WriteFile,
+        search_index: *SearchIndex,
     ) !void {
         const pandoc_step = std.Build.Step.Run.create(b, "run pandoc");
         pandoc_step.addFileArg(website.pandoc_bin);
@@ -212,6 +236,8 @@ const DocPage = struct {
         pandoc_step.addArg("--output");
         const pandoc_out = pandoc_step.addOutputFileArg("pandoc-out.html");
         pandoc_step.addFileArg(b.path(self.path_source));
+
+        try search_index.append(.{ .page_path = self.path_target, .html_path = pandoc_out });
 
         const page_path = website.write_page(.{
             .title = self.title,

@@ -9,6 +9,7 @@ pub const supported_file_types = [_][]const u8{
     "html",
     "jpg",
     "js",
+    "json",
     "png",
     "svg",
     "ttf",
