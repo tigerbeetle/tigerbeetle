@@ -17,7 +17,10 @@ import com.tigerbeetle.UInt128;
  */
 public final class Main {
   public static void main(String[] args) throws Exception {
-    assert args.length == 2 : "java driver requires two positional command-line arguments";
+    if (args.length != 2) {
+      throw new IllegalArgumentException(
+          "java driver requires two positional command-line arguments");
+    }
 
     byte[] clusterID = UInt128.asBytes(Long.parseLong(args[0]));
 
