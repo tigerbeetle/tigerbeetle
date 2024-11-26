@@ -708,6 +708,7 @@ test "tidy extensions" {
         .{"LICENSE"},
         .{"module-info.test"},
         .{"anchor-links.lua"},
+        .{"markdown-links.lua"},
         .{"zig/download.sh"},
         .{"src/scripts/cfo_supervisor.sh"},
         .{".github/ci/docs_check.sh"},
