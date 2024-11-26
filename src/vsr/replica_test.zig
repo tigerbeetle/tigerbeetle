@@ -2039,7 +2039,7 @@ const TestReplicas = struct {
     pub fn stop(t: *const TestReplicas) void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: crash replica", .{r});
-            t.cluster.crash_replica(r);
+            t.cluster.replica_crash(r);
 
             // For simplicity, ensure that any packets that are in flight to this replica are
             // discarded before it starts up again.
@@ -2053,7 +2053,7 @@ const TestReplicas = struct {
     pub fn open(t: *const TestReplicas) !void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(
+            t.cluster.replica_restart(
                 r,
                 t.cluster.replicas[r].releases_bundled,
             ) catch |err| {
@@ -2079,7 +2079,7 @@ const TestReplicas = struct {
 
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(r, &releases_bundled) catch |err| {
+            t.cluster.replica_restart(r, &releases_bundled) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,

@@ -618,7 +618,7 @@ pub const Simulator = struct {
         while (it.next()) |replica_index| {
             const fault = false;
             if (simulator.cluster.replica_health[replica_index] == .down) {
-                simulator.restart_replica(@intCast(replica_index), fault);
+                simulator.replica_restart(@intCast(replica_index), fault);
             }
             simulator.cluster.storages[replica_index].transition_to_liveness_mode();
         }
@@ -1055,7 +1055,7 @@ pub const Simulator = struct {
         if (!crash_upgrade and !crash_random) return;
 
         log.debug("{}: crash replica", .{replica.replica});
-        simulator.cluster.crash_replica(replica.replica);
+        simulator.cluster.replica_crash(replica.replica);
 
         simulator.replica_crash_stability[replica.replica] =
             simulator.options.replica_crash_stability;
@@ -1090,11 +1090,11 @@ pub const Simulator = struct {
         // To improve VOPR utilization, try to prevent the replica from going into
         // `.recovering_head` state if the replica is needed to form a quorum.
         const fault = recoverable_count >= recoverable_count_min or replica.standby();
-        simulator.restart_replica(replica.replica, fault);
+        simulator.replica_restart(replica.replica, fault);
         maybe(!fault and replica.status == .recovering_head);
     }
 
-    fn restart_replica(simulator: *Simulator, replica_index: u8, fault: bool) void {
+    fn replica_restart(simulator: *Simulator, replica_index: u8, fault: bool) void {
         assert(simulator.cluster.replica_health[replica_index] == .down);
 
         const replica_storage = &simulator.cluster.storages[replica_index];
@@ -1155,7 +1155,7 @@ pub const Simulator = struct {
         }
 
         replica_storage.faulty = fault;
-        simulator.cluster.restart_replica(
+        simulator.cluster.replica_restart(
             replica_index,
             &replica_releases,
         ) catch unreachable;

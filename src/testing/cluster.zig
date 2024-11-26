@@ -82,7 +82,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             /// A monotonically-increasing list of releases.
             /// Initially:
             /// - All replicas are formatted and started with releases[0].
-            /// - Only releases[0] is "bundled" in each replica. (Use `restart_replica()` to add
+            /// - Only releases[0] is "bundled" in each replica. (Use `replica_restart()` to add
             ///   more).
             releases: []const Release,
             client_release: vsr.Release,
@@ -453,7 +453,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 } else {
                     // Upgrades immediately follow storage.tick(), since upgrades occur at
                     // checkpoint completion. (Downgrades are triggered separately – see
-                    // restart_replica()).
+                    // replica_restart()).
                     storage.tick();
                     if (upgrade.*) |_| cluster.replica_release_execute(@intCast(i));
                     assert(upgrade.* == null);
@@ -489,7 +489,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         /// Returns an error when the replica was unable to recover (open).
-        pub fn restart_replica(
+        pub fn replica_restart(
             cluster: *Cluster,
             replica_index: u8,
             releases_bundled: *const vsr.ReleaseList,
@@ -520,7 +520,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// Reset a replica to its initial state, simulating a random crash/panic.
         /// Leave the persistent storage untouched, and leave any currently
         /// inflight messages to/from the replica in the network.
-        pub fn crash_replica(cluster: *Cluster, replica_index: u8) void {
+        pub fn replica_crash(cluster: *Cluster, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .up);
 
             // Reset the storage before the replica so that pending writes can (partially) finish.
@@ -636,7 +636,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 release,
             });
 
-            cluster.crash_replica(replica_index);
+            cluster.replica_crash(replica_index);
 
             const release_available = for (replica.releases_bundled.const_slice()) |r| {
                 if (r.value == release.value) break true;
