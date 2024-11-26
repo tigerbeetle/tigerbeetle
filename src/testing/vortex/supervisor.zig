@@ -46,6 +46,7 @@ const LoggedProcess = @import("./logged_process.zig");
 const faulty_network = @import("./faulty_network.zig");
 const arbitrary = @import("./arbitrary.zig");
 const constants = @import("./constants.zig");
+const Stats = @import("./workload.zig").Stats;
 
 const log = std.log.scoped(.supervisor);
 
@@ -80,6 +81,7 @@ pub const CLIArgs = struct {
     test_duration_minutes: u16 = 10,
     driver_command: ?[]const u8 = null,
     disable_faults: bool = false,
+    trace: ?[]const u8 = null,
 };
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
@@ -97,6 +99,15 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         };
         allocator.free(tmp_dir);
     }
+
+    var trace = if (args.trace) |trace_file_path|
+        try TraceWriter.from_file(trace_file_path)
+    else
+        .noop;
+    defer trace.deinit();
+
+    try trace.begin();
+    defer trace.end() catch {};
 
     log.info(
         "starting test with target runtime of {d}m",
@@ -160,6 +171,11 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         replicas[replica_index] = replica;
         replicas_initialized += 1;
 
+        try trace.process_name(
+            replica_index,
+            std.fmt.comptimePrint("Replica {d}", .{replica_index}),
+        );
+
         try replica.start();
     }
 
@@ -186,11 +202,12 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         random,
     );
     defer network.destroy(allocator);
+    try trace.process_name(4, "Network");
 
-    const workload = try start_workload(allocator, args);
+    const workload = try Workload.spawn(allocator, args, &io, &trace);
     defer {
-        if (workload.state() == .running) {
-            _ = workload.terminate() catch {};
+        if (workload.process.state() == .running) {
+            _ = workload.process.terminate() catch {};
         }
         workload.destroy(allocator);
     }
@@ -240,15 +257,19 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
             switch (arbitrary.weighted(random, Action, .{
                 .sleep = 10,
-                .replica_terminate = if (running_replicas.len > 0 and terminated_replicas.len == 0) 3 else 0,
+                .replica_terminate = if (running_replicas.len > 0 and
+                    terminated_replicas.len == 0 and
+                    stopped_replicas.len == 0) 3 else 0,
                 .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
-                .replica_stop = if (running_replicas.len > 0) 2 else 0,
+                .replica_stop = if (running_replicas.len > 0 and
+                    terminated_replicas.len == 0 and
+                    stopped_replicas.len == 0) 2 else 0,
                 .replica_resume = if (stopped_replicas.len > 0) 10 else 0,
                 .network_delay = if (network.faults.delay == null) 3 else 0,
                 .network_lose = if (network.faults.lose == null) 3 else 0,
                 .network_corrupt = if (network.faults.corrupt == null) 3 else 0,
                 .network_heal = if (!network.faults.is_healed()) 10 else 0,
-                .quiesce = if (running_replicas.len > 0 or
+                .quiesce = if (terminated_replicas.len > 0 or
                     stopped_replicas.len > 0 or
                     !network.faults.is_healed()) 1 else 0,
             }).?) {
@@ -260,54 +281,149 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                 .replica_terminate => {
                     const pick = arbitrary.element(random, ReplicaWithIndex, running_replicas);
                     log.info("terminating replica {d}", .{pick.index});
+                    try trace.write(.{
+                        .name = "terminated",
+                        .pid = pick.index,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .B,
+                    }, .{});
                     _ = try pick.replica.terminate();
                 },
                 .replica_restart => {
                     const pick = arbitrary.element(random, ReplicaWithIndex, terminated_replicas);
                     log.info("restarting replica {d}", .{pick.index});
+                    try trace.write(.{
+                        .name = "terminated",
+                        .pid = pick.index,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .E,
+                    }, .{});
                     _ = try pick.replica.start();
                 },
                 .replica_stop => {
                     const pick = arbitrary.element(random, ReplicaWithIndex, running_replicas);
                     log.info("stopping replica {d}", .{pick.index});
+                    try trace.write(.{
+                        .name = "stopped",
+                        .pid = pick.index,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .B,
+                    }, .{});
                     _ = try pick.replica.stop();
                 },
                 .replica_resume => {
                     const pick = arbitrary.element(random, ReplicaWithIndex, stopped_replicas);
                     log.info("resuming replica {d}", .{pick.index});
+                    try trace.write(.{
+                        .name = "stopped",
+                        .pid = pick.index,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .E,
+                    }, .{});
                     _ = try pick.replica.cont();
                 },
                 .network_delay => {
+                    if (!network.faults.is_healed()) {
+                        try trace.write(.{
+                            .name = "faults",
+                            .pid = 4,
+                            .ts = @intCast(std.time.microTimestamp()),
+                            .ph = .E,
+                        }, .{});
+                    }
                     const time_ms = random.intRangeAtMost(u32, 10, 500);
                     network.faults.delay = .{
                         .time_ms = time_ms,
                         .jitter_ms = @min(time_ms, 50),
                     };
                     log.info("injecting network delays: {any}", .{network.faults});
+                    try trace.write(.{
+                        .name = "faults",
+                        .pid = 4,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .B,
+                    }, network.faults);
                 },
                 .network_lose => {
+                    if (!network.faults.is_healed()) {
+                        try trace.write(.{
+                            .name = "faults",
+                            .pid = 4,
+                            .ts = @intCast(std.time.microTimestamp()),
+                            .ph = .E,
+                        }, .{});
+                    }
                     network.faults.lose = .{
                         .percentage = random.intRangeAtMost(u8, 1, 10),
                     };
                     log.info("injecting network loss: {any}", .{network.faults});
+                    try trace.write(.{
+                        .name = "faults",
+                        .pid = 4,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .B,
+                    }, network.faults);
                 },
                 .network_corrupt => {
+                    if (!network.faults.is_healed()) {
+                        try trace.write(.{
+                            .name = "faults",
+                            .pid = 4,
+                            .ts = @intCast(std.time.microTimestamp()),
+                            .ph = .E,
+                        }, .{});
+                    }
                     network.faults.corrupt = .{
                         .percentage = random.intRangeAtMost(u8, 1, 10),
                     };
                     log.info("injecting network corruption: {any}", .{network.faults});
+                    try trace.write(.{
+                        .name = "faults",
+                        .pid = 4,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .B,
+                    }, network.faults);
                 },
                 .network_heal => {
                     log.info("healing network", .{});
                     network.faults.heal();
+                    try trace.write(.{
+                        .name = "faults",
+                        .pid = 4,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .E,
+                    }, .{});
                 },
                 .quiesce => {
                     const duration = random.intRangeAtMost(u64, 60, 120) * std.time.ns_per_s;
                     sleep_deadline = now + duration;
+
                     network.faults.heal();
+                    try trace.write(.{
+                        .name = "faults",
+                        .pid = 4,
+                        .ts = @intCast(std.time.microTimestamp()),
+                        .ph = .E,
+                    }, .{});
                     for (stopped_replicas) |stopped| {
                         _ = try stopped.replica.cont();
+                        try trace.write(.{
+                            .name = "stopped",
+                            .pid = stopped.index,
+                            .ts = @intCast(std.time.microTimestamp()),
+                            .ph = .E,
+                        }, .{});
                     }
+                    for (terminated_replicas) |terminated| {
+                        _ = try terminated.replica.start();
+                        try trace.write(.{
+                            .name = "terminated",
+                            .pid = terminated.index,
+                            .ts = @intCast(std.time.microTimestamp()),
+                            .ph = .E,
+                        }, .{});
+                    }
+
                     log.info("going into {} quiescence (no faults)", .{
                         std.fmt.fmtDuration(duration),
                     });
@@ -343,18 +459,18 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         // We do not expect the workload to terminate on its own, but if it does,
         // we end the test.
-        if (workload.state() == .terminated) {
+        if (workload.process.state() == .terminated) {
             log.info("workload terminated by itself", .{});
-            break try workload.wait();
+            break try workload.process.wait();
         }
     } else blk: {
         // If the workload doesn't terminate by itself, we terminate it after we've run for the
         // required duration.
         log.info("terminating workload due to max duration", .{});
-        break :blk if (workload.state() == .running)
-            try workload.terminate()
+        break :blk if (workload.process.state() == .running)
+            try workload.process.terminate()
         else
-            try workload.wait();
+            try workload.process.wait();
     };
 
     switch (workload_result) {
@@ -396,38 +512,6 @@ fn replicas_in_state(
         }
     }
     return buffer[0..count];
-}
-
-fn start_workload(allocator: std.mem.Allocator, args: CLIArgs) !*LoggedProcess {
-    var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
-
-    var driver_command_default_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const driver_command_default = try std.fmt.bufPrint(
-        &driver_command_default_buffer,
-        "{s} driver",
-        .{vortex_path},
-    );
-
-    const driver_command_selected = args.driver_command orelse driver_command_default;
-    log.info("launching workload with driver: {s}", .{driver_command_selected});
-
-    var driver_command_arg_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const driver_command_arg = try std.fmt.bufPrint(
-        &driver_command_arg_buffer,
-        "--driver-command={s}",
-        .{driver_command_selected},
-    );
-
-    const argv = &.{
-        vortex_path,
-        "workload",
-        std.fmt.comptimePrint("--cluster-id={d}", .{constants.cluster_id}),
-        std.fmt.comptimePrint("--addresses={s}", .{replica_addresses_for_clients}),
-        driver_command_arg,
-    };
-
-    return try LoggedProcess.spawn(allocator, argv);
 }
 
 pub fn comma_separate_ports(comptime ports: []const u16) []const u8 {
@@ -526,7 +610,7 @@ const Replica = struct {
             self.datafile,
         };
 
-        self.process = try LoggedProcess.spawn(self.allocator, argv);
+        self.process = try LoggedProcess.spawn(self.allocator, argv, .{});
     }
 
     pub fn terminate(
@@ -557,5 +641,237 @@ const Replica = struct {
 
         assert(self.process != null);
         return try self.process.?.cont();
+    }
+};
+
+const Workload = struct {
+    pub const State = enum(u8) { running, terminated };
+
+    io: *IO,
+    process: *LoggedProcess,
+    trace: *TraceWriter,
+
+    read_buffer: [@sizeOf(Stats)]u8 = undefined,
+    read_completion: IO.Completion = undefined,
+    read_progress: usize = 0,
+
+    pub fn spawn(
+        allocator: std.mem.Allocator,
+        args: CLIArgs,
+        io: *IO,
+        trace: *TraceWriter,
+    ) !*Workload {
+        const workload = try allocator.create(Workload);
+        errdefer allocator.destroy(workload);
+
+        var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+        const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
+
+        var driver_command_default_buffer: [std.fs.max_path_bytes]u8 = undefined;
+        const driver_command_default = try std.fmt.bufPrint(
+            &driver_command_default_buffer,
+            "{s} driver",
+            .{vortex_path},
+        );
+
+        const driver_command_selected = args.driver_command orelse driver_command_default;
+        log.info("launching workload with driver: {s}", .{driver_command_selected});
+
+        var driver_command_arg_buffer: [std.fs.max_path_bytes]u8 = undefined;
+        const driver_command_arg = try std.fmt.bufPrint(
+            &driver_command_arg_buffer,
+            "--driver-command={s}",
+            .{driver_command_selected},
+        );
+
+        const argv = &.{
+            vortex_path,
+            "workload",
+            std.fmt.comptimePrint("--cluster-id={d}", .{constants.cluster_id}),
+            std.fmt.comptimePrint("--addresses={s}", .{replica_addresses_for_clients}),
+            driver_command_arg,
+        };
+
+        workload.* = .{
+            .io = io,
+            .process = try LoggedProcess.spawn(allocator, argv, .{
+                .stdout_behavior = .Pipe,
+            }),
+            .trace = trace,
+        };
+
+        try trace.process_name(5, "Workload");
+
+        // Kick off read loop.
+        workload.read();
+
+        return workload;
+    }
+
+    pub fn destroy(workload: *Workload, allocator: std.mem.Allocator) void {
+        assert(workload.process.state() == .terminated);
+        workload.process.destroy(allocator);
+        allocator.destroy(workload);
+    }
+
+    fn read(workload: *Workload) void {
+        workload.io.read(
+            *Workload,
+            workload,
+            on_read,
+            &workload.read_completion,
+            workload.process.child.stdout.?.handle,
+            workload.read_buffer[workload.read_progress..workload.read_buffer.len],
+            0,
+        );
+    }
+
+    fn on_read(
+        workload: *Workload,
+        _: *IO.Completion,
+        result: IO.ReadError!usize,
+    ) void {
+        const count = result catch |err| {
+            log.err("couldn't read from workload stdout: {}", .{err});
+            return;
+        };
+
+        workload.read_progress += count;
+
+        if (workload.read_progress >= workload.read_buffer.len) {
+            const stats = std.mem.bytesAsValue(Stats, workload.read_buffer[0..]);
+            workload.read_progress = 0;
+
+            workload.trace.write(.{
+                .name = "request",
+                .pid = 5,
+                .ts = stats.timestamp_start_micros,
+                .dur = stats.timestamp_end_micros - stats.timestamp_start_micros,
+                .ph = .X,
+            }, .{ .event_count = stats.event_count }) catch {};
+        }
+
+        workload.read();
+    }
+};
+
+const TraceEvent = struct {
+    const Phase = enum { X, B, E };
+
+    pid: u8,
+    tid: u32 = 0,
+    ts: u64,
+    dur: ?u64 = null,
+    ph: Phase,
+    name: ?[]const u8 = null,
+};
+
+const TraceWriter = union(enum) {
+    chrome_tracing: struct {
+        trace_file: std.fs.File,
+        stream: std.json.WriteStream(
+            std.io.GenericWriter(std.fs.File, std.fs.File.WriteError, std.fs.File.write),
+            .{ .checked_to_fixed_depth = 16 },
+        ),
+        timestamp_start: u64,
+    },
+    noop: void,
+
+    fn from_file(trace_file_path: []const u8) !TraceWriter {
+        const trace_file = try std.fs.cwd().createFile(trace_file_path, .{ .mode = 0o666 });
+        return .{
+            .chrome_tracing = .{
+                .trace_file = trace_file,
+                .stream = std.json.writeStreamMaxDepth(trace_file.writer(), .{}, 16),
+                .timestamp_start = @intCast(std.time.microTimestamp()),
+            },
+        };
+    }
+
+    fn noop() !TraceWriter {
+        return .noop;
+    }
+
+    // The following pointer switching shenanigans are required due to:
+    // https://github.com/ziglang/zig/issues/13856
+
+    fn deinit(writer: *TraceWriter) void {
+        switch (writer.*) {
+            .chrome_tracing => |*file_writer| file_writer.trace_file.close(),
+            .noop => {},
+        }
+    }
+
+    fn begin(writer: *TraceWriter) !void {
+        switch (writer.*) {
+            .chrome_tracing => |*file_writer| try file_writer.stream.beginArray(),
+            .noop => {},
+        }
+    }
+
+    fn end(writer: *TraceWriter) !void {
+        switch (writer.*) {
+            .chrome_tracing => |*file_writer| try file_writer.stream.endArray(),
+            .noop => {},
+        }
+    }
+
+    fn process_name(writer: *TraceWriter, pid: u8, name: []const u8) !void {
+        switch (writer.*) {
+            .chrome_tracing => |*file_writer| {
+                try file_writer.stream.beginObject();
+
+                try file_writer.stream.objectField("ph");
+                try file_writer.stream.write("M");
+
+                try file_writer.stream.objectField("pid");
+                try file_writer.stream.write(pid);
+
+                try file_writer.stream.objectField("name");
+                try file_writer.stream.write("process_name");
+
+                try file_writer.stream.objectField("args");
+                try file_writer.stream.write(.{ .name = name });
+
+                try file_writer.stream.endObject();
+            },
+            .noop => {},
+        }
+    }
+
+    fn write(writer: *TraceWriter, event: TraceEvent, args: anytype) !void {
+        switch (writer.*) {
+            .chrome_tracing => |*file_writer| {
+                try file_writer.stream.beginObject();
+
+                try file_writer.stream.objectField("pid");
+                try file_writer.stream.write(event.pid);
+
+                try file_writer.stream.objectField("tid");
+                try file_writer.stream.write(event.tid);
+
+                try file_writer.stream.objectField("ts");
+                try file_writer.stream.write(event.ts - file_writer.timestamp_start);
+
+                if (event.dur) |dur| {
+                    try file_writer.stream.objectField("dur");
+                    try file_writer.stream.write(dur);
+                }
+
+                try file_writer.stream.objectField("ph");
+                try file_writer.stream.write(event.ph);
+
+                if (event.name) |name| {
+                    try file_writer.stream.objectField("name");
+                    try file_writer.stream.write(name);
+                }
+
+                try file_writer.stream.objectField("args");
+                try file_writer.stream.write(args);
+
+                try file_writer.stream.endObject();
+            },
+            .noop => {},
+        }
     }
 };
