@@ -447,27 +447,45 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.replica_health,
                 0..,
             ) |*storage, *replica, *upgrade, *time, *health, i| {
+                if (health.* == .up and health.*.up.paused) {
+                    // Tick the time even in a paused state, to simulate VM migration.
+                    time.tick();
+                } else {
+                    // Upgrades immediately follow storage.tick(), since upgrades occur at
+                    // checkpoint completion. (Downgrades are triggered separately – see
+                    // restart_replica()).
+                    storage.tick();
+                    if (upgrade.*) |_| cluster.replica_release_execute(@intCast(i));
+                    assert(upgrade.* == null);
 
-                // Upgrades immediately follow storage.tick(), since upgrades occur at checkpoint
-                // completion. (Downgrades are triggered separately – see restart_replica()).
-                storage.tick();
-                if (upgrade.*) |_| cluster.replica_release_execute(@intCast(i));
-                assert(upgrade.* == null);
-
-                switch (health.*) {
-                    .up => {
-                        replica.tick();
-                        cluster.state_checker.check_state(replica.replica) catch |err| {
-                            fatal(.correctness, "state checker error: {}", .{err});
-                        };
-                    },
-                    .down => {
-                        // Keep ticking the time so that it won't have diverged too far to
-                        // synchronize when the replica restarts.
-                        time.tick();
-                    },
+                    switch (health.*) {
+                        .up => |up| {
+                            assert(!up.paused);
+                            replica.tick();
+                            cluster.state_checker.check_state(replica.replica) catch |err| {
+                                fatal(.correctness, "state checker error: {}", .{err});
+                            };
+                        },
+                        .down => {
+                            // Keep ticking the time so that it won't have diverged too far to
+                            // synchronize when the replica restarts.
+                            time.tick();
+                        },
+                    }
                 }
             }
+        }
+
+        pub fn replica_pause(cluster: *Cluster, replica_index: u8) void {
+            assert(cluster.replica_health[replica_index] == .up);
+            assert(!cluster.replica_health[replica_index].up.paused);
+            cluster.replica_health[replica_index].up.paused = true;
+        }
+
+        pub fn replica_unpause(cluster: *Cluster, replica_index: u8) void {
+            assert(cluster.replica_health[replica_index] == .up);
+            assert(cluster.replica_health[replica_index].up.paused);
+            cluster.replica_health[replica_index].up.paused = false;
         }
 
         /// Returns an error when the replica was unable to recover (open).
