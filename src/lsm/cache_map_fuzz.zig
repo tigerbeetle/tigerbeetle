@@ -374,16 +374,13 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 break :blk FuzzOp{ .compact = {} };
             },
             .scope => blk: {
-                if (!scope_is_open) {
-                    scope_is_open = true;
-                    operations_since_scope_open = 0;
+                operations_since_scope_open = 0;
+                defer scope_is_open = !scope_is_open;
 
-                    break :blk FuzzOp{ .scope = .open };
-                } else {
-                    scope_is_open = false;
-                    operations_since_scope_open = 0;
-
+                if (scope_is_open) {
                     break :blk FuzzOp{ .scope = if (random.boolean()) .persist else .discard };
+                } else {
+                    break :blk FuzzOp{ .scope = .open };
                 }
             },
         };
