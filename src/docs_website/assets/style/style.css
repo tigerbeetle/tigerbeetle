@@ -310,6 +310,10 @@ article {
     h3 a {
       color: var(--gray-12);
       text-decoration: none;
+
+      code {
+        color: var(--gray-12);
+      }
     }
 
     .anchor::after {
