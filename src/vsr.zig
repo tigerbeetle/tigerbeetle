@@ -1128,6 +1128,7 @@ test "quorums" {
     const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
     const expect_nack_prepare = [_]u8{ 1, 1, 2, 3, 3, 4, 5, 6 };
     const expect_majority = [_]u8{ 1, 2, 2, 3, 3, 4, 4, 5 };
+    const expect_upgrade = [_]u8{ 1, 2, 2, 3, 4, 5, 6, 7 };
 
     for (expect_replication[0..], 0..) |_, i| {
         const replicas = @as(u8, @intCast(i)) + 1;
@@ -1136,6 +1137,7 @@ test "quorums" {
         try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
         try std.testing.expectEqual(actual.nack_prepare, expect_nack_prepare[i]);
         try std.testing.expectEqual(actual.majority, expect_majority[i]);
+        try std.testing.expectEqual(actual.upgrade, expect_upgrade[i]);
 
         // The nack quorum only differs from the view-change quorum when R=2.
         if (replicas == 2) {
