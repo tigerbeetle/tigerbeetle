@@ -55,7 +55,24 @@ pub fn IOPSType(comptime T: type, comptime size: u6) type {
             }
         };
 
+        pub const IteratorConst = struct {
+            iops: *const IOPS,
+            bitset_iterator: Map.Iterator(.{ .kind = .unset }),
+
+            pub fn next(iterator: *@This()) ?*const T {
+                const i = iterator.bitset_iterator.next() orelse return null;
+                return &iterator.iops.items[i];
+            }
+        };
+
         pub fn iterate(self: *IOPS) Iterator {
+            return .{
+                .iops = self,
+                .bitset_iterator = self.free.iterator(.{ .kind = .unset }),
+            };
+        }
+
+        pub fn iterate_const(self: *const IOPS) IteratorConst {
             return .{
                 .iops = self,
                 .bitset_iterator = self.free.iterator(.{ .kind = .unset }),
