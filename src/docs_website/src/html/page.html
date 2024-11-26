@@ -34,7 +34,11 @@
       <div class="line"></div>
       <a href="$url_prefix/">Docs</a>
       <div class="spacer"></div>
-      <input type="search" placeholder="Search" />
+      <div class="search-container">
+        <input type="search" placeholder="Search" />
+        <div class="search-results">
+        </div>
+      </div>
       <div class="spacer"></div>
       <a href="https://github.com/tigerbeetle/tigerbeetle">GitHub</a>
     </nav>
@@ -56,6 +60,8 @@
       </svg>
     </div>
     <script>
+      window.urlPrefix = "$url_prefix";
+
       const navSide = document.querySelector("nav.side");
       const menuHeads = [...navSide.querySelectorAll(".menu-head")];
       menuHeads.forEach(e => {
@@ -93,5 +99,6 @@
         localStorage.setItem("navSideState", JSON.stringify(navSideState));
       });
     </script>
+    <script src="$url_prefix/js/search.js"></script>
   </body>
 </html>
