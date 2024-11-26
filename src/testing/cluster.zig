@@ -22,6 +22,7 @@ const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
 const StorageChecker = @import("cluster/storage_checker.zig").StorageChecker;
 const GridChecker = @import("cluster/grid_checker.zig").GridChecker;
 const ManifestCheckerType = @import("cluster/manifest_checker.zig").ManifestCheckerType;
+const JournalCheckerType = @import("cluster/journal_checker.zig").JournalCheckerType;
 
 const vsr = @import("../vsr.zig");
 pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
@@ -57,16 +58,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
         pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
-        pub const Replica = vsr.ReplicaType(
-            StateMachine,
-            MessageBus,
-            Storage,
-            TimePointer,
-            AOF,
-        );
+        pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, TimePointer, AOF);
         pub const Client = vsr.ClientType(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
+        pub const JournalChecker = JournalCheckerType(Replica);
 
         pub const Options = struct {
             cluster_id: u128,
@@ -449,7 +445,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 switch (cluster.replica_health[i]) {
                     .up => {
                         replica.tick();
-                        cluster.check_wal(replica.replica);
+
+                        // For performance, don't run every tick.
+                        if (i % 100 == 0) JournalChecker.check(replica);
+
                         cluster.state_checker.check_state(replica.replica) catch |err| {
                             fatal(.correctness, "state checker error: {}", .{err});
                         };
@@ -458,41 +457,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     // when the replica restarts.
                     .down => cluster.replica_times[i].tick(),
                 }
-            }
-        }
-
-        // Sanity-check: If the journal is clean and idle, there should be no zeroed entries
-        // (representing faulty journal entries) in the redundant WAL headers.
-        fn check_wal(cluster: *const Cluster, replica_index: u8) void {
-            const replica = &cluster.replicas[replica_index];
-            const replica_storage = &cluster.storages[replica_index];
-            assert(cluster.replica_health[replica_index] == .up);
-
-            if (replica.journal.dirty.count == 0 and
-                replica.journal.writes.executing() == 0)
-            {
-                assert(replica.journal.faulty.count == 0);
-
-                var wal_header_errors: u32 = 0;
-                for (
-                    replica_storage.wal_headers(),
-                    replica_storage.wal_prepares(),
-                    replica.journal.headers,
-                    0..,
-                ) |*wal_header, *wal_prepare, *journal_header, slot| {
-                    if (journal_header.operation == .reserved) {
-                        // Ignore reserved headers -- when Journal.remove_entries_from() truncates
-                        // the log, it cleans the in-memory journal without writing to the WAL.
-                    } else {
-                        if (wal_header.checksum == 0) {
-                            log.err("{}: check_wal: slot={} checksum=0", .{ replica_index, slot });
-                            wal_header_errors += 1;
-                        } else {
-                            assert(wal_header.checksum == wal_prepare.header.checksum);
-                        }
-                    }
-                }
-                assert(wal_header_errors == 0);
             }
         }
 
