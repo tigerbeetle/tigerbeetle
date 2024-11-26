@@ -2095,10 +2095,15 @@ const TestReplicas = struct {
         return t.replicas.get(0);
     }
 
-    pub fn health(t: *const TestReplicas) ReplicaHealth {
-        var value_all: ?ReplicaHealth = null;
+    const Health = enum { up, down };
+
+    pub fn health(t: *const TestReplicas) Health {
+        var value_all: ?Health = null;
         for (t.replicas.const_slice()) |r| {
-            const value = t.cluster.replica_health[r];
+            const value: Health = switch (t.cluster.replica_health[r]) {
+                .up => .up,
+                .down => .down,
+            };
             if (value_all) |all| {
                 assert(all == value);
             } else {

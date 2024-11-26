@@ -28,7 +28,10 @@ pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
 
-pub const ReplicaHealth = enum { up, down };
+pub const ReplicaHealth = union(enum) {
+    up: struct { paused: bool },
+    down,
+};
 
 pub const Release = struct {
     release: vsr.Release,
@@ -254,7 +257,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const replica_health = try allocator.alloc(ReplicaHealth, node_count);
             errdefer allocator.free(replica_health);
-            @memset(replica_health, .up);
+            @memset(replica_health, .{ .up = .{ .paused = false } });
 
             const replica_upgrades = try allocator.alloc(?vsr.Release, node_count);
             errdefer allocator.free(replica_upgrades);
@@ -436,26 +439,33 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 if (eviction_reason == null) client.tick();
             }
 
-            for (cluster.storages) |*storage| storage.tick();
+            for (
+                cluster.storages,
+                cluster.replicas,
+                cluster.replica_upgrades,
+                cluster.replica_times,
+                cluster.replica_health,
+                0..,
+            ) |*storage, *replica, *upgrade, *time, *health, i| {
 
-            // Upgrades immediately follow storage.tick(), since upgrades occur at checkpoint
-            // completion. (Downgrades are triggered separately – see restart_replica()).
-            for (cluster.replica_upgrades, 0..) |release, i| {
-                if (release) |_| cluster.replica_release_execute(@intCast(i));
-            }
+                // Upgrades immediately follow storage.tick(), since upgrades occur at checkpoint
+                // completion. (Downgrades are triggered separately – see restart_replica()).
+                storage.tick();
+                if (upgrade.*) |_| cluster.replica_release_execute(@intCast(i));
+                assert(upgrade.* == null);
 
-            for (cluster.replicas, 0..) |*replica, i| {
-                assert(cluster.replica_upgrades[i] == null);
-                switch (cluster.replica_health[i]) {
+                switch (health.*) {
                     .up => {
                         replica.tick();
                         cluster.state_checker.check_state(replica.replica) catch |err| {
                             fatal(.correctness, "state checker error: {}", .{err});
                         };
                     },
-                    // Keep ticking the time so that it won't have diverged too far to synchronize
-                    // when the replica restarts.
-                    .down => cluster.replica_times[i].tick(),
+                    .down => {
+                        // Keep ticking the time so that it won't have diverged too far to
+                        // synchronize when the replica restarts.
+                        time.tick();
+                    },
                 }
             }
         }
@@ -517,7 +527,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(cluster.replica_health[replica_index] == .down);
 
             cluster.network.process_enable(.{ .replica = replica_index });
-            cluster.replica_health[replica_index] = .up;
+            cluster.replica_health[replica_index] = .{ .up = .{ .paused = false } };
             cluster.log_replica(.recover, replica_index);
         }
 
