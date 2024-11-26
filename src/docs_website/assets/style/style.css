@@ -1,6 +1,7 @@
 :root {
   --gray-0: #FFFFFF;
   --gray-1: #FCFCFC;
+  --gray-2: #F9F9F9;
   --gray-3: #F0F0F0;
   --gray-4: #E8E8E8;
   --gray-6: #D9D9D9;
@@ -17,6 +18,7 @@
     color-scheme: dark;
     --gray-0: #000000;
     --gray-1: #111111;
+    --gray-2: #191919;
     --gray-3: #222222;
     --gray-4: #2A2A2A;
     --gray-6: #3A3A3A;
@@ -101,22 +103,47 @@ nav.top {
     flex: 1;
   }
 
-  input[type=search] {
-    appearance: none;
-    width: 290px;
-    height: 34px;
-    padding: 12px 9px 12px 8px;
-    background-color: var(--gray-1);
-    border: 1px solid var(--gray-4);
-    border-radius: 6px;
-    outline: none;
-    font-size: 14px;
-    line-height: 16px;
+  .search-container {
+    position: relative;
 
-    &:focus {
-      padding-left: 7px;
-      border-width: 2px;
-      border-color: var(--primary);
+    input[type=search] {
+      appearance: none;
+      width: 290px;
+      height: 34px;
+      padding: 12px 9px 12px 8px;
+      background-color: var(--gray-1);
+      border: 1px solid var(--gray-4);
+      border-radius: 6px;
+      outline: none;
+      font-size: 14px;
+      line-height: 16px;
+
+      &:focus {
+        padding-left: 7px;
+        border-width: 2px;
+        border-color: var(--primary);
+      }
+    }
+
+    .search-results {
+      position: absolute;
+      z-index: 1;
+      top: 37px;
+      border: 1px solid var(--gray-6);
+      border-radius: 14px;
+      background-color: var(--gray-2);
+      padding: 8px;
+      width: max-content;
+
+      &:not(:has(:first-child)) {
+        display: none;
+      }
+
+      a {
+        display: block;
+        padding: 8px 12px;
+        height: 34px;
+      }
     }
   }
 }
