@@ -614,6 +614,7 @@ const DeadFilesDetector = struct {
             "vortex.zig",
             "file_checker.zig",
             "page_writer.zig",
+            "search_index_writer.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
