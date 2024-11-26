@@ -209,6 +209,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             const Action = enum {
                 sleep,
                 replica_terminate,
+                replica_restart,
                 replica_stop,
                 replica_resume,
                 network_delay,
@@ -224,6 +225,12 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                 &running_replicas_buffer,
                 .running,
             );
+            var terminated_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
+            const terminated_replicas = replicas_in_state(
+                &replicas,
+                &terminated_replicas_buffer,
+                .terminated,
+            );
             var stopped_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
             const stopped_replicas = replicas_in_state(
                 &replicas,
@@ -233,7 +240,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
             switch (arbitrary.weighted(random, Action, .{
                 .sleep = 10,
-                .replica_terminate = if (running_replicas.len > 0) 3 else 0,
+                .replica_terminate = if (running_replicas.len > 0 and terminated_replicas.len == 0) 3 else 0,
+                .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
                 .replica_stop = if (running_replicas.len > 0) 2 else 0,
                 .replica_resume = if (stopped_replicas.len > 0) 10 else 0,
                 .network_delay = if (network.faults.delay == null) 3 else 0,
@@ -253,6 +261,11 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     const pick = arbitrary.element(random, ReplicaWithIndex, running_replicas);
                     log.info("terminating replica {d}", .{pick.index});
                     _ = try pick.replica.terminate();
+                },
+                .replica_restart => {
+                    const pick = arbitrary.element(random, ReplicaWithIndex, terminated_replicas);
+                    log.info("restarting replica {d}", .{pick.index});
+                    _ = try pick.replica.start();
                 },
                 .replica_stop => {
                     const pick = arbitrary.element(random, ReplicaWithIndex, running_replicas);
@@ -302,7 +315,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             }
         }
 
-        // Restart any (by the above) terminated replicas. Any other termination reason
+        // CHeck for terminated replicas. Any other termination reason
         // than SIGKILL is considered unexpected and fails the test.
         for (replicas, 0..) |replica, index| {
             if (replica.state() == .terminated) {
@@ -310,13 +323,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                 switch (replica_result) {
                     .Signal => |signal| {
                         switch (signal) {
-                            std.posix.SIG.KILL => {
-                                log.info(
-                                    "restarting terminated replica {d}",
-                                    .{index},
-                                );
-                                try replica.start();
-                            },
+                            std.posix.SIG.KILL => {},
                             else => {
                                 log.err(
                                     "replica {d} terminated unexpectedly with signal {d}",
