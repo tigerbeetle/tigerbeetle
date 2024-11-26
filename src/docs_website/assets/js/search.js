@@ -3,12 +3,13 @@ let sections = [];
 async function init() {
     const response = await fetch(urlPrefix + "/search_index.json");
     const index = await response.json();
+    const parser = new DOMParser();
     index.forEach(entry => {
-        const div = document.createElement("div");
-        div.innerHTML = entry.html;
+        const doc = parser.parseFromString(entry.html, "text/html");
+        const body = doc.querySelector("body");
 
         let currentSection;
-        for (const child of div.children) {
+        for (const child of body.children) {
             const anchor = child.querySelector(".anchor");
             if (anchor) {
                 const title = anchor.innerText.replace(/\n/g, " ");
