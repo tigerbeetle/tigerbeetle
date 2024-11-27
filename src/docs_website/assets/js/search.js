@@ -85,6 +85,40 @@ function search(term, maxResults = 20) {
     return hits;
 }
 
+function selectNextResult() {
+    const selected = searchResults.querySelector(".selected");
+    if (selected) {
+        selected.classList.remove("selected");
+        if (selected.nextSibling) {
+            selected.nextSibling.classList.add("selected");
+            return;
+        }
+    }
+    if (searchResults.firstChild) {
+        searchResults.firstChild.classList.add("selected");
+    }
+}
+
+function selectPreviousResult() {
+    const selected = searchResults.querySelector(".selected");
+    if (selected) {
+        selected.classList.remove("selected");
+        if (selected.previousSibling) {
+            selected.previousSibling.classList.add("selected");
+            return;
+        }
+    }
+    if (searchResults.lastChild) {
+        searchResults.lastChild.classList.add("selected");
+    }
+}
+
+function clickSelectedResult() {
+    const selected = searchResults.querySelector(".selected") || searchResults.firstChild;
+    if (!selected) return;
+    selected.click();
+}
+
 document.addEventListener("keydown", event => {
     if (event.key === "/" && searchInput !== document.activeElement) {
         searchInput.focus();
@@ -110,6 +144,21 @@ searchInput.addEventListener("input", () => {
     }));
 
     searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
+});
+searchInput.addEventListener("keydown", event => {
+    if (event.key === "ArrowDown") {
+        selectNextResult();
+        event.preventDefault();
+    } else if (event.key === "ArrowUp") {
+        selectPreviousResult();
+        event.preventDefault();
+    } else if (event.key === "Enter") {
+        clickSelectedResult();
+        event.preventDefault();
+    } else if (event.key === "Escape") {
+        searchInput.blur();
+        event.preventDefault();
+    }
 });
 searchClearButton.addEventListener("click", () => {
     searchInput.value = "";
