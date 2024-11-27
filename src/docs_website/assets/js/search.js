@@ -8,12 +8,15 @@ async function init() {
         const doc = parser.parseFromString(entry.html, "text/html");
         const body = doc.querySelector("body");
 
+        let pageTitle;
         let currentSection;
         for (const child of body.children) {
             const anchor = child.querySelector(".anchor");
             if (anchor) {
                 const title = anchor.innerText.replace(/\n/g, " ");
+                if (!pageTitle) pageTitle = title;
                 currentSection = {
+                    pageTitle,
                     title,
                     link: entry.path + anchor.hash,
                     text: title,
@@ -32,7 +35,7 @@ async function init() {
         searchResults.replaceChildren(...results.map(result => {
             const a = document.createElement("a");
             a.href = urlPrefix + "/" + result.section.link;
-            a.innerHTML = result.context;
+            a.innerHTML = "<h3>" + result.section.pageTitle + "</h3><p>" + result.context + "</p>";
             return a;
         }));
     })
@@ -61,7 +64,8 @@ function search(term, maxResults = 20) {
     if (term.length === 0) return [];
     term = term.toLowerCase();
     let hits = [];
-    for (const section of sections) {        const searchText = section.text.toLowerCase();
+    for (const section of sections) {
+        const searchText = section.text.toLowerCase();
         const firstIndex = searchText.indexOf(term);
         if (firstIndex >= 0) {
             let count = 0;

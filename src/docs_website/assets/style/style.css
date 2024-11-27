@@ -142,7 +142,8 @@ nav.top {
       }
 
       a {
-        display: block;
+        display: flex;
+        gap: 8px;
         padding: 8px 12px;
         height: 34px;
       }
