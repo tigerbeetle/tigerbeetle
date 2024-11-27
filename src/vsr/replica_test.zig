@@ -1386,13 +1386,22 @@ test "Cluster: upgrade: state-sync to new release" {
     t.replica(.R_).stop();
     try t.replica(.R0).open_upgrade(&[_]u8{ 10, 20 });
     try t.replica(.R1).open_upgrade(&[_]u8{ 10, 20 });
+    try t.replica(.R2).open_upgrade(&[_]u8{ 10, 20 });
+
+    // R2 is advertising the new release (so that the upgrade can begin) but it doesn't actually
+    // join in yet.
+    t.replica(.R2).drop(.__, .bidirectional, .prepare);
+    t.replica(.R2).drop(.__, .bidirectional, .start_view); // Prevent state sync.
     t.run();
+
     try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
     try c.request(constants.vsr_checkpoint_ops, constants.vsr_checkpoint_ops);
     try expectEqual(t.replica(.R0).commit(), checkpoint_2_trigger);
 
     // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
-    try t.replica(.R2).open();
+    t.replica(.R2).stop();
+    t.replica(.R2).pass_all(.__, .bidirectional);
+    try t.replica(.R2).open_upgrade(&[_]u8{10});
     try expectEqual(t.replica(.R2).health(), .up);
     try expectEqual(t.replica(.R2).release(), 10);
     try expectEqual(t.replica(.R2).commit(), 0);
