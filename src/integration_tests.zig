@@ -515,21 +515,14 @@ test "vortex smoke" {
     });
     defer shell.cwd.deleteTree(script_path) catch {};
 
-    const trace_path = try shell.fmt("./.zig-cache/tmp/{}.json", .{
-        std.crypto.random.int(u64),
-    });
-    defer shell.cwd.deleteTree(trace_path) catch {};
-
     const script_contents = try shell.fmt(
         \\ ip link set up dev lo && \
         \\   {s} supervisor \
         \\   --test-duration-minutes=1 \
-        \\   --tigerbeetle-executable={s} \
-        \\   --trace={s}
+        \\   --tigerbeetle-executable={s}
     , .{
         vortex_exe,
         tigerbeetle,
-        trace_path,
     });
     _ = try shell.cwd.writeFile(.{
         .sub_path = script_path,

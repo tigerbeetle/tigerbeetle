@@ -27,6 +27,9 @@
 //! Control the test duration by adding the `--test-duration-minutes=N` option (it's 10 minutes by
 //! default).
 //!
+//! Generate a trace JSON file compatible with `chrome://tracing` by adding the `--trace=<file>`
+//! option.
+//!
 //! If you have permissions troubles with unshare and Ubuntu, see:
 //! https://github.com/YoYoGames/GameMaker-Bugs/issues/6015#issuecomment-2135552784
 //!
@@ -36,7 +39,6 @@
 //! * filesystem faults
 //! * clock faults
 //! * upgrades (replicas and clients)
-//! * liveness checks
 //! * multiple drivers? could use a special multiplexer driver that delegates to others
 
 const std = @import("std");
@@ -46,7 +48,7 @@ const LoggedProcess = @import("./logged_process.zig");
 const faulty_network = @import("./faulty_network.zig");
 const arbitrary = @import("./arbitrary.zig");
 const constants = @import("./constants.zig");
-const Stats = @import("./workload.zig").Stats;
+const Progress = @import("./workload.zig").Progress;
 
 const log = std.log.scoped(.supervisor);
 
@@ -75,6 +77,25 @@ const replica_addresses_for_replicas = blk: {
 };
 
 const replica_addresses_for_clients = comma_separate_ports(&replica_ports_proxied);
+
+// For the Chrome trace file, we need to assign process IDs to all logical
+// processes in the Vortex test. The replicas get their replica indices, and
+// the other ones are assigned manually here.
+const vortex_process_ids = .{
+    .supervisor = constants.replica_count,
+    .workload = constants.replica_count + 1,
+    .network = constants.replica_count + 2,
+};
+comptime {
+    // Check that the assigned process IDs are sequential and start at the right number.
+    for (
+        std.meta.fields(@TypeOf(vortex_process_ids)),
+        constants.replica_count..,
+    ) |field, value_expected| {
+        const value_actual = @field(vortex_process_ids, field.name);
+        assert(value_actual == value_expected);
+    }
+}
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
@@ -106,15 +127,14 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .noop;
     defer trace.deinit();
 
-    try trace.begin();
-    defer trace.end() catch {};
+    inline for (std.meta.fields(@TypeOf(vortex_process_ids))) |field| {
+        try trace.process_name_assign(@field(vortex_process_ids, field.name), field.name);
+    }
 
     log.info(
         "starting test with target runtime of {d}m",
         .{args.test_duration_minutes},
     );
-    const test_duration_ns = @as(u64, @intCast(args.test_duration_minutes)) * std.time.ns_per_min;
-    const test_deadline = std.time.nanoTimestamp() + test_duration_ns;
 
     const seed = std.crypto.random.int(u64);
     var prng = std.rand.DefaultPrng.init(seed);
@@ -171,9 +191,9 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         replicas[replica_index] = replica;
         replicas_initialized += 1;
 
-        try trace.process_name(
+        try trace.process_name_assign(
             replica_index,
-            std.fmt.comptimePrint("Replica {d}", .{replica_index}),
+            std.fmt.comptimePrint("replica {d}", .{replica_index}),
         );
 
         try replica.start();
@@ -202,7 +222,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         random,
     );
     defer network.destroy(allocator);
-    try trace.process_name(4, "Network");
 
     const workload = try Workload.spawn(allocator, args, &io, &trace);
     defer {
@@ -212,289 +231,421 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         workload.destroy(allocator);
     }
 
-    var sleep_deadline: u64 = 0;
+    const supervisor = try Supervisor.create(allocator, .{
+        .io = &io,
+        .network = network,
+        .replicas = replicas,
+        .workload = workload,
+        .trace = &trace,
+        .random = random,
+        .test_duration_minutes = args.test_duration_minutes,
+        .disable_faults = args.disable_faults,
+    });
+    defer supervisor.destroy(allocator);
 
-    const workload_result = while (std.time.nanoTimestamp() < test_deadline) {
-        network.tick();
-        try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    try supervisor.run();
+}
 
-        const now: u64 = @intCast(std.time.nanoTimestamp());
-        if (now < sleep_deadline) continue;
+const Supervisor = struct {
+    io: *IO,
+    network: *faulty_network.Network,
+    replicas: [constants.replica_count]*Replica,
+    workload: *Workload,
+    trace: *TraceWriter,
+    random: std.Random,
+    test_deadline: i128,
+    disable_faults: bool,
 
-        if (!args.disable_faults) {
-            // Things we do in this main loop, except supervising the replicas.
-            const Action = enum {
-                sleep,
-                replica_terminate,
-                replica_restart,
-                replica_stop,
-                replica_resume,
-                network_delay,
-                network_lose,
-                network_corrupt,
-                network_heal,
-                quiesce,
-            };
+    running_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined,
+    terminated_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined,
+    stopped_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined,
 
-            var running_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
+    fn create(allocator: std.mem.Allocator, options: struct {
+        io: *IO,
+        network: *faulty_network.Network,
+        replicas: [constants.replica_count]*Replica,
+        workload: *Workload,
+        trace: *TraceWriter,
+        random: std.Random,
+        test_duration_minutes: u16,
+        disable_faults: bool,
+    }) !*Supervisor {
+        const test_duration_ns = @as(u64, @intCast(options.test_duration_minutes)) *
+            std.time.ns_per_min;
+        const test_deadline = std.time.nanoTimestamp() + test_duration_ns;
+
+        const supervisor = try allocator.create(Supervisor);
+        errdefer allocator.destroy(supervisor);
+
+        supervisor.* = .{
+            .io = options.io,
+            .network = options.network,
+            .replicas = options.replicas,
+            .workload = options.workload,
+            .trace = options.trace,
+            .random = options.random,
+            .test_deadline = test_deadline,
+            .disable_faults = options.disable_faults,
+        };
+        return supervisor;
+    }
+    fn destroy(supervisor: *Supervisor, allocator: std.mem.Allocator) void {
+        allocator.destroy(supervisor);
+    }
+
+    fn run(supervisor: *Supervisor) !void {
+        var sleep_deadline: u64 = 0;
+        // This represents the start timestamp of a period where we have an acceptable number of
+        // process faults, such that we require liveness (that requests are finished within a
+        // certain time period). If null, it means we're in a period of too many faults, thus
+        // enforcing no such requirement.
+        var acceptable_faults_start_ns: ?u64 = null;
+        const workload_result = while (std.time.nanoTimestamp() < supervisor.test_deadline) {
+            supervisor.network.tick();
+            try supervisor.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            const now: u64 = @intCast(std.time.nanoTimestamp());
+
             const running_replicas = replicas_in_state(
-                &replicas,
-                &running_replicas_buffer,
+                &supervisor.replicas,
+                &supervisor.running_replicas_buffer,
                 .running,
             );
-            var terminated_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
             const terminated_replicas = replicas_in_state(
-                &replicas,
-                &terminated_replicas_buffer,
+                &supervisor.replicas,
+                &supervisor.terminated_replicas_buffer,
                 .terminated,
             );
-            var stopped_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
             const stopped_replicas = replicas_in_state(
-                &replicas,
-                &stopped_replicas_buffer,
+                &supervisor.replicas,
+                &supervisor.stopped_replicas_buffer,
                 .stopped,
             );
 
-            switch (arbitrary.weighted(random, Action, .{
-                .sleep = 10,
-                .replica_terminate = if (running_replicas.len > 0 and
-                    terminated_replicas.len == 0 and
-                    stopped_replicas.len == 0) 3 else 0,
-                .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
-                .replica_stop = if (running_replicas.len > 0 and
-                    terminated_replicas.len == 0 and
-                    stopped_replicas.len == 0) 2 else 0,
-                .replica_resume = if (stopped_replicas.len > 0) 10 else 0,
-                .network_delay = if (network.faults.delay == null) 3 else 0,
-                .network_lose = if (network.faults.lose == null) 3 else 0,
-                .network_corrupt = if (network.faults.corrupt == null) 3 else 0,
-                .network_heal = if (!network.faults.is_healed()) 10 else 0,
-                .quiesce = if (terminated_replicas.len > 0 or
-                    stopped_replicas.len > 0 or
-                    !network.faults.is_healed()) 1 else 0,
-            }).?) {
-                .sleep => {
-                    const duration = random.uintLessThan(u64, 10 * std.time.ns_per_s);
-                    log.info("sleeping for {}", .{std.fmt.fmtDuration(duration)});
-                    sleep_deadline = now + duration;
-                },
-                .replica_terminate => {
-                    const pick = arbitrary.element(random, ReplicaWithIndex, running_replicas);
-                    log.info("terminating replica {d}", .{pick.index});
-                    try trace.write(.{
-                        .name = "terminated",
-                        .pid = pick.index,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
-                    }, .{});
-                    _ = try pick.replica.terminate();
-                },
-                .replica_restart => {
-                    const pick = arbitrary.element(random, ReplicaWithIndex, terminated_replicas);
-                    log.info("restarting replica {d}", .{pick.index});
-                    try trace.write(.{
-                        .name = "terminated",
-                        .pid = pick.index,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .E,
-                    }, .{});
-                    _ = try pick.replica.start();
-                },
-                .replica_stop => {
-                    const pick = arbitrary.element(random, ReplicaWithIndex, running_replicas);
-                    log.info("stopping replica {d}", .{pick.index});
-                    try trace.write(.{
-                        .name = "stopped",
-                        .pid = pick.index,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
-                    }, .{});
-                    _ = try pick.replica.stop();
-                },
-                .replica_resume => {
-                    const pick = arbitrary.element(random, ReplicaWithIndex, stopped_replicas);
-                    log.info("resuming replica {d}", .{pick.index});
-                    try trace.write(.{
-                        .name = "stopped",
-                        .pid = pick.index,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .E,
-                    }, .{});
-                    _ = try pick.replica.cont();
-                },
-                .network_delay => {
-                    if (!network.faults.is_healed()) {
-                        try trace.write(.{
-                            .name = "faults",
-                            .pid = 4,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
-                        }, .{});
-                    }
-                    const time_ms = random.intRangeAtMost(u32, 10, 500);
-                    network.faults.delay = .{
-                        .time_ms = time_ms,
-                        .jitter_ms = @min(time_ms, 50),
-                    };
-                    log.info("injecting network delays: {any}", .{network.faults});
-                    try trace.write(.{
-                        .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
-                    }, network.faults);
-                },
-                .network_lose => {
-                    if (!network.faults.is_healed()) {
-                        try trace.write(.{
-                            .name = "faults",
-                            .pid = 4,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
-                        }, .{});
-                    }
-                    network.faults.lose = .{
-                        .percentage = random.intRangeAtMost(u8, 1, 10),
-                    };
-                    log.info("injecting network loss: {any}", .{network.faults});
-                    try trace.write(.{
-                        .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
-                    }, network.faults);
-                },
-                .network_corrupt => {
-                    if (!network.faults.is_healed()) {
-                        try trace.write(.{
-                            .name = "faults",
-                            .pid = 4,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
-                        }, .{});
-                    }
-                    network.faults.corrupt = .{
-                        .percentage = random.intRangeAtMost(u8, 1, 10),
-                    };
-                    log.info("injecting network corruption: {any}", .{network.faults});
-                    try trace.write(.{
-                        .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
-                    }, network.faults);
-                },
-                .network_heal => {
-                    log.info("healing network", .{});
-                    network.faults.heal();
-                    try trace.write(.{
-                        .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .E,
-                    }, .{});
-                },
-                .quiesce => {
-                    const duration = random.intRangeAtMost(u64, 60, 120) * std.time.ns_per_s;
-                    sleep_deadline = now + duration;
+            const faulty_replica_count = terminated_replicas.len + stopped_replicas.len;
 
-                    network.faults.heal();
-                    try trace.write(.{
-                        .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .E,
-                    }, .{});
-                    for (stopped_replicas) |stopped| {
-                        _ = try stopped.replica.cont();
-                        try trace.write(.{
-                            .name = "stopped",
-                            .pid = stopped.index,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
-                        }, .{});
-                    }
-                    for (terminated_replicas) |terminated| {
-                        _ = try terminated.replica.start();
-                        try trace.write(.{
-                            .name = "terminated",
-                            .pid = terminated.index,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
-                        }, .{});
-                    }
-
-                    log.info("going into {} quiescence (no faults)", .{
-                        std.fmt.fmtDuration(duration),
+            // If we've been in a state with an acceptable number of faults for the required amount
+            // of time, we should have seen finished requests.
+            if (acceptable_faults_start_ns) |start_ns| {
+                const deadline = start_ns + constants.liveness_requirement_seconds *
+                    std.time.ns_per_s;
+                if (now > deadline and
+                    supervisor.workload.event_count_total == 0)
+                {
+                    log.err("no successful requests after {d} seconds of {d} faulty replica(s)", .{
+                        constants.liveness_requirement_seconds,
+                        faulty_replica_count,
                     });
-                },
+                    const start_us = @divFloor(start_ns, std.time.ns_per_us);
+                    try supervisor.trace.write(.{
+                        .name = .liveness_required,
+                        .timestamp_micros = start_us,
+                        .duration = @as(u64, @intCast(std.time.microTimestamp())) - start_us,
+                        .process_id = vortex_process_ids.supervisor,
+                        .phase = .complete,
+                    }, .{});
+                    try supervisor.trace.write(.{
+                        .name = .test_failure,
+                        .process_id = vortex_process_ids.supervisor,
+                        .phase = .instant,
+                    }, .{});
+                    return error.TestFailed;
+                }
             }
-        }
 
-        // CHeck for terminated replicas. Any other termination reason
-        // than SIGKILL is considered unexpected and fails the test.
-        for (replicas, 0..) |replica, index| {
-            if (replica.state() == .terminated) {
-                const replica_result = try replica.process.?.wait();
-                switch (replica_result) {
-                    .Signal => |signal| {
-                        switch (signal) {
-                            std.posix.SIG.KILL => {},
-                            else => {
-                                log.err(
-                                    "replica {d} terminated unexpectedly with signal {d}",
-                                    .{ index, signal },
-                                );
-                                std.process.exit(1);
-                            },
-                        }
+            // Check if `acceptable_faults_start_ns` should change state. If so, we reset the event
+            // counter.
+            // NOTE: Network faults are currently global, so we relax the requirement in such cases.
+            if (faulty_replica_count <= constants.liveness_faulty_replicas_max and
+                supervisor.network.faults.is_healed())
+            {
+                // We have an acceptable number of faults, so we require liveness (after some time).
+                if (acceptable_faults_start_ns == null) {
+                    acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
+                    supervisor.workload.event_count_total = 0;
+                }
+            } else {
+                // We have too many faults to require liveness.
+                if (acceptable_faults_start_ns) |start_ns| {
+                    acceptable_faults_start_ns = null;
+                    supervisor.workload.event_count_total = 0;
+
+                    // Record the previously passed liveness requirement period in the trace:
+                    const duration_ns = @as(u64, @intCast(std.time.nanoTimestamp())) - start_ns;
+                    if (@divFloor(duration_ns, std.time.ns_per_s) >
+                        constants.liveness_requirement_seconds)
+                    {
+                        try supervisor.trace.write(.{
+                            .name = .liveness_required,
+                            .timestamp_micros = @divFloor(start_ns, std.time.ns_per_us),
+                            .duration = @divFloor(duration_ns, std.time.ns_per_us),
+                            .process_id = vortex_process_ids.supervisor,
+                            .phase = .complete,
+                        }, .{});
+                    }
+                }
+            }
+
+            if (now < sleep_deadline) continue;
+
+            if (!supervisor.disable_faults) {
+                const Action = enum {
+                    sleep,
+                    replica_terminate,
+                    replica_restart,
+                    replica_stop,
+                    replica_resume,
+                    network_delay,
+                    network_lose,
+                    network_corrupt,
+                    network_heal,
+                    quiesce,
+                };
+
+                switch (arbitrary.weighted(supervisor.random, Action, .{
+                    .sleep = 10,
+                    .replica_terminate = if (running_replicas.len > 0) 4 else 0,
+                    .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
+                    .replica_stop = if (running_replicas.len > 0) 3 else 0,
+                    .replica_resume = if (stopped_replicas.len > 0) 10 else 0,
+                    .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
+                    .network_lose = if (supervisor.network.faults.lose == null) 3 else 0,
+                    .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
+                    .network_heal = if (!supervisor.network.faults.is_healed()) 10 else 0,
+                    .quiesce = if (faulty_replica_count > 0 or
+                        !supervisor.network.faults.is_healed()) 1 else 0,
+                }).?) {
+                    .sleep => {
+                        const duration =
+                            supervisor.random.uintLessThan(u64, 10 * std.time.ns_per_s);
+                        log.info("sleeping for {}", .{std.fmt.fmtDuration(duration)});
+                        sleep_deadline = now + duration;
                     },
-                    else => {
-                        log.err("unexpected replica result: {any}", .{replica_result});
-                        return error.TestFailed;
+                    .replica_terminate => {
+                        const pick = arbitrary.element(
+                            supervisor.random,
+                            ReplicaWithIndex,
+                            running_replicas,
+                        );
+                        log.info("terminating replica {d}", .{pick.index});
+                        try supervisor.trace.write(.{
+                            .name = .terminated,
+                            .process_id = pick.index,
+                            .phase = .begin,
+                        }, .{});
+                        _ = try pick.replica.terminate();
+                    },
+                    .replica_restart => {
+                        const pick = arbitrary.element(
+                            supervisor.random,
+                            ReplicaWithIndex,
+                            terminated_replicas,
+                        );
+                        log.info("restarting replica {d}", .{pick.index});
+                        try supervisor.trace.write(.{
+                            .name = .terminated,
+                            .process_id = pick.index,
+                            .phase = .end,
+                        }, .{});
+                        _ = try pick.replica.start();
+                    },
+                    .replica_stop => {
+                        const pick = arbitrary.element(
+                            supervisor.random,
+                            ReplicaWithIndex,
+                            running_replicas,
+                        );
+                        log.info("stopping replica {d}", .{pick.index});
+                        try supervisor.trace.write(.{
+                            .name = .stopped,
+                            .process_id = pick.index,
+                            .phase = .begin,
+                        }, .{});
+                        _ = try pick.replica.stop();
+                    },
+                    .replica_resume => {
+                        const pick = arbitrary.element(
+                            supervisor.random,
+                            ReplicaWithIndex,
+                            stopped_replicas,
+                        );
+                        log.info("resuming replica {d}", .{pick.index});
+                        try supervisor.trace.write(.{
+                            .name = .stopped,
+                            .process_id = pick.index,
+                            .phase = .end,
+                        }, .{});
+                        _ = try pick.replica.cont();
+                    },
+                    .network_delay => {
+                        if (!supervisor.network.faults.is_healed()) {
+                            try supervisor.trace.write(.{
+                                .name = .network_faults,
+                                .process_id = vortex_process_ids.network,
+                                .phase = .end,
+                            }, .{});
+                        }
+                        const time_ms = supervisor.random.intRangeAtMost(u32, 10, 500);
+                        supervisor.network.faults.delay = .{
+                            .time_ms = time_ms,
+                            .jitter_ms = @min(time_ms, 50),
+                        };
+                        log.info("injecting network delays: {any}", .{supervisor.network.faults});
+                        try supervisor.trace.write(.{
+                            .name = .network_faults,
+                            .process_id = vortex_process_ids.network,
+                            .phase = .begin,
+                        }, supervisor.network.faults);
+                    },
+                    .network_lose => {
+                        if (!supervisor.network.faults.is_healed()) {
+                            try supervisor.trace.write(.{
+                                .name = .network_faults,
+                                .process_id = vortex_process_ids.network,
+                                .phase = .end,
+                            }, .{});
+                        }
+                        supervisor.network.faults.lose = .{
+                            .percentage = supervisor.random.intRangeAtMost(u8, 1, 10),
+                        };
+                        log.info("injecting network loss: {any}", .{supervisor.network.faults});
+                        try supervisor.trace.write(.{
+                            .name = .network_faults,
+                            .process_id = vortex_process_ids.network,
+                            .phase = .begin,
+                        }, supervisor.network.faults);
+                    },
+                    .network_corrupt => {
+                        if (!supervisor.network.faults.is_healed()) {
+                            try supervisor.trace.write(.{
+                                .name = .network_faults,
+                                .process_id = vortex_process_ids.network,
+                                .phase = .end,
+                            }, .{});
+                        }
+                        supervisor.network.faults.corrupt = .{
+                            .percentage = supervisor.random.intRangeAtMost(u8, 1, 10),
+                        };
+                        log.info("injecting network corruption: {any}", .{
+                            supervisor.network.faults,
+                        });
+                        try supervisor.trace.write(.{
+                            .name = .network_faults,
+                            .process_id = vortex_process_ids.network,
+                            .phase = .begin,
+                        }, supervisor.network.faults);
+                    },
+                    .network_heal => {
+                        log.info("healing network", .{});
+                        supervisor.network.faults.heal();
+                        try supervisor.trace.write(.{
+                            .name = .network_faults,
+                            .process_id = vortex_process_ids.network,
+                            .phase = .end,
+                        }, .{});
+                    },
+                    .quiesce => {
+                        const duration = supervisor.random.intRangeAtMost(
+                            u64,
+                            constants.liveness_requirement_seconds,
+                            constants.liveness_requirement_seconds * 2,
+                        ) * std.time.ns_per_s;
+                        sleep_deadline = now + duration;
+
+                        supervisor.network.faults.heal();
+                        try supervisor.trace.write(.{
+                            .name = .network_faults,
+                            .process_id = vortex_process_ids.network,
+                            .phase = .end,
+                        }, .{});
+                        for (stopped_replicas) |stopped| {
+                            _ = try stopped.replica.cont();
+                            try supervisor.trace.write(.{
+                                .name = .stopped,
+                                .process_id = stopped.index,
+                                .phase = .end,
+                            }, .{});
+                        }
+                        for (terminated_replicas) |terminated| {
+                            _ = try terminated.replica.start();
+                            try supervisor.trace.write(.{
+                                .name = .terminated,
+                                .process_id = terminated.index,
+                                .phase = .end,
+                            }, .{});
+                        }
+
+                        log.info("going into {} quiescence (no faults)", .{
+                            std.fmt.fmtDuration(duration),
+                        });
                     },
                 }
             }
-        }
 
-        // We do not expect the workload to terminate on its own, but if it does,
-        // we end the test.
-        if (workload.process.state() == .terminated) {
-            log.info("workload terminated by itself", .{});
-            break try workload.process.wait();
-        }
-    } else blk: {
-        // If the workload doesn't terminate by itself, we terminate it after we've run for the
-        // required duration.
-        log.info("terminating workload due to max duration", .{});
-        break :blk if (workload.process.state() == .running)
-            try workload.process.terminate()
-        else
-            try workload.process.wait();
-    };
-
-    switch (workload_result) {
-        .Signal => |signal| {
-            switch (signal) {
-                std.posix.SIG.KILL => log.info(
-                    "workload terminated as requested",
-                    .{},
-                ),
-                else => {
-                    log.err(
-                        "workload exited unexpectedly with signal {d}",
-                        .{signal},
-                    );
-                    std.process.exit(1);
-                },
+            // Check for terminated replicas. Any other termination reason
+            // than SIGKILL is considered unexpected and fails the test.
+            for (supervisor.replicas, 0..) |replica, index| {
+                if (replica.state() == .terminated) {
+                    const replica_result = try replica.process.?.wait();
+                    switch (replica_result) {
+                        .Signal => |signal| {
+                            switch (signal) {
+                                std.posix.SIG.KILL => {},
+                                else => {
+                                    log.err(
+                                        "replica {d} terminated unexpectedly with signal {d}",
+                                        .{ index, signal },
+                                    );
+                                    std.process.exit(1);
+                                },
+                            }
+                        },
+                        else => {
+                            log.err("unexpected replica result: {any}", .{replica_result});
+                            return error.TestFailed;
+                        },
+                    }
+                }
             }
-        },
-        else => {
-            log.err("unexpected workload result: {any}", .{workload_result});
-            return error.TestFailed;
-        },
+
+            // We do not expect the workload to terminate on its own, but if it does,
+            // we end the test.
+            if (supervisor.workload.process.state() == .terminated) {
+                log.info("workload terminated by itself", .{});
+                break try supervisor.workload.process.wait();
+            }
+        } else blk: {
+            // If the workload doesn't terminate by itself, we terminate it after we've run for the
+            // required duration.
+            log.info("terminating workload due to max duration", .{});
+            break :blk if (supervisor.workload.process.state() == .running)
+                try supervisor.workload.process.terminate()
+            else
+                try supervisor.workload.process.wait();
+        };
+
+        switch (workload_result) {
+            .Signal => |signal| {
+                switch (signal) {
+                    std.posix.SIG.KILL => log.info(
+                        "workload terminated as requested",
+                        .{},
+                    ),
+                    else => {
+                        log.err(
+                            "workload exited unexpectedly with signal {d}",
+                            .{signal},
+                        );
+                        std.process.exit(1);
+                    },
+                }
+            },
+            else => {
+                log.err("unexpected workload result: {any}", .{workload_result});
+                return error.TestFailed;
+            },
+        }
     }
-}
+};
 
 const ReplicaWithIndex = struct { replica: *Replica, index: u8 };
 
@@ -651,9 +802,11 @@ const Workload = struct {
     process: *LoggedProcess,
     trace: *TraceWriter,
 
-    read_buffer: [@sizeOf(Stats)]u8 = undefined,
+    read_buffer: [@sizeOf(Progress)]u8 = undefined,
     read_completion: IO.Completion = undefined,
     read_progress: usize = 0,
+
+    event_count_total: u64 = 0,
 
     pub fn spawn(
         allocator: std.mem.Allocator,
@@ -661,9 +814,6 @@ const Workload = struct {
         io: *IO,
         trace: *TraceWriter,
     ) !*Workload {
-        const workload = try allocator.create(Workload);
-        errdefer allocator.destroy(workload);
-
         var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
 
@@ -692,15 +842,19 @@ const Workload = struct {
             driver_command_arg,
         };
 
+        const workload = try allocator.create(Workload);
+        errdefer allocator.destroy(workload);
+
+        const process = try LoggedProcess.spawn(allocator, argv, .{
+            .stdout_behavior = .Pipe,
+        });
+        errdefer process.destroy(allocator);
+
         workload.* = .{
             .io = io,
-            .process = try LoggedProcess.spawn(allocator, argv, .{
-                .stdout_behavior = .Pipe,
-            }),
+            .process = process,
             .trace = trace,
         };
-
-        try trace.process_name(5, "Workload");
 
         // Kick off read loop.
         workload.read();
@@ -715,6 +869,8 @@ const Workload = struct {
     }
 
     fn read(workload: *Workload) void {
+        assert(workload.process.state() == .running);
+
         workload.io.read(
             *Workload,
             workload,
@@ -731,6 +887,8 @@ const Workload = struct {
         _: *IO.Completion,
         result: IO.ReadError!usize,
     ) void {
+        if (workload.process.state() != .running) return;
+
         const count = result catch |err| {
             log.err("couldn't read from workload stdout: {}", .{err});
             return;
@@ -739,31 +897,42 @@ const Workload = struct {
         workload.read_progress += count;
 
         if (workload.read_progress >= workload.read_buffer.len) {
-            const stats = std.mem.bytesAsValue(Stats, workload.read_buffer[0..]);
+            const progress = std.mem.bytesAsValue(Progress, workload.read_buffer[0..]);
             workload.read_progress = 0;
+            workload.event_count_total += progress.event_count;
 
             workload.trace.write(.{
-                .name = "request",
-                .pid = 5,
-                .ts = stats.timestamp_start_micros,
-                .dur = stats.timestamp_end_micros - stats.timestamp_start_micros,
-                .ph = .X,
-            }, .{ .event_count = stats.event_count }) catch {};
+                .name = .request,
+                .process_id = vortex_process_ids.workload,
+                .timestamp_micros = progress.timestamp_start_micros,
+                .duration = progress.timestamp_end_micros - progress.timestamp_start_micros,
+                .phase = .complete,
+            }, .{ .event_count = progress.event_count }) catch {};
         }
 
         workload.read();
     }
 };
 
+// Based on:
+// https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview?tab=t.0
 const TraceEvent = struct {
-    const Phase = enum { X, B, E };
+    const EventName = enum {
+        terminated,
+        stopped,
+        network_faults,
+        request,
+        liveness_required,
+        test_failure,
+    };
+    const Phase = enum { instant, complete, begin, end };
 
-    pid: u8,
-    tid: u32 = 0,
-    ts: u64,
-    dur: ?u64 = null,
-    ph: Phase,
-    name: ?[]const u8 = null,
+    process_id: u8,
+    thread_id: u32 = 0,
+    timestamp_micros: ?u64 = null,
+    duration: ?u64 = null,
+    phase: Phase,
+    name: ?EventName = null,
 };
 
 const TraceWriter = union(enum) {
@@ -779,44 +948,33 @@ const TraceWriter = union(enum) {
 
     fn from_file(trace_file_path: []const u8) !TraceWriter {
         const trace_file = try std.fs.cwd().createFile(trace_file_path, .{ .mode = 0o666 });
+        errdefer trace_file.close();
+
+        var stream = std.json.writeStreamMaxDepth(trace_file.writer(), .{}, 16);
+        try stream.beginArray();
+
         return .{
             .chrome_tracing = .{
                 .trace_file = trace_file,
-                .stream = std.json.writeStreamMaxDepth(trace_file.writer(), .{}, 16),
+                .stream = stream,
                 .timestamp_start = @intCast(std.time.microTimestamp()),
             },
         };
     }
 
-    fn noop() !TraceWriter {
-        return .noop;
-    }
-
-    // The following pointer switching shenanigans are required due to:
-    // https://github.com/ziglang/zig/issues/13856
-
     fn deinit(writer: *TraceWriter) void {
+        // The following pointer switching shenanigans are required due to:
+        // https://github.com/ziglang/zig/issues/13856
         switch (writer.*) {
-            .chrome_tracing => |*file_writer| file_writer.trace_file.close(),
+            .chrome_tracing => |*file_writer| {
+                file_writer.stream.endArray() catch {};
+                file_writer.trace_file.close();
+            },
             .noop => {},
         }
     }
 
-    fn begin(writer: *TraceWriter) !void {
-        switch (writer.*) {
-            .chrome_tracing => |*file_writer| try file_writer.stream.beginArray(),
-            .noop => {},
-        }
-    }
-
-    fn end(writer: *TraceWriter) !void {
-        switch (writer.*) {
-            .chrome_tracing => |*file_writer| try file_writer.stream.endArray(),
-            .noop => {},
-        }
-    }
-
-    fn process_name(writer: *TraceWriter, pid: u8, name: []const u8) !void {
+    fn process_name_assign(writer: *TraceWriter, process_id: u8, name: []const u8) !void {
         switch (writer.*) {
             .chrome_tracing => |*file_writer| {
                 try file_writer.stream.beginObject();
@@ -825,7 +983,7 @@ const TraceWriter = union(enum) {
                 try file_writer.stream.write("M");
 
                 try file_writer.stream.objectField("pid");
-                try file_writer.stream.write(pid);
+                try file_writer.stream.write(process_id);
 
                 try file_writer.stream.objectField("name");
                 try file_writer.stream.write("process_name");
@@ -845,25 +1003,32 @@ const TraceWriter = union(enum) {
                 try file_writer.stream.beginObject();
 
                 try file_writer.stream.objectField("pid");
-                try file_writer.stream.write(event.pid);
+                try file_writer.stream.write(event.process_id);
 
                 try file_writer.stream.objectField("tid");
-                try file_writer.stream.write(event.tid);
+                try file_writer.stream.write(event.thread_id);
 
                 try file_writer.stream.objectField("ts");
-                try file_writer.stream.write(event.ts - file_writer.timestamp_start);
+                const timestamp = event.timestamp_micros orelse
+                    @as(u64, @intCast(std.time.microTimestamp()));
+                try file_writer.stream.write(timestamp - file_writer.timestamp_start);
 
-                if (event.dur) |dur| {
+                if (event.duration) |dur| {
                     try file_writer.stream.objectField("dur");
                     try file_writer.stream.write(dur);
                 }
 
                 try file_writer.stream.objectField("ph");
-                try file_writer.stream.write(event.ph);
+                try file_writer.stream.write(switch (event.phase) {
+                    .instant => "i",
+                    .complete => "X",
+                    .begin => "B",
+                    .end => "E",
+                });
 
                 if (event.name) |name| {
                     try file_writer.stream.objectField("name");
-                    try file_writer.stream.write(name);
+                    try file_writer.stream.write(@tagName(name));
                 }
 
                 try file_writer.stream.objectField("args");
