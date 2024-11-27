@@ -53,6 +53,7 @@
         "EAGAIN",
         "EHOSTUNREACH",
         "epoll",
+        "español",
         "evented",
         "execveat",
         "feira",
