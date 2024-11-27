@@ -23,7 +23,8 @@ async function init() {
                 currentSection = {
                     pageTitle,
                     title,
-                    link: entry.path + anchor.hash,
+                    path: entry.path,
+                    hash: anchor.hash,
                     text: title,
                 };
                 sections.push(currentSection);
@@ -90,18 +91,73 @@ searchInput.addEventListener("blur", () => {
 });
 searchInput.addEventListener("input", () => {
     const results = search(searchInput.value);
+    const highlightQuery = `?highlight=${encodeURIComponent(searchInput.value)}`
     searchResults.replaceChildren(...results.map(result => {
         const a = document.createElement("a");
-        a.href = urlPrefix + "/" + result.section.link;
+        a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
         a.innerHTML = "<h3>" + result.section.pageTitle + "</h3><p>" + result.context + "</p>";
         return a;
     }));
-    
+
     searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
-})
+});
 searchClearButton.addEventListener("click", () => {
     searchInput.value = "";
     searchResults.replaceChildren();
     searchClearButton.style.display = "none";
     if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
-})
+});
+
+if (location.search) {
+    const params = new URLSearchParams(location.search);
+    const highlight = params.get("highlight");
+    if (highlight) highlightText(decodeURIComponent(highlight));
+}
+
+function highlightText(term) {
+    const contentDiv = document.querySelector('article>.content');
+
+    // Escape special characters for regex
+    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedTerm, 'gi');
+
+    // Highlight matches recursively
+    traverseAndHighlight(contentDiv, regex);
+}
+
+function traverseAndHighlight(node, regex) {
+    if (node.nodeType === Node.TEXT_NODE) {
+        const match = node.nodeValue.match(regex);
+        if (match) {
+            const parent = node.parentNode;
+            const fragment = document.createDocumentFragment();
+
+            let lastIndex = 0;
+            node.nodeValue.replace(regex, (matchedText, offset) => {
+                // Add plain text before the match
+                if (offset > lastIndex) {
+                    fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex, offset)));
+                }
+
+                // Create the highlighted node
+                const span = document.createElement('span');
+                span.className = 'highlight';
+                span.textContent = matchedText;
+                fragment.appendChild(span);
+
+                lastIndex = offset + matchedText.length;
+            });
+
+            // Add any remaining text after the last match
+            if (lastIndex < node.nodeValue.length) {
+                fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex)));
+            }
+
+            // Replace the text node with the fragment
+            parent.replaceChild(fragment, node);
+        }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+        // Recursively check child nodes
+        Array.from(node.childNodes).forEach(child => traverseAndHighlight(child, regex));
+    }
+}
