@@ -1858,28 +1858,27 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 journal.prepare_checksums[slot.index] = message.header.checksum;
             }
 
-            if (journal.slot_with_op_and_checksum(
+            const slot = journal.slot_with_op_and_checksum(
                 message.header.op,
                 message.header.checksum,
-            )) |slot| {
-                journal.headers_redundant[slot.index] = message.header.*;
-            } else {
+            ) orelse {
                 journal.write_prepare_debug(message.header, "entry changed while writing sectors");
                 journal.write_prepare_release(write, null);
                 return;
-            }
+            };
+            journal.headers_redundant[slot.index] = message.header.*;
+
             // TODO It's possible within this section that the header has since been replaced but we
             // continue writing, even when the dirty bit is no longer set. This is not a problem
             // but it would be good to stop writing as soon as we see we no longer need to.
             // For this, we'll need to have a way to tweak write_prepare_release() to release locks.
             // At present, we don't return early here simply because it doesn't yet do that.
 
-            const slot_of_message = journal.slot_for_header(message.header);
-            const offset = Ring.headers.offset(slot_of_message);
+            const offset = Ring.headers.offset(slot);
             assert(offset % constants.sector_size == 0);
 
             const buffer: []u8 = journal.header_sector(
-                @divFloor(slot_of_message.index, headers_per_sector),
+                @divFloor(slot.index, headers_per_sector),
                 write,
             );
 
