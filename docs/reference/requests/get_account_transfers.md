@@ -25,3 +25,4 @@ For language-specific docs see:
 - [Java library](/src/clients/java/README.md#get-account-transfers)
 - [Go library](/src/clients/go/README.md#get-account-transfers)
 - [Node.js library](/src/clients/node/README.md#get-account-transfers)
+- [Python library](/src/clients/python/README.md#get-account-transfers)

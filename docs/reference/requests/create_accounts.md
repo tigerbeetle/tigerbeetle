@@ -187,6 +187,7 @@ For language-specific docs see:
 - [Java library](/src/clients/java/README.md#creating-accounts)
 - [Go library](/src/clients/go/README.md#creating-accounts)
 - [Node.js library](/src/clients/node/README.md#creating-accounts)
+- [Python library](/src/clients/python/README.md#creating-accounts)
 
 ## Internals
 

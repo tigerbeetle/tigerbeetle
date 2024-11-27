@@ -21,6 +21,7 @@ const LanguageCI = .{
     .go = @import("../clients/go/ci.zig"),
     .java = @import("../clients/java/ci.zig"),
     .node = @import("../clients/node/ci.zig"),
+    .python = @import("../clients/python/ci.zig"),
 };
 
 pub const CLIArgs = struct {

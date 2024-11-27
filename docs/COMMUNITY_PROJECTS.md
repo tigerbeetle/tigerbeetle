@@ -23,6 +23,6 @@ clients may lag behind.
 * [tigerbeetle-cpp](https://github.com/kassane/tigerbeetle-cpp): A C++ client
 * [tigerbeetle-rs](https://github.com/ZetaNumbers/tigerbeetle-rs): A Rust client
 
-Need a client for Go, Java, Node.js, or .NET? We've got you covered
+Need a client for Go, Java, Node.js, .NET, or Python? We've got you covered
 with [first-party
 clients](https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients).
