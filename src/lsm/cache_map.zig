@@ -157,9 +157,8 @@ pub fn CacheMapType(
                 } else {
                     // If it was an insert, append a tombstone to the scope rollback log.
                     const key = key_from_value(value);
-                    self.scope_rollback_log.appendAssumeCapacity(
-                        tombstone_from_key(key),
-                    );
+                    const key_tombstone = tombstone_from_key(key);
+                    self.scope_rollback_log.appendAssumeCapacity(key_tombstone);
                 }
             }
         }
@@ -282,15 +281,12 @@ pub fn CacheMapType(
 
                     // A tombstone in the rollback log can only occur when the value doesn't exist
                     // in _both_ the cache and stash on insert.
-                    if (self.cache) |*cache| {
-                        // If we have cache enabled, it must be there.
-                        const cache_removed = cache.remove(key) != null;
-                        assert(cache_removed);
-                    }
+                    const cache_removed =
+                        if (self.cache) |*cache| cache.remove(key) != null else false;
 
-                    // It should be in the stash _iif_ we don't have cache enabled.
+                    // The key should be in the stash iff it wasn't in the cache.
                     const stash_removed = self.stash_remove(key) != null;
-                    assert(stash_removed == (self.cache == null));
+                    assert(stash_removed != cache_removed);
                 } else {
                     // Reverting an update or delete consists of an insert of the original value.
                     self.upsert(rollback_value);
