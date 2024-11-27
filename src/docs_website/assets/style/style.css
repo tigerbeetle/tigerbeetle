@@ -5,6 +5,8 @@
   --gray-3: #F0F0F0;
   --gray-4: #E8E8E8;
   --gray-6: #D9D9D9;
+  --gray-7: #CECECE;
+  --gray-10: #838383;
   --gray-11: #646464;
   --gray-12: #202020;
   --yellow-10: #FFDC00;
@@ -22,6 +24,8 @@
     --gray-3: #222222;
     --gray-4: #2A2A2A;
     --gray-6: #3A3A3A;
+    --gray-7: #484848;
+    --gray-10: #7B7B7B;
     --gray-11: #B4B4B4;
     --gray-12: #EEEEEE;
     --yellow-10: #FFEF5C;
@@ -77,6 +81,7 @@ nav.top {
   .logo {
     a {
       display: block;
+      color: var(--gray-12);
 
       svg {
         display: block;
@@ -106,22 +111,63 @@ nav.top {
   .search-container {
     position: relative;
 
+    .search-icon {
+      position: absolute;
+      left: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--gray-10);
+    }
+
+    input[type=search]:focus~.search-icon {
+      color: var(--gray-12);
+    }
+
+    .hotkey {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    .clear-button {
+      display: none;
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
     input[type=search] {
       appearance: none;
       width: 290px;
       height: 34px;
-      padding: 12px 9px 12px 8px;
+      padding: 12px 8px 12px 31px;
       background-color: var(--gray-1);
       border: 1px solid var(--gray-4);
       border-radius: 6px;
       outline: none;
       font-size: 14px;
       line-height: 16px;
+      color: var(--gray-10);
+
+      &::placeholder {
+        color: var(--gray-10);
+      }
 
       &:focus {
-        padding-left: 7px;
+        padding-left: 30px;
         border-width: 2px;
         border-color: var(--primary);
+        color: var(--gray-12);
+      }
+
+      &::-webkit-search-cancel-button {
+        display: none;
+      }
+
+      &::-moz-search-cancel-button {
+        display: none;
       }
     }
 
@@ -137,7 +183,7 @@ nav.top {
       padding: 8px;
       width: max-content;
 
-      &:not(:has(:first-child)) {
+      &:empty {
         display: none;
       }
 

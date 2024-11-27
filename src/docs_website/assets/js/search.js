@@ -2,6 +2,8 @@ let sections = [];
 
 const searchInput = document.querySelector("input[type=search]");
 const searchResults = document.querySelector(".search-results");
+const searchHotkey = document.querySelector(".search-container .hotkey");
+const searchClearButton = document.querySelector(".search-container .clear-button");
 
 async function init() {
     const response = await fetch(urlPrefix + "/search_index.json");
@@ -30,16 +32,6 @@ async function init() {
             }
         }
     });
-
-    searchInput.addEventListener("input", () => {
-        const results = search(searchInput.value);
-        searchResults.replaceChildren(...results.map(result => {
-            const a = document.createElement("a");
-            a.href = urlPrefix + "/" + result.section.link;
-            a.innerHTML = "<h3>" + result.section.pageTitle + "</h3><p>" + result.context + "</p>";
-            return a;
-        }));
-    })
 }
 
 init();
@@ -88,4 +80,28 @@ document.addEventListener("keydown", event => {
         event.preventDefault();
         return false;
     }
+})
+
+searchInput.addEventListener("focus", () => {
+    searchHotkey.style.display = "none";
+});
+searchInput.addEventListener("blur", () => {
+    if (searchInput.value === "") searchHotkey.style.display = "block";
+});
+searchInput.addEventListener("input", () => {
+    const results = search(searchInput.value);
+    searchResults.replaceChildren(...results.map(result => {
+        const a = document.createElement("a");
+        a.href = urlPrefix + "/" + result.section.link;
+        a.innerHTML = "<h3>" + result.section.pageTitle + "</h3><p>" + result.context + "</p>";
+        return a;
+    }));
+    
+    searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
+})
+searchClearButton.addEventListener("click", () => {
+    searchInput.value = "";
+    searchResults.replaceChildren();
+    searchClearButton.style.display = "none";
+    if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
 })
