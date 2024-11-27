@@ -349,7 +349,7 @@ article {
   flex-direction: column;
   align-items: center;
 
-  .content {
+  >.content {
     display: flex;
     flex-direction: column;
     gap: 24px;
@@ -359,6 +359,10 @@ article {
     color: var(--gray-11);
     font-size: 16px;
     line-height: 24px;
+
+    .highlight {
+      background-color: color-mix(in srgb, var(--primary), transparent 75%);
+    }
 
     p {
       text-wrap: pretty;
