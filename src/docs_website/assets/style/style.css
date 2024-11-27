@@ -188,7 +188,8 @@ nav.top {
       border-radius: 14px;
       background-color: var(--gray-2);
       padding: 8px;
-      width: max-content;
+      width: 580px;
+      white-space: nowrap;
 
       &:empty {
         display: none;
@@ -196,9 +197,22 @@ nav.top {
 
       a {
         display: flex;
+        align-items: center;
         gap: 8px;
-        padding: 8px 12px;
+        padding: 0 12px;
         height: 34px;
+        overflow: hidden;
+
+        p {
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        &.selected {
+          border: 2px solid var(--primary);
+          border-radius: 6px;
+          padding: 0 10px;
+        }
       }
     }
   }
