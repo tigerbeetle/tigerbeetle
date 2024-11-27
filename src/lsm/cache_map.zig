@@ -157,7 +157,8 @@ pub fn CacheMapType(
                 } else {
                     // If it was an insert, append a tombstone to the scope rollback log.
                     const key = key_from_value(value);
-                    self.scope_rollback_log.appendAssumeCapacity(tombstone_from_key(key));
+                    const key_tombstone = tombstone_from_key(key);
+                    self.scope_rollback_log.appendAssumeCapacity(key_tombstone);
                 }
             }
         }
