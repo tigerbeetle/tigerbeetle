@@ -1,5 +1,8 @@
 let sections = [];
 
+const searchInput = document.querySelector("input[type=search]");
+const searchResults = document.querySelector(".search-results");
+
 async function init() {
     const response = await fetch(urlPrefix + "/search_index.json");
     const index = await response.json();
@@ -28,8 +31,6 @@ async function init() {
         }
     });
 
-    const searchInput = document.querySelector("input[type=search]");
-    const searchResults = document.querySelector(".search-results");
     searchInput.addEventListener("input", () => {
         const results = search(searchInput.value);
         searchResults.replaceChildren(...results.map(result => {
@@ -80,3 +81,11 @@ function search(term, maxResults = 20) {
     hits.forEach(hit => hit.context = makeContext(hit.section.text, hit.firstIndex, term.length));
     return hits;
 }
+
+document.addEventListener("keydown", event => {
+    if (event.key === "/" && searchInput !== document.activeElement) {
+        searchInput.focus();
+        event.preventDefault();
+        return false;
+    }
+})
