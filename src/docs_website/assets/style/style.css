@@ -420,9 +420,7 @@ article {
 
     .anchor::after {
       margin-left: 8px;
-      vertical-align: middle;
       content: url("../img/link.svg");
-      height: 16px;
       opacity: 0.2;
     }
 
