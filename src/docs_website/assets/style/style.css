@@ -129,6 +129,8 @@ nav.top {
       position: absolute;
       z-index: 1;
       top: 37px;
+      left: 50%;
+      transform: translateX(-50%);
       border: 1px solid var(--gray-6);
       border-radius: 14px;
       background-color: var(--gray-2);
