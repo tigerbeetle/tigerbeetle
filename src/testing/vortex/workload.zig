@@ -23,6 +23,9 @@
 //! 3. The workload receives the results, and expects them to be of the same operation type as
 //!    originally requested. There might be fewer results than events, because clients can omit
 //!    .ok results.
+//!
+//! Additionally, the workload itself sends `Progress` events on its stdout back to the supervisor.
+//! This is used for tracing and liveness checks.
 
 const std = @import("std");
 const stdx = @import("../../stdx.zig");
@@ -68,7 +71,7 @@ pub fn main(
         const result = try execute(command, driver) orelse break;
         try reconcile(result, &command, &model);
         const command_timestamp_end: u64 = @intCast(std.time.microTimestamp());
-        try write_stats(stdout, .{
+        try progress_write(stdout, .{
             .event_count = command.event_count(),
             .timestamp_start_micros = command_timestamp_start,
             .timestamp_end_micros = command_timestamp_end,
@@ -79,7 +82,7 @@ pub fn main(
         const query_result = try execute(query, driver) orelse break;
         try reconcile(query_result, &query, &model);
         const query_timestamp_end: u64 = @intCast(std.time.microTimestamp());
-        try write_stats(stdout, .{
+        try progress_write(stdout, .{
             .event_count = query.event_count(),
             .timestamp_start_micros = query_timestamp_start,
             .timestamp_end_micros = query_timestamp_end,
@@ -516,12 +519,13 @@ pub fn receive(
     return results[0..results_count];
 }
 
-pub const Stats = extern struct {
+/// A message written to stdout by the workload, communicating the progress it makes.
+pub const Progress = extern struct {
     event_count: u64,
     timestamp_start_micros: u64,
     timestamp_end_micros: u64,
 };
 
-fn write_stats(writer: std.io.AnyWriter, stats: Stats) !void {
+fn progress_write(writer: std.io.AnyWriter, stats: Progress) !void {
     try writer.writeAll(std.mem.asBytes(&stats));
 }
