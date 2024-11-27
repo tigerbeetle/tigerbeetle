@@ -56,20 +56,30 @@ function makeContext(text, i, length, windowSize = 40) {
 
 function search(term, maxResults = 20) {
     if (term.length === 0) return [];
-    term = term.toLowerCase();
+    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedTerm, 'gi');
     let hits = [];
     for (const section of sections) {
-        const searchText = section.text.toLowerCase();
-        const firstIndex = searchText.indexOf(term);
-        if (firstIndex >= 0) {
-            let count = 0;
-            for (let index = firstIndex; index >= 0; index = searchText.indexOf(term, index + 1)) {
-                count++;
+        const match = regex.exec(section.text);
+        if (match) {
+            const firstIndex = match.index;
+            const count = section.text.match(regex).length;
+            let score = 1 + 0.01 * count;
+            score -= 0.004 * firstIndex; // penalty if match isn't early
+            if (section.pageTitle.match(regex)) {
+                score += 10;
+                if (term.length === section.pageTitle.length) score += 10; // exact match
+                score -= 0.02 * Math.abs(term.length - section.pageTitle.length); // penalty
             }
-            hits.push({ firstIndex, count, section });
+            if (section.title.match(regex)) {
+                score += 4;
+                if (term.length === section.title.length) score += 10; // exact match
+                score -= 0.02 * Math.abs(term.length - section.title.length); // penalty
+            }
+            hits.push({ firstIndex, score, section });
         }
     }
-    hits.sort((a, b) => b.count - a.count);
+    hits.sort((a, b) => b.score - a.score);
     hits = hits.slice(0, maxResults);
     hits.forEach(hit => hit.context = makeContext(hit.section.text, hit.firstIndex, term.length));
     return hits;
