@@ -137,6 +137,12 @@ nav.top {
       right: 8px;
       top: 50%;
       transform: translateY(-50%);
+      color: var(--gray-11);
+      cursor: pointer;
+
+      &:hover {
+        color: var(--gray-12);
+      }
     }
 
     input[type=search] {
