@@ -1101,13 +1101,14 @@ pub fn quorums(replica_count: u8) struct {
     assert(quorum_majority <= replica_count);
     assert(quorum_majority > @divFloor(replica_count, 2));
 
-    // A majority quorum (i.e. `max(quorum_commit, quorum_view_change)`) is required
+    // A majority quorum (i.e. `max(quorum_replication, quorum_view_change)`) is required
     // to ensure that the upgraded cluster can both commit and view-change.
     //
-    // However, we farther require that all-but-one replicas can upgrade. In most cases, not
-    // upgrading all replicas together would be a mistake (leading to replicas lagging and needing
-    // to state sync). The -1 allows for a single broken/recovering replica before the upgrade.
-    const quorum_upgrade = @max(replica_count - 1, quorum_majority);
+    // However, we farther require that all replicas can upgrade. In most cases, not upgrading all
+    // replicas together would be a mistake (leading to replicas lagging and needing to state sync).
+    // If an upgrade is needed while the cluster is compromised, then it should be a hotfix upgrade
+    // (i.e. to a build tagged with the same release).
+    const quorum_upgrade = replica_count;
     assert(quorum_upgrade <= replica_count);
     assert(quorum_upgrade >= quorum_replication);
     assert(quorum_upgrade >= quorum_view_change);
@@ -1128,6 +1129,7 @@ test "quorums" {
     const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
     const expect_nack_prepare = [_]u8{ 1, 1, 2, 3, 3, 4, 5, 6 };
     const expect_majority = [_]u8{ 1, 2, 2, 3, 3, 4, 4, 5 };
+    const expect_upgrade = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
 
     for (expect_replication[0..], 0..) |_, i| {
         const replicas = @as(u8, @intCast(i)) + 1;
@@ -1136,6 +1138,7 @@ test "quorums" {
         try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
         try std.testing.expectEqual(actual.nack_prepare, expect_nack_prepare[i]);
         try std.testing.expectEqual(actual.majority, expect_majority[i]);
+        try std.testing.expectEqual(actual.upgrade, expect_upgrade[i]);
 
         // The nack quorum only differs from the view-change quorum when R=2.
         if (replicas == 2) {
