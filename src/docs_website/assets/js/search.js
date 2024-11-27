@@ -41,15 +41,27 @@ async function init() {
 init();
 
 function makeContext(text, i, length, windowSize = 40) {
-    return text.slice(i - 20, i) + "<strong>" + text.slice(i, i + length) + "</strong>" + text.slice(i + length, i + length + 20);
+    let contextLeft = "";
+    let i0 = i - windowSize / 2;
+    if (i0 > 0) contextLeft = "...";
+    while (i0 > 0 && text[i0] !== ' ') i0--;
+    contextLeft = contextLeft + text.slice(i0, i).trimLeft();
+
+    let contextRight = "";
+    let i1 = i + length + windowSize / 2;
+    if (i1 < text.length) contextRight = "...";
+    while (i1 < text.length && text[i1] !== ' ') i1++;
+    contextRight = text.slice(i + length, i1).trimRight() + contextRight;
+
+    const highlight = "<strong>" + text.slice(i, i + length) + "</strong>";
+    return contextLeft + highlight + contextRight;
 }
 
 function search(term, maxResults = 20) {
     if (term.length === 0) return [];
     term = term.toLowerCase();
     let hits = [];
-    for (const section of sections) {
-        const searchText = section.text.toLowerCase();
+    for (const section of sections) {        const searchText = section.text.toLowerCase();
         const firstIndex = searchText.indexOf(term);
         if (firstIndex >= 0) {
             let count = 0;
