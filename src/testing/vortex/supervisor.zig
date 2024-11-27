@@ -213,12 +213,48 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
 
     var sleep_deadline: u64 = 0;
+    var last_action_timestamp: ?u64 = null;
 
     const workload_result = while (std.time.nanoTimestamp() < test_deadline) {
         network.tick();
         try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
-
         const now: u64 = @intCast(std.time.nanoTimestamp());
+
+        var running_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
+        const running_replicas = replicas_in_state(
+            &replicas,
+            &running_replicas_buffer,
+            .running,
+        );
+        var terminated_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
+        const terminated_replicas = replicas_in_state(
+            &replicas,
+            &terminated_replicas_buffer,
+            .terminated,
+        );
+        var stopped_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
+        const stopped_replicas = replicas_in_state(
+            &replicas,
+            &stopped_replicas_buffer,
+            .stopped,
+        );
+
+        // If there has been no faults during the last 10+ seconds, we expect some requests to have
+        // completed during the period.
+        if (last_action_timestamp) |timestamp| {
+            if (now > (timestamp + (constants.liveness_requirement_seconds * std.time.ns_per_s)) and
+                network.faults.is_healed() and
+                terminated_replicas.len == 0 and
+                stopped_replicas.len == 0 and
+                workload.event_count_total == 0)
+            {
+                log.err("no successful requests after {d} seconds of healthy cluster", .{
+                    constants.liveness_requirement_seconds,
+                });
+                return error.TestFailed;
+            }
+        }
+
         if (now < sleep_deadline) continue;
 
         if (!args.disable_faults) {
@@ -236,24 +272,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                 quiesce,
             };
 
-            var running_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
-            const running_replicas = replicas_in_state(
-                &replicas,
-                &running_replicas_buffer,
-                .running,
-            );
-            var terminated_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
-            const terminated_replicas = replicas_in_state(
-                &replicas,
-                &terminated_replicas_buffer,
-                .terminated,
-            );
-            var stopped_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
-            const stopped_replicas = replicas_in_state(
-                &replicas,
-                &stopped_replicas_buffer,
-                .stopped,
-            );
+            last_action_timestamp = @intCast(std.time.nanoTimestamp());
+            workload.event_count_total = 0;
 
             switch (arbitrary.weighted(random, Action, .{
                 .sleep = 10,
@@ -395,7 +415,11 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     }, .{});
                 },
                 .quiesce => {
-                    const duration = random.intRangeAtMost(u64, 60, 120) * std.time.ns_per_s;
+                    const duration = random.intRangeAtMost(
+                        u64,
+                        constants.liveness_requirement_seconds,
+                        constants.liveness_requirement_seconds * 2,
+                    ) * std.time.ns_per_s;
                     sleep_deadline = now + duration;
 
                     network.faults.heal();
@@ -655,6 +679,8 @@ const Workload = struct {
     read_completion: IO.Completion = undefined,
     read_progress: usize = 0,
 
+    event_count_total: u64 = 0,
+
     pub fn spawn(
         allocator: std.mem.Allocator,
         args: CLIArgs,
@@ -741,6 +767,7 @@ const Workload = struct {
         if (workload.read_progress >= workload.read_buffer.len) {
             const stats = std.mem.bytesAsValue(Stats, workload.read_buffer[0..]);
             workload.read_progress = 0;
+            workload.event_count_total += stats.event_count;
 
             workload.trace.write(.{
                 .name = "request",
