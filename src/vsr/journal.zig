@@ -1846,15 +1846,15 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.prepare_inhabited[slot.index] = true;
             journal.prepare_checksums[slot.index] = message.header.checksum;
 
-            if (journal.slot_with_header(message.header)) |_| {
-                journal.headers_redundant[slot.index] = message.header.*;
-            } else {
+            if (!journal.has_header(message.header)) {
                 journal.write_prepare_debug(message.header, "entry changed while writing sectors");
                 journal.write_prepare_release(write, null);
                 // We just overwrote a (potentially-clean) prepare with the "wrong" header.
                 journal.dirty.set(slot);
                 return;
             }
+            journal.headers_redundant[slot.index] = message.header.*;
+
             // TODO It's possible within this section that the header has since been replaced but we
             // continue writing, even when the dirty bit is no longer set. This is not a problem
             // but it would be good to stop writing as soon as we see we no longer need to.
