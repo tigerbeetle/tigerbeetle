@@ -174,6 +174,7 @@ pub fn CacheMapType(
                     switch (result.updated) {
                         .update => {
                             assert(key_from_value(evicted) == key);
+                            if (constants.verify) assert(!self.stash.contains(value.*));
 
                             // There was an eviction because an item was updated,
                             // the evicted item is always its previous version.
@@ -300,6 +301,16 @@ pub fn CacheMapType(
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
             maybe(self.stash.count() <= self.options.map_value_count_max);
+
+            if (constants.verify) {
+                if (self.cache) |*cache| {
+                    var it = self.stash.keyIterator();
+                    while (it.next()) |value| {
+                        const key = key_from_value(value);
+                        assert(cache.get(key) == null);
+                    }
+                }
+            }
 
             self.stash.clearRetainingCapacity();
         }
