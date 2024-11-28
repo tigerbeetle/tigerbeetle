@@ -54,8 +54,10 @@ fn create_root_menu(arena: std.mem.Allocator, title: []const u8, base_path: []co
     var pages = std.ArrayList(DocPage).init(arena);
     var menus = std.ArrayList(Menu).init(arena);
 
-    const index_page = try DocPage.init(arena, base_path, try std.fs.path.join(arena, &.{ base_path, "README.md" }));
-    try pages.append(try DocPage.init(arena, base_path, try std.fs.path.join(arena, &.{ base_path, "quick-start.md" })));
+    const index_path = try std.fs.path.join(arena, &.{ base_path, "README.md" });
+    const index_page = try DocPage.init(arena, base_path, index_path);
+    const quick_start_path = try std.fs.path.join(arena, &.{ base_path, "quick-start.md" });
+    try pages.append(try DocPage.init(arena, base_path, quick_start_path));
 
     var dir = std.fs.cwd().openDir(base_path, .{ .iterate = true }) catch |err| {
         log.err("unable to open path '{s}'", .{base_path});
@@ -88,18 +90,18 @@ fn create_root_menu(arena: std.mem.Allocator, title: []const u8, base_path: []co
 fn create_clients_menu(arena: std.mem.Allocator) !Menu {
     var pages = std.ArrayList(DocPage).init(arena);
 
-    const clients = [_][]const u8{ "go", "java", "dotnet", "node" };
-    inline for (clients) |client| {
-        try pages.append(try DocPage.initWithTarget(
-            arena,
-            "../clients/" ++ client ++ "/README.md",
-            "clients/" ++ client,
-        ));
+    const clients = &.{ "go", "java", "dotnet", "node" };
+    const titles = &.{ "Go", "Java", ".NET", "Node.js" };
+    inline for (clients, titles) |client, title| {
+        try pages.append(.{
+            .path_source = "../clients/" ++ client ++ "/README.md",
+            .path_target = "clients/" ++ client,
+            .title = title,
+        });
     }
 
     return .{
         .title = "Clients",
-        // .path = "../clients",
         .index_page = null,
         .menus = &.{},
         .pages = pages.items,
@@ -189,15 +191,9 @@ const DocPage = struct {
             path_target = path_target[0 .. path_target.len - ".md".len];
         }
 
-        return try initWithTarget(arena, path_source, path_target);
-    }
-
-    fn initWithTarget(arena: Allocator, source: []const u8, target: []const u8) !DocPage {
-        assert(std.mem.endsWith(u8, source, ".md"));
-
         var post: DocPage = .{
-            .path_source = source,
-            .path_target = target,
+            .path_source = path_source,
+            .path_target = path_target,
             .title = undefined,
         };
         try post.load(arena);
