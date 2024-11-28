@@ -72,21 +72,42 @@ fn create_root_menu(arena: std.mem.Allocator, title: []const u8, base_path: []co
         }
     }
 
+    try menus.append(try create_clients_menu(arena));
+
     std.mem.sort(DocPage, pages.items, {}, DocPage.asc);
     std.mem.sort(Menu, menus.items, {}, Menu.asc);
 
     return .{
         .title = title,
-        .path = base_path,
         .index_page = index_page,
         .menus = menus.items,
         .pages = pages.items,
     };
 }
 
+fn create_clients_menu(arena: std.mem.Allocator) !Menu {
+    var pages = std.ArrayList(DocPage).init(arena);
+
+    const clients = [_][]const u8{ "go", "java", "dotnet", "node" };
+    inline for (clients) |client| {
+        try pages.append(try DocPage.initWithTarget(
+            arena,
+            "../clients/" ++ client ++ "/README.md",
+            "clients/" ++ client,
+        ));
+    }
+
+    return .{
+        .title = "Clients",
+        // .path = "../clients",
+        .index_page = null,
+        .menus = &.{},
+        .pages = pages.items,
+    };
+}
+
 const Menu = struct {
     title: []const u8,
-    path: []const u8,
     index_page: ?DocPage,
     menus: []Menu,
     pages: []DocPage,
@@ -251,7 +272,6 @@ const DocPage = struct {
 
         return .{
             .title = title,
-            .path = path,
             .index_page = index_page,
             .menus = menus.items,
             .pages = pages.items,

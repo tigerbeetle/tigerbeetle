@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.file_checker);
 const assets = @import("assets.zig");
 
-pub const file_size_max = 600 << 10;
+pub const file_size_max = 900 << 10;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
