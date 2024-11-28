@@ -73,11 +73,9 @@
 
       const navSide = document.querySelector("nav.side");
       const menuHeads = [...navSide.querySelectorAll(".menu-head")];
-      menuHeads.forEach(e => {
-        e.addEventListener("click", (ev) => {
-          if (ev.target == e) e.classList.toggle("expanded");
-        });
-      });
+      menuHeads.forEach(e => e.addEventListener("click", ev => {
+        if (ev.target == e) e.classList.toggle("expanded");
+      }));
 
       // Expand side nav based on location
       let path = location.pathname;
