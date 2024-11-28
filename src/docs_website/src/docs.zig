@@ -23,7 +23,7 @@ pub fn build(
     const arena = b.allocator;
     const docs = b.addWriteFiles();
 
-    const menu = try DocPage.find_all(arena, "TigerBeetle Docs", source_dir, source_dir);
+    const menu = try create_root_menu(arena, "TigerBeetle Docs", source_dir);
 
     var nav_html = try Html.create(arena);
     try menu.write_links(website, nav_html);
@@ -48,6 +48,40 @@ pub fn build(
     }
 
     return docs.getDirectory();
+}
+
+fn create_root_menu(arena: std.mem.Allocator, title: []const u8, base_path: []const u8) !Menu {
+    var pages = std.ArrayList(DocPage).init(arena);
+    var menus = std.ArrayList(Menu).init(arena);
+
+    const index_page = try DocPage.init(arena, base_path, try std.fs.path.join(arena, &.{ base_path, "README.md" }));
+    try pages.append(try DocPage.init(arena, base_path, try std.fs.path.join(arena, &.{ base_path, "quick-start.md" })));
+
+    var dir = std.fs.cwd().openDir(base_path, .{ .iterate = true }) catch |err| {
+        log.err("unable to open path '{s}'", .{base_path});
+        return err;
+    };
+    defer dir.close();
+
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind == .directory) {
+            const menu_path = try std.fs.path.join(arena, &.{ base_path, entry.name });
+            const menu_title = try make_title(arena, entry.name);
+            try menus.append(try DocPage.find_all(arena, menu_title, base_path, menu_path));
+        }
+    }
+
+    std.mem.sort(DocPage, pages.items, {}, DocPage.asc);
+    std.mem.sort(Menu, menus.items, {}, Menu.asc);
+
+    return .{
+        .title = title,
+        .path = base_path,
+        .index_page = index_page,
+        .menus = menus.items,
+        .pages = pages.items,
+    };
 }
 
 const Menu = struct {
@@ -134,9 +168,15 @@ const DocPage = struct {
             path_target = path_target[0 .. path_target.len - ".md".len];
         }
 
+        return try initWithTarget(arena, path_source, path_target);
+    }
+
+    fn initWithTarget(arena: Allocator, source: []const u8, target: []const u8) !DocPage {
+        assert(std.mem.endsWith(u8, source, ".md"));
+
         var post: DocPage = .{
-            .path_source = path_source,
-            .path_target = path_target,
+            .path_source = source,
+            .path_target = target,
             .title = undefined,
         };
         try post.load(arena);
