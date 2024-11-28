@@ -87,6 +87,8 @@
             if (parent.matches(".menu")) {
               const head = parent.previousSibling;
               if (head?.matches?.(".menu-head")) head.classList.add("expanded");
+            } else if (parent.matches(".menu-head")) {
+              parent.classList.add("expanded"); // expand for discoverability
             }
           }
         }
