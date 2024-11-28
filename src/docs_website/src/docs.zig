@@ -256,6 +256,7 @@ const DocPage = struct {
                     try pages.append(page);
                 }
             } else if (entry.kind == .directory) {
+                if (std.mem.eql(u8, entry.name, "internals")) continue; // hide internals
                 const menu_path = try std.fs.path.join(arena, &.{ path, entry.name });
                 const menu_title = try make_title(arena, entry.name);
                 try menus.append(try find_all(arena, menu_title, base_path, menu_path));
