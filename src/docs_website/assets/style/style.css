@@ -443,14 +443,6 @@ article {
       opacity: 1;
     }
 
-    code {
-      color: var(--gray-12);
-    }
-
-    img {
-      max-width: 100%;
-    }
-
     @media (prefers-color-scheme: dark) {
       .anchor::after {
         filter: invert(100%);
@@ -461,6 +453,14 @@ article {
       }
     }
 
+    code {
+      color: var(--gray-12);
+    }
+
+    img {
+      max-width: 100%;
+    }
+
     ul, ol {
       display: flex;
       flex-direction: column;
@@ -469,6 +469,29 @@ article {
 
     li {
       margin-left: 16px;
+    }
+
+    table {
+      display: block;
+      width: 100%;
+      white-space: nowrap;
+      overflow-x: auto;
+      border-collapse: collapse;
+
+      tr {
+        th {
+          font-weight: 600;
+        }
+
+        th, td {
+          padding: 4px 8px;
+          border: 1px solid var(--gray-4);
+        }
+      }
+
+      tr:nth-child(2n) {
+        background-color: var(--gray-1);
+      }
     }
   }
 }
