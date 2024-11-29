@@ -452,6 +452,12 @@ article {
       }
     }
 
+    ul, ol {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
     li {
       margin-left: 16px;
     }
