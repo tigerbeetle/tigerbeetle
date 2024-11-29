@@ -90,8 +90,8 @@ fn create_root_menu(arena: std.mem.Allocator, title: []const u8, base_path: []co
 fn create_clients_menu(arena: std.mem.Allocator) !Menu {
     var pages = std.ArrayList(DocPage).init(arena);
 
-    const clients = &.{ "go", "java", "dotnet", "node" };
-    const titles = &.{ "Go", "Java", ".NET", "Node.js" };
+    const clients = &.{ "go", "java", "dotnet", "node", "python" };
+    const titles = &.{ "Go", "Java", ".NET", "Node.js", "Python" };
     inline for (clients, titles) |client, title| {
         try pages.append(.{
             .path_source = "../clients/" ++ client ++ "/README.md",
