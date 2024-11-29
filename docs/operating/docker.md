@@ -33,6 +33,8 @@ info(io): allocating 660.140625MiB...
 
 ## Run the Server
 
+> **_NOTE:_** To allow external clients to connect, replace `0.0.0.0` with the container's IP address
+
 ```console
 docker run -it --security-opt seccomp=unconfined \
     -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
@@ -173,7 +175,7 @@ If you get `error: SystemResources` when running TigerBeetle in Docker on macOS,
 the container may be blocking TigerBeetle from locking memory, which is necessary both for io_uring
 and to prevent the kernel's use of swap from bypassing TigerBeetle's storage fault tolerance.
 
-#### Allowing MEMLOCK 
+#### Allowing MEMLOCK
 
 To raise the memory lock limits under Docker, execute one of the following:
 
