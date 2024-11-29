@@ -1,6 +1,3 @@
-:root {
-}
-
 .content pre {
   border-radius: 15px;
   padding: 30px;
@@ -19,27 +16,27 @@
   code .kw,
   code .at,
   code .cf {
-    color: var(--red);
+    color: var(--red-10);
   }
 
   code .op {
-    color: var(--red);
+    color: var(--red-10);
   }
 
   code .dt {
-    color: var(--orange);
+    color: var(--orange-10);
   }
 
   code .st {
-    color: var(--green);
+    color: var(--green-10);
   }
 
   code .dv,
   code .fl {
-    color: var(--light-blue);
+    color: var(--sky-10);
   }
 
   code .bu {
-    color: var(--blue);
+    color: var(--blue-10);
   }
 }
