@@ -285,10 +285,17 @@ fn run_fuzzers(
                         .{ fuzzer.seed.command, if (!fuzzer_done) " (timeout)" else "" },
                     );
                     const term = try if (fuzzer_done) fuzzer.child.wait() else fuzzer.child.kill();
-                    var seed_record = fuzzer.seed;
-                    seed_record.ok = std.meta.eql(term, .{ .Exited = 0 });
-                    seed_record.seed_timestamp_end = @intCast(std.time.timestamp());
-                    try seeds.append(seed_record);
+                    if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL })) {
+                        // Something killed the fuzzer. This is likely OOM, so count this seed
+                        // neither as a success, nor as a failure.
+                        log.info("ignored SIGKILL for '{s}'", .{fuzzer.seed.command});
+                    } else {
+                        var seed_record = fuzzer.seed;
+                        seed_record.ok = std.meta.eql(term, .{ .Exited = 0 });
+                        seed_record.seed_timestamp_end = @intCast(std.time.timestamp());
+                        try seeds.append(seed_record);
+                    }
+
                     fuzzer_or_null.* = null;
                 }
             }
