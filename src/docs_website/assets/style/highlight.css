@@ -1,0 +1,42 @@
+.content pre {
+  border-radius: 15px;
+  padding: 30px;
+  background-color: var(--gray-1);
+  border: 1px solid var(--gray-4);
+  overflow: auto;
+
+  code {
+    color: var(--gray-12);
+  }
+
+  code .co {
+    color: var(--gray-10);
+  }
+
+  code .kw,
+  code .at,
+  code .cf {
+    color: var(--red-10);
+  }
+
+  code .op {
+    color: var(--red-10);
+  }
+
+  code .dt {
+    color: var(--orange-10);
+  }
+
+  code .st {
+    color: var(--green-10);
+  }
+
+  code .dv,
+  code .fl {
+    color: var(--sky-10);
+  }
+
+  code .bu {
+    color: var(--blue-10);
+  }
+}
