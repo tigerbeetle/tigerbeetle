@@ -2,8 +2,8 @@ let sections = [];
 
 const searchInput = document.querySelector("input[type=search]");
 const searchResults = document.querySelector(".search-results");
-const searchHotkey = document.querySelector(".search-container .hotkey");
-const searchClearButton = document.querySelector(".search-container .clear-button");
+const searchHotkey = document.querySelector(".search-container>.hotkey");
+const searchClearButton = document.querySelector(".search-container>.clear-button");
 
 async function init() {
     const response = await fetch(urlPrefix + "/search_index.json");
@@ -174,21 +174,16 @@ if (location.search) {
 }
 
 function highlightText(term) {
-    const contentDiv = document.querySelector('article>.content');
-
-    // Escape special characters for regex
     const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(escapedTerm, 'gi');
-
-    // Highlight matches recursively
-    traverseAndHighlight(contentDiv, regex);
+    const content = document.querySelector('article>.content');
+    traverseAndHighlight(content, regex);
 }
 
 function traverseAndHighlight(node, regex) {
     if (node.nodeType === Node.TEXT_NODE) {
         const match = node.nodeValue.match(regex);
         if (match) {
-            const parent = node.parentNode;
             const fragment = document.createDocumentFragment();
 
             let lastIndex = 0;
@@ -198,7 +193,6 @@ function traverseAndHighlight(node, regex) {
                     fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex, offset)));
                 }
 
-                // Create the highlighted node
                 const span = document.createElement('span');
                 span.className = 'highlight';
                 span.textContent = matchedText;
@@ -212,11 +206,9 @@ function traverseAndHighlight(node, regex) {
                 fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex)));
             }
 
-            // Replace the text node with the fragment
-            parent.replaceChild(fragment, node);
+            node.parentNode.replaceChild(fragment, node);
         }
     } else if (node.nodeType === Node.ELEMENT_NODE) {
-        // Recursively check child nodes
-        Array.from(node.childNodes).forEach(child => traverseAndHighlight(child, regex));
+        node.childNodes.forEach(child => traverseAndHighlight(child, regex));
     }
 }
