@@ -23,12 +23,13 @@ pub const Parser = struct {
     terminal: *const Terminal,
 
     pub const Error = error{
-        BadKeyValuePair,
-        BadValue,
-        BadOperation,
-        BadIdentifier,
-        MissingEqualBetweenKeyValuePair,
-        NoSyntaxMatch,
+        IdentifierBad,
+        OperationBad,
+        ValueBad,
+        KeyValuePairBad,
+        KeyValuePairEqualMissing,
+        SyntaxMatchNone,
+        SliceOperationUnsupported,
     };
 
     pub const Operation = enum {
@@ -131,7 +132,7 @@ pub const Parser = struct {
             return;
         }
 
-        return Error.NoSyntaxMatch;
+        return Error.SyntaxMatchNone;
     }
 
     fn parse_value(parser: *Parser) []const u8 {
@@ -315,13 +316,12 @@ pub const Parser = struct {
         var object_has_fields = false;
         while (parser.offset < parser.input.len) {
             parser.eat_whitespace();
-            // Always need to check `i` against length in case we've hit the end.
+            // Always need to check i against length in case we've hit the end.
             if (parser.offset >= parser.input.len or parser.input[parser.offset] == ';') {
                 break;
             }
 
             // Expect comma separating objects.
-            // TODO: Not all operations allow multiple objects, e.g. get_account_transfers.
             if (parser.offset < parser.input.len and parser.input[parser.offset] == ',') {
                 parser.offset += 1;
                 inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_tree_field| {
@@ -329,6 +329,19 @@ pub const Parser = struct {
                         const unwrapped_field = @field(object, object_tree_field.name);
                         try arguments.appendSlice(std.mem.asBytes(&unwrapped_field));
                     }
+                }
+                const state_machine_op = std.meta.stringToEnum(
+                    StateMachine.Operation,
+                    @tagName(operation),
+                ).?;
+
+                if (!StateMachine.event_is_slice(state_machine_op)) {
+                    try parser.print_current_position();
+                    try parser.terminal.print_error(
+                        "{s} expects a single {s} but received multiple.\n",
+                        .{ @tagName(operation), @tagName(object) },
+                    );
+                    return error.SliceOperationUnsupported;
                 }
 
                 // Reset object.
@@ -345,7 +358,7 @@ pub const Parser = struct {
                     "Expected key starting key-value pair. e.g. `id=1`\n",
                     .{},
                 );
-                return Error.BadIdentifier;
+                return Error.IdentifierBad;
             }
 
             // Grab =.
@@ -356,7 +369,7 @@ pub const Parser = struct {
                         " pair. e.g. `id=1`.\n",
                     .{id_result},
                 );
-                return Error.MissingEqualBetweenKeyValuePair;
+                return Error.KeyValuePairEqualMissing;
             };
 
             // Grab value.
@@ -368,7 +381,7 @@ pub const Parser = struct {
                     "Expected value after equal sign in key-value pair. e.g. `id=1`.\n",
                     .{},
                 );
-                return Error.BadValue;
+                return Error.ValueBad;
             }
 
             // Match key to a field in the struct.
@@ -378,7 +391,7 @@ pub const Parser = struct {
                     "'{s}'='{s}' is not a valid pair for {s}.\n",
                     .{ id_result, value_result, @tagName(object) },
                 );
-                return Error.BadKeyValuePair;
+                return Error.KeyValuePairBad;
             };
 
             object_has_fields = true;
@@ -445,7 +458,7 @@ pub const Parser = struct {
                 } ++ ". Got: '{s}'.\n",
                 .{operation_identifier},
             );
-            return Error.BadOperation;
+            return Error.OperationBad;
         };
 
         var arguments = std.ArrayList(u8).init(arena.allocator());
@@ -758,12 +771,13 @@ pub fn ReplType(comptime MessageBus: type) type {
                     // These are parsing errors, so the REPL should
                     // not continue to execute this statement but can
                     // still accept new statements.
-                    Parser.Error.BadIdentifier,
-                    Parser.Error.BadOperation,
-                    Parser.Error.BadValue,
-                    Parser.Error.BadKeyValuePair,
-                    Parser.Error.MissingEqualBetweenKeyValuePair,
-                    Parser.Error.NoSyntaxMatch,
+                    Parser.Error.IdentifierBad,
+                    Parser.Error.OperationBad,
+                    Parser.Error.ValueBad,
+                    Parser.Error.KeyValuePairBad,
+                    Parser.Error.KeyValuePairEqualMissing,
+                    Parser.Error.SyntaxMatchNone,
+                    Parser.Error.SliceOperationUnsupported,
                     // TODO(zig): This will be more convenient to express
                     // once https://github.com/ziglang/zig/issues/2473 is
                     // in.
@@ -900,12 +914,13 @@ pub fn ReplType(comptime MessageBus: type) type {
                                 // is not an interactive command, we should
                                 // exit immediately. Parsing error info
                                 // has already been emitted to stderr.
-                                Parser.Error.BadIdentifier,
-                                Parser.Error.BadOperation,
-                                Parser.Error.BadValue,
-                                Parser.Error.BadKeyValuePair,
-                                Parser.Error.MissingEqualBetweenKeyValuePair,
-                                Parser.Error.NoSyntaxMatch,
+                                Parser.Error.IdentifierBad,
+                                Parser.Error.OperationBad,
+                                Parser.Error.ValueBad,
+                                Parser.Error.KeyValuePairBad,
+                                Parser.Error.KeyValuePairEqualMissing,
+                                Parser.Error.SyntaxMatchNone,
+                                Parser.Error.SliceOperationUnsupported,
                                 // TODO: This will be more convenient to express
                                 // once https://github.com/ziglang/zig/issues/2473 is
                                 // in.
@@ -1161,13 +1176,13 @@ const null_terminal = Terminal{
 };
 
 test "repl.zig: Parser single transfer successfully" {
-    const tests = [_]struct {
-        in: []const u8 = "",
-        want: tb.Transfer,
+    const vectors = [_]struct {
+        string: []const u8 = "",
+        result: tb.Transfer,
     }{
         .{
-            .in = "create_transfers id=1",
-            .want = tb.Transfer{
+            .string = "create_transfers id=1",
+            .result = tb.Transfer{
                 .id = 1,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1184,8 +1199,8 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
-            .in = "create_transfers timestamp=1",
-            .want = tb.Transfer{
+            .string = "create_transfers timestamp=1",
+            .result = tb.Transfer{
                 .id = 0,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1202,12 +1217,12 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_transfers id=32 amount=65 ledger=12 code=9999 pending_id=7
             \\ credit_account_id=2121 debit_account_id=77 user_data_128=2
             \\ user_data_64=3 user_data_32=4 flags=linked
             ,
-            .want = tb.Transfer{
+            .result = tb.Transfer{
                 .id = 32,
                 .debit_account_id = 77,
                 .credit_account_id = 2121,
@@ -1224,7 +1239,7 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_transfers flags=
             \\ post_pending_transfer |
             \\ balancing_credit |
@@ -1233,7 +1248,7 @@ test "repl.zig: Parser single transfer successfully" {
             \\ pending |
             \\ linked
             ,
-            .want = tb.Transfer{
+            .result = tb.Transfer{
                 .id = 0,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1257,10 +1272,10 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_transfers amount=-0
             ,
-            .want = tb.Transfer{
+            .result = tb.Transfer{
                 .id = 0,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1277,10 +1292,10 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_transfers amount=-1
             ,
-            .want = tb.Transfer{
+            .result = tb.Transfer{
                 .id = 0,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1297,10 +1312,10 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_transfers amount=0xbee71e
             ,
-            .want = tb.Transfer{
+            .result = tb.Transfer{
                 .id = 0,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1317,10 +1332,10 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_transfers amount=1_000_000
             ,
-            .want = tb.Transfer{
+            .result = tb.Transfer{
                 .id = 0,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1337,10 +1352,10 @@ test "repl.zig: Parser single transfer successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_transfers id=0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6
             ,
-            .want = tb.Transfer{
+            .result = tb.Transfer{
                 .id = 0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1358,29 +1373,29 @@ test "repl.zig: Parser single transfer successfully" {
         },
     };
 
-    for (tests) |t| {
+    for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const statement = try Parser.parse_statement(
             &arena,
-            t.in,
+            vector.string,
             &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
+        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
     }
 }
 
 test "repl.zig: Parser multiple transfers successfully" {
-    const tests = [_]struct {
-        in: []const u8 = "",
-        want: [2]tb.Transfer,
+    const vectors = [_]struct {
+        string: []const u8 = "",
+        result: [2]tb.Transfer,
     }{
         .{
-            .in = "create_transfers id=1 debit_account_id=2, id=2 credit_account_id = 1;",
-            .want = [2]tb.Transfer{
+            .string = "create_transfers id=1 debit_account_id=2, id=2 credit_account_id = 1;",
+            .result = [2]tb.Transfer{
                 tb.Transfer{
                     .id = 1,
                     .debit_account_id = 2,
@@ -1415,29 +1430,33 @@ test "repl.zig: Parser multiple transfers successfully" {
         },
     };
 
-    for (tests) |t| {
+    for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const statement = try Parser.parse_statement(
             &arena,
-            t.in,
+            vector.string,
             &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.sliceAsBytes(&t.want));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments,
+            std.mem.sliceAsBytes(&vector.result),
+        );
     }
 }
 
 test "repl.zig: Parser single account successfully" {
-    const tests = [_]struct {
-        in: []const u8,
-        want: tb.Account,
+    const vectors = [_]struct {
+        string: []const u8,
+        result: tb.Account,
     }{
         .{
-            .in = "create_accounts id=1",
-            .want = tb.Account{
+            .string = "create_accounts id=1",
+            .result = tb.Account{
                 .id = 1,
                 .debits_pending = 0,
                 .debits_posted = 0,
@@ -1454,12 +1473,12 @@ test "repl.zig: Parser single account successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_accounts id=32 credits_posted=344 ledger=12 credits_pending=18
             \\ code=9999 flags=linked | debits_must_not_exceed_credits debits_posted=3390
             \\ debits_pending=3212 user_data_128=2 user_data_64=3 user_data_32=4
             ,
-            .want = tb.Account{
+            .result = tb.Account{
                 .id = 32,
                 .debits_pending = 3212,
                 .debits_posted = 3390,
@@ -1476,11 +1495,11 @@ test "repl.zig: Parser single account successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\create_accounts flags=credits_must_not_exceed_debits|
             \\ linked|debits_must_not_exceed_credits id =1
             ,
-            .want = tb.Account{
+            .result = tb.Account{
                 .id = 1,
                 .debits_pending = 0,
                 .debits_posted = 0,
@@ -1502,31 +1521,31 @@ test "repl.zig: Parser single account successfully" {
         },
     };
 
-    for (tests) |t| {
+    for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const statement = try Parser.parse_statement(
             &arena,
-            t.in,
+            vector.string,
             &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
+        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
     }
 }
 
 test "repl.zig: Parser account filter successfully" {
-    const tests = [_]struct {
-        in: []const u8,
+    const vectors = [_]struct {
+        string: []const u8,
         operation: Parser.Operation,
-        want: tb.AccountFilter,
+        result: tb.AccountFilter,
     }{
         .{
-            .in = "get_account_transfers account_id=1",
+            .string = "get_account_transfers account_id=1",
             .operation = .get_account_transfers,
-            .want = tb.AccountFilter{
+            .result = tb.AccountFilter{
                 .account_id = 1,
                 .user_data_128 = 0,
                 .user_data_64 = 0,
@@ -1543,7 +1562,7 @@ test "repl.zig: Parser account filter successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\get_account_balances account_id=1000
             \\user_data_128=128 user_data_64=64 user_data_32=32
             \\code=2
@@ -1552,7 +1571,7 @@ test "repl.zig: Parser account filter successfully" {
             \\
             ,
             .operation = .get_account_balances,
-            .want = tb.AccountFilter{
+            .result = tb.AccountFilter{
                 .account_id = 1000,
                 .user_data_128 = 128,
                 .user_data_64 = 64,
@@ -1570,31 +1589,31 @@ test "repl.zig: Parser account filter successfully" {
         },
     };
 
-    for (tests) |t| {
+    for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const statement = try Parser.parse_statement(
             &arena,
-            t.in,
+            vector.string,
             &null_terminal,
         );
 
-        try std.testing.expectEqual(statement.operation, t.operation);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
+        try std.testing.expectEqual(statement.operation, vector.operation);
+        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
     }
 }
 
 test "repl.zig: Parser query filter successfully" {
-    const tests = [_]struct {
-        in: []const u8,
+    const vectors = [_]struct {
+        string: []const u8,
         operation: Parser.Operation,
-        want: tb.QueryFilter,
+        result: tb.QueryFilter,
     }{
         .{
-            .in = "query_transfers user_data_128=1",
+            .string = "query_transfers user_data_128=1",
             .operation = .query_transfers,
-            .want = tb.QueryFilter{
+            .result = tb.QueryFilter{
                 .user_data_128 = 1,
                 .user_data_64 = 0,
                 .user_data_32 = 0,
@@ -1609,7 +1628,7 @@ test "repl.zig: Parser query filter successfully" {
             },
         },
         .{
-            .in =
+            .string =
             \\query_accounts user_data_128=1000
             \\user_data_64=100 user_data_32=10
             \\ledger=1 code=2
@@ -1618,7 +1637,7 @@ test "repl.zig: Parser query filter successfully" {
             \\
             ,
             .operation = .query_accounts,
-            .want = tb.QueryFilter{
+            .result = tb.QueryFilter{
                 .user_data_128 = 1000,
                 .user_data_64 = 100,
                 .user_data_32 = 10,
@@ -1634,29 +1653,29 @@ test "repl.zig: Parser query filter successfully" {
         },
     };
 
-    for (tests) |t| {
+    for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const statement = try Parser.parse_statement(
             &arena,
-            t.in,
+            vector.string,
             &null_terminal,
         );
 
-        try std.testing.expectEqual(statement.operation, t.operation);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
+        try std.testing.expectEqual(statement.operation, vector.operation);
+        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
     }
 }
 
 test "repl.zig: Parser multiple accounts successfully" {
-    const tests = [_]struct {
-        in: []const u8,
-        want: [2]tb.Account,
+    const vectors = [_]struct {
+        string: []const u8,
+        result: [2]tb.Account,
     }{
         .{
-            .in = "create_accounts id=1, id=2",
-            .want = [2]tb.Account{
+            .string = "create_accounts id=1, id=2",
+            .result = [2]tb.Account{
                 tb.Account{
                     .id = 1,
                     .debits_pending = 0,
@@ -1691,30 +1710,34 @@ test "repl.zig: Parser multiple accounts successfully" {
         },
     };
 
-    for (tests) |t| {
+    for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const statement = try Parser.parse_statement(
             &arena,
-            t.in,
+            vector.string,
             &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.sliceAsBytes(&t.want));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments,
+            std.mem.sliceAsBytes(&vector.result),
+        );
     }
 }
 
 test "repl.zig: Parser odd but correct formatting" {
-    const tests = [_]struct {
-        in: []const u8 = "",
-        want: tb.Transfer,
+    const vectors = [_]struct {
+        string: []const u8 = "",
+        result: tb.Transfer,
     }{
         // Space between key-value pair and equality
         .{
-            .in = "create_transfers id = 1",
-            .want = tb.Transfer{
+            .string = "create_transfers id = 1",
+            .result = tb.Transfer{
                 .id = 1,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1732,8 +1755,8 @@ test "repl.zig: Parser odd but correct formatting" {
         },
         // Space only before equals sign
         .{
-            .in = "create_transfers id =1",
-            .want = tb.Transfer{
+            .string = "create_transfers id =1",
+            .result = tb.Transfer{
                 .id = 1,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1751,8 +1774,8 @@ test "repl.zig: Parser odd but correct formatting" {
         },
         // Whitespace before command
         .{
-            .in = "  \t  \n  create_transfers id=1",
-            .want = tb.Transfer{
+            .string = "  \t  \n  create_transfers id=1",
+            .result = tb.Transfer{
                 .id = 1,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1770,8 +1793,8 @@ test "repl.zig: Parser odd but correct formatting" {
         },
         // Trailing semicolon
         .{
-            .in = "create_transfers id=1;",
-            .want = tb.Transfer{
+            .string = "create_transfers id=1;",
+            .result = tb.Transfer{
                 .id = 1,
                 .debit_account_id = 0,
                 .credit_account_id = 0,
@@ -1789,7 +1812,7 @@ test "repl.zig: Parser odd but correct formatting" {
         },
         // Spaces everywhere
         .{
-            .in =
+            .string =
             \\
             \\
             \\      create_transfers
@@ -1800,7 +1823,7 @@ test "repl.zig: Parser odd but correct formatting" {
             \\
             \\
             ,
-            .want = tb.Transfer{
+            .result = tb.Transfer{
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 10,
@@ -1818,89 +1841,126 @@ test "repl.zig: Parser odd but correct formatting" {
         },
     };
 
-    for (tests) |t| {
+    for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const statement = try Parser.parse_statement(
             &arena,
-            t.in,
+            vector.string,
             &null_terminal,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
+        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
     }
 }
 
 test "repl.zig: Handle parsing errors" {
-    const tests = [_]struct {
-        in: []const u8 = "",
-        err: anyerror,
+    const vectors = [_]struct {
+        string: []const u8 = "",
+        result: anyerror,
     }{
         .{
-            .in = "create_trans",
-            .err = error.BadOperation,
+            .string = "create_trans",
+            .result = error.OperationBad,
         },
         .{
-            .in =
+            .string =
             \\
             \\
             \\ create
             ,
-            .err = error.BadOperation,
+            .result = error.OperationBad,
         },
         .{
-            .in = "create_transfers 12",
-            .err = error.BadIdentifier,
+            .string = "create_transfers 12",
+            .result = error.IdentifierBad,
         },
         .{
-            .in = "create_transfers =12",
-            .err = error.BadIdentifier,
+            .string = "create_transfers =12",
+            .result = error.IdentifierBad,
         },
         .{
-            .in = "create_transfers x",
-            .err = error.MissingEqualBetweenKeyValuePair,
+            .string = "create_transfers x",
+            .result = error.KeyValuePairEqualMissing,
         },
         .{
-            .in = "create_transfers x=",
-            .err = error.BadValue,
+            .string = "create_transfers x=",
+            .result = error.ValueBad,
         },
         .{
-            .in = "create_transfers x=    ",
-            .err = error.BadValue,
+            .string = "create_transfers x=    ",
+            .result = error.ValueBad,
         },
         .{
-            .in = "create_transfers x=    ;",
-            .err = error.BadValue,
+            .string = "create_transfers x=    ;",
+            .result = error.ValueBad,
         },
         .{
-            .in = "create_transfers x=[]",
-            .err = error.BadValue,
+            .string = "create_transfers x=[]",
+            .result = error.ValueBad,
         },
         .{
-            .in = "create_transfers id=abcd",
-            .err = error.BadKeyValuePair,
+            .string = "create_transfers id=abcd",
+            .result = error.KeyValuePairBad,
         },
         .{
-            .in = "create_transfers amount=0y1234",
-            .err = error.BadKeyValuePair,
+            .string = "create_transfers amount=0y1234",
+            .result = error.KeyValuePairBad,
         },
         .{
-            .in = "create_transfers amount=--0",
-            .err = error.BadKeyValuePair,
+            .string = "create_transfers amount=--0",
+            .result = error.KeyValuePairBad,
         },
     };
 
-    for (tests) |t| {
+    for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const result = Parser.parse_statement(
             &arena,
-            t.in,
+            vector.string,
             &null_terminal,
         );
-        try std.testing.expectError(t.err, result);
+        try std.testing.expectError(vector.result, result);
+    }
+}
+
+test "repl.zig: Parser fails for operations not supporting multiple objects" {
+    const vectors = [_]struct {
+        string: []const u8,
+        result: anyerror,
+    }{
+        .{
+            .string = "get_account_transfers account_id=1, account_id=2",
+            .result = error.SliceOperationUnsupported,
+        },
+        .{
+            .string = "get_account_balances account_id=1, account_id=2",
+            .result = error.SliceOperationUnsupported,
+        },
+        .{
+            .string = "query_accounts account_id=1, account_id=2",
+            .result = error.SliceOperationUnsupported,
+        },
+        .{
+            .string = "query_transfers account_id=1, account_id=2",
+            .result = error.SliceOperationUnsupported,
+        },
+    };
+
+    for (vectors) |vector| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        const result = Parser.parse_statement(
+            &arena,
+            vector.string,
+            &null_terminal,
+        );
+
+        try std.testing.expectError(vector.result, result);
     }
 }
