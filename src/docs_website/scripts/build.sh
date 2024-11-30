@@ -13,7 +13,7 @@ cp -r ../../docs pages
 
 # Rewrite links to clients
 mkdir pages/clients
-clients="go java dotnet node"
+clients="go java dotnet node python"
 for client in $clients; do
     # READMEs are rewritten to a local path since they will be on the docs site.
     for page in $(find pages -type f); do

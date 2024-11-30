@@ -925,7 +925,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 //     this entry it turns out not to have the right op.
                 //   (This case (and the accompanying unnecessary read) could be prevented by
                 //   storing the op along with the checksum in `prepare_checksums`.)
-                assert(slot == null);
+                if (slot) |s| {
+                    journal.faulty.set(s);
+                    journal.dirty.set(s);
+                }
 
                 journal.read_prepare_log(op, checksum, "op changed during read");
                 callback(replica, null, null);
@@ -934,7 +937,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             if (message.header.checksum != checksum) {
                 // This can also be caused by a misdirected read/write.
-                assert(slot == null);
+                if (slot) |s| {
+                    journal.faulty.set(s);
+                    journal.dirty.set(s);
+                }
 
                 journal.read_prepare_log(op, checksum, "checksum changed during read");
                 callback(replica, null, null);
@@ -1306,6 +1312,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 });
             }
 
+            for (cases, 0..) |case, index| journal.recover_slot(Slot{ .index = index }, case);
+            assert(cases.len == slot_count);
+
+            stdx.copy_disjoint(
+                .exact,
+                Header.Prepare,
+                journal.headers_redundant,
+                journal.headers,
+            );
+
             // Discard headers which we are certain do not belong in the current log_view.
             // - This ensures that we don't accidentally set our new head op to be a message
             //   which was truncated but not yet overwritten.
@@ -1320,32 +1336,26 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             //
             // (These headers can originate if we join a view, write some prepares from the new
             // view, and then crash before the view_durable_update() finished.)
-            for ([_][]align(constants.sector_size) Header.Prepare{
-                journal.headers_redundant,
-                journal.headers,
-            }) |headers| {
-                for (headers, 0..) |*header_untrusted, index| {
-                    const slot = Slot{ .index = index };
-                    if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
-                        var view_range = view_change_headers.view_for_op(header.op, log_view);
-                        assert(view_range.max <= log_view);
+            for (journal.headers, 0..) |*header_untrusted, index| {
+                const slot = Slot{ .index = index };
+                if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
+                    var view_range = view_change_headers.view_for_op(header.op, log_view);
+                    assert(view_range.max <= log_view);
 
-                        if (header.operation != .reserved and !view_range.contains(header.view)) {
-                            cases[index] = &case_cut_view_range;
-                        }
+                    if (header.operation != .reserved and !view_range.contains(header.view)) {
+                        log.warn("{}: recover_slots: drop header " ++
+                            "view_range={}..{} view={} op={} checksum={}", .{
+                            journal.replica,
+                            view_range.min,
+                            view_range.max,
+                            header.view,
+                            header.op,
+                            header.checksum,
+                        });
+                        journal.remove_entry(slot);
                     }
                 }
             }
-
-            for (cases, 0..) |case, index| journal.recover_slot(Slot{ .index = index }, case);
-            assert(cases.len == slot_count);
-
-            stdx.copy_disjoint(
-                .exact,
-                Header.Prepare,
-                journal.headers_redundant,
-                journal.headers,
-            );
 
             log.debug("{}: recover_slots: dirty={} faulty={}", .{
                 journal.replica,
@@ -1577,24 +1587,26 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             switch (decision) {
                 .eql, .nil => {
                     log.debug("{}: recover_slot: recovered " ++
-                        "slot={:0>4} label={s} decision={s} operation={} op={}", .{
+                        "slot={:0>4} label={s} decision={s} operation={} op={} view={}", .{
                         journal.replica,
                         slot.index,
                         case.label,
                         @tagName(decision),
                         journal.headers[slot.index].operation,
                         journal.headers[slot.index].op,
+                        journal.headers[slot.index].view,
                     });
                 },
                 .fix, .vsr, .cut_torn, .cut_view_range => {
                     log.warn("{}: recover_slot: recovered " ++
-                        "slot={:0>4} label={s} decision={s} operation={} op={}", .{
+                        "slot={:0>4} label={s} decision={s} operation={} op={} view={}", .{
                         journal.replica,
                         slot.index,
                         case.label,
                         @tagName(decision),
                         journal.headers[slot.index].operation,
                         journal.headers[slot.index].op,
+                        journal.headers[slot.index].view,
                     });
                 },
             }
@@ -2290,13 +2302,6 @@ const case_cut_torn = Case{
     .label = "@TruncateTorn",
     .decision_multiple = .cut_torn,
     .decision_single = .cut_torn,
-    .pattern = undefined,
-};
-
-const case_cut_view_range = Case{
-    .label = "@TruncateViewRange",
-    .decision_multiple = .cut_view_range,
-    .decision_single = .cut_view_range,
     .pattern = undefined,
 };
 

@@ -12,8 +12,6 @@ public final class IdBatch extends Batch {
         int SIZE = 16;
     }
 
-    static final IdBatch EMPTY = new IdBatch(0);
-
     /**
      * Constructs an empty batch of ids with the desired maximum capacity.
      * <p>

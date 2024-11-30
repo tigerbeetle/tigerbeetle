@@ -70,6 +70,7 @@ pub fn build(b: *std.Build) !void {
         .clients_go = b.step("clients:go", "Build Go client shared library"),
         .clients_java = b.step("clients:java", "Build Java client shared library"),
         .clients_node = b.step("clients:node", "Build Node client shared library"),
+        .clients_python = b.step("clients:python", "Build Python client library"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
         .run = b.step("run", "Run TigerBeetle"),
@@ -280,6 +281,12 @@ pub fn build(b: *std.Build) !void {
     build_node_client(b, build_steps.clients_node, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .mode = mode,
+    });
+    build_python_client(b, build_steps.clients_python, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .tb_client_header = tb_client_header.path,
         .mode = mode,
     });
     build_c_client(b, build_steps.clients_c, .{
@@ -1169,6 +1176,64 @@ fn build_node_client(
             "/client.node",
         })).step);
     }
+}
+
+fn build_python_client(
+    b: *std.Build,
+    step_clients_python: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        tb_client_header: std.Build.LazyPath,
+        mode: Mode,
+    },
+) void {
+    const python_bindings_generator = b.addExecutable(.{
+        .name = "python_bindings",
+        .root_source_file = b.path("src/clients/python/python_bindings.zig"),
+        .target = b.graph.host,
+    });
+    python_bindings_generator.root_module.addImport("vsr", options.vsr_module);
+    python_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
+    const bindings = Generated.file(b, .{
+        .generator = python_bindings_generator,
+        .path = "./src/clients/python/src/tigerbeetle/bindings.py",
+    });
+
+    inline for (platforms) |platform| {
+        const cross_target = CrossTarget.parse(.{
+            .arch_os_abi = platform[0],
+            .cpu_features = platform[2],
+        }) catch unreachable;
+        const resolved_target = b.resolveTargetQuery(cross_target);
+
+        const shared_lib = b.addSharedLibrary(.{
+            .name = "tb_client",
+            .root_source_file = b.path("src/tb_client_exports.zig"),
+            .target = resolved_target,
+            .optimize = options.mode,
+        });
+
+        shared_lib.linkLibC();
+
+        if (resolved_target.result.os.tag == .windows) {
+            shared_lib.linkSystemLibrary("ws2_32");
+            shared_lib.linkSystemLibrary("advapi32");
+        }
+
+        shared_lib.root_module.addOptions("vsr_options", options.vsr_options);
+
+        step_clients_python.dependOn(&b.addInstallFile(
+            shared_lib.getEmittedBin(),
+            b.pathJoin(&.{
+                "../src/clients/python/src/tigerbeetle/lib/",
+                platform[0],
+                shared_lib.out_filename,
+            }),
+        ).step);
+    }
+
+    step_clients_python.dependOn(&bindings.step);
 }
 
 fn build_c_client(

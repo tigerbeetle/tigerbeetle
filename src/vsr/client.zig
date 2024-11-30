@@ -181,7 +181,13 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
             assert(!self.evicted);
 
-            log.debug("{}: on_message: {}", .{ self.id, message.header });
+            // Switch on the header type so that we don't log opaque bytes for the per-command data.
+            switch (message.header.into_any()) {
+                inline else => |header| {
+                    log.debug("{}: on_message: {}", .{ self.id, header });
+                },
+            }
+
             if (message.header.invalid()) |reason| {
                 log.debug("{}: on_message: invalid ({s})", .{ self.id, reason });
                 return;
@@ -600,12 +606,17 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         fn send_message_to_replica(self: *Client, replica: u8, message: *Message) void {
-            log.debug("{}: sending {s} to replica {}: {}", .{
-                self.id,
-                @tagName(message.header.command),
-                replica,
-                message.header,
-            });
+            // Switch on the header type so that we don't log opaque bytes for the per-command data.
+            switch (message.header.into_any()) {
+                inline else => |header| {
+                    log.debug("{}: sending {s} to replica {}: {}", .{
+                        self.id,
+                        @tagName(message.header.command),
+                        replica,
+                        header,
+                    });
+                },
+            }
 
             assert(replica < self.replica_count);
             assert(message.header.valid_checksum());

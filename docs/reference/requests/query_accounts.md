@@ -2,6 +2,11 @@
 
 Query [`Account`](../account.md)s by the intersection of some fields and by timestamp range.
 
+⚠️ It is not possible currently to query more than a full batch (8190) of accounts atomically.
+When issuing multiple `query_accounts` calls, it can happen that other operations will interleave
+between the calls leading to read skew. Consider using the
+[`history`](../account.md#flagshistory) flag to enable atomic lookups.
+
 ## Event
 
 The query filter.
@@ -25,3 +30,4 @@ For language-specific docs see:
 - [Java library](/src/clients/java/README.md#query-accounts)
 - [Go library](/src/clients/go/README.md#query-accounts)
 - [Node.js library](/src/clients/node/README.md#query-accounts)
+- [Python library](/src/clients/python/README.md#query-accounts)

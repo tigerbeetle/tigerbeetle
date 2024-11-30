@@ -22,8 +22,6 @@ public final class AccountBalanceBatch extends Batch {
         int Reserved = 72;
     }
 
-    static final AccountBalanceBatch EMPTY = new AccountBalanceBatch(0);
-
     /**
      * Creates an empty batch with the desired maximum capacity.
      * <p>

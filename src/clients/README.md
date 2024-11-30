@@ -17,6 +17,7 @@ Existing `Docs` struct implementations are in:
 * [go/docs.zig](./go/docs.zig), which generates [go/README.md](./go/README.md)
 * [java/docs.zig](./java/docs.zig), which generates [java/README.md](./java/README.md)
 * [node/docs.zig](./node/docs.zig), which generates [node/README.md](./node/README.md)
+* [python/docs.zig](./python/docs.zig), which generates [python/README.md](./node/README.md)
 
 ### Run
 

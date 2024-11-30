@@ -1,0 +1,5 @@
+__pycache__/
+dist/
+lib/
+.ruff_cache/
+.pytest_cache/

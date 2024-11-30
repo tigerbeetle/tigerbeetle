@@ -28,7 +28,7 @@ const multiversion_binary_size_max = multiversioning.multiversion_binary_size_ma
 const multiversion_binary_platform_size_max = multiversioning.multiversion_binary_platform_size_max;
 const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 
-const Language = enum { dotnet, go, java, node, zig, docker };
+const Language = enum { dotnet, go, java, node, python, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
 pub const CLIArgs = struct {
     sha: []const u8,
@@ -207,6 +207,13 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
         defer dist_dir_node.close();
 
         try build_node(shell, info, dist_dir_node);
+    }
+
+    if (languages.contains(.python)) {
+        var dist_dir_python = try dist_dir.makeOpenPath("python", .{});
+        defer dist_dir_python.close();
+
+        try build_python(shell, info, dist_dir_python);
     }
 }
 
@@ -449,6 +456,62 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     );
 }
 
+fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
+    var section = try shell.open_section("build python");
+    defer section.close();
+
+    try shell.pushd("./src/clients/python");
+    defer shell.popd();
+
+    const python_version = shell.exec_stdout("python3 --version", .{}) catch {
+        return error.NoPython;
+    };
+    log.info("{s}", .{python_version});
+
+    try shell.exec_zig(
+        \\build clients:python -Drelease -Dconfig-release={release_triple}
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
+
+    try backup_create(shell.cwd, "pyproject.toml");
+    defer backup_restore(shell.cwd, "pyproject.toml");
+
+    const pyproject = try shell.cwd.readFileAlloc(
+        shell.arena.allocator(),
+        "pyproject.toml",
+        1024 * 1024,
+    );
+    const version_line = try shell.fmt(
+        "version = \"{s}\"",
+        .{info.tag},
+    );
+    const pyproject_updated = try std.mem.replaceOwned(
+        u8,
+        shell.arena.allocator(),
+        pyproject,
+        "version = \"0.0.1\"",
+        version_line,
+    );
+    assert(std.mem.indexOf(u8, pyproject_updated, version_line) != null);
+
+    try shell.cwd.writeFile(.{
+        .sub_path = "pyproject.toml",
+        .data = pyproject_updated,
+    });
+
+    try shell.exec("python3 -m build .", .{});
+
+    try Shell.copy_path(
+        shell.cwd,
+        try shell.fmt("dist/tigerbeetle-{s}-py3-none-any.whl", .{info.tag}),
+        dist_dir,
+        try shell.fmt("tigerbeetle-{s}-py3-none-any.whl", .{info.tag}),
+    );
+}
+
 fn publish(
     shell: *Shell,
     languages: LanguageSet,
@@ -585,11 +648,12 @@ fn publish(
     if (languages.contains(.dotnet)) try publish_dotnet(shell, info);
     if (languages.contains(.go)) try publish_go(shell, info);
     if (languages.contains(.java)) try publish_java(shell, info);
-    if (languages.contains(.node)) {
-        try publish_node(shell, info);
-        // Our docs are build with node, so publish the docs together with the node package.
-        try publish_docs(shell, info);
-    }
+    if (languages.contains(.node)) try publish_node(shell, info);
+    if (languages.contains(.python)) try publish_python(shell, info);
+
+    // Our docs are build with node, so publish the docs together with the node package, but do it
+    // last so that if docs fail everything else is still released.
+    if (languages.contains(.node)) try publish_docs(shell, info);
 
     if (languages.contains(.zig)) {
         try shell.exec(
@@ -729,6 +793,22 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     _ = try shell.env_get("NODE_AUTH_TOKEN");
     try shell.exec("npm publish {package}", .{
         .package = try shell.fmt("zig-out/dist/node/tigerbeetle-node-{s}.tgz", .{
+            info.tag,
+        }),
+    });
+}
+
+fn publish_python(shell: *Shell, info: VersionInfo) !void {
+    var section = try shell.open_section("publish python");
+    defer section.close();
+
+    assert(try shell.dir_exists("zig-out/dist/python"));
+
+    _ = try shell.env_get("TWINE_USERNAME");
+    _ = try shell.env_get("TWINE_PASSWORD");
+
+    try shell.exec("python3 -m twine upload {package}", .{
+        .package = try shell.fmt("zig-out/dist/python/tigerbeetle-{s}-py3-none-any.whl", .{
             info.tag,
         }),
     });

@@ -172,7 +172,7 @@ public class BatchTest {
 
     @Test
     public void testNextEmptyBatch() {
-        var batch = TransferBatch.EMPTY;
+        var batch = new TransferBatch(Request.REPLY_EMPTY);
 
         // Empty batch
         // Expected position = -1 and length = 0

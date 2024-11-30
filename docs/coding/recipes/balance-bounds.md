@@ -59,7 +59,7 @@ We will refer to two amounts:
 
 In this case, we are keeping the Destination Account's balance between the bounds.
 
-| Transfer | Debit Account | Credit Account | Amount       | Pending ID | Flags (Note: `|` sets multiple flags)                                                                                                                                                                   |
+| Transfer | Debit Account | Credit Account | Amount       | Pending ID | Flags (Note: `\|` sets multiple flags)                                                                                                                                                                  |
 | -------- | ------------- | -------------- | ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1        | Source        | Destination    | Transfer     | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                               |
 | 2        | Control       | Operator       | Limit        | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                               |
@@ -73,7 +73,7 @@ In this case, we are keeping the Destination Account's balance between the bound
 
 In this case, we are keeping the Destination Account's balance between the bounds.
 
-| Transfer | Debit Account | Credit Account | Amount       | Pending ID | Flags (Note `|` sets multiple flags)                                                                                                                                                                      |
+| Transfer | Debit Account | Credit Account | Amount       | Pending ID | Flags (Note `\|` sets multiple flags)                                                                                                                                                                     |
 | -------- | ------------- | -------------- | ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1        | Destination   | Source         | Transfer     | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                                 |
 | 2        | Operator      | Control        | Limit        | `0`        | [`flags.linked`](../../reference/transfer.md#flagslinked)                                                                                                                                                 |

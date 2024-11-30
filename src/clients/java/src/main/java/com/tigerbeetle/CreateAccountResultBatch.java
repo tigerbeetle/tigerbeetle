@@ -18,8 +18,6 @@ public final class CreateAccountResultBatch extends Batch {
         int Result = 4;
     }
 
-    static final CreateAccountResultBatch EMPTY = new CreateAccountResultBatch(0);
-
     /**
      * Creates an empty batch with the desired maximum capacity.
      * <p>

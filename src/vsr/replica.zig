@@ -6718,7 +6718,7 @@ pub fn ReplicaType(
         /// The mistake in this example was not that we ignored the break to the left, which we must
         /// do to repair reordered ops, but that we did not check for connection to the right.
         fn repair_header_would_connect_hash_chain(
-            self: *Replica,
+            self: *const Replica,
             header: *const Header.Prepare,
         ) bool {
             var entry = header;
@@ -6745,7 +6745,7 @@ pub fn ReplicaType(
         /// Primary must have no missing headers and no faulty prepares between op_repair_min
         /// and self.op, to maintain the invariant that a replica can repair everything back
         /// till op_repair_min
-        fn primary_journal_repaired(self: *Replica) bool {
+        fn primary_journal_repaired(self: *const Replica) bool {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.view == self.log_view);
@@ -6755,7 +6755,7 @@ pub fn ReplicaType(
                 self.primary_journal_prepares_repaired();
         }
 
-        fn primary_journal_prepares_repaired(self: *Replica) bool {
+        fn primary_journal_prepares_repaired(self: *const Replica) bool {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.view == self.log_view);
@@ -6771,7 +6771,7 @@ pub fn ReplicaType(
             return true;
         }
 
-        fn primary_journal_headers_repaired(self: *Replica) bool {
+        fn primary_journal_headers_repaired(self: *const Replica) bool {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.view == self.log_view);
@@ -8914,6 +8914,7 @@ pub fn ReplicaType(
                     if (primary_repairing or op > view_headers_op_max) break :header null;
 
                     const header = &self.view_headers.array.const_slice()[view_headers_op_max - op];
+                    assert(header.op == op);
                     break :header switch (vsr.Headers.dvc_header_type(header)) {
                         .valid => header,
                         .blank => null,

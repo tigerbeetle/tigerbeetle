@@ -21,6 +21,7 @@ comptime {
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client/echo_client.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
+    _ = @import("clients/java/src/client.zig");
 
     _ = @import("io/test.zig");
 

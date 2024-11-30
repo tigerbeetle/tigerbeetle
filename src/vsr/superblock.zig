@@ -1276,7 +1276,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     vsr.fatal(
                         .storage_size_exceeds_limit,
                         "data file too large size={} > limit={}, " ++
-                            "restart the replica increasing '--storage-size-limit'",
+                            "restart the replica increasing '--limit-storage'",
                         .{
                             superblock.working.vsr_state.checkpoint.storage_size,
                             superblock.storage_size_limit,

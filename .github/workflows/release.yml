@@ -45,6 +45,11 @@ jobs:
           node-version: '18.x'
           registry-url: 'https://registry.npmjs.org'
 
+      - uses: actions/setup-python@v4
+        with:
+          python-version: 3.13
+      - run: pip install build twine
+
       - run: ./zig/download.sh
       - run: ./zig/zig build scripts -- release --build --publish --sha=${{ github.sha }}
         env:

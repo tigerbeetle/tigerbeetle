@@ -20,6 +20,8 @@ After=network-online.target
 Wants=network-online.target systemd-networkd-wait-online.service
 
 [Service]
+AmbientCapabilities=CAP_IPC_LOCK
+
 Environment=TIGERBEETLE_CACHE_GRID_SIZE=1GiB
 Environment=TIGERBEETLE_ADDRESSES=3001
 Environment=TIGERBEETLE_REPLICA_COUNT=1
@@ -136,3 +138,20 @@ If you wish to change those, you are expected to understand those implications a
 The service was created assuming it'll be used in a production scenario.
 
 In case you want to use this service for development as well, you may need to adjust the `ExecStart` line to include the `--development` flag if your development environment doesn't support Direct IO, or if you require smaller cache sizes and/or batch sizes due to memory constraints.
+
+### Memory Locking
+
+TigerBeetle requires `RLIMIT_MEMLOCK` to be set high enough to:
+
+1. initialize io_uring, which requires memory shared with the kernel to be locked, as well as
+2. lock all allocated memory, and so prevent the kernel from swapping any pages to disk, which would not only affect performance but also bypass TigerBeetle's storage fault-tolerance.
+
+If the required memory cannot be locked, then the environment should be modified either by (in order of preference):
+
+1. giving the local `tigerbeetle` binary the `CAP_IPC_LOCK` capability (`sudo setcap "cap_ipc_lock=+ep" ./tigerbeetle`), or
+2. raising the global `memlock` value under `/etc/security/limits.conf`, or else
+3. disabling swap (io_uring may still require an RLIMIT increase).
+
+Memory locking is disabled for development environments when using the `--development` flag.
+
+For Linux running under Docker, refer to [Allowing MEMLOCK](docker.md#allowing-memlock).

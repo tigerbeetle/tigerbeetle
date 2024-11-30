@@ -25,6 +25,7 @@ We officially support the following libraries for communicating with a TigerBeet
 - [Go](/src/clients/go/README.md)
 - [Java](/src/clients/java/README.md)
 - [Node.js](/src/clients/node/README.md)
+- [Python](/src/clients/python/README.md)
 
 Within each client library README you will find links to sample code.
 

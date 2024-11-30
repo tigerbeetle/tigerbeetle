@@ -346,8 +346,8 @@ pub fn ClockType(comptime Time: type) type {
             return self.time.realtime();
         }
 
-        /// Called by `StateMachine.prepare_timestamp()` when the primary wants to timestamp a
-        /// batch. If the primary's clock is not synchronized with the cluster, it must wait until
+        /// Called by `Replica.on_request()` when the primary wants to timestamp a batch. If the
+        /// primary's clock is not synchronized with the cluster, it must wait until it is.
         /// it is.
         /// Returns the system time clamped to be within our synchronized lower and upper bounds.
         /// This is complementary to NTP and allows clusters with very accurate time to make use of
@@ -376,7 +376,7 @@ pub fn ClockType(comptime Time: type) type {
             // Expire the current epoch if successive windows failed to synchronize:
             // Gradual clock drift prevents us from using an epoch for more than a few seconds.
             if (self.epoch.elapsed(self) >= epoch_max) {
-                log.warn(
+                log.err(
                     "{}: no agreement on cluster time (partitioned or too many clock faults)",
                     .{self.replica},
                 );
@@ -387,6 +387,25 @@ pub fn ClockType(comptime Time: type) type {
         /// Estimates the asymmetric delay for a sample compared to the previous window,
         /// according to Algorithm 1 from Section 4.2,
         /// "A System for Clock Synchronization in an Internet of Things".
+        ///
+        /// Note that it is impossible to estimate persistent asymmetric delay, as these two
+        /// situations are indistinguishable:
+        /// - A and B have synchronized clocks and a 50ms symmetrical delay.
+        /// - B's clock is 50ms ahead, A → B delay is 0ms, B → A delay is 100ms.
+        ///
+        /// In both of these cases, A and B observe that a ping-pong round trip takes 100ms and that
+        /// a pong's timestamp is 50ms ahead of ping's timestamp.
+        ///
+        /// Instead, the model here is of a one-time delay --- a particular ping or pong message
+        /// got delayed because it had a large prepare message in front of it in the send queue, a
+        /// network packet got lost, or a pigeon got eaten by a cat.
+        ///
+        /// The delay happened either for the ping (forward path) or for the pong (reverse path)
+        /// message. Assuming that the minimum RTT seen before is a no-delay situation, the
+        /// magnitude of a delay for the current sample can be estimated as RTT - min(RTT), and the
+        /// direction (forward/reverse) distinguished by comparing unadjusted clock offsets.
+        ///
+        /// Previous window is used to determine min(RTT).
         fn estimate_asymmetric_delay(
             self: *Clock,
             replica: u8,
@@ -468,6 +487,16 @@ pub fn ClockType(comptime Time: type) type {
 
             // Wait for more accurate samples or until we timeout the window for lack of quorum:
             if (self.window.synchronized == null) return;
+
+            // Transitioning from not being synchronized to being synchronized - log out a message
+            // for the operator, as the counterpoint to `no agreement on cluster time`.
+            if (self.epoch.synchronized == null and self.window.synchronized != null) {
+                const new_interval = self.window.synchronized.?;
+                log.info("{}: synchronized: accuracy={}", .{
+                    self.replica,
+                    fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
+                });
+            }
 
             var new_window = self.epoch;
             new_window.reset(self);

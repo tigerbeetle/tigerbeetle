@@ -105,21 +105,27 @@ jobs:
           - { os: 'ubuntu-latest',  language: 'node',    language_version: '18.x'  }
           - { os: 'ubuntu-latest',  language: 'node',    language_version: '20.x'  }
 
+          # Support Python 3.7 explicitly, even though it's EOL.
+          - { os: 'ubuntu-latest',  language: 'python',  language_version: '3.7'  }
+          - { os: 'ubuntu-latest',  language: 'python',  language_version: '3.13'  }
+
           - { os: 'windows-latest', language: 'dotnet',  language_version: '8.0.x' }
           - { os: 'windows-latest', language: 'go',      language_version: '1.21'  }
           - { os: 'windows-latest', language: 'java',    language_version: '11'    }
           - { os: 'windows-latest', language: 'java',    language_version: '21'    }
           - { os: 'windows-latest', language: 'node',    language_version: '18.x'  }
           - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
+          - { os: 'windows-latest', language: 'python',  language_version: '3.7'  }
+          - { os: 'windows-latest', language: 'python',  language_version: '3.13'  }
 
           # Limited matrix for macOS - runners are concurrency limited.
-          # TODO: Go build is currently failing:
-          # https://github.com/tigerbeetle/tigerbeetle/actions/runs/10088474857/job/27894324584?pr=2137
           - { os: 'macos-latest',   language: 'go',      language_version: '1.21'  }
           - { os: 'macos-latest',   language: 'node',    language_version: '20.x'  }
+          - { os: 'macos-latest',   language: 'python',  language_version: '3.13'  }
 
           - { os: 'macos-13',       language: 'go',      language_version: '1.21'  }
           - { os: 'macos-13',       language: 'node',    language_version: '20.x'  }
+          - { os: 'macos-13',       language: 'python',  language_version: '3.13'  }
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -146,6 +152,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.language_version }}
+
+      - if: matrix.language == 'python'
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.language_version }}
+      - if: matrix.language == 'python'
+        run: pip install build hatch pytest
 
       - run: ./zig/download.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=${{ matrix.language }}
@@ -208,8 +221,8 @@ jobs:
       - name: Login to Container Registry
         run: docker login -u "$ANTITHESIS_DOCKER_USER" -p "$ANTITHESIS_DOCKER_PASS" us-central1-docker.pkg.dev
         env:
-          ANTITHESIS_DOCKER_USER: ${{ secrets.ANTITHESIS_DOCKER_USER }} 
-          ANTITHESIS_DOCKER_PASS: ${{ secrets.ANTITHESIS_DOCKER_PASS }} 
+          ANTITHESIS_DOCKER_USER: ${{ secrets.ANTITHESIS_DOCKER_USER }}
+          ANTITHESIS_DOCKER_PASS: ${{ secrets.ANTITHESIS_DOCKER_PASS }}
       - name: Download Zig
         run: ./zig/download.sh
       - name: Build and push

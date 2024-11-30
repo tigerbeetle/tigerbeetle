@@ -13,6 +13,11 @@ const log = std.log.scoped(.lsm_cache_map_fuzz);
 const Key = TestTable.Key;
 const Value = TestTable.Value;
 
+const map_value_count_max = 1024;
+// Use a large scope (relative to map_value_count_max) to increase the chances of
+// (SetAssociativeCache) hash collisions.
+const scope_value_count_max = map_value_count_max;
+
 const OpValue = struct {
     op: u32,
     value: Value,
@@ -307,9 +312,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     //       the maximum capacity...?
     var op: u64 = 0;
     var operations_since_scope_open: usize = 0;
-    const operations_since_scope_open_max: usize = 32;
+    const operations_since_scope_open_max: usize = scope_value_count_max;
     var upserts_since_compact: usize = 0;
-    const upserts_since_compact_max: usize = 1024;
+    const upserts_since_compact_max: usize = map_value_count_max;
     var scope_is_open = false;
     for (fuzz_ops, 0..) |*fuzz_op, i| {
         var fuzz_op_tag: FuzzOpTag = undefined;
@@ -369,16 +374,13 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 break :blk FuzzOp{ .compact = {} };
             },
             .scope => blk: {
-                if (!scope_is_open) {
-                    scope_is_open = true;
-                    operations_since_scope_open = 0;
+                operations_since_scope_open = 0;
+                defer scope_is_open = !scope_is_open;
 
-                    break :blk FuzzOp{ .scope = .open };
-                } else {
-                    scope_is_open = false;
-                    operations_since_scope_open = 0;
-
+                if (scope_is_open) {
                     break :blk FuzzOp{ .scope = if (random.boolean()) .persist else .discard };
+                } else {
+                    break :blk FuzzOp{ .scope = .open };
                 }
             },
         };
@@ -392,8 +394,8 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     const random = rng.random();
 
     const fuzz_op_count = @min(
-        fuzz_args.events_max orelse @as(usize, 1E7),
-        fuzz.random_int_exponential(random, usize, 1E6),
+        fuzz_args.events_max orelse @as(usize, 1E9),
+        fuzz.random_int_exponential(random, usize, 1E8),
     );
 
     const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
@@ -403,8 +405,8 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     inline for (&.{ TestCacheMap.Cache.value_count_max_multiple, 0 }) |cache_value_count_max| {
         const options = TestCacheMap.Options{
             .cache_value_count_max = cache_value_count_max,
-            .map_value_count_max = 1024,
-            .scope_value_count_max = 32,
+            .map_value_count_max = map_value_count_max,
+            .scope_value_count_max = scope_value_count_max,
             .name = "fuzz map",
         };
 

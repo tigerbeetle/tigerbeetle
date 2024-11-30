@@ -3,6 +3,56 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.14
+
+Released: 2024-11-25
+
+### Safety And Performance
+
+- [#2501](https://github.com/tigerbeetle/tigerbeetle/pull/2501)
+
+  Call `DetachCurrentThread` when the Java client is closed. The underlying Zig TigerBeetle client
+  runs in a separate thread internally, and a handler to this thread was being leaked.
+
+  This is not noticeable in normal operation, but could impact long running processes that
+  create and close clients frequently.
+
+- [#2492](https://github.com/tigerbeetle/tigerbeetle/pull/2492)
+
+  Document that it's not possible to currently look up or query more than a full batch of accounts
+  atomically without using the history flag and querying balances.
+
+- [#2434](https://github.com/tigerbeetle/tigerbeetle/pull/2434)
+
+  Add the ability to check timestamp order - and verify they are monotonically increasing - for
+  accounts and transfers inside Vortex.
+
+### Internals
+
+- [#2455](https://github.com/tigerbeetle/tigerbeetle/pull/2455)
+
+  Recently the VOPR has gotten too good, and it's very tempting to switch to an empirical mode of
+  coding: write some code and let the VOPR figure out whether it is correct or not.
+
+  This is suboptimal - silence of the VOPR doesn't guarantee total absence of bugs and safety comes
+  in layers and cross checks. Just formal or informal reasoning is not enough, we need both.
+
+  Document this in TigerStyle.
+
+- [#2472](https://github.com/tigerbeetle/tigerbeetle/pull/2472)
+
+  Previously, the Zig part of languages clients logged directly to stderr using Zig's `std.log`, but
+  since directly outputting to stderr is considered rude for a library, logging was disabled.
+
+  This PR adds in scaffolding for sending these logs to the client language to be handled there,
+  tying in with native log libraries (eg, Log4j). No languages use it yet, however.
+
+  Additionally, log `warn` and `err` directly to stderr, if there's no handler.
+
+### TigerTracks 🎧
+
+- [Hello](https://www.youtube.com/watch?v=kK42LZqO0wA)
+
 ## TigerBeetle 0.16.13
 
 Released: 2024-11-18

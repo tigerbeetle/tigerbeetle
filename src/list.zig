@@ -67,8 +67,8 @@ pub fn DoublyLinkedListType(
         }
 
         pub fn push(list: *DoublyLinkedList, node: *Node) void {
-            if (constants.verify) list.verify();
             if (constants.verify) assert(!list.contains(node));
+            if (constants.verify) list.verify();
             assert(@field(node, field_back) == null);
             assert(@field(node, field_next) == null);
 
@@ -110,8 +110,8 @@ pub fn DoublyLinkedListType(
         }
 
         pub fn remove(list: *DoublyLinkedList, node: *Node) void {
-            if (constants.verify) list.verify();
             if (constants.verify) assert(list.contains(node));
+            if (constants.verify) list.verify();
             assert(list.count > 0);
             assert(list.tail != null);
 

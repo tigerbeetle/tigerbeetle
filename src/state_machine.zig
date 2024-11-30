@@ -386,6 +386,66 @@ pub fn StateMachineType(
             return vsr.Operation.to(StateMachine, operation);
         }
 
+        pub fn EventType(comptime operation: Operation) type {
+            return switch (operation) {
+                .pulse => void,
+                .create_accounts => Account,
+                .create_transfers => Transfer,
+                .lookup_accounts => u128,
+                .lookup_transfers => u128,
+                .get_account_transfers => AccountFilter,
+                .get_account_balances => AccountFilter,
+                .query_accounts => QueryFilter,
+                .query_transfers => QueryFilter,
+            };
+        }
+
+        pub fn ResultType(comptime operation: Operation) type {
+            return switch (operation) {
+                .pulse => void,
+                .create_accounts => CreateAccountsResult,
+                .create_transfers => CreateTransfersResult,
+                .lookup_accounts => Account,
+                .lookup_transfers => Transfer,
+                .get_account_transfers => Transfer,
+                .get_account_balances => AccountBalance,
+                .query_accounts => Account,
+                .query_transfers => Transfer,
+            };
+        }
+
+        /// Used by client code generation to make clearer APIs and for type hinting: if the Event
+        /// is a slice / list / array.
+        pub fn event_is_slice(operation: Operation) bool {
+            return switch (operation) {
+                .pulse => false,
+                .create_accounts => true,
+                .create_transfers => true,
+                .lookup_accounts => true,
+                .lookup_transfers => true,
+                .get_account_transfers => false,
+                .get_account_balances => false,
+                .query_accounts => false,
+                .query_transfers => false,
+            };
+        }
+
+        /// Used by client code generation to make clearer APIs: the name of the Event parameter,
+        /// when used as a variable.
+        pub fn event_name(operation: Operation) []const u8 {
+            return switch (operation) {
+                .pulse => "none",
+                .create_accounts => "accounts",
+                .create_transfers => "transfers",
+                .lookup_accounts => "accounts",
+                .lookup_transfers => "transfers",
+                .get_account_transfers => "filter",
+                .get_account_balances => "filter",
+                .query_accounts => "query_filter",
+                .query_transfers => "query_filter",
+            };
+        }
+
         pub const Options = struct {
             batch_size_limit: u32,
             lsm_forest_compaction_block_count: u32,
@@ -538,34 +598,6 @@ pub fn StateMachineType(
                 .commit_timestamp = 0,
                 .forest = self.forest,
                 .scan_lookup_buffer = self.scan_lookup_buffer,
-            };
-        }
-
-        pub fn EventType(comptime operation: Operation) type {
-            return switch (operation) {
-                .pulse => void,
-                .create_accounts => Account,
-                .create_transfers => Transfer,
-                .lookup_accounts => u128,
-                .lookup_transfers => u128,
-                .get_account_transfers => AccountFilter,
-                .get_account_balances => AccountFilter,
-                .query_accounts => QueryFilter,
-                .query_transfers => QueryFilter,
-            };
-        }
-
-        pub fn ResultType(comptime operation: Operation) type {
-            return switch (operation) {
-                .pulse => void,
-                .create_accounts => CreateAccountsResult,
-                .create_transfers => CreateTransfersResult,
-                .lookup_accounts => Account,
-                .lookup_transfers => Transfer,
-                .get_account_transfers => Transfer,
-                .get_account_balances => AccountBalance,
-                .query_accounts => Account,
-                .query_transfers => Transfer,
             };
         }
 

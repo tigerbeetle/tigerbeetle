@@ -1,3 +1,5 @@
+// TODO Test scope_open/scope_close.
+
 const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;

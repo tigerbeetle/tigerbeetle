@@ -117,6 +117,11 @@ Edit your `pom.xml`:
 npm install tigerbeetle-node@0.15.4
 ```
 
+### Python
+```
+pip install tigerbeetle==0.15.4
+```
+
 ## Troubleshooting
 ### Upgrading to a newer version with incompatible clients
 If a release of TigerBeetle no longer supports the client version you're using, it's still possible

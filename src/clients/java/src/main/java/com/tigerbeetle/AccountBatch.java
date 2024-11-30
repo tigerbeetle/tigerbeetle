@@ -29,8 +29,6 @@ public final class AccountBatch extends Batch {
         int Timestamp = 120;
     }
 
-    static final AccountBatch EMPTY = new AccountBatch(0);
-
     /**
      * Creates an empty batch with the desired maximum capacity.
      * <p>
