@@ -76,6 +76,21 @@ const replica_addresses_for_replicas = blk: {
 
 const replica_addresses_for_clients = comma_separate_ports(&replica_ports_proxied);
 
+const vortex_process_ids = .{
+    .supervisor = constants.replica_count,
+    .workload = constants.replica_count + 1,
+    .network = constants.replica_count + 2,
+};
+comptime {
+    for (
+        std.meta.fields(@TypeOf(vortex_process_ids)),
+        constants.replica_count..,
+    ) |field, value_expected| {
+        const value_actual = @field(vortex_process_ids, field.name);
+        assert(value_actual == value_expected);
+    }
+}
+
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
     test_duration_minutes: u16 = 10,
@@ -106,8 +121,9 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .noop;
     defer trace.deinit();
 
-    try trace.begin();
-    defer trace.end() catch {};
+    inline for (std.meta.fields(@TypeOf(vortex_process_ids))) |field| {
+        try trace.process_name(@field(vortex_process_ids, field.name), field.name);
+    }
 
     log.info(
         "starting test with target runtime of {d}m",
@@ -173,7 +189,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         try trace.process_name(
             replica_index,
-            std.fmt.comptimePrint("Replica {d}", .{replica_index}),
+            std.fmt.comptimePrint("replica {d}", .{replica_index}),
         );
 
         try replica.start();
@@ -202,7 +218,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         random,
     );
     defer network.destroy(allocator);
-    try trace.process_name(4, "Network");
 
     const workload = try Workload.spawn(allocator, args, &io, &trace);
     defer {
@@ -213,7 +228,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
 
     var sleep_deadline: u64 = 0;
-    var last_action_timestamp: ?u64 = null;
+    var acceptable_faults_start_ns: ?u64 = null;
 
     const workload_result = while (std.time.nanoTimestamp() < test_deadline) {
         network.tick();
@@ -241,19 +256,60 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         const faulty_replica_count = terminated_replicas.len + stopped_replicas.len;
 
-        // If there has been no faults during the last 10+ seconds, we expect some requests to have
-        // completed during the period.
-        if (last_action_timestamp) |timestamp| {
-            if (now > (timestamp + (constants.liveness_requirement_seconds * std.time.ns_per_s)) and
-                network.faults.is_healed() and
-                (faulty_replica_count <= constants.liveness_faulty_replicas_max) and
+        // If we've been in a state with an acceptable number of faults for the required amount of
+        // time, we should have seen finished requests.
+        if (acceptable_faults_start_ns) |start_ns| {
+            const deadline = start_ns + constants.liveness_requirement_seconds * std.time.ns_per_s;
+            if (now > deadline and
                 workload.event_count_total == 0)
             {
                 log.err("no successful requests after {d} seconds of {d} faulty replica(s)", .{
                     constants.liveness_requirement_seconds,
                     faulty_replica_count,
                 });
+                const start_us = @divFloor(start_ns, std.time.ns_per_us);
+                try trace.write(.{
+                    .name = "liveness required",
+                    .timestamp_micros = start_us,
+                    .duration = @as(u64, @intCast(std.time.microTimestamp())) - start_us,
+                    .process_id = vortex_process_ids.supervisor,
+                    .phase = .Complete,
+                }, .{});
+                try trace.write(.{
+                    .name = "test failure",
+                    .process_id = vortex_process_ids.supervisor,
+                    .phase = .Instant,
+                }, .{});
                 return error.TestFailed;
+            }
+        }
+
+        // NOTE: Network faults are currently global, so we relax the requirement in such cases.
+        if (faulty_replica_count <= constants.liveness_faulty_replicas_max and
+            network.faults.is_healed())
+        {
+            // We an acceptable number of faults, so we require liveness (after some time).
+            if (acceptable_faults_start_ns == null) {
+                acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
+                workload.event_count_total = 0;
+            }
+        } else {
+            // We have too many faults to require liveness.
+            if (acceptable_faults_start_ns) |start_ns| {
+                acceptable_faults_start_ns = null;
+                workload.event_count_total = 0;
+
+                // Record the previously passed liveness requirement period in the trace:
+                const duration_ns = @as(u64, @intCast(std.time.nanoTimestamp())) - start_ns;
+                if (@divFloor(duration_ns, std.time.ns_per_s) > constants.liveness_requirement_seconds) {
+                    try trace.write(.{
+                        .name = "liveness required",
+                        .timestamp_micros = @divFloor(start_ns, std.time.ns_per_us),
+                        .duration = @divFloor(duration_ns, std.time.ns_per_us),
+                        .process_id = vortex_process_ids.supervisor,
+                        .phase = .Complete,
+                    }, .{});
+                }
             }
         }
 
@@ -274,18 +330,11 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                 quiesce,
             };
 
-            last_action_timestamp = @intCast(std.time.nanoTimestamp());
-            workload.event_count_total = 0;
-
             switch (arbitrary.weighted(random, Action, .{
                 .sleep = 10,
-                .replica_terminate = if (running_replicas.len > 0 and
-                    terminated_replicas.len == 0 and
-                    stopped_replicas.len == 0) 3 else 0,
+                .replica_terminate = if (running_replicas.len > 0) 4 else 0,
                 .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
-                .replica_stop = if (running_replicas.len > 0 and
-                    terminated_replicas.len == 0 and
-                    stopped_replicas.len == 0) 2 else 0,
+                .replica_stop = if (running_replicas.len > 0) 3 else 0,
                 .replica_resume = if (stopped_replicas.len > 0) 10 else 0,
                 .network_delay = if (network.faults.delay == null) 3 else 0,
                 .network_lose = if (network.faults.lose == null) 3 else 0,
@@ -305,9 +354,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     log.info("terminating replica {d}", .{pick.index});
                     try trace.write(.{
                         .name = "terminated",
-                        .pid = pick.index,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
+                        .process_id = pick.index,
+                        .phase = .Begin,
                     }, .{});
                     _ = try pick.replica.terminate();
                 },
@@ -316,9 +364,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     log.info("restarting replica {d}", .{pick.index});
                     try trace.write(.{
                         .name = "terminated",
-                        .pid = pick.index,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .E,
+                        .process_id = pick.index,
+                        .phase = .End,
                     }, .{});
                     _ = try pick.replica.start();
                 },
@@ -327,9 +374,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     log.info("stopping replica {d}", .{pick.index});
                     try trace.write(.{
                         .name = "stopped",
-                        .pid = pick.index,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
+                        .process_id = pick.index,
+                        .phase = .Begin,
                     }, .{});
                     _ = try pick.replica.stop();
                 },
@@ -338,9 +384,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     log.info("resuming replica {d}", .{pick.index});
                     try trace.write(.{
                         .name = "stopped",
-                        .pid = pick.index,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .E,
+                        .process_id = pick.index,
+                        .phase = .End,
                     }, .{});
                     _ = try pick.replica.cont();
                 },
@@ -348,9 +393,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     if (!network.faults.is_healed()) {
                         try trace.write(.{
                             .name = "faults",
-                            .pid = 4,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
+                            .process_id = vortex_process_ids.network,
+                            .phase = .End,
                         }, .{});
                     }
                     const time_ms = random.intRangeAtMost(u32, 10, 500);
@@ -361,18 +405,16 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     log.info("injecting network delays: {any}", .{network.faults});
                     try trace.write(.{
                         .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
+                        .process_id = vortex_process_ids.network,
+                        .phase = .Begin,
                     }, network.faults);
                 },
                 .network_lose => {
                     if (!network.faults.is_healed()) {
                         try trace.write(.{
                             .name = "faults",
-                            .pid = 4,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
+                            .process_id = vortex_process_ids.network,
+                            .phase = .End,
                         }, .{});
                     }
                     network.faults.lose = .{
@@ -381,18 +423,16 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     log.info("injecting network loss: {any}", .{network.faults});
                     try trace.write(.{
                         .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
+                        .process_id = vortex_process_ids.network,
+                        .phase = .Begin,
                     }, network.faults);
                 },
                 .network_corrupt => {
                     if (!network.faults.is_healed()) {
                         try trace.write(.{
                             .name = "faults",
-                            .pid = 4,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
+                            .process_id = vortex_process_ids.network,
+                            .phase = .End,
                         }, .{});
                     }
                     network.faults.corrupt = .{
@@ -401,9 +441,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     log.info("injecting network corruption: {any}", .{network.faults});
                     try trace.write(.{
                         .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .B,
+                        .process_id = vortex_process_ids.network,
+                        .phase = .Begin,
                     }, network.faults);
                 },
                 .network_heal => {
@@ -411,9 +450,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     network.faults.heal();
                     try trace.write(.{
                         .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .E,
+                        .process_id = vortex_process_ids.network,
+                        .phase = .End,
                     }, .{});
                 },
                 .quiesce => {
@@ -427,26 +465,23 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                     network.faults.heal();
                     try trace.write(.{
                         .name = "faults",
-                        .pid = 4,
-                        .ts = @intCast(std.time.microTimestamp()),
-                        .ph = .E,
+                        .process_id = vortex_process_ids.network,
+                        .phase = .End,
                     }, .{});
                     for (stopped_replicas) |stopped| {
                         _ = try stopped.replica.cont();
                         try trace.write(.{
                             .name = "stopped",
-                            .pid = stopped.index,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
+                            .process_id = stopped.index,
+                            .phase = .End,
                         }, .{});
                     }
                     for (terminated_replicas) |terminated| {
                         _ = try terminated.replica.start();
                         try trace.write(.{
                             .name = "terminated",
-                            .pid = terminated.index,
-                            .ts = @intCast(std.time.microTimestamp()),
-                            .ph = .E,
+                            .process_id = terminated.index,
+                            .phase = .End,
                         }, .{});
                     }
 
@@ -728,8 +763,6 @@ const Workload = struct {
             .trace = trace,
         };
 
-        try trace.process_name(5, "Workload");
-
         // Kick off read loop.
         workload.read();
 
@@ -773,10 +806,10 @@ const Workload = struct {
 
             workload.trace.write(.{
                 .name = "request",
-                .pid = 5,
-                .ts = stats.timestamp_start_micros,
-                .dur = stats.timestamp_end_micros - stats.timestamp_start_micros,
-                .ph = .X,
+                .process_id = vortex_process_ids.workload,
+                .timestamp_micros = stats.timestamp_start_micros,
+                .duration = stats.timestamp_end_micros - stats.timestamp_start_micros,
+                .phase = .Complete,
             }, .{ .event_count = stats.event_count }) catch {};
         }
 
@@ -785,13 +818,13 @@ const Workload = struct {
 };
 
 const TraceEvent = struct {
-    const Phase = enum { X, B, E };
+    const PhaseType = enum { Instant, Complete, Begin, End };
 
-    pid: u8,
-    tid: u32 = 0,
-    ts: u64,
-    dur: ?u64 = null,
-    ph: Phase,
+    process_id: u8,
+    thread_id: u32 = 0,
+    timestamp_micros: ?u64 = null,
+    duration: ?u64 = null,
+    phase: PhaseType,
     name: ?[]const u8 = null,
 };
 
@@ -808,10 +841,15 @@ const TraceWriter = union(enum) {
 
     fn from_file(trace_file_path: []const u8) !TraceWriter {
         const trace_file = try std.fs.cwd().createFile(trace_file_path, .{ .mode = 0o666 });
+        errdefer trace_file.close();
+
+        var stream = std.json.writeStreamMaxDepth(trace_file.writer(), .{}, 16);
+        try stream.beginArray();
+
         return .{
             .chrome_tracing = .{
                 .trace_file = trace_file,
-                .stream = std.json.writeStreamMaxDepth(trace_file.writer(), .{}, 16),
+                .stream = stream,
                 .timestamp_start = @intCast(std.time.microTimestamp()),
             },
         };
@@ -821,31 +859,19 @@ const TraceWriter = union(enum) {
         return .noop;
     }
 
-    // The following pointer switching shenanigans are required due to:
-    // https://github.com/ziglang/zig/issues/13856
-
     fn deinit(writer: *TraceWriter) void {
+        // The following pointer switching shenanigans are required due to:
+        // https://github.com/ziglang/zig/issues/13856
         switch (writer.*) {
-            .chrome_tracing => |*file_writer| file_writer.trace_file.close(),
+            .chrome_tracing => |*file_writer| {
+                file_writer.stream.endArray() catch {};
+                file_writer.trace_file.close();
+            },
             .noop => {},
         }
     }
 
-    fn begin(writer: *TraceWriter) !void {
-        switch (writer.*) {
-            .chrome_tracing => |*file_writer| try file_writer.stream.beginArray(),
-            .noop => {},
-        }
-    }
-
-    fn end(writer: *TraceWriter) !void {
-        switch (writer.*) {
-            .chrome_tracing => |*file_writer| try file_writer.stream.endArray(),
-            .noop => {},
-        }
-    }
-
-    fn process_name(writer: *TraceWriter, pid: u8, name: []const u8) !void {
+    fn process_name(writer: *TraceWriter, process_id: u8, name: []const u8) !void {
         switch (writer.*) {
             .chrome_tracing => |*file_writer| {
                 try file_writer.stream.beginObject();
@@ -854,7 +880,7 @@ const TraceWriter = union(enum) {
                 try file_writer.stream.write("M");
 
                 try file_writer.stream.objectField("pid");
-                try file_writer.stream.write(pid);
+                try file_writer.stream.write(process_id);
 
                 try file_writer.stream.objectField("name");
                 try file_writer.stream.write("process_name");
@@ -874,21 +900,28 @@ const TraceWriter = union(enum) {
                 try file_writer.stream.beginObject();
 
                 try file_writer.stream.objectField("pid");
-                try file_writer.stream.write(event.pid);
+                try file_writer.stream.write(event.process_id);
 
                 try file_writer.stream.objectField("tid");
-                try file_writer.stream.write(event.tid);
+                try file_writer.stream.write(event.thread_id);
 
                 try file_writer.stream.objectField("ts");
-                try file_writer.stream.write(event.ts - file_writer.timestamp_start);
+                const timestamp = event.timestamp_micros orelse
+                    @as(u64, @intCast(std.time.microTimestamp()));
+                try file_writer.stream.write(timestamp - file_writer.timestamp_start);
 
-                if (event.dur) |dur| {
+                if (event.duration) |dur| {
                     try file_writer.stream.objectField("dur");
                     try file_writer.stream.write(dur);
                 }
 
                 try file_writer.stream.objectField("ph");
-                try file_writer.stream.write(event.ph);
+                try file_writer.stream.write(switch (event.phase) {
+                    .Instant => "i",
+                    .Complete => "X",
+                    .Begin => "B",
+                    .End => "E",
+                });
 
                 if (event.name) |name| {
                     try file_writer.stream.objectField("name");
