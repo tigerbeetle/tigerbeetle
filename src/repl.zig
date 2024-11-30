@@ -23,10 +23,10 @@ pub const Parser = struct {
     terminal: *const Terminal,
 
     pub const Error = error{
-        KeyValuePairBad,
-        ValueBad,
-        OperationBad,
         IdentifierBad,
+        OperationBad,
+        ValueBad,
+        KeyValuePairBad,
         KeyValuePairEqualMissing,
         SyntaxMatchNone,
         SliceOperationUnsupported,
@@ -333,7 +333,7 @@ pub const Parser = struct {
                 const state_machine_op = std.meta.stringToEnum(
                     StateMachine.Operation,
                     @tagName(operation),
-                ) orelse return error.SliceOperationUnsupported;
+                ).?;
 
                 if (!StateMachine.event_is_slice(state_machine_op)) {
                     try parser.print_current_position();
