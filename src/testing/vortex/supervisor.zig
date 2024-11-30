@@ -239,17 +239,19 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             .stopped,
         );
 
+        const faulty_replica_count = terminated_replicas.len + stopped_replicas.len;
+
         // If there has been no faults during the last 10+ seconds, we expect some requests to have
         // completed during the period.
         if (last_action_timestamp) |timestamp| {
             if (now > (timestamp + (constants.liveness_requirement_seconds * std.time.ns_per_s)) and
                 network.faults.is_healed() and
-                terminated_replicas.len == 0 and
-                stopped_replicas.len == 0 and
+                (faulty_replica_count <= constants.liveness_faulty_replicas_max) and
                 workload.event_count_total == 0)
             {
-                log.err("no successful requests after {d} seconds of healthy cluster", .{
+                log.err("no successful requests after {d} seconds of {d} faulty replica(s)", .{
                     constants.liveness_requirement_seconds,
+                    faulty_replica_count,
                 });
                 return error.TestFailed;
             }
