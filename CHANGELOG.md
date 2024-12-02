@@ -3,6 +3,64 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.15
+
+Released: 2024-12-02
+
+The highlight of today's release is the new official Python client, implemented in
+[#2527](https://github.com/tigerbeetle/tigerbeetle/pull/2527), and
+[#2487](https://github.com/tigerbeetle/tigerbeetle/pull/2487). Please kick the tires!
+
+### Safety And Performance
+
+- [#2517](https://github.com/tigerbeetle/tigerbeetle/pull/2517)
+
+  Require that all replicas in a cluster have the latest TigerBeetle binary as a precondition for an
+  upgrade.
+
+- [#2506](https://github.com/tigerbeetle/tigerbeetle/pull/2506)
+
+  Fix several bugs when handling misdirected writes. That is, situations when the disk reports
+  a write as successful, despite the write ending up in the wrong place on the disk!
+
+- [#2478](https://github.com/tigerbeetle/tigerbeetle/pull/2478)
+
+  Make sure that TigerBeetle memory is not swappable, otherwise a storage fault can occur in a
+  currently swapped-out page, circumventing TigerBeetle guarantees.
+
+- [#2522](https://github.com/tigerbeetle/tigerbeetle/pull/2522)
+
+  REPL correctly emits errors when several objects are used as an argument of an operation that
+  only works for a single object, like `get_account_transfers`.
+
+- [#2502](https://github.com/tigerbeetle/tigerbeetle/pull/2502)
+
+  Add randomized integration tests for the Java client.
+
+### Features
+
+- [#2527](https://github.com/tigerbeetle/tigerbeetle/pull/2527),
+  [#2487](https://github.com/tigerbeetle/tigerbeetle/pull/2487)
+
+  The Python client!
+
+### Internals
+
+- [#2526](https://github.com/tigerbeetle/tigerbeetle/pull/2526)
+
+  Ignore OOM failures during fuzzing. Fuzzers normally don't use that much memory, but, depending on
+  random parameters selected by swarm testing, there are big outliers. If all concurrent fuzzers hit
+  a seed that requires a lot of memory, a fuzzing machine runs out of physical RAM. Handle such
+  errors and don't treat them as fuzzing failures.
+
+- [#2510](https://github.com/tigerbeetle/tigerbeetle/pull/2510)
+
+  Track the number of untriaged issues on [DevHub](https://tigerbeetle.github.io/tigerbeetle/).
+
+### TigerTracks 🎧
+
+- [Always Look On The Bright Side of Life](https://www.youtube.com/watch?v=X_-q9xeOgG4)
+
 ## TigerBeetle 0.16.14
 
 Released: 2024-11-25
