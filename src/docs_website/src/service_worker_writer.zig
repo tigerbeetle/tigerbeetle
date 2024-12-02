@@ -27,7 +27,13 @@ fn collect_files(
     var walker = try dir.walk(arena);
     while (try walker.next()) |entry| {
         if (entry.kind == .file) {
-            try file_paths.append(try std.mem.join(arena, "/", &.{ url_prefix, entry.path }));
+            // Normalize requests by using directory with trailing slash instead of index.html.
+            if (std.mem.endsWith(u8, entry.path, "index.html")) {
+                const stripped = entry.path[0 .. entry.path.len - "index.html".len];
+                try file_paths.append(try std.mem.join(arena, "/", &.{ url_prefix, stripped }));
+            } else {
+                try file_paths.append(try std.mem.join(arena, "/", &.{ url_prefix, entry.path }));
+            }
         }
     }
     return file_paths.toOwnedSlice();

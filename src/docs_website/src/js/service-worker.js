@@ -26,9 +26,21 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  const normalizedUrl = normalizeUrl(event.request.url);
+
   event.respondWith(
-    caches.match(event.request).then(response => {
+    caches.match(normalizedUrl).then(response => {
       return response || fetch(event.request);
     })
   );
 });
+
+function normalizeUrl(url) {
+  const urlObj = new URL(url);
+
+  if (urlObj.pathname && !urlObj.pathname.includes('.') && !urlObj.pathname.endsWith('/')) {
+    urlObj.pathname += '/';
+  }
+
+  return urlObj.toString();
+}
