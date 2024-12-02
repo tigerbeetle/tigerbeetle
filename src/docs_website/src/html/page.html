@@ -71,6 +71,10 @@
     <script>
       window.urlPrefix = "$url_prefix";
 
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
+      }
+
       const navSide = document.querySelector("nav.side");
       const menuHeads = [...navSide.querySelectorAll(".menu-head")];
       menuHeads.forEach(e => e.addEventListener("click", ev => {

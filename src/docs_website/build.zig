@@ -9,14 +9,24 @@ pub fn build(b: *std.Build) !void {
         "url_prefix",
         "Prefix links with this string",
     ) orelse "";
+
+    const git_commit = b.option(
+        []const u8,
+        "git-commit",
+        "The git commit revision of the source code.",
+    ) orelse std.mem.trimRight(u8, b.run(&.{ "git", "rev-parse", "--verify", "HEAD" }), "\n");
+
     const pandoc_bin = get_pandoc_bin(b) orelse return;
+
     const website = Website.init(b, url_prefix, pandoc_bin);
+
     const file_checker_exe = b.addExecutable(.{
         .name = "file_checker",
         .root_source_file = b.path("src/file_checker.zig"),
         .target = b.graph.host,
     });
     const file_checker_run = b.addRunArtifact(file_checker_exe);
+    file_checker_run.addArg("zig-out");
 
     const install_assets = assets.install(b, .{ .source = "assets", .target = "." });
     file_checker_run.step.dependOn(&install_assets.step);
@@ -29,9 +39,16 @@ pub fn build(b: *std.Build) !void {
     });
     file_checker_run.step.dependOn(&install_docs.step);
 
-    file_checker_run.addArg("zig-out");
+    const service_worker_writer_exe = b.addExecutable(.{
+        .name = "service_worker_writer",
+        .root_source_file = b.path("src/service_worker_writer.zig"),
+        .target = b.graph.host,
+    });
+    const service_worker_writer_run = b.addRunArtifact(service_worker_writer_exe);
+    service_worker_writer_run.addArgs(&.{url_prefix, git_commit, "zig-out"});
+    service_worker_writer_run.step.dependOn(&file_checker_run.step);
 
-    b.getInstallStep().dependOn(&file_checker_run.step);
+    b.getInstallStep().dependOn(&service_worker_writer_run.step);
 }
 
 fn get_pandoc_bin(b: *std.Build) ?std.Build.LazyPath {
