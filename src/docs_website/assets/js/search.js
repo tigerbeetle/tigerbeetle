@@ -6,7 +6,7 @@ const searchHotkey = document.querySelector(".search-container>.hotkey");
 const searchClearButton = document.querySelector(".search-container>.clear-button");
 
 async function init() {
-    const response = await fetch(urlPrefix + "/search_index.json");
+    const response = await fetch(urlPrefix + "/search-index.json");
     const index = await response.json();
     const parser = new DOMParser();
     index.forEach(entry => {

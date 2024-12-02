@@ -40,8 +40,8 @@ pub fn build(
         .target = b.graph.host,
     });
     const run_search_index_writer = b.addRunArtifact(search_index_writer_exe);
-    const search_index_output = run_search_index_writer.addOutputFileArg("search_index.json");
-    _ = docs.addCopyFile(search_index_output, "search_index.json");
+    const search_index_output = run_search_index_writer.addOutputFileArg("search-index.json");
+    _ = docs.addCopyFile(search_index_output, "search-index.json");
     for (search_index.items) |entry| {
         run_search_index_writer.addArg(entry.page_path);
         run_search_index_writer.addFileArg(entry.html_path);
