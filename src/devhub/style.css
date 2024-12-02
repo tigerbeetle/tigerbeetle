@@ -148,13 +148,20 @@ section#fuzz-runs {
             padding: 4px 8px;
         }
 
-        tr.group-start td {
-            border-top: 1px solid var(--gray-4);
+        tr {
+            &.group-start td {
+                border-top: 1px solid var(--gray-4);
+            }
+
+            &.success {
+                color: var(--lime-10);
+            }
+
+            &:not(.success) :not(th) {
+                color: var(--red-10);
+            }
         }
 
-        tr.success {
-            color: var(--lime-10);
-        }
     }
 }
 
