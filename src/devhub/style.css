@@ -1,22 +1,24 @@
 :root {
-    --Bright-Lime-10: #93C926;
-    --Bright-Amber-10: #FFA01C;
-    --Colors-Indigo-10: #3358D4;
-    --Grays-Gray-1: #FCFCFC;
-    --Grays-Gray-4: #E8E8E8;
-    --Grays-Gray-11: #646464;
-    --Grays-Gray-12: #202020;
+    --red-10: #DC3E42;
+    --lime-10: #93C926;
+    --amber-10: #FFA01C;
+    --indigo-10: #3358D4;
+    --gray-1: #FCFCFC;
+    --gray-4: #E8E8E8;
+    --gray-11: #646464;
+    --gray-12: #202020;
 }
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --Bright-Lime-10: #CF0;
-        --Bright-Amber-10: #FFCB47;
-        --Colors-Indigo-10: #5472E4;
-        --Grays-Gray-1: #111111;
-        --Grays-Gray-4: #2A2A2A;
-        --Grays-Gray-11: #B4B4B4;
-        --Grays-Gray-12: #EEEEEE;
+        --red-10: #EC5D5E;
+        --lime-10: #CF0;
+        --amber-10: #FFCB47;
+        --indigo-10: #5472E4;
+        --gray-1: #111111;
+        --gray-4: #2A2A2A;
+        --gray-11: #B4B4B4;
+        --gray-12: #EEEEEE;
     }
 }
 
@@ -27,15 +29,15 @@
 }
 
 body {
-    background-color: var(--Grays-Gray-1);
-    color: var(--Grays-Gray-12);
+    background-color: var(--gray-1);
+    color: var(--gray-12);
     font-family: Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     font-size: 14px;
 }
 
 a {
-    color: var(--Colors-Indigo-10);
+    color: var(--indigo-10);
     text-underline-offset: 0.1em;
 }
 
@@ -54,19 +56,27 @@ h3 {
     font-size: 14px;
     line-height: 24px;
     padding: 4px 16px;
-    border-bottom: 1px solid var(--Grays-Gray-4);
+    border-bottom: 1px solid var(--gray-4);
+}
+
+.badge {
+    background-color: var(--indigo-10);
+    border-radius: 50px;
+    padding: 1px 6px;
+    color: var(--gray-1);
+    font-weight: bold;
 }
 
 nav {
     display: flex;
     align-items: center;
-    border-bottom: 1px solid var(--Grays-Gray-4);
+    border-bottom: 1px solid var(--gray-4);
     height: 56px;
     padding: 8px 16px;
 }
 
 #svg-logo-devhub {
-    fill: var(--Bright-Lime-10);
+    fill: var(--lime-10);
 }
 
 main {
@@ -84,7 +94,7 @@ section#top {
 
     section {
         height: min-content;
-        border: 1px solid var(--Grays-Gray-4);
+        border: 1px solid var(--gray-4);
         border-radius: 6px;
     }
 
@@ -95,11 +105,11 @@ section#top {
     }
 
     #release table {
-        color: var(--Grays-Gray-11);
+        color: var(--gray-11);
 
         strong {
             font-weight: normal;
-            color: var(--Grays-Gray-12);
+            color: var(--gray-12);
         }
     }
 
@@ -112,7 +122,7 @@ section#top {
     }
 
     #untriaged-issues-count.untriaged {
-         color: var(--Bright-Amber-10);
+        background-color: var(--red-10);
     }
 }
 
@@ -125,7 +135,7 @@ section#fuzz-runs {
     table {
         border-collapse: separate;
         border-spacing: 0;
-        border: 1px solid var(--Grays-Gray-4);
+        border: 1px solid var(--gray-4);
         border-radius: 6px;
         line-height: 24px;
 
@@ -139,11 +149,11 @@ section#fuzz-runs {
         }
 
         tr.group-start td {
-            border-top: 1px solid var(--Grays-Gray-4);
+            border-top: 1px solid var(--gray-4);
         }
 
         tr.success {
-            color: var(--Bright-Lime-10);
+            color: var(--lime-10);
         }
     }
 }
@@ -154,7 +164,7 @@ section#metrics {
     gap: 12px;
 
     #charts {
-        border: 1px solid var(--Grays-Gray-4);
+        border: 1px solid var(--gray-4);
         border-radius: 6px;
         display: flex;
         flex-wrap: wrap;
@@ -170,7 +180,7 @@ section#metrics {
 
 @media (prefers-color-scheme: dark) {
     #charts {
-        color: var(--Grays-Gray-1);
+        color: var(--gray-1);
 
         >div {
             filter: invert(1);
