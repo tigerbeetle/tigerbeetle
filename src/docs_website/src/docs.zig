@@ -296,8 +296,16 @@ const DocPage = struct {
 
         try search_index.append(.{ .page_path = self.path_target, .html_path = pandoc_out });
 
+        const title_suffix = "TigerBeetle Docs";
+        const page_title = blk: {
+            if (std.mem.eql(u8, self.title, title_suffix)) {
+                break :blk self.title;
+            }
+            break :blk try std.mem.join(b.allocator, " | ", &.{ self.title, title_suffix });
+        };
+
         const page_path = website.write_page(.{
-            .title = self.title,
+            .title = page_title,
             .nav = nav,
             .content = pandoc_out,
         });
