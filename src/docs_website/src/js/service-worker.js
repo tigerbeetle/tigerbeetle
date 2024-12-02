@@ -41,6 +41,9 @@ function normalizeUrl(url) {
   if (urlObj.pathname && !urlObj.pathname.includes('.') && !urlObj.pathname.endsWith('/')) {
     urlObj.pathname += '/';
   }
+  if (urlObj.search) {
+    urlObj.search = "";
+  }
 
   return urlObj.toString();
 }
