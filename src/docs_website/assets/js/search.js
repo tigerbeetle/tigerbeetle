@@ -33,25 +33,23 @@ async function init() {
             }
         }
     });
+
+    if (searchInput.value) onSearchInput(); // Repeat search once the index is fetched.
 }
 
 init();
 
-function makeContext(text, i, length, windowSize = 40) {
-    let contextLeft = "";
-    let i0 = Math.max(0, i - windowSize / 2);
-    if (i0 > 0) contextLeft = "...";
-    while (i0 > 0 && text[i0] !== ' ') i0--;
-    contextLeft = contextLeft + text.slice(i0, i).trimLeft();
+function onSearchInput() {
+    const results = search(searchInput.value);
+    const highlightQuery = `?highlight=${encodeURIComponent(searchInput.value)}`
+    searchResults.replaceChildren(...results.map(result => {
+        const a = document.createElement("a");
+        a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
+        a.innerHTML = "<h3>" + result.section.pageTitle + "</h3><p>" + result.context + "</p>";
+        return a;
+    }));
 
-    let contextRight = "";
-    let i1 = Math.min(text.length, i + length + windowSize / 2);
-    if (i1 < text.length) contextRight = "...";
-    while (i1 < text.length && text[i1] !== ' ') i1++;
-    contextRight = text.slice(i + length, i1).trimRight() + contextRight;
-
-    const highlight = "<strong>" + text.slice(i, i + length) + "</strong>";
-    return contextLeft + highlight + contextRight;
+    searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
 }
 
 function search(term, maxResults = 20) {
@@ -83,6 +81,23 @@ function search(term, maxResults = 20) {
     hits = hits.slice(0, maxResults);
     hits.forEach(hit => hit.context = makeContext(hit.section.text, hit.firstIndex, term.length));
     return hits;
+}
+
+function makeContext(text, i, length, windowSize = 40) {
+    let contextLeft = "";
+    let i0 = Math.max(0, i - windowSize / 2);
+    if (i0 > 0) contextLeft = "...";
+    while (i0 > 0 && text[i0] !== ' ') i0--;
+    contextLeft = contextLeft + text.slice(i0, i).trimLeft();
+
+    let contextRight = "";
+    let i1 = Math.min(text.length, i + length + windowSize / 2);
+    if (i1 < text.length) contextRight = "...";
+    while (i1 < text.length && text[i1] !== ' ') i1++;
+    contextRight = text.slice(i + length, i1).trimRight() + contextRight;
+
+    const highlight = "<strong>" + text.slice(i, i + length) + "</strong>";
+    return contextLeft + highlight + contextRight;
 }
 
 function selectNextResult() {
@@ -133,18 +148,7 @@ searchInput.addEventListener("focus", () => {
 searchInput.addEventListener("blur", () => {
     if (searchInput.value === "") searchHotkey.style.display = "block";
 });
-searchInput.addEventListener("input", () => {
-    const results = search(searchInput.value);
-    const highlightQuery = `?highlight=${encodeURIComponent(searchInput.value)}`
-    searchResults.replaceChildren(...results.map(result => {
-        const a = document.createElement("a");
-        a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
-        a.innerHTML = "<h3>" + result.section.pageTitle + "</h3><p>" + result.context + "</p>";
-        return a;
-    }));
-
-    searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
-});
+searchInput.addEventListener("input", onSearchInput);
 searchInput.addEventListener("keydown", event => {
     if (event.key === "ArrowDown") {
         selectNextResult();
