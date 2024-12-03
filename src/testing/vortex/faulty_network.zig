@@ -106,6 +106,7 @@ const Pipe = struct {
         pipe.send_count = 0;
         pipe.recv_inflight = true;
 
+        // We don't need to recv a certain count of bytes, because whatever we recv, we send along.
         pipe.connection.io.recv(
             *Pipe,
             pipe,

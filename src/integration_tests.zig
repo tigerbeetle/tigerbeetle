@@ -524,7 +524,11 @@ test "vortex smoke" {
         vortex_exe,
         tigerbeetle,
     });
-    _ = try shell.file_ensure_content(script_path, script_contents, .{ .mode = 0o777 });
+    _ = try shell.cwd.writeFile(.{
+        .sub_path = script_path,
+        .data = script_contents,
+        .flags = .{ .mode = 0o777 },
+    });
 
     try shell.exec("unshare --net --fork --map-root-user --pid sh {script_path}", .{
         .script_path = script_path,
