@@ -24,7 +24,11 @@ const compaction_block_count_beat_min = @import("compaction.zig").compaction_blo
 
 const IO = @import("../io.zig").IO;
 
-const table_count_max = @import("tree.zig").table_count_max;
+/// The maximum number of tables for the forest as a whole. This is set a bit backwards due to how
+/// the code is structured: a single tree should be able to use all the tables in the forest, so the
+/// table_count_max of the forest is equal to the table_count_max of a single tree.
+/// In future, Forest.table_count_max could exceed Tree.table_count_max.
+pub const table_count_max = @import("tree.zig").table_count_max;
 
 pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     var groove_fields: []const std.builtin.Type.StructField = &.{};

@@ -36,7 +36,6 @@ const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const BlockType = @import("schema.zig").BlockType;
-const tree = @import("tree.zig");
 const compaction = @import("compaction.zig");
 const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
 const schema = @import("schema.zig");
@@ -135,8 +134,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
         ///
         /// This hash-set tracks tables that have been removed but whose corresponding "insert" has
         /// not yet been encountered. Given that the maximum number of tables in the forest at any
-        /// given moment is `table_count_max`, there are likewise at most `table_count_max`
-        /// "unpaired" removes to track.
+        /// given moment is `forest_table_count_max`, there are likewise at most
+        /// `forest_table_count_max` "unpaired" removes to track.
         // TODO(Optimization) This memory (~35MiB) is only needed during open() – maybe borrow it
         // from the grid cache or node pool instead so that we don't pay for it during normal
         // operation.
@@ -212,11 +211,17 @@ pub fn ManifestLogType(comptime Storage: type) type {
             @memset(manifest_log.writes, undefined);
 
             manifest_log.table_extents = TableExtents{};
-            try manifest_log.table_extents.ensureTotalCapacity(allocator, tree.table_count_max);
+            try manifest_log.table_extents.ensureTotalCapacity(
+                allocator,
+                options.forest_table_count_max,
+            );
             errdefer manifest_log.table_extents.deinit(allocator);
 
             manifest_log.tables_removed = TablesRemoved{};
-            try manifest_log.tables_removed.ensureTotalCapacity(allocator, tree.table_count_max);
+            try manifest_log.tables_removed.ensureTotalCapacity(
+                allocator,
+                options.forest_table_count_max,
+            );
             errdefer manifest_log.tables_removed.deinit(allocator);
         }
 
@@ -317,8 +322,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback != null);
             assert(!manifest_log.writing);
             assert(manifest_log.write_callback == null);
-            assert(manifest_log.table_extents.count() <= tree.table_count_max);
-            assert(manifest_log.tables_removed.count() <= tree.table_count_max);
+            assert(manifest_log.table_extents.count() <=
+                manifest_log.options.forest_table_count_max);
+            assert(manifest_log.tables_removed.count() <=
+                manifest_log.options.forest_table_count_max);
             assert(manifest_log.log_block_checksums.count <
                 manifest_log.log_block_checksums.buffer.len);
             assert(manifest_log.log_block_checksums.count ==
@@ -428,8 +435,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback != null);
             assert(!manifest_log.writing);
             assert(manifest_log.write_callback == null);
-            assert(manifest_log.table_extents.count() <= tree.table_count_max);
-            assert(manifest_log.tables_removed.count() <= tree.table_count_max);
+            assert(manifest_log.table_extents.count() <=
+                manifest_log.options.forest_table_count_max);
+            assert(manifest_log.tables_removed.count() <=
+                manifest_log.options.forest_table_count_max);
             assert(manifest_log.log_block_checksums.count ==
                 manifest_log.log_block_addresses.count);
             assert(manifest_log.log_block_checksums.count ==
