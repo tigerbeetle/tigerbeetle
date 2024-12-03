@@ -16,25 +16,18 @@
 //!
 //!     $ zig build test:integration -- "vortex smoke"
 //!
-//! If you need more control, you can run this program directly:
+//! If you need more control, you can run this program directly. Using `unshare` is recommended to
+//! be sure all child processes are killed, and to get network sandboxing.
 //!
+//!     $ zig build
 //!     $ zig build vortex
-//!     $ unshare --net --fork --map-root-user --pid \
-//!         zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle
+//!     $ unshare --net --fork --map-root-user --pid bash -c 'ip link set up dev lo ; \
+//!         ./zig-out/bin/vortex supervisor --tigerbeetle-executable=./zig-out/bin/tigerbeetle'
 //!
-//! Run a longer test:
+//! Control the test duration by adding the `--test-duration-minutes=N` option (it's 10 minutes by
+//! default).
 //!
-//!     $ unshare --net --fork --map-root-user --pid \
-//!         zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle \
-//!         --test-duration-minutes=10
-//!
-//! To capture its logs, for instance to run grep afterwards, redirect stderr to a file.
-//!
-//!     $ unshare --net --fork --map-root-user --pid \
-//!         zig-out/bin/vortex supervisor --tigerbeetle-executable=./tigerbeetle \
-//!         2> /tmp/vortex.log
-//!
-//! If you have permissions troubles with Ubuntu, see:
+//! If you have permissions troubles with unshare and Ubuntu, see:
 //! https://github.com/YoYoGames/GameMaker-Bugs/issues/6015#issuecomment-2135552784
 //!
 //! Further possible work:
@@ -48,23 +41,45 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const IO = @import("../../io.zig").IO;
 const LoggedProcess = @import("./logged_process.zig");
-const NetworkFaults = @import("./network_faults.zig");
+const faulty_network = @import("./faulty_network.zig");
 const arbitrary = @import("./arbitrary.zig");
+const constants = @import("./constants.zig");
 
 const log = std.log.scoped(.supervisor);
 
 const assert = std.debug.assert;
 
-const cluster_id = 1;
-const replica_count = 3;
-const replica_ports = [replica_count]u16{ 3000, 3001, 3002 };
-const replica_addresses = comma_separate_ports(&replica_ports);
+const replica_ports_actual = [constants.replica_count]u16{ 4000, 4001, 4002 };
+const replica_ports_proxied = [constants.replica_count]u16{ 3000, 3001, 3002 };
+
+// Calculate replica addresses (comma-separated) for each replica. Because
+// we want replicas to communicate over the proxies, we use those ports
+// for their peers, but we must use the replica's actual port for itself
+// (because that's the port it listens to).
+const replica_addresses_for_replicas = blk: {
+    var result: [constants.replica_count][]const u8 = undefined;
+    for (0..constants.replica_count) |replica_self| {
+        var ports: [constants.replica_count]u16 = undefined;
+        for (0..constants.replica_count) |replica_other| {
+            ports[replica_other] = if (replica_self == replica_other)
+                replica_ports_actual[replica_other]
+            else
+                replica_ports_proxied[replica_other];
+        }
+        result[replica_self] = comma_separate_ports(&ports);
+    }
+    break :blk result;
+};
+
+const replica_addresses_for_clients = comma_separate_ports(&replica_ports_proxied);
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
     test_duration_minutes: u16 = 10,
     driver_command: ?[]const u8 = null,
+    disable_faults: bool = false,
 };
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
@@ -72,6 +87,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         log.err("vortex is not supported for Windows", .{});
         return error.NotSupported;
     }
+
+    var io = try IO.init(128, 0);
 
     const tmp_dir = try create_tmp_dir(allocator);
     defer {
@@ -81,18 +98,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         allocator.free(tmp_dir);
     }
 
-    // Check that we are running as root.
-    const user_id = std.os.linux.getuid();
-    if (user_id != 0) {
-        log.err(
-            \\ this script needs to be run in a separate namespace using
-            \\ 'unshare --net --fork --map-root-user --pid'
-        , .{});
-        std.process.exit(1);
-    }
-
-    try NetworkFaults.setup(allocator);
-
     log.info(
         "starting test with target runtime of {d}m",
         .{args.test_duration_minutes},
@@ -100,9 +105,14 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const test_duration_ns = @as(u64, @intCast(args.test_duration_minutes)) * std.time.ns_per_min;
     const test_deadline = std.time.nanoTimestamp() + test_duration_ns;
 
-    var replicas: [replica_count]*Replica = undefined;
+    const seed = std.crypto.random.int(u64);
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    var replicas: [constants.replica_count]*Replica = undefined;
+    var replicas_initialized: usize = 0;
     defer {
-        for (replicas) |replica| {
+        for (replicas[0..replicas_initialized]) |replica| {
             // We might have terminated the replica and never restarted it,
             // so we need to check its state.
             if (replica.state() != .terminated) {
@@ -112,21 +122,21 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         }
     }
 
-    var datafile_buffers: [replica_count][std.fs.max_path_bytes]u8 = undefined;
-    inline for (0..replica_count) |replica_index| {
+    var datafile_buffers: [constants.replica_count][std.fs.max_path_bytes]u8 = undefined;
+    inline for (0..constants.replica_count) |replica_index| {
         const datafile = try std.fmt.bufPrint(
             datafile_buffers[replica_index][0..],
             "{s}/{d}_{d}.tigerbeetle",
-            .{ tmp_dir, cluster_id, replica_index },
+            .{ tmp_dir, constants.cluster_id, replica_index },
         );
 
         // Format each replica's datafile.
         const result = try std.process.Child.run(.{ .allocator = allocator, .argv = &.{
             args.tigerbeetle_executable,
             "format",
-            std.fmt.comptimePrint("--cluster={d}", .{cluster_id}),
+            std.fmt.comptimePrint("--cluster={d}", .{constants.cluster_id}),
             std.fmt.comptimePrint("--replica={d}", .{replica_index}),
-            std.fmt.comptimePrint("--replica-count={d}", .{replica_count}),
+            std.fmt.comptimePrint("--replica-count={d}", .{constants.replica_count}),
             datafile,
         } });
         defer {
@@ -143,14 +153,39 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         var replica = try Replica.create(
             allocator,
             args.tigerbeetle_executable,
+            @intCast(replica_index),
             datafile,
         );
-        errdefer replica.destroy();
-
-        try replica.start();
 
         replicas[replica_index] = replica;
+        replicas_initialized += 1;
+
+        try replica.start();
     }
+
+    // Construct mappings between proxy and underlying replicas.
+    var mappings: [constants.replica_count]faulty_network.Mapping = undefined;
+    inline for (0..constants.replica_count) |replica_index| {
+        mappings[replica_index] = .{
+            .origin = .{ .in = std.net.Ip4Address.init(
+                .{ 0, 0, 0, 0 },
+                replica_ports_proxied[replica_index],
+            ) },
+            .remote = .{ .in = std.net.Ip4Address.init(
+                .{ 0, 0, 0, 0 },
+                replica_ports_actual[replica_index],
+            ) },
+        };
+    }
+
+    // Start fault-injecting network (a set of proxies).
+    var network = try faulty_network.Network.listen(
+        allocator,
+        &io,
+        mappings[0..],
+        random,
+    );
+    defer network.destroy(allocator);
 
     const workload = try start_workload(allocator, args);
     defer {
@@ -160,65 +195,114 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         workload.destroy(allocator);
     }
 
-    const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var sleep_deadline: u64 = 0;
 
     const workload_result = while (std.time.nanoTimestamp() < test_deadline) {
-        // Things we do in this main loop, except supervising the replicas.
-        const Action = enum {
-            sleep,
-            replica_terminate,
-            replica_stop,
-            replica_resume,
-            mutate_network,
-        };
+        network.tick();
+        try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
 
-        const running_replica = random_replica_in_state(random, &replicas, .running);
-        const stopped_replica = random_replica_in_state(random, &replicas, .stopped);
+        const now: u64 = @intCast(std.time.nanoTimestamp());
+        if (now < sleep_deadline) continue;
 
-        switch (arbitrary.weighted(random, Action, .{
-            .sleep = 20,
-            .replica_terminate = if (running_replica != null) 1 else 0,
-            .replica_stop = if (running_replica != null) 1 else 0,
-            .replica_resume = if (stopped_replica != null) 5 else 0,
-            .mutate_network = 3,
-        }).?) {
-            .sleep => std.time.sleep(5 * std.time.ns_per_s),
-            .replica_terminate => {
-                if (running_replica) |found| {
-                    log.info("terminating replica {d}", .{found.index});
-                    _ = try found.replica.terminate();
-                }
-            },
-            .replica_stop => {
-                if (running_replica) |found| {
-                    log.info("stopping replica {d}", .{found.index});
-                    _ = try found.replica.stop();
-                }
-            },
-            .replica_resume => {
-                if (stopped_replica) |found| {
-                    log.info("resuming replica {d}", .{found.index});
-                    _ = try found.replica.cont();
-                }
-            },
-            .mutate_network => {
-                const weights = NetworkFaults.adjusted_weights(.{
-                    .network_delay_add = 1,
-                    .network_delay_remove = 10,
-                    .network_loss_add = 1,
-                    .network_loss_remove = 10,
-                });
-                if (arbitrary.weighted(random, NetworkFaults.Action, weights)) |action| {
-                    try NetworkFaults.execute(allocator, random, action);
-                } else {
-                    std.time.sleep(100 * std.time.ns_per_ms);
-                }
-            },
+        if (!args.disable_faults) {
+            // Things we do in this main loop, except supervising the replicas.
+            const Action = enum {
+                sleep,
+                replica_terminate,
+                replica_stop,
+                replica_resume,
+                network_delay,
+                network_lose,
+                network_corrupt,
+                network_heal,
+                quiesce,
+            };
+
+            var running_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
+            const running_replicas = replicas_in_state(
+                &replicas,
+                &running_replicas_buffer,
+                .running,
+            );
+            var stopped_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined;
+            const stopped_replicas = replicas_in_state(
+                &replicas,
+                &stopped_replicas_buffer,
+                .stopped,
+            );
+
+            switch (arbitrary.weighted(random, Action, .{
+                .sleep = 10,
+                .replica_terminate = if (running_replicas.len > 0) 3 else 0,
+                .replica_stop = if (running_replicas.len > 0) 2 else 0,
+                .replica_resume = if (stopped_replicas.len > 0) 10 else 0,
+                .network_delay = if (network.faults.delay == null) 3 else 0,
+                .network_lose = if (network.faults.lose == null) 3 else 0,
+                .network_corrupt = if (network.faults.corrupt == null) 3 else 0,
+                .network_heal = if (!network.faults.is_healed()) 10 else 0,
+                .quiesce = if (running_replicas.len > 0 or
+                    stopped_replicas.len > 0 or
+                    !network.faults.is_healed()) 1 else 0,
+            }).?) {
+                .sleep => {
+                    const duration = random.uintLessThan(u64, 10 * std.time.ns_per_s);
+                    log.info("sleeping for {}", .{std.fmt.fmtDuration(duration)});
+                    sleep_deadline = now + duration;
+                },
+                .replica_terminate => {
+                    const pick = arbitrary.element(random, ReplicaWithIndex, running_replicas);
+                    log.info("terminating replica {d}", .{pick.index});
+                    _ = try pick.replica.terminate();
+                },
+                .replica_stop => {
+                    const pick = arbitrary.element(random, ReplicaWithIndex, running_replicas);
+                    log.info("stopping replica {d}", .{pick.index});
+                    _ = try pick.replica.stop();
+                },
+                .replica_resume => {
+                    const pick = arbitrary.element(random, ReplicaWithIndex, stopped_replicas);
+                    log.info("resuming replica {d}", .{pick.index});
+                    _ = try pick.replica.cont();
+                },
+                .network_delay => {
+                    const time_ms = random.intRangeAtMost(u32, 10, 500);
+                    network.faults.delay = .{
+                        .time_ms = time_ms,
+                        .jitter_ms = @min(time_ms, 50),
+                    };
+                    log.info("injecting network delays: {any}", .{network.faults});
+                },
+                .network_lose => {
+                    network.faults.lose = .{
+                        .percentage = random.intRangeAtMost(u8, 1, 10),
+                    };
+                    log.info("injecting network loss: {any}", .{network.faults});
+                },
+                .network_corrupt => {
+                    network.faults.corrupt = .{
+                        .percentage = random.intRangeAtMost(u8, 1, 10),
+                    };
+                    log.info("injecting network corruption: {any}", .{network.faults});
+                },
+                .network_heal => {
+                    log.info("healing network", .{});
+                    network.faults.heal();
+                },
+                .quiesce => {
+                    const duration = random.intRangeAtMost(u64, 60, 120) * std.time.ns_per_s;
+                    sleep_deadline = now + duration;
+                    network.faults.heal();
+                    for (stopped_replicas) |stopped| {
+                        _ = try stopped.replica.cont();
+                    }
+                    log.info("going into {} quiescence (no faults)", .{
+                        std.fmt.fmtDuration(duration),
+                    });
+                },
+            }
         }
 
-        // Restart any (by the nemesis) terminated replicas. Any other termination reason
+        // Restart any (by the above) terminated replicas. Any other termination reason
         // than SIGKILL is considered unexpected and fails the test.
         for (replicas, 0..) |replica, index| {
             if (replica.state() == .terminated) {
@@ -289,27 +373,22 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
 }
 
-const RandomReplica = struct { replica: *Replica, index: u8 };
+const ReplicaWithIndex = struct { replica: *Replica, index: u8 };
 
-fn random_replica_in_state(
-    random: std.Random,
+fn replicas_in_state(
     replicas: []*Replica,
+    buffer: []ReplicaWithIndex,
     state: Replica.State,
-) ?RandomReplica {
-    var matching: [replica_count]RandomReplica = undefined;
+) []ReplicaWithIndex {
     var count: u8 = 0;
 
     for (replicas, 0..) |replica, index| {
         if (replica.state() == state) {
-            matching[count] = .{ .replica = replica, .index = @intCast(index) };
+            buffer[count] = .{ .replica = replica, .index = @intCast(index) };
             count += 1;
         }
     }
-    if (count == 0) {
-        return null;
-    } else {
-        return matching[random.uintLessThan(usize, count)];
-    }
+    return buffer[0..count];
 }
 
 fn start_workload(allocator: std.mem.Allocator, args: CLIArgs) !*LoggedProcess {
@@ -336,8 +415,8 @@ fn start_workload(allocator: std.mem.Allocator, args: CLIArgs) !*LoggedProcess {
     const argv = &.{
         vortex_path,
         "workload",
-        std.fmt.comptimePrint("--cluster-id={d}", .{cluster_id}),
-        std.fmt.comptimePrint("--addresses={s}", .{replica_addresses}),
+        std.fmt.comptimePrint("--cluster-id={d}", .{constants.cluster_id}),
+        std.fmt.comptimePrint("--addresses={s}", .{replica_addresses_for_clients}),
         driver_command_arg,
     };
 
@@ -376,12 +455,14 @@ const Replica = struct {
 
     allocator: std.mem.Allocator,
     executable_path: []const u8,
+    replica_index: u8,
     datafile: []const u8,
     process: ?*LoggedProcess,
 
     pub fn create(
         allocator: std.mem.Allocator,
         executable_path: []const u8,
+        replica_index: u8,
         datafile: []const u8,
     ) !*Replica {
         const self = try allocator.create(Replica);
@@ -390,6 +471,7 @@ const Replica = struct {
         self.* = .{
             .allocator = allocator,
             .executable_path = executable_path,
+            .replica_index = replica_index,
             .datafile = datafile,
             .process = null,
         };
@@ -423,10 +505,17 @@ const Replica = struct {
             process.destroy(self.allocator);
         }
 
+        var addresses_buffer: [128]u8 = undefined;
+        const addresses_arg = try std.fmt.bufPrint(
+            addresses_buffer[0..],
+            "--addresses={s}",
+            .{replica_addresses_for_replicas[self.replica_index]},
+        );
+
         const argv = &.{
             self.executable_path,
             "start",
-            "--addresses=" ++ replica_addresses,
+            addresses_arg,
             self.datafile,
         };
 

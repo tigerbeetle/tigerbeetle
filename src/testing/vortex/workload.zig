@@ -70,8 +70,13 @@ pub fn main(
         try reconcile(query_result, &query, &model);
 
         log.info(
-            "accounts={d}, transfers={d}, commands={d}",
-            .{ model.accounts.items.len, model.transfers_created, i },
+            "accounts created = {d}, transfers = {d}, pending transfers = {d}, commands run = {d}",
+            .{
+                model.accounts.items.len,
+                model.transfers_created,
+                model.pending_transfers.count(),
+                i + 1,
+            },
         );
     }
 }

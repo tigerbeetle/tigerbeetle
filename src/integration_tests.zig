@@ -510,15 +510,27 @@ test "vortex smoke" {
     const shell = try Shell.create(std.testing.allocator);
     defer shell.destroy();
 
-    log.info("running 1m vortex test...", .{});
-    try shell.exec(
-        \\ unshare --net --fork --map-root-user --pid
-        \\   {vortex} supervisor
-        \\      --test-duration-minutes=1
-        \\      --tigerbeetle-executable={tigerbeetle}
-    , .{
-        .vortex = vortex_exe,
-        .tigerbeetle = tigerbeetle,
+    const script_path = try shell.fmt("./.zig-cache/tmp/{}.sh", .{
+        std.crypto.random.int(u64),
     });
-    log.info("vortex passed", .{});
+    defer shell.cwd.deleteTree(script_path) catch {};
+
+    const script_contents = try shell.fmt(
+        \\ ip link set up dev lo && \
+        \\   {s} supervisor \
+        \\   --test-duration-minutes=1 \
+        \\   --tigerbeetle-executable={s}
+    , .{
+        vortex_exe,
+        tigerbeetle,
+    });
+    _ = try shell.cwd.writeFile(.{
+        .sub_path = script_path,
+        .data = script_contents,
+        .flags = .{ .mode = 0o777 },
+    });
+
+    try shell.exec("unshare --net --fork --map-root-user --pid sh {script_path}", .{
+        .script_path = script_path,
+    });
 }
