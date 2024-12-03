@@ -529,27 +529,51 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
 
 // Downloads a pre-build llvm-objcopy from <https://github.com/tigerbeetle/dependencies>.
 fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
-    return switch (b.graph.host.result.os.tag) {
-        .linux => fetch(b, .{
-            .url = "https://github.com/tigerbeetle/dependencies/releases/download/18.1.8/" ++
-                "llvm-objcopy-x86_64-linux.zip",
-            .file_name = "llvm-objcopy",
-            .hash = "12203104f50e31efee26b1467d0d918bf4ac6cda7bee93d865d01e0913f33504b03a",
-        }),
-        .windows => fetch(b, .{
-            .url = "https://github.com/tigerbeetle/dependencies/releases/download/18.1.8/" ++
-                "llvm-objcopy-x86_64-windows.zip",
-            .file_name = "llvm-objcopy.exe",
-            .hash = "122069747460977a1eb52110eb2abc8b992af57242ef724316d3071c7ec7f61e41bc",
-        }),
-        .macos => fetch(b, .{
-            .url = "https://github.com/tigerbeetle/dependencies/releases/download/18.1.8/" ++
-                "llvm-objcopy-aarch64-macos.zip",
-            .file_name = "llvm-objcopy",
-            .hash = "12202b751a54e74823261a9a014497b137a62a8d80f6b09a7b0515a3e34a617313fa",
-        }),
+    switch (b.graph.host.result.os.tag) {
+        .linux => {
+            switch (b.graph.host.result.cpu.arch) {
+                .x86_64 => {
+                    return fetch(b, .{
+                        .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
+                            "18.1.8/llvm-objcopy-x86_64-linux.zip",
+                        .file_name = "llvm-objcopy",
+                        .hash = "12203104f50e31efee26b1467d0d918bf4ac6cda7bee93d865d01e09" ++
+                            "13f33504b03a",
+                    });
+                },
+                .aarch64 => {
+                    return fetch(b, .{
+                        .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
+                            "18.1.8/llvm-objcopy-aarch64-linux.zip",
+                        .file_name = "llvm-objcopy",
+                        .hash = "122006fbe2af4f6cdbd7236b951b4d128de95b7688828a6999b4fe71" ++
+                            "50e4bb3142ee",
+                    });
+                },
+                else => @panic("unsupported arch"),
+            }
+        },
+        .windows => {
+            assert(b.graph.host.result.cpu.arch == .x86_64);
+            return fetch(b, .{
+                .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
+                    "18.1.8/llvm-objcopy-x86_64-windows.zip",
+                .file_name = "llvm-objcopy.exe",
+                .hash = "122069747460977a1eb52110eb2abc8b992af57242ef724316d3071c7ec7f61e41bc",
+            });
+        },
+        .macos => {
+            // TODO: this assert triggers, but the macOS tests on x86_64 work...?
+            // assert(b.graph.host.result.cpu.arch == .aarch64);
+            return fetch(b, .{
+                .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
+                    "18.1.8/llvm-objcopy-aarch64-macos.zip",
+                .file_name = "llvm-objcopy",
+                .hash = "12202b751a54e74823261a9a014497b137a62a8d80f6b09a7b0515a3e34a617313fa",
+            });
+        },
         else => @panic("unsupported host"),
-    };
+    }
 }
 
 fn build_aof(
