@@ -9,7 +9,7 @@ const constants = @import("../constants.zig");
 const growth_factor = constants.lsm_growth_factor;
 
 const vsr = @import("../vsr.zig");
-const table_count_max = @import("tree.zig").table_count_max;
+const table_count_max_tree = @import("tree.zig").table_count_max;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const schema = @import("schema.zig");
@@ -163,7 +163,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const KeyRange = Level.KeyRange;
         pub const ManifestLog = ManifestLogType(Storage);
         pub const Level =
-            ManifestLevelType(NodePool, Key, TreeTableInfo, table_count_max);
+            ManifestLevelType(NodePool, Key, TreeTableInfo, table_count_max_tree);
 
         const CompactionTableRange = struct {
             table_a: TableInfoReference,

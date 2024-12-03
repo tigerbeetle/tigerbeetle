@@ -71,13 +71,13 @@ pub fn main(args: fuzz.FuzzArgs) !void {
         fuzz.random_int_exponential(random, usize, 1e5),
     );
 
-    const table_count_max = 1024;
+    const table_count_max_tree = 1024;
     const node_size = 1024;
 
-    const fuzz_ops = try generate_fuzz_ops(random, table_count_max, fuzz_op_count);
+    const fuzz_ops = try generate_fuzz_ops(random, table_count_max_tree, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
-    const Environment = EnvironmentType(@as(u32, table_count_max), node_size);
+    const Environment = EnvironmentType(@as(u32, table_count_max_tree), node_size);
     var env = try Environment.init(random);
     try env.run_fuzz_ops(fuzz_ops);
     try env.deinit();
@@ -97,7 +97,7 @@ const max_tables_per_insert = 10;
 
 fn generate_fuzz_ops(
     random: std.rand.Random,
-    table_count_max: usize,
+    table_count_max_tree: usize,
     fuzz_op_count: usize,
 ) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
@@ -115,7 +115,7 @@ fn generate_fuzz_ops(
     };
     log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
-    var ctx = GenerateContext{ .max_inserted = table_count_max, .random = random };
+    var ctx = GenerateContext{ .max_inserted = table_count_max_tree, .random = random };
     for (fuzz_ops) |*fuzz_op| {
         const fuzz_op_tag = fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
         fuzz_op.* = ctx.next(fuzz_op_tag);
@@ -217,7 +217,7 @@ const GenerateContext = struct {
     }
 };
 
-pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type {
+pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u32) type {
     return struct {
         const Environment = @This();
 
@@ -227,7 +227,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             NodePool,
             Key,
             TableInfo,
-            table_count_max,
+            table_count_max_tree,
         );
         pub const TableInfo = @import("manifest.zig").TreeTableInfoType(Table);
         pool: NodePool,
@@ -286,7 +286,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             // Generate random, non-overlapping TableInfo's into env.buffer:
             {
                 var insert_amount = amount;
-                var key = env.random.uintAtMostBiased(Key, table_count_max * 64);
+                var key = env.random.uintAtMostBiased(Key, table_count_max_tree * 64);
 
                 while (insert_amount > 0) : (insert_amount -= 1) {
                     const table = env.generate_non_overlapping_table(key);

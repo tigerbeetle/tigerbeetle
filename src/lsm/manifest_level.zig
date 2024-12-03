@@ -18,7 +18,7 @@ pub fn ManifestLevelType(
     comptime NodePool: type,
     comptime Key: type,
     comptime TableInfo: type,
-    comptime table_count_max: u32,
+    comptime table_count_max_tree: u32,
 ) type {
     comptime assert(@typeInfo(Key) == .Int or @typeInfo(Key) == .ComptimeInt);
 
@@ -28,7 +28,7 @@ pub fn ManifestLevelType(
         pub const Keys = SortedSegmentedArrayType(
             Key,
             NodePool,
-            table_count_max,
+            table_count_max_tree,
             Key,
             struct {
                 inline fn key_from_value(value: *const Key) Key {
@@ -41,7 +41,7 @@ pub fn ManifestLevelType(
         pub const Tables = SortedSegmentedArrayType(
             TableInfo,
             NodePool,
-            table_count_max,
+            table_count_max_tree,
             KeyMaxSnapshotMin.Int,
             struct {
                 inline fn key_from_value(table_info: *const TableInfo) KeyMaxSnapshotMin.Int {
@@ -162,7 +162,7 @@ pub fn ManifestLevelType(
         key_range_latest: LevelKeyRange = .{ .key_range = null },
 
         /// The number of tables visible to snapshot_latest.
-        /// Used to enforce table_count_max_for_level().
+        /// Used to enforce table_count_max_tree_for_level().
         // TODO Track this in Manifest instead, since it knows both when tables are
         // added/updated/removed, and also knows the superblock's persisted snapshots.
         table_count_visible: u32 = 0,
@@ -762,7 +762,7 @@ pub fn ManifestLevelType(
 pub fn TestContextType(
     comptime node_size: u32,
     comptime Key: type,
-    comptime table_count_max: u32,
+    comptime table_count_max_tree: u32,
 ) type {
     return struct {
         const TestContext = @This();
@@ -809,7 +809,7 @@ pub fn TestContextType(
         const NodePoolType = @import("node_pool.zig").NodePoolType;
 
         const TestPool = NodePoolType(node_size, @alignOf(TableInfo));
-        const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, table_count_max);
+        const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, table_count_max_tree);
         const KeyRange = TestLevel.KeyRange;
 
         random: std.rand.Random,
@@ -863,7 +863,7 @@ pub fn TestContextType(
 
             {
                 var i: usize = 0;
-                while (i < table_count_max * 2) : (i += 1) {
+                while (i < table_count_max_tree * 2) : (i += 1) {
                     switch (context.random.uintLessThanBiased(u32, 100)) {
                         0...59 => try context.insert_tables(),
                         60...69 => try context.create_snapshot(),
@@ -876,7 +876,7 @@ pub fn TestContextType(
 
             {
                 var i: usize = 0;
-                while (i < table_count_max * 2) : (i += 1) {
+                while (i < table_count_max_tree * 2) : (i += 1) {
                     switch (context.random.uintLessThanBiased(u32, 100)) {
                         0...34 => try context.insert_tables(),
                         35...39 => try context.create_snapshot(),
@@ -891,7 +891,7 @@ pub fn TestContextType(
         }
 
         fn insert_tables(context: *TestContext) !void {
-            const count_free = table_count_max - context.level.keys.len();
+            const count_free = table_count_max_tree - context.level.keys.len();
 
             if (count_free == 0) return;
 
@@ -901,7 +901,7 @@ pub fn TestContextType(
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
 
             {
-                var key: Key = context.random.uintAtMostBiased(Key, table_count_max * 64);
+                var key: Key = context.random.uintAtMostBiased(Key, table_count_max_tree * 64);
 
                 for (buffer[0..count]) |*table| {
                     table.* = context.random_greater_non_overlapping_table(key);
@@ -1036,7 +1036,7 @@ pub fn TestContextType(
             const count_max = @min(reference_len, 13);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
 
-            assert(context.reference.items.len <= table_count_max);
+            assert(context.reference.items.len <= table_count_max_tree);
             const index = context.random.uintAtMostBiased(u32, reference_len - count);
 
             const snapshot = context.take_snapshot();
@@ -1255,20 +1255,20 @@ test "ManifestLevel" {
     const Options = struct {
         key_type: type,
         node_size: u32,
-        table_count_max: u32,
+        table_count_max_tree: u32,
     };
 
     inline for (.{
-        Options{ .key_type = u64, .node_size = 256, .table_count_max = 33 },
-        Options{ .key_type = u64, .node_size = 256, .table_count_max = 34 },
-        Options{ .key_type = u64, .node_size = 256, .table_count_max = 1024 },
-        Options{ .key_type = u64, .node_size = 512, .table_count_max = 1024 },
-        Options{ .key_type = u64, .node_size = 1024, .table_count_max = 1024 },
+        Options{ .key_type = u64, .node_size = 256, .table_count_max_tree = 33 },
+        Options{ .key_type = u64, .node_size = 256, .table_count_max_tree = 34 },
+        Options{ .key_type = u64, .node_size = 256, .table_count_max_tree = 1024 },
+        Options{ .key_type = u64, .node_size = 512, .table_count_max_tree = 1024 },
+        Options{ .key_type = u64, .node_size = 1024, .table_count_max_tree = 1024 },
     }) |options| {
         const TestContext = TestContextType(
             options.node_size,
             options.key_type,
-            options.table_count_max,
+            options.table_count_max_tree,
         );
 
         var context: TestContext = undefined;
