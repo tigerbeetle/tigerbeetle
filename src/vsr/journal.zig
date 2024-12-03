@@ -877,78 +877,56 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // * The in-memory header is reserved+faulty; the read was via `prepare_checksums`
             const slot = journal.slot_with_op_and_checksum(op, checksum);
 
-            if (!message.header.valid_checksum()) {
+            const error_reason: ?[]const u8 = reason: {
+                if (!message.header.valid_checksum()) {
+                    break :reason "corrupt header after read";
+                }
+                assert(message.header.invalid() == null);
+
+                if (message.header.cluster != replica.cluster) {
+                    // This could be caused by a misdirected read or write.
+                    // Though when a prepare spans multiple sectors, a misdirected read/write will
+                    // likely manifest as a checksum failure instead.
+                    break :reason "wrong cluster";
+                }
+
+                if (message.header.op != op) {
+                    // Possible causes:
+                    // * The prepare was rewritten since the read began.
+                    // * Misdirected read/write.
+                    // * The combination of:
+                    //   * The primary is responding to a `request_prepare`.
+                    //   * The `request_prepare` did not include a checksum.
+                    //   * The requested op's slot is faulty, but the prepare is valid. Since the
+                    //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on
+                    //     reading this entry it turns out not to have the right op.
+                    //   (This case (and the accompanying unnecessary read) could be prevented by
+                    //   storing the op along with the checksum in `prepare_checksums`.)
+                    break :reason "op changed during read";
+                }
+
+                if (message.header.checksum != checksum) {
+                    // This can also be caused by a misdirected read/write.
+                    break :reason "checksum changed during read";
+                }
+
+                if (!message.header.valid_checksum_body(message.body_used())) {
+                    break :reason "corrupt body after read";
+                }
+                break :reason null;
+            };
+
+            if (error_reason) |reason| {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
                 }
 
-                journal.read_prepare_log(op, checksum, "corrupt header after read");
+                journal.read_prepare_log(op, checksum, reason);
                 callback(replica, null, null);
-                return;
+            } else {
+                callback(replica, message, destination_replica);
             }
-            assert(message.header.invalid() == null);
-
-            if (message.header.cluster != replica.cluster) {
-                // This could be caused by a misdirected read or write.
-                // Though when a prepare spans multiple sectors, a misdirected read/write will
-                // likely manifest as a checksum failure instead.
-                if (slot) |s| {
-                    journal.faulty.set(s);
-                    journal.dirty.set(s);
-                }
-
-                journal.read_prepare_log(op, checksum, "wrong cluster");
-                callback(replica, null, null);
-                return;
-            }
-
-            if (message.header.op != op) {
-                // Possible causes:
-                // * The prepare was rewritten since the read began.
-                // * Misdirected read/write.
-                // * The combination of:
-                //   * The primary is responding to a `request_prepare`.
-                //   * The `request_prepare` did not include a checksum.
-                //   * The requested op's slot is faulty, but the prepare is valid. Since the
-                //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on reading
-                //     this entry it turns out not to have the right op.
-                //   (This case (and the accompanying unnecessary read) could be prevented by
-                //   storing the op along with the checksum in `prepare_checksums`.)
-                if (slot) |s| {
-                    journal.faulty.set(s);
-                    journal.dirty.set(s);
-                }
-
-                journal.read_prepare_log(op, checksum, "op changed during read");
-                callback(replica, null, null);
-                return;
-            }
-
-            if (message.header.checksum != checksum) {
-                // This can also be caused by a misdirected read/write.
-                if (slot) |s| {
-                    journal.faulty.set(s);
-                    journal.dirty.set(s);
-                }
-
-                journal.read_prepare_log(op, checksum, "checksum changed during read");
-                callback(replica, null, null);
-                return;
-            }
-
-            if (!message.header.valid_checksum_body(message.body_used())) {
-                if (slot) |s| {
-                    journal.faulty.set(s);
-                    journal.dirty.set(s);
-                }
-
-                journal.read_prepare_log(op, checksum, "corrupt body after read");
-                callback(replica, null, null);
-                return;
-            }
-
-            callback(replica, message, destination_replica);
         }
 
         fn read_prepare_log(journal: *Journal, op: u64, checksum: ?u128, notice: []const u8) void {
