@@ -43,11 +43,19 @@ jobs:
       - run: ./zig/zig build test
 
   test_ubuntu:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { os: 'ubuntu-latest' }
+          - { os: 'ubuntu-latest-arm64' }
+
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2147483647
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: ./zig/download.sh
       - run: ./zig/zig build test
       - run: ./zig/zig build clients:c:sample -Drelease
@@ -126,6 +134,13 @@ jobs:
           - { os: 'macos-13',       language: 'go',      language_version: '1.21'  }
           - { os: 'macos-13',       language: 'node',    language_version: '20.x'  }
           - { os: 'macos-13',       language: 'python',  language_version: '3.13'  }
+
+          # Limited matrix for Ubuntu ARM - runners are paid and we're not sure of the cost yet.
+          - { os: 'ubuntu-latest-arm64',  language: 'dotnet',  language_version: '8.0.x' }
+          - { os: 'ubuntu-latest-arm64',  language: 'go',      language_version: '1.21'  }
+          - { os: 'ubuntu-latest-arm64',  language: 'java',    language_version: '21'    }
+          - { os: 'ubuntu-latest-arm64',  language: 'node',    language_version: '20.x'  }
+          - { os: 'ubuntu-latest-arm64',  language: 'python',  language_version: '3.13'  }
 
     runs-on: ${{ matrix.os }}
     steps:
