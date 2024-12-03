@@ -7,7 +7,7 @@ sidebar_position: 6
 How a new TigerBeetle release is made. Note that the process is being
 established, so this document might not perfectly reflect reality just yet.
 
-The document _start_ with a succinct release manager algorithm for convenience of release managers.
+This document _starts_ with a succinct release manager algorithm for convenience of release managers.
 The motivation for specific steps follows after.
 
 ## Release Manager Algorithm
@@ -78,8 +78,8 @@ If the release failed completely (nothing was published), it is safe to re-run t
 Actions job.
 
 More likely, the release was partially successful: eg, the NodeJS package was uploaded, but
-uploading the Java package failed. This is not a problem --- release on GitHub will remain a daft in
-this case. To re-try release, increment the version number of the latest changelog entry alongside
+uploading the Java package failed. This is not a problem --- the replica release on GitHub will remain a draft in
+this case. To retry the release, increment the version number of the latest changelog entry alongside
 any changes to fix the release process, and push the new commit to the release branch. The _old_
 version number will be irrevocably burned. There will be an intentional gap in the changelog
 sequence. When a release with the new version number is fully released, delete the draft release on
