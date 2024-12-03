@@ -135,10 +135,10 @@ function clickSelectedResult() {
 }
 
 document.addEventListener("keydown", event => {
+    if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
     if (event.key === "/" && searchInput !== document.activeElement) {
         searchInput.focus();
         event.preventDefault();
-        return false;
     }
 })
 
@@ -150,6 +150,7 @@ searchInput.addEventListener("blur", () => {
 });
 searchInput.addEventListener("input", onSearchInput);
 searchInput.addEventListener("keydown", event => {
+    if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
     if (event.key === "ArrowDown") {
         selectNextResult();
         event.preventDefault();
