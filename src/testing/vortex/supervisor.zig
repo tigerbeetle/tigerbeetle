@@ -76,12 +76,16 @@ const replica_addresses_for_replicas = blk: {
 
 const replica_addresses_for_clients = comma_separate_ports(&replica_ports_proxied);
 
+// For the Chrome trace file, we need to assign process IDs to all logical
+// processes in the Vortex test. The replicas get their replica indices, and
+// the other ones are assigned manually here.
 const vortex_process_ids = .{
     .supervisor = constants.replica_count,
     .workload = constants.replica_count + 1,
     .network = constants.replica_count + 2,
 };
 comptime {
+    // Check that the assigned process IDs are sequential and start at the right number.
     for (
         std.meta.fields(@TypeOf(vortex_process_ids)),
         constants.replica_count..,
@@ -122,7 +126,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     defer trace.deinit();
 
     inline for (std.meta.fields(@TypeOf(vortex_process_ids))) |field| {
-        try trace.process_name(@field(vortex_process_ids, field.name), field.name);
+        try trace.assign_process_name(@field(vortex_process_ids, field.name), field.name);
     }
 
     log.info(
@@ -187,7 +191,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         replicas[replica_index] = replica;
         replicas_initialized += 1;
 
-        try trace.process_name(
+        try trace.assign_process_name(
             replica_index,
             std.fmt.comptimePrint("replica {d}", .{replica_index}),
         );
@@ -228,6 +232,9 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
 
     var sleep_deadline: u64 = 0;
+    // This represents the start timestamp of a period where we have an acceptable number of process
+    // faults, such that we require liveness (that requests are finished within a certain time
+    // period). If null, it means we have too many faults, and thus no such requirement.
     var acceptable_faults_start_ns: ?u64 = null;
 
     const workload_result = while (std.time.nanoTimestamp() < test_deadline) {
@@ -284,11 +291,13 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             }
         }
 
+        // Check if `acceptable_faults_start_ns` should change state. If so, we reset the event
+        // counter.
         // NOTE: Network faults are currently global, so we relax the requirement in such cases.
         if (faulty_replica_count <= constants.liveness_faulty_replicas_max and
             network.faults.is_healed())
         {
-            // We an acceptable number of faults, so we require liveness (after some time).
+            // We have an acceptable number of faults, so we require liveness (after some time).
             if (acceptable_faults_start_ns == null) {
                 acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
                 workload.event_count_total = 0;
@@ -340,9 +349,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
                 .network_lose = if (network.faults.lose == null) 3 else 0,
                 .network_corrupt = if (network.faults.corrupt == null) 3 else 0,
                 .network_heal = if (!network.faults.is_healed()) 10 else 0,
-                .quiesce = if (terminated_replicas.len > 0 or
-                    stopped_replicas.len > 0 or
-                    !network.faults.is_healed()) 1 else 0,
+                .quiesce = if (faulty_replica_count > 0 or !network.faults.is_healed()) 1 else 0,
             }).?) {
                 .sleep => {
                     const duration = random.uintLessThan(u64, 10 * std.time.ns_per_s);
@@ -492,7 +499,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             }
         }
 
-        // CHeck for terminated replicas. Any other termination reason
+        // Check for terminated replicas. Any other termination reason
         // than SIGKILL is considered unexpected and fails the test.
         for (replicas, 0..) |replica, index| {
             if (replica.state() == .terminated) {
@@ -871,7 +878,7 @@ const TraceWriter = union(enum) {
         }
     }
 
-    fn process_name(writer: *TraceWriter, process_id: u8, name: []const u8) !void {
+    fn assign_process_name(writer: *TraceWriter, process_id: u8, name: []const u8) !void {
         switch (writer.*) {
             .chrome_tracing => |*file_writer| {
                 try file_writer.stream.beginObject();

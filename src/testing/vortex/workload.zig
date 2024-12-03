@@ -516,6 +516,7 @@ pub fn receive(
     return results[0..results_count];
 }
 
+/// A message written to stdout by the workload, communicating the progress it makes.
 pub const Stats = extern struct {
     event_count: u64,
     timestamp_start_micros: u64,
