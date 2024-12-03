@@ -80,11 +80,12 @@ func NewClient(
 	defer C.free(unsafe.Pointer(c_addresses))
 
 	var tb_client C.tb_client_t
+	var cluster_id = C.tb_uint128_t(clusterID)
 
 	// Create the tb_client.
 	status := C.tb_client_init(
 		&tb_client,
-		C.tb_uint128_t(clusterID),
+		(*C.uint8_t)(unsafe.Pointer(&cluster_id)),
 		c_addresses,
 		C.uint32_t(len(addresses_raw)),
 		C.uintptr_t(0), // on_completion_ctx

@@ -18,7 +18,7 @@ internal sealed class NativeClient : IDisposable
 
     private unsafe delegate InitializationStatus InitFunction(
                 IntPtr* out_client,
-                UInt128Extensions.UnsafeU128 cluster_id,
+                UInt128Extensions.UnsafeU128* cluster_id,
                 byte* address_ptr,
                 uint address_len,
                 IntPtr on_completion_ctx,
@@ -64,7 +64,7 @@ internal sealed class NativeClient : IDisposable
 
                 var status = initFunction(
                     &handle,
-                    clusterID,
+                    &clusterID,
                     addressPtr,
                     (uint)addresses_byte.Length - 1,
                     IntPtr.Zero,

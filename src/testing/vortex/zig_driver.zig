@@ -35,7 +35,7 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
     var tb_client: c.tb_client_t = undefined;
     const result = c.tb_client_init(
         &tb_client,
-        cluster_id,
+        std.mem.asBytes(&cluster_id),
         args.positional.addresses.ptr,
         @intCast(args.positional.addresses.len),
         0,

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import bindings
-from .lib import tb_assert
+from .lib import tb_assert, c_uint128
 
 logger = logging.getLogger("tigerbeetle")
 
@@ -93,7 +93,9 @@ class Client:
 
         init_status = bindings.tb_client_init(
             ctypes.byref(self._client),
-            cluster_id,
+            ctypes.cast(
+                ctypes.byref(c_uint128.from_param(cluster_id)), ctypes.POINTER(ctypes.c_uint8 * 16)
+            ),
             replica_addresses.encode("ascii"),
             len(replica_addresses),
             self._client_key,
