@@ -125,13 +125,13 @@ test "c_client echo" {
     // We ensure that the retry mechanism is being tested
     // by allowing more simultaneous packets than "client_request_queue_max".
     var tb_client: c.tb_client_t = undefined;
-    const cluster_id = 0;
+    const cluster_id: u128 = 0;
     const address = "3000";
     const concurrency_max: u32 = constants.client_request_queue_max * 2;
     const tb_context: usize = 42;
     const result = c.tb_client_init_echo(
         &tb_client,
-        cluster_id,
+        std.mem.asBytes(&cluster_id),
         address,
         @intCast(address.len),
         tb_context,
@@ -208,11 +208,11 @@ test "c_client tb_status" {
             expected_status: c_uint,
         ) !void {
             var tb_client: c.tb_client_t = undefined;
-            const cluster_id = 0;
+            const cluster_id: u128 = 0;
             const tb_context: usize = 0;
             const result = c.tb_client_init_echo(
                 &tb_client,
-                cluster_id,
+                std.mem.asBytes(&cluster_id),
                 addresses.ptr,
                 @intCast(addresses.len),
                 tb_context,
@@ -250,12 +250,12 @@ test "c_client tb_packet_status" {
     const RequestContext = RequestContextType(constants.message_body_size_max);
 
     var tb_client: c.tb_client_t = undefined;
-    const cluster_id = 0;
+    const cluster_id: u128 = 0;
     const address = "3000";
     const tb_context: usize = 42;
     const result = c.tb_client_init_echo(
         &tb_client,
-        cluster_id,
+        std.mem.asBytes(&cluster_id),
         address,
         @intCast(address.len),
         tb_context,

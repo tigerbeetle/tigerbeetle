@@ -615,14 +615,16 @@ OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, Client, ctypes.POINTER(CP
 # completes submitted packets by invoking the callback with the given context.
 tb_client_init = tbclient.tb_client_init
 tb_client_init.restype = Status
-tb_client_init.argtypes = [ctypes.POINTER(Client), c_uint128, ctypes.c_char_p,
-                           ctypes.c_uint32, ctypes.c_void_p, OnCompletion]
+tb_client_init.argtypes = [ctypes.POINTER(Client), ctypes.POINTER(ctypes.c_uint8 * 16),
+                           ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
+                           OnCompletion]
 
 # Initialize a new TigerBeetle client which echos back any data submitted.
 tb_client_init_echo = tbclient.tb_client_init_echo
 tb_client_init_echo.restype = Status
-tb_client_init.argtypes = [ctypes.POINTER(Client), c_uint128, ctypes.c_char_p,
-                           ctypes.c_uint32, ctypes.c_void_p, OnCompletion]
+tb_client_init_echo.argtypes = [ctypes.POINTER(Client), ctypes.POINTER(ctypes.c_uint8 * 16),
+                                ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
+                                OnCompletion]
 
 # Closes the client, causing any previously submitted packets to be completed with
 # `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.

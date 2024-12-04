@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx.zig");
 const builtin = @import("builtin");
 
 // TODO: Move this back to src/clients/c when there's a better solution for main_pkg_path=src/
@@ -28,13 +29,25 @@ comptime {
 
 fn init(
     out_client: *tb.tb_client_t,
-    cluster_id: u128,
+    cluster_id_ptr: *const [16]u8,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
     on_completion_ctx: usize,
     on_completion_fn: tb.tb_completion_t,
 ) callconv(.C) tb.tb_status_t {
     const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
+
+    // Passing u128 by value is prone to ABI issues. Pass as a [16]u8, and explicitly copy into
+    // memory we know will be aligned correctly. Don't just use bytesToValue here, as that keeps
+    // pointer alignment, and will result in a potentially unaligned access of a
+    // `*align(1) const u128`.
+    const cluster_id: u128 = blk: {
+        var cluster_id: u128 = undefined;
+        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&cluster_id), cluster_id_ptr);
+
+        break :blk cluster_id;
+    };
+
     const client = tb.init(
         std.heap.c_allocator,
         cluster_id,
@@ -49,13 +62,22 @@ fn init(
 
 fn init_echo(
     out_client: *tb.tb_client_t,
-    cluster_id: u128,
+    cluster_id_ptr: *const [16]u8,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
     on_completion_ctx: usize,
     on_completion_fn: tb.tb_completion_t,
 ) callconv(.C) tb.tb_status_t {
     const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
+
+    // See explanation in init().
+    const cluster_id: u128 = blk: {
+        var cluster_id: u128 = undefined;
+        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&cluster_id), cluster_id_ptr);
+
+        break :blk cluster_id;
+    };
+
     const client = tb.init_echo(
         std.heap.c_allocator,
         cluster_id,

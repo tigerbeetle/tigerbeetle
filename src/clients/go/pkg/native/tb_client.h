@@ -277,7 +277,7 @@ typedef enum TB_STATUS {
 // completes submitted packets by invoking the callback with the given context.
 TB_STATUS tb_client_init(
     tb_client_t* out_client,
-    tb_uint128_t cluster_id,
+    const uint8_t cluster_id[16],
     const char* address_ptr,
     uint32_t address_len,
     uintptr_t on_completion_ctx,
@@ -287,7 +287,7 @@ TB_STATUS tb_client_init(
 // Initialize a new TigerBeetle client which echos back any data submitted.
 TB_STATUS tb_client_init_echo(
     tb_client_t* out_client,
-    tb_uint128_t cluster_id,
+    const uint8_t cluster_id[16],
     const char* address_ptr,
     uint32_t address_len,
     uintptr_t on_completion_ctx,
