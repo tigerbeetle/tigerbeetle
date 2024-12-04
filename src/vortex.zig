@@ -7,6 +7,7 @@
 /// * _workload_: a separate process that, given a driver, runs commands and queries against the
 /// cluster, verifying its correctness.
 const std = @import("std");
+const stdx = @import("./stdx.zig");
 const builtin = @import("builtin");
 const flags = @import("flags.zig");
 
@@ -17,7 +18,11 @@ const Workload = @import("testing/vortex/workload.zig");
 const assert = std.debug.assert;
 
 const log = std.log.scoped(.vortex);
-pub const log_level: std.log.Level = .info;
+
+pub const std_options = .{
+    .log_level = .info,
+    .logFn = stdx.log_with_timestamp,
+};
 
 pub const CLIArgs = union(enum) {
     supervisor: Supervisor.CLIArgs,
