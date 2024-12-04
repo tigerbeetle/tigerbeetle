@@ -52,7 +52,7 @@ function onSearchInput() {
     searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
 }
 
-function search(term, maxResults = 20) {
+function search(term, maxResults = 100) {
     if (term.length === 0) return [];
     const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(escapedTerm, 'gi');
