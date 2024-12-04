@@ -732,20 +732,26 @@ pub const Simulator = struct {
 
         if (missing_header_op == null and missing_prepare_op == null) return null;
 
-        const missing_op = if (missing_header_op) |op| op else missing_prepare_op.?;
-        const missing_header = simulator.cluster.state_checker.header_with_op(missing_op);
+        for ([_]?u64{
+            missing_header_op,
+            missing_prepare_op,
+        }) |missing_op_maybe| {
+            const missing_op = missing_op_maybe orelse continue;
+            const missing_header = simulator.cluster.state_checker.header_with_op(missing_op);
 
-        for (simulator.cluster.replicas) |replica| {
-            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
-                if (replica.journal.has_clean(&missing_header)) {
-                    // Prepare *was* found on an active core replica, so the header isn't
-                    // actually missing.
-                    return null;
+            for (simulator.cluster.replicas) |replica| {
+                if (simulator.core.isSet(replica.replica) and !replica.standby()) {
+                    if (replica.journal.has_clean(&missing_header)) {
+                        // Prepare *was* found on an active core replica, so the header isn't
+                        // actually missing.
+                        break;
+                    }
                 }
+            } else {
+                return missing_header;
             }
         }
-
-        return missing_header;
+        return null;
     }
 
     /// Check whether the cluster is stuck because the entire core is missing the same block[s].
