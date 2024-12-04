@@ -81,31 +81,34 @@ const Fuzzer = enum {
     vsr_superblock_quorums,
     vsr_superblock,
 
-    fn fill_args_build(fuzzer: Fuzzer, accumulator: *std.ArrayList([]const u8)) !void {
-        switch (fuzzer) {
+    fn args_build(comptime fuzzer: Fuzzer) []const []const u8 {
+        comptime switch (fuzzer) {
             .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
+                var result: []const []const u8 = &.{"vopr:build"};
                 if (f == .vopr_testing or f == .vopr_testing_lite) {
-                    try accumulator.append("-Dvopr-state-machine=testing");
+                    result = result ++ .{"-Dvopr-state-machine=testing"};
                 }
-                try accumulator.appendSlice(&.{"vopr:build"});
+                return result;
             },
-            else => try accumulator.appendSlice(&.{"fuzz:build"}),
-        }
+            else => return &.{"fuzz:build"},
+        };
     }
 
-    fn fill_args_run(fuzzer: Fuzzer, accumulator: *std.ArrayList([]const u8)) !void {
-        switch (fuzzer) {
+    fn args_run(comptime fuzzer: Fuzzer) []const []const u8 {
+        comptime switch (fuzzer) {
             .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
+                var result: []const []const u8 = &.{"vopr"};
                 if (f == .vopr_testing or f == .vopr_testing_lite) {
-                    try accumulator.append("-Dvopr-state-machine=testing");
+                    result = result ++ .{"-Dvopr-state-machine=testing"};
                 }
-                try accumulator.appendSlice(&.{ "vopr", "--" });
+                result = result ++ .{"--"};
                 if (f == .vopr_lite or f == .vopr_testing_lite) {
-                    try accumulator.append("--lite");
+                    result = result ++ .{"--lite"};
                 }
+                return result;
             },
-            else => |f| try accumulator.appendSlice(&.{ "fuzz", "--", @tagName(f) }),
-        }
+            else => |f| return &.{ "fuzz", "--", @tagName(f) },
+        };
     }
 };
 
@@ -216,7 +219,9 @@ fn run_fuzzers(
                         // recorded timings.
                         args.clearRetainingCapacity();
                         try args.appendSlice(&.{ "build", "-Drelease" });
-                        try fuzzer.fill_args_build(&args);
+                        try args.appendSlice(switch (fuzzer) {
+                            inline else => |f| comptime f.args_build(),
+                        });
                         shell.exec_zig("{args}", .{ .args = args.items }) catch {
                             // Ignore the error, it'll get recorded by the run anyway.
                         };
@@ -227,7 +232,9 @@ fn run_fuzzers(
 
                     args.clearRetainingCapacity();
                     try args.appendSlice(&.{ "build", "-Drelease" });
-                    try fuzzer.fill_args_run(&args);
+                    try args.appendSlice(switch (fuzzer) {
+                        inline else => |f| comptime f.args_run(),
+                    });
                     try args.append(try shell.fmt("{d}", .{seed_record.seed}));
 
                     var command = std.ArrayList(u8).init(shell.arena.allocator());
