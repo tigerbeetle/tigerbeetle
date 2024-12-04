@@ -163,14 +163,15 @@ searchInput.addEventListener("keydown", event => {
     event.preventDefault();
   } else if (event.key === "Escape") {
     searchInput.blur();
+    searchInput.value = "";
+    onSearchInput();
     event.preventDefault();
   }
 });
 searchClearButton.addEventListener("click", () => {
   searchInput.value = "";
   searchResults.replaceChildren();
-  searchClearButton.style.display = "none";
-  if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
+  searchClearButton.style.display = "none";  if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
 });
 
 if (location.search) {
