@@ -82,32 +82,20 @@ const Fuzzer = enum {
     vsr_superblock,
 
     fn args_build(comptime fuzzer: Fuzzer) []const []const u8 {
-        comptime switch (fuzzer) {
-            .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
-                var result: []const []const u8 = &.{"vopr:build"};
-                if (f == .vopr_testing or f == .vopr_testing_lite) {
-                    result = result ++ .{"-Dvopr-state-machine=testing"};
-                }
-                return result;
-            },
-            else => return &.{"fuzz:build"},
+        return comptime switch (fuzzer) {
+            .vopr, .vopr_lite => &.{"vopr:build"},
+            .vopr_testing, .vopr_testing_lite => &.{ "vopr:build", "-Dvopr-state-machine=testing" },
+            else => &.{"fuzz:build"},
         };
     }
 
     fn args_run(comptime fuzzer: Fuzzer) []const []const u8 {
-        comptime switch (fuzzer) {
-            .vopr, .vopr_testing, .vopr_lite, .vopr_testing_lite => |f| {
-                var result: []const []const u8 = &.{"vopr"};
-                if (f == .vopr_testing or f == .vopr_testing_lite) {
-                    result = result ++ .{"-Dvopr-state-machine=testing"};
-                }
-                result = result ++ .{"--"};
-                if (f == .vopr_lite or f == .vopr_testing_lite) {
-                    result = result ++ .{"--lite"};
-                }
-                return result;
-            },
-            else => |f| return &.{ "fuzz", "--", @tagName(f) },
+        return comptime switch (fuzzer) {
+            .vopr => &.{ "vopr", "--" },
+            .vopr_lite => &.{ "vopr", "--", "--lite" },
+            .vopr_testing => &.{ "vopr", "-Dvopr-state-machine=testing", "--" },
+            .vopr_testing_lite => &.{ "vopr", "-Dvopr-state-machine=testing", "--", "--lite" },
+            else => |f| &.{ "fuzz", "--", @tagName(f) },
         };
     }
 };
