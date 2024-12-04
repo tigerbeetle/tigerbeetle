@@ -189,7 +189,7 @@ nav.top {
   }
 }
 
-.main-wrapper {
+.content-wrapper {
   flex: 1;
   overflow: hidden;
   display: grid;
@@ -238,8 +238,7 @@ nav.top {
 }
 
 main {
-  grid-column: 1;
-  grid-row: 1;
+  flex: 1;
   display: flex;
   overflow: hidden;
 }
@@ -361,6 +360,8 @@ nav.side {
 }
 
 article {
+  grid-column: 1;
+  grid-row: 1;
   flex: 1;
   height: 100%;
   overflow-y: auto;
