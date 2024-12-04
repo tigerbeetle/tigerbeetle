@@ -364,7 +364,6 @@ article {
   flex: 1;
   height: 100%;
   overflow-y: auto;
-  scroll-behavior: smooth;
   display: flex;
   flex-direction: column;
   align-items: center;
