@@ -84,6 +84,8 @@ function search(term, maxResults = 100) {
 }
 
 function makeContext(text, i, length, windowSize = 40) {
+    const highlight = text.slice(i, i + length);
+
     let contextLeft = "";
     let i0 = Math.max(0, i - windowSize / 2);
     if (i0 > 0) contextLeft = "...";
@@ -96,8 +98,7 @@ function makeContext(text, i, length, windowSize = 40) {
     while (i1 < text.length && text[i1] !== ' ') i1++;
     contextRight = text.slice(i + length, i1).trimRight() + contextRight;
 
-    const highlight = "<strong>" + text.slice(i, i + length) + "</strong>";
-    return contextLeft + highlight + contextRight;
+    return `${escapeHtml(contextLeft)}<strong>${escapeHtml(highlight)}</strong>${escapeHtml(contextRight)}`;
 }
 
 function selectNextResult() {
@@ -216,4 +217,8 @@ function traverseAndHighlight(node, regex) {
     } else if (node.nodeType === Node.ELEMENT_NODE) {
         node.childNodes.forEach(child => traverseAndHighlight(child, regex));
     }
+}
+
+function escapeHtml(unsafe) {
+    return unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 }
