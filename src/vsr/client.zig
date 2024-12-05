@@ -20,7 +20,6 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
         const Client = @This();
 
         pub const StateMachine = StateMachine_;
-        pub const DemuxerType = StateMachine.DemuxerType;
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
@@ -43,6 +42,9 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                 register: RegisterCallback,
             },
         };
+
+        pub const RequestType = StateMachine.EventType;
+        pub const ReplyType = StateMachine.ResultType;
 
         allocator: mem.Allocator,
 
@@ -302,10 +304,17 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .command = .request,
                 .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @intCast(@sizeOf(Header) + events.len),
+                .size = @sizeOf(Header),
             };
 
-            stdx.copy_disjoint(.exact, u8, message.body_used(), events);
+            // Write the events using the vsr Batch format to be consistent with StateMachine.
+            var writer = vsr.Batch.Writer.init(event_size, message.buffer[@sizeOf(Header)..]);
+            stdx.copy_disjoint(.exact, u8, writer.writable(), events);
+            writer.advance(@divExact(events.len, event_size));
+
+            message.header.size += @as(u32, @intCast(writer.finish().len));
+            assert(message.header.size <= constants.message_size_max);
+
             self.raw_request(callback, user_data, message);
         }
 
@@ -325,7 +334,6 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             assert(message.header.command == .request);
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= constants.message_size_max);
-            assert(message.header.size <= @sizeOf(Header) + self.batch_size_limit.?);
             assert(message.header.operation.valid(StateMachine));
             assert(message.header.view == 0);
             assert(message.header.parent == 0);

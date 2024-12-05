@@ -1691,3 +1691,159 @@ pub const Snapshot = struct {
         return op + 1;
     }
 };
+
+pub const Batch = struct {
+    /// Returns true if the caller should use the vsr Batching protocol for message bodies.
+    pub fn required(client_release: Release) bool {
+        const unsupoprted_release_min_inclusive =
+            Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
+        const unsupported_release_max_exclusive =
+            Release.from(.{ .major = 0, .minor = 16, .patch = 16 });
+
+        return client_release.value < unsupoprted_release_min_inclusive.value or
+            client_release.value >= unsupported_release_max_exclusive.value;
+    }
+
+    // The overhead of the Batching protocol format for a single message body.
+    pub const overhead = 2 * @sizeOf(u16); // +1 for the item_counts=[1], +1 for item_counts_count.
+
+    // Maximum usable bytes for data in a message body with a single batch.
+    pub const body_size_max = constants.message_body_size_max - overhead;
+
+    /// Returns true if the number of items (item_count) and number of batches (batch_count) would
+    /// overflow the body limit of a batched message.
+    pub fn overflows(item_size: usize, item_count: usize, batch_count: usize) bool {
+        const body_max = (item_count * item_size) + ((batch_count + 1) * @sizeOf(u16));
+        return body_max > constants.message_body_size_max;
+    }
+
+    pub const Writer = struct {
+        item_size: u16,
+        item_buffer: std.io.FixedBufferStream([]u8),
+        item_counts: stdx.BoundedArrayType(u16, 8191),
+
+        pub fn init(item_size: usize, buffer: []u8) Writer {
+            stdx.maybe(item_size == 0); // StateMachine.Operation.pulse
+            return .{
+                .item_size = @intCast(item_size),
+                .item_buffer = std.io.fixedBufferStream(buffer),
+                .item_counts = .{},
+            };
+        }
+
+        pub fn writable(self: *Writer) []u8 {
+            if (self.item_size == 0) {
+                assert(self.item_buffer.pos == 0);
+                assert(self.item_counts.count() == 0);
+                return self.item_buffer.buffer[0..0]; // zero-sized.
+            }
+
+            var unused = self.item_buffer.buffer[self.item_buffer.pos..];
+            // Subtract item_counts (+1 for item_counts_count) (+1 for this batch's count).
+            unused.len -|= (self.item_counts.count() + 2) * @sizeOf(u16);
+            // Align down towards the item size.
+            unused.len = std.mem.alignBackward(usize, unused.len, self.item_size);
+            return unused;
+        }
+
+        pub fn advance(self: *Writer, item_count: usize) void {
+            const bytes_written = item_count * self.item_size;
+            assert(bytes_written <= self.writable().len);
+
+            self.item_buffer.pos += bytes_written;
+            self.item_counts.append_assume_capacity(@intCast(item_count));
+        }
+
+        pub fn finish(self: *Writer) []u8 {
+            const item_counts_count: u16 = @intCast(self.item_counts.count());
+            if (self.item_size == 0) {
+                assert(item_counts_count == 0);
+                assert(self.item_buffer.getWritten().len == 0);
+                return &.{};
+            }
+
+            // Append the number of item counts to the count array for decoding in Reader.
+            self.item_counts.append_assume_capacity(item_counts_count);
+
+            // Append the count array as bytes to the buffer.
+            assert(self.item_buffer.pos % @alignOf(u16) == 0);
+            self.item_buffer.writer().writeAll(
+                std.mem.sliceAsBytes(self.item_counts.slice()),
+            ) catch unreachable;
+
+            return self.item_buffer.getWritten();
+        }
+    };
+
+    pub const Reader = struct {
+        item_size: u16,
+        item_buffer: []const u8,
+        item_counts: []const u16,
+
+        pub const Error = error{
+            InvalidBufferSize,
+            InvalidBufferTrailer,
+        };
+
+        pub fn init(item_size: usize, buffer: []const u8) Error!Reader {
+            if (item_size == 0) {
+                if (buffer.len > 0) return error.InvalidBufferSize;
+                return .{
+                    .item_size = 0,
+                    .item_buffer = buffer, // zero-sized.
+                    .item_counts = @alignCast(std.mem.bytesAsSlice(u16, buffer)), // zero-sized.
+                };
+            }
+
+            // Extract the number of item counts from the end of the buffer.
+            if (buffer.len <= @sizeOf(u16)) return error.InvalidBufferTrailer;
+            const item_count_counts: u16 = @bitCast(buffer[buffer.len - @sizeOf(u16) ..][0..2].*);
+            stdx.maybe(item_count_counts == 0);
+
+            // Extract the item counts themselves.
+            const item_count_bytes = @as(usize, item_count_counts) * @sizeOf(u16);
+            if (item_count_bytes >= buffer.len) return error.InvalidBufferTrailer;
+            const item_counts: []const u16 = @alignCast(std.mem.bytesAsSlice(
+                u16,
+                buffer[buffer.len - @sizeOf(u16) - item_count_bytes .. buffer.len - @sizeOf(u16)],
+            ));
+
+            // Count the total number of items using the item counts.
+            var item_count_total: usize = 0;
+            for (item_counts) |c| item_count_total += c;
+
+            const item_buffer_bytes = item_count_total * item_size;
+            if (item_buffer_bytes + item_count_bytes + @sizeOf(u16) != buffer.len) {
+                return error.InvalidBufferSize;
+            }
+
+            return .{
+                .item_size = @intCast(item_size),
+                .item_buffer = buffer[0..item_buffer_bytes],
+                .item_counts = item_counts,
+            };
+        }
+
+        pub fn next(self: *Reader) ?[]const u8 {
+            if (self.item_counts.len == 0) {
+                assert(self.item_buffer.len == 0);
+                return null;
+            }
+
+            assert(self.item_size > 0);
+            assert(self.item_buffer.len % self.item_size == 0);
+
+            const item_count = self.item_counts[0];
+            self.item_counts = self.item_counts[1..];
+            stdx.maybe(item_count == 0);
+
+            const item_bytes = @as(usize, self.item_size) * item_count;
+            assert(self.item_buffer.len >= item_bytes);
+            stdx.maybe(item_bytes == 0);
+
+            const items = self.item_buffer[0..item_bytes];
+            self.item_buffer = self.item_buffer[item_bytes..];
+            return items;
+        }
+    };
+};

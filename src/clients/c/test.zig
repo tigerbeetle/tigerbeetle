@@ -8,6 +8,7 @@ const c = @cImport({
     @cInclude("tb_client.h");
 });
 
+const vsr = @import("../../vsr.zig");
 const stdx = @import("../../stdx.zig");
 const constants = @import("../../constants.zig");
 const Packet = @import("tb_client/packet.zig").Packet;
@@ -119,7 +120,7 @@ test "c_client echo" {
     const RequestContext = RequestContextType(constants.message_body_size_max);
     const create_accounts_operation: u8 = c.TB_OPERATION_CREATE_ACCOUNTS;
     const event_size = @sizeOf(c.tb_account_t);
-    const event_request_max = @divFloor(constants.message_body_size_max, event_size);
+    const event_request_max: u32 = @divFloor(vsr.Batch.body_size_max, event_size);
 
     // Initializing an echo client for testing purposes.
     // We ensure that the retry mechanism is being tested

@@ -67,6 +67,12 @@ public class IntegrationTest {
         server.close();
     }
 
+    @Test
+    public void testConstructorSuccess() throws Throwable {
+        final var stubClient = new Client(clusterId, new String[] {server.address});
+        stubClient.close();
+    }
+
     @Test(expected = NullPointerException.class)
     public void testConstructorNullReplicaAddresses() throws Throwable {
         try (final var client = new Client(clusterId, null)) {

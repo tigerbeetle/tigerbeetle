@@ -1879,7 +1879,7 @@ const TestContext = struct {
                 .faulty_grid = false,
             },
             .state_machine = .{
-                .batch_size_limit = constants.message_body_size_max,
+                .batch_size_limit = vsr.Batch.body_size_max,
                 .lsm_forest_node_count = 4096,
             },
             .on_client_reply = TestContext.on_client_reply,

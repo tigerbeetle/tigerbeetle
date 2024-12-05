@@ -1211,7 +1211,7 @@ internal unsafe struct TBPacket
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     private unsafe struct ReservedData
     {
-        public const int SIZE = 7;
+        public const int SIZE = 6;
 
         private fixed byte raw[SIZE];
 
@@ -1254,9 +1254,11 @@ internal unsafe struct TBPacket
 
     public TBPacket* batchTail;
 
-    public uint batchSize;
+    public ushort batchCountPackets;
 
-    public byte batchAllowed;
+    public ushort batchCountEvents;
+
+    public uint batchCountResults;
 
     private ReservedData reserved;
 

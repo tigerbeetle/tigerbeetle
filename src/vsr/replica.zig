@@ -21,6 +21,7 @@ const TestStorage = @import("../testing/storage.zig").Storage;
 const marks = @import("../testing/marks.zig");
 
 const vsr = @import("../vsr.zig");
+const Batch = vsr.Batch;
 const Header = vsr.Header;
 const Timeout = vsr.Timeout;
 const Command = vsr.Command;
@@ -1619,12 +1620,13 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (message.header.size > self.request_size_limit) {
+            const header_size = get_message_input(message).len + @sizeOf(Header);
+            if (header_size > self.request_size_limit) {
                 // The replica needs to be restarted with a higher batch size limit.
                 log.err("{}: on_prepare: ignoring (large prepare, op={} size={} size_limit={})", .{
                     self.replica,
                     message.header.op,
-                    message.header.size,
+                    header_size,
                     self.request_size_limit,
                 });
                 @panic("Cannot prepare; batch limit too low.");
@@ -1718,6 +1720,22 @@ pub fn ReplicaType(
             self.journal.set_header_as_dirty(message.header);
 
             self.append(message);
+        }
+
+        fn get_message_input(message: anytype) []align(16) const u8 {
+            if (Batch.required(message.header.release)) blk: {
+                if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
+                    const event_size: usize = switch (operation) {
+                        inline else => |op_comptime| @sizeOf(StateMachine.EventType(op_comptime)),
+                    };
+                    const reader = Batch.Reader.init(event_size, message.body_used()) catch {
+                        break :blk; // Fallback to returning body_used() on invalid Batch parsing.
+                    };
+                    return @alignCast(reader.item_buffer);
+                }
+            }
+
+            return message.body_used();
         }
 
         fn on_prepare_ok(self: *Replica, message: *Message.PrepareOk) void {
@@ -3986,14 +4004,15 @@ pub fn ReplicaType(
 
             const prepare = self.commit_prepare.?;
 
-            if (prepare.header.size > self.request_size_limit) {
+            const header_size = get_message_input(prepare).len + @sizeOf(Header);
+            if (header_size > self.request_size_limit) {
                 // Normally this would be caught during on_prepare(), but it is possible that we are
                 // replaying a message that we prepared before a restart, and the restart changed
                 // our batch_size_limit.
                 log.err("{}: commit_prefetch: op={} size={} size_limit={}", .{
                     self.replica,
                     prepare.header.op,
-                    prepare.header.size,
+                    header_size,
                     self.request_size_limit,
                 });
                 @panic("Cannot commit prepare; batch limit too low.");
@@ -5225,11 +5244,12 @@ pub fn ReplicaType(
                 return true;
             }
 
-            if (message.header.size > self.request_size_limit) {
+            const header_size = get_message_input(message).len + @sizeOf(Header);
+            if (header_size > self.request_size_limit) {
                 log.warn("{}: on_request: ignoring oversized request (client={} size={}>{})", .{
                     self.replica,
                     message.header.client,
-                    message.header.size,
+                    header_size,
                     self.request_size_limit,
                 });
                 self.send_eviction_message_to_client(
@@ -5256,17 +5276,17 @@ pub fn ReplicaType(
                 return true;
             }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
-                if (!self.state_machine.input_valid(
+                if (self.state_machine.input_validate(
                     message.header.release,
                     operation,
                     message.body_used(),
-                )) {
+                ) == null) {
                     log.warn(
                         "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
                         .{
                             self.replica,
                             @tagName(operation),
-                            message.body_used().len,
+                            get_message_input(message).len,
                         },
                     );
                     self.send_eviction_message_to_client(

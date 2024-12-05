@@ -68,19 +68,33 @@ pub fn ContextType(
             assert(@sizeOf(UserData) == @sizeOf(u128));
         }
 
+        const BatchIterator = struct {
+            current: ?*Packet,
+            count: u16,
+
+            fn init(packet: *Packet) BatchIterator {
+                assert(packet.batch_count_packets > 0);
+                return .{
+                    .current = packet,
+                    .count = packet.batch_count_packets,
+                };
+            }
+
+            fn next(self: *BatchIterator) ?*Packet {
+                const packet = self.current orelse {
+                    assert(self.count == 0);
+                    return null;
+                };
+                self.current = packet.batch_next;
+                self.count -= 1;
+                return packet;
+            }
+        };
+
         fn operation_from_int(op: u8) ?StateMachine.Operation {
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
                     return operation;
-                }
-            }
-            return null;
-        }
-
-        fn operation_event_size(op: u8) ?usize {
-            inline for (allowed_operations) |operation| {
-                if (op == @intFromEnum(operation)) {
-                    return @sizeOf(StateMachine.EventType(operation));
                 }
             }
             return null;
@@ -311,22 +325,24 @@ pub fn ContextType(
             };
 
             // Get the size of each request structure in the packet.data:
-            const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| blk: {
-                    break :blk @sizeOf(StateMachine.EventType(operation_comptime));
+            const event_size: usize, const result_size: usize = switch (operation) {
+                inline else => |operation_comptime| .{
+                    @sizeOf(Client.RequestType(operation_comptime)),
+                    @sizeOf(Client.ReplyType(operation_comptime)),
                 },
             };
 
-            // Make sure the packet.data size is correct:
-            const events: []const u8 = if (packet.data_size > 0) events: {
-                const data: [*]const u8 = @ptrCast(packet.data.?);
-                break :events data[0..packet.data_size];
-            } else empty: {
-                // It may be an empty array (null pointer)
-                // or a buffer with no elements (valid pointer and size == 0).
+            const events: []const u8 = if (packet.data_size == 0) blk: {
+                // It may be an empty array (null data ptr)
+                // or a buffer with no elements (valid data ptr but size == 0).
                 stdx.maybe(packet.data == null);
-                break :empty &[0]u8{};
+                break :blk &[0]u8{};
+            } else blk: {
+                const data_ptr: [*]const u8 = @ptrCast(packet.data.?);
+                break :blk data_ptr[0..packet.data_size];
             };
+
+            // Make sure the packet.data size is correct:
             if (events.len % event_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
@@ -335,12 +351,14 @@ pub fn ContextType(
             // results won't overflow a reply.
             const events_batch_max = switch (operation) {
                 .pulse => unreachable,
-                inline else => |operation_comptime| StateMachine.operation_batch_max(
+                inline else => |operation_comptime| StateMachine.operation_event_max(
                     operation_comptime,
                     self.batch_size_limit.?,
                 ),
             };
-            if (@divExact(events.len, event_size) > events_batch_max) {
+
+            const events_count = @divExact(events.len, event_size);
+            if (events_count > events_batch_max) {
                 return self.on_complete(packet, error.TooMuchData);
             } else {
                 assert(events.len <= self.batch_size_limit.?);
@@ -348,12 +366,14 @@ pub fn ContextType(
 
             packet.batch_next = null;
             packet.batch_tail = packet;
-            packet.batch_size = packet.data_size;
-            packet.batch_allowed = batch_logical_allowed(
-                operation,
-                packet.data,
-                packet.data_size,
-            );
+            packet.batch_count_packets = 1;
+            packet.batch_count_events = @intCast(events_count);
+            packet.batch_count_results = switch (operation) {
+                inline else => |operation_comptime| StateMachine.operation_result_max(
+                    operation_comptime,
+                    events,
+                ),
+            };
 
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
             if (self.shutdown.load(.acquire)) {
@@ -366,19 +386,30 @@ pub fn ContextType(
             }
 
             // If allowed, try to batch the packet with another already in self.pending.
-            if (packet.batch_allowed) {
+            if (StateMachine.batch_logical_allowed.get(operation)) {
                 var it = self.pending.peek();
                 while (it) |root| {
                     it = root.next;
 
                     // Check for pending packets of the same operation which can be batched.
                     if (root.operation != packet.operation) continue;
-                    if (!root.batch_allowed) continue;
 
-                    const merged_events = @divExact(root.batch_size + packet.data_size, event_size);
-                    if (merged_events > events_batch_max) continue;
+                    // Ensure the packet would fit in this batched message.
+                    const merged_count = root.batch_count_packets + 1;
+                    const merged_events = root.batch_count_events + packet.batch_count_events;
+                    const merged_results = root.batch_count_results + packet.batch_count_results;
+                    if (
+                        merged_events > events_batch_max or
+                        vsr.Batch.overflows(event_size, merged_events, merged_count) or
+                        vsr.Batch.overflows(result_size, merged_results, merged_count))
+                    {
+                        continue;
+                    }
 
-                    root.batch_size += packet.data_size;
+                    root.batch_count_packets = merged_count;
+                    root.batch_count_events = merged_events;
+                    root.batch_count_results = merged_results;
+
                     root.batch_tail.?.batch_next = packet;
                     root.batch_tail = packet;
                     return;
@@ -388,39 +419,6 @@ pub fn ContextType(
             // Couldn't batch with existing packet so push to pending directly.
             packet.next = null;
             self.pending.push(packet);
-        }
-
-        fn batch_logical_allowed(
-            operation: StateMachine.Operation,
-            data: ?*const anyopaque,
-            data_size: u32,
-        ) bool {
-            if (!StateMachine.batch_logical_allowed.get(operation)) return false;
-
-            // TODO(king): Remove this code once protocol batching is implemented.
-            //
-            // If the application submits an unclosed linked chain, it can inadvertently make
-            // the elements of the next batch part of it.
-            // To work around this issue, we don't allow unclosed linked chains to be batched.
-            if (data_size > 0) {
-                assert(data != null);
-                const linked_chain_open: bool = switch (operation) {
-                    inline .create_accounts,
-                    .create_transfers,
-                    => |tag| linked_chain_open: {
-                        const Event = StateMachine.EventType(tag);
-                        // Packet data isn't necessarily aligned.
-                        const events: [*]align(@alignOf(u8)) const Event = @ptrCast(data.?);
-                        const events_count: usize = @divExact(data_size, @sizeOf(Event));
-                        break :linked_chain_open events[events_count - 1].flags.linked;
-                    },
-                    else => false,
-                };
-
-                if (linked_chain_open) return false;
-            }
-
-            return true;
         }
 
         fn submit(self: *Context, packet: *Packet) void {
@@ -443,29 +441,35 @@ pub fn ContextType(
                 .cluster = self.client.cluster,
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @sizeOf(vsr.Header) + packet.batch_size,
+                .size = @sizeOf(Header),
             };
 
-            // Copy all batched packet event data into the message.
-            var offset: u32 = 0;
-            var it: ?*Packet = packet;
-            while (it) |batched| {
-                assert(batched.batch_next == null or batched.batch_allowed);
-                it = batched.batch_next;
+            const event_size: usize = switch (operation) {
+                inline else => |op_comptime| @sizeOf(Client.RequestType(op_comptime)),
+            };
 
-                const event_data: []const u8 = if (batched.data_size > 0)
-                    @as([*]const u8, @ptrCast(batched.data.?))[0..batched.data_size]
-                else empty: {
-                    // It may be an empty array (null pointer)
-                    // or a buffer with no elements (valid pointer and size == 0).
+            // Copy all batched packet event data into the message body buffer.
+            var writer = vsr.Batch.Writer.init(event_size, message.buffer[@sizeOf(Header)..]);
+            var it = BatchIterator.init(packet);
+            while (it.next()) |batched| {
+                const event_data: []const u8 = if (batched.data_size == 0) blk: {
+                    // It may be an empty array (null data ptr)
+                    // or a buffer with no elements (valid data ptr but size == 0).
                     stdx.maybe(batched.data == null);
-                    break :empty &[0]u8{};
+                    break :blk &[0]u8{};
+                } else blk: {
+                    const data_ptr: [*]const u8 = @ptrCast(batched.data.?);
+                    break :blk data_ptr[0..batched.data_size];
                 };
-                stdx.copy_disjoint(.inexact, u8, message.body_used()[offset..], event_data);
-                offset += @intCast(event_data.len);
+
+                const event_count = @divExact(event_data.len, event_size);
+                stdx.copy_disjoint(.inexact, u8, writer.writable(), event_data);
+                writer.advance(@intCast(event_count));
             }
 
-            assert(offset == packet.batch_size);
+            message.header.size += @as(u32, @intCast(writer.finish().len));
+            assert(message.header.size <= constants.message_size_max);
+
             self.client.raw_request(
                 Context.on_result,
                 @bitCast(UserData{
@@ -478,7 +482,7 @@ pub fn ContextType(
 
         fn on_result(
             raw_user_data: u128,
-            op: StateMachine.Operation,
+            operation: StateMachine.Operation,
             timestamp: u64,
             reply: []u8,
         ) void {
@@ -496,44 +500,27 @@ pub fn ContextType(
                 if (self.client.request_inflight != null) break;
             }
 
-            switch (op) {
-                inline else => |operation| {
-                    // on_result should never be called with an operation not green-lit by request()
-                    // This also guards from passing an unsupported operation into DemuxerType.
-                    if (comptime operation_event_size(@intFromEnum(operation)) == null) {
-                        unreachable;
-                    }
+            const result_size: usize = switch (operation) {
+                inline else => |op_comptime| @sizeOf(Client.ReplyType(op_comptime)),
+            };
 
-                    // Demuxer expects []u8 but VSR callback provides []const u8.
-                    // The bytes are known to come from a Message body that will be soon discarded
-                    // therefore it's safe to @constCast and potentially modify the data in-place.
-                    var demuxer = Client.DemuxerType(operation).init(@constCast(reply));
+            // TODO: convert these panics into errors returned as Packet.Status (InternalError?)
+            var reader = vsr.Batch.Reader.init(result_size, reply) catch |err| switch (err) {
+                error.InvalidBufferSize => @panic("vsr Batch response size invalid"),
+                error.InvalidBufferTrailer => @panic("vsr Batch response format invalid"),
+            };
 
-                    var it: ?*Packet = packet;
-                    var event_offset: u32 = 0;
-                    while (it) |batched| {
-                        assert(batched.batch_next == null or batched.batch_allowed);
-                        it = batched.batch_next;
-
-                        const event_count = @divExact(
-                            batched.data_size,
-                            @sizeOf(StateMachine.EventType(operation)),
-                        );
-                        const batched_reply = demuxer.decode(event_offset, event_count);
-                        event_offset += event_count;
-
-                        if (!StateMachine.batch_logical_allowed.get(operation)) {
-                            assert(batched_reply.len == reply.len);
-                        }
-
-                        assert(batched.operation == @intFromEnum(operation));
-                        self.on_complete(batched, .{
-                            .timestamp = timestamp,
-                            .reply = batched_reply,
-                        });
-                    }
-                },
+            var it = BatchIterator.init(packet);
+            while (it.next()) |batched| {
+                const results = reader.next() orelse @panic("vsr Batch response size mismatch");
+                self.on_complete(batched, .{
+                    .timestamp = timestamp,
+                    .reply = results,
+                });
             }
+
+            // No more results should be available after each batched packet is processed.
+            assert(reader.next() == null);
         }
 
         fn cancel_all(self: *Context) void {
@@ -562,10 +549,8 @@ pub fn ContextType(
 
         fn cancel(self: *Context, packet: *Packet) void {
             const result = if (self.evicted) error.ClientEvicted else error.ClientShutdown;
-            var it: ?*Packet = packet;
-            while (it) |batched| {
-                assert(batched.batch_next == null or batched.batch_allowed);
-                it = batched.batch_next;
+            var it = BatchIterator.init(packet);
+            while (it.next()) |batched| {
                 self.on_complete(batched, result);
             }
         }
@@ -621,9 +606,10 @@ pub fn ContextType(
                 .data = packet.data,
                 .batch_next = null,
                 .batch_tail = null,
-                .batch_size = 0,
-                .batch_allowed = false,
-                .reserved = [_]u8{0} ** 7,
+                .batch_count_packets = 1,
+                .batch_count_events = 0,
+                .batch_count_results = 0,
+                .reserved = [_]u8{0} ** 6,
             };
             const self = get_context(implementation);
 
@@ -639,46 +625,6 @@ pub fn ContextType(
             self.deinit() catch |err| {
                 std.debug.panic("deinit error: {}", .{err});
             };
-        }
-
-        test "client_batch_linked_chain" {
-            inline for ([_]StateMachine.Operation{
-                .create_accounts,
-                .create_transfers,
-            }) |operation| {
-                const Event = StateMachine.EventType(operation);
-                var data = [_]Event{std.mem.zeroInit(Event, .{})} ** 3;
-
-                // Broken linked chain cannot be batched.
-                for (&data) |*item| item.flags.linked = true;
-                try std.testing.expect(!batch_logical_allowed(
-                    operation,
-                    data[0..],
-                    data.len * @sizeOf(Event),
-                ));
-
-                // Valid linked chain.
-                data[data.len - 1].flags.linked = false;
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    data[0..],
-                    data.len * @sizeOf(Event),
-                ));
-
-                // Single element.
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    &data[data.len - 1],
-                    1 * @sizeOf(Event),
-                ));
-
-                // No elements.
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    null,
-                    0,
-                ));
-            }
         }
     };
 }

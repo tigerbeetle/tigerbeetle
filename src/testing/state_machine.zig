@@ -45,32 +45,6 @@ pub fn StateMachineType(
             return u8; // Must be non-zero-sized for sliceAsBytes().
         }
 
-        /// Empty demuxer to be compatible with vsr.Client batching.
-        pub fn DemuxerType(comptime operation: Operation) type {
-            return struct {
-                const Demuxer = @This();
-
-                reply: []ResultType(operation),
-                offset: u32 = 0,
-
-                pub fn init(reply: []u8) Demuxer {
-                    return .{
-                        .reply = @alignCast(std.mem.bytesAsSlice(
-                            ResultType(operation),
-                            reply,
-                        )),
-                    };
-                }
-
-                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
-                    assert(self.offset == event_offset);
-                    assert(event_offset + event_count <= self.reply.len);
-                    defer self.offset += event_count;
-                    return std.mem.sliceAsBytes(self.reply[self.offset..][0..event_count]);
-                }
-            };
-        }
-
         pub const Options = struct {
             batch_size_limit: u32,
             lsm_forest_node_count: u32,
@@ -184,17 +158,16 @@ pub fn StateMachineType(
             return false;
         }
 
-        pub fn input_valid(
+        pub fn input_validate(
             state_machine: *const StateMachine,
             client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
-        ) bool {
+        ) ?[]align(16) const u8 {
             _ = state_machine;
             _ = client_release;
             _ = operation;
-            _ = input;
-            return true;
+            return input;
         }
 
         pub fn prepare(

@@ -23,7 +23,7 @@ const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
 const batch_max: u32 = @divFloor(
-    constants.message_body_size_max,
+    vsr.Batch.body_size_max,
     @sizeOf(Thing),
 );
 
