@@ -462,6 +462,11 @@ const Proxy = struct {
     accept_fd: std.posix.socket_t,
     mapping: Mapping,
     connections: [constants.connections_count_max]Connection,
+
+    fn deinit(proxy: *Proxy) void {
+        proxy.io.close_socket(proxy.accept_fd);
+        proxy.* = undefined;
+    }
 };
 
 pub const Network = struct {
@@ -489,6 +494,11 @@ pub const Network = struct {
             .random = random,
             .proxies = proxies,
             .faults = std.mem.zeroes(Faults),
+        };
+
+        var proxies_initialized: usize = 0;
+        errdefer for (proxies[0..proxies_initialized]) |*proxy| {
+            proxy.deinit();
         };
 
         for (address_mappings, proxies, 0..) |mapping, *proxy, replica_index| {
@@ -533,6 +543,7 @@ pub const Network = struct {
             try std.posix.listen(listen_fd, constants.tcp_backlog);
 
             log.info("proxying {any} -> {any}", .{ mapping.origin, mapping.remote });
+            proxies_initialized += 1;
         }
 
         return network;
@@ -576,7 +587,7 @@ pub const Network = struct {
 
     pub fn destroy(network: *Network, allocator: std.mem.Allocator) void {
         for (network.proxies) |*proxy| {
-            network.io.close_socket(proxy.accept_fd);
+            proxy.deinit();
         }
         allocator.free(network.proxies);
         allocator.destroy(network);
