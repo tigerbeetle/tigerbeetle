@@ -160,6 +160,11 @@ document.addEventListener("keydown", event => {
   if (event.key === "/" && searchInput !== document.activeElement) {
     searchInput.focus();
     event.preventDefault();
+  } else if (event.key === "Escape") {
+    searchInput.blur();
+    searchInput.value = "";
+    onSearchInput();
+    event.preventDefault();
   }
 })
 
@@ -180,11 +185,6 @@ searchInput.addEventListener("keydown", event => {
     event.preventDefault();
   } else if (event.key === "Enter") {
     clickSelectedResult();
-    event.preventDefault();
-  } else if (event.key === "Escape") {
-    searchInput.blur();
-    searchInput.value = "";
-    onSearchInput();
     event.preventDefault();
   }
 });
