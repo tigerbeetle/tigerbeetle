@@ -120,11 +120,13 @@
       // Restore and save the state of the side navigation
       const navSideState = JSON.parse(localStorage.getItem("navSideState"));
       if (navSideState) {
+        if (navSideState.width) leftPane.style.width = navSideState.width;
         navSideState.expanded.forEach((e, i) => { if (e) menuHeads[i].classList.add("expanded"); });
         navSide.scrollTop = navSideState.scrollTop;
       }
       addEventListener("beforeunload", () => {
         const navSideState = {
+          width: leftPane.style.width,
           expanded: menuHeads.map(e => e.classList.contains("expanded")),
           scrollTop: navSide.scrollTop,
         };
