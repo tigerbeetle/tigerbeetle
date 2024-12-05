@@ -80,14 +80,16 @@
         navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
       }
 
-      const leftPane = document.querySelector('.left-pane');
-      const resizer = document.querySelector('.resizer');
-      resizer.addEventListener('mousedown', (e) => {
-        document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', () => {
-            document.body.style.userSelect = '';
-            document.removeEventListener('mousemove', handleMouseMove);
+      const leftPane = document.querySelector(".left-pane");
+      const resizer = document.querySelector(".resizer");
+      resizer.addEventListener("mousedown", (e) => {
+        document.body.style.cursor = "ew-resize";
+        document.body.style.userSelect = "none";
+        document.addEventListener("mousemove", handleMouseMove);
+        document.addEventListener("mouseup", () => {
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+          document.removeEventListener("mousemove", handleMouseMove);
         });
         function handleMouseMove(e) {
           leftPane.style.width = e.clientX + "px";
@@ -102,7 +104,7 @@
 
       // Expand side nav based on location
       let path = location.pathname;
-      if (path.endsWith('/')) path = path.slice(0, -1);
+      if (path.endsWith("/")) path = path.slice(0, -1);
       document.querySelectorAll("nav.side a").forEach(a => {
         if (a.href.endsWith(path)) {
           a.classList.add("target");
