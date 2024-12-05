@@ -50,9 +50,10 @@ const zig_version = std.SemanticVersion{
 
 comptime {
     if (builtin.zig_version.order(zig_version) != .eq) {
-        std.log.err("expected zig version: {}", .{zig_version});
-        std.log.err("found zig version:    {}", .{builtin.zig_version});
-        @panic("unsupported zig version");
+        @compileError(std.fmt.comptimePrint(
+            "unsupported zig version: expected {}, found {}",
+            .{ zig_version, builtin.zig_version },
+        ));
     }
 }
 
