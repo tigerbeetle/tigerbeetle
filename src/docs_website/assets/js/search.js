@@ -107,11 +107,13 @@ function selectNextResult() {
     selected.classList.remove("selected");
     if (selected.nextSibling) {
       selected.nextSibling.classList.add("selected");
+      scrollIntoViewIfNeeded(selected.nextSibling);
       return;
     }
   }
   if (searchResults.firstChild) {
     searchResults.firstChild.classList.add("selected");
+    scrollIntoViewIfNeeded(searchResults.firstChild);
   }
 }
 
@@ -121,11 +123,29 @@ function selectPreviousResult() {
     selected.classList.remove("selected");
     if (selected.previousSibling) {
       selected.previousSibling.classList.add("selected");
+      scrollIntoViewIfNeeded(selected.previousSibling);
       return;
     }
   }
   if (searchResults.lastChild) {
     searchResults.lastChild.classList.add("selected");
+    scrollIntoViewIfNeeded(searchResults.lastChild);
+  }
+}
+
+function scrollIntoViewIfNeeded(element) {
+  const elementRect = element.getBoundingClientRect();
+  const parentRect = element.parentNode.getBoundingClientRect();
+
+  const isOutOfView = (
+    elementRect.top < parentRect.top ||
+    elementRect.left < parentRect.left ||
+    elementRect.bottom > parentRect.bottom ||
+    elementRect.right > parentRect.right
+  );
+
+  if (isOutOfView) {
+    element.scrollIntoView({ block: 'center', inline: 'center' });
   }
 }
 
@@ -171,7 +191,8 @@ searchInput.addEventListener("keydown", event => {
 searchClearButton.addEventListener("click", () => {
   searchInput.value = "";
   searchResults.replaceChildren();
-  searchClearButton.style.display = "none";  if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
+  searchClearButton.style.display = "none";
+  if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
 });
 
 if (location.search) {
