@@ -214,39 +214,32 @@ nav.left-pane {
   grid-row: 1;
   z-index: 1;
   background-color: var(--gray-0);
-  padding: 8px;
-  overflow: auto;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 0 8px 0 16px;
 
   &:empty {
     display: none;
   }
 
   a {
+    display: block;
     color: var(--gray-11);
     text-decoration: none;
+    font-size: 14px;
+    line-height: 20px;
+    padding: 6px 16px;
+    border-radius: 6px;
 
     &:hover {
+      background-color: var(--gray-3);
       color: var(--gray-12);
-    }
-  }
-
-  a {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px;
-    height: 34px;
-    overflow: hidden;
-
-    p {
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
 
     &.selected {
+      box-sizing: content-box;
       border: 2px solid var(--primary);
-      border-radius: 6px;
-      padding: 0 10px;
+      padding: 4px 14px;
     }
   }
 }
@@ -256,7 +249,7 @@ nav.side {
   grid-row: 1;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding: 16px;
+  padding: 0 8px 0 16px;
   font-size: 14px;
   line-height: 20px;
   color: var(--gray-11);

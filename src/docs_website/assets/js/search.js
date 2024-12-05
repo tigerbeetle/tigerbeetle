@@ -45,7 +45,7 @@ function onSearchInput() {
   searchResults.replaceChildren(...results.map(result => {
     const a = document.createElement("a");
     a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
-    a.innerHTML = "<h3>" + result.section.pageTitle + "</h3><p>" + result.context + "</p>";
+    a.innerHTML = result.context;
     return a;
   }));
 
