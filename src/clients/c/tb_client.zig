@@ -75,15 +75,21 @@ pub const Logging = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        // Messages are silently dropped if no logging callback is specified - unless they're warn
-        // or err. The value in having those for debugging is too high to silence them, even until
-        // client libraries catch up and implement a callback handler.
-        const callback = logging.callback orelse {
-            if (message_level == .warn or message_level == .err) {
-                std.log.defaultLog(message_level, scope, format, args);
-            }
+        // Debug logs are dropped here unless debug is set, because of the potential penalty in
+        // crossing FFI to drop them.
+        if (message_level == .debug and !logging.debug) {
             return;
-        };
+        }
+
+        // Other messages are silently dropped if no logging callback is specified - unless they're
+        // warn or err. The value in having those for debugging is too high to silence them, even
+        // until client libraries catch up and implement a callback handler.
+        if (logging.callback == null and (message_level == .warn or message_level == .err)) {
+            std.log.defaultLog(message_level, scope, format, args);
+            return;
+        }
+
+        const callback = logging.callback orelse return;
 
         // Protect everything with a mutex - logging can be called from different threads
         // simultaneously, and there's only one buffer for now.
@@ -113,6 +119,7 @@ pub const Logging = struct {
     callback: ?Callback = null,
     mutex: std.Thread.Mutex = .{},
     buffer: [log_line_max]u8 = undefined,
+    debug: bool = false,
 };
 
 pub fn register_log_callback(

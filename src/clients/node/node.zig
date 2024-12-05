@@ -26,7 +26,7 @@ const Operation = StateMachine.Operation;
 const constants = vsr.constants;
 
 pub const std_options = .{
-    .log_level = vsr.constants.log_level,
+    .log_level = .debug,
     .logFn = tb_client.Logging.application_logger,
 };
 

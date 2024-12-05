@@ -68,6 +68,7 @@ const CLIArgs = union(enum) {
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
         trace: ?[:0]const u8 = null,
+        log_debug: bool = false,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
@@ -405,6 +406,7 @@ pub const Command = union(enum) {
         experimental: bool,
         aof: bool,
         path: [:0]const u8,
+        log_debug: bool,
     };
 
     pub const Version = struct {
@@ -791,6 +793,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .trace = start.trace,
         .aof = start.aof,
         .path = start.positional.path,
+        .log_debug = start.log_debug,
     };
 }
 

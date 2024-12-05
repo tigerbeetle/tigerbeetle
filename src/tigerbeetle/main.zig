@@ -30,9 +30,27 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
+/// The runtime maximum log level.
+/// One of: .err, .warn, .info, .debug
+pub var log_level_runtime: std.log.Level = .info;
+
+pub fn log_runtime(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    // A microbenchmark places the cost of this if at somewhere around 1600us for 10 million calls.
+    if (@intFromEnum(message_level) <= @intFromEnum(log_level_runtime)) {
+        std.log.defaultLog(message_level, scope, format, args);
+    }
+}
+
 pub const std_options = .{
-    .log_level = constants.log_level,
-    .logFn = constants.log,
+    // The comptime log_level. This needs to be debug - otherwise messages are compiled out.
+    // The runtime filtering is handled by log_level_runtime.
+    .log_level = .debug,
+    .logFn = log_runtime,
 };
 
 pub fn main() !void {
@@ -55,7 +73,12 @@ pub fn main() !void {
             .replica_count = args.replica_count,
             .release = config.process.release,
         }),
-        .start => |*args| try Command.start(arena.allocator(), args),
+        .start => |*args| {
+            if (args.log_debug) {
+                log_level_runtime = .debug;
+            }
+            try Command.start(arena.allocator(), args);
+        },
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
