@@ -26,10 +26,12 @@ async function init() {
           path: entry.path,
           hash: anchor.hash,
           text: title,
+          html: child.outerHTML,
         };
         sections.push(currentSection);
       } else if (currentSection) {
         currentSection.text += " " + child.innerText.replace(/\n/g, " ");
+        currentSection.html += child.outerHTML;
       }
     }
   });
@@ -46,6 +48,7 @@ function onSearchInput() {
     const a = document.createElement("a");
     a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
     a.innerHTML = result.context;
+    a.sectionHTML = result.section.html;
     return a;
   }));
 
@@ -101,20 +104,23 @@ function makeContext(text, i, length, windowSize = 40) {
   return `${escapeHtml(contextLeft)}<strong>${escapeHtml(highlight)}</strong>${escapeHtml(contextRight)}`;
 }
 
+function select(result) {
+  result.classList.add("selected");
+  scrollIntoViewIfNeeded(result);
+  document.querySelector("article>.content").innerHTML = result.sectionHTML;
+  highlightText(searchInput.value);
+}
+
 function selectNextResult() {
   const selected = searchResults.querySelector(".selected");
   if (selected) {
     selected.classList.remove("selected");
     if (selected.nextSibling) {
-      selected.nextSibling.classList.add("selected");
-      scrollIntoViewIfNeeded(selected.nextSibling);
+      select(selected.nextSibling);
       return;
     }
   }
-  if (searchResults.firstChild) {
-    searchResults.firstChild.classList.add("selected");
-    scrollIntoViewIfNeeded(searchResults.firstChild);
-  }
+  if (searchResults.firstChild) select(searchResults.firstChild);
 }
 
 function selectPreviousResult() {
@@ -122,15 +128,11 @@ function selectPreviousResult() {
   if (selected) {
     selected.classList.remove("selected");
     if (selected.previousSibling) {
-      selected.previousSibling.classList.add("selected");
-      scrollIntoViewIfNeeded(selected.previousSibling);
+      select(selected.previousSibling);
       return;
     }
   }
-  if (searchResults.lastChild) {
-    searchResults.lastChild.classList.add("selected");
-    scrollIntoViewIfNeeded(searchResults.lastChild);
-  }
+  if (searchResults.lastChild) select(searchResults.lastChild)
 }
 
 function scrollIntoViewIfNeeded(element) {
