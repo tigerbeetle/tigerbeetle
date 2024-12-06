@@ -1,3 +1,4 @@
+let pages = [];
 let sections = [];
 
 const searchInput = document.querySelector("input[type=search]");
@@ -7,31 +8,28 @@ const searchClearButton = document.querySelector(".search-container>.clear-butto
 
 async function init() {
   const response = await fetch(urlPrefix + "/search-index.json");
-  const index = await response.json();
+  pages = await response.json();
   const parser = new DOMParser();
-  index.forEach(entry => {
-    const doc = parser.parseFromString(entry.html, "text/html");
+  pages.forEach((page, pageIndex) => {
+    const doc = parser.parseFromString(page.html, "text/html");
     const body = doc.querySelector("body");
 
-    let pageTitle;
     let currentSection;
     for (const child of body.children) {
       const anchor = child.querySelector(".anchor");
       if (anchor) {
         const title = anchor.innerText.replace(/\n/g, " ");
-        if (!pageTitle) pageTitle = title;
+        if (!page.title) page.title = title;
         currentSection = {
-          pageTitle,
+          pageIndex,
           title,
-          path: entry.path,
+          path: page.path,
           hash: anchor.hash,
           text: title,
-          html: child.outerHTML,
         };
         sections.push(currentSection);
       } else if (currentSection) {
         currentSection.text += " " + child.innerText.replace(/\n/g, " ");
-        currentSection.html += child.outerHTML;
       }
     }
   });
@@ -48,7 +46,7 @@ function onSearchInput() {
     const a = document.createElement("a");
     a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
     a.innerHTML = result.context;
-    a.sectionHTML = result.section.html;
+    a.pageIndex = result.section.pageIndex;
     return a;
   }));
 
@@ -67,10 +65,11 @@ function search(term, maxResults = 100) {
       const count = section.text.match(regex).length;
       let score = 1 + 0.01 * count;
       score -= 0.004 * firstIndex; // penalty if match isn't early
-      if (section.pageTitle.match(regex)) {
+      const pageTitle = pages[section.pageIndex].title;
+      if (pageTitle.match(regex)) {
         score += 10;
-        if (term.length === section.pageTitle.length) score += 10; // exact match
-        score -= 0.02 * Math.abs(term.length - section.pageTitle.length); // penalty
+        if (term.length === pageTitle.length) score += 10; // exact match
+        score -= 0.02 * Math.abs(term.length - pageTitle.length); // penalty
       }
       if (section.title.match(regex)) {
         score += 4;
@@ -107,7 +106,12 @@ function makeContext(text, i, length, windowSize = 40) {
 function select(result) {
   result.classList.add("selected");
   scrollIntoViewIfNeeded(result);
-  document.querySelector("article>.content").innerHTML = result.sectionHTML;
+  const page = pages[result.pageIndex];
+  document.querySelector("article>.content").innerHTML = page.html;
+  window.history.pushState({}, "", result.href);
+  document.title = "TigerBeetle Docs | " + page.title;
+  const anchor = document.querySelector(window.location.hash);
+  anchor.scrollIntoView();
   highlightText(searchInput.value);
 }
 
