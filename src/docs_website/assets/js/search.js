@@ -41,19 +41,46 @@ init();
 
 function onSearchInput() {
   const results = search(searchInput.value);
+  const groups = [];
+  let currentGroup;
+  for (const result of results) {
+    if (!currentGroup || currentGroup.pageIndex !== result.section.pageIndex) {
+      currentGroup = { pageIndex: result.section.pageIndex, results: [] };
+      groups.push(currentGroup);
+    }
+    currentGroup.results.push(result);
+  }
   const highlightQuery = `?highlight=${encodeURIComponent(searchInput.value)}`
-  searchResults.replaceChildren(...results.map(result => {
-    const a = document.createElement("a");
-    a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
-    a.innerHTML = result.context;
-    a.pageIndex = result.section.pageIndex;
-    return a;
-  }));
+  searchResults.replaceChildren();
+  for (const group of groups) {
+    const menuHead = document.createElement("div");
+    searchResults.appendChild(menuHead);
+    menuHead.classList.add("item");
+    menuHead.classList.add("menu-head");
+    menuHead.classList.add("expanded");
+    menuHead.innerText = pages[group.pageIndex].title;
+    menuHead.addEventListener("click", ev => {
+      if (ev.target == menuHead) menuHead.classList.toggle("expanded");
+    })
+    const menu = document.createElement("div");
+    searchResults.appendChild(menu);
+    menu.classList.add("menu");
+    for (const result of group.results) {
+      const item = document.createElement("div");
+      menu.appendChild(item);
+      item.classList.add("item");
+      const a = document.createElement("a");
+      item.appendChild(a);
+      a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
+      a.innerHTML = result.context;
+      a.pageIndex = result.section.pageIndex;
+    }
+  }
 
   searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
 }
 
-function search(term, maxResults = 100) {
+function search(term) {
   if (term.length === 0) return [];
   const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(escapedTerm, 'gi');
@@ -63,24 +90,9 @@ function search(term, maxResults = 100) {
     if (match) {
       const firstIndex = match.index;
       const count = section.text.match(regex).length;
-      let score = 1 + 0.01 * count;
-      score -= 0.004 * firstIndex; // penalty if match isn't early
-      const pageTitle = pages[section.pageIndex].title;
-      if (pageTitle.match(regex)) {
-        score += 10;
-        if (term.length === pageTitle.length) score += 10; // exact match
-        score -= 0.02 * Math.abs(term.length - pageTitle.length); // penalty
-      }
-      if (section.title.match(regex)) {
-        score += 4;
-        if (term.length === section.title.length) score += 10; // exact match
-        score -= 0.02 * Math.abs(term.length - section.title.length); // penalty
-      }
-      hits.push({ firstIndex, score, section });
+      hits.push({ firstIndex, count, section });
     }
   }
-  hits.sort((a, b) => b.score - a.score);
-  hits = hits.slice(0, maxResults);
   hits.forEach(hit => hit.context = makeContext(hit.section.text, hit.firstIndex, term.length));
   return hits;
 }
