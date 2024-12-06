@@ -206,6 +206,13 @@ nav.left-pane {
     }
   }
 
+  .search-stats {
+    color: var(--gray-10);
+    font-size: 12px;
+    line-height: 20px;
+    padding: 0 24px;
+  }
+
   .wrapper {
     flex: 1;
     overflow: hidden;

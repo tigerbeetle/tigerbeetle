@@ -3,6 +3,7 @@ let sections = [];
 
 const searchInput = document.querySelector("input[type=search]");
 const searchResults = document.querySelector(".search-results");
+const searchStats = document.querySelector(".search-stats");
 const searchHotkey = document.querySelector(".search-container>.hotkey");
 const searchClearButton = document.querySelector(".search-container>.clear-button");
 const content = document.querySelector("article>.content");
@@ -78,6 +79,10 @@ function onSearchInput() {
       p.innerHTML = result.context;
     }
   }
+
+  const resultText = results.length === 1 ? "result" : "results";
+  const pageText = groups.length === 1 ? "page" : "pages";
+  searchStats.innerText = `${results.length} ${resultText} on ${groups.length} ${pageText}`
 
   highlightText(searchInput.value, searchResults);
 
