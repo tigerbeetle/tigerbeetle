@@ -1023,15 +1023,22 @@ pub fn StateMachineType(
                         );
 
                         return;
+                    } else {
+                        // TODO(batiati): Improve the way we do validations on the state machine.
+                        log.info("get_account_balances: invalid filter: {any}", .{filter});
                     }
+                } else {
+                    log.info(
+                        "get_account_balances: cannot query account.id={}; flags.history=false",
+                        .{filter.account_id},
+                    );
                 }
+            } else {
+                log.info(
+                    "get_account_balances: cannot query account.id={}; account does not exist",
+                    .{filter.account_id},
+                );
             }
-
-            // TODO(batiati): Improve the way we do validations on the state machine.
-            log.info(
-                "invalid filter for get_account_balances: {any}",
-                .{filter},
-            );
 
             // Returning an empty array on the next tick.
             self.forest.grid.on_next_tick(
