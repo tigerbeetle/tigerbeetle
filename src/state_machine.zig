@@ -122,6 +122,14 @@ pub fn StateMachineType(
 
                 pub const account_balances = .{
                     .timestamp = 22,
+                    .transfer_pending_status = 27,
+                    .account_events = 28,
+                    .dr_account_id_expired = 29,
+                    .cr_account_id_expired = 30,
+                    .transfer_pending_id_expired = 31,
+                    .dr_account_closing_status = 32,
+                    .cr_account_closing_status = 33,
+                    .history_disabled = 34,
                 };
             };
         };
@@ -298,22 +306,125 @@ pub fn StateMachineType(
                 .batch_value_count_max = batch_value_count_max.account_balances,
                 .ignored = &[_][]const u8{
                     "dr_account_id",
+                    "dr_account_timestamp",
                     "dr_debits_pending",
                     "dr_debits_posted",
                     "dr_credits_pending",
                     "dr_credits_posted",
                     "cr_account_id",
+                    "cr_account_timestamp",
                     "cr_debits_pending",
                     "cr_debits_posted",
                     "cr_credits_pending",
                     "cr_credits_posted",
+                    "transfer_pending_id",
+                    "dr_account_flags",
+                    "cr_account_flags",
+                    "transfer_flags",
+                    "transfer_pending_flags",
                     "reserved",
                 },
                 .optional = &[_][]const u8{},
-                .derived = .{},
+                .derived = .{
+                    // Placeholder derived index (will be inserted during `historical_balance`).
+                    //
+                    // This index stores two values per object (the credit and debit accounts).
+                    // It is used for balance as-of queries and to search events related to a
+                    // particular account.
+                    // Examples:
+                    //   "Balance where account=X and timestamp=Y"
+                    //   "Last time account=X was updated"
+                    .account_events = struct {
+                        fn account_events(_: *const AccountBalancesGrooveValue) ?u64 {
+                            return null;
+                        }
+                    }.account_events,
+
+                    // Events related to transfers can be searched using `Transfers.dr_account_id`
+                    // and `Transfers.cr_account_id`.
+                    // However, expired events require a specific index to be searchable by both
+                    // debit and credit accounts.
+                    // Example: "All expired debits where account=X"
+                    .dr_account_id_expired = struct {
+                        fn dr_account_id_expired(object: *const AccountBalancesGrooveValue) ?u128 {
+                            return if (object.transfer_pending_status == .expired)
+                                object.dr_account_id
+                            else
+                                null;
+                        }
+                    }.dr_account_id_expired,
+                    .cr_account_id_expired = struct {
+                        fn cr_account_id_expired(object: *const AccountBalancesGrooveValue) ?u128 {
+                            return if (object.transfer_pending_status == .expired)
+                                object.cr_account_id
+                            else
+                                null;
+                        }
+                    }.cr_account_id_expired,
+
+                    // Events related to voiding or posting pending transfers can be searched using
+                    // `Transfers.pending_id`.
+                    // However, expired events require a specific index to be searchable by the
+                    // transfer.
+                    // Example: "When transfer=X has expired"
+                    .transfer_pending_id_expired = struct {
+                        fn transfer_pending_id_expired(object: *const AccountBalancesGrooveValue) ?u128 {
+                            return if (object.transfer_pending_status == .expired)
+                                object.transfer_pending_id
+                            else
+                                null;
+                        }
+                    }.transfer_pending_id_expired,
+
+                    // Placeholder derived index (will be inserted during `historical_balance`).
+                    //
+                    // Closing and reopening account events require a specific index to be
+                    // searchable by both debit and credit accounts.
+                    .dr_account_closing_status = struct {
+                        fn dr_account_closing_status(
+                            _: *const AccountBalancesGrooveValue,
+                        ) ?AccountClosingStatus {
+                            return null;
+                        }
+                    }.dr_account_closing_status,
+                    .cr_account_closing_status = struct {
+                        fn dr_account_closing_status(
+                            _: *const AccountBalancesGrooveValue,
+                        ) ?AccountClosingStatus {
+                            return null;
+                        }
+                    }.dr_account_closing_status,
+
+                    // Objects that do not need to be retained because neither the debit nor the
+                    // credit `Account`s are marked with the `flags.history` flag.
+                    // Currently, they are not deleted.
+                    .history_disabled = struct {
+                        fn history_disabled(object: *const AccountBalancesGrooveValue) ?void {
+                            const history = object.dr_account_flags.history or
+                                object.cr_account_flags.history;
+                            return if (!history) {} else null;
+                        }
+                    }.history_disabled,
+                },
                 .orphaned_ids = false,
             },
         );
+
+        pub const AccountClosingStatus = enum(u8) {
+            /// The account hasn't changed.
+            /// This event is not indexed.
+            none = 0,
+            /// The account has been closed by the event.
+            closed = 1,
+            /// The account has been re-opened by the event.
+            reopened = 2,
+
+            comptime {
+                for (std.enums.values(AccountClosingStatus), 0..) |result, index| {
+                    assert(@intFromEnum(result) == index);
+                }
+            }
+        };
 
         pub const AccountBalancesGrooveValue = extern struct {
             dr_account_id: u128,
@@ -326,8 +437,27 @@ pub fn StateMachineType(
             cr_debits_posted: u128,
             cr_credits_pending: u128,
             cr_credits_posted: u128,
-            timestamp: u64 = 0,
-            reserved: [88]u8 = [_]u8{0} ** 88,
+            timestamp: u64,
+            dr_account_timestamp: u64,
+            cr_account_timestamp: u64,
+            dr_account_flags: AccountFlags,
+            cr_account_flags: AccountFlags,
+            transfer_flags: TransferFlags,
+            transfer_pending_flags: TransferFlags,
+            transfer_pending_id: u128,
+            ///  Value   | Description
+            /// ---------|-----------------------------------------------------
+            /// `none`   | This event is a regular transfer.
+            /// `pending`| This event is a pending transfer.
+            /// `posted` | This event posted a pending transfer.
+            /// `voided` | This event voided a pending transfer.
+            /// `expired`| Expiry of pending transfer, this event does not relate to a transfer.
+            ///
+            /// See `transfer_pending_timestamp` and `transfer_pending_id` for tracking the pending
+            /// transfer. It will be `zero` for `none` and `pending`.
+            transfer_pending_status: TransferPendingStatus,
+
+            reserved: [47]u8 = [_]u8{0} ** 47,
 
             comptime {
                 assert(stdx.no_padding(AccountBalancesGrooveValue));
@@ -671,7 +801,7 @@ pub fn StateMachineType(
             assert(input.len <= self.batch_size_limit);
 
             self.prepare_timestamp += switch (operation) {
-                .pulse => 0,
+                .pulse => constants.batch_max.create_transfers, // Max transfers to expire.
                 .create_accounts => mem.bytesAsSlice(Account, input).len,
                 .create_transfers => mem.bytesAsSlice(Transfer, input).len,
                 .lookup_accounts => 0,
@@ -2191,9 +2321,14 @@ pub fn StateMachineType(
             }
 
             self.historical_balance(.{
-                .transfer = &t2,
+                .event_timestamp = t2.timestamp,
                 .dr_account = &dr_account_new,
+                .dr_account_closing_status = if (dr_account_new.flags.closed) .closed else .none,
                 .cr_account = &cr_account_new,
+                .cr_account_closing_status = if (cr_account_new.flags.closed) .closed else .none,
+                .transfer_flags = t2.flags,
+                .transfer_pending_status = if (t2.flags.pending) .pending else .none,
+                .transfer_pending = null,
             });
 
             if (t2.timeout > 0) {
@@ -2443,11 +2578,12 @@ pub fn StateMachineType(
                 }
             }
 
-            self.transfer_update_pending_status(transfer_pending, status: {
+            const transfer_pending_status: TransferPendingStatus = status: {
                 if (t2.flags.post_pending_transfer) break :status .posted;
                 if (t2.flags.void_pending_transfer) break :status .voided;
                 unreachable;
-            });
+            };
+            self.transfer_update_pending_status(transfer_pending, transfer_pending_status);
 
             var dr_account_new = dr_account.*;
             var cr_account_new = cr_account.*;
@@ -2491,9 +2627,14 @@ pub fn StateMachineType(
             }
 
             self.historical_balance(.{
-                .transfer = &t2,
+                .event_timestamp = t2.timestamp,
                 .dr_account = &dr_account_new,
+                .dr_account_closing_status = if (p.flags.closing_debit) .reopened else .none,
                 .cr_account = &cr_account_new,
+                .cr_account_closing_status = if (p.flags.closing_credit) .reopened else .none,
+                .transfer_flags = t2.flags,
+                .transfer_pending_status = transfer_pending_status,
+                .transfer_pending = p,
             });
 
             self.commit_timestamp = t2.timestamp;
@@ -2593,37 +2734,88 @@ pub fn StateMachineType(
         fn historical_balance(
             self: *StateMachine,
             args: struct {
-                transfer: *const Transfer,
+                event_timestamp: u64,
                 dr_account: *const Account,
+                dr_account_closing_status: AccountClosingStatus,
                 cr_account: *const Account,
+                cr_account_closing_status: AccountClosingStatus,
+                transfer_flags: ?TransferFlags,
+                transfer_pending_status: TransferPendingStatus,
+                transfer_pending: ?*const Transfer,
             },
         ) void {
-            assert(args.transfer.timestamp > 0);
-            assert(args.transfer.debit_account_id == args.dr_account.id);
-            assert(args.transfer.credit_account_id == args.cr_account.id);
+            assert(args.event_timestamp > 0);
+            switch (args.transfer_pending_status) {
+                .none, .pending => {
+                    assert(args.transfer_flags != null);
+                    assert(args.transfer_pending == null);
+                    assert(args.dr_account_closing_status != .reopened);
+                    assert(args.cr_account_closing_status != .reopened);
+                },
+                .posted, .voided => {
+                    assert(args.transfer_flags != null);
+                    assert(args.transfer_pending != null);
+                    assert(args.dr_account_closing_status != .closed);
+                    assert(args.cr_account_closing_status != .closed);
+                },
+                .expired => {
+                    assert(args.transfer_flags == null);
+                    assert(args.transfer_pending != null);
+                    assert(args.dr_account_closing_status != .closed);
+                    assert(args.cr_account_closing_status != .closed);
+                },
+            }
 
-            if (args.dr_account.flags.history or args.cr_account.flags.history) {
-                var balance = std.mem.zeroInit(AccountBalancesGrooveValue, .{
-                    .timestamp = args.transfer.timestamp,
+            // For CDC as balance as-of, we always insert the history,
+            // regardless `Account.flags.history`.
+            self.forest.grooves.account_balances.insert(&.{
+                .timestamp = args.event_timestamp,
+
+                .dr_account_id = args.dr_account.id,
+                .dr_account_timestamp = args.dr_account.timestamp,
+                .dr_debits_pending = args.dr_account.debits_pending,
+                .dr_debits_posted = args.dr_account.debits_posted,
+                .dr_credits_pending = args.dr_account.credits_pending,
+                .dr_credits_posted = args.dr_account.credits_posted,
+                .dr_account_flags = args.dr_account.flags,
+
+                .cr_account_id = args.cr_account.id,
+                .cr_account_timestamp = args.cr_account.timestamp,
+                .cr_debits_pending = args.cr_account.debits_pending,
+                .cr_debits_posted = args.cr_account.debits_posted,
+                .cr_credits_pending = args.cr_account.credits_pending,
+                .cr_credits_posted = args.cr_account.credits_posted,
+                .cr_account_flags = args.cr_account.flags,
+
+                .transfer_flags = if (args.transfer_flags) |flags| flags else .{},
+
+                .transfer_pending_id = if (args.transfer_pending) |p| p.id else 0,
+                .transfer_pending_status = args.transfer_pending_status,
+                .transfer_pending_flags = if (args.transfer_pending) |p| p.flags else .{},
+            });
+
+            // Indexing the debit and credit accounts.
+            self.forest.grooves.account_balances.indexes.account_events.put(&.{
+                .timestamp = args.event_timestamp,
+                .field = args.dr_account.timestamp,
+            });
+            self.forest.grooves.account_balances.indexes.account_events.put(&.{
+                .timestamp = args.event_timestamp,
+                .field = args.cr_account.timestamp,
+            });
+
+            // Tracking changes to the closing account.
+            if (args.dr_account_closing_status != .none) {
+                self.forest.grooves.account_balances.indexes.dr_account_closing_status.put(&.{
+                    .timestamp = args.event_timestamp,
+                    .field = @intFromEnum(args.dr_account_closing_status),
                 });
-
-                if (args.dr_account.flags.history) {
-                    balance.dr_account_id = args.dr_account.id;
-                    balance.dr_debits_pending = args.dr_account.debits_pending;
-                    balance.dr_debits_posted = args.dr_account.debits_posted;
-                    balance.dr_credits_pending = args.dr_account.credits_pending;
-                    balance.dr_credits_posted = args.dr_account.credits_posted;
-                }
-
-                if (args.cr_account.flags.history) {
-                    balance.cr_account_id = args.cr_account.id;
-                    balance.cr_debits_pending = args.cr_account.debits_pending;
-                    balance.cr_debits_posted = args.cr_account.debits_posted;
-                    balance.cr_credits_pending = args.cr_account.credits_pending;
-                    balance.cr_credits_posted = args.cr_account.credits_posted;
-                }
-
-                self.forest.grooves.account_balances.insert(&balance);
+            }
+            if (args.cr_account_closing_status != .none) {
+                self.forest.grooves.account_balances.indexes.cr_account_closing_status.put(&.{
+                    .timestamp = args.event_timestamp,
+                    .field = @intFromEnum(args.cr_account_closing_status),
+                });
             }
         }
 
@@ -2676,44 +2868,50 @@ pub fn StateMachineType(
         fn execute_expire_pending_transfers(self: *StateMachine, timestamp: u64) usize {
             assert(self.scan_lookup_result_count != null);
             assert(self.scan_lookup_result_count.? <= constants.batch_max.create_transfers);
+            assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0;
 
-            const transfers: []const Transfer = std.mem.bytesAsSlice(
+            const transfers_pending: []const Transfer = std.mem.bytesAsSlice(
                 Transfer,
                 self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? * @sizeOf(Transfer)],
             );
 
-            log.debug("expire_pending_transfers: len={}", .{transfers.len});
+            log.debug("expire_pending_transfers: len={}", .{transfers_pending.len});
 
-            for (transfers) |expired| {
-                assert(expired.flags.pending);
-                assert(expired.timeout > 0);
+            for (transfers_pending, 0..) |*p, index| {
+                assert(p.flags.pending);
+                assert(p.timeout > 0);
 
-                const expires_at = expired.timestamp + expired.timeout_ns();
-                assert(expires_at <= timestamp);
+                const event_timestamp = timestamp - transfers_pending.len + index + 1;
+                assert(event_timestamp >= TimestampRange.timestamp_min);
+                assert(event_timestamp <= TimestampRange.timestamp_max);
+                assert(self.commit_timestamp < event_timestamp);
+
+                const expires_at = p.timestamp + p.timeout_ns();
+                assert(expires_at <= event_timestamp);
 
                 const dr_account = self.get_account(
-                    expired.debit_account_id,
+                    p.debit_account_id,
                 ).?;
-                assert(dr_account.debits_pending >= expired.amount);
+                assert(dr_account.debits_pending >= p.amount);
 
                 const cr_account = self.get_account(
-                    expired.credit_account_id,
+                    p.credit_account_id,
                 ).?;
-                assert(cr_account.credits_pending >= expired.amount);
+                assert(cr_account.credits_pending >= p.amount);
 
                 var dr_account_new = dr_account.*;
                 var cr_account_new = cr_account.*;
-                dr_account_new.debits_pending -= expired.amount;
-                cr_account_new.credits_pending -= expired.amount;
+                dr_account_new.debits_pending -= p.amount;
+                cr_account_new.credits_pending -= p.amount;
 
-                if (expired.flags.closing_debit) {
+                if (p.flags.closing_debit) {
                     assert(dr_account_new.flags.closed);
                     dr_account_new.flags.closed = false;
                 }
-                if (expired.flags.closing_credit) {
+                if (p.flags.closing_credit) {
                     assert(cr_account_new.flags.closed);
                     cr_account_new.flags.closed = false;
                 }
@@ -2722,9 +2920,8 @@ pub fn StateMachineType(
                 maybe(dr_account_new.flags.closed);
                 maybe(cr_account_new.flags.closed);
 
-                const dr_updated = expired.amount > 0 or
+                const dr_updated = p.amount > 0 or
                     dr_account_new.flags.closed != dr_account.flags.closed;
-                assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
                 if (dr_updated) {
                     self.forest.grooves.accounts.update(.{
                         .old = dr_account,
@@ -2732,9 +2929,8 @@ pub fn StateMachineType(
                     });
                 }
 
-                const cr_updated = expired.amount > 0 or
+                const cr_updated = p.amount > 0 or
                     cr_account_new.flags.closed != cr_account.flags.closed;
-                assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
                 if (cr_updated) {
                     self.forest.grooves.accounts.update(.{
                         .old = cr_account,
@@ -2742,16 +2938,28 @@ pub fn StateMachineType(
                     });
                 }
 
-                const transfer_pending = self.get_transfer_pending(expired.timestamp).?;
-                assert(expired.timestamp == transfer_pending.timestamp);
+                const transfer_pending = self.get_transfer_pending(p.timestamp).?;
+                assert(p.timestamp == transfer_pending.timestamp);
                 assert(transfer_pending.status == .pending);
                 self.transfer_update_pending_status(transfer_pending, .expired);
 
                 // Removing the `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
-                    .timestamp = expired.timestamp,
+                    .timestamp = p.timestamp,
                     .field = expires_at,
                 });
+
+                self.historical_balance(.{
+                    .event_timestamp = event_timestamp,
+                    .dr_account = &dr_account_new,
+                    .dr_account_closing_status = if (p.flags.closing_debit) .reopened else .none,
+                    .cr_account = &cr_account_new,
+                    .cr_account_closing_status = if (p.flags.closing_credit) .reopened else .none,
+                    .transfer_flags = null,
+                    .transfer_pending_status = .expired,
+                    .transfer_pending = p,
+                });
+                self.commit_timestamp = event_timestamp;
             }
 
             // This operation has no output.
@@ -2840,7 +3048,10 @@ pub fn StateMachineType(
                         .batch_value_count_limit = batch_values_limit.account_balances.timestamp,
                     },
                     .tree_options_id = {},
-                    .tree_options_index = .{},
+                    .tree_options_index = index_tree_options(
+                        AccountBalancesGroove.IndexTreeOptions,
+                        batch_values_limit.account_balances,
+                    ),
                 },
             };
         }
@@ -2890,6 +3101,14 @@ pub fn StateMachineType(
             },
             account_balances: struct {
                 timestamp: u32,
+                transfer_pending_status: u32,
+                account_events: u32,
+                dr_account_id_expired: u32,
+                cr_account_id_expired: u32,
+                transfer_pending_id_expired: u32,
+                dr_account_closing_status: u32,
+                cr_account_closing_status: u32,
+                history_disabled: u32,
             },
         } {
             assert(batch_size_limit <= constants.message_body_size_max);
@@ -2937,6 +3156,14 @@ pub fn StateMachineType(
                 },
                 .account_balances = .{
                     .timestamp = batch_create_transfers,
+                    .transfer_pending_status = batch_create_transfers,
+                    .account_events = 2 * batch_create_transfers, // dr and cr accounts.
+                    .dr_account_id_expired = batch_create_transfers,
+                    .cr_account_id_expired = batch_create_transfers,
+                    .transfer_pending_id_expired = batch_create_transfers,
+                    .dr_account_closing_status = batch_create_transfers,
+                    .cr_account_closing_status = batch_create_transfers,
+                    .history_disabled = batch_create_transfers,
                 },
             };
         }
@@ -3900,15 +4127,31 @@ fn check(test_table: []const u8) !void {
                 );
 
                 if (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
+                    const pulse: TestContext.StateMachine.Operation = vsr.Operation.pulse.cast(
+                        TestContext.StateMachine,
+                    );
+
+                    context.state_machine.prepare(
+                        context.client_release,
+                        pulse,
+                        &.{},
+                    );
                     const pulse_size = context.execute(
                         op,
-                        vsr.Operation.pulse.cast(TestContext.StateMachine),
+                        pulse,
                         &.{},
                         reply_actual_buffer[0..TestContext.message_body_size_max],
                     );
                     assert(pulse_size == 0);
 
                     op += 1;
+                    context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
+                    context.state_machine.prepare_timestamp += 1;
+                    context.state_machine.prepare(
+                        context.client_release,
+                        commit_operation,
+                        request.items,
+                    );
                 }
 
                 const reply_actual_size = context.execute(
