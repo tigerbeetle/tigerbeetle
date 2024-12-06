@@ -472,7 +472,8 @@ pub const Header = extern struct {
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         ping_timestamp_monotonic: u64,
-        reserved: [120]u8 = [_]u8{0} ** 120,
+        replica_count: u8 = 0,
+        reserved: [119]u8 = [_]u8{0} ** 119,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong_client);
