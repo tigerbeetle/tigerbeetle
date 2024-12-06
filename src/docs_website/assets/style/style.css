@@ -77,6 +77,10 @@ code {
   font-size: 85%;
 }
 
+.highlight {
+  background-color: color-mix(in srgb, var(--primary), transparent 75%);
+}
+
 nav.left-pane {
   display: flex;
   flex-direction: column;
@@ -217,8 +221,8 @@ nav.left-pane {
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding: 0 8px 0 16px;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 16px;
   color: var(--gray-11);
   -webkit-user-select: none;
   user-select: none;
@@ -227,14 +231,36 @@ nav.left-pane {
     display: none;
   }
 
+  .menu-head {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: 6px;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 20px;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover {
+      background-color: var(--gray-3);
+      color: var(--gray-12);
+    }
+  }
+
   a {
     display: block;
     color: var(--gray-11);
     text-decoration: none;
-    font-size: 14px;
-    line-height: 20px;
-    padding: 6px 16px;
+    padding: 6px 8px 6px 24px;
     border-radius: 6px;
+
+    h3 {
+      color: var(--gray-12);
+      font-size: 13px;
+      line-height: 16px;
+      font-weight: 600;
+    }
 
     &:hover {
       background-color: var(--gray-3);
@@ -260,36 +286,75 @@ nav.side {
   color: var(--gray-11);
   -webkit-user-select: none;
   user-select: none;
-}
 
-.item {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  border-radius: 6px;
-  padding: 6px 8px;
-
-  &:hover {
-    cursor: pointer;
-    background-color: var(--gray-3);
-  }
-
-  a {
-    color: var(--gray-11);
-    text-decoration: none;
-    display: block;
-    width: 100%;
-    margin: -6px -8px -6px -4px;
-    padding: 6px 8px 6px 4px;
-    box-sizing: content-box;
+  .item {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    border-radius: 6px;
+    padding: 6px 8px;
 
     &:hover {
-      color: var(--gray-12);
+      cursor: pointer;
+      background-color: var(--gray-3);
     }
 
-    &.target {
-      font-weight: 600;
-      color: var(--gray-12);
+    a {
+      color: var(--gray-11);
+      text-decoration: none;
+      display: block;
+      width: 100%;
+      margin: -6px -8px -6px -4px;
+      padding: 6px 8px 6px 4px;
+      box-sizing: content-box;
+
+      &:hover {
+        color: var(--gray-12);
+      }
+
+      &.target {
+        font-weight: 600;
+        color: var(--gray-12);
+      }
+    }
+  }
+
+  .menu .item {
+    padding-left: 24px;
+
+    &:not(.menu-head) a {
+      margin-left: -24px;
+      padding-left: 24px;
+    }
+
+    &.menu-head {
+      padding-left: 8px;
+    }
+  }
+
+  .menu .menu .item {
+    padding-left: 32px;
+
+    &:not(.menu-head) a {
+      margin-left: -32px;
+      padding-left: 32px;
+    }
+
+    &.menu-head {
+      padding-left: 16px;
+    }
+  }
+
+  .menu .menu .menu .item {
+    padding-left: 40px;
+
+    &:not(.menu-head) a {
+      margin-left: -40px;
+      padding-left: 40px;
+    }
+
+    &.menu-head {
+      padding-left: 24px;
     }
   }
 }
@@ -305,45 +370,6 @@ nav.side {
 
 .menu-head.expanded+.menu {
   display: flex;
-}
-
-.menu .item {
-  padding-left: 24px;
-
-  &:not(.menu-head) a {
-    margin-left: -24px;
-    padding-left: 24px;
-  }
-
-  &.menu-head {
-    padding-left: 8px;
-  }
-}
-
-.menu .menu .item {
-  padding-left: 32px;
-
-  &:not(.menu-head) a {
-    margin-left: -32px;
-    padding-left: 32px;
-  }
-
-  &.menu-head {
-    padding-left: 16px;
-  }
-}
-
-.menu .menu .menu .item {
-  padding-left: 40px;
-
-  &:not(.menu-head) a {
-    margin-left: -40px;
-    padding-left: 40px;
-  }
-
-  &.menu-head {
-    padding-left: 24px;
-  }
 }
 
 .menu-head::before {
@@ -398,10 +424,6 @@ article {
     color: var(--gray-11);
     font-size: 16px;
     line-height: 24px;
-
-    .highlight {
-      background-color: color-mix(in srgb, var(--primary), transparent 75%);
-    }
 
     p {
       text-wrap: pretty;

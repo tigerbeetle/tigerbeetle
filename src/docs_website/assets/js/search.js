@@ -5,6 +5,7 @@ const searchInput = document.querySelector("input[type=search]");
 const searchResults = document.querySelector(".search-results");
 const searchHotkey = document.querySelector(".search-container>.hotkey");
 const searchClearButton = document.querySelector(".search-container>.clear-button");
+const content = document.querySelector("article>.content");
 
 async function init() {
   const response = await fetch(urlPrefix + "/search-index.json");
@@ -55,7 +56,6 @@ function onSearchInput() {
   for (const group of groups) {
     const menuHead = document.createElement("div");
     searchResults.appendChild(menuHead);
-    menuHead.classList.add("item");
     menuHead.classList.add("menu-head");
     menuHead.classList.add("expanded");
     menuHead.innerText = pages[group.pageIndex].title;
@@ -66,16 +66,20 @@ function onSearchInput() {
     searchResults.appendChild(menu);
     menu.classList.add("menu");
     for (const result of group.results) {
-      const item = document.createElement("div");
-      menu.appendChild(item);
-      item.classList.add("item");
       const a = document.createElement("a");
-      item.appendChild(a);
+      menu.appendChild(a);
       a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
-      a.innerHTML = result.context;
       a.pageIndex = result.section.pageIndex;
+      const h3 = document.createElement("h3");
+      a.appendChild(h3);
+      h3.innerText = result.section.title;
+      const p = document.createElement("p");
+      a.appendChild(p);
+      p.innerHTML = result.context;
     }
   }
+
+  highlightText(searchInput.value, searchResults);
 
   searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
 }
@@ -112,14 +116,15 @@ function makeContext(text, i, length, windowSize = 40) {
   while (i1 < text.length && text[i1] !== ' ') i1++;
   contextRight = text.slice(i + length, i1).trimRight() + contextRight;
 
-  return `${escapeHtml(contextLeft)}<strong>${escapeHtml(highlight)}</strong>${escapeHtml(contextRight)}`;
+  // return `${escapeHtml(contextLeft)}<strong>${escapeHtml(highlight)}</strong>${escapeHtml(contextRight)}`;
+  return contextLeft + highlight + contextRight;
 }
 
 function select(result) {
   result.classList.add("selected");
   scrollIntoViewIfNeeded(result);
   const page = pages[result.pageIndex];
-  document.querySelector("article>.content").innerHTML = page.html;
+  content.innerHTML = page.html;
   window.history.pushState({}, "", result.href);
   document.title = "TigerBeetle Docs | " + page.title;
   const anchor = document.querySelector(window.location.hash);
@@ -216,14 +221,13 @@ searchClearButton.addEventListener("click", () => {
 if (location.search) {
   const params = new URLSearchParams(location.search);
   const highlight = params.get("highlight");
-  if (highlight) highlightText(decodeURIComponent(highlight));
+  if (highlight) highlightText(decodeURIComponent(highlight), content);
 }
 
-function highlightText(term) {
+function highlightText(term, node) {
   const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(escapedTerm, 'gi');
-  const content = document.querySelector('article>.content');
-  traverseAndHighlight(content, regex);
+  traverseAndHighlight(node, regex);
 }
 
 function traverseAndHighlight(node, regex) {
