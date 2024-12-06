@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
@@ -22,59 +23,31 @@ const Direction = @import("../direction.zig").Direction;
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
-const batch_max: u32 = @divFloor(
+const batch_objects_max: u32 = @divFloor(
     constants.message_body_size_max,
     @sizeOf(Thing),
 );
 
+const commit_queries_max: u32 = 8;
+
 /// The testing object.
 const Thing = extern struct {
     id: u128,
-    // All indexes must be `u64` to avoid conflicting matching values,
-    // the most significant bits are a seed used for assertions.
-    index_1: u64,
-    index_2: u64,
-    index_3: u64,
-    index_4: u64,
-    index_5: u64,
-    index_6: u64,
-    index_7: u64,
-    index_8: u64,
-    index_9: u64,
+    index_01: u64,
+    index_02: u64,
+    index_03: u64,
+    index_04: u64,
+    index_05: u64,
+    index_06: u64,
+    index_07: u64,
+    index_08: u64,
+    index_09: u64,
     index_10: u64,
     index_11: u64,
     index_12: u64,
-    checksum: u64,
+    index_13: u64,
     timestamp: u64,
 
-    comptime {
-        assert(stdx.no_padding(Thing));
-        assert(@sizeOf(Thing) == 128);
-        assert(@alignOf(Thing) == 16);
-    }
-
-    /// Initializes a struct with all fields zeroed.
-    fn zeroed() Thing {
-        return .{
-            .id = 0,
-            .index_1 = 0,
-            .index_2 = 0,
-            .index_3 = 0,
-            .index_4 = 0,
-            .index_5 = 0,
-            .index_6 = 0,
-            .index_7 = 0,
-            .index_8 = 0,
-            .index_9 = 0,
-            .index_10 = 0,
-            .index_11 = 0,
-            .index_12 = 0,
-            .checksum = 0,
-            .timestamp = 0,
-        };
-    }
-
-    /// Gets the field's value based on the `Index` enum.
     fn get_index(thing: *const Thing, index: Index) u64 {
         switch (index) {
             inline else => |comptime_index| {
@@ -83,78 +56,10 @@ const Thing = extern struct {
         }
     }
 
-    /// Sets the field's value based on the `Index` enum.
-    fn set_index(thing: *Thing, index: Index, value: u64) void {
-        switch (index) {
-            inline else => |comptime_index| {
-                @field(thing, @tagName(comptime_index)) = value;
-            },
-        }
-    }
-
-    /// Merges all non-zero fields.
-    fn merge(template: *Thing, other: Thing) void {
-        stdx.maybe(stdx.zeroed(std.mem.asBytes(template)));
-        assert(!stdx.zeroed(std.mem.asBytes(&other)));
-        defer assert(!stdx.zeroed(std.mem.asBytes(template)));
-
-        for (std.enums.values(Index)) |index| {
-            const value = other.get_index(index);
-            if (value != 0) {
-                assert(template.get_index(index) == 0);
-                template.set_index(index, value);
-            }
-        }
-    }
-
-    fn merge_all(things: []const Thing) Thing {
-        var result = Thing.zeroed();
-        for (things) |thing| result.merge(thing);
-        return result;
-    }
-
-    /// Creates a struct from a template, setting all zeroed fields with random values and
-    /// calculating the checksum of the resulting struct.
-    fn from_template(
-        template: Thing,
-        random: std.rand.Random,
-        init: struct { id: u128, timestamp: u64 },
-    ) Thing {
-        assert(template.id == 0);
-        assert(template.timestamp == 0);
-        assert(init.id != 0);
-        assert(init.timestamp != 0);
-
-        var thing: Thing = template;
-        thing.id = init.id;
-        thing.timestamp = init.timestamp;
-        for (std.enums.values(Index)) |index| {
-            const value = thing.get_index(index);
-            if (value == 0) {
-                // Fill the zeroed fields with random values out of the matching prefix.
-                thing.set_index(
-                    index,
-                    prefix_combine(
-                        std.math.maxInt(u32),
-                        random.intRangeAtMost(u32, 1, std.math.maxInt(u32)),
-                    ),
-                );
-            }
-        }
-
-        thing.checksum = stdx.hash_inline(thing);
-        return thing;
-    }
-
-    fn checksum_valid(thing: *const Thing) bool {
-        assert(thing.id != 0);
-        assert(thing.timestamp != 0);
-        assert(thing.checksum != 0);
-
-        var copy = thing.*;
-        copy.checksum = 0;
-
-        return thing.checksum == stdx.hash_inline(copy);
+    comptime {
+        assert(stdx.no_padding(Thing));
+        assert(@sizeOf(Thing) == 128);
+        assert(@alignOf(Thing) == 16);
     }
 };
 
@@ -164,37 +69,39 @@ const ThingsGroove = GrooveType(
     .{
         .ids = .{
             .id = 1,
-            .index_1 = 2,
-            .index_2 = 3,
-            .index_3 = 4,
-            .index_4 = 5,
-            .index_5 = 6,
-            .index_6 = 7,
-            .index_7 = 8,
-            .index_8 = 9,
-            .index_9 = 10,
+            .index_01 = 2,
+            .index_02 = 3,
+            .index_03 = 4,
+            .index_04 = 5,
+            .index_05 = 6,
+            .index_06 = 7,
+            .index_07 = 8,
+            .index_08 = 9,
+            .index_09 = 10,
             .index_10 = 11,
             .index_11 = 12,
             .index_12 = 13,
-            .timestamp = 14,
+            .index_13 = 14,
+            .timestamp = 15,
         },
         .batch_value_count_max = .{
-            .id = batch_max,
-            .index_1 = batch_max,
-            .index_2 = batch_max,
-            .index_3 = batch_max,
-            .index_4 = batch_max,
-            .index_5 = batch_max,
-            .index_6 = batch_max,
-            .index_7 = batch_max,
-            .index_8 = batch_max,
-            .index_9 = batch_max,
-            .index_10 = batch_max,
-            .index_11 = batch_max,
-            .index_12 = batch_max,
-            .timestamp = batch_max,
+            .id = batch_objects_max,
+            .index_01 = batch_objects_max,
+            .index_02 = batch_objects_max,
+            .index_03 = batch_objects_max,
+            .index_04 = batch_objects_max,
+            .index_05 = batch_objects_max,
+            .index_06 = batch_objects_max,
+            .index_07 = batch_objects_max,
+            .index_08 = batch_objects_max,
+            .index_09 = batch_objects_max,
+            .index_10 = batch_objects_max,
+            .index_11 = batch_objects_max,
+            .index_12 = batch_objects_max,
+            .index_13 = batch_objects_max,
+            .timestamp = batch_objects_max,
         },
-        .ignored = &[_][]const u8{"checksum"},
+        .ignored = &[_][]const u8{},
         .optional = &[_][]const u8{},
         .derived = .{},
         .orphaned_ids = false,
@@ -215,18 +122,16 @@ const ScanLookup = ScanLookupType(
 
 const Scan = ThingsGroove.ScanBuilder.Scan;
 
+const thing_index_count = std.enums.values(Index).len;
 /// The max number of indexes in a query.
-const index_max: comptime_int = @min(constants.lsm_scans_max, std.enums.values(Index).len);
+const query_scans_max: comptime_int = @min(constants.lsm_scans_max, thing_index_count);
+comptime {
+    assert(thing_index_count >= query_scans_max);
+}
 
 /// The max number of query parts.
-/// If `index_max == x`, then we can have at most x fields and x - 1 merge operations.
-const query_part_max = (index_max * 2) - 1;
-
-/// The max number of query specs generated per run.
-/// Always generate more than one query spec, since multiple queries can
-/// test both the positive space (results must match the query) and the
-/// negative space (results from other queries must not match).
-const query_spec_max = 8;
+/// If `query_scans_max == x`, then we can have at most x fields and x - 1 merge operations.
+const query_part_max = (query_scans_max * 2) - 1;
 
 const QueryPart = union(enum) {
     const Field = struct { index: Index, value: u64 };
@@ -238,10 +143,7 @@ const QueryPart = union(enum) {
 
 /// The query is represented non-recursively in reverse polish notation as an array of `QueryPart`.
 /// Example: `(a OR b) AND (c OR d OR e)` == `[{AND;2}, {OR;2}, {a}, {b}, {OR;3}, {c}, {d}, {e}]`.
-const Query = stdx.BoundedArrayType(
-    QueryPart,
-    query_part_max,
-);
+const Query = stdx.BoundedArrayType(QueryPart, query_part_max);
 
 const QueryOperator = enum {
     union_set,
@@ -256,14 +158,8 @@ const QueryOperator = enum {
 };
 
 const QuerySpec = struct {
-    // All matching fields must start with this prefix, to avoid collision.
-    prefix: u32,
-    // The query.
     query: Query,
-    // Ascending or descending.
-    reversed: bool,
-    // Number of expected results.
-    expected_results: u32,
+    direction: Direction,
 
     /// Formats the array of `QueryPart`, for debugging purposes.
     /// E.g. "((a OR b) and c)".
@@ -273,10 +169,10 @@ const QuerySpec = struct {
         _: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        var stack: stdx.BoundedArrayType(QueryPart.Merge, index_max - 1) = .{};
+        var stack: stdx.BoundedArrayType(QueryPart.Merge, query_scans_max - 1) = .{};
         var print_operator: bool = false;
         for (0..self.query.count()) |index| {
-            // Reverse the RPN array in order to print in the natual order.
+            // Reverse the RPN array in order to print in the natural order.
             const query_part = self.query.get(self.query.count() - index - 1);
 
             const merge_current: ?*QueryPart.Merge = if (stack.count() > 0) merge_current: {
@@ -322,13 +218,34 @@ const QuerySpec = struct {
         }
         assert(stack.count() == 0);
     }
+
+    /// Returns whether the query results should include the specified object.
+    fn query_matches(query_spec: *const QuerySpec, thing: *const Thing) bool {
+        var matches = stdx.BoundedArrayType(bool, query_part_max){};
+        for (query_spec.query.const_slice()) |query_part| {
+            const match = switch (query_part) {
+                .field => |field| thing.get_index(field.index) == field.value,
+                .merge => |merge| switch (merge.operator) {
+                    .union_set => match: {
+                        var match: bool = false;
+                        for (0..merge.operand_count) |_| match = matches.pop() or match;
+                        break :match match;
+                    },
+                    .intersection_set => match: {
+                        var match: bool = true;
+                        for (0..merge.operand_count) |_| match = matches.pop() and match;
+                        break :match match;
+                    },
+                },
+            };
+            matches.append_assume_capacity(match);
+        }
+        return matches.get(matches.count() - 1);
+    }
 };
 
 /// This fuzzer generates random arbitrary complex query conditions such as
 /// `(a OR b) AND (c OR d OR (e AND f AND g))`.
-/// It also includes an array of at least one object that matches the condition.
-/// Those objects are used as template to populate the database in such a way
-/// that the results retrieved by the query can be asserted.
 ///
 /// Some limitations in place:
 ///
@@ -344,58 +261,29 @@ const QuerySpec = struct {
 ///   always false conditions such as `(a=1 AND a=2)`.
 const QuerySpecFuzzer = struct {
     random: std.rand.Random,
-    prefix: u32,
-
-    suffix_last: u32 = 0,
+    index_cardinality: [thing_index_count]u64,
     indexes_used: std.EnumSet(Index) = std.EnumSet(Index).initEmpty(),
 
-    fn generate_fuzz_query_specs(
-        random: std.rand.Random,
-    ) stdx.BoundedArrayType(QuerySpec, query_spec_max) {
-        var query_specs = stdx.BoundedArrayType(QuerySpec, query_spec_max){};
-        const query_spec_count = random.intRangeAtMostBiased(
-            usize,
-            2,
-            query_specs.inner.capacity(),
-        );
-
-        log.info("query_spec_count = {}", .{query_spec_count});
-
-        for (0..query_spec_count) |prefix| {
-            var fuzzer = QuerySpecFuzzer{
-                .random = random,
-                .prefix = @intCast(prefix + 1),
-            };
-
-            const query_spec = fuzzer.generate_query_spec();
-            log.info("query_specs[{}]: {}", .{ prefix, query_spec });
-
-            query_specs.append_assume_capacity(query_spec);
-        }
-
-        return query_specs;
-    }
-
     fn generate_query_spec(
-        self: *QuerySpecFuzzer,
+        random: std.rand.Random,
+        index_cardinality: [thing_index_count]u64,
     ) QuerySpec {
-        const field_max = self.random.intRangeAtMostBiased(u32, 1, index_max);
-        const query = self.generate_query(field_max);
+        var fuzzer = QuerySpecFuzzer{
+            .random = random,
+            .index_cardinality = index_cardinality,
+        };
+        const query_field_max = random.intRangeAtMost(u32, 1, query_scans_max);
+        const query = fuzzer.generate_query(query_field_max);
 
         return QuerySpec{
-            .prefix = self.prefix,
             .query = query,
-            .reversed = self.random.boolean(),
-            .expected_results = 0,
+            .direction = if (random.boolean()) .ascending else .descending,
         };
     }
 
-    fn generate_query(
-        self: *QuerySpecFuzzer,
-        field_max: u32,
-    ) Query {
+    fn generate_query(self: *QuerySpecFuzzer, field_max: u32) Query {
         assert(field_max > 0);
-        assert(field_max <= index_max);
+        assert(field_max <= query_scans_max);
 
         const QueryPartTag = std.meta.Tag(QueryPart);
         const MergeStack = struct {
@@ -422,7 +310,7 @@ const QuerySpecFuzzer = struct {
         }
 
         // Multi field queries must start with a merge.
-        var stack: stdx.BoundedArrayType(MergeStack, index_max - 1) = .{};
+        var stack: stdx.BoundedArrayType(MergeStack, query_scans_max - 1) = .{};
         stack.append_assume_capacity(.{
             .index = 0,
             .operand_count = 0,
@@ -439,7 +327,7 @@ const QuerySpecFuzzer = struct {
         // Limiting the maximum number of merges upfront produces both simple and complex
         // queries with the same probability.
         // Otherwise, simple queries would be rare or limited to have few fields.
-        const merge_max = self.random.intRangeAtMostBiased(u32, 1, field_max - 1);
+        const merge_max = self.random.intRangeAtMost(u32, 1, field_max - 1);
 
         var field_remain: u32 = field_max;
         while (field_remain > 0) {
@@ -479,7 +367,7 @@ const QuerySpecFuzzer = struct {
                 },
                 .merge => merge: {
                     assert(field_remain > 1);
-                    const merge_field_remain = self.random.intRangeAtMostBiased(
+                    const merge_field_remain = self.random.intRangeAtMost(
                         u32,
                         // Merge must contain at least two fields, and at most the
                         // number of remaining field for the current merge.
@@ -525,29 +413,23 @@ const QuerySpecFuzzer = struct {
         return query;
     }
 
-    fn generate_query_field(
-        self: *QuerySpecFuzzer,
-    ) QueryPart.Field {
-        self.suffix_last += 1;
-        const value: u64 = prefix_combine(self.prefix, self.suffix_last);
+    fn generate_query_field(self: *QuerySpecFuzzer) QueryPart.Field {
+        assert(self.indexes_used.count() < thing_index_count);
+
+        const index = while (true) {
+            const index = self.random.enumValue(Index);
+            if (!self.indexes_used.contains(index)) {
+                self.indexes_used.insert(index);
+                break index;
+            }
+        };
+
+        const index_cardinality = self.index_cardinality[@intFromEnum(index)];
 
         return QueryPart.Field{
-            .index = self.index_random(),
-            .value = value,
+            .index = index,
+            .value = self.random.intRangeAtMostBiased(u64, 1, index_cardinality),
         };
-    }
-
-    fn index_random(self: *QuerySpecFuzzer) Index {
-        const index_count = comptime std.enums.values(Index).len;
-        comptime assert(index_count >= index_max);
-        assert(self.indexes_used.count() < index_count);
-        while (true) {
-            const index = self.random.enumValue(Index);
-            if (self.indexes_used.contains(index)) continue;
-
-            self.indexes_used.insert(index);
-            return index;
-        }
     }
 };
 
@@ -561,24 +443,25 @@ const Environment = struct {
     const cache_entries_max = 2048;
     const forest_options = Forest.GroovesOptions{
         .things = .{
-            .prefetch_entries_for_read_max = batch_max,
-            .prefetch_entries_for_update_max = batch_max,
+            .prefetch_entries_for_read_max = batch_objects_max,
+            .prefetch_entries_for_update_max = batch_objects_max,
             .cache_entries_max = cache_entries_max,
-            .tree_options_object = .{ .batch_value_count_limit = batch_max },
-            .tree_options_id = .{ .batch_value_count_limit = batch_max },
+            .tree_options_object = .{ .batch_value_count_limit = batch_objects_max },
+            .tree_options_id = .{ .batch_value_count_limit = batch_objects_max },
             .tree_options_index = .{
-                .index_1 = .{ .batch_value_count_limit = batch_max },
-                .index_2 = .{ .batch_value_count_limit = batch_max },
-                .index_3 = .{ .batch_value_count_limit = batch_max },
-                .index_4 = .{ .batch_value_count_limit = batch_max },
-                .index_5 = .{ .batch_value_count_limit = batch_max },
-                .index_6 = .{ .batch_value_count_limit = batch_max },
-                .index_7 = .{ .batch_value_count_limit = batch_max },
-                .index_8 = .{ .batch_value_count_limit = batch_max },
-                .index_9 = .{ .batch_value_count_limit = batch_max },
-                .index_10 = .{ .batch_value_count_limit = batch_max },
-                .index_11 = .{ .batch_value_count_limit = batch_max },
-                .index_12 = .{ .batch_value_count_limit = batch_max },
+                .index_01 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_02 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_03 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_04 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_05 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_06 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_07 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_08 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_09 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_10 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_11 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_12 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_13 = .{ .batch_value_count_limit = batch_objects_max },
             },
         },
     };
@@ -608,11 +491,11 @@ const Environment = struct {
     superblock_context: SuperBlock.Context = undefined,
     grid: Grid,
     forest: Forest,
+    model: std.ArrayList(Thing), // Ordered by ascending timestamp.
     ticks_remaining: usize,
 
     op: u64 = 0,
     checkpoint_op: ?u64 = null,
-    object_count: u64,
 
     scan_lookup: ScanLookup = undefined,
     scan_lookup_buffer: []Thing,
@@ -625,6 +508,9 @@ const Environment = struct {
     ) !void {
         env.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
         errdefer env.trace.deinit(allocator);
+
+        env.model = std.ArrayList(Thing).init(allocator);
+        errdefer env.model.deinit();
 
         env.* = .{
             .storage = storage,
@@ -643,16 +529,17 @@ const Environment = struct {
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
             }),
-
-            .scan_lookup_buffer = try allocator.alloc(Thing, batch_max),
             .forest = undefined,
+            .model = env.model,
+
+            .scan_lookup_buffer = try allocator.alloc(Thing, batch_objects_max),
             .checkpoint_op = null,
             .ticks_remaining = std.math.maxInt(usize),
-            .object_count = 0,
         };
     }
 
     fn deinit(env: *Environment) void {
+        env.model.deinit();
         env.superblock.deinit(allocator);
         env.grid.deinit(allocator);
         env.trace.deinit(allocator);
@@ -662,12 +549,10 @@ const Environment = struct {
     pub fn run(
         storage: *Storage,
         random: std.rand.Random,
-        /// Repeating multiple times is valuable since it populates
-        /// more data, compacts and scans again on each iteration.
-        repeat: u32,
+        commits_max: u32,
     ) !void {
-        assert(repeat > 0);
-        log.info("repeat = {}", .{repeat});
+        assert(commits_max > 0);
+        log.info("commits = {}", .{commits_max});
 
         var env: Environment = undefined;
         try env.init(storage, random);
@@ -685,234 +570,139 @@ const Environment = struct {
         try env.open();
         defer env.close();
 
-        var query_specs = QuerySpecFuzzer.generate_fuzz_query_specs(random);
-        for (0..repeat) |_| {
-            try env.apply(query_specs.slice());
+        var index_cardinality: [thing_index_count]u64 = undefined;
+        for (&index_cardinality) |*cardinality| {
+            cardinality.* = 1 +| fuzz.random_int_exponential(env.random, u64, 32);
+        }
+
+        for (0..commits_max) |_| {
+            assert(env.state == .fuzzing);
+
+            // Often insert full batches, to fill the database.
+            const batch_objects = if (random.boolean())
+                batch_objects_max
+            else
+                random.intRangeAtMost(u32, 1, batch_objects_max);
+            try env.model.ensureUnusedCapacity(batch_objects);
+
+            for (0..batch_objects) |_| {
+                // TODO: sometimes update and delete things.
+                const thing = Thing{
+                    .id = env.random.int(u128),
+                    .index_01 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[0]),
+                    .index_02 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[1]),
+                    .index_03 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[2]),
+                    .index_04 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[3]),
+                    .index_05 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[4]),
+                    .index_06 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[5]),
+                    .index_07 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[6]),
+                    .index_08 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[7]),
+                    .index_09 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[8]),
+                    .index_10 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[9]),
+                    .index_11 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[10]),
+                    .index_12 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[11]),
+                    .index_13 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[12]),
+                    .timestamp = env.model.items.len + 1,
+                };
+                env.forest.grooves.things.insert(&thing);
+                env.model.appendAssumeCapacity(thing);
+            }
+            try env.commit();
+
+            for (0..commit_queries_max) |_| {
+                const query_spec = QuerySpecFuzzer.generate_query_spec(random, index_cardinality);
+                const query_results_count = try env.run_query(&query_spec);
+
+                log.debug("query: {} direction={s} results={}\n", .{
+                    query_spec,
+                    @tagName(query_spec.direction),
+                    query_results_count,
+                });
+            }
         }
     }
 
-    fn apply(
-        env: *Environment,
-        query_specs: []QuerySpec,
-    ) !void {
-        assert(env.state == .fuzzing);
+    fn run_query(env: *Environment, query_spec: *const QuerySpec) !u32 {
+        var timestamp_previous: u64 = switch (query_spec.direction) {
+            .ascending => 0,
+            .descending => std.math.maxInt(u64),
+        };
 
-        // Inserting one batch for each query spec.
-        for (query_specs) |*query_spec| {
-            try env.populate_things(query_spec);
-        }
-
-        // Executing each query spec.
-        for (query_specs) |*query_spec| {
-            log.debug(
-                \\prefix: {}
-                \\object_count: {}
-                \\expected_results: {}
-                \\reversed: {}
-                \\query: {}
-                \\
-            , .{
-                query_spec.prefix,
-                env.object_count,
-                query_spec.expected_results,
-                query_spec.reversed,
-                query_spec,
-            });
-
-            try env.run_query(query_spec);
-        }
-    }
-
-    // TODO: sometimes update and delete things.
-    fn populate_things(env: *Environment, query_spec: *QuerySpec) !void {
-        for (0..batch_max) |_| {
-            // Total number of objects inserted.
-            env.object_count += 1;
-
-            // Non-match inserted just for creating "noise".
-            const noise_probability = 20;
-            if (chance(env.random, noise_probability)) {
-                var dummy = Thing.zeroed();
-                env.forest.grooves.things.insert(&dummy.from_template(
-                    env.random,
-                    .{
-                        .id = env.random.int(u128),
-                        .timestamp = env.object_count,
-                    },
-                ));
-
-                continue;
+        // Execute the query repeatedly with different limits, paging until all objects are scanned.
+        var results_count: u32 = 0;
+        var model_offset: u32 = 0;
+        while (model_offset < env.model.items.len) {
+            assert(env.forest.scan_buffer_pool.scan_buffer_used == 0);
+            assert(env.scan_lookup_result == null);
+            defer {
+                env.forest.scan_buffer_pool.reset();
+                env.forest.grooves.things.scan_builder.reset();
             }
 
-            const template = env.template_matching_query(query_spec);
-            query_spec.expected_results += 1; // Expected objects that match the spec.
-            const thing = template.from_template(
-                env.random,
-                .{
-                    .id = prefix_combine(
-                        query_spec.prefix,
-                        query_spec.expected_results,
-                    ),
-                    .timestamp = env.object_count,
-                },
-            );
-            env.forest.grooves.things.insert(&thing);
-        }
+            const query_results_max =
+                env.random.intRangeAtMost(usize, 1, env.scan_lookup_buffer.len);
+            const query_results = results: {
+                const scan = env.scan_from_condition(query_spec, timestamp_previous);
+                env.scan_lookup = ScanLookup.init(&env.forest.grooves.things, scan);
 
-        try env.commit();
-    }
+                const scan_lookup_buffer = env.scan_lookup_buffer[0..query_results_max];
+                env.change_state(.fuzzing, .scanning);
+                env.scan_lookup.read(scan_lookup_buffer, &scan_lookup_callback);
+                try env.tick_until_state_change(.scanning, .fuzzing);
 
-    /// Templates are objects that match the condition, such as:
-    /// - The condition `a=1` (from now on represented only as `a` for brevity)
-    ///   generates a template with the field `a` set to `1`, so when inserting
-    ///   objects based on this template, they're expected to match.
-    ///
-    /// - The condition `(a OR b)` generates two templates, one with the
-    ///   field `a` and another one with the field `b` set, so both of them
-    ///   can satisfy the OR clause.
-    ///
-    /// - The condition `(a AND b)` generates only a single template that
-    ///   matches the criteria with both fields `a` and `b` set to the
-    ///   corresponding value.
-    ///
-    /// More complex queries like `(a OR b) AND (c OR d)` need to combine the
-    /// templates generated by each individual condition in such a way any of
-    /// them can satisfy the OR and AND clauses: {a,c},{a,d},{b,c}, and {b,d}.
-    fn template_matching_query(env: *const Environment, query_spec: *const QuerySpec) Thing {
-        var stack: [query_part_max]Thing = undefined;
-        var stack_top: usize = 0;
-        for (query_spec.query.const_slice()) |query_part| {
-            switch (query_part) {
-                .field => |field| {
-                    var thing = Thing.zeroed();
-                    thing.set_index(field.index, field.value);
-                    stack[stack_top] = thing;
-                    stack_top += 1;
-                },
-                .merge => |merge| {
-                    const operands = stack[stack_top - merge.operand_count .. stack_top];
-                    const result = switch (merge.operator) {
-                        .union_set => union_set: {
-                            const index = env.random.uintLessThan(usize, operands.len);
-                            break :union_set if (env.random.boolean())
-                                operands[index]
-                            else
-                                // Union `(a OR B)` should also match if the element contains
-                                // both `a` and `b`.
-                                Thing.merge_all(operands[index..][0..env.random.intRangeAtMost(
-                                    usize,
-                                    1,
-                                    operands.len - index,
-                                )]);
-                        },
-                        // Intersection matches only when the element contains all conditions.
-                        .intersection_set => Thing.merge_all(operands),
-                    };
-                    stack_top -= merge.operand_count;
-                    stack[stack_top] = result;
-                    stack_top += 1;
-                },
+                const query_results = env.scan_lookup_result.?;
+                env.scan_lookup_result = null;
+                break :results query_results;
+            };
+
+            var results_index: u32 = 0;
+            while (model_offset < env.model.items.len) {
+                defer model_offset += 1;
+
+                const model_index = switch (query_spec.direction) {
+                    .ascending => model_offset,
+                    .descending => env.model.items.len - model_offset - 1,
+                };
+                const model_result = &env.model.items[model_index];
+
+                if (query_spec.query_matches(model_result)) {
+                    assert(results_index < query_results.len);
+                    // Positive space:
+                    // - Each result is a valid, matching object from the model.
+                    // - The results are ordered correctly.
+                    const query_result = &query_results[results_index];
+                    assert(stdx.equal_bytes(Thing, model_result, query_result));
+
+                    timestamp_previous = query_result.timestamp;
+                    results_index += 1;
+                    if (results_index == query_results_max) break;
+                } else {
+                    maybe(results_index == query_results.len);
+                }
             }
+            // Negative space: The query didn't miss any matching objects.
+            assert(results_index == query_results.len);
+            results_count += @intCast(query_results.len);
         }
-
-        assert(stack_top == 1);
-        return stack[0];
-    }
-
-    fn run_query(env: *Environment, query_spec: *QuerySpec) !void {
-        assert(query_spec.expected_results > 0);
-
-        const pages = stdx.div_ceil(query_spec.expected_results, batch_max);
-        assert(pages > 0);
-
-        var result_count: u32 = 0;
-        var timestamp_prev: u64 = if (query_spec.reversed)
-            std.math.maxInt(u64)
-        else
-            0;
-
-        for (0..pages) |page| {
-            const results = try env.fetch_page(query_spec, timestamp_prev);
-
-            for (results) |result| {
-                if (query_spec.reversed)
-                    assert(timestamp_prev > result.timestamp)
-                else
-                    assert(timestamp_prev < result.timestamp);
-                timestamp_prev = result.timestamp;
-
-                assert(prefix_validate(query_spec.prefix, result.id));
-                assert(result.checksum_valid());
-                result_count += 1;
-            }
-
-            if (query_spec.expected_results <= batch_max) {
-                assert(results.len == query_spec.expected_results);
-            }
-
-            const remaining: u32 = query_spec.expected_results - result_count;
-            if (remaining == 0) {
-                assert(page == pages - 1);
-                assert(results.len + (page * batch_max) == query_spec.expected_results);
-            } else {
-                assert(results.len == batch_max);
-            }
-        }
-
-        assert(result_count == query_spec.expected_results);
-    }
-
-    fn fetch_page(
-        env: *Environment,
-        query_spec: *const QuerySpec,
-        timestamp_last: u64, // exclusive
-    ) ![]const Thing {
-        assert(env.forest.scan_buffer_pool.scan_buffer_used == 0);
-        defer {
-            assert(env.forest.scan_buffer_pool.scan_buffer_used > 0);
-
-            env.forest.scan_buffer_pool.reset();
-            env.forest.grooves.things.scan_builder.reset();
-        }
-
-        const scan = env.scan_from_condition(
-            &query_spec.query,
-            timestamp_last,
-            query_spec.reversed,
-        );
-        env.scan_lookup = ScanLookup.init(
-            &env.forest.grooves.things,
-            scan,
-        );
-
-        assert(env.scan_lookup_result == null);
-        defer env.scan_lookup_result = null;
-
-        env.change_state(.fuzzing, .scanning);
-        env.scan_lookup.read(env.scan_lookup_buffer, &scan_lookup_callback);
-        try env.tick_until_state_change(.scanning, .fuzzing);
-
-        return env.scan_lookup_result.?;
+        return results_count;
     }
 
     fn scan_from_condition(
         env: *Environment,
-        query: *const Query,
+        query_spec: *const QuerySpec,
         timestamp_last: u64, // exclusive
-        reversed: bool,
     ) *Scan {
         const scan_buffer_pool = &env.forest.scan_buffer_pool;
         const things_groove = &env.forest.grooves.things;
         const scan_builder: *ThingsGroove.ScanBuilder = &things_groove.scan_builder;
 
-        var stack = stdx.BoundedArrayType(*Scan, index_max){};
-        for (query.const_slice()) |query_part| {
+        var stack = stdx.BoundedArrayType(*Scan, query_scans_max){};
+        for (query_spec.query.const_slice()) |query_part| {
             switch (query_part) {
                 .field => |field| {
-                    const direction: Direction = if (reversed) .descending else .ascending;
                     const timestamp_range = if (timestamp_last == 0)
                         TimestampRange.all()
-                    else if (reversed)
+                    else if (query_spec.direction == .descending)
                         TimestampRange.lte(timestamp_last - 1)
                     else
                         TimestampRange.gte(timestamp_last + 1);
@@ -925,7 +715,7 @@ const Environment = struct {
                             lsm.snapshot_latest,
                             field.value,
                             timestamp_range,
-                            direction,
+                            query_spec.direction,
                         ),
                     };
                     stack.append_assume_capacity(scan);
@@ -1108,34 +898,14 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     );
     defer storage.deinit(allocator);
 
-    const repeat: u32 = @intCast(
+    const commits_max: u32 = @intCast(
         fuzz_args.events_max orelse
-            random.intRangeAtMostBiased(u32, 1, 32),
+            random.intRangeAtMost(u32, 1, 1024),
     );
 
-    try Environment.run(
-        &storage,
-        random,
-        repeat,
-    );
+    try Environment.run(&storage, random, commits_max);
 
     log.info("Passed!", .{});
-}
-
-fn prefix_combine(prefix: u32, suffix: u32) u64 {
-    assert(prefix != 0);
-    assert(suffix != 0);
-    return @as(u64, @intCast(prefix)) << 32 |
-        @as(u64, @intCast(suffix));
-}
-
-fn prefix_validate(prefix: u32, value: u128) bool {
-    assert(prefix != 0);
-    assert(value != 0);
-    assert(value >> 64 == 0); // Asserting it's not a random id.
-
-    const value_64: u64 = @truncate(value);
-    return prefix == @as(u32, @truncate(value_64 >> 32));
 }
 
 /// Returns true, `p` percent of the time, else false.
