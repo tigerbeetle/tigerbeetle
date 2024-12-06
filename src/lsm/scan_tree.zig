@@ -828,6 +828,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.values == .fetching);
 
             assert(self.scan.state == .seeking or
+                self.scan.state == .needs_data or
                 self.scan.state == .buffering);
 
             const manifest: *Manifest = &self.scan.tree.manifest;
