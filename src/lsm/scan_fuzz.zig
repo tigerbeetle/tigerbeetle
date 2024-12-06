@@ -28,7 +28,8 @@ const batch_objects_max: u32 = @divFloor(
     @sizeOf(Thing),
 );
 
-const commit_queries_max: u32 = 8;
+/// The max number of query specs generated per run.
+const query_spec_max = 8;
 
 /// The testing object.
 const Thing = extern struct {
@@ -264,21 +265,26 @@ const QuerySpecFuzzer = struct {
     index_cardinality: [thing_index_count]u64,
     indexes_used: std.EnumSet(Index) = std.EnumSet(Index).initEmpty(),
 
-    fn generate_query_spec(
+    fn generate_fuzz_query_specs(
         random: std.rand.Random,
         index_cardinality: [thing_index_count]u64,
-    ) QuerySpec {
-        var fuzzer = QuerySpecFuzzer{
-            .random = random,
-            .index_cardinality = index_cardinality,
-        };
-        const query_field_max = random.intRangeAtMost(u32, 1, query_scans_max);
-        const query = fuzzer.generate_query(query_field_max);
+    ) [query_spec_max]QuerySpec {
+        var query_specs: [query_spec_max]QuerySpec = undefined;
+        for (&query_specs) |*query_spec| {
+            var fuzzer = QuerySpecFuzzer{
+                .random = random,
+                .index_cardinality = index_cardinality,
+            };
 
-        return QuerySpec{
-            .query = query,
-            .direction = if (random.boolean()) .ascending else .descending,
-        };
+            const query_field_max = random.intRangeAtMost(u32, 1, query_scans_max);
+            const query = fuzzer.generate_query(query_field_max);
+
+            query_spec.* = .{
+                .query = query,
+                .direction = if (random.boolean()) .ascending else .descending,
+            };
+        }
+        return query_specs;
     }
 
     fn generate_query(self: *QuerySpecFuzzer, field_max: u32) Query {
@@ -491,7 +497,8 @@ const Environment = struct {
     superblock_context: SuperBlock.Context = undefined,
     grid: Grid,
     forest: Forest,
-    model: std.ArrayList(Thing), // Ordered by ascending timestamp.
+    model: std.ArrayListUnmanaged(Thing), // Ordered by ascending timestamp.
+    model_matches: [query_spec_max]std.DynamicBitSetUnmanaged,
     ticks_remaining: usize,
 
     op: u64 = 0,
@@ -508,9 +515,6 @@ const Environment = struct {
     ) !void {
         env.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
         errdefer env.trace.deinit(allocator);
-
-        env.model = std.ArrayList(Thing).init(allocator);
-        errdefer env.model.deinit();
 
         env.* = .{
             .storage = storage,
@@ -530,7 +534,8 @@ const Environment = struct {
                 .missing_tables_max = 0,
             }),
             .forest = undefined,
-            .model = env.model,
+            .model = .{},
+            .model_matches = [_]std.DynamicBitSetUnmanaged{.{}} ** query_spec_max,
 
             .scan_lookup_buffer = try allocator.alloc(Thing, batch_objects_max),
             .checkpoint_op = null,
@@ -539,7 +544,8 @@ const Environment = struct {
     }
 
     fn deinit(env: *Environment) void {
-        env.model.deinit();
+        for (&env.model_matches) |*matches| matches.deinit(allocator);
+        env.model.deinit(allocator);
         env.superblock.deinit(allocator);
         env.grid.deinit(allocator);
         env.trace.deinit(allocator);
@@ -575,6 +581,11 @@ const Environment = struct {
             cardinality.* = 1 +| fuzz.random_int_exponential(env.random, u64, 32);
         }
 
+        const query_specs = QuerySpecFuzzer.generate_fuzz_query_specs(random, index_cardinality);
+        for (&query_specs, 0..) |*query_spec, i| {
+            log.info("query_specs[{}]: {} {s}", .{ i, query_spec, @tagName(query_spec.direction) });
+        }
+
         for (0..commits_max) |_| {
             assert(env.state == .fuzzing);
 
@@ -583,10 +594,14 @@ const Environment = struct {
                 batch_objects_max
             else
                 random.intRangeAtMost(u32, 1, batch_objects_max);
-            try env.model.ensureUnusedCapacity(batch_objects);
+            try env.model.ensureUnusedCapacity(allocator, batch_objects);
+            for (&env.model_matches) |*query_matches| {
+                try query_matches.resize(allocator, env.model.items.len + batch_objects, false);
+            }
 
             for (0..batch_objects) |_| {
                 // TODO: sometimes update and delete things.
+                const thing_index = env.model.items.len;
                 const thing = Thing{
                     .id = env.random.int(u128),
                     .index_01 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[0]),
@@ -602,27 +617,32 @@ const Environment = struct {
                     .index_11 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[10]),
                     .index_12 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[11]),
                     .index_13 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[12]),
-                    .timestamp = env.model.items.len + 1,
+                    .timestamp = thing_index + 1,
                 };
+
                 env.forest.grooves.things.insert(&thing);
                 env.model.appendAssumeCapacity(thing);
+
+                for (&query_specs, &env.model_matches) |*query_spec, *query_matches| {
+                    query_matches.setValue(thing_index, query_spec.query_matches(&thing));
+                }
             }
             try env.commit();
 
-            for (0..commit_queries_max) |_| {
-                const query_spec = QuerySpecFuzzer.generate_query_spec(random, index_cardinality);
-                const query_results_count = try env.run_query(&query_spec);
-
-                log.debug("query: {} direction={s} results={}\n", .{
-                    query_spec,
-                    @tagName(query_spec.direction),
-                    query_results_count,
-                });
+            for (&query_specs, &env.model_matches) |*query_spec, *query_matches| {
+                const query_results_count = try env.run_query(query_spec, query_matches);
+                assert(query_results_count == query_matches.count()); // Sanity-check.
             }
         }
     }
 
-    fn run_query(env: *Environment, query_spec: *const QuerySpec) !u32 {
+    fn run_query(
+        env: *Environment,
+        query_spec: *const QuerySpec,
+        model_matches: *const std.DynamicBitSetUnmanaged,
+    ) !u32 {
+        assert(model_matches.bit_length >= env.model.items.len);
+
         var timestamp_previous: u64 = switch (query_spec.direction) {
             .ascending => 0,
             .descending => std.math.maxInt(u64),
@@ -663,14 +683,14 @@ const Environment = struct {
                     .ascending => model_offset,
                     .descending => env.model.items.len - model_offset - 1,
                 };
-                const model_result = &env.model.items[model_index];
 
-                if (query_spec.query_matches(model_result)) {
+                if (model_matches.isSet(model_index)) {
                     assert(results_index < query_results.len);
                     // Positive space:
                     // - Each result is a valid, matching object from the model.
                     // - The results are ordered correctly.
                     const query_result = &query_results[results_index];
+                    const model_result = &env.model.items[model_index];
                     assert(stdx.equal_bytes(Thing, model_result, query_result));
 
                     timestamp_previous = query_result.timestamp;
@@ -682,8 +702,13 @@ const Environment = struct {
             }
             // Negative space: The query didn't miss any matching objects.
             assert(results_index == query_results.len);
+
             results_count += @intCast(query_results.len);
+            assert(results_count <= model_matches.count());
+            assert(results_count == model_matches.count() or query_results.len > 0);
         }
+        assert(model_matches.count() == results_count);
+
         return results_count;
     }
 
@@ -900,7 +925,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
 
     const commits_max: u32 = @intCast(
         fuzz_args.events_max orelse
-            random.intRangeAtMost(u32, 1, 1024),
+            random.intRangeAtMost(u32, 1, 2048),
     );
 
     try Environment.run(&storage, random, commits_max);
