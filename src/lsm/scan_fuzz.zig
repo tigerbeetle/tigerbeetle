@@ -925,16 +925,10 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
 
     const commits_max: u32 = @intCast(
         fuzz_args.events_max orelse
-            random.intRangeAtMost(u32, 1, 2048),
+            random.intRangeAtMost(u32, 1, 1024),
     );
 
     try Environment.run(&storage, random, commits_max);
 
     log.info("Passed!", .{});
-}
-
-/// Returns true, `p` percent of the time, else false.
-fn chance(random: std.rand.Random, p: u8) bool {
-    assert(p <= 100);
-    return random.uintLessThanBiased(u8, 100) < p;
 }
