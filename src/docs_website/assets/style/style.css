@@ -425,7 +425,7 @@ article {
     display: flex;
     flex-direction: column;
     gap: 24px;
-    max-width: 858px;
+    max-width: 950px;
     padding: 48px 64px;
 
     color: var(--gray-11);
