@@ -917,6 +917,11 @@ pub fn StateMachineType(
             assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
+            log.debug("{?}: get_account_transfers: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
+
             if (self.get_scan_from_account_filter(filter)) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
@@ -967,6 +972,11 @@ pub fn StateMachineType(
 
         fn prefetch_get_account_balances(self: *StateMachine, filter: AccountFilter) void {
             assert(self.scan_lookup_result_count == null);
+
+            log.debug("{?}: get_account_balances: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
 
             self.forest.grooves.accounts.prefetch_enqueue(filter.account_id);
             self.forest.grooves.accounts.prefetch(
@@ -1215,6 +1225,11 @@ pub fn StateMachineType(
         fn prefetch_query_accounts(self: *StateMachine, filter: QueryFilter) void {
             assert(self.scan_lookup_result_count == null);
 
+            log.debug("{?}: query_accounts: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
+
             if (self.get_scan_from_query_filter(
                 AccountsGroove,
                 &self.forest.grooves.accounts,
@@ -1268,6 +1283,11 @@ pub fn StateMachineType(
 
         fn prefetch_query_transfers(self: *StateMachine, filter: QueryFilter) void {
             assert(self.scan_lookup_result_count == null);
+
+            log.debug("{?}: query_transfers: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
 
             if (self.get_scan_from_query_filter(
                 TransfersGroove,
