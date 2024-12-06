@@ -266,6 +266,30 @@ pub const log = if (builtin.is_test)
 else
     std.log;
 
+/// An alternative to the default logFn from `std.log`, which prepends a UTC timestamp.
+pub fn log_with_timestamp(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    const level_text = comptime message_level.asText();
+    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    const date_time = DateTimeUTC.now();
+
+    const stderr = std.io.getStdErr().writer();
+    var buffered_writer = std.io.bufferedWriter(stderr);
+    const writer = buffered_writer.writer();
+
+    std.debug.lockStdErr();
+    defer std.debug.unlockStdErr();
+    nosuspend {
+        date_time.format("", .{}, writer) catch return;
+        writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
+        buffered_writer.flush() catch return;
+    }
+}
+
 /// Compare two values by directly comparing the underlying memory.
 ///
 /// Assert at compile time that this is a reasonable thing to do for a given `T`. That is, check
@@ -855,15 +879,16 @@ pub const DateTimeUTC = struct {
     hour: u8,
     minute: u8,
     second: u8,
+    millisecond: u16,
 
     pub fn now() DateTimeUTC {
-        const timestamp_seconds = std.time.timestamp();
-        assert(timestamp_seconds > 0);
-        return DateTimeUTC.from_timestamp(@intCast(timestamp_seconds));
+        const timestamp_ms = std.time.milliTimestamp();
+        assert(timestamp_ms > 0);
+        return DateTimeUTC.from_timestamp_ms(@intCast(timestamp_ms));
     }
 
-    pub fn from_timestamp(timestamp: u64) DateTimeUTC {
-        const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = timestamp };
+    pub fn from_timestamp_ms(timestamp_ms: u64) DateTimeUTC {
+        const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @divTrunc(timestamp_ms, 1000) };
         const year_day = epoch_seconds.getEpochDay().calculateYearDay();
         const month_day = year_day.calculateMonthDay();
         const time = epoch_seconds.getDaySeconds();
@@ -875,6 +900,7 @@ pub const DateTimeUTC = struct {
             .hour = time.getHoursIntoDay(),
             .minute = time.getMinutesIntoHour(),
             .second = time.getSecondsIntoMinute(),
+            .millisecond = @intCast(@mod(timestamp_ms, 1000)),
         };
     }
 
@@ -886,13 +912,14 @@ pub const DateTimeUTC = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2} UTC", .{
+        try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
             datetime.year,
             datetime.month,
             datetime.day,
             datetime.hour,
             datetime.minute,
             datetime.second,
+            datetime.millisecond,
         });
     }
 };
