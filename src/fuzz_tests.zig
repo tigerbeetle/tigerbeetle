@@ -77,6 +77,7 @@ fn main_smoke() !void {
             .lsm_cache_map => 20_000,
             .lsm_forest => 10_000,
             .lsm_manifest_log => 2_000,
+            .lsm_scan => 100,
             .lsm_tree => 400,
             .vsr_free_set => 10_000,
             .vsr_superblock => 3,
@@ -86,7 +87,6 @@ fn main_smoke() !void {
             .lsm_manifest_level,
             .vsr_journal_format,
             .vsr_superblock_quorums,
-            .lsm_scan,
             .storage,
             => null,
         };

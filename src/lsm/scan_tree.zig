@@ -787,17 +787,28 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                         // If the next key is out of the range,
                         // there are no more `table_info`s to scan next.
                         const key_exclusive_next = iterating.key_exclusive_next;
-                        if (self.scan.key_min <= key_exclusive_next and
-                            key_exclusive_next <= self.scan.key_max)
-                        {
-                            // Load the next `table_info`.
-                            self.state = .loading_manifest;
-                            self.values = .fetching;
-                            self.move_next_manifest_table(key_exclusive_next);
-                        } else {
+                        if (switch (self.scan.direction) {
+                            .ascending => key_exclusive_next > self.scan.key_max,
+                            .descending => key_exclusive_next < self.scan.key_min,
+                        }) {
                             // The next `table_info` is out of the key range, so it's finished.
                             self.state = .{ .finished = .{} };
                             self.values = .finished;
+                        } else {
+                            // Load the next `table_info`.
+                            self.state = .loading_manifest;
+                            self.values = .fetching;
+                            if (switch (self.scan.direction) {
+                                .ascending => key_exclusive_next < self.scan.key_min,
+                                .descending => key_exclusive_next > self.scan.key_max,
+                            }) {
+                                // A probe() skipped past the last table we iterated, so our
+                                // key_exclusive_next is now out of bounds, superseded by the
+                                // tightened key_min (ascending) or key_max (descending) bound.
+                                self.move_next_manifest_table(null);
+                            } else {
+                                self.move_next_manifest_table(key_exclusive_next);
+                            }
                         }
                     } else {
                         // Keep iterating to the next `value_block`.
@@ -817,6 +828,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.values == .fetching);
 
             assert(self.scan.state == .seeking or
+                self.scan.state == .needs_data or
                 self.scan.state == .buffering);
 
             const manifest: *Manifest = &self.scan.tree.manifest;

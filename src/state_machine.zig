@@ -917,6 +917,11 @@ pub fn StateMachineType(
             assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
+            log.debug("{?}: get_account_transfers: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
+
             if (self.get_scan_from_account_filter(filter)) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
@@ -968,6 +973,11 @@ pub fn StateMachineType(
         fn prefetch_get_account_balances(self: *StateMachine, filter: AccountFilter) void {
             assert(self.scan_lookup_result_count == null);
 
+            log.debug("{?}: get_account_balances: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
+
             self.forest.grooves.accounts.prefetch_enqueue(filter.account_id);
             self.forest.grooves.accounts.prefetch(
                 prefetch_get_account_balances_lookup_account_callback,
@@ -1013,15 +1023,22 @@ pub fn StateMachineType(
                         );
 
                         return;
+                    } else {
+                        // TODO(batiati): Improve the way we do validations on the state machine.
+                        log.info("get_account_balances: invalid filter: {any}", .{filter});
                     }
+                } else {
+                    log.info(
+                        "get_account_balances: cannot query account.id={}; flags.history=false",
+                        .{filter.account_id},
+                    );
                 }
+            } else {
+                log.info(
+                    "get_account_balances: cannot query account.id={}; account does not exist",
+                    .{filter.account_id},
+                );
             }
-
-            // TODO(batiati): Improve the way we do validations on the state machine.
-            log.info(
-                "invalid filter for get_account_balances: {any}",
-                .{filter},
-            );
 
             // Returning an empty array on the next tick.
             self.forest.grid.on_next_tick(
@@ -1215,6 +1232,11 @@ pub fn StateMachineType(
         fn prefetch_query_accounts(self: *StateMachine, filter: QueryFilter) void {
             assert(self.scan_lookup_result_count == null);
 
+            log.debug("{?}: query_accounts: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
+
             if (self.get_scan_from_query_filter(
                 AccountsGroove,
                 &self.forest.grooves.accounts,
@@ -1268,6 +1290,11 @@ pub fn StateMachineType(
 
         fn prefetch_query_transfers(self: *StateMachine, filter: QueryFilter) void {
             assert(self.scan_lookup_result_count == null);
+
+            log.debug("{?}: query_transfers: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
 
             if (self.get_scan_from_query_filter(
                 TransfersGroove,
