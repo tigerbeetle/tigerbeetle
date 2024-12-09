@@ -16,7 +16,18 @@
   --yellow-10: #FFDC00;
   --sky-10: #74DAF8;
 
-  --primary: var(--blue-10);
+  --primary-1: #0080FF04;
+  --primary-2: #008CFF0B;
+  --primary-3: #008FF519;
+  --primary-4: #009EFF2A;
+  --primary-5: #0093FF3D;
+  --primary-6: #0088F653;
+  --primary-7: #0083EB71;
+  --primary-8: #0084E6A1;
+  --primary-9: #0090FFFF;
+  --primary-10: #0086F0FA;
+  --primary-11: #006DCBF2;
+  --primary-12: #002359EE;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -39,7 +50,18 @@
     --yellow-10: #FFEF5C;
     --sky-10: #A8EEFF;
 
-    --primary: var(--yellow-10);
+    --primary-1: #1C1500FF;
+    --primary-2: #221A00FF;
+    --primary-3: #2C2100FF;
+    --primary-4: #FDC2001C;
+    --primary-5: #FEC70026;
+    --primary-6: #FED80032;
+    --primary-7: #FFDB1344;
+    --primary-8: #FED8005E;
+    --primary-9: #FFE20AF3;
+    --primary-10: #FFF45EF9;
+    --primary-11: #FFCCOOEE;
+    --primary-12: #FFFFD5F9;
   }
 }
 
@@ -78,7 +100,7 @@ code {
 }
 
 .highlight {
-  background-color: color-mix(in srgb, var(--primary), transparent 75%);
+  background-color: color-mix(in srgb, var(--primary-10), transparent 75%);
 }
 
 nav.left-pane {
@@ -199,7 +221,7 @@ nav.left-pane {
       &:focus {
         padding-left: 30px;
         border-width: 2px;
-        border-color: var(--primary);
+        border-color: var(--primary-10);
         color: var(--gray-12);
       }
 
@@ -214,6 +236,7 @@ nav.left-pane {
   }
 
   .search-stats {
+    display: none;
     color: var(--gray-10);
     font-size: 12px;
     line-height: 20px;
@@ -234,16 +257,13 @@ nav.left-pane {
   background-color: var(--gray-0);
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding: 0 8px 0 16px;
+  padding: 0 8px 16px 16px;
   font-size: 12px;
   line-height: 16px;
   color: var(--gray-11);
   -webkit-user-select: none;
   user-select: none;
-
-  &:empty {
-    display: none;
-  }
+  display: none;
 
   .menu-head {
     display: flex;
@@ -276,15 +296,18 @@ nav.left-pane {
       font-weight: 600;
     }
 
-    &:hover {
-      background-color: var(--gray-3);
-      color: var(--gray-12);
+    &:hover,
+    &.selected {
+      background-color: var(--primary-3);
+      color: var(--primary-11);
+
+      h3 {
+        color: var(--primary-12);
+      }
     }
 
     &.selected {
-      box-sizing: content-box;
-      border: 2px solid var(--primary);
-      padding: 4px 14px;
+      background-color: var(--primary-5);
     }
   }
 }
@@ -454,12 +477,12 @@ article {
     }
 
     a {
-      color: var(--primary);
+      color: var(--primary-10);
       text-underline-offset: 0.2em;
       text-decoration-thickness: 1px;
 
       code {
-        color: var(--primary);
+        color: var(--primary-10);
       }
     }
 

@@ -69,6 +69,10 @@ function onSearchInput() {
     for (const result of group.results) {
       const a = document.createElement("a");
       menu.appendChild(a);
+      a.onclick = (e) => {
+        e.preventDefault();
+        select(a);
+      }
       a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
       a.pageIndex = result.section.pageIndex;
       const h3 = document.createElement("h3");
@@ -86,7 +90,10 @@ function onSearchInput() {
 
   highlightText(searchInput.value, searchResults);
 
-  searchClearButton.style.display = searchInput.value === "" ? "none" : "block";
+  const displaySearch = searchInput.value === "" ? "none" : "block";
+  searchClearButton.style.display = displaySearch;
+  searchResults.style.display = displaySearch;
+  searchStats.style.display = displaySearch;
 }
 
 function search(term) {
@@ -126,6 +133,7 @@ function makeContext(text, i, length, windowSize = 40) {
 }
 
 function select(result) {
+  searchResults.querySelectorAll(".selected").forEach(r => r.classList.remove("selected"));
   result.classList.add("selected");
   scrollIntoViewIfNeeded(result);
   const page = pages[result.pageIndex];
@@ -134,13 +142,12 @@ function select(result) {
   document.title = "TigerBeetle Docs | " + page.title;
   const anchor = document.querySelector(window.location.hash);
   anchor.scrollIntoView();
-  highlightText(searchInput.value);
+  highlightText(searchInput.value, content);
 }
 
 function selectNextResult() {
   const selected = searchResults.querySelector(".selected");
   if (selected) {
-    selected.classList.remove("selected");
     if (selected.nextSibling) {
       select(selected.nextSibling);
       return;
@@ -152,7 +159,6 @@ function selectNextResult() {
 function selectPreviousResult() {
   const selected = searchResults.querySelector(".selected");
   if (selected) {
-    selected.classList.remove("selected");
     if (selected.previousSibling) {
       select(selected.previousSibling);
       return;
@@ -190,6 +196,7 @@ document.addEventListener("keydown", event => {
     event.preventDefault();
   } else if (event.key === "Escape") {
     searchInput.blur();
+    searchHotkey.style.display = "block";
     searchInput.value = "";
     onSearchInput();
     event.preventDefault();
@@ -218,8 +225,7 @@ searchInput.addEventListener("keydown", event => {
 });
 searchClearButton.addEventListener("click", () => {
   searchInput.value = "";
-  searchResults.replaceChildren();
-  searchClearButton.style.display = "none";
+  onSearchInput();
   if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
 });
 
