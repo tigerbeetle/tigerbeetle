@@ -71,7 +71,7 @@ function onSearchInput() {
       menu.appendChild(a);
       a.addEventListener("click", (e) => {
         e.preventDefault();
-        select(a);
+        selectResult(a);
       });
       a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
       a.pageIndex = result.section.pageIndex;
@@ -132,13 +132,14 @@ function makeContext(text, i, length, windowSize = 40) {
   return contextLeft + highlight + contextRight;
 }
 
-function select(result) {
+function selectResult(node) {
   searchResults.querySelectorAll(".selected").forEach(r => r.classList.remove("selected"));
-  result.classList.add("selected");
-  scrollIntoViewIfNeeded(result);
-  const page = pages[result.pageIndex];
+  node.classList.add("selected");
+  scrollIntoViewIfNeeded(node, searchResults.parentNode);
+  // Preview result
+  const page = pages[node.pageIndex];
   content.innerHTML = page.html;
-  window.history.pushState({}, "", result.href);
+  window.history.pushState({}, "", node.href);
   document.title = "TigerBeetle Docs | " + page.title;
   const anchor = document.querySelector(window.location.hash);
   anchor.scrollIntoView();
@@ -146,30 +147,24 @@ function select(result) {
 }
 
 function selectNextResult() {
+  const nodes = [...searchResults.querySelectorAll("a")];
+  if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
-  if (selected) {
-    if (selected.nextSibling) {
-      select(selected.nextSibling);
-      return;
-    }
-  }
-  if (searchResults.firstChild) select(searchResults.firstChild);
+  const i = selected ? nodes.indexOf(selected) + 1 : 0;
+  selectResult(nodes[i % nodes.length]);
 }
 
 function selectPreviousResult() {
+  const nodes = [...searchResults.querySelectorAll("a")];
+  if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
-  if (selected) {
-    if (selected.previousSibling) {
-      select(selected.previousSibling);
-      return;
-    }
-  }
-  if (searchResults.lastChild) select(searchResults.lastChild)
+  const i = selected ? nodes.indexOf(selected) - 1 : -1;
+  selectResult(nodes[(i + nodes.length) % nodes.length]);
 }
 
-function scrollIntoViewIfNeeded(element) {
+function scrollIntoViewIfNeeded(element, parent) {
   const elementRect = element.getBoundingClientRect();
-  const parentRect = element.parentNode.getBoundingClientRect();
+  const parentRect = parent.getBoundingClientRect();
 
   const isOutOfView = (
     elementRect.top < parentRect.top ||
@@ -181,6 +176,13 @@ function scrollIntoViewIfNeeded(element) {
   if (isOutOfView) {
     element.scrollIntoView({ block: 'center', inline: 'center' });
   }
+}
+
+function closeSearch() {
+  searchInput.blur();
+  searchHotkey.style.display = "block";
+  searchInput.value = "";
+  onSearchInput();
 }
 
 function clickSelectedResult() {
@@ -195,11 +197,10 @@ document.addEventListener("keydown", event => {
     searchInput.focus();
     event.preventDefault();
   } else if (event.key === "Escape") {
-    searchInput.blur();
-    searchHotkey.style.display = "block";
-    searchInput.value = "";
-    onSearchInput();
-    event.preventDefault();
+    if (searchInput === document.activeElement || searchInput.value !== "") {
+      closeSearch();
+      event.preventDefault();
+    }
   }
 })
 
@@ -219,7 +220,9 @@ searchInput.addEventListener("keydown", event => {
     selectPreviousResult();
     event.preventDefault();
   } else if (event.key === "Enter") {
-    clickSelectedResult();
+    const selected = searchResults.querySelector(".selected");
+    if (!selected) selectNextResult();
+    closeSearch();
     event.preventDefault();
   }
 });
