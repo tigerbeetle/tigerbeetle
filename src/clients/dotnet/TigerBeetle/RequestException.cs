@@ -21,6 +21,8 @@ public sealed class RequestException : Exception
                 case PacketStatus.InvalidOperation: return "Invalid operation.";
                 case PacketStatus.InvalidDataSize: return "Invalid data size.";
                 case PacketStatus.ClientEvicted: return "Client was evicted.";
+                case PacketStatus.ClientReleaseTooLow: return "Client was evicted: release too old.";
+                case PacketStatus.ClientReleaseTooHigh: return "Client was evicted: release too new.";
                 case PacketStatus.ClientShutdown: return "Client was closed.";
                 default: return "Unknown error status " + Status;
             }

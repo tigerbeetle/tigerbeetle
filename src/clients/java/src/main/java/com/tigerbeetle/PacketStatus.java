@@ -9,9 +9,11 @@ public enum PacketStatus {
     Ok((byte) 0),
     TooMuchData((byte) 1),
     ClientEvicted((byte) 2),
-    ClientShutdown((byte) 3),
-    InvalidOperation((byte) 4),
-    InvalidDataSize((byte) 5);
+    ClientReleaseTooLow((byte) 3),
+    ClientReleaseTooHigh((byte) 4),
+    ClientShutdown((byte) 5),
+    InvalidOperation((byte) 6),
+    InvalidDataSize((byte) 7);
 
     public final byte value;
 

@@ -1172,11 +1172,15 @@ public enum PacketStatus : byte
 
     ClientEvicted = 2,
 
-    ClientShutdown = 3,
+    ClientReleaseTooLow = 3,
 
-    InvalidOperation = 4,
+    ClientReleaseTooHigh = 4,
 
-    InvalidDataSize = 5,
+    ClientShutdown = 5,
+
+    InvalidOperation = 6,
+
+    InvalidDataSize = 7,
 
 }
 

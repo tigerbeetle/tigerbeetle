@@ -28,9 +28,11 @@ class PacketStatus(enum.IntEnum):
     OK = 0
     TOO_MUCH_DATA = 1
     CLIENT_EVICTED = 2
-    CLIENT_SHUTDOWN = 3
-    INVALID_OPERATION = 4
-    INVALID_DATA_SIZE = 5
+    CLIENT_RELEASE_TOO_LOW = 3
+    CLIENT_RELEASE_TOO_HIGH = 4
+    CLIENT_SHUTDOWN = 5
+    INVALID_OPERATION = 6
+    INVALID_DATA_SIZE = 7
 
 
 Client = ctypes.c_void_p

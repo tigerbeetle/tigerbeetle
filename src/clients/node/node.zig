@@ -293,7 +293,11 @@ fn on_completion(
                 .pulse => unreachable,
             }
         },
-        .client_evicted, .client_shutdown => {}, // Handled on the JS side to throw exception.
+        .client_evicted,
+        .client_release_too_low,
+        .client_release_too_high,
+        .client_shutdown,
+        => {}, // Handled on the JS side to throw exception.
         .too_much_data => unreachable, // We limit packet data size during request().
         .invalid_operation => unreachable, // We check the operation during request().
         .invalid_data_size => unreachable, // We set correct data size during request().
@@ -343,6 +347,12 @@ fn on_completion_js(
                 },
                 .client_evicted => {
                     break :blk translate.throw(env, "Client was evicted.");
+                },
+                .client_release_too_low => {
+                    break :blk translate.throw(env, "Client was evicted: release too old.");
+                },
+                .client_release_too_high => {
+                    break :blk translate.throw(env, "Client was evicted: release too new.");
                 },
                 else => unreachable, // all other packet status' handled in previous callback.
             }

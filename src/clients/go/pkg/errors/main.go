@@ -34,6 +34,14 @@ type ErrClientEvicted struct{}
 
 func (s ErrClientEvicted) Error() string { return "Client was evicted." }
 
+type ErrClientReleaseTooLow struct{}
+
+func (s ErrClientReleaseTooLow) Error() string { return "Client was evicted: release too old." }
+
+type ErrClientReleaseTooHigh struct{}
+
+func (s ErrClientReleaseTooHigh) Error() string { return "Client was evicted; release too new." }
+
 type ErrClientClosed struct{}
 
 func (s ErrClientClosed) Error() string { return "Client was closed." }
