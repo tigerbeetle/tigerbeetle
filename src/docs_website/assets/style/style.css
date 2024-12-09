@@ -265,10 +265,6 @@ nav.left-pane {
   user-select: none;
   display: none;
 
-  .menu {
-    gap: 4px;
-  }
-
   .menu-head {
     display: flex;
     align-items: center;
