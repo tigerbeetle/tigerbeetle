@@ -205,8 +205,8 @@ pub const AccountingAuditor = struct {
         errdefer allocator.free(accounts_state);
         @memset(accounts_state, AccountState{});
 
-        // The number of known intersection values ​​for the secondary indices is kept
-        // low enough to explore different cardinalities.
+        // The number of known intersection values for the secondary indices is kept low enough to
+        // explore different cardinalities.
         const query_intersections = try allocator.alloc(
             QueryIntersection,
             options.accounts_max / 2,

@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
@@ -245,13 +246,31 @@ fn ScanMergeType(
                     }
 
                     if (self.merge_iterator) |*merge_iterator| {
-                        // It's not expected to probe a scan that already produced a key equals
-                        // or ahead the probe.
-                        assert(merge_iterator.key_popped == null or
+                        if (merge_iterator.key_popped) |key_popped| {
+                            // The new timestamp may lag behind the merge_iterator's latest key.
+                            //
+                            // Suppose there is a query:
+                            //   (index_1 AND (index_1 OR (index_2 AND index_3)))
+                            // with the listed timestamps in each index:
+                            //
+                            //   zig_zag_merge₁:     [              13, 13     ]
+                            //     tree₀:            [          12, 12, 13     ]
+                            //     k_way_merge₁:     [ 2, 2, 3,     12, 13, 14 ]
+                            //       tree₁:          [ 2, 2, 3,                ]
+                            //       zig_zag_merge₂: [              13, 13, 14 ]
+                            //         tree₂:        [ 2, 2, 3,     12, 13, 14 ]
+                            //         tree₃:        [              13, 13, 14 ]
+                            //
+                            // 1. While peeking the first key from zig_zag_merge₁, we peek 12 from
+                            //    tree₀ and 1 from k_way_merge₁. So we probe k_way_merge₁ with 12.
+                            // 2. k_way_merge₁ relays 11 to its streams (tree₁ + zig_zag_merge₂).
+                            // 3. Probing zig_zag_merge₂ with 12 trips the assert, because tree₃ has
+                            //    already produced a higher key (11 < 12).
                             switch (self.direction) {
-                            .ascending => merge_iterator.key_popped.? < timestamp,
-                            .descending => merge_iterator.key_popped.? > timestamp,
-                        });
+                                .ascending => maybe(key_popped < timestamp),
+                                .descending => maybe(key_popped > timestamp),
+                            }
+                        }
 
                         // Once the underlying streams have been changed, the merge iterator needs
                         // to reset its state, otherwise it may have dirty keys buffered.
