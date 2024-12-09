@@ -3,6 +3,73 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.17
+
+Released: 2024-12-09
+
+This release includes a correctness fix for the preview API `get_account_balances`,
+`get_account_transfers`, `query_accounts`, and `query_transfers`. If your application uses these
+features it might be affected.
+
+### Safety And Performance
+
+- [#2544](https://github.com/tigerbeetle/tigerbeetle/pull/2544)
+
+  Fix correctness bug which affected the preview `get_account_balances`, `get_account_transfers`,
+  `query_accounts`, and `query_transfers` queries. Specifically, if several filters are used (that
+  is, several fields in `QueryFilter` or `AccountFilter` are set), then some objects might be
+  missing from the result set.
+
+  The underlying data is safely stored in the database, so re-running these queries using the new
+  version of TigerBeetle will give correct results.
+
+- [#2550](https://github.com/tigerbeetle/tigerbeetle/pull/2550)
+
+  Fix panic in the node client which occurred on eviction.
+
+- [#2534](https://github.com/tigerbeetle/tigerbeetle/pull/2534)
+
+  Fix incorrect ABI used on aarch64 for the client library. To prevent such issues from cropping up
+  in the future, add aarch64 testing to CI.
+
+- [#2520](https://github.com/tigerbeetle/tigerbeetle/pull/2520)
+
+  Add extra assertions to verify object cache consistency.
+
+- [#2485](https://github.com/tigerbeetle/tigerbeetle/pull/2485)
+
+  Implement network fault injection in Vörtex, our non-deterministic whole system simulator.
+
+### Features
+
+- [#2539](https://github.com/tigerbeetle/tigerbeetle/pull/2539)
+
+  Log level can now be specified at runtime.
+
+- [#2538](https://github.com/tigerbeetle/tigerbeetle/pull/2538)
+
+  Log messages now include UTC timestamp (formatted as per [RFC 3339](https://www.rfc-editor.org/rfc/rfc3339)).
+
+### Internals
+
+- [#2543](https://github.com/tigerbeetle/tigerbeetle/pull/2543)
+
+  Relax compiler requirements for building TigerBeetle. While we only support building using one
+  specific version of Zig, the one downloaded via `./zig/download.sh`, you can try using other
+  versions.
+
+- [#2533](https://github.com/tigerbeetle/tigerbeetle/pull/2533)
+
+  Document how to handle errors during release. TigerBeetle's release process is complicated, as we
+  need to release, in lockstep, both the `tigerbeetle` binary and all the related client libraries.
+  The release process is intentionally designed to be "highly-available", such that a failure of any
+  aspect of a release can be safely detected, isolated, and repaired. But, so far, this wasn't
+  clearly spelled out in the documentation!
+
+### TigerTracks 🎧
+
+- [The Beetle's Buzz](https://soundcloud.com/kprotty/the-beetles-buzz)
+
 ## TigerBeetle 0.16.16
 
 Released: 2024-12-02
