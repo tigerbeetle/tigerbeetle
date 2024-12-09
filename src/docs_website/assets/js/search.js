@@ -52,27 +52,27 @@ function onSearchInput() {
     }
     currentGroup.results.push(result);
   }
-  const highlightQuery = `?highlight=${encodeURIComponent(searchInput.value)}`
-  searchResults.replaceChildren();
+  const highlightQuery = `?highlight=${encodeURIComponent(searchInput.value)}`;
+  const rootMenu = document.createElement("div");
+  rootMenu.classList.add("menu");
+  searchResults.replaceChildren(rootMenu);
   for (const group of groups) {
     const menuHead = document.createElement("div");
-    searchResults.appendChild(menuHead);
+    rootMenu.appendChild(menuHead);
     menuHead.classList.add("menu-head");
     menuHead.classList.add("expanded");
-    menuHead.innerText = pages[group.pageIndex].title;
-    menuHead.addEventListener("click", ev => {
-      if (ev.target == menuHead) menuHead.classList.toggle("expanded");
-    })
+    menuHead.innerHTML = `<p>${pages[group.pageIndex].title}</p>`;
+    menuHead.addEventListener("click", () => menuHead.classList.toggle("expanded"));
     const menu = document.createElement("div");
-    searchResults.appendChild(menu);
+    rootMenu.appendChild(menu);
     menu.classList.add("menu");
     for (const result of group.results) {
       const a = document.createElement("a");
       menu.appendChild(a);
-      a.onclick = (e) => {
+      a.addEventListener("click", (e) => {
         e.preventDefault();
         select(a);
-      }
+      });
       a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
       a.pageIndex = result.section.pageIndex;
       const h3 = document.createElement("h3");

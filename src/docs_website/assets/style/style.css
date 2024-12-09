@@ -255,15 +255,19 @@ nav.left-pane {
   grid-row: 1;
   z-index: 1;
   background-color: var(--gray-0);
+  color: var(--gray-10);
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding: 0 8px 16px 16px;
   font-size: 12px;
   line-height: 16px;
-  color: var(--gray-11);
   -webkit-user-select: none;
   user-select: none;
   display: none;
+
+  .menu {
+    gap: 4px;
+  }
 
   .menu-head {
     display: flex;
@@ -276,8 +280,12 @@ nav.left-pane {
     font-weight: 600;
     cursor: pointer;
 
+    p {
+      text-overflow: ellipsis;
+    }
+
     &:hover {
-      background-color: var(--gray-3);
+      background-color: var(--gray-2);
       color: var(--gray-12);
     }
   }
