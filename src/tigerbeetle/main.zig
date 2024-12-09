@@ -80,7 +80,7 @@ pub fn main() !void {
             try Command.start(arena.allocator(), args);
         },
         .version => |*args| try Command.version(allocator, args.verbose),
-        .repl => |*args| try Command.repl(&arena, args),
+        .repl => |*args| try Command.repl(arena.allocator(), args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
         .inspect => |*args| inspect.main(allocator, args) catch |err| {
             // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
@@ -623,15 +623,18 @@ const Command = struct {
         try stdout_buffer.flush();
     }
 
-    pub fn repl(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Repl) !void {
+    pub fn repl(allocator: mem.Allocator, args: *const cli.Command.Repl) !void {
         const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
-        try Repl.run(
-            arena,
+
+        var repl_instance = try Repl.init(
+            allocator,
             args.addresses.const_slice(),
             args.cluster,
-            args.statements,
             args.verbose,
         );
+        defer repl_instance.deinit(allocator);
+
+        try repl_instance.run(args.statements);
     }
 };
 

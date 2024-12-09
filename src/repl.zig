@@ -263,7 +263,7 @@ pub const Parser = struct {
     fn parse_arguments(
         parser: *Parser,
         operation: Operation,
-        arguments: *std.ArrayList(u8),
+        arguments: *std.ArrayListUnmanaged(u8),
     ) !void {
         const default: ObjectSyntaxTree = switch (operation) {
             .help, .none => return,
@@ -327,7 +327,7 @@ pub const Parser = struct {
                 inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_tree_field| {
                     if (std.mem.eql(u8, @tagName(object), object_tree_field.name)) {
                         const unwrapped_field = @field(object, object_tree_field.name);
-                        try arguments.appendSlice(std.mem.asBytes(&unwrapped_field));
+                        arguments.appendSliceAssumeCapacity(std.mem.asBytes(&unwrapped_field));
                     }
                 }
                 const state_machine_op = std.meta.stringToEnum(
@@ -402,7 +402,7 @@ pub const Parser = struct {
             inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_tree_field| {
                 if (std.mem.eql(u8, @tagName(object), object_tree_field.name)) {
                     const unwrapped_field = @field(object, object_tree_field.name);
-                    try arguments.appendSlice(std.mem.asBytes(&unwrapped_field));
+                    arguments.appendSliceAssumeCapacity(std.mem.asBytes(&unwrapped_field));
                 }
             }
         }
@@ -420,9 +420,9 @@ pub const Parser = struct {
     //   create_accounts id=1 code=2 ledger=3, id = 2 code= 2 ledger =3;
     //   create_accounts flags=linked | debits_must_not_exceed_credits ;
     pub fn parse_statement(
-        arena: *std.heap.ArenaAllocator,
         input: []const u8,
         terminal: *const Terminal,
+        arguments: *std.ArrayListUnmanaged(u8),
     ) (error{OutOfMemory} || std.fs.File.WriteError || Error)!Statement {
         var parser = Parser{ .input = input, .terminal = terminal };
         parser.eat_whitespace();
@@ -461,8 +461,7 @@ pub const Parser = struct {
             return Error.OperationBad;
         };
 
-        var arguments = std.ArrayList(u8).init(arena.allocator());
-        try parser.parse_arguments(operation, &arguments);
+        try parser.parse_arguments(operation, arguments);
 
         return Statement{
             .operation = operation,
@@ -475,9 +474,16 @@ const repl_history_entries = 256;
 const repl_history_entry_bytes_with_nul = 512;
 const repl_history_entry_bytes_without_nul = 511;
 
+const ReplBufferBoundedArray = stdx.BoundedArrayType(u8, repl_history_entry_bytes_without_nul);
+
 pub fn ReplType(comptime MessageBus: type) type {
     const Client = vsr.ClientType(StateMachine, MessageBus);
-    const HistoryBuffer = RingBufferType([repl_history_entry_bytes_with_nul]u8, .slice);
+
+    // Requires 512 * 256 == 128KiB of stack space.
+    const HistoryBuffer = RingBufferType(
+        [repl_history_entry_bytes_with_nul]u8,
+        .{ .array = repl_history_entries },
+    );
 
     return struct {
         event_loop_done: bool,
@@ -486,14 +492,18 @@ pub fn ReplType(comptime MessageBus: type) type {
         interactive: bool,
         debug_logs: bool,
 
-        client: *Client,
+        client: Client,
         terminal: Terminal,
         history: HistoryBuffer,
 
         /// Fixed-capacity buffer for reading input strings.
-        buffer: std.ArrayList(u8),
+        buffer: ReplBufferBoundedArray,
         /// Saved input string while navigating through history.
-        buffer_outside_history: std.ArrayList(u8),
+        buffer_outside_history: ReplBufferBoundedArray,
+
+        arguments: std.ArrayListUnmanaged(u8),
+        message_pool: *MessagePool,
+        io: *IO,
 
         const Repl = @This();
 
@@ -548,9 +558,9 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn read_until_newline_or_eof(
             repl: *Repl,
-        ) !?[]u8 {
-            repl.buffer.clearRetainingCapacity();
-            repl.buffer_outside_history.clearRetainingCapacity();
+        ) !?[]const u8 {
+            repl.buffer.clear();
+            repl.buffer_outside_history.clear();
 
             try repl.terminal.prompt_mode_set();
             defer repl.terminal.prompt_mode_unset() catch {};
@@ -571,14 +581,14 @@ pub fn ReplType(comptime MessageBus: type) type {
                     },
                     .newline => {
                         try repl.terminal.print("\n", .{});
-                        return repl.buffer.items;
+                        return repl.buffer.const_slice();
                     },
                     .printable => |character| {
-                        if (repl.buffer.items.len == repl.buffer.capacity) {
+                        if (repl.buffer.count() == repl_history_entry_bytes_without_nul) {
                             continue;
                         }
 
-                        const is_append = buffer_index == repl.buffer.items.len;
+                        const is_append = buffer_index == repl.buffer.count();
                         if (is_append) {
                             terminal_screen.update_cursor_position(1);
                             try repl.terminal.print("{c}", .{character});
@@ -598,7 +608,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             // the buffer after redrawing, and move it back to one position after
                             // the newly inserted character.
                             const buffer_redraw_len: isize = @intCast(
-                                repl.buffer.items.len - buffer_index,
+                                repl.buffer.count() - buffer_index,
                             );
                             // It's crucial to update in two steps because the terminal may have
                             // scrolled down as part of the text redraw.
@@ -606,13 +616,13 @@ pub fn ReplType(comptime MessageBus: type) type {
                             terminal_screen.update_cursor_position(1 - buffer_redraw_len);
                             try repl.terminal.print("{c}{s}\x1b[{};{}H", .{
                                 character,
-                                repl.buffer.items[buffer_index..],
+                                repl.buffer.const_slice()[buffer_index..],
                                 terminal_screen.cursor_row,
                                 terminal_screen.cursor_column,
                             });
                         }
 
-                        repl.buffer.insertAssumeCapacity(buffer_index, character);
+                        repl.buffer.insert_assume_capacity(buffer_index, character);
                         buffer_index += 1;
                     },
                     .backspace => if (buffer_index > 0) {
@@ -622,15 +632,15 @@ pub fn ReplType(comptime MessageBus: type) type {
                             terminal_screen.cursor_column,
                             // If we're deleting mid-buffer, we need to redraw everything that
                             // comes after as well.
-                            if (buffer_index < repl.buffer.items.len)
-                                repl.buffer.items[buffer_index..]
+                            if (buffer_index < repl.buffer.count())
+                                repl.buffer.const_slice()[buffer_index..]
                             else
                                 "",
                             terminal_screen.cursor_row,
                             terminal_screen.cursor_column,
                         });
                         buffer_index -= 1;
-                        _ = repl.buffer.orderedRemove(buffer_index);
+                        _ = repl.buffer.ordered_remove(buffer_index);
                     },
                     .left => if (buffer_index > 0) {
                         terminal_screen.update_cursor_position(-1);
@@ -640,7 +650,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         });
                         buffer_index -= 1;
                     },
-                    .right => if (buffer_index < repl.buffer.items.len) {
+                    .right => if (buffer_index < repl.buffer.count()) {
                         terminal_screen.update_cursor_position(1);
                         try repl.terminal.print("\x1b[{};{}H", .{
                             terminal_screen.cursor_row,
@@ -674,22 +684,22 @@ pub fn ReplType(comptime MessageBus: type) type {
                         });
 
                         if (history_index == repl.history.count) {
-                            repl.buffer_outside_history.clearRetainingCapacity();
-                            repl.buffer_outside_history.appendSliceAssumeCapacity(
-                                repl.buffer.items,
+                            repl.buffer_outside_history.clear();
+                            repl.buffer_outside_history.append_slice_assume_capacity(
+                                repl.buffer.const_slice(),
                             );
                         }
                         history_index = history_index_next;
 
-                        repl.buffer.clearRetainingCapacity();
-                        repl.buffer.appendSliceAssumeCapacity(buffer_next);
-                        buffer_index = repl.buffer.items.len;
+                        repl.buffer.clear();
+                        repl.buffer.append_slice_assume_capacity(buffer_next);
+                        buffer_index = repl.buffer.count();
                     },
                     .down => if (history_index < repl.history.count) {
                         const history_index_next = history_index + 1;
 
                         const buffer_next = if (history_index_next == repl.history.count)
-                            repl.buffer_outside_history.items
+                            repl.buffer_outside_history.const_slice()
                         else brk: {
                             const buffer_next_full = repl.history.get_ptr(history_index_next).?;
                             const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
@@ -718,9 +728,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                             terminal_screen.cursor_column,
                         });
 
-                        repl.buffer.clearRetainingCapacity();
-                        repl.buffer.appendSliceAssumeCapacity(buffer_next);
-                        buffer_index = repl.buffer.items.len;
+                        repl.buffer.clear();
+                        repl.buffer.append_slice_assume_capacity(buffer_next);
+                        buffer_index = repl.buffer.count();
                     },
                     .unhandled => {},
                 }
@@ -730,7 +740,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn do_repl(
             repl: *Repl,
-            arena: *std.heap.ArenaAllocator,
+            arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
             try repl.terminal.print(prompt, .{});
             const input = repl.read_until_newline_or_eof() catch |err| {
@@ -763,9 +773,9 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
 
             const statement = Parser.parse_statement(
-                arena,
                 input,
                 &repl.terminal,
+                arguments,
             ) catch |err| {
                 switch (err) {
                     // These are parsing errors, so the REPL should
@@ -825,62 +835,78 @@ pub fn ReplType(comptime MessageBus: type) type {
             , .{constants.semver});
         }
 
-        pub fn run(
-            arena: *std.heap.ArenaAllocator,
+        pub fn init(
+            allocator: std.mem.Allocator,
             addresses: []const std.net.Address,
             cluster_id: u128,
-            statements: []const u8,
             verbose: bool,
-        ) !void {
-            const allocator = arena.allocator();
+        ) !Repl {
+            var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+                allocator,
+                constants.message_size_max,
+            );
+            errdefer arguments.deinit(allocator);
 
-            var repl = Repl{
-                .client = undefined,
-                .debug_logs = verbose,
-                .request_done = true,
-                .event_loop_done = false,
-                .interactive = statements.len == 0,
-                .terminal = undefined,
-                .history = try HistoryBuffer.init(allocator, repl_history_entries),
-                .buffer = try std.ArrayList(u8).initCapacity(
-                    allocator,
-                    repl_history_entry_bytes_without_nul,
-                ),
-                .buffer_outside_history = try std.ArrayList(u8).initCapacity(
-                    allocator,
-                    repl_history_entry_bytes_without_nul,
-                ),
-            };
+            var message_pool = try allocator.create(MessagePool);
+            errdefer allocator.destroy(message_pool);
 
-            try Terminal.init(&repl.terminal, arena, repl.interactive);
+            message_pool.* = try MessagePool.init(allocator, .client);
+            errdefer message_pool.deinit(allocator);
 
-            try repl.debug("Connecting to '{any}'.\n", .{addresses});
+            var io = try allocator.create(IO);
+            errdefer allocator.destroy(io);
+
+            io.* = try IO.init(32, 0);
+            errdefer io.deinit();
 
             const client_id = std.crypto.random.int(u128);
-
-            var io = try IO.init(32, 0);
-
-            var message_pool = try MessagePool.init(allocator, .client);
-
-            var client = try Client.init(
+            const client = try Client.init(
                 allocator,
                 .{
                     .id = client_id,
                     .cluster = cluster_id,
                     .replica_count = @intCast(addresses.len),
-                    .message_pool = &message_pool,
+                    .message_pool = message_pool,
                     .message_bus_options = .{
                         .configuration = addresses,
-                        .io = &io,
+                        .io = io,
                     },
                 },
             );
-            repl.client = &client;
+            errdefer client.deinit(allocator);
 
-            client.register(register_callback, @intCast(@intFromPtr(&repl)));
+            return .{
+                .client = client,
+                .debug_logs = verbose,
+                .request_done = true,
+                .event_loop_done = false,
+                .interactive = false,
+                .terminal = undefined, // Init on run.
+                .history = HistoryBuffer.init(), // No corresponding deinit.
+                .buffer = .{},
+                .buffer_outside_history = .{},
+                .arguments = arguments,
+                .message_pool = message_pool,
+                .io = io,
+            };
+        }
+
+        pub fn deinit(repl: *Repl, allocator: std.mem.Allocator) void {
+            repl.client.deinit(allocator);
+            repl.io.deinit();
+            repl.message_pool.deinit(allocator);
+            allocator.destroy(repl.message_pool);
+            repl.arguments.deinit(allocator);
+        }
+
+        pub fn run(repl: *Repl, statements: []const u8) !void {
+            repl.interactive = statements.len == 0;
+            try Terminal.init(&repl.terminal, repl.interactive); // No corresponding deinit.
+
+            repl.client.register(register_callback, @intCast(@intFromPtr(repl)));
             while (!repl.event_loop_done) {
                 repl.client.tick();
-                try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+                try repl.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
             }
             repl.event_loop_done = false;
 
@@ -895,19 +921,16 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             while (!repl.event_loop_done) {
                 if (repl.request_done) {
-                    // Release allocation after every execution.
-                    var execution_arena = std.heap.ArenaAllocator.init(allocator);
-                    defer execution_arena.deinit();
-
+                    repl.arguments.clearRetainingCapacity();
                     if (repl.interactive) {
-                        try repl.do_repl(&execution_arena);
+                        try repl.do_repl(&repl.arguments);
                     } else blk: {
                         const statement_string = statements_iterator.?.next() orelse break :blk;
 
                         const statement = Parser.parse_statement(
-                            &execution_arena,
                             statement_string,
                             &repl.terminal,
+                            &repl.arguments,
                         ) catch |err| {
                             switch (err) {
                                 // These are parsing errors and since this
@@ -953,7 +976,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 }
 
                 repl.client.tick();
-                try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+                try repl.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
             }
         }
 
@@ -1376,11 +1399,18 @@ test "repl.zig: Parser single transfer successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
+
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
+        );
+        errdefer arguments.deinit(allocator);
 
         const statement = try Parser.parse_statement(
-            &arena,
             vector.string,
             &null_terminal,
+            &arguments,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1433,11 +1463,18 @@ test "repl.zig: Parser multiple transfers successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
+
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
+        );
+        errdefer arguments.deinit(allocator);
 
         const statement = try Parser.parse_statement(
-            &arena,
             vector.string,
             &null_terminal,
+            &arguments,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1524,12 +1561,15 @@ test "repl.zig: Parser single account successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
 
-        const statement = try Parser.parse_statement(
-            &arena,
-            vector.string,
-            &null_terminal,
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
         );
+        errdefer arguments.deinit(allocator);
+
+        const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
         try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
@@ -1592,12 +1632,15 @@ test "repl.zig: Parser account filter successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
 
-        const statement = try Parser.parse_statement(
-            &arena,
-            vector.string,
-            &null_terminal,
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
         );
+        errdefer arguments.deinit(allocator);
+
+        const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
 
         try std.testing.expectEqual(statement.operation, vector.operation);
         try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
@@ -1656,11 +1699,18 @@ test "repl.zig: Parser query filter successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
+
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
+        );
+        errdefer arguments.deinit(allocator);
 
         const statement = try Parser.parse_statement(
-            &arena,
             vector.string,
             &null_terminal,
+            &arguments,
         );
 
         try std.testing.expectEqual(statement.operation, vector.operation);
@@ -1713,11 +1763,18 @@ test "repl.zig: Parser multiple accounts successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
+
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
+        );
+        errdefer arguments.deinit(allocator);
 
         const statement = try Parser.parse_statement(
-            &arena,
             vector.string,
             &null_terminal,
+            &arguments,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -1844,11 +1901,18 @@ test "repl.zig: Parser odd but correct formatting" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
+
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
+        );
+        errdefer arguments.deinit(allocator);
 
         const statement = try Parser.parse_statement(
-            &arena,
             vector.string,
             &null_terminal,
+            &arguments,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -1918,11 +1982,18 @@ test "repl.zig: Handle parsing errors" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
+
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
+        );
+        errdefer arguments.deinit(allocator);
 
         const result = Parser.parse_statement(
-            &arena,
             vector.string,
             &null_terminal,
+            &arguments,
         );
         try std.testing.expectError(vector.result, result);
     }
@@ -1954,11 +2025,18 @@ test "repl.zig: Parser fails for operations not supporting multiple objects" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+        const allocator = arena.allocator();
+
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
+        );
+        errdefer arguments.deinit(allocator);
 
         const result = Parser.parse_statement(
-            &arena,
             vector.string,
             &null_terminal,
+            &arguments,
         );
 
         try std.testing.expectError(vector.result, result);
