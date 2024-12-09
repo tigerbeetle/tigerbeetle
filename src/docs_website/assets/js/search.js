@@ -4,8 +4,8 @@ let sections = [];
 const searchInput = document.querySelector("input[type=search]");
 const searchResults = document.querySelector(".search-results");
 const searchStats = document.querySelector(".search-stats");
-const searchHotkey = document.querySelector(".search-container>.hotkey");
-const searchClearButton = document.querySelector(".search-container>.clear-button");
+const searchHotkey = document.querySelector(".search-box>.hotkey");
+const searchClearButton = document.querySelector(".search-box>.clear-button");
 const content = document.querySelector("article>.content");
 
 async function init() {

@@ -24,33 +24,35 @@
   </head>
   <body>
     <nav class="left-pane">
-      <header>
-        <div class="logo">
-          <a href="https://tigerbeetle.com" aria-label="TigerBeetle website">
-            <svg width="127" height="24" viewBox="0 0 127 24" aria-label="TigerBeetle logo">
-              <use href="#svg-tigerbeetle-logo"></use>
-            </svg>
-          </a>
+      <div class="top">
+        <header>
+          <div class="logo">
+            <a href="https://tigerbeetle.com" aria-label="TigerBeetle website">
+              <svg width="127" height="24" viewBox="0 0 127 24" aria-label="TigerBeetle logo">
+                <use href="#svg-tigerbeetle-logo"></use>
+              </svg>
+            </a>
+          </div>
+          <div class="line"></div>
+          <a href="$url_prefix/">Docs</a>
+          <div class="spacer"></div>
+          <a class="collapse-button" onclick="collapse()">«</a>
+        </header>
+        <div class="search-box">
+          <input type="search" placeholder="Search" value="architecture" />
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M14 14L10 10M2 6.66667C2 7.2795 2.12071 7.88634 2.35523 8.45252C2.58975 9.01871 2.93349 9.53316 3.36683 9.9665C3.80018 10.3998 4.31462 10.7436 4.88081 10.9781C5.447 11.2126 6.05383 11.3333 6.66667 11.3333C7.2795 11.3333 7.88634 11.2126 8.45252 10.9781C9.01871 10.7436 9.53316 10.3998 9.9665 9.9665C10.3998 9.53316 10.7436 9.01871 10.9781 8.45252C11.2126 7.88634 11.3333 7.2795 11.3333 6.66667C11.3333 6.05383 11.2126 5.447 10.9781 4.88081C10.7436 4.31462 10.3998 3.80018 9.9665 3.36683C9.53316 2.93349 9.01871 2.58975 8.45252 2.35523C7.88634 2.12071 7.2795 2 6.66667 2C6.05383 2 5.447 2.12071 4.88081 2.35523C4.31462 2.58975 3.80018 2.93349 3.36683 3.36683C2.93349 3.80018 2.58975 4.31462 2.35523 4.88081C2.12071 5.447 2 6.05383 2 6.66667Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg class="hotkey" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="0.5" y="0.5" width="15" height="15" rx="2.5" stroke="var(--gray-7)"/>
+            <path d="M9.55584 3.38636L7.21209 12.0938H6.44505L8.7888 3.38636H9.55584Z" fill="var(--gray-11)"/>
+          </svg>    
+          <svg class="clear-button" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M2.34401 13.656C1.57993 12.918 0.970469 12.0353 0.551197 11.0592C0.131925 10.0832 -0.0887645 9.03345 -0.0979951 7.97121C-0.107226 6.90898 0.095188 5.85554 0.497435 4.87237C0.899682 3.8892 1.49371 2.99598 2.24485 2.24484C2.99599 1.4937 3.88921 0.899675 4.87238 0.497427C5.85555 0.0951804 6.90898 -0.107233 7.97122 -0.0980027C9.03345 -0.0887722 10.0832 0.131918 11.0592 0.55119C12.0353 0.970462 12.918 1.57992 13.656 2.344C15.1133 3.85282 15.9196 5.87364 15.9014 7.97121C15.8832 10.0688 15.0418 12.0753 13.5586 13.5585C12.0753 15.0418 10.0688 15.8832 7.97122 15.9014C5.87364 15.9196 3.85283 15.1133 2.34401 13.656ZM9.12001 8L11.384 5.736L10.256 4.608L8.00001 6.872L5.73601 4.608L4.60801 5.736L6.87201 8L4.60801 10.264L5.73601 11.392L8.00001 9.128L10.264 11.392L11.392 10.264L9.12801 8H9.12001Z" fill="currentColor"/>
+          </svg>
         </div>
-        <div class="line"></div>
-        <a href="$url_prefix/">Docs</a>
-        <div class="spacer"></div>
-        <a class="collapser" onclick="collapse()">«</a>
-      </header>
-      <div class="search-container">
-        <input type="search" placeholder="Search" />
-        <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M14 14L10 10M2 6.66667C2 7.2795 2.12071 7.88634 2.35523 8.45252C2.58975 9.01871 2.93349 9.53316 3.36683 9.9665C3.80018 10.3998 4.31462 10.7436 4.88081 10.9781C5.447 11.2126 6.05383 11.3333 6.66667 11.3333C7.2795 11.3333 7.88634 11.2126 8.45252 10.9781C9.01871 10.7436 9.53316 10.3998 9.9665 9.9665C10.3998 9.53316 10.7436 9.01871 10.9781 8.45252C11.2126 7.88634 11.3333 7.2795 11.3333 6.66667C11.3333 6.05383 11.2126 5.447 10.9781 4.88081C10.7436 4.31462 10.3998 3.80018 9.9665 3.36683C9.53316 2.93349 9.01871 2.58975 8.45252 2.35523C7.88634 2.12071 7.2795 2 6.66667 2C6.05383 2 5.447 2.12071 4.88081 2.35523C4.31462 2.58975 3.80018 2.93349 3.36683 3.36683C2.93349 3.80018 2.58975 4.31462 2.35523 4.88081C2.12071 5.447 2 6.05383 2 6.66667Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <svg class="hotkey" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="0.5" y="0.5" width="15" height="15" rx="2.5" stroke="var(--gray-7)"/>
-          <path d="M9.55584 3.38636L7.21209 12.0938H6.44505L8.7888 3.38636H9.55584Z" fill="var(--gray-11)"/>
-        </svg>    
-        <svg class="clear-button" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M2.34401 13.656C1.57993 12.918 0.970469 12.0353 0.551197 11.0592C0.131925 10.0832 -0.0887645 9.03345 -0.0979951 7.97121C-0.107226 6.90898 0.095188 5.85554 0.497435 4.87237C0.899682 3.8892 1.49371 2.99598 2.24485 2.24484C2.99599 1.4937 3.88921 0.899675 4.87238 0.497427C5.85555 0.0951804 6.90898 -0.107233 7.97122 -0.0980027C9.03345 -0.0887722 10.0832 0.131918 11.0592 0.55119C12.0353 0.970462 12.918 1.57992 13.656 2.344C15.1133 3.85282 15.9196 5.87364 15.9014 7.97121C15.8832 10.0688 15.0418 12.0753 13.5586 13.5585C12.0753 15.0418 10.0688 15.8832 7.97122 15.9014C5.87364 15.9196 3.85283 15.1133 2.34401 13.656ZM9.12001 8L11.384 5.736L10.256 4.608L8.00001 6.872L5.73601 4.608L4.60801 5.736L6.87201 8L4.60801 10.264L5.73601 11.392L8.00001 9.128L10.264 11.392L11.392 10.264L9.12801 8H9.12001Z" fill="currentColor"/>
-        </svg>
+        <p class="search-stats"></p>
       </div>
-      <p class="search-stats"></p>
       <div class="wrapper">
         <div class="search-results"></div>
         <nav class="side">
@@ -127,7 +129,7 @@
         navSideState.expanded.forEach((e, i) => { if (e) menuHeads[i].classList.add("expanded"); });
         navSide.scrollTop = navSideState.scrollTop;
       }
-      addEventListener("beforeunload", () => {
+      document.addEventListener("beforeunload", () => {
         const navSideState = {
           width: leftPane.style.width,
           expanded: menuHeads.map(e => e.classList.contains("expanded")),
