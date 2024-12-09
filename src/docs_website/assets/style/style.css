@@ -281,6 +281,8 @@ nav.left-pane {
     cursor: pointer;
 
     p {
+      white-space: nowrap;
+      overflow: hidden;
       text-overflow: ellipsis;
     }
 
@@ -302,6 +304,9 @@ nav.left-pane {
       font-size: 13px;
       line-height: 16px;
       font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     &:hover,
