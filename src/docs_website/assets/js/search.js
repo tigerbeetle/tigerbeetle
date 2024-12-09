@@ -72,7 +72,7 @@ function onSearchInput() {
         e.preventDefault();
         selectResult(a);
       });
-      a.href = urlPrefix + "/" + result.section.path + result.section.hash;
+      a.href = urlPrefix + "/" + result.section.path + "/" + result.section.hash;
       a.pageIndex = result.section.pageIndex;
       const h3 = document.createElement("h3");
       a.appendChild(h3);
@@ -140,7 +140,7 @@ function selectResult(node) {
   content.innerHTML = page.html;
   window.history.pushState({}, "", node.href);
   document.title = "TigerBeetle Docs | " + page.title;
-  const anchor = document.querySelector(window.location.hash);
+  const anchor = document.getElementById(window.location.hash.slice(1));
   anchor.scrollIntoView();
   highlightText(searchInput.value, content);
 }
