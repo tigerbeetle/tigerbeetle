@@ -273,7 +273,7 @@ nav.left-pane {
     gap: 8px;
     font-size: 12px;
     line-height: 20px;
-    font-weight: 600;
+    font-weight: 400;
     cursor: pointer;
 
     p {
@@ -353,6 +353,9 @@ nav.side {
       margin: -6px -8px -6px -4px;
       padding: 6px 8px 6px 4px;
       box-sizing: content-box;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
 
       &:hover {
         color: var(--gray-12);
