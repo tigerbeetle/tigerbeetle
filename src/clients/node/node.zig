@@ -266,34 +266,37 @@ fn on_completion(
     _ = timestamp;
 
     switch (packet.status) {
-        .ok => {},
+        .ok => {
+            switch (@as(Operation, @enumFromInt(packet.operation))) {
+                inline else => |op| {
+                    const event_count = @divExact(
+                        packet.data_size,
+                        @sizeOf(StateMachine.EventType(op)),
+                    );
+                    const buffer: BufferType(op) = .{
+                        .ptr = @ptrCast(packet),
+                        .count = event_count,
+                    };
+
+                    const Result = StateMachine.ResultType(op);
+                    const results: []const Result = @alignCast(std.mem.bytesAsSlice(
+                        Result,
+                        result_ptr.?[0..result_len],
+                    ));
+                    @memcpy(buffer.results()[0..results.len], results);
+
+                    packet.data_size = @bitCast(BufferSize{
+                        .event_count = @intCast(event_count),
+                        .result_count = @intCast(results.len),
+                    });
+                },
+                .pulse => unreachable,
+            }
+        },
         .client_evicted, .client_shutdown => {}, // Handled on the JS side to throw exception.
         .too_much_data => unreachable, // We limit packet data size during request().
         .invalid_operation => unreachable, // We check the operation during request().
         .invalid_data_size => unreachable, // We set correct data size during request().
-    }
-
-    switch (@as(Operation, @enumFromInt(packet.operation))) {
-        inline else => |op| {
-            const event_count = @divExact(packet.data_size, @sizeOf(StateMachine.EventType(op)));
-            const buffer: BufferType(op) = .{
-                .ptr = @ptrCast(packet),
-                .count = event_count,
-            };
-
-            const Result = StateMachine.ResultType(op);
-            const results: []const Result = @alignCast(std.mem.bytesAsSlice(
-                Result,
-                result_ptr.?[0..result_len],
-            ));
-            @memcpy(buffer.results()[0..results.len], results);
-
-            packet.data_size = @bitCast(BufferSize{
-                .event_count = @intCast(event_count),
-                .result_count = @intCast(results.len),
-            });
-        },
-        .pulse => unreachable,
     }
 
     // Queue the packet to be processed on the JS thread to invoke its JS callback.
