@@ -87,14 +87,21 @@ nav.left-pane {
   overflow: hidden;
   width: 300px;
 
+  >.top {
+    display: flex;
+    flex-direction: column;
+    padding: 16px 16px 12px 16px;
+    gap: 4px;
+  }
+
   header {
     display: flex;
     align-items: center;
     gap: 12px;
     color: var(--gray-12);
-    padding: 16px;
-    font-size: 14px;
-    line-height: 16px;
+    font-size: 15px;
+    line-height: 20px;
+    padding-bottom: 16px;
 
     .logo {
       a {
@@ -126,18 +133,18 @@ nav.left-pane {
       flex: 1;
     }
 
-    .collapser {
+    .collapse-button {
       cursor: pointer;
+      display: block;
       width: 16px;
-      height: 16px;
+      line-height: 16px;
       text-align: center;
       font-size: 16px;
     }
   }
 
-  .search-container {
+  .search-box {
     position: relative;
-    margin: 4px 16px 8px 16px;
 
     .search-icon {
       position: absolute;
@@ -210,7 +217,7 @@ nav.left-pane {
     color: var(--gray-10);
     font-size: 12px;
     line-height: 20px;
-    padding: 0 24px;
+    padding: 0 8px;
   }
 
   .wrapper {
