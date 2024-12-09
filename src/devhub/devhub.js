@@ -34,7 +34,7 @@ function mainReleaseRotation() {
       "batiati",
       "cb22",
       "chaitanyabhandari",
-      "kprotty",
+      "fabioarnold",
       "matklad",
       "sentientwaffle",
     ];
