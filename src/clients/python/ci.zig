@@ -67,6 +67,33 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     version: []const u8,
     tigerbeetle: []const u8,
 }) !void {
+    const tmp_dir = try shell.create_tmp_dir();
+    defer shell.cwd.deleteTree(tmp_dir) catch {};
+
+    try shell.exec("python3 -m venv {tmp_dir}", .{ .tmp_dir = tmp_dir });
+
+    for (0..9) |_| {
+        if (shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={version}", .{
+            .tmp_dir = tmp_dir,
+            .version = options.version,
+        })) {
+            break;
+        } else |_| {
+            log.warn("waiting for 5 minutes for the {s} version to appear in PyPi", .{
+                options.version,
+            });
+            std.time.sleep(5 * std.time.ns_per_min);
+        }
+    } else {
+        shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={version}", .{
+            .tmp_dir = tmp_dir,
+            .version = options.version,
+        }) catch |err| {
+            log.err("package is not available in PyPi", .{});
+            return err;
+        };
+    }
+
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
         .prebuilt = options.tigerbeetle,
     });
@@ -74,13 +101,6 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     errdefer tmp_beetle.log_stderr();
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
-    const tmp_dir = try shell.create_tmp_dir();
-    try shell.exec("python3 -m venv {tmp_dir}", .{ .tmp_dir = tmp_dir });
-
-    try shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={version}", .{
-        .version = options.version,
-        .tmp_dir = tmp_dir,
-    });
 
     try Shell.copy_path(
         shell.project_root,
