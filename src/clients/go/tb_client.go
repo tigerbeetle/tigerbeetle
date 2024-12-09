@@ -226,6 +226,10 @@ func (c *c_client) doRequest(
 			return 0, errors.ErrMaximumBatchSizeExceeded{}
 		case C.TB_PACKET_CLIENT_EVICTED:
 			return 0, errors.ErrClientEvicted{}
+		case C.TB_PACKET_CLIENT_RELEASE_TOO_LOW:
+			return 0, errors.ErrClientReleaseTooLow{}
+		case C.TB_PACKET_CLIENT_RELEASE_TOO_HIGH:
+			return 0, errors.ErrClientReleaseTooHigh{}
 		case C.TB_PACKET_CLIENT_SHUTDOWN:
 			return 0, errors.ErrClientClosed{}
 		case C.TB_PACKET_INVALID_OPERATION:

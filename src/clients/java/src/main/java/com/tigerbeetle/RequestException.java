@@ -33,6 +33,10 @@ public final class RequestException extends RuntimeException {
             return "Invalid data size.";
         else if (status == PacketStatus.ClientEvicted.value)
             return "Client was evicted";
+        else if (status == PacketStatus.ClientReleaseTooLow.value)
+            return "Client was evicted: release too old";
+        else if (status == PacketStatus.ClientReleaseTooHigh.value)
+            return "Client was evicted: release too new";
         else if (status == PacketStatus.ClientShutdown.value)
             return "Client was closed";
         else

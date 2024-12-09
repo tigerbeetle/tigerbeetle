@@ -90,6 +90,8 @@ pub fn ContextType(
             TooMuchData,
             ClientShutdown,
             ClientEvicted,
+            ClientReleaseTooLow,
+            ClientReleaseTooHigh,
             InvalidOperation,
             InvalidDataSize,
         };
@@ -107,7 +109,7 @@ pub fn ContextType(
         implementation: ContextImplementation,
 
         canceled: bool,
-        evicted: bool,
+        evicted: ?vsr.Header.Eviction.Reason,
 
         signal: Signal,
         submitted: Packet.SubmissionStack,
@@ -197,7 +199,7 @@ pub fn ContextType(
             context.shutdown = Atomic(bool).init(false);
             context.pending = .{ .name = null };
             context.canceled = false;
-            context.evicted = false;
+            context.evicted = null;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.on_signal);
@@ -256,16 +258,22 @@ pub fn ContextType(
             on_signal(&self.signal);
         }
 
-        fn client_eviction_callback(client: *Client, _: *const Message.Eviction) void {
+        fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
             const self: *Context = @fieldParentPtr("client", client);
-            assert(!self.evicted);
+            assert(self.evicted == null);
 
-            self.evicted = true;
+            log.debug("{}: client_eviction_callback: reason={?s} reason_int={}", .{
+                self.client_id,
+                std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
+                @intFromEnum(eviction.header.reason),
+            });
+
+            self.evicted = eviction.header.reason;
             self.cancel_all();
         }
 
         pub fn tick(self: *Context) void {
-            if (!self.evicted) {
+            if (self.evicted == null) {
                 self.client.tick();
             }
         }
@@ -302,8 +310,8 @@ pub fn ContextType(
         fn request(self: *Context, packet: *Packet) void {
             assert(self.batch_size_limit != null);
 
-            if (self.evicted) {
-                return self.on_complete(packet, error.ClientEvicted);
+            if (self.evicted) |reason| {
+                return self.on_complete(packet, client_eviction_error(reason));
             }
 
             const operation: StateMachine.Operation = operation_from_int(packet.operation) orelse {
@@ -561,7 +569,11 @@ pub fn ContextType(
         }
 
         fn cancel(self: *Context, packet: *Packet) void {
-            const result = if (self.evicted) error.ClientEvicted else error.ClientShutdown;
+            const result = if (self.evicted) |reason|
+                client_eviction_error(reason)
+            else
+                error.ClientShutdown;
+
             var it: ?*Packet = packet;
             while (it) |batched| {
                 assert(batched.batch_next == null or batched.batch_allowed);
@@ -584,6 +596,8 @@ pub fn ContextType(
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
                     error.ClientEvicted => .client_evicted,
+                    error.ClientReleaseTooLow => .client_release_too_low,
+                    error.ClientReleaseTooHigh => .client_release_too_high,
                     error.ClientShutdown => .client_shutdown,
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,
@@ -680,5 +694,17 @@ pub fn ContextType(
                 ));
             }
         }
+    };
+}
+
+fn client_eviction_error(reason: vsr.Header.Eviction.Reason) error{
+    ClientEvicted,
+    ClientReleaseTooLow,
+    ClientReleaseTooHigh,
+} {
+    return switch (reason) {
+        .client_release_too_low => error.ClientReleaseTooLow,
+        .client_release_too_high => error.ClientReleaseTooHigh,
+        else => error.ClientEvicted,
     };
 }
