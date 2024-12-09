@@ -169,7 +169,14 @@ fn start(allocator: std.mem.Allocator, options: struct {
         }
     }
 
-    if (options.args.trace) |_| {
+    // Some options require the "--experimental" flag.
+    const experimental: bool =
+        options.args.trace != null or
+        options.args.cache_accounts != null or
+        options.args.cache_transfers != null or
+        options.args.cache_transfers_pending != null or
+        options.args.cache_account_balances != null;
+    if (experimental) {
         try start_args.append(arena.allocator(), "--experimental");
     }
 
