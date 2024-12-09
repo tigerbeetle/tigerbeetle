@@ -23,6 +23,9 @@
 //! 3. The workload receives the results, and expects them to be of the same operation type as
 //!    originally requested. There might be fewer results than events, because clients can omit
 //!    .ok results.
+//!
+//! Additionally, the workload itself sends `Progress` events on its stdout back to the supervisor.
+//! This is used for tracing and liveness checks.
 
 const std = @import("std");
 const stdx = @import("../../stdx.zig");
@@ -60,14 +63,30 @@ pub fn main(
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
+    const stdout = std.io.getStdOut().writer().any();
+
     for (0..std.math.maxInt(u64)) |i| {
+        const command_timestamp_start: u64 = @intCast(std.time.microTimestamp());
         const command = random_command(random, &model);
         const result = try execute(command, driver) orelse break;
         try reconcile(result, &command, &model);
+        const command_timestamp_end: u64 = @intCast(std.time.microTimestamp());
+        try progress_write(stdout, .{
+            .event_count = command.event_count(),
+            .timestamp_start_micros = command_timestamp_start,
+            .timestamp_end_micros = command_timestamp_end,
+        });
 
+        const query_timestamp_start: u64 = @intCast(std.time.microTimestamp());
         const query = lookup_all_accounts(&model);
         const query_result = try execute(query, driver) orelse break;
         try reconcile(query_result, &query, &model);
+        const query_timestamp_end: u64 = @intCast(std.time.microTimestamp());
+        try progress_write(stdout, .{
+            .event_count = query.event_count(),
+            .timestamp_start_micros = query_timestamp_start,
+            .timestamp_end_micros = query_timestamp_end,
+        });
 
         log.info(
             "accounts created = {d}, transfers = {d}, pending transfers = {d}, commands run = {d}",
@@ -86,6 +105,15 @@ const Command = union(enum) {
     create_transfers: []tb.Transfer,
     lookup_all_accounts: []u128,
     lookup_latest_transfers: []u128,
+
+    fn event_count(command: Command) usize {
+        return switch (command) {
+            .create_accounts => |entries| entries.len,
+            .create_transfers => |entries| entries.len,
+            .lookup_all_accounts => |entries| entries.len,
+            .lookup_latest_transfers => |entries| entries.len,
+        };
+    }
 };
 
 const CommandBuffers = FixedSizeBuffersType(Command);
@@ -489,4 +517,15 @@ pub fn receive(
     assert(try reader.readAtLeast(buf, buf.len) == buf.len);
 
     return results[0..results_count];
+}
+
+/// A message written to stdout by the workload, communicating the progress it makes.
+pub const Progress = extern struct {
+    event_count: u64,
+    timestamp_start_micros: u64,
+    timestamp_end_micros: u64,
+};
+
+fn progress_write(writer: std.io.AnyWriter, stats: Progress) !void {
+    try writer.writeAll(std.mem.asBytes(&stats));
 }
