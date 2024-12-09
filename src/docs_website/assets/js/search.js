@@ -52,7 +52,6 @@ function onSearchInput() {
     }
     currentGroup.results.push(result);
   }
-  const highlightQuery = `?highlight=${encodeURIComponent(searchInput.value)}`;
   const rootMenu = document.createElement("div");
   rootMenu.classList.add("menu");
   searchResults.replaceChildren(rootMenu);
@@ -73,7 +72,7 @@ function onSearchInput() {
         e.preventDefault();
         selectResult(a);
       });
-      a.href = urlPrefix + "/" + result.section.path + "/" + highlightQuery + result.section.hash;
+      a.href = urlPrefix + "/" + result.section.path + result.section.hash;
       a.pageIndex = result.section.pageIndex;
       const h3 = document.createElement("h3");
       a.appendChild(h3);
@@ -183,12 +182,7 @@ function closeSearch() {
   searchHotkey.style.display = "block";
   searchInput.value = "";
   onSearchInput();
-}
-
-function clickSelectedResult() {
-  const selected = searchResults.querySelector(".selected") || searchResults.firstChild;
-  if (!selected) return;
-  selected.click();
+  removeTextHighlight(content);
 }
 
 document.addEventListener("keydown", event => {
@@ -230,51 +224,28 @@ searchClearButton.addEventListener("click", () => {
   searchInput.value = "";
   onSearchInput();
   if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
+  removeTextHighlight(content);
 });
 
-if (location.search) {
-  const params = new URLSearchParams(location.search);
-  const highlight = params.get("highlight");
-  if (highlight) highlightText(decodeURIComponent(highlight), content);
-}
-
-function highlightText(term, node) {
+function highlightText(term, container) {
   const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(escapedTerm, 'gi');
-  traverseAndHighlight(node, regex);
+  const regex = new RegExp(`(${escapedTerm})`, 'gi');
+  let replacements = [];
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  let node;
+  while (node = walker.nextNode()) {
+    const parent = node.parentNode;
+    if (parent && node.nodeValue.match(regex)) {
+      const span = document.createElement("span");
+      span.innerHTML = node.nodeValue.replace(regex, '<span class="highlight">$1</span>');
+      replacements.push({parent, node, span});
+    }
+  }
+  replacements.forEach(r => r.parent.replaceChild(r.span, r.node));
 }
 
-function traverseAndHighlight(node, regex) {
-  if (node.nodeType === Node.TEXT_NODE) {
-    const match = node.nodeValue.match(regex);
-    if (match) {
-      const fragment = document.createDocumentFragment();
-
-      let lastIndex = 0;
-      node.nodeValue.replace(regex, (matchedText, offset) => {
-        // Add plain text before the match
-        if (offset > lastIndex) {
-          fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex, offset)));
-        }
-
-        const span = document.createElement('span');
-        span.className = 'highlight';
-        span.textContent = matchedText;
-        fragment.appendChild(span);
-
-        lastIndex = offset + matchedText.length;
-      });
-
-      // Add any remaining text after the last match
-      if (lastIndex < node.nodeValue.length) {
-        fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex)));
-      }
-
-      node.parentNode.replaceChild(fragment, node);
-    }
-  } else if (node.nodeType === Node.ELEMENT_NODE) {
-    node.childNodes.forEach(child => traverseAndHighlight(child, regex));
-  }
+function removeTextHighlight(container) {
+  container.querySelectorAll(".highlight").forEach(h => h.classList.remove("highlight"));
 }
 
 function escapeHtml(unsafe) {
