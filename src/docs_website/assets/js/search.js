@@ -197,6 +197,19 @@ document.addEventListener("keydown", event => {
       closeSearch();
       event.preventDefault();
     }
+  } else if (searchInput.value !== "") {
+    if (event.key === "ArrowDown") {
+      selectNextResult();
+      event.preventDefault();
+    } else if (event.key === "ArrowUp") {
+      selectPreviousResult();
+      event.preventDefault();
+    } else if (event.key === "Enter") {
+      const selected = searchResults.querySelector(".selected");
+      if (!selected) selectNextResult();
+      closeSearch();
+      event.preventDefault();
+    }
   }
 })
 
@@ -207,21 +220,6 @@ searchInput.addEventListener("blur", () => {
   if (searchInput.value === "") searchHotkey.style.display = "block";
 });
 searchInput.addEventListener("input", onSearchInput);
-searchInput.addEventListener("keydown", event => {
-  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
-  if (event.key === "ArrowDown") {
-    selectNextResult();
-    event.preventDefault();
-  } else if (event.key === "ArrowUp") {
-    selectPreviousResult();
-    event.preventDefault();
-  } else if (event.key === "Enter") {
-    const selected = searchResults.querySelector(".selected");
-    if (!selected) selectNextResult();
-    closeSearch();
-    event.preventDefault();
-  }
-});
 searchClearButton.addEventListener("click", () => {
   searchInput.value = "";
   onSearchInput();
