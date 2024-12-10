@@ -17,7 +17,6 @@ const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
 const ReplicaHealth = @import("../testing/cluster.zig").ReplicaHealth;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
-const Storage = @import("../testing/storage.zig").Storage;
 
 const slot_count = constants.journal_slot_count;
 const checkpoint_1 = vsr.Checkpoint.checkpoint_after(0);

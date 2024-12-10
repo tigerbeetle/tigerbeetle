@@ -27,7 +27,6 @@ const Grid = vsr.GridType(Storage);
 
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
 const SuperBlock = vsr.SuperBlockType(Storage);
-const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
 /// The runtime maximum log level.

@@ -1,6 +1,5 @@
 const std = @import("std");
 const math = std.math;
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);

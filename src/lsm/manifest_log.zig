@@ -20,7 +20,6 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
-const math = std.math;
 const mem = std.mem;
 const maybe = stdx.maybe;
 
@@ -35,7 +34,6 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
-const BlockType = @import("schema.zig").BlockType;
 const compaction = @import("compaction.zig");
 const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
 const schema = @import("schema.zig");
@@ -52,7 +50,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         const SuperBlock = SuperBlockType(Storage);
         const Grid = GridType(Storage);
-        const Label = schema.ManifestNode.Label;
 
         pub const Callback = *const fn (manifest_log: *ManifestLog) void;
 

@@ -25,8 +25,6 @@ const multiversioning = @import("../multiversioning.zig");
 const changelog = @import("./changelog.zig");
 
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
-const multiversion_binary_platform_size_max = multiversioning.multiversion_binary_platform_size_max;
-const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 
 const Language = enum { dotnet, go, java, node, python, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
