@@ -1,11 +1,14 @@
 .content pre {
-  border-radius: 15px;
-  padding: 30px;
+  border-radius: 7px;
   background-color: var(--gray-1);
   border: 1px solid var(--gray-4);
-  overflow: auto;
+  padding: 2px;
+  overflow: hidden;
 
   code {
+    display: block;
+    padding: 6px 12px;
+    overflow: auto;
     color: var(--gray-12);
   }
 
