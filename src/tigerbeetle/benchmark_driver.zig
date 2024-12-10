@@ -59,8 +59,19 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
             .args = args,
         });
     } else {
-        if (args.trace) |_| {
-            vsr.fatal(.cli, "--trace: incompatible with --addresses", .{});
+        // Arguments forwarded to the replica cannot be used with a cluster started by the user.
+        inline for (.{
+            "cache_accounts",
+            "cache_transfers",
+            "cache_transfers_pending",
+            "cache_account_balances",
+            "cache_grid",
+            "trace",
+            "file",
+        }) |arg_name| {
+            if (@field(args, arg_name) != null) {
+                vsr.fatal(.cli, "--" ++ arg_name ++ ": incompatible with --addresses", .{});
+            }
         }
     }
 
@@ -169,13 +180,10 @@ fn start(allocator: std.mem.Allocator, options: struct {
         }
     }
 
-    // Some options require the "--experimental" flag.
-    const experimental: bool =
-        options.args.trace != null or
-        options.args.cache_accounts != null or
-        options.args.cache_transfers != null or
-        options.args.cache_transfers_pending != null or
-        options.args.cache_account_balances != null;
+    // Some of the forwarded arguments require the "--experimental" flag.
+    const experimental: bool = inline for (forward_args) |forward_arg| {
+        if (forward_arg[0] != null) break true;
+    } else false;
     if (experimental) {
         try start_args.append(arena.allocator(), "--experimental");
     }
