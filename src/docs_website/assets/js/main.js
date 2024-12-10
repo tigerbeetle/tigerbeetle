@@ -223,6 +223,7 @@ function closeSearch() {
   searchInput.value = "";
   onSearchInput();
   removeTextHighlight(content);
+  syncSideNavWithLocation();
 }
 
 document.addEventListener("keydown", event => {
@@ -294,7 +295,7 @@ function escapeHtml(unsafe) {
 
 function syncSideNavWithLocation() {
   const target = document.querySelector("nav.side .target");
-  if (target) target.classList.remove(".target");
+  if (target) target.classList.remove("target");
 
   let path = location.pathname;
   if (path.endsWith("/")) path = path.slice(0, -1);
