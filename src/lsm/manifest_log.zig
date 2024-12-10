@@ -1239,6 +1239,14 @@ const Pace = struct {
         /// The number of live tables.
         tables_count: u32,
     }) u32 {
+        if (options.tables_count > pace.tables_max) {
+            vsr.fatal(
+                .forest_tables_count_would_exceed_limit,
+                "forest_tables_count would exceed limit (tables_count={} tables_max={}) - " ++
+                    "please contact the team directly who will be able to assist",
+                .{ options.tables_count, pace.tables_max },
+            );
+        }
         assert(options.tables_count <= pace.tables_max);
 
         // Pretend we have an extra half_bar_append_blocks_max blocks so that we always switch to
@@ -1257,7 +1265,7 @@ const Pace = struct {
         // Our "target" block count extrapolates a log block count from our table count and the
         // log's maximum load factor.
         const log_blocks_target = @max(1, @divFloor(
-            pace.log_blocks_cycle_max * options.tables_count,
+            @as(u64, @intCast(pace.log_blocks_cycle_max)) * options.tables_count,
             pace.tables_max,
         ));
 
