@@ -8,7 +8,47 @@ const searchHotkey = document.querySelector(".search-box>.hotkey");
 const searchClearButton = document.querySelector(".search-box>.clear-button");
 const content = document.querySelector("article>.content");
 
-async function init() {
+const leftPane = document.querySelector(".left-pane");
+const resizer = document.querySelector(".resizer");
+resizer.addEventListener("mousedown", (e) => {
+  document.body.style.cursor = "ew-resize";
+  document.body.style.userSelect = "none";
+  document.addEventListener("mousemove", handleMouseMove);
+  document.addEventListener("mouseup", () => {
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    document.removeEventListener("mousemove", handleMouseMove);
+  });
+  function handleMouseMove(e) {
+    leftPane.style.width = e.clientX + "px";
+  }
+});
+
+const navSide = document.querySelector("nav.side");
+const menuHeads = [...navSide.querySelectorAll(".menu-head")];
+menuHeads.forEach(e => e.addEventListener("click", ev => {
+  if (ev.target == e) e.classList.toggle("expanded");
+}));
+
+syncSideNavWithLocation();
+
+// Restore and save the state of the side navigation
+const navSideState = JSON.parse(localStorage.getItem("navSideState"));
+if (navSideState) {
+  if (navSideState.width) leftPane.style.width = navSideState.width;
+  navSideState.expanded.forEach((e, i) => { if (e) menuHeads[i].classList.add("expanded"); });
+  navSide.scrollTop = navSideState.scrollTop;
+}
+document.addEventListener("beforeunload", () => {
+  const navSideState = {
+    width: leftPane.style.width,
+    expanded: menuHeads.map(e => e.classList.contains("expanded")),
+    scrollTop: navSide.scrollTop,
+  };
+  localStorage.setItem("navSideState", JSON.stringify(navSideState));
+});
+
+async function initSearch() {
   const response = await fetch(urlPrefix + "/search-index.json");
   pages = await response.json();
   const parser = new DOMParser();
@@ -39,7 +79,7 @@ async function init() {
   if (searchInput.value) onSearchInput(); // Repeat search once the index is fetched.
 }
 
-init();
+initSearch();
 
 function onSearchInput() {
   const results = search(searchInput.value);
@@ -238,7 +278,7 @@ function highlightText(term, container) {
     if (parent && node.nodeValue.match(regex)) {
       const span = document.createElement("span");
       span.innerHTML = node.nodeValue.replace(regex, '<span class="highlight">$1</span>');
-      replacements.push({parent, node, span});
+      replacements.push({ parent, node, span });
     }
   }
   replacements.forEach(r => r.parent.replaceChild(r.span, r.node));
@@ -250,4 +290,25 @@ function removeTextHighlight(container) {
 
 function escapeHtml(unsafe) {
   return unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+}
+
+function syncSideNavWithLocation() {
+  const target = document.querySelector("nav.side .target");
+  if (target) target.classList.remove(".target");
+
+  let path = location.pathname;
+  if (path.endsWith("/")) path = path.slice(0, -1);
+  document.querySelectorAll("nav.side a").forEach(a => {
+    if (a.href.endsWith(path)) {
+      a.classList.add("target");
+      for (let parent = a.parentElement; parent; parent = parent.parentElement) {
+        if (parent.matches(".menu")) {
+          const head = parent.previousSibling;
+          if (head?.matches?.(".menu-head")) head.classList.add("expanded");
+        } else if (parent.matches(".menu-head")) {
+          parent.classList.add("expanded"); // expand for discoverability
+        }
+      }
+    }
+  });
 }
