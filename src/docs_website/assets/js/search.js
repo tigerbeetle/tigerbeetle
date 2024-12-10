@@ -180,7 +180,11 @@ function selectResult(node) {
   const page = pages[node.pageIndex];
   content.innerHTML = page.html;
   window.history.pushState({}, "", node.href);
-  document.title = "TigerBeetle Docs | " + page.title;
+  if (page.title === "TigerBeetle Docs") {
+    document.title = page.title;
+  } else {
+    document.title = "TigerBeetle Docs | " + page.title;
+  }
   const anchor = document.getElementById(window.location.hash.slice(1));
   anchor.scrollIntoView();
   highlightText(searchInput.value, content);
