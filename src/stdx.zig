@@ -8,6 +8,8 @@ pub const BoundedArrayType = @import("./stdx/bounded_array.zig").BoundedArrayTyp
 pub const ZipfianGenerator = @import("./stdx/zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("./stdx/zipfian.zig").ZipfianShuffled;
 
+pub const memory_lock_allocated = @import("./stdx/mlock.zig").memory_lock_allocated;
+
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
         switch (@typeInfo(@TypeOf(numerator))) {
