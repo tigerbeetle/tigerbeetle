@@ -87,7 +87,68 @@
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
       }
+
+      const leftPane = document.querySelector(".left-pane");
+      const resizer = document.querySelector(".resizer");
+      resizer.addEventListener("mousedown", (e) => {
+        document.body.style.cursor = "ew-resize";
+        document.body.style.userSelect = "none";
+        document.addEventListener("mousemove", handleMouseMove);
+        document.addEventListener("mouseup", () => {
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+          document.removeEventListener("mousemove", handleMouseMove);
+        });
+        function handleMouseMove(e) {
+          leftPane.style.width = e.clientX + "px";
+        }
+      });
+
+      const navSide = document.querySelector("nav.side");
+      const menuHeads = [...navSide.querySelectorAll(".menu-head")];
+      menuHeads.forEach(e => e.addEventListener("click", ev => {
+        if (ev.target == e) e.classList.toggle("expanded");
+      }));
+
+      syncSideNavWithLocation();
+
+      // Restore and save the state of the side navigation
+      const navSideState = JSON.parse(localStorage.getItem("navSideState"));
+      if (navSideState) {
+        if (navSideState.width) leftPane.style.width = navSideState.width;
+        navSideState.expanded.forEach((e, i) => { if (e) menuHeads[i].classList.add("expanded"); });
+        navSide.scrollTop = navSideState.scrollTop;
+      }
+      document.addEventListener("beforeunload", () => {
+        const navSideState = {
+          width: leftPane.style.width,
+          expanded: menuHeads.map(e => e.classList.contains("expanded")),
+          scrollTop: navSide.scrollTop,
+        };
+        localStorage.setItem("navSideState", JSON.stringify(navSideState));
+      });
+
+      function syncSideNavWithLocation() {
+        const target = document.querySelector("nav.side .target");
+        if (target) target.classList.remove("target");
+
+        let path = location.pathname;
+        if (path.endsWith("/")) path = path.slice(0, -1);
+        document.querySelectorAll("nav.side a").forEach(a => {
+          if (a.href.endsWith(path)) {
+            a.classList.add("target");
+            for (let parent = a.parentElement; parent; parent = parent.parentElement) {
+              if (parent.matches(".menu")) {
+                const head = parent.previousSibling;
+                if (head?.matches?.(".menu-head")) head.classList.add("expanded");
+              } else if (parent.matches(".menu-head")) {
+                parent.classList.add("expanded"); // expand for discoverability
+              }
+            }
+          }
+        });
+      }
     </script>
-    <script src="$url_prefix/js/main.js"></script>
+    <script src="$url_prefix/js/search.js"></script>
   </body>
 </html>
