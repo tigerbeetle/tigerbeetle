@@ -16,7 +16,6 @@ const schema = @import("schema.zig");
 
 const TreeConfig = @import("tree.zig").TreeConfig;
 const Direction = @import("../direction.zig").Direction;
-const GridType = @import("../vsr/grid.zig").GridType;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);

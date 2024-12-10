@@ -11,7 +11,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_lsm_manifest_log);
-const maybe = stdx.maybe;
 
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");

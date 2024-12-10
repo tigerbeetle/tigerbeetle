@@ -4,12 +4,9 @@ const assert = std.debug.assert;
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const vsr = @import("../../vsr.zig");
-const Header = vsr.Header;
 const ProcessType = vsr.ProcessType;
 
 const Network = @import("network.zig").Network;
-
-const log = std.log.scoped(.message_bus);
 
 pub const Process = union(ProcessType) {
     replica: u8,

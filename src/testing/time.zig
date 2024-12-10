@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 
 pub const OffsetType = enum {
     linear,

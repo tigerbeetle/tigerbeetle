@@ -11,17 +11,12 @@
 //!   corrupt blocks.
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.grid_blocks_missing);
-const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
 const vsr = @import("../vsr.zig");
 
-const GridType = @import("./grid.zig").GridType;
 const FIFOType = @import("../fifo.zig").FIFOType;
-const IOPS = @import("../iops.zig").IOPS;
 const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
 pub const GridBlocksMissing = struct {

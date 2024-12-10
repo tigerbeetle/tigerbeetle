@@ -1,5 +1,4 @@
 const std = @import("std");
-const os = std.os;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.storage);

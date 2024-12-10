@@ -10,7 +10,6 @@ const c = @cImport({
 
 const stdx = @import("../../stdx.zig");
 const constants = @import("../../constants.zig");
-const Packet = @import("tb_client/packet.zig").Packet;
 
 const Mutex = std.Thread.Mutex;
 const Condition = std.Thread.Condition;

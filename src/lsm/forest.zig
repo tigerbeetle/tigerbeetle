@@ -10,19 +10,14 @@ const constants = @import("../constants.zig");
 
 const schema = @import("schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
-const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
-const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
 const ResourcePoolType = @import("compaction.zig").ResourcePoolType;
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
-const snapshot_max_for_table_input = @import("compaction.zig").snapshot_max_for_table_input;
 const compaction_op_min = @import("compaction.zig").compaction_op_min;
 const compaction_block_count_bar_max = @import("compaction.zig").compaction_block_count_bar_max;
 const compaction_block_count_beat_min = @import("compaction.zig").compaction_block_count_beat_min;
-
-const IO = @import("../io.zig").IO;
 
 /// The maximum number of tables for the forest as a whole. This is set a bit backwards due to how
 /// the code is structured: a single tree should be able to use all the tables in the forest, so the

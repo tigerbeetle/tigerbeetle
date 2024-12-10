@@ -8,16 +8,10 @@ const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 
 const Account = tb.Account;
-const AccountFlags = tb.AccountFlags;
 const Transfer = tb.Transfer;
-const TransferFlags = tb.TransferFlags;
-const CreateAccountsResult = tb.CreateAccountsResult;
-const CreateTransfersResult = tb.CreateTransfersResult;
 const AccountFilter = tb.AccountFilter;
-const AccountFilterFlags = tb.AccountFilterFlags;
 const AccountBalance = tb.AccountBalance;
 const QueryFilter = tb.QueryFilter;
-const QueryFilterFlags = tb.QueryFilterFlags;
 
 const vsr = @import("vsr");
 const Storage = vsr.storage.StorageType(vsr.io.IO);

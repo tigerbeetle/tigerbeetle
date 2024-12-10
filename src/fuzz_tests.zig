@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const flags = @import("./flags.zig");
 const constants = @import("./constants.zig");
 const fuzz = @import("./testing/fuzz.zig");
-const fatal = flags.fatal;
 
 const log = std.log.scoped(.fuzz);
 

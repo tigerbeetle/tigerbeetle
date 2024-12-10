@@ -12,12 +12,9 @@ const allocator = fuzz.allocator;
 const log = std.log.scoped(.lsm_tree_fuzz);
 
 const Direction = @import("../direction.zig").Direction;
-const Transfer = @import("../tigerbeetle.zig").Transfer;
-const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const GridType = @import("../vsr/grid.zig").GridType;
-const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
 const TableType = @import("table.zig").TableType;

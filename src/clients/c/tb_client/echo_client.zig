@@ -7,7 +7,6 @@ const vsr = @import("../tb_client.zig").vsr;
 const Header = vsr.Header;
 const stdx = vsr.stdx;
 const constants = vsr.constants;
-const RingBuffer = vsr.ring_buffer.RingBuffer;
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 

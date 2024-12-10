@@ -30,13 +30,11 @@ const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
 const FIFOType = @import("../fifo.zig").FIFOType;
 const IOPSType = @import("../iops.zig").IOPSType;
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 const allocate_block = @import("./grid.zig").allocate_block;
 const GridType = @import("./grid.zig").GridType;
 const BlockPtr = @import("./grid.zig").BlockPtr;
 const ForestTableIteratorType = @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
-const snapshot_from_op = @import("../lsm/manifest.zig").snapshot_from_op;
 const TestStorage = @import("../testing/storage.zig").Storage;
 
 pub fn GridScrubberType(comptime Forest: type) type {

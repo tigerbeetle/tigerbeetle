@@ -51,8 +51,6 @@ const log = std.log;
 const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
-const flags = @import("../flags.zig");
-const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 
 pub const CLIArgs = struct {

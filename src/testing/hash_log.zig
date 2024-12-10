@@ -6,7 +6,6 @@
 //! Otherwise, calls to `emit` are noops.
 
 const std = @import("std");
-const assert = std.debug.assert;
 const panic = std.debug.panic;
 
 const constants = @import("../constants.zig");

@@ -1,12 +1,9 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const Allocator = std.mem.Allocator;
-
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const GridType = @import("../vsr/grid.zig").GridType;
-const ScanType = @import("scan_builder.zig").ScanType;
 
 pub const ScanLookupStatus = enum {
     idle,

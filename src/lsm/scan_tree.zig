@@ -2,9 +2,6 @@ const std = @import("std");
 const mem = std.mem;
 const meta = std.meta;
 const assert = std.debug.assert;
-const Allocator = std.mem.Allocator;
-
-const log = std.log.scoped(.scan);
 
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
@@ -14,10 +11,8 @@ const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");
 const k_way_merge = @import("k_way_merge.zig");
 
-const BinarySearchRange = binary_search.BinarySearchRange;
 const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
-const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const TreeTableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;

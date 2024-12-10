@@ -1,6 +1,5 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.state_machine);
 
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");

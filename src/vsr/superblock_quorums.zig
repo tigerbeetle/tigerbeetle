@@ -4,7 +4,6 @@ const log = std.log.scoped(.superblock_quorums);
 
 const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
-const SuperBlockVersion = superblock.SuperBlockVersion;
 const fuzz = @import("./superblock_quorums_fuzz.zig");
 
 pub const Options = struct {

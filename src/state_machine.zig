@@ -23,11 +23,9 @@ const Direction = @import("direction.zig").Direction;
 const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
 const Account = tb.Account;
-const AccountFlags = tb.AccountFlags;
 const AccountBalance = tb.AccountBalance;
 
 const Transfer = tb.Transfer;
-const TransferFlags = tb.TransferFlags;
 const TransferPendingStatus = tb.TransferPendingStatus;
 
 const CreateAccountsResult = tb.CreateAccountsResult;
@@ -3054,7 +3052,6 @@ fn ExpirePendingTransfersType(
         const ScanLookupStatus = @import("lsm/scan_lookup.zig").ScanLookupStatus;
 
         const Tree = std.meta.FieldType(TransfersGroove.IndexTrees, .expires_at);
-        const Key = Tree.Table.Key;
         const Value = Tree.Table.Value;
 
         // TODO(zig) Context should be `*ExpirePendingTransfers`,

@@ -18,7 +18,6 @@ const StateMachineType = switch (state_machine) {
     .testing => @import("testing/state_machine.zig").StateMachineType,
 };
 
-const Client = @import("testing/cluster.zig").Client;
 const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
 const Release = @import("testing/cluster.zig").Release;
 const StateMachine = Cluster.StateMachine;
@@ -27,7 +26,6 @@ const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
 const PartitionSymmetry = @import("testing/packet_simulator.zig").PartitionSymmetry;
 const Core = @import("testing/cluster/network.zig").Network.Core;
 const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
-const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
 const releases = [_]Release{

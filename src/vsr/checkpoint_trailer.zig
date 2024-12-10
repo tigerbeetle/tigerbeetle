@@ -1,6 +1,5 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const maybe = stdx.maybe;
 const mem = std.mem;
 
 const vsr = @import("../vsr.zig");

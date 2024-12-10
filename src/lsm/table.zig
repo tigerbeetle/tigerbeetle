@@ -9,9 +9,7 @@ const binary_search = @import("binary_search.zig");
 
 const stdx = @import("../stdx.zig");
 const div_ceil = stdx.div_ceil;
-const snapshot_latest = @import("tree.zig").snapshot_latest;
 
-const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TreeTableInfoType = @import("manifest.zig").TreeTableInfoType;
 const schema = @import("schema.zig");
 

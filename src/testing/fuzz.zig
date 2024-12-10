@@ -2,9 +2,6 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
-const mem = std.mem;
-
-const log = std.log.scoped(.fuzz);
 
 // Use our own allocator in the global scope instead of testing.allocator
 // as the latter now @compileError()'s if referenced outside a `test` block.

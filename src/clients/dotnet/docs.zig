@@ -1,7 +1,3 @@
-const std = @import("std");
-
-const assert = std.debug.assert;
-
 const Docs = @import("../docs_types.zig").Docs;
 
 pub const DotnetDocs = Docs{

@@ -1,6 +1,5 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
-const maybe = stdx.maybe;
 const mem = std.mem;
 const assert = std.debug.assert;
 
@@ -10,8 +9,6 @@ const Header = vsr.Header;
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const IOPS = @import("../iops.zig").IOPS;
-const FIFO = @import("../fifo.zig").FIFO;
 
 const log = stdx.log.scoped(.client);
 
