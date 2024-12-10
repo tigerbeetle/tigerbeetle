@@ -8,6 +8,48 @@ const searchHotkey = document.querySelector(".search-box>.hotkey");
 const searchClearButton = document.querySelector(".search-box>.clear-button");
 const content = document.querySelector("article>.content");
 
+document.addEventListener("keydown", event => {
+  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+  if (event.key === "/" && searchInput !== document.activeElement) {
+    searchInput.focus();
+    event.preventDefault();
+  } else if (event.key === "Escape") {
+    if (searchInput === document.activeElement || searchInput.value !== "") {
+      closeSearch();
+      event.preventDefault();
+    }
+  } else if (searchInput.value !== "") {
+    if (event.key === "ArrowDown") {
+      selectNextResult();
+      event.preventDefault();
+    } else if (event.key === "ArrowUp") {
+      selectPreviousResult();
+      event.preventDefault();
+    } else if (event.key === "Enter") {
+      const selected = searchResults.querySelector(".selected");
+      if (!selected) selectNextResult();
+      closeSearch();
+      event.preventDefault();
+    }
+  }
+})
+
+searchInput.addEventListener("focus", () => {
+  searchHotkey.style.display = "none";
+});
+searchInput.addEventListener("blur", () => {
+  if (searchInput.value === "") searchHotkey.style.display = "block";
+});
+searchInput.addEventListener("input", onSearchInput);
+searchClearButton.addEventListener("click", () => {
+  searchInput.value = "";
+  onSearchInput();
+  if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
+  removeTextHighlight(content);
+});
+
+initSearch();
+
 async function initSearch() {
   const response = await fetch(urlPrefix + "/search-index.json");
   pages = await response.json();
@@ -38,8 +80,6 @@ async function initSearch() {
 
   if (searchInput.value) onSearchInput(); // Repeat search once the index is fetched.
 }
-
-initSearch();
 
 function onSearchInput() {
   const results = search(searchInput.value);
@@ -186,46 +226,6 @@ function closeSearch() {
   removeTextHighlight(content);
   syncSideNavWithLocation();
 }
-
-document.addEventListener("keydown", event => {
-  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
-  if (event.key === "/" && searchInput !== document.activeElement) {
-    searchInput.focus();
-    event.preventDefault();
-  } else if (event.key === "Escape") {
-    if (searchInput === document.activeElement || searchInput.value !== "") {
-      closeSearch();
-      event.preventDefault();
-    }
-  } else if (searchInput.value !== "") {
-    if (event.key === "ArrowDown") {
-      selectNextResult();
-      event.preventDefault();
-    } else if (event.key === "ArrowUp") {
-      selectPreviousResult();
-      event.preventDefault();
-    } else if (event.key === "Enter") {
-      const selected = searchResults.querySelector(".selected");
-      if (!selected) selectNextResult();
-      closeSearch();
-      event.preventDefault();
-    }
-  }
-})
-
-searchInput.addEventListener("focus", () => {
-  searchHotkey.style.display = "none";
-});
-searchInput.addEventListener("blur", () => {
-  if (searchInput.value === "") searchHotkey.style.display = "block";
-});
-searchInput.addEventListener("input", onSearchInput);
-searchClearButton.addEventListener("click", () => {
-  searchInput.value = "";
-  onSearchInput();
-  if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
-  removeTextHighlight(content);
-});
 
 function highlightText(term, container) {
   const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
