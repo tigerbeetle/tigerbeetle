@@ -124,6 +124,7 @@ nav.left-pane {
     font-size: 15px;
     line-height: 20px;
     padding-bottom: 16px;
+    container-type: inline-size;
 
     .logo {
       a {
@@ -133,6 +134,13 @@ nav.left-pane {
         svg {
           display: block;
         }
+      }
+    }
+
+    @container (max-width: 224px) {
+      .logo {
+        width: 28px;
+        overflow: hidden;
       }
     }
 
