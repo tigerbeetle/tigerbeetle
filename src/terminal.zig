@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const posix = std.posix;
 const windows = std.os.windows;
@@ -22,11 +23,10 @@ pub const Terminal = struct {
     stdout: ?std.fs.File.Writer,
     stderr: ?std.fs.File.Writer,
 
-    buffer_in: std.ArrayList(u8),
+    buffer_in: stdx.BoundedArrayType(u8, buffer_in_capacity),
 
     pub fn init(
         self: *Terminal,
-        arena: *std.heap.ArenaAllocator,
         interactive: bool,
     ) !void {
         const stdout = std.io.getStdOut();
@@ -63,7 +63,7 @@ pub const Terminal = struct {
             .stdin = std.io.bufferedReader(stdin.reader()),
             .stdout = stdout.writer(),
             .stderr = std.io.getStdErr().writer(),
-            .buffer_in = try std.ArrayList(u8).initCapacity(arena.allocator(), buffer_in_capacity),
+            .buffer_in = .{},
         };
     }
 
@@ -185,7 +185,7 @@ pub const Terminal = struct {
         while (true) {
             // The response is of the form `<ESC>[{row};{col}R`.
             try self.print("\x1b[6n", .{});
-            self.buffer_in.clearRetainingCapacity();
+            self.buffer_in.clear();
             stdin.streamUntilDelimiter(
                 self.buffer_in.writer(),
                 '[',
@@ -197,7 +197,7 @@ pub const Terminal = struct {
                 }
             };
 
-            self.buffer_in.clearRetainingCapacity();
+            self.buffer_in.clear();
             stdin.streamUntilDelimiter(
                 self.buffer_in.writer(),
                 ';',
@@ -208,9 +208,9 @@ pub const Terminal = struct {
                     else => return err,
                 }
             };
-            const row = std.fmt.parseInt(usize, self.buffer_in.items, 10) catch continue;
+            const row = std.fmt.parseInt(usize, self.buffer_in.const_slice(), 10) catch continue;
 
-            self.buffer_in.clearRetainingCapacity();
+            self.buffer_in.clear();
             stdin.streamUntilDelimiter(
                 self.buffer_in.writer(),
                 'R',
@@ -221,7 +221,7 @@ pub const Terminal = struct {
                     else => return err,
                 }
             };
-            const column = std.fmt.parseInt(usize, self.buffer_in.items, 10) catch continue;
+            const column = std.fmt.parseInt(usize, self.buffer_in.const_slice(), 10) catch continue;
 
             return .{
                 .row = row,

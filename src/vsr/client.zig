@@ -44,8 +44,6 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             },
         };
 
-        allocator: mem.Allocator,
-
         message_bus: MessageBus,
 
         /// A universally unique identifier for the client (must not be zero).
@@ -148,7 +146,6 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             errdefer message_bus.deinit(allocator);
 
             var self = Client{
-                .allocator = allocator,
                 .message_bus = message_bus,
                 .id = options.id,
                 .cluster = options.cluster,
