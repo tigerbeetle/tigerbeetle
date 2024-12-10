@@ -191,7 +191,7 @@ function selectResult(node) {
 }
 
 function selectNextResult() {
-  const nodes = [...searchResults.querySelectorAll("a")];
+  const nodes = [...searchResults.querySelectorAll(".menu-head.expanded+.menu a")];
   if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
   const i = selected ? nodes.indexOf(selected) + 1 : 0;
@@ -199,7 +199,7 @@ function selectNextResult() {
 }
 
 function selectPreviousResult() {
-  const nodes = [...searchResults.querySelectorAll("a")];
+  const nodes = [...searchResults.querySelectorAll(".menu-head.expanded+.menu a")];
   if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
   const i = selected ? nodes.indexOf(selected) - 1 : -1;
