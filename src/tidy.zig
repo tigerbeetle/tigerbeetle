@@ -291,8 +291,10 @@ fn tidy_dead_declarations(
             assert(used.get(token_text).? == 1);
             var declaration_keyword = false;
             for (0..3) |context_offset| {
-                if (index - context_offset < 2) break;
-                const context_tag = tree.tokens.get(index - context_offset - 2).tag;
+                const context_tag = if (index - context_offset < 2)
+                    .eof
+                else
+                    tree.tokens.get(index - context_offset - 2).tag;
                 if (!declaration_keyword) {
                     switch (context_tag) {
                         .keyword_fn, .keyword_const => declaration_keyword = true,

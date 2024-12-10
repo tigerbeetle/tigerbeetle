@@ -1,5 +1,3 @@
-const std = @import("std");
-
 // The purpose of these types is to help in reading this doc, not
 // because the types matter.
 const String = []const u8;

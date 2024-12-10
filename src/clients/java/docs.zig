@@ -1,5 +1,3 @@
-const builtin = @import("builtin");
-
 const Docs = @import("../docs_types.zig").Docs;
 
 pub const JavaDocs = Docs{
