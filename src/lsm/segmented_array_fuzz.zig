@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const fuzz = @import("../testing/fuzz.zig");
 const segmented_array = @import("segmented_array.zig");
 

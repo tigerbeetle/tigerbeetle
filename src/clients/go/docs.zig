@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const Docs = @import("../docs_types.zig").Docs;
 
 pub const GoDocs = Docs{
