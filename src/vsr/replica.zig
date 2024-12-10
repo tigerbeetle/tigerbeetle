@@ -2948,25 +2948,15 @@ pub fn ReplicaType(
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [constants.replicas_max]u8 = undefined;
             var waiting_len: usize = 0;
-            var ok_from_all_replicas_iterator = prepare.ok_from_all_replicas.iterator(.{
-                .kind = .unset,
-            });
-            while (ok_from_all_replicas_iterator.next()) |replica| {
-                // Ensure we don't wait for replicas that don't exist.
-                // The bits between `replica_count` and `replicas_max` are always unset,
-                // since they don't actually represent replicas.
-                if (replica == self.replica_count) {
-                    assert(self.replica_count < constants.replicas_max);
-                    break;
-                }
-                assert(replica < self.replica_count);
-
-                if (replica != self.replica) {
-                    waiting[waiting_len] = @intCast(replica);
+            for (1..self.replica_count) |ring_index| {
+                const replica: u8 = @intCast(
+                    (@as(usize, self.replica) + ring_index) % self.replica_count,
+                );
+                assert(replica != self.replica);
+                if (!prepare.ok_from_all_replicas.isSet(replica)) {
+                    waiting[waiting_len] = replica;
                     waiting_len += 1;
                 }
-            } else {
-                assert(self.replica_count == constants.replicas_max);
             }
 
             if (waiting_len == 0) {

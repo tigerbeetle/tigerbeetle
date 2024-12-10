@@ -1788,6 +1788,7 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
     b1.pass(.R_, .outgoing, .do_view_change);
 
     t.run();
+    t.run();
 
     try expectEqual(b1.status(), .normal);
     try expectEqual(b1.role(), .primary);
