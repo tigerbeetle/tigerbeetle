@@ -6231,9 +6231,10 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
-            log.debug("{}: primary_pipeline_prepare: prepare {}", .{
+            log.debug("{}: primary_pipeline_prepare: prepare checksum={} op={}", .{
                 self.replica,
                 message.header.checksum,
+                message.header.op,
             });
 
             if (self.primary_pipeline_pending()) |_| {
