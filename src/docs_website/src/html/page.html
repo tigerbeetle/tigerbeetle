@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' plausible.io 'sha256-gvIkEBjOb1Ko+9iah/NSDSKyFYWsRwFbEjDtkCMFmZc='">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' plausible.io 'sha256-jTiOeQIaEst59YIKxxueIXkHwlekJFBL16mOukDsmck='">
     <meta name="description" content="The financial transactions database to power the next 30 years of Online Transaction Processing.">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@TigerBeetleDB">
@@ -101,9 +101,10 @@
           document.removeEventListener("mousemove", handleMouseMove);
         });
         function handleMouseMove(e) {
-          leftPane.style.width = e.clientX + "px";
+          leftPane.style.width = Math.max(160, e.clientX) + "px";
         }
       });
+      resizer.addEventListener("dblclick", () => leftPane.style.width = "300px");
 
       const navSide = document.querySelector("nav.side");
       const menuHeads = [...navSide.querySelectorAll(".menu-head")];
