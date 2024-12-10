@@ -112,22 +112,23 @@ function search(term) {
   return hits;
 }
 
-function makeContext(text, i, length, windowSize = 40) {
+function makeContext(text, i, length) {
+  const windowSizeLeft = 15;
+  const windowSizeRight = 200;
   const highlight = text.slice(i, i + length);
 
   let contextLeft = "";
-  let i0 = Math.max(0, i - windowSize / 2);
+  let i0 = Math.max(0, i - windowSizeLeft);
   if (i0 > 0) contextLeft = "...";
   while (i0 > 0 && text[i0] !== ' ') i0--;
   contextLeft = contextLeft + text.slice(i0, i).trimLeft();
 
   let contextRight = "";
-  let i1 = Math.min(text.length, i + length + windowSize / 2);
+  let i1 = Math.min(text.length, i + length + windowSizeRight);
   if (i1 < text.length) contextRight = "...";
   while (i1 < text.length && text[i1] !== ' ') i1++;
   contextRight = text.slice(i + length, i1).trimRight() + contextRight;
 
-  // return `${escapeHtml(contextLeft)}<strong>${escapeHtml(highlight)}</strong>${escapeHtml(contextRight)}`;
   return contextLeft + highlight + contextRight;
 }
 
