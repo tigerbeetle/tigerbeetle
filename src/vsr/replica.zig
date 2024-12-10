@@ -1146,7 +1146,7 @@ pub fn ReplicaType(
                 .prepare_timeout = Timeout{
                     .name = "prepare_timeout",
                     .id = replica_index,
-                    .after = 50,
+                    .after = 25,
                 },
                 .primary_abdicate_timeout = Timeout{
                     .name = "primary_abdicate_timeout",
