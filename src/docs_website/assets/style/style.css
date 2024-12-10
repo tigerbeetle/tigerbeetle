@@ -305,6 +305,15 @@ nav.left-pane {
       text-overflow: ellipsis;
     }
 
+    p {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-clamp: 2;
+      -webkit-line-clamp: 2;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+    }
+
     &:hover,
     &.selected {
       background-color: var(--primary-3);
