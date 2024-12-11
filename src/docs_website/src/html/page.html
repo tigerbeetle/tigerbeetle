@@ -24,6 +24,11 @@
     <script defer data-domain="tigerbeetle.com" src="https://plausible.io/js/script.js"></script>
   </head>
   <body>
+    <a class="expand-button" title="Show menu">
+      <svg width="28" height="24" viewBox="0 0 28 24" aria-label="TigerBeetle logo">
+        <use href="#svg-tigerbeetle-logo"></use>
+      </svg>
+    </a>
     <nav class="left-pane">
       <div class="top">
         <header>
@@ -37,7 +42,7 @@
           <div class="line"></div>
           <a href="$url_prefix/">Docs</a>
           <div class="spacer"></div>
-          <a class="collapse-button">
+          <a class="collapse-button" title="Hide menu">
             <svg width="16" height="16" fill="none">
               <path d="M7 5L4 8L7 11M12 5L9 8L12 11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor"/>
             </svg>
@@ -95,20 +100,30 @@
 
       const leftPane = document.querySelector(".left-pane");
       const resizer = document.querySelector(".resizer");
-      resizer.addEventListener("mousedown", (e) => {
+      resizer.addEventListener("mousedown", () => {
         document.body.style.cursor = "ew-resize";
         document.body.style.userSelect = "none";
-        document.addEventListener("mousemove", handleMouseMove);
-        document.addEventListener("mouseup", () => {
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", onMouseUp);
+        function onMouseMove(e) {
+          leftPane.style.width = Math.max(160, e.clientX) + "px";
+          if (e.clientX < 80) {
+            document.body.classList.add("sidenav-collapsed");
+            onMouseUp();
+          }
+        }
+        function onMouseUp() {
           document.body.style.cursor = "";
           document.body.style.userSelect = "";
-          document.removeEventListener("mousemove", handleMouseMove);
-        });
-        function handleMouseMove(e) {
-          leftPane.style.width = Math.max(160, e.clientX) + "px";
+          document.removeEventListener("mousemove", onMouseMove);
         }
       });
       resizer.addEventListener("dblclick", () => leftPane.style.width = "300px");
+
+      const collapseButton = document.querySelector(".collapse-button");
+      collapseButton.addEventListener("click", () => document.body.classList.add("sidenav-collapsed"));
+      const expandButton = document.querySelector(".expand-button");
+      expandButton.addEventListener("click", () => document.body.classList.remove("sidenav-collapsed"));
 
       const navSide = document.querySelector("nav.side");
       const menuHeads = [...navSide.querySelectorAll(".menu-head")];
