@@ -517,6 +517,7 @@ article {
   flex: 1;
   height: 100%;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   align-items: center;
