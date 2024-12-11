@@ -114,7 +114,7 @@ Edit your `pom.xml`:
 
 ### Node.js
 ```
-npm install tigerbeetle-node@0.15.4
+npm install --save-exact tigerbeetle-node@0.15.4
 ```
 
 ### Python

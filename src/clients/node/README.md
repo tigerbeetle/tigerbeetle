@@ -20,7 +20,7 @@ First, create a directory for your project and `cd` into the directory.
 Then, install the TigerBeetle client:
 
 ```console
-npm install tigerbeetle-node
+npm install --save-exact tigerbeetle-node
 ```
 
 Now, create `main.js` and copy this into it:
