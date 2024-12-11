@@ -8,9 +8,12 @@ const searchHotkey = document.querySelector(".search-box>.hotkey");
 const searchClearButton = document.querySelector(".search-box>.clear-button");
 const content = document.querySelector("article>.content");
 
+let sidenavWasCollapsed = false;
 document.addEventListener("keydown", event => {
   if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
   if (event.key === "/" && searchInput !== document.activeElement) {
+    sidenavWasCollapsed = document.body.classList.contains("sidenav-collapsed");
+    document.body.classList.remove("sidenav-collapsed");
     searchInput.focus();
     event.preventDefault();
   } else if (event.key === "Escape") {
@@ -229,6 +232,7 @@ function closeSearch() {
   onSearchInput();
   removeTextHighlight(content);
   syncSideNavWithLocation();
+  if (sidenavWasCollapsed) document.body.classList.add("sidenav-collapsed");
 }
 
 function highlightText(term, container) {
