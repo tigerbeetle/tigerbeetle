@@ -103,6 +103,7 @@ pub const CLIArgs = struct {
     driver_command: ?[]const u8 = null,
     disable_faults: bool = false,
     trace: ?[]const u8 = null,
+    output_directory: ?[]const u8 = null,
 };
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
@@ -113,13 +114,10 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     var io = try IO.init(128, 0);
 
-    const tmp_dir = try create_tmp_dir(allocator);
-    defer {
-        std.fs.cwd().deleteTree(tmp_dir) catch |err| {
-            log.err("failed deleting temporary directory ({s}): {any}", .{ tmp_dir, err });
-        };
-        allocator.free(tmp_dir);
-    }
+    var output_directory_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const output_directory = args.output_directory orelse
+        try create_tmp_dir(&output_directory_buffer);
+    log.info("output directory: {s}", .{output_directory});
 
     var trace = if (args.trace) |trace_file_path|
         try TraceWriter.from_file(trace_file_path)
@@ -158,7 +156,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         const datafile = try std.fmt.bufPrint(
             datafile_buffers[replica_index][0..],
             "{s}/{d}_{d}.tigerbeetle",
-            .{ tmp_dir, constants.cluster_id, replica_index },
+            .{ output_directory, constants.cluster_id, replica_index },
         );
 
         // Format each replica's datafile.
@@ -687,18 +685,18 @@ pub fn comma_separate_ports(comptime ports: []const u16) []const u8 {
     return out;
 }
 
-// Create a new Vortex-specific temporary directory. Caller owns the returned memory.
-fn create_tmp_dir(allocator: std.mem.Allocator) ![]const u8 {
+// Create a new Vortex-specific temporary directory.
+fn create_tmp_dir(absolute_path_buffer: []u8) ![]const u8 {
     const working_directory = std.fs.cwd();
 
-    const path = try std.fmt.allocPrint(allocator, ".zig-cache/vortex-{d}", .{
+    var relative_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&relative_path_buffer, ".zig-cache/vortex-{d}", .{
         std.crypto.random.int(u64),
     });
-    defer allocator.free(path);
 
     try working_directory.makePath(path);
 
-    return working_directory.realpathAlloc(allocator, path);
+    return working_directory.realpath(path, absolute_path_buffer);
 }
 
 const Replica = struct {
