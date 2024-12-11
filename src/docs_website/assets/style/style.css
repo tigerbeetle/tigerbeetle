@@ -110,6 +110,7 @@ nav.left-pane {
   flex-direction: column;
   overflow: hidden;
   width: 300px;
+  transition: width 2.5s cubic-bezier(0, 0.7, 0.3, 1);
 
   >.top {
     display: flex;
@@ -176,6 +177,7 @@ nav.left-pane {
 
   .search-box {
     position: relative;
+    overflow: hidden;
 
     .search-icon {
       position: absolute;
@@ -478,7 +480,8 @@ body>.expand-button {
 
 body.sidenav-collapsed {
   nav.left-pane {
-    display: none;
+    width: 0px !important;
+    transition: width 2.5s cubic-bezier(0.7, 0, 1, 0.3);
   }
 
   .resizer {
