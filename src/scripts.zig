@@ -10,10 +10,8 @@
 //!
 //!   This is a special case of the following rule-of-thumb: length of `build.zig` should be O(1).
 const std = @import("std");
-const assert = std.debug.assert;
 
 const flags = @import("flags.zig");
-const fatal = flags.fatal;
 const Shell = @import("shell.zig");
 
 const cfo = @import("./scripts/cfo.zig");

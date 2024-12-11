@@ -22,8 +22,6 @@ const ReplicaHead = struct {
     op: u64,
 };
 
-const log = std.log.scoped(.state_checker);
-
 pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
     return struct {
         const StateChecker = @This();

@@ -4,10 +4,14 @@ const std = @import("std");
 const assert = std.debug.assert;
 const fs = std.fs;
 const mem = std.mem;
-const math = std.math;
 
 const stdx = @import("./stdx.zig");
 const Shell = @import("./shell.zig");
+
+const UsedDeclarations = std.StringHashMapUnmanaged(struct {
+    count: u32,
+    offset: u32,
+});
 
 test "tidy" {
     const allocator = std.testing.allocator;
@@ -24,7 +28,7 @@ test "tidy" {
     var dead_files_detector = DeadFilesDetector.init(allocator);
     defer dead_files_detector.deinit();
 
-    var dead_declarations: std.StringHashMapUnmanaged(u32) = .{};
+    var dead_declarations: UsedDeclarations = .{};
     defer dead_declarations.deinit(allocator);
 
     try dead_declarations.ensureTotalCapacity(allocator, identifiers_per_file_max);
@@ -246,7 +250,7 @@ const identifiers_per_file_max = 100_000;
 /// seemed simpler.
 fn tidy_dead_declarations(
     tree: *const std.zig.Ast,
-    used: *std.StringHashMapUnmanaged(u32),
+    used: *UsedDeclarations,
 ) ?[]const u8 {
     assert(used.count() == 0);
     defer used.clearRetainingCapacity();
@@ -274,13 +278,27 @@ fn tidy_dead_declarations(
             switch (phase) {
                 .fill => {
                     const gop = used.getOrPutAssumeCapacity(token_text);
-                    if (!gop.found_existing) gop.value_ptr.* = 0;
-                    gop.value_ptr.* += 1;
                     if (used.count() >= identifiers_per_file_max) @panic("file to large");
+
+                    if (gop.found_existing) {
+                        const same_line_occurrence = mem.indexOfScalar(
+                            u8,
+                            tree.source[gop.value_ptr.offset..start],
+                            '\n',
+                        ) == null;
+                        // Count occurrences on a single line as one, as a special case for imports:
+                        // const foo = std.foo;
+                        if (same_line_occurrence) continue :next_token;
+                    }
+
+                    if (!gop.found_existing) gop.value_ptr.* = .{ .count = 0, .offset = 0 };
+                    gop.value_ptr.count += 1;
+                    gop.value_ptr.offset = start;
+
                     continue :next_token;
                 },
                 .check => {
-                    const usages = used.get(token_text).?;
+                    const usages = used.get(token_text).?.count;
                     assert(usages >= 1);
                     if (usages > 1) continue :next_token;
                 },
@@ -288,7 +306,7 @@ fn tidy_dead_declarations(
             }
 
             assert(phase == .check);
-            assert(used.get(token_text).? == 1);
+            assert(used.get(token_text).?.count == 1);
             var declaration_keyword = false;
             for (0..3) |context_offset| {
                 const context_tag = if (index - context_offset < 2)

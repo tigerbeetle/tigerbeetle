@@ -26,7 +26,6 @@ const ManifestCheckerType = @import("cluster/manifest_checker.zig").ManifestChec
 const vsr = @import("../vsr.zig");
 pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
-const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
 
 pub const ReplicaHealth = enum { up, down };
 

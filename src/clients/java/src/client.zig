@@ -13,7 +13,8 @@ const builtin = @import("builtin");
 const jni = @import("jni.zig");
 
 // When referenced from unit_test.zig, there is no vsr import module. So use relative path instead.
-pub const vsr = if (builtin.is_test) @import("../../../vsr.zig") else @import("vsr");
+pub const vsr =
+    if (builtin.is_test) @import("../../../vsr.zig") else @import("vsr");
 
 const tb = vsr.tb_client;
 

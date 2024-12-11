@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
-const tb_client = vsr.tb_client;
 
 const type_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },

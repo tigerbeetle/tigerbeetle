@@ -280,7 +280,6 @@ pub fn CompactionType(
         const TableInfoReference = Manifest.TableInfoReference;
         const CompactionRange = Manifest.CompactionRange;
 
-        const Key = Table.Key;
         const Value = Table.Value;
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;

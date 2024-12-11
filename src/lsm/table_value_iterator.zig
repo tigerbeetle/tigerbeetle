@@ -1,6 +1,4 @@
 const std = @import("std");
-const mem = std.mem;
-const math = std.math;
 const assert = std.debug.assert;
 
 const schema = @import("schema.zig");

@@ -1,7 +1,6 @@
 // TODO Test scope_open/scope_close.
 
 const std = @import("std");
-const testing = std.testing;
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
@@ -14,15 +13,12 @@ const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
 const tb = @import("../tigerbeetle.zig");
 
-const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig")
     .StateMachineType(Storage, constants.state_machine_config);
 const Reservation = @import("../vsr/free_set.zig").Reservation;
 const GridType = @import("../vsr/grid.zig").GridType;
-const GrooveType = @import("groove.zig").GrooveType;
-const ScanBuffer = @import("../lsm/scan_buffer.zig").ScanBuffer;
 const ScanRangeType = @import("../lsm/scan_range.zig").ScanRangeType;
 const EvaluateNext = @import("../lsm/scan_range.zig").EvaluateNext;
 const ScanLookupType = @import("../lsm/scan_lookup.zig").ScanLookupType;
@@ -32,7 +28,6 @@ const Forest = StateMachine.Forest;
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
-const FreeSet = vsr.FreeSet;
 
 const FuzzOpAction = union(enum) {
     compact: struct {

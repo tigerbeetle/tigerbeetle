@@ -11,8 +11,6 @@ const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
-const flags = @import("../flags.zig");
-const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 
 pub const CLIArgs = struct {

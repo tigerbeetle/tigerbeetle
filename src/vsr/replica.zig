@@ -25,9 +25,7 @@ const Header = vsr.Header;
 const Timeout = vsr.Timeout;
 const Command = vsr.Command;
 const Version = vsr.Version;
-const VSRState = vsr.VSRState;
 const SyncStage = vsr.SyncStage;
-const SyncTarget = vsr.SyncTarget;
 const ClientSessions = vsr.ClientSessions;
 
 const log = marks.wrap_log(stdx.log.scoped(.replica));

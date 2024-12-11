@@ -5,7 +5,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
-const log = std.log.scoped(.static_allocator);
 
 const StaticAllocator = @This();
 parent_allocator: mem.Allocator,

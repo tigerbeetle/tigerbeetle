@@ -13,7 +13,6 @@
 //! the load and measuring response latencies and throughput. The load runs in-process.
 
 const std = @import("std");
-const assert = std.debug.assert;
 const ChildProcess = std.process.Child;
 
 const vsr = @import("vsr");
