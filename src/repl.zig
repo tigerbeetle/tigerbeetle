@@ -658,9 +658,16 @@ pub fn ReplType(comptime MessageBus: type) type {
                         _ = repl.buffer.ordered_remove(buffer_index);
                     },
                     .tab => {
-                        try repl.completion.split_and_complete(repl.buffer.const_slice(), buffer_index);
+                        try repl.completion.split_and_complete(repl.buffer.slice(), buffer_index);
 
                         current_completion = try repl.completion.get_next_completion();
+
+                        // Skip the current completion entry if adding it would overflow the buffer.
+                        if ((repl.completion.prefix.count() + repl.completion.suffix.count() +
+                            current_completion.len) >= repl_history_entry_bytes_without_nul)
+                        {
+                            continue;
+                        }
 
                         // Move cursor to the start of the current row, clear the screen from start
                         // to end. Then print the leading buffer, currently selected completion and
@@ -752,9 +759,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                         // Re-fill the buffer with prefix, current match and suffix. Set the
                         // buffer index where the current selected match ends.
                         repl.buffer.clear();
-                        repl.buffer.append_slice_assume_capacity(repl.completion.prefix.const_slice());
+                        repl.buffer.append_slice_assume_capacity(repl.completion.prefix.slice());
                         repl.buffer.append_slice_assume_capacity(current_completion);
-                        repl.buffer.append_slice_assume_capacity(repl.completion.suffix.const_slice());
+                        repl.buffer.append_slice_assume_capacity(repl.completion.suffix.slice());
                         buffer_index = repl.buffer.count() - repl.completion.suffix.count();
                     },
                     .left => if (buffer_index > 0) {
@@ -1015,11 +1022,11 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl.arguments.deinit(allocator);
         }
 
-        pub fn run(repl: *Repl, statements: []const u8, allocator: std.mem.Allocator,) !void {
+        pub fn run(repl: *Repl, statements: []const u8) !void {
             repl.interactive = statements.len == 0;
             try Terminal.init(&repl.terminal, repl.interactive); // No corresponding deinit.
 
-            try Completion.init(&repl.completion, allocator);
+            try Completion.init(&repl.completion);
 
             repl.client.register(register_callback, @intCast(@intFromPtr(repl)));
             while (!repl.event_loop_done) {

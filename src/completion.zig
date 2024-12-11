@@ -5,8 +5,6 @@ const assert = std.debug.assert;
 const RingBuffer = @import("ring_buffer.zig").RingBufferType;
 const BoundedArray = stdx.BoundedArrayType;
 
-const completion_entries = 256;
-const completion_entry_bytes = 512;
 const keywords = [_][]const u8{
     "create_accounts",
     "create_transfers",
@@ -26,9 +24,11 @@ const keywords = [_][]const u8{
     "credit_account_id",
     "amount",
 };
+const completion_entries = keywords.len;
+const completion_entry_bytes = 512;
 
 pub const Completion = struct {
-    const CompletionList = RingBuffer([completion_entries]u8, .slice);
+    const CompletionList = RingBuffer([completion_entry_bytes]u8, .{ .array = completion_entries });
 
     matches: CompletionList,
     prefix: BoundedArray(u8, completion_entry_bytes),
@@ -36,9 +36,9 @@ pub const Completion = struct {
     query: BoundedArray(u8, completion_entry_bytes),
     match_index: usize = 0,
 
-    pub fn init(self: *Completion, allocator: std.mem.Allocator) !void {
+    pub fn init(self: *Completion) !void {
         self.* = Completion{
-            .matches = try CompletionList.init(allocator, completion_entry_bytes),
+            .matches = CompletionList.init(),
             .prefix = BoundedArray(u8, completion_entry_bytes){},
             .suffix = BoundedArray(u8, completion_entry_bytes){},
             .query = BoundedArray(u8, completion_entry_bytes){},
@@ -77,9 +77,9 @@ pub const Completion = struct {
     /// returns the query.
     pub fn get_next_completion(self: *Completion) ![]const u8 {
         if (self.matches.count > 0) {
-            const macth_ptr = self.matches.get_ptr(self.match_index).?;
+            const match_ptr = self.matches.get_ptr(self.match_index).?;
             self.match_index = (self.match_index + 1) % self.matches.count;
-            return std.mem.sliceTo(macth_ptr, '\x00');
+            return std.mem.sliceTo(match_ptr, '\x00');
         } else {
             return self.query.const_slice();
         }
