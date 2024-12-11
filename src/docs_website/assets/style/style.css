@@ -167,9 +167,7 @@ nav.left-pane {
       cursor: pointer;
       display: block;
       width: 16px;
-      line-height: 16px;
-      text-align: center;
-      font-size: 16px;
+      height: 16px;
     }
   }
 
