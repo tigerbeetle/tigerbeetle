@@ -108,7 +108,7 @@
         document.addEventListener("mouseup", onMouseUp);
         function onMouseMove(e) {
           leftPane.style.width = Math.max(160, e.clientX) + "px";
-          if (e.clientX < 120) {
+          if (e.clientX < 130) {
             document.body.classList.add("sidenav-collapsed");
             onMouseUp();
           }
