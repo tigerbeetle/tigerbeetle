@@ -140,7 +140,7 @@
         navSideState.expanded.forEach((e, i) => { if (e) menuHeads[i].classList.add("expanded"); });
         navSide.scrollTop = navSideState.scrollTop;
       }
-      document.addEventListener("beforeunload", () => {
+      window.addEventListener("beforeunload", () => {
         const navSideState = {
           width: leftPane.style.width,
           expanded: menuHeads.map(e => e.classList.contains("expanded")),
