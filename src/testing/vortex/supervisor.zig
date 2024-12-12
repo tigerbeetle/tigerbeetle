@@ -42,6 +42,7 @@
 //! * multiple drivers? could use a special multiplexer driver that delegates to others
 
 const std = @import("std");
+const stdx = @import("../../stdx.zig");
 const builtin = @import("builtin");
 const IO = @import("../../io.zig").IO;
 const LoggedProcess = @import("./logged_process.zig");
@@ -1008,7 +1009,7 @@ const TraceWriter = union(enum) {
         }
     }
 
-    fn write(writer: *TraceWriter, event: TraceEvent, args: anytype) !void {
+    fn write(writer: *TraceWriter, event: TraceEvent, metadata: anytype) !void {
         switch (writer.*) {
             .chrome_tracing => |*file_writer| {
                 try file_writer.stream.beginObject();
@@ -1042,8 +1043,16 @@ const TraceWriter = union(enum) {
                     try file_writer.stream.write(@tagName(name));
                 }
 
+                const datetime = stdx.DateTimeUTC.from_timestamp_ms(timestamp / 1000);
+                var datetime_buffer: [128]u8 = undefined;
+                var datetime_stream = std.io.fixedBufferStream(&datetime_buffer);
+                stdx.DateTimeUTC.format(datetime, "", .{}, datetime_stream.writer()) catch return;
+
                 try file_writer.stream.objectField("args");
-                try file_writer.stream.write(args);
+                try file_writer.stream.write(.{
+                    .metadata = metadata,
+                    .timestamp = datetime_stream.getWritten(),
+                });
 
                 try file_writer.stream.endObject();
             },
