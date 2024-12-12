@@ -108,14 +108,28 @@ code {
 nav.left-pane {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   width: 300px;
 
-  >.top {
-    display: flex;
-    flex-direction: column;
-    padding: 16px 16px 12px 16px;
-    gap: 4px;
+  >.top-wrapper {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+
+    >.top {
+      backdrop-filter: blur(10px);
+      background-color: color-mix(in srgb, var(--gray-0), transparent 50%);
+      display: flex;
+      flex-direction: column;
+      padding: 16px 8px 12px 16px;
+      gap: 4px;
+    }
+
+    >.glass-edge {
+      height: 1px;
+      backdrop-filter: blur(20px);
+    }
   }
 
   header {
@@ -252,22 +266,11 @@ nav.left-pane {
     line-height: 20px;
     padding: 0 8px;
   }
-
-  .wrapper {
-    flex: 1;
-    overflow: hidden;
-    display: grid;
-  }
 }
 
 .search-results {
-  grid-column: 1;
-  grid-row: 1;
-  z-index: 1;
   background-color: var(--gray-0);
   color: var(--gray-10);
-  overflow-y: auto;
-  scrollbar-gutter: stable;
   padding: 0 8px 16px 16px;
   font-size: 12px;
   line-height: 16px;
@@ -341,10 +344,6 @@ nav.left-pane {
 }
 
 nav.side {
-  grid-column: 1;
-  grid-row: 1;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
   padding: 0 8px 0 16px;
   font-size: 14px;
   line-height: 20px;

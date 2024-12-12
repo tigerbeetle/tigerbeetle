@@ -28,48 +28,52 @@
       <svg width="28" height="24" viewBox="0 0 28 24" aria-label="TigerBeetle logo">
         <use href="#svg-tigerbeetle-logo"></use>
       </svg>
+      <svg width="16" height="16" fill="none">
+        <path d="M7 5L10 8L7 11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#888"/>
+      </svg>
     </a>
     <nav class="left-pane">
-      <div class="top">
-        <header>
-          <div class="logo">
-            <a href="https://tigerbeetle.com" aria-label="TigerBeetle website">
-              <svg width="127" height="24" viewBox="0 0 127 24" aria-label="TigerBeetle logo">
-                <use href="#svg-tigerbeetle-logo"></use>
+      <div class="top-wrapper">
+        <div class="top">
+          <header>
+            <div class="logo">
+              <a href="https://tigerbeetle.com" aria-label="TigerBeetle website">
+                <svg width="127" height="24" viewBox="0 0 127 24" aria-label="TigerBeetle logo">
+                  <use href="#svg-tigerbeetle-logo"></use>
+                </svg>
+              </a>
+            </div>
+            <div class="line"></div>
+            <a href="$url_prefix/">Docs</a>
+            <div class="spacer"></div>
+            <a class="collapse-button" title="Hide menu">
+              <svg width="16" height="16" fill="none">
+                <path d="M7 5L4 8L7 11M12 5L9 8L12 11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor"/>
               </svg>
             </a>
-          </div>
-          <div class="line"></div>
-          <a href="$url_prefix/">Docs</a>
-          <div class="spacer"></div>
-          <a class="collapse-button" title="Hide menu">
-            <svg width="16" height="16" fill="none">
-              <path d="M7 5L4 8L7 11M12 5L9 8L12 11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor"/>
+          </header>
+          <div class="search-box">
+            <input type="search" placeholder="Search" />
+            <svg class="search-icon" width="16" height="16" fill="none">
+              <circle cx="6.5" cy="6.5" r="4.5" stroke-width="1.5" stroke="currentColor"/>
+              <path d="M10 10l4 4" stroke-width="1.5" stroke-linecap="round" stroke="currentColor"/>
             </svg>
-          </a>
-        </header>
-        <div class="search-box">
-          <input type="search" placeholder="Search" />
-          <svg class="search-icon" width="16" height="16" fill="none">
-            <circle cx="6.5" cy="6.5" r="4.5" stroke-width="1.5" stroke="currentColor"/>
-            <path d="M10 10l4 4" stroke-width="1.5" stroke-linecap="round" stroke="currentColor"/>
-          </svg>
-          <svg class="hotkey" width="16" height="16" fill="none">
-            <rect x="0.5" y="0.5" width="15" height="15" rx="2.5" stroke="var(--gray-7)"/>
-            <path d="M9.55584 3.38636L7.21209 12.0938H6.44505L8.7888 3.38636H9.55584Z" fill="var(--gray-11)"/>
-          </svg>    
-          <svg class="clear-button" width="16" height="16">
-            <path d="m16 8a8 8 0 0 0-16 0 8 8 0 0 0 16 0m-9 0-2.5-2.5 1-1 2.5 2.5 2.5-2.5 1 1-2.5 2.5 2.5 2.5-1 1-2.5-2.5-2.5 2.5-1-1" fill="currentColor" />
-          </svg>
+            <svg class="hotkey" width="16" height="16" fill="none">
+              <rect x="0.5" y="0.5" width="15" height="15" rx="2.5" stroke="var(--gray-7)"/>
+              <path d="M9.55584 3.38636L7.21209 12.0938H6.44505L8.7888 3.38636H9.55584Z" fill="var(--gray-11)"/>
+            </svg>    
+            <svg class="clear-button" width="16" height="16">
+              <path d="m16 8a8 8 0 0 0-16 0 8 8 0 0 0 16 0m-9 0-2.5-2.5 1-1 2.5 2.5 2.5-2.5 1 1-2.5 2.5 2.5 2.5-1 1-2.5-2.5-2.5 2.5-1-1" fill="currentColor" />
+            </svg>
+          </div>
+          <p class="search-stats"></p>
         </div>
-        <p class="search-stats"></p>
+        <div class="glass-edge"></div>
       </div>
-      <div class="wrapper">
-        <div class="search-results"></div>
-        <nav class="side">
-          $nav
-        </nav>
-      </div>
+      <div class="search-results"></div>
+      <nav class="side">
+        $nav
+      </nav>
     </nav>
     <div class="resizer"></div>
     <main>
@@ -141,14 +145,14 @@
         leftPane.style.width = navSideState.width;
         if (navSideState.collapsed) document.body.classList.add("sidenav-collapsed");
         navSideState.expanded.forEach((e, i) => { if (e) menuHeads[i].classList.add("expanded"); });
-        navSide.scrollTop = navSideState.scrollTop;
+        leftPane.scrollTop = navSideState.scrollTop;
       }
       window.addEventListener("beforeunload", () => {
         const navSideState = {
           width: leftPane.style.width,
           collapsed: document.body.classList.contains("sidenav-collapsed"),
           expanded: menuHeads.map(e => e.classList.contains("expanded")),
-          scrollTop: navSide.scrollTop,
+          scrollTop: leftPane.scrollTop,
         };
         localStorage.setItem("navSideState", JSON.stringify(navSideState));
       });
