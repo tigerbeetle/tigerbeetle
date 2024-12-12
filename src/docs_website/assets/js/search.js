@@ -136,6 +136,7 @@ function onSearchInput() {
   searchClearButton.style.display = displaySearch;
   searchResults.style.display = displaySearch;
   searchStats.style.display = displaySearch;
+  navSide.style.display = searchInput.value === "" ? "block" : "none"
 }
 
 function search(term) {
