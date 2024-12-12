@@ -110,7 +110,8 @@
           leftPane.style.width = Math.max(160, e.clientX) + "px";
           if (e.clientX < 130) {
             document.body.classList.add("sidenav-collapsed");
-            onMouseUp();
+          } else if (e.clientX > 140) {
+            document.body.classList.remove("sidenav-collapsed");
           }
         }
         function onMouseUp() {
