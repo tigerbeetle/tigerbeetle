@@ -1366,6 +1366,41 @@ public class IntegrationTest {
         }
     }
 
+    /**
+     * This test asserts that the client can handle thread interruption.
+     */
+    @Test
+    public void testConcurrentInterruptedTasks() throws Throwable {
+        final int TASKS_COUNT = 256;
+        final var barrier = new CountDownLatch(TASKS_COUNT);
+        final var zeroedId = UInt128.asBytes(0L);
+
+        // Connect to an invalid cluster, so the calls never complete.
+        try (final var client = new Client(clusterId, new String[] {"0"})) {
+            final var tasks = new TransferTask[TASKS_COUNT];
+            for (int i = 0; i < TASKS_COUNT; i++) {
+                // Starting multiple threads.
+                tasks[i] = new TransferTask(client, zeroedId, zeroedId, TransferFlags.NONE, barrier,
+                        new CountDownLatch(0));
+                tasks[i].start();
+            }
+
+            // Waits until all threads start.
+            barrier.await();
+
+            // Interrupt all threads.
+            for (int i = 0; i < TASKS_COUNT; i++) {
+                tasks[i].interrupt();
+                tasks[i].join();
+
+                assertTrue(tasks[i].getState() == Thread.State.TERMINATED);
+                assertTrue(tasks[i].result == null);
+                assertTrue(tasks[i].exception instanceof AssertionError);
+                assertTrue(tasks[i].exception.getCause() instanceof InterruptedException);
+            }
+        }
+    }
+
     @Test
     public void testAccountTransfers() throws Throwable {
         final var account1Id = UInt128.id();
@@ -2298,9 +2333,13 @@ public class IntegrationTest {
             try {
                 enterBarrier.countDown();
                 enterBarrier.await();
-                result = client.createTransfers(transfers);
-            } catch (Throwable e) {
-                exception = e;
+                try {
+                    result = client.createTransfers(transfers);
+                } catch (Throwable any) {
+                    exception = any;
+                }
+            } catch (InterruptedException interruptedException) {
+                return;
             } finally {
                 exitBarrier.countDown();
             }
