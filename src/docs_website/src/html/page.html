@@ -102,7 +102,7 @@
       const leftPane = document.querySelector(".left-pane");
       const resizer = document.querySelector(".resizer");
       resizer.addEventListener("mousedown", () => {
-        document.body.style.cursor = "ew-resize";
+        document.body.style.cursor = "col-resize";
         document.body.style.userSelect = "none";
         document.addEventListener("mousemove", onMouseMove);
         document.addEventListener("mouseup", onMouseUp);
