@@ -184,9 +184,9 @@ function selectResult(node) {
   content.innerHTML = page.html;
   const state = { pageIndex: node.pageIndex };
   if (history.state) {
-    history.replaceState(state, "", node.href);
+    history.replaceState(state, page.title, node.href);
   } else {
-    history.pushState(state, "", node.href);
+    history.pushState(state, page.title, node.href);
   }
   if (page.title === "TigerBeetle Docs") {
     document.title = page.title;
@@ -201,9 +201,10 @@ function selectResult(node) {
 window.addEventListener("popstate", (e) => {
   if (e.state) {
     const page = pages[e.state.pageIndex];
-    if (page) content.innerHTML = page.html;
+    content.innerHTML = page.html;
+    syncSideNavWithLocation();
   } else {
-    window.location.href = window.location.href;
+    location.reload();
   }
 });
 
