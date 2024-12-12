@@ -110,7 +110,6 @@ nav.left-pane {
   flex-direction: column;
   overflow: hidden;
   width: 300px;
-  transition: width 2.5s cubic-bezier(0, 0.7, 0.3, 1);
 
   >.top {
     display: flex;
@@ -480,8 +479,7 @@ body>.expand-button {
 
 body.sidenav-collapsed {
   nav.left-pane {
-    width: 0px !important;
-    transition: width 2.5s cubic-bezier(0.7, 0, 1, 0.3);
+    display: none;
   }
 
   .resizer {
