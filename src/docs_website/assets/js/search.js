@@ -182,11 +182,12 @@ function selectResult(node) {
   // Preview result
   const page = pages[node.pageIndex];
   content.innerHTML = page.html;
-  history.pushState({}, "", node.href);
-  // Do a little dance around this bug: https://issues.chromium.org/issues/40596439
-  const hash = location.hash;
-  location.hash = "";
-  location.hash = hash;
+  const state = { pageIndex: node.pageIndex };
+  if (history.state) {
+    history.replaceState(state, "", node.href);
+  } else {
+    history.pushState(state, "", node.href);
+  }
   if (page.title === "TigerBeetle Docs") {
     document.title = page.title;
   } else {
@@ -196,6 +197,15 @@ function selectResult(node) {
   anchor.scrollIntoView();
   highlightText(searchInput.value, content);
 }
+
+window.addEventListener("popstate", (e) => {
+  if (e.state) {
+    const page = pages[e.state.pageIndex];
+    if (page) content.innerHTML = page.html;
+  } else {
+    window.location.href = window.location.href;
+  }
+});
 
 function selectNextResult() {
   const nodes = [...searchResults.querySelectorAll(".menu-head.expanded+.menu a")];
