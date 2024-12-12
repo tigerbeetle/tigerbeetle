@@ -182,13 +182,17 @@ function selectResult(node) {
   // Preview result
   const page = pages[node.pageIndex];
   content.innerHTML = page.html;
-  window.history.pushState({}, "", node.href);
+  history.pushState({}, "", node.href);
+  // Do a little dance around this bug: https://issues.chromium.org/issues/40596439
+  const hash = location.hash;
+  location.hash = "";
+  location.hash = hash;
   if (page.title === "TigerBeetle Docs") {
     document.title = page.title;
   } else {
     document.title = "TigerBeetle Docs | " + page.title;
   }
-  const anchor = document.getElementById(window.location.hash.slice(1));
+  const anchor = document.getElementById(location.hash.slice(1));
   anchor.scrollIntoView();
   highlightText(searchInput.value, content);
 }
