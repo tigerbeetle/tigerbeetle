@@ -461,7 +461,7 @@ nav.side {
 
 .resizer {
   width: 8px;
-  cursor: ew-resize;
+  cursor: col-resize;
 
   &:hover {
     border-left: 1px solid var(--gray-4);
