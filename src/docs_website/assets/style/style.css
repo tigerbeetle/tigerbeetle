@@ -596,6 +596,7 @@ article {
       opacity: 0.77;
     }
 
+    .target .anchor::after,
     :target .anchor::after {
       /* computed using https://codepen.io/sosuke/pen/Pjoqqp */
       filter: invert(52%) sepia(55%) saturate(5949%) hue-rotate(189deg) brightness(93%) contrast(105%);
@@ -607,6 +608,7 @@ article {
         filter: invert(100%);
       }
 
+      .target .anchor::after,
       :target .anchor::after {
         filter: invert(91%) sepia(89%) saturate(569%) hue-rotate(332deg) brightness(104%) contrast(103%);
       }

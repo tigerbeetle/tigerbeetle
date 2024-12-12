@@ -195,6 +195,7 @@ function selectResult(node) {
     document.title = "TigerBeetle Docs | " + page.title;
   }
   const anchor = document.getElementById(location.hash.slice(1));
+  anchor.classList.add("target");
   anchor.scrollIntoView();
   highlightText(searchInput.value, content);
 }
