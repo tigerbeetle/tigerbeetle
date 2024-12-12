@@ -715,7 +715,10 @@ pub fn ReplicaType(
                 // that SV to a DVC (dropping the hooks), and never finished the view change.
                 if (op_head == null) {
                     assert(self.view > self.log_view);
-                    if (self.journal.op_maximum() < self.op_checkpoint()) {
+                    if (self.journal.op_maximum() < self.op_checkpoint() or
+                        // Corrupted root prepare:
+                        (self.journal.op_maximum() == 0 and self.journal.header_with_op(0) == null))
+                    {
                         const header_checkpoint =
                             &self.superblock.working.vsr_state.checkpoint.header;
                         assert(header_checkpoint.op == self.op_checkpoint());
