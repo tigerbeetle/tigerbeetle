@@ -708,27 +708,11 @@ pub fn ReplicaType(
                     }
                     break;
                 }
-            } else {
-                // This case can occur if we loaded an SV for its hook header but never finished
-                // that SV to a DVC (dropping the hooks), and never finished the view change.
-                if (op_head == null) {
-                    assert(self.view > self.log_view);
-                    if (self.journal.op_maximum() < self.op_checkpoint() or
-                        // Corrupted root prepare:
-                        (self.journal.op_maximum() == 0 and self.journal.header_with_op(0) == null))
-                    {
-                        const header_checkpoint =
-                            &self.superblock.working.vsr_state.checkpoint.header;
-                        assert(header_checkpoint.op == self.op_checkpoint());
-                        assert(!self.journal.has(header_checkpoint));
-                        self.journal.set_header_as_dirty(header_checkpoint);
-                    }
-                    op_head = self.journal.op_maximum();
-                }
             }
 
             // Guaranteed since our durable view_headers always contain an op from the current
             // checkpoint (see `commit_checkpoint_superblock`).
+            assert(op_head != null);
             assert(op_head.? >= self.op_checkpoint());
             assert(op_head.? <= self.op_prepare_max());
 
