@@ -210,7 +210,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.table_extents = TableExtents{};
             try manifest_log.table_extents.ensureTotalCapacity(
                 allocator,
-                options.forest_table_count_max,
+                // Allocate space for one additional table, so that the code can still use
+                // `getOrPutAssumeCapacity` while making it easier to check if the limit has been
+                // exceeded to error with a friendly message.
+                options.forest_table_count_max + 1,
             );
             errdefer manifest_log.table_extents.deinit(allocator);
 
@@ -395,6 +398,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                         const extent =
                             manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
                         if (!extent.found_existing) {
+                            manifest_log.check_tables_count();
                             extent.value_ptr.* = .{ .block = block_address, .entry = entry };
                             manifest_log.open_event(manifest_log, table);
                         }
@@ -533,10 +537,14 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .update,
                 => {
                     const extent = manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
-                    if (extent.found_existing) {
-                        maybe(table.label.event == .insert); // (Compaction.)
-                    } else {
+                    if (!extent.found_existing) {
                         assert(table.label.event == .insert);
+
+                        // When inserting, check that the insertion didn't cause the number of
+                        // tables to exceed `forest_table_count_max`.
+                        manifest_log.check_tables_count();
+                    } else {
+                        maybe(table.label.event == .insert); // (Compaction.)
                     }
                     extent.value_ptr.* = .{ .block = block_address, .entry = entry };
                 },
@@ -547,6 +555,19 @@ pub fn ManifestLogType(comptime Storage: type) type {
             if (manifest_log.entry_count == schema.ManifestNode.entry_count_max) {
                 manifest_log.close_block();
                 assert(manifest_log.entry_count == 0);
+            }
+        }
+
+        fn check_tables_count(manifest_log: *ManifestLog) void {
+            const tables_count = manifest_log.table_extents.count();
+            if (tables_count > manifest_log.options.forest_table_count_max) {
+                vsr.fatal(
+                    .forest_tables_count_would_exceed_limit,
+                    "forest_tables_count would exceed limit " ++
+                        "(tables_count={} tables_max={}) - " ++
+                        "please contact the team directly who will be able to assist",
+                    .{ tables_count, manifest_log.options.forest_table_count_max },
+                );
             }
         }
 
@@ -1130,12 +1151,12 @@ const Pace = struct {
     /// "T":
     /// The maximum number of blocks in a fully-compacted manifest.
     /// (Exposed by the struct only for the purpose of logging.)
-    log_blocks_full_max: u32,
+    log_blocks_full_max: u64,
 
     /// "limit of MC(c) as c approaches ∞"
-    log_blocks_cycle_max: u32,
+    log_blocks_cycle_max: u64,
     /// "limit of MB(b) as b approaches ∞"
-    log_blocks_max: u32,
+    log_blocks_max: u64,
 
     tables_max: u32,
 
