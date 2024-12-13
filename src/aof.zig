@@ -324,7 +324,7 @@ pub const AOFReplayClient = struct {
         client.* = try Client.init(
             allocator,
             .{
-                .id = std.crypto.random.int(u128),
+                .id = stdx.unique_u128(),
                 .cluster = 0,
                 .replica_count = @intCast(addresses.len),
                 .message_pool = message_pool,

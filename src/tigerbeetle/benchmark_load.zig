@@ -70,7 +70,7 @@ pub fn main(
         .{cli_args.transfer_hot_percent},
     );
 
-    const client_id = std.crypto.random.int(u128);
+    const client_id = stdx.unique_u128();
     const cluster_id: u128 = 0;
 
     var io = try IO.init(32, 0);
