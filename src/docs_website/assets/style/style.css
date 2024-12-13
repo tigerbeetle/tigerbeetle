@@ -246,7 +246,7 @@ nav.left-pane {
       &:focus {
         padding-left: 30px;
         border-width: 2px;
-        border-color: var(--primary-10);
+        border-color: var(--primary-11);
         color: var(--gray-12);
       }
 
@@ -547,12 +547,13 @@ article {
     }
 
     a {
-      color: var(--primary-10);
+      color: var(--primary-11);
       text-underline-offset: 0.2em;
       text-decoration-thickness: 1px;
+      text-decoration-color: var(--primary-8);
 
       code {
-        color: var(--primary-10);
+        color: var(--primary-11);
       }
     }
 
