@@ -103,6 +103,7 @@ code {
 
 .highlight {
   background-color: var(--primary-6);
+  color: var(--gray-12);
 }
 
 nav.left-pane {
