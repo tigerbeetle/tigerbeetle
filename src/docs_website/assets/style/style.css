@@ -588,8 +588,12 @@ article {
     }
 
     .anchor::after {
+      content: "";
+      display: inline-block;
+      background: url("../img/link.svg");
+      width: 16px;
+      height: 16px;
       margin-left: 8px;
-      content: url("../img/link.svg");
       opacity: 0.2;
     }
 
