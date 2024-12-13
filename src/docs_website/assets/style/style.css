@@ -102,7 +102,7 @@ code {
 }
 
 .highlight {
-  background-color: color-mix(in srgb, var(--primary-10), transparent 75%);
+  background-color: var(--primary-6);
 }
 
 nav.left-pane {
