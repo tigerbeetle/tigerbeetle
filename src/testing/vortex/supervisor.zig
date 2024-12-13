@@ -328,10 +328,19 @@ const Supervisor = struct {
             if (acceptable_faults_start_ns) |start_ns| {
                 const deadline = start_ns + constants.liveness_requirement_seconds *
                     std.time.ns_per_s;
-                if (now > deadline and
-                    supervisor.workload.event_count_total == 0)
-                {
-                    log.err("no successful requests after {d} seconds of {d} faulty replica(s)", .{
+                const no_finished_requests =
+                    supervisor.workload.request_duration_max_micros == null;
+                const too_slow_request =
+                    if (supervisor.workload.request_duration_max_micros) |duration|
+                    duration > (constants.liveness_requirement_seconds * 1_000_000)
+                else
+                    false;
+                if (now > deadline and (no_finished_requests or too_slow_request)) {
+                    log.info("no_finished_requests={}, too_slow_request={}", .{
+                        no_finished_requests,
+                        too_slow_request,
+                    });
+                    log.err("liveness check failed after {d} seconds of {d} faulty replica(s)", .{
                         constants.liveness_requirement_seconds,
                         faulty_replica_count,
                     });
@@ -352,8 +361,8 @@ const Supervisor = struct {
                 }
             }
 
-            // Check if `acceptable_faults_start_ns` should change state. If so, we reset the event
-            // counter.
+            // Check if `acceptable_faults_start_ns` should change state. If so, we reset the max
+            // request duration too.
             // NOTE: Network faults are currently global, so we relax the requirement in such cases.
             if (faulty_replica_count <= constants.liveness_faulty_replicas_max and
                 supervisor.network.faults.is_healed())
@@ -361,13 +370,13 @@ const Supervisor = struct {
                 // We have an acceptable number of faults, so we require liveness (after some time).
                 if (acceptable_faults_start_ns == null) {
                     acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
-                    supervisor.workload.event_count_total = 0;
+                    supervisor.workload.request_duration_max_micros = null;
                 }
             } else {
                 // We have too many faults to require liveness.
                 if (acceptable_faults_start_ns) |start_ns| {
                     acceptable_faults_start_ns = null;
-                    supervisor.workload.event_count_total = 0;
+                    supervisor.workload.request_duration_max_micros = null;
 
                     // Record the previously passed liveness requirement period in the trace:
                     const duration_ns = @as(u64, @intCast(std.time.nanoTimestamp())) - start_ns;
@@ -806,7 +815,7 @@ const Workload = struct {
     read_completion: IO.Completion = undefined,
     read_progress: usize = 0,
 
-    event_count_total: u64 = 0,
+    request_duration_max_micros: ?u64 = null,
 
     pub fn spawn(
         allocator: std.mem.Allocator,
@@ -898,14 +907,18 @@ const Workload = struct {
 
         if (workload.read_progress >= workload.read_buffer.len) {
             const progress = std.mem.bytesAsValue(Progress, workload.read_buffer[0..]);
+            const duration_micros = progress.timestamp_end_micros - progress.timestamp_start_micros;
             workload.read_progress = 0;
-            workload.event_count_total += progress.event_count;
+            workload.request_duration_max_micros = if (workload.request_duration_max_micros) |duration_max|
+                @max(duration_max, duration_micros)
+            else
+                duration_micros;
 
             workload.trace.write(.{
                 .name = .request,
                 .process_id = vortex_process_ids.workload,
                 .timestamp_micros = progress.timestamp_start_micros,
-                .duration = progress.timestamp_end_micros - progress.timestamp_start_micros,
+                .duration = duration_micros,
                 .phase = .complete,
             }, .{ .event_count = progress.event_count }) catch {};
         }
