@@ -463,6 +463,7 @@ nav.side {
   width: 8px;
   cursor: col-resize;
 
+  &.resizing,
   &:hover {
     border-left: 1px solid var(--gray-4);
   }
@@ -470,19 +471,31 @@ nav.side {
 
 body>.expand-button {
   display: none;
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 1;
+  padding: 16px 8px 0 16px;
   cursor: pointer;
+
+  .tick {
+    color: var(--gray-8);
+  }
+
+  >div {
+    display: flex;
+    align-items: center;
+  }
+
+  &:hover {
+    background-color: var(--gray-1);
+    border-right: 1px solid var(--gray-3);
+    padding-right: 7px;
+
+    .tick {
+      color: var(--gray-12);
+    }
+  }
 }
 
 body.sidenav-collapsed {
   nav.left-pane {
-    display: none;
-  }
-
-  .resizer {
     display: none;
   }
 

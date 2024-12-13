@@ -7,6 +7,7 @@ if ("serviceWorker" in navigator) {
 const leftPane = document.querySelector(".left-pane");
 const resizer = document.querySelector(".resizer");
 resizer.addEventListener("mousedown", () => {
+  resizer.classList.add("resizing");
   document.body.style.cursor = "col-resize";
   document.body.style.userSelect = "none";
   document.addEventListener("mousemove", onMouseMove);
@@ -20,6 +21,7 @@ resizer.addEventListener("mousedown", () => {
     }
   }
   function onMouseUp() {
+    resizer.classList.remove("resizing");
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
     document.removeEventListener("mousemove", onMouseMove);
