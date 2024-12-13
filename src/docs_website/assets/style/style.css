@@ -596,16 +596,20 @@ article {
       line-height: 27px;
     }
 
-    h1 a,
-    h2 a,
-    h3 a,
-    h4 a,
-    h5 a {
-      color: var(--gray-12);
-      text-decoration: none;
+    h1,
+    h2,
+    h3,
+    h4,
+    h5 {
+      scroll-margin-top: 24px;
 
-      code {
+      a {
         color: var(--gray-12);
+        text-decoration: none;
+
+        code {
+          color: var(--gray-12);
+        }
       }
     }
 
