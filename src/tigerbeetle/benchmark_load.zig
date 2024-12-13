@@ -380,28 +380,52 @@ const Benchmark = struct {
         b.create_accounts();
     }
 
-    fn gen_account_index(b: *Benchmark, generator: *Generator) u64 {
+    fn gen_account_index(b: *Benchmark, hint: enum { hot, cold }) u64 {
+        assert(b.account_count > 0);
+        stdx.maybe(b.account_count_hot == 0);
+        assert(b.account_count >= b.account_count_hot);
+
+        // The hint may be ignored if:
+        // Always use hot accounts if `account_count == account_count_hot`.
+        // Always use cold accounts if `account_count_hot == 0`.
+        const source: @TypeOf(hint) = switch (hint) {
+            .hot => if (b.account_count_hot > 0) .hot else .cold,
+            .cold => if (b.account_count > b.account_count_hot) .cold else .hot,
+        };
+
+        // Select the generator and the count from each source.
+        const generator: *Generator, const account_count: u64 = switch (source) {
+            .hot => .{ &b.account_generator_hot, b.account_count_hot },
+            .cold => .{ &b.account_generator, b.account_count - b.account_count_hot },
+        };
+        assert(account_count > 0);
+
         const random = b.rng.random();
-        switch (generator.*) {
-            .zipfian => |gen| {
+        const index = switch (generator.*) {
+            .zipfian => |gen| index: {
                 // zipfian set size must be same as account set size
-                assert(b.account_count == gen.gen.n);
+                assert(account_count == gen.gen.n);
                 const index = gen.next(random);
-                assert(index < b.account_count);
-                return index;
+                assert(index < account_count);
+                break :index index;
             },
-            .latest => |gen| {
-                assert(b.account_count == gen.n);
+            .latest => |gen| index: {
+                assert(account_count == gen.n);
                 const index_rev = gen.next(random);
-                assert(index_rev < b.account_count);
-                return b.account_count - index_rev - 1;
+                assert(index_rev < account_count);
+                break :index account_count - index_rev - 1;
             },
-            .uniform => |count| {
+            .uniform => |count| index: {
                 const index = random.uintLessThan(u64, count);
-                assert(index < b.account_count);
-                return index;
+                assert(index < account_count);
+                break :index index;
             },
-        }
+        };
+
+        return switch (source) {
+            .hot => index,
+            .cold => index + b.account_count_hot,
+        };
     }
 
     fn create_transfer(b: *Benchmark) tb.Transfer {
@@ -411,18 +435,16 @@ const Benchmark = struct {
         // `account_count_hot`. Sometimes the debit account will be selected
         // from the first `account_count_hot` accounts; otherwise both
         // debit and credit will be selected from an account >= `account_count_hot`.
-
-        const debit_account_hot = b.account_count_hot > 0 and
-            random.uintLessThan(u64, 100) < b.transfer_hot_percent;
-
-        const debit_account_index = if (debit_account_hot)
-            b.gen_account_index(&b.account_generator_hot)
-        else
-            b.gen_account_index(&b.account_generator) + b.account_count_hot;
+        const debit_account_index = b.gen_account_index(
+            if (random.intRangeAtMost(usize, 1, 100) <= b.transfer_hot_percent)
+                .hot
+            else
+                .cold,
+        );
         const credit_account_index = index: {
-            var index = b.gen_account_index(&b.account_generator) + b.account_count_hot;
+            var index = b.gen_account_index(.cold);
             if (index == debit_account_index) {
-                index = (index + 1) % b.account_count + b.account_count_hot;
+                index = (index + 1) % b.account_count;
             }
             break :index index;
         };
@@ -573,7 +595,9 @@ const Benchmark = struct {
             return;
         }
 
-        b.account_index = b.gen_account_index(&b.account_generator);
+        // Use hot accounts for queries to equalize the number of results
+        // returned on each execution.
+        b.account_index = b.gen_account_index(.hot);
         var filter = tb.AccountFilter{
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
             .user_data_128 = 0,
