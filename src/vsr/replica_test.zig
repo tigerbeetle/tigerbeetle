@@ -2047,7 +2047,7 @@ const TestReplicas = struct {
     pub fn stop(t: *const TestReplicas) void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: crash replica", .{r});
-            t.cluster.crash_replica(r);
+            t.cluster.replica_crash(r);
 
             // For simplicity, ensure that any packets that are in flight to this replica are
             // discarded before it starts up again.
@@ -2061,7 +2061,7 @@ const TestReplicas = struct {
     pub fn open(t: *const TestReplicas) !void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(
+            t.cluster.replica_restart(
                 r,
                 t.cluster.replicas[r].releases_bundled,
             ) catch |err| {
@@ -2087,7 +2087,7 @@ const TestReplicas = struct {
 
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(r, &releases_bundled) catch |err| {
+            t.cluster.replica_restart(r, &releases_bundled) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
@@ -2103,10 +2103,15 @@ const TestReplicas = struct {
         return t.replicas.get(0);
     }
 
-    pub fn health(t: *const TestReplicas) ReplicaHealth {
-        var value_all: ?ReplicaHealth = null;
+    const Health = enum { up, down };
+
+    pub fn health(t: *const TestReplicas) Health {
+        var value_all: ?Health = null;
         for (t.replicas.const_slice()) |r| {
-            const value = t.cluster.replica_health[r];
+            const value: Health = switch (t.cluster.replica_health[r]) {
+                .up => .up,
+                .down => .down,
+            };
             if (value_all) |all| {
                 assert(all == value);
             } else {
