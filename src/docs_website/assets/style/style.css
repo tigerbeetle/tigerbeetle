@@ -74,9 +74,13 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: var(--gray-4);
+  background: transparent;
   border: 2px solid var(--gray-0);
   border-radius: 24px;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background-color: var(--gray-4);
 }
 
 *::-webkit-scrollbar-thumb:hover {
@@ -84,7 +88,7 @@
 }
 
 *::-webkit-scrollbar {
-  background-color: #00000000;
+  background: transparent;
   display: block;
   width: 8px;
   height: 8px;
