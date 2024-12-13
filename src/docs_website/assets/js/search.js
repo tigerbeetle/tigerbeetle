@@ -10,7 +10,7 @@ const content = document.querySelector("article>.content");
 
 let sidenavWasCollapsed = false;
 document.addEventListener("keydown", event => {
-  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+  if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (event.key === "/" && searchInput !== document.activeElement) {
     sidenavWasCollapsed = document.body.classList.contains("sidenav-collapsed");
     document.body.classList.remove("sidenav-collapsed");
