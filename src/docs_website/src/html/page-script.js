@@ -9,7 +9,7 @@ const resizer = document.querySelector(".resizer");
 resizer.addEventListener("mousedown", () => {
   resizer.classList.add("resizing");
   document.body.style.cursor = "col-resize";
-  document.body.style.userSelect = "none";
+  document.body.style.userSelect = document.body.style.webkitUserSelect = "none";
   document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
   function onMouseMove(e) {
@@ -23,7 +23,7 @@ resizer.addEventListener("mousedown", () => {
   function onMouseUp() {
     resizer.classList.remove("resizing");
     document.body.style.cursor = "";
-    document.body.style.userSelect = "";
+    document.body.style.userSelect = document.body.style.webkitUserSelect = "";
     document.removeEventListener("mousemove", onMouseMove);
   }
 });
