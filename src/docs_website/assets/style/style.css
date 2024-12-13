@@ -231,7 +231,7 @@ nav.left-pane {
       width: 100%;
       height: 34px;
       padding: 12px 8px 12px 31px;
-      background-color: var(--gray-1);
+      background-color: color-mix(in srgb, var(--gray-2), transparent 35%);
       border: 1px solid var(--gray-4);
       border-radius: 6px;
       outline: none;
