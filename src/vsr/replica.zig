@@ -6776,6 +6776,7 @@ pub fn ReplicaType(
         fn primary_repair_pipeline(self: *Replica) enum { done, busy } {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_stage == .idle);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
@@ -6841,6 +6842,7 @@ pub fn ReplicaType(
         fn primary_repair_pipeline_op(self: *const Replica) ?u64 {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_stage == .idle);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
@@ -6858,6 +6860,7 @@ pub fn ReplicaType(
         fn primary_repair_pipeline_read(self: *Replica) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_stage == .idle);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
@@ -6903,7 +6906,20 @@ pub fn ReplicaType(
                 return;
             }
 
-            // We may even be several views ahead and may now have a completely different pipeline.
+            if (self.commit_min != self.commit_max or self.commit_stage != .idle) {
+                log.debug("{}: repair_pipeline_read_callback: no longer repairing", .{
+                    self.replica,
+                });
+                return;
+            }
+
+            // We are in a state where we should be repairing the pipeline (cf. the end of repair).
+            assert(self.status == .view_change);
+            assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_stage == .idle);
+            assert(self.commit_min == self.commit_max);
+
+            // But we still need to check that we are reparing the right prepare.
             const op = self.primary_repair_pipeline_op() orelse {
                 log.debug("{}: repair_pipeline_read_callback: pipeline changed", .{self.replica});
                 return;
@@ -6921,9 +6937,6 @@ pub fn ReplicaType(
                 log.debug("{}: repair_pipeline_read_callback: checksum changed", .{self.replica});
                 return;
             }
-
-            assert(self.status == .view_change);
-            assert(self.primary_index(self.view) == self.replica);
 
             log.debug("{}: repair_pipeline_read_callback: op={} checksum={}", .{
                 self.replica,
