@@ -273,7 +273,10 @@ nav.left-pane {
     color: var(--gray-10);
     font-size: 12px;
     line-height: 20px;
-    padding: 0 8px;
+    padding-left: 32px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
   }
 }
 
