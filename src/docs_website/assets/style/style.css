@@ -313,18 +313,11 @@ nav.left-pane {
     }
   }
 
-  .menu-head::before {
-    font-size: 8px;
-    line-height: 8px;
-    width: 8px;
-    height: 8px;
-  }
-
   a {
     display: block;
     color: var(--gray-11);
     text-decoration: none;
-    padding: 6px 8px 6px 24px;
+    padding: 6px 8px 6px 32px;
     border-radius: 6px;
 
     h3 {
