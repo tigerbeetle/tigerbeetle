@@ -44,6 +44,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const IO = @import("../../io.zig").IO;
+const RingBufferType = @import("../../ring_buffer.zig").RingBufferType;
 const LoggedProcess = @import("./logged_process.zig");
 const faulty_network = @import("./faulty_network.zig");
 const arbitrary = @import("./arbitrary.zig");
@@ -323,40 +324,42 @@ const Supervisor = struct {
 
             const faulty_replica_count = terminated_replicas.len + stopped_replicas.len;
 
-            // If we've been in a state with an acceptable number of faults for the required amount
-            // of time, we should have seen finished requests.
             if (acceptable_faults_start_ns) |start_ns| {
                 const deadline = start_ns + constants.liveness_requirement_seconds *
                     std.time.ns_per_s;
+                // If we've been in a state with an acceptable number of faults for the required
+                // amount of time, we should have seen finished requests.
                 const no_finished_requests =
-                    supervisor.workload.request_duration_max_micros == null;
-                const too_slow_request =
-                    if (supervisor.workload.request_duration_max_micros) |duration|
-                    duration > (constants.liveness_requirement_seconds * 1_000_000)
-                else
-                    false;
-                if (now > deadline and (no_finished_requests or too_slow_request)) {
-                    log.info("no_finished_requests={}, too_slow_request={}", .{
-                        no_finished_requests,
-                        too_slow_request,
-                    });
-                    log.err("liveness check failed after {d} seconds of {d} faulty replica(s)", .{
-                        constants.liveness_requirement_seconds,
-                        faulty_replica_count,
-                    });
+                    now > deadline and supervisor.workload.requests_finished.empty();
+                // Also, those that do finish should not have too long durations, counting from the
+                // start of the acceptably-faulty period.
+                const too_slow_request = supervisor.workload.find_slow_request_since(start_ns);
+
+                errdefer {
                     const start_us = @divFloor(start_ns, std.time.ns_per_us);
-                    try supervisor.trace.write(.{
+                    supervisor.trace.write(.{
                         .name = .liveness_required,
                         .timestamp_micros = start_us,
                         .duration = @as(u64, @intCast(std.time.microTimestamp())) - start_us,
                         .process_id = vortex_process_ids.supervisor,
                         .phase = .complete,
-                    }, .{});
-                    try supervisor.trace.write(.{
+                    }, .{}) catch {};
+                    supervisor.trace.write(.{
                         .name = .test_failure,
                         .process_id = vortex_process_ids.supervisor,
                         .phase = .instant,
-                    }, .{});
+                    }, .{}) catch {};
+                }
+
+                if (no_finished_requests) {
+                    log.err("liveness check: no finished requests after {d} seconds", .{
+                        constants.liveness_requirement_seconds,
+                    });
+                    return error.TestFailed;
+                }
+
+                if (too_slow_request) |_| {
+                    log.err("liveness check: too slow request", .{});
                     return error.TestFailed;
                 }
             }
@@ -370,13 +373,13 @@ const Supervisor = struct {
                 // We have an acceptable number of faults, so we require liveness (after some time).
                 if (acceptable_faults_start_ns == null) {
                     acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
-                    supervisor.workload.request_duration_max_micros = null;
+                    supervisor.workload.requests_finished.clear();
                 }
             } else {
                 // We have too many faults to require liveness.
                 if (acceptable_faults_start_ns) |start_ns| {
                     acceptable_faults_start_ns = null;
-                    supervisor.workload.request_duration_max_micros = null;
+                    supervisor.workload.requests_finished.clear();
 
                     // Record the previously passed liveness requirement period in the trace:
                     const duration_ns = @as(u64, @intCast(std.time.nanoTimestamp())) - start_ns;
@@ -807,6 +810,13 @@ const Replica = struct {
 const Workload = struct {
     pub const State = enum(u8) { running, terminated };
 
+    const RequestInfo = struct {
+        timestamp_start_micros: u64,
+        timestamp_end_micros: u64,
+    };
+
+    const Requests = RingBufferType(RequestInfo, .{ .array = 1024 * 16 });
+
     io: *IO,
     process: *LoggedProcess,
     trace: *TraceWriter,
@@ -815,7 +825,7 @@ const Workload = struct {
     read_completion: IO.Completion = undefined,
     read_progress: usize = 0,
 
-    request_duration_max_micros: ?u64 = null,
+    requests_finished: Requests = Requests.init(),
 
     pub fn spawn(
         allocator: std.mem.Allocator,
@@ -907,23 +917,36 @@ const Workload = struct {
 
         if (workload.read_progress >= workload.read_buffer.len) {
             const progress = std.mem.bytesAsValue(Progress, workload.read_buffer[0..]);
-            const duration_micros = progress.timestamp_end_micros - progress.timestamp_start_micros;
+            const request_info: RequestInfo = .{
+                .timestamp_start_micros = progress.timestamp_start_micros,
+                .timestamp_end_micros = progress.timestamp_end_micros,
+            };
             workload.read_progress = 0;
-            workload.request_duration_max_micros = if (workload.request_duration_max_micros) |duration_max|
-                @max(duration_max, duration_micros)
-            else
-                duration_micros;
+            workload.requests_finished.push(request_info) catch
+                log.warn("requests_finished is full", .{});
 
             workload.trace.write(.{
                 .name = .request,
                 .process_id = vortex_process_ids.workload,
                 .timestamp_micros = progress.timestamp_start_micros,
-                .duration = duration_micros,
+                .duration = progress.timestamp_end_micros - progress.timestamp_start_micros,
                 .phase = .complete,
             }, .{ .event_count = progress.event_count }) catch {};
         }
 
         workload.read();
+    }
+
+    fn find_slow_request_since(workload: *const Workload, start_ns: u64) ?RequestInfo {
+        var it = workload.requests_finished.iterator();
+        while (it.next()) |request| {
+            // If a request started before the acceptably-faulty period, we ignore that part of
+            // its duration.
+            const duration_adjusted = request.timestamp_end_micros -
+                @max(request.timestamp_start_micros, @divFloor(start_ns, 1000));
+            if (duration_adjusted > constants.liveness_requirement_micros) return request;
+        }
+        return null;
     }
 };
 
