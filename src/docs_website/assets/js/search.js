@@ -195,9 +195,7 @@ function selectResult(node) {
   } else {
     document.title = "TigerBeetle Docs | " + page.title;
   }
-  const anchor = document.getElementById(location.hash.slice(1));
-  anchor.classList.add("target");
-  anchor.scrollIntoView();
+  handleAnchor();
   highlightText(searchInput.value, content);
 }
 
@@ -213,6 +211,11 @@ window.addEventListener("popstate", (e) => {
     }
   }
   statePathname = location.pathname;
+  handleAnchor();
+});
+
+function handleAnchor() {
+  document.querySelectorAll(".target>.anchor").forEach(e => e.parentNode?.classList.remove("target"));
   if (location.hash) {
     const anchor = document.getElementById(location.hash.slice(1));
     if (anchor) {
@@ -220,6 +223,9 @@ window.addEventListener("popstate", (e) => {
       anchor.scrollIntoView();
     }
   }
+}
+window.addEventListener("load", () => {
+  handleAnchor();
 });
 
 function selectNextResult() {
