@@ -200,13 +200,23 @@ function selectResult(node) {
   highlightText(searchInput.value, content);
 }
 
+let oldPathname = document.location.pathname;
 window.addEventListener("popstate", (e) => {
   if (e.state) {
     const page = pages[e.state.pageIndex];
     content.innerHTML = page.html;
     syncSideNavWithLocation();
   } else {
-    location.reload();
+    if (location.pathname != oldPathname) {
+      location.reload();
+    }
+  }
+  if (location.hash) {
+    const anchor = document.getElementById(location.hash.slice(1));
+    if (anchor) {
+      anchor.classList.add("target");
+      anchor.scrollIntoView();
+    }
   }
 });
 
