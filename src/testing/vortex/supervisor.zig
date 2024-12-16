@@ -768,6 +768,8 @@ const Replica = struct {
         const argv = &.{
             self.executable_path,
             "start",
+            "--log-debug",
+            "--experimental",
             addresses_arg,
             self.datafile,
         };
