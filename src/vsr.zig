@@ -673,6 +673,7 @@ pub const Timeout = struct {
     name: []const u8,
     id: u128,
     after: u64,
+    after_dynamic: ?u64 = null, // null iff !ticking
     attempts: u8 = 0,
     rtt: u64 = constants.rtt_ticks,
     rtt_multiple: u8 = constants.rtt_multiple,
@@ -696,9 +697,9 @@ pub const Timeout = struct {
     /// It's important to check that when fired() is acted on that the timeout is stopped/started,
     /// otherwise further ticks around the event loop may trigger a thundering herd of messages.
     pub fn fired(self: *const Timeout) bool {
-        if (self.ticking and self.ticks >= self.after) {
+        if (self.ticking and self.ticks >= self.after_dynamic.?) {
             log.debug("{}: {s} fired", .{ self.id, self.name });
-            if (self.ticks > self.after) {
+            if (self.ticks > self.after_dynamic.?) {
                 log.err("{}: {s} is firing every tick", .{ self.id, self.name });
                 @panic("timeout was not reset correctly");
             }
@@ -736,7 +737,7 @@ pub const Timeout = struct {
         log.debug("{}: {s} after={}..{} (rtt={} min={} max={} attempts={})", .{
             self.id,
             self.name,
-            self.after,
+            self.after_dynamic.?,
             after,
             self.rtt,
             constants.backoff_min_ticks,
@@ -744,8 +745,8 @@ pub const Timeout = struct {
             self.attempts,
         });
 
-        self.after = after;
-        assert(self.after > 0);
+        self.after_dynamic = after;
+        assert(self.after_dynamic.? > 0);
     }
 
     pub fn set_rtt(self: *Timeout, rtt_ticks: u64) void {
@@ -764,6 +765,7 @@ pub const Timeout = struct {
 
     pub fn start(self: *Timeout) void {
         self.attempts = 0;
+        self.after_dynamic = self.after;
         self.ticks = 0;
         self.ticking = true;
         // TODO Use self.prng to adjust for rtt and attempts.
@@ -772,6 +774,7 @@ pub const Timeout = struct {
 
     pub fn stop(self: *Timeout) void {
         self.attempts = 0;
+        self.after_dynamic = null;
         self.ticks = 0;
         self.ticking = false;
         log.debug("{}: {s} stopped", .{ self.id, self.name });

@@ -3174,7 +3174,8 @@ pub fn ReplicaType(
             if (self.sync_tables != null) return;
             assert(self.grid.callback != .cancel);
 
-            self.grid_scrub_timeout.after = std.math.clamp(
+            assert(self.grid_scrub_timeout.after_dynamic != null);
+            self.grid_scrub_timeout.after_dynamic = std.math.clamp(
                 @divFloor(
                     constants.grid_scrubber_cycle_ticks,
                     @max(1, self.grid.free_set.count_acquired()),
