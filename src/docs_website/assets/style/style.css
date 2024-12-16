@@ -622,6 +622,7 @@ article {
       content: "";
       display: inline-block;
       background: url("../img/link.svg");
+      background-position-y: 2px;
       width: 16px;
       height: 16px;
       margin-left: 4px;
