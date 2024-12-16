@@ -548,6 +548,7 @@ article {
     gap: 24px;
     max-width: 950px;
     padding: 48px 64px;
+    padding-bottom: 50vh;
 
     color: var(--gray-11);
     font-size: 16px;
