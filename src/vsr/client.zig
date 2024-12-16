@@ -245,6 +245,7 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .command = .request,
                 .operation = .register,
                 .release = self.release,
+                .batch_count = 0,
             };
 
             std.mem.bytesAsValue(
@@ -302,6 +303,7 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + events.len),
+                .batch_count = 0,
             };
 
             stdx.copy_disjoint(.exact, u8, message.body_used(), events);
