@@ -1269,6 +1269,7 @@ pub const Headers = struct {
             .commit = 0,
             .timestamp = 0,
             .request = 0,
+            .batch_count = 0,
         };
     }
 
