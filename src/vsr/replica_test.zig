@@ -14,7 +14,6 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
-const ReplicaHealth = @import("../testing/cluster.zig").ReplicaHealth;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
 
