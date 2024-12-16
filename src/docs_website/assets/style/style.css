@@ -310,6 +310,13 @@ nav.left-pane {
     }
   }
 
+  .menu-head::before {
+    font-size: 8px;
+    line-height: 8px;
+    width: 8px;
+    height: 8px;
+  }
+
   a {
     display: block;
     color: var(--gray-11);
@@ -396,19 +403,6 @@ nav.side {
   }
 
   .menu .item {
-    padding-left: 24px;
-
-    &:not(.menu-head) a {
-      margin-left: -24px;
-      padding-left: 24px;
-    }
-
-    &.menu-head {
-      padding-left: 8px;
-    }
-  }
-
-  .menu .menu .item {
     padding-left: 32px;
 
     &:not(.menu-head) a {
@@ -417,16 +411,29 @@ nav.side {
     }
 
     &.menu-head {
-      padding-left: 16px;
+      padding-left: 8px;
     }
   }
 
-  .menu .menu .menu .item {
+  .menu .menu .item {
     padding-left: 40px;
 
     &:not(.menu-head) a {
       margin-left: -40px;
       padding-left: 40px;
+    }
+
+    &.menu-head {
+      padding-left: 16px;
+    }
+  }
+
+  .menu .menu .menu .item {
+    padding-left: 48px;
+
+    &:not(.menu-head) a {
+      margin-left: -48px;
+      padding-left: 48px;
     }
 
     &.menu-head {
@@ -450,13 +457,14 @@ nav.side {
 
 .menu-head::before {
   content: "\25b6";
+  text-align: center;
   flex-shrink: 0;
-  font-size: 8px;
-  line-height: 8px;
+  font-size: 9px;
+  line-height: 16px;
   color: var(--gray-11);
   display: block;
-  width: 8px;
-  height: 8px;
+  width: 16px;
+  height: 16px;
 }
 
 .menu-head:hover:not(:has(a:hover))::before {
