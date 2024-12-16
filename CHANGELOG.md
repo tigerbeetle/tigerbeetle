@@ -3,6 +3,57 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle (unreleased)
+
+Released: 2024-12-16
+
+### Safety And Performance
+
+- [#2537](https://github.com/tigerbeetle/tigerbeetle/pull/2537)
+
+  Exit cleanly if the database grows to the maximum size.
+
+- [#2511](https://github.com/tigerbeetle/tigerbeetle/pull/2511)
+
+  Simulate virtual machine migration in the VOPR.
+
+- [#2561](https://github.com/tigerbeetle/tigerbeetle/pull/2561)
+
+  Test that Java client behaves correctly when its thread is interrupted.
+
+### Features
+
+- [#2540](https://github.com/tigerbeetle/tigerbeetle/pull/2540)
+
+  `tigerbeetle format` now automatically generates a random cluster id if it isn't passed on the
+  command line. To avoid operational errors, it is important that each cluster gets a globally
+  unique id.
+
+- [#2558](https://github.com/tigerbeetle/tigerbeetle/pull/2558),
+  [#2552](https://github.com/tigerbeetle/tigerbeetle/pull/2552)
+
+  Improve error reporting when a client gets evicted due to a mismatched version.
+
+### Internals
+
+- [#2542](https://github.com/tigerbeetle/tigerbeetle/pull/2542)
+
+  Switch CLI client to static allocation.
+
+- [#2562](https://github.com/tigerbeetle/tigerbeetle/pull/2562),
+  [#2560](https://github.com/tigerbeetle/tigerbeetle/pull/2560)
+
+  Run benchmark under sudo to enable memory locking for accurate RSS stats.
+
+- [#2556](https://github.com/tigerbeetle/tigerbeetle/pull/2556),
+  [#2555](https://github.com/tigerbeetle/tigerbeetle/pull/2555)
+
+  Remove many false negatives from unused imports tidy check.
+
+### TigerTracks 🎧
+
+- [You Bring Out The Boogie In Me](https://youtu.be/0AsLHBAbByk)
+
 ## TigerBeetle 0.16.17
 
 Released: 2024-12-09
