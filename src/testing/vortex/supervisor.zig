@@ -24,11 +24,13 @@
 //!     $ unshare --net --fork --map-root-user --pid bash -c 'ip link set up dev lo ; \
 //!         ./zig-out/bin/vortex supervisor --tigerbeetle-executable=./zig-out/bin/tigerbeetle'
 //!
-//! Control the test duration by adding the `--test-duration-minutes=N` option (it's 10 minutes by
-//! default).
+//! Other options:
 //!
-//! Generate a trace JSON file compatible with `chrome://tracing` by adding the `--trace=<file>`
-//! option.
+//! * Control the test duration by adding the `--test-duration-minutes=N` option (it's 10 minutes
+//!   by default).
+//! * Generate a trace JSON file compatible with `chrome://tracing` by adding the `--trace=<file>`
+//!   option.
+//! * Enable replica debug logging with `--log-debug`.
 //!
 //! If you have permissions troubles with unshare and Ubuntu, see:
 //! https://github.com/YoYoGames/GameMaker-Bugs/issues/6015#issuecomment-2135552784
@@ -42,6 +44,7 @@
 //! * multiple drivers? could use a special multiplexer driver that delegates to others
 
 const std = @import("std");
+const stdx = @import("../../stdx.zig");
 const builtin = @import("builtin");
 const IO = @import("../../io.zig").IO;
 const RingBufferType = @import("../../ring_buffer.zig").RingBufferType;
@@ -104,6 +107,8 @@ pub const CLIArgs = struct {
     driver_command: ?[]const u8 = null,
     disable_faults: bool = false,
     trace: ?[]const u8 = null,
+    output_directory: ?[]const u8 = null,
+    log_debug: bool = false,
 };
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
@@ -187,6 +192,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             args.tigerbeetle_executable,
             @intCast(replica_index),
             datafile,
+            args.log_debug,
         );
 
         replicas[replica_index] = replica;
@@ -711,6 +717,7 @@ const Replica = struct {
     executable_path: []const u8,
     replica_index: u8,
     datafile: []const u8,
+    log_debug: bool,
     process: ?*LoggedProcess,
 
     pub fn create(
@@ -718,6 +725,7 @@ const Replica = struct {
         executable_path: []const u8,
         replica_index: u8,
         datafile: []const u8,
+        log_debug: bool,
     ) !*Replica {
         const self = try allocator.create(Replica);
         errdefer allocator.destroy(self);
@@ -727,6 +735,7 @@ const Replica = struct {
             .executable_path = executable_path,
             .replica_index = replica_index,
             .datafile = datafile,
+            .log_debug = log_debug,
             .process = null,
         };
         return self;
@@ -766,14 +775,23 @@ const Replica = struct {
             .{replica_addresses_for_replicas[self.replica_index]},
         );
 
-        const argv = &.{
+        var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
+        argv.append_slice_assume_capacity(&.{
             self.executable_path,
             "start",
+        });
+        if (self.log_debug) {
+            argv.append_slice_assume_capacity(&.{
+                "--log-debug",
+                "--experimental",
+            });
+        }
+        argv.append_slice_assume_capacity(&.{
             addresses_arg,
             self.datafile,
-        };
+        });
 
-        self.process = try LoggedProcess.spawn(self.allocator, argv, .{});
+        self.process = try LoggedProcess.spawn(self.allocator, argv.const_slice(), .{});
     }
 
     pub fn terminate(
