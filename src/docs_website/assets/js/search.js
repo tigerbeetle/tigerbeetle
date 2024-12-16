@@ -189,6 +189,7 @@ function selectResult(node) {
   } else {
     history.pushState(state, page.title, node.href);
   }
+  statePathname = location.pathname;
   if (page.title === "TigerBeetle Docs") {
     document.title = page.title;
   } else {
@@ -200,17 +201,18 @@ function selectResult(node) {
   highlightText(searchInput.value, content);
 }
 
-let oldPathname = document.location.pathname;
+let statePathname = location.pathname;
 window.addEventListener("popstate", (e) => {
   if (e.state) {
     const page = pages[e.state.pageIndex];
     content.innerHTML = page.html;
     syncSideNavWithLocation();
   } else {
-    if (location.pathname != oldPathname) {
+    if (location.pathname != statePathname) {
       location.reload();
     }
   }
+  statePathname = location.pathname;
   if (location.hash) {
     const anchor = document.getElementById(location.hash.slice(1));
     if (anchor) {
