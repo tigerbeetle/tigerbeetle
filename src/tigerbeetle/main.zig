@@ -303,8 +303,7 @@ const Command = struct {
             });
         }
 
-        const nonce = std.crypto.random.int(u128);
-        assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
+        const nonce = stdx.unique_u128();
 
         var multiversion: ?vsr.multiversioning.Multiversion = blk: {
             if (constants.config.process.release.value ==

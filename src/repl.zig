@@ -859,7 +859,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             io.* = try IO.init(32, 0);
             errdefer io.deinit();
 
-            const client_id = std.crypto.random.int(u128);
+            const client_id = stdx.unique_u128();
             const client = try Client.init(
                 allocator,
                 .{

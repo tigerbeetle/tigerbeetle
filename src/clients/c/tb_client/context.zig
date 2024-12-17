@@ -125,8 +125,7 @@ pub fn ContextType(
             errdefer allocator.destroy(context);
 
             context.allocator = allocator;
-            context.client_id = std.crypto.random.int(u128);
-            assert(context.client_id != 0); // Broken CSPRNG is the likeliest explanation for zero.
+            context.client_id = stdx.unique_u128();
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
             context.addresses = .{};

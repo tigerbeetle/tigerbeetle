@@ -636,8 +636,7 @@ pub const Multiversion = struct {
         );
         errdefer allocator.free(source_buffer);
 
-        const nonce = std.crypto.random.int(u128);
-        assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
+        const nonce = stdx.unique_u128();
 
         const target_path: [:0]const u8 = switch (builtin.target.os.tag) {
             .linux => try allocator.dupeZ(u8, multiversion_uuid),
