@@ -13,7 +13,7 @@ const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 
 const Header = vsr.Header;
-const Client = vsr.ClientType(StateMachine, MessageBus);
+const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
 const log = std.log.scoped(.aof);
 
 const magic_number: u128 = 312960301372567410560647846651901451202;
@@ -327,6 +327,7 @@ pub const AOFReplayClient = struct {
                 .id = stdx.unique_u128(),
                 .cluster = 0,
                 .replica_count = @intCast(addresses.len),
+                .time = .{},
                 .message_pool = message_pool,
                 .message_bus_options = .{
                     .configuration = addresses,

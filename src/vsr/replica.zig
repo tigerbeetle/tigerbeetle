@@ -1509,6 +1509,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .view = self.view,
                 .release = self.release,
+                .ping_timestamp_monotonic = message.header.ping_timestamp_monotonic,
             }));
         }
 
