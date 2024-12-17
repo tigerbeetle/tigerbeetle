@@ -9,7 +9,8 @@
   --gray-7: #CECECE;
   --gray-8: #BBBBBB;
   --gray-10: #838383;
-  --gray-11: #646464;
+  --gray-11: #4B4B4B;
+  /* change to darker gray for legibility */
   --gray-12: #202020;
   --red-10: #DC3E42;
   --blue-10: #0588F0;
@@ -104,6 +105,7 @@ body {
   flex-direction: row;
   height: 100vh;
   overflow: hidden;
+  text-wrap-style: pretty;
 }
 
 code {
@@ -669,7 +671,7 @@ article {
     }
 
     li {
-      margin-left: 16px;
+      margin-left: 32px;
     }
 
     table {
