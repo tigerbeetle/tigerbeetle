@@ -4797,6 +4797,7 @@ pub fn ReplicaType(
                 .timestamp = prepare.header.timestamp,
                 .commit = prepare.header.op,
                 .size = @sizeOf(Header) + @as(u32, @intCast(reply_body_size)),
+                .batch_count = 0,
             };
             assert(reply.header.epoch == 0);
 
@@ -6568,6 +6569,7 @@ pub fn ReplicaType(
                 },
                 .request = request_header.request,
                 .operation = request_header.operation,
+                .batch_count = 0,
             };
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
@@ -10267,6 +10269,7 @@ pub fn ReplicaType(
                 .parent = 0,
                 .client = 0,
                 .session = 0,
+                .batch_count = 0,
             };
 
             stdx.copy_disjoint(.exact, u8, request.body_used(), body);
