@@ -130,6 +130,21 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         "us",
     );
 
+    const ci_pipeline_duration_s = blk: {
+        const times_gh = try shell.exec_stdout("gh run list -c {sha} -e merge_group " ++
+            "--json startedAt,updatedAt -L 1 --template {template}", .{
+            .sha = cli_args.sha,
+            .template = "{{range .}}{{.startedAt}} {{.updatedAt}}{{end}}",
+        });
+        const iso8601_started_at, const iso8601_updated_at =
+            (stdx.cut(times_gh, " ") orelse break :blk null).unpack();
+
+        const epoch_started_at = try shell.iso8601_to_timestamp_seconds(iso8601_started_at);
+        const epoch_updated_at = try shell.iso8601_to_timestamp_seconds(iso8601_updated_at);
+
+        break :blk epoch_updated_at - epoch_started_at;
+    };
+
     const batch = MetricBatch{
         .timestamp = commit_timestamp,
         .attributes = .{
@@ -138,7 +153,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .branch = "main",
         },
         .metrics = &[_]Metric{
-            .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
+            .{ .name = "ci pipeline duration", .value = ci_pipeline_duration_s.?, .unit = "s" },
             .{ .name = "executable size", .value = executable_size_bytes, .unit = "bytes" },
             .{ .name = "TPS", .value = tps, .unit = "count" },
             .{ .name = "batch p100", .value = batch_p100_ms, .unit = "ms" },
@@ -151,6 +166,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
                 .value = checksum_message_size_max_us,
                 .unit = "us",
             },
+            .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
         },
     };
 
