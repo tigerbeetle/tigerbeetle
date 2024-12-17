@@ -557,7 +557,7 @@ article {
   >.content {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
     max-width: 950px;
     padding: 48px 64px;
     padding-bottom: 50vh;
@@ -620,6 +620,7 @@ article {
     h4,
     h5 {
       scroll-margin-top: 24px;
+      margin-top: 16px;
 
       a {
         color: var(--gray-12);
@@ -632,6 +633,15 @@ article {
           color: var(--gray-12);
         }
       }
+    }
+
+    h1,
+    h1+h2,
+    h2+h3,
+    h3+h4,
+    h4+h5,
+    h5+h6 {
+      margin-top: 0;
     }
 
     .anchor::after {
