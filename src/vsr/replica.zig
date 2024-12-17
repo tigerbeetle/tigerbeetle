@@ -1487,9 +1487,7 @@ pub fn ReplicaType(
 
             self.clock.learn(message.header.replica, m0, t1, m2);
             if (self.clock.round_trip_time_median_ns()) |rtt_ns| {
-                const rtt_ms = @divFloor(rtt_ns, std.time.ns_per_ms);
-                const rtt_ticks = @divFloor(rtt_ms, constants.tick_ms);
-                self.prepare_timeout.set_rtt(@max(1, rtt_ticks));
+                self.prepare_timeout.set_rtt_ns(rtt_ns);
             }
         }
 
