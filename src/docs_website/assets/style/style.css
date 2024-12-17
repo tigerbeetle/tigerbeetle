@@ -578,9 +578,14 @@ article {
 
     a {
       color: var(--primary-11);
-      text-underline-offset: 0.2em;
-      text-decoration-thickness: 1px;
-      text-decoration-color: var(--primary-8);
+      text-decoration: none;
+
+      &:hover {
+        text-decoration: underline;
+        text-underline-offset: 0.2em;
+        text-decoration-thickness: 1px;
+        text-decoration-color: var(--primary-8);
+      }
 
       code {
         color: var(--primary-11);
@@ -614,7 +619,10 @@ article {
 
       a {
         color: var(--gray-12);
-        text-decoration: none;
+
+        &:hover {
+          text-decoration: none;
+        }
 
         code {
           color: var(--gray-12);
