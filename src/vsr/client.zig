@@ -565,6 +565,8 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         fn on_request_timeout(self: *Client) void {
+            // TODO Compute round-trip time and call self.request_timeout.set_rtt(...).
+            // Right now the timeout uses the default RTT, which is typically too high.
             self.request_timeout.backoff(self.prng.random());
 
             const message = self.request_inflight.?.message;
