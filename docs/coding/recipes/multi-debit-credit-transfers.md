@@ -70,7 +70,7 @@ It uses the following accounts:
 |  3 |    USD |           `B` |        `SETUP` |    100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
 |  4 |    USD |           `C` |        `SETUP` |    100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
 |  5 |    USD |       `SETUP` |            `X` |    100 | [`linked`](../../reference/transfer.md#flagslinked) |
-|  6 |    USD |       `LIMIT` |        `SETUP` |    100 | [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+|  6 |    USD |       `LIMIT` |        `SETUP` |     -0 | [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
 
 If the cumulative [credit balance](../data-modeling.md#credit-balances) of `A + B + C` is less than
 `100`, the chain will fail (transfer `6` will return `exceeds_credits`).
