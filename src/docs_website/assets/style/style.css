@@ -537,7 +537,11 @@ main {
   line-height: 20px;
   font-weight: 400;
   text-decoration: none;
-  color: var(--gray-12);
+  color: var(--gray-11);
+
+  &:hover {
+    color: var(--gray-12);
+  }
 }
 
 article {
@@ -728,7 +732,8 @@ article {
         }
       }
 
-      th, th:first-child {
+      th,
+      th:first-child {
         border-color: var(--gray-7);
       }
 
