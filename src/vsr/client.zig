@@ -450,15 +450,26 @@ pub fn ClientType(
             const ping_timestamp_monotonic = pong.header.ping_timestamp_monotonic;
             const pong_timestamp_monotonic = self.time.monotonic();
             if (ping_timestamp_monotonic <= pong_timestamp_monotonic) {
-                const rtt_ns = pong_timestamp_monotonic - ping_timestamp_monotonic;
-                const rtt_ms = @divFloor(rtt_ns, std.time.ns_per_ms);
-                const rtt_ticks = @divFloor(rtt_ms, constants.tick_ms);
-                self.request_timeout.set_rtt(@max(1, rtt_ticks));
+                self.replica_round_trip_times_ns[pong.header.replica] =
+                    pong_timestamp_monotonic - ping_timestamp_monotonic;
+
+                var round_trip_times_ns = stdx.BoundedArrayType(u64, constants.replicas_max){};
+                for (self.replica_round_trip_times_ns) |round_trip_time_ns| {
+                    if (round_trip_time_ns) |rtt_ns| {
+                        round_trip_times_ns.append_assume_capacity(rtt_ns);
+                    }
+                }
+                std.mem.sort(u64, round_trip_times_ns.slice(), {}, std.sort.asc(u64));
+
+                const rtt_median_ns =
+                    round_trip_times_ns.get(@divFloor(round_trip_times_ns.count(), 2));
+                self.request_timeout.set_rtt_ns(rtt_median_ns);
             } else {
-                log.debug("{}: on_pong: monotonic timestamp regressed {}..{}", .{
+                log.debug("{}: on_pong: monotonic timestamp regressed {}..{} replica={}", .{
                     self.id,
                     ping_timestamp_monotonic,
                     pong_timestamp_monotonic,
+                    pong.header.replica,
                 });
             }
         }
