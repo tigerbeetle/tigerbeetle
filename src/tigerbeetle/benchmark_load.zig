@@ -25,7 +25,7 @@ const Storage = vsr.storage.StorageType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
-const Client = vsr.ClientType(StateMachine, MessageBus);
+const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
 const tb = vsr.tigerbeetle;
 const StatsD = vsr.statsd.StatsD;
 const IdPermutation = vsr.testing.IdPermutation;
@@ -100,6 +100,7 @@ pub fn main(
             .id = stdx.unique_u128(),
             .cluster = cluster_id,
             .replica_count = @intCast(addresses.len),
+            .time = .{},
             .message_pool = &message_pools.slice()[i],
             .message_bus_options = .{ .configuration = addresses, .io = &io },
         }));

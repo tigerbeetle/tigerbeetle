@@ -174,6 +174,7 @@ pub fn ContextType(
                     .id = context.client_id,
                     .cluster = cluster_id,
                     .replica_count = context.addresses.count_as(u8),
+                    .time = .{},
                     .message_pool = &context.message_pool,
                     .message_bus_options = .{
                         .configuration = context.addresses.const_slice(),
