@@ -86,7 +86,8 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         );
         var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
 
-        const last_release_changelog = changelog_iteratator.next_changelog().?.release.?;
+        const last_release_changelog = changelog_iteratator.next_changelog().?.release orelse
+            break :blk true;
         const last_release_published = try Release.parse(try shell.exec_stdout(
             "gh release list --json tagName --jq {query} --limit 1",
             .{ .query = ".[].tagName" },
