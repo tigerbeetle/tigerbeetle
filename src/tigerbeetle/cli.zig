@@ -98,8 +98,7 @@ const CLIArgs = union(enum) {
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_count_hot: usize = 0,
-        /// The probability distribution used to select accounts when making
-        /// transfers or queries.
+        /// The probability distribution used to select accounts when making transfers or queries.
         account_distribution: Command.Benchmark.Distribution = .uniform,
         flag_history: bool = false,
         flag_imported: bool = false,
@@ -120,6 +119,7 @@ const CLIArgs = union(enum) {
         query_count: usize = 100,
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
+        clients: u32 = 1,
         statsd: bool = false,
         trace: ?[:0]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
@@ -457,6 +457,7 @@ pub const Command = union(enum) {
         query_count: usize,
         print_batch_timings: bool,
         id_order: IdOrder,
+        clients: u32,
         statsd: bool,
         trace: ?[:0]const u8,
         file: ?[]const u8,
@@ -857,6 +858,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .checksum_performance = benchmark.checksum_performance,
         .query_count = benchmark.query_count,
         .print_batch_timings = benchmark.print_batch_timings,
+        .clients = benchmark.clients,
         .id_order = benchmark.id_order,
         .statsd = benchmark.statsd,
         .trace = benchmark.trace,
