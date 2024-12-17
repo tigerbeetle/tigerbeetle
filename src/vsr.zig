@@ -753,14 +753,16 @@ pub const Timeout = struct {
         assert(self.rtt > 0);
         assert(rtt_ticks > 0);
 
-        log.debug("{}: {s} rtt={}..{}", .{
-            self.id,
-            self.name,
-            self.rtt,
-            rtt_ticks,
-        });
+        if (self.rtt != rtt_ticks) {
+            log.debug("{}: {s} rtt={}..{}", .{
+                self.id,
+                self.name,
+                self.rtt,
+                rtt_ticks,
+            });
 
-        self.rtt = rtt_ticks;
+            self.rtt = rtt_ticks;
+        }
     }
 
     pub fn start(self: *Timeout) void {
