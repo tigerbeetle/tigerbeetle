@@ -958,9 +958,10 @@ const Workload = struct {
     fn find_slow_request_since(workload: *const Workload, start_ns: u64) ?RequestInfo {
         var it = workload.requests_finished.iterator();
         while (it.next()) |request| {
+            assert(request.timestamp_start_micros < request.timestamp_end_micros);
             // If a request started before the acceptably-faulty period, we ignore that part of
             // its duration.
-            const duration_adjusted = request.timestamp_end_micros -
+            const duration_adjusted = request.timestamp_end_micros -|
                 @max(request.timestamp_start_micros, @divFloor(start_ns, 1000));
             if (duration_adjusted > constants.liveness_requirement_micros) return request;
         }
