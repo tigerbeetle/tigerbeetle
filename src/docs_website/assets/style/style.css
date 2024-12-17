@@ -677,7 +677,6 @@ article {
     table {
       display: block;
       width: 100%;
-      white-space: nowrap;
       overflow-x: auto;
       border-collapse: separate;
       border-spacing: 0;
@@ -687,6 +686,8 @@ article {
         font-weight: 600;
         background-color: var(--gray-3);
         border-top: 1px solid var(--gray-4);
+        font-size: 14px;
+        line-height: 20px;
       }
 
       th:first-child {
