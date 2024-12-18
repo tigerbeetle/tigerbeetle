@@ -3903,7 +3903,6 @@ pub fn ReplicaType(
                         commit_start_journal_callback,
                         op,
                         header.checksum,
-                        null,
                     );
                     return .pending;
                 }
@@ -6875,7 +6874,7 @@ pub fn ReplicaType(
                 op,
                 op_checksum,
             });
-            self.journal.read_prepare(repair_pipeline_read_callback, op, op_checksum, null);
+            self.journal.read_prepare(repair_pipeline_read_callback, op, op_checksum);
         }
 
         fn repair_pipeline_read_callback(

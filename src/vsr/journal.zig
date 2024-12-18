@@ -725,13 +725,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             ) void,
             op: u64,
             checksum: u128,
-            destination_replica: ?u8,
         ) void {
             assert(journal.status == .recovered);
             assert(checksum != 0);
-            if (destination_replica == null) {
-                assert(journal.reads.available() > 0);
-            }
+            assert(journal.reads.available() > 0);
 
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             if (op > replica.op) {
@@ -753,7 +750,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     callback,
                     op,
                     checksum,
-                    destination_replica,
+                    null,
                 );
             } else {
                 journal.read_prepare_log(op, checksum, "no matching prepare");
