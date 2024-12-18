@@ -96,6 +96,7 @@ pub const Terminal = struct {
             std.ascii.control_code.etx => return .ctrlc,
             std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
+            std.ascii.control_code.ht => return .tab,
             std.ascii.control_code.esc => {
                 const second_byte = try stdin.readByte();
                 switch (second_byte) {
@@ -300,6 +301,7 @@ const UserInput = union(enum) {
     ctrlc,
     newline,
     backspace,
+    tab,
     left,
     right,
     up,

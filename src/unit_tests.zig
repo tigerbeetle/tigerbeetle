@@ -1,5 +1,6 @@
 comptime {
     _ = @import("aof.zig");
+    _ = @import("completion.zig");
     _ = @import("copyhound.zig");
     _ = @import("ewah_benchmark.zig");
     _ = @import("ewah.zig");

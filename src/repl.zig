@@ -16,6 +16,7 @@ const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 const tb = vsr.tigerbeetle;
 
 const Terminal = @import("terminal.zig").Terminal;
+const Completion = @import("completion.zig").Completion;
 
 pub const Parser = struct {
     input: []const u8,
@@ -494,6 +495,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         client: Client,
         terminal: Terminal,
+        completion: Completion,
         history: HistoryBuffer,
 
         /// Fixed-capacity buffer for reading input strings.
@@ -570,8 +572,21 @@ pub fn ReplType(comptime MessageBus: type) type {
             var buffer_index: usize = 0;
             var history_index = repl.history.count;
 
+            var current_completion: []const u8 = "";
+
             while (true) {
                 const user_input = try repl.terminal.read_user_input() orelse return null;
+
+                // Clear the completion menu when a match is selected or another key is pressed.
+                if (user_input != .tab and repl.completion.count() > 0) {
+                    repl.completion.clear();
+                    try repl.terminal.print("\x1b[{};1H\x1b[J\x1b[{};{}H", .{
+                        terminal_screen.cursor_row + 1,
+                        terminal_screen.cursor_row,
+                        terminal_screen.cursor_column,
+                    });
+                }
+
                 switch (user_input) {
                     .ctrlc => {
                         // Erase everything below the current cursor's position in case Ctrl-C was
@@ -641,6 +656,113 @@ pub fn ReplType(comptime MessageBus: type) type {
                         });
                         buffer_index -= 1;
                         _ = repl.buffer.ordered_remove(buffer_index);
+                    },
+                    .tab => {
+                        try repl.completion.split_and_complete(repl.buffer.slice(), buffer_index);
+
+                        current_completion = try repl.completion.get_next_completion();
+
+                        // Skip the current completion entry if adding it would overflow the buffer.
+                        if ((repl.completion.prefix.count() + repl.completion.suffix.count() +
+                            current_completion.len) >= repl_history_entry_bytes_without_nul)
+                        {
+                            continue;
+                        }
+
+                        // Move cursor to the start of the current row, clear the screen from start
+                        // to end. Then print the leading buffer, currently selected completion and
+                        // trailing buffer(if any).
+                        terminal_screen.update_cursor_position(-@as(isize, @intCast(buffer_index)));
+
+                        const buffer_row = terminal_screen.cursor_row;
+
+                        terminal_screen.update_cursor_position(
+                            @as(
+                                isize,
+                                @intCast(repl.completion.prefix.count() + current_completion.len),
+                            ),
+                        );
+
+                        // \x1b[n;mH - Moves the cursor to row n, column m.
+                        // \x1b[J - Clear the screen from current cursor position to end.
+                        try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}{s}{s}\x20\x08", .{
+                            buffer_row,
+                            prompt,
+                            repl.completion.prefix.const_slice(),
+                            current_completion,
+                            repl.completion.suffix.const_slice(),
+                        });
+
+                        // When cursor reaches the last row of terminal, scroll content upward
+                        // to create space for displaying completion menu.
+                        // \x1b[nS - Scroll whole page up by n lines; defualt 1 line.
+                        // \x1b[nA - Moves cursor up n cells; default 1 cell up.
+                        if (terminal_screen.cursor_row == terminal_screen.rows) {
+                            try repl.terminal.print("\x1b[S\x1b[A", .{});
+                        }
+
+                        // Position cursor for completion menu. If the current buffer overflows to
+                        // the next line after printing the prefix, selected completion and suffix,
+                        // the completion menu should effectively be placed `row_delta` lines below
+                        // the current buffer row.
+                        const buffer_width =
+                            repl.completion.prefix.count() +
+                            repl.completion.suffix.count() +
+                            current_completion.len + 1;
+                        const row_delta = @divFloor(buffer_width, terminal_screen.columns) + 1;
+                        try repl.terminal.print("\x1b[{};1H", .{buffer_row + row_delta});
+
+                        // Display completion menu in the next line and highlight the currently
+                        // selected completion.
+                        var menu_width: usize = 0;
+                        var match_itr = repl.completion.matches.iterator();
+
+                        while (match_itr.next()) |match| {
+                            const match_len = std.mem.indexOf(u8, match[0..], &[_]u8{'\x00'}).?;
+                            menu_width += match_len + 2;
+
+                            // \x1b[7m - Highlights the text by inverting the color. Inverts
+                            //           the text and background color.
+                            // \x1b[0m - Reset the style property of text. In this case, resets
+                            //           the effect of \x1b[7m - color inversion.
+                            if (std.mem.eql(u8, match[0..match_len], current_completion)) {
+                                try repl.terminal.print("\x20\x1b[7m{s}\x1b[0m\x20", .{
+                                    match[0..match_len],
+                                });
+                            } else {
+                                try repl.terminal.print("\x20{s}\x20", .{match[0..match_len]});
+                            }
+                        }
+
+                        // If the completion menu overflows past the last row of terminal screen,
+                        // move the cursor up by number of rows that would be overflown.
+                        const menu_rows = @divFloor(menu_width, terminal_screen.columns) + 1;
+                        const required_rows = terminal_screen.cursor_row + menu_rows;
+                        const overflow_rows = @as(
+                            isize,
+                            @intCast(required_rows),
+                        ) - @as(
+                            isize,
+                            @intCast(terminal_screen.rows),
+                        );
+                        if (overflow_rows > 0) {
+                            terminal_screen.update_cursor_position(
+                                -@as(isize, @intCast(terminal_screen.columns)) * overflow_rows,
+                            );
+                        }
+
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+
+                        // Re-fill the buffer with prefix, current match and suffix. Set the
+                        // buffer index where the current selected match ends.
+                        repl.buffer.clear();
+                        repl.buffer.append_slice_assume_capacity(repl.completion.prefix.slice());
+                        repl.buffer.append_slice_assume_capacity(current_completion);
+                        repl.buffer.append_slice_assume_capacity(repl.completion.suffix.slice());
+                        buffer_index = repl.buffer.count() - repl.completion.suffix.count();
                     },
                     .left => if (buffer_index > 0) {
                         terminal_screen.update_cursor_position(-1);
@@ -882,6 +1004,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .event_loop_done = false,
                 .interactive = false,
                 .terminal = undefined, // Init on run.
+                .completion = undefined, // Init on run.
                 .history = HistoryBuffer.init(), // No corresponding deinit.
                 .buffer = .{},
                 .buffer_outside_history = .{},
@@ -902,6 +1025,8 @@ pub fn ReplType(comptime MessageBus: type) type {
         pub fn run(repl: *Repl, statements: []const u8) !void {
             repl.interactive = statements.len == 0;
             try Terminal.init(&repl.terminal, repl.interactive); // No corresponding deinit.
+
+            try Completion.init(&repl.completion);
 
             repl.client.register(register_callback, @intCast(@intFromPtr(repl)));
             while (!repl.event_loop_done) {
