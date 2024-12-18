@@ -15,8 +15,8 @@ const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 
 const tb = vsr.tigerbeetle;
 
-const Terminal = @import("terminal.zig").Terminal;
-const Completion = @import("completion.zig").Completion;
+const Terminal = @import("repl/terminal.zig").Terminal;
+const Completion = @import("repl/completion.zig").Completion;
 
 pub const Parser = struct {
     input: []const u8,
