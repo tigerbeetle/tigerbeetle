@@ -220,7 +220,7 @@ function handleAnchor() {
     const anchor = document.getElementById(location.hash.slice(1));
     if (anchor) {
       anchor.classList.add("target");
-      anchor.scrollIntoView();
+      scrollIntoViewIfNeeded(anchor, content.parentNode);
     }
   }
 }
