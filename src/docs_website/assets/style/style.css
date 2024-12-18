@@ -500,7 +500,6 @@ body>.expand-button {
   }
 
   &:hover {
-    background-color: var(--gray-1);
     border-right: 1px solid var(--gray-3);
     padding-right: 7px;
 
