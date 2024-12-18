@@ -956,9 +956,9 @@ const Workload = struct {
             assert(request.timestamp_start_micros < request.timestamp_end_micros);
             // If a request started before the acceptably-faulty period, we ignore that part of
             // its duration.
-            const duration_adjusted = request.timestamp_end_micros -|
+            const duration_adjusted_micros = request.timestamp_end_micros -|
                 @max(request.timestamp_start_micros, @divFloor(start_ns, 1000));
-            if (duration_adjusted > constants.liveness_requirement_micros) return request;
+            if (duration_adjusted_micros > constants.liveness_requirement_micros) return request;
         }
         return null;
     }
