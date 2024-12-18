@@ -1,6 +1,5 @@
 const std = @import("std");
 const math = std.math;
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);
@@ -646,6 +645,7 @@ const FatalReason = enum(u8) {
     manifest_node_pool_exhausted = 3,
     storage_size_exceeds_limit = 4,
     storage_size_would_exceed_limit = 5,
+    forest_tables_count_would_exceed_limit = 6,
 
     fn exit_status(reason: FatalReason) u8 {
         return @intFromEnum(reason);

@@ -192,7 +192,8 @@ jobs:
           fetch-depth: 2147483647
       - run: sudo apt install kcov
       - run: ./zig/download.sh
-      - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
+      # Run under sudo to enable memory locking for accurate RSS stats.
+      - run: sudo -E ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
           NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}

@@ -19,7 +19,6 @@
 //!
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.test_workload);
 
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;

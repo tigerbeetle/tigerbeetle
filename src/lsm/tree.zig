@@ -3,11 +3,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
-const os = std.os;
 const maybe = stdx.maybe;
-const div_ceil = stdx.div_ceil;
-
-const log = std.log.scoped(.tree);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
@@ -15,12 +11,10 @@ const schema = @import("schema.zig");
 
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 
 pub const ScopeCloseMode = enum { persist, discard };
-const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).

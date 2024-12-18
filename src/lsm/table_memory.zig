@@ -1,6 +1,5 @@
 const std = @import("std");
 const mem = std.mem;
-const math = std.math;
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");

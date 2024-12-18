@@ -6,11 +6,8 @@ const maybe = stdx.maybe;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const IdPermutation = @import("id.zig").IdPermutation;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
-const Client = @import("cluster.zig").Client;
-const StateMachine = @import("cluster.zig").StateMachine;
 
 const PriorityQueue = std.PriorityQueue;
 

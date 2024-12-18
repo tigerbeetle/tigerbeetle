@@ -1,6 +1,5 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
-const maybe = stdx.maybe;
 const mem = std.mem;
 const assert = std.debug.assert;
 
@@ -10,8 +9,6 @@ const Header = vsr.Header;
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const IOPS = @import("../iops.zig").IOPS;
-const FIFO = @import("../fifo.zig").FIFO;
 
 const log = stdx.log.scoped(.client);
 
@@ -395,11 +392,23 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             assert(eviction.header.view >= self.view);
 
             if (self.on_eviction_callback) |callback| {
-                log.err("{}: session evicted: reason={?s} (cluster_release={})", .{
-                    self.id,
-                    std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
-                    eviction.header.release,
-                });
+                const eviction_specific_log = switch (eviction.header.reason) {
+                    .client_release_too_low => " - your client is too old; upgrade to a version " ++
+                        "compatible with your cluster",
+                    .client_release_too_high => " - your client is too new; downgrade to the " ++
+                        "same version as your cluster",
+                    else => "",
+                };
+                log.err(
+                    "{}: session evicted: reason={?s} (cluster_release={}, client_release={}){s}",
+                    .{
+                        self.id,
+                        std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
+                        eviction.header.release,
+                        self.release,
+                        eviction_specific_log,
+                    },
+                );
 
                 self.evicted = true;
                 self.on_eviction_callback = null;

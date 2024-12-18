@@ -1,6 +1,3 @@
-const std = @import("std");
-const assert = std.debug.assert;
-
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 

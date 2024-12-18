@@ -12,7 +12,6 @@
 //!
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.fuzz_vsr_superblock);
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");

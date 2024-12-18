@@ -909,3 +909,11 @@ pub fn http_post(shell: *Shell, url: []const u8, body: []const u8, options: Http
         return error.WrongStatusResponse;
     }
 }
+
+/// Converts an ISO8601 timestamp into seconds from the epoch by shelling out to the `date` util.
+pub fn iso8601_to_timestamp_seconds(shell: *Shell, datetime_iso8601: []const u8) !u64 {
+    return try std.fmt.parseInt(u64, try shell.exec_stdout(
+        "date -d {datetime_iso8601} +%s",
+        .{ .datetime_iso8601 = datetime_iso8601 },
+    ), 10);
+}

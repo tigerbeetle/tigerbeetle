@@ -18,7 +18,6 @@ const StateMachineType = switch (state_machine) {
     .testing => @import("testing/state_machine.zig").StateMachineType,
 };
 
-const Client = @import("testing/cluster.zig").Client;
 const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
 const Release = @import("testing/cluster.zig").Release;
 const StateMachine = Cluster.StateMachine;
@@ -27,7 +26,6 @@ const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
 const PartitionSymmetry = @import("testing/packet_simulator.zig").PartitionSymmetry;
 const Core = @import("testing/cluster/network.zig").Network.Core;
 const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
-const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
 const releases = [_]Release{
@@ -226,8 +224,15 @@ pub fn main() !void {
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
+
+        .replica_pause_probability = 0.00008,
+        .replica_pause_stability = random.uintLessThan(u32, 1_000),
+        .replica_unpause_probability = 0.0008,
+        .replica_unpause_stability = random.uintLessThan(u32, 1_000),
+
         .replica_release_advance_probability = 0.0001,
         .replica_release_catchup_probability = 0.001,
+
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
@@ -400,6 +405,12 @@ pub const Simulator = struct {
         replica_restart_probability: f64,
         /// Minimum time a replica is up until it is crashed again.
         replica_restart_stability: u32,
+
+        replica_pause_probability: f64,
+        replica_pause_stability: u32,
+        replica_unpause_probability: f64,
+        replica_unpause_stability: u32,
+
         /// Probability per tick that a healthy replica will be crash-upgraded.
         /// This probability is set to 0 during liveness mode.
         replica_release_advance_probability: f64,
@@ -428,7 +439,7 @@ pub const Simulator = struct {
     replica_releases_limit: usize = 1,
 
     /// Protect a replica from fast successive crash/restarts.
-    replica_stability: []usize,
+    replica_crash_stability: []usize,
     reply_sequence: ReplySequence,
     reply_op_next: u64 = 1, // Skip the root op.
 
@@ -472,12 +483,12 @@ pub const Simulator = struct {
         errdefer allocator.free(replica_releases);
         @memset(replica_releases, 1);
 
-        const replica_stability = try allocator.alloc(
+        const replica_crash_stability = try allocator.alloc(
             usize,
             options.cluster.replica_count + options.cluster.standby_count,
         );
-        errdefer allocator.free(replica_stability);
-        @memset(replica_stability, 0);
+        errdefer allocator.free(replica_crash_stability);
+        @memset(replica_crash_stability, 0);
 
         var reply_sequence = try ReplySequence.init(allocator);
         errdefer reply_sequence.deinit(allocator);
@@ -488,14 +499,14 @@ pub const Simulator = struct {
             .cluster = cluster,
             .workload = workload,
             .replica_releases = replica_releases,
-            .replica_stability = replica_stability,
+            .replica_crash_stability = replica_crash_stability,
             .reply_sequence = reply_sequence,
         };
     }
 
     pub fn deinit(simulator: *Simulator, allocator: std.mem.Allocator) void {
         allocator.free(simulator.replica_releases);
-        allocator.free(simulator.replica_stability);
+        allocator.free(simulator.replica_crash_stability);
         simulator.reply_sequence.deinit(allocator);
         simulator.workload.deinit(allocator);
         simulator.cluster.deinit();
@@ -581,6 +592,7 @@ pub const Simulator = struct {
         simulator.cluster.tick();
         simulator.tick_requests();
         simulator.tick_crash();
+        simulator.tick_pause();
     }
 
     /// Executes the following:
@@ -604,7 +616,7 @@ pub const Simulator = struct {
         while (it.next()) |replica_index| {
             const fault = false;
             if (simulator.cluster.replica_health[replica_index] == .down) {
-                simulator.restart_replica(@intCast(replica_index), fault);
+                simulator.replica_restart(@intCast(replica_index), fault);
             }
             simulator.cluster.storages[replica_index].transition_to_liveness_mode();
         }
@@ -1013,12 +1025,13 @@ pub const Simulator = struct {
 
     fn tick_crash(simulator: *Simulator) void {
         for (simulator.cluster.replicas) |*replica| {
-            simulator.replica_stability[replica.replica] -|= 1;
-            const stability = simulator.replica_stability[replica.replica];
-            if (stability > 0) continue;
+            simulator.replica_crash_stability[replica.replica] -|= 1;
+            if (simulator.replica_crash_stability[replica.replica] > 0) continue;
 
             switch (simulator.cluster.replica_health[replica.replica]) {
-                .up => simulator.tick_crash_up(replica),
+                .up => |up| {
+                    if (!up.paused) simulator.tick_crash_up(replica);
+                },
                 .down => simulator.tick_crash_down(replica),
             }
         }
@@ -1040,9 +1053,9 @@ pub const Simulator = struct {
         if (!crash_upgrade and !crash_random) return;
 
         log.debug("{}: crash replica", .{replica.replica});
-        simulator.cluster.crash_replica(replica.replica);
+        simulator.cluster.replica_crash(replica.replica);
 
-        simulator.replica_stability[replica.replica] =
+        simulator.replica_crash_stability[replica.replica] =
             simulator.options.replica_crash_stability;
     }
 
@@ -1075,11 +1088,11 @@ pub const Simulator = struct {
         // To improve VOPR utilization, try to prevent the replica from going into
         // `.recovering_head` state if the replica is needed to form a quorum.
         const fault = recoverable_count >= recoverable_count_min or replica.standby();
-        simulator.restart_replica(replica.replica, fault);
+        simulator.replica_restart(replica.replica, fault);
         maybe(!fault and replica.status == .recovering_head);
     }
 
-    fn restart_replica(simulator: *Simulator, replica_index: u8, fault: bool) void {
+    fn replica_restart(simulator: *Simulator, replica_index: u8, fault: bool) void {
         assert(simulator.cluster.replica_health[replica_index] == .down);
 
         const replica_storage = &simulator.cluster.storages[replica_index];
@@ -1140,7 +1153,7 @@ pub const Simulator = struct {
         }
 
         replica_storage.faulty = fault;
-        simulator.cluster.restart_replica(
+        simulator.cluster.replica_restart(
             replica_index,
             &replica_releases,
         ) catch unreachable;
@@ -1151,7 +1164,7 @@ pub const Simulator = struct {
         }
 
         replica_storage.faulty = true;
-        simulator.replica_stability[replica_index] =
+        simulator.replica_crash_stability[replica_index] =
             simulator.options.replica_restart_stability;
     }
 
@@ -1160,6 +1173,40 @@ pub const Simulator = struct {
             @min(simulator.replica_releases[replica_index] + 1, releases.len);
         simulator.replica_releases_limit =
             @max(simulator.replica_releases[replica_index], simulator.replica_releases_limit);
+    }
+
+    // Randomly pause replicas. A paused replica doesn't tick and doesn't complete any asynchronous
+    // work. The goals of pausing are:
+    // - catch more interesting interleaving of events,
+    // - simulate real-world scenario of VM migration.
+    fn tick_pause(simulator: *Simulator) void {
+        for (
+            simulator.cluster.replicas,
+            simulator.replica_crash_stability,
+            0..,
+        ) |*replica, *stability, replica_index| {
+            stability.* -|= 1;
+            if (stability.* > 0) continue;
+
+            if (simulator.cluster.replica_health[replica.replica] == .down) continue;
+            const paused = simulator.cluster.replica_health[replica.replica].up.paused;
+            const pause = chance_f64(
+                simulator.random,
+                simulator.options.replica_pause_probability,
+            );
+            const unpause = chance_f64(
+                simulator.random,
+                simulator.options.replica_unpause_probability,
+            );
+
+            if (!paused and pause) {
+                simulator.cluster.replica_pause(@intCast(replica_index));
+                stability.* = simulator.options.replica_pause_stability;
+            } else if (paused and unpause) {
+                simulator.cluster.replica_unpause(@intCast(replica_index));
+                stability.* = simulator.options.replica_unpause_stability;
+            }
+        }
     }
 
     fn requests_cancelled(simulator: *const Simulator) u32 {

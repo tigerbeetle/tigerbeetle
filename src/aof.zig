@@ -1,10 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const os = std.os;
 
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
-const tb = @import("tigerbeetle.zig");
 
 const stdx = @import("stdx.zig");
 const IO = @import("io.zig").IO;
@@ -15,8 +13,6 @@ const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 
 const Header = vsr.Header;
-const Account = tb.Account;
-const Transfer = tb.Transfer;
 const Client = vsr.ClientType(StateMachine, MessageBus);
 const log = std.log.scoped(.aof);
 
@@ -328,7 +324,7 @@ pub const AOFReplayClient = struct {
         client.* = try Client.init(
             allocator,
             .{
-                .id = std.crypto.random.int(u128),
+                .id = stdx.unique_u128(),
                 .cluster = 0,
                 .replica_count = @intCast(addresses.len),
                 .message_pool = message_pool,

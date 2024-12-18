@@ -1,5 +1,4 @@
 const std = @import("std");
-const os = std.os;
 const posix = std.posix;
 const mem = std.mem;
 const assert = std.debug.assert;

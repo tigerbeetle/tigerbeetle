@@ -21,7 +21,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
-const mem = std.mem;
 const log = std.log.scoped(.client_replies);
 
 const stdx = @import("../stdx.zig");

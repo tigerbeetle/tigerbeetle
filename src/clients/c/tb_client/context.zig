@@ -1,5 +1,4 @@
 const std = @import("std");
-const os = std.os;
 const assert = std.debug.assert;
 const Atomic = std.atomic.Value;
 
@@ -23,8 +22,6 @@ const Packet = @import("packet.zig").Packet;
 const Signal = @import("signal.zig").Signal;
 
 const api = @import("../tb_client.zig");
-const tb_status_t = api.tb_status_t;
-const tb_client_t = api.tb_client_t;
 const tb_completion_t = api.tb_completion_t;
 
 pub const ContextImplementation = struct {
@@ -128,8 +125,7 @@ pub fn ContextType(
             errdefer allocator.destroy(context);
 
             context.allocator = allocator;
-            context.client_id = std.crypto.random.int(u128);
-            assert(context.client_id != 0); // Broken CSPRNG is the likeliest explanation for zero.
+            context.client_id = stdx.unique_u128();
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
             context.addresses = .{};

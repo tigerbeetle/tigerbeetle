@@ -27,7 +27,6 @@ const Grid = vsr.GridType(Storage);
 
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
 const SuperBlock = vsr.SuperBlockType(Storage);
-const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
 /// The runtime maximum log level.
@@ -304,8 +303,7 @@ const Command = struct {
             });
         }
 
-        const nonce = std.crypto.random.int(u128);
-        assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
+        const nonce = stdx.unique_u128();
 
         var multiversion: ?vsr.multiversioning.Multiversion = blk: {
             if (constants.config.process.release.value ==
@@ -484,6 +482,11 @@ const Command = struct {
                     .{},
                 );
             };
+
+            if (replica.cluster == 0) {
+                log.warn("a cluster id of 0 is reserved for testing and benchmarking, " ++
+                    "do not use in production", .{});
+            }
         }
 
         while (true) {

@@ -1,6 +1,5 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.fuzz_storage);
 
 const vsr = @import("vsr.zig");
 const constants = @import("constants.zig");

@@ -32,7 +32,6 @@
 const std = @import("std");
 const stdx = @import("./stdx.zig");
 const flags = @import("./flags.zig");
-const assert = std.debug.assert;
 
 const log = std.log;
 pub const std_options = .{

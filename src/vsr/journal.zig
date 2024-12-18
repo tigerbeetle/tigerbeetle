@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-const math = std.math;
 const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");

@@ -1,15 +1,12 @@
 const std = @import("std");
-const os = std.os;
 const posix = std.posix;
 const mem = std.mem;
 const assert = std.debug.assert;
-const log = std.log.scoped(.io);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const FIFOType = @import("../fifo.zig").FIFOType;
 const buffer_limit = @import("../io.zig").buffer_limit;
-const DirectIO = @import("../io.zig").DirectIO;
 
 /// A very simple mock IO implementation that only implements what is needed to test Storage.
 pub const IO = struct {

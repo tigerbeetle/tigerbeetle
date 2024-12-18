@@ -26,9 +26,11 @@ const ManifestCheckerType = @import("cluster/manifest_checker.zig").ManifestChec
 const vsr = @import("../vsr.zig");
 pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
-const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
 
-pub const ReplicaHealth = enum { up, down };
+pub const ReplicaHealth = union(enum) {
+    up: struct { paused: bool },
+    down,
+};
 
 pub const Release = struct {
     release: vsr.Release,
@@ -79,7 +81,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             /// A monotonically-increasing list of releases.
             /// Initially:
             /// - All replicas are formatted and started with releases[0].
-            /// - Only releases[0] is "bundled" in each replica. (Use `restart_replica()` to add
+            /// - Only releases[0] is "bundled" in each replica. (Use `replica_restart()` to add
             ///   more).
             releases: []const Release,
             client_release: vsr.Release,
@@ -254,7 +256,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const replica_health = try allocator.alloc(ReplicaHealth, node_count);
             errdefer allocator.free(replica_health);
-            @memset(replica_health, .up);
+            @memset(replica_health, .{ .up = .{ .paused = false } });
 
             const replica_upgrades = try allocator.alloc(?vsr.Release, node_count);
             errdefer allocator.free(replica_upgrades);
@@ -436,32 +438,57 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 if (eviction_reason == null) client.tick();
             }
 
-            for (cluster.storages) |*storage| storage.tick();
+            for (
+                cluster.storages,
+                cluster.replicas,
+                cluster.replica_upgrades,
+                cluster.replica_times,
+                cluster.replica_health,
+                0..,
+            ) |*storage, *replica, *upgrade, *time, *health, i| {
+                if (health.* == .up and health.*.up.paused) {
+                    // Tick the time even in a paused state, to simulate VM migration.
+                    time.tick();
+                } else {
+                    // Upgrades immediately follow storage.tick(), since upgrades occur at
+                    // checkpoint completion. (Downgrades are triggered separately – see
+                    // replica_restart()).
+                    storage.tick();
+                    if (upgrade.*) |_| cluster.replica_release_execute(@intCast(i));
+                    assert(upgrade.* == null);
 
-            // Upgrades immediately follow storage.tick(), since upgrades occur at checkpoint
-            // completion. (Downgrades are triggered separately – see restart_replica()).
-            for (cluster.replica_upgrades, 0..) |release, i| {
-                if (release) |_| cluster.replica_release_execute(@intCast(i));
-            }
-
-            for (cluster.replicas, 0..) |*replica, i| {
-                assert(cluster.replica_upgrades[i] == null);
-                switch (cluster.replica_health[i]) {
-                    .up => {
-                        replica.tick();
-                        cluster.state_checker.check_state(replica.replica) catch |err| {
-                            fatal(.correctness, "state checker error: {}", .{err});
-                        };
-                    },
-                    // Keep ticking the time so that it won't have diverged too far to synchronize
-                    // when the replica restarts.
-                    .down => cluster.replica_times[i].tick(),
+                    switch (health.*) {
+                        .up => |up| {
+                            assert(!up.paused);
+                            replica.tick();
+                            cluster.state_checker.check_state(replica.replica) catch |err| {
+                                fatal(.correctness, "state checker error: {}", .{err});
+                            };
+                        },
+                        .down => {
+                            // Keep ticking the time so that it won't have diverged too far to
+                            // synchronize when the replica restarts.
+                            time.tick();
+                        },
+                    }
                 }
             }
         }
 
+        pub fn replica_pause(cluster: *Cluster, replica_index: u8) void {
+            assert(cluster.replica_health[replica_index] == .up);
+            assert(!cluster.replica_health[replica_index].up.paused);
+            cluster.replica_health[replica_index].up.paused = true;
+        }
+
+        pub fn replica_unpause(cluster: *Cluster, replica_index: u8) void {
+            assert(cluster.replica_health[replica_index] == .up);
+            assert(cluster.replica_health[replica_index].up.paused);
+            cluster.replica_health[replica_index].up.paused = false;
+        }
+
         /// Returns an error when the replica was unable to recover (open).
-        pub fn restart_replica(
+        pub fn replica_restart(
             cluster: *Cluster,
             replica_index: u8,
             releases_bundled: *const vsr.ReleaseList,
@@ -492,7 +519,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// Reset a replica to its initial state, simulating a random crash/panic.
         /// Leave the persistent storage untouched, and leave any currently
         /// inflight messages to/from the replica in the network.
-        pub fn crash_replica(cluster: *Cluster, replica_index: u8) void {
+        pub fn replica_crash(cluster: *Cluster, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .up);
 
             // Reset the storage before the replica so that pending writes can (partially) finish.
@@ -517,7 +544,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(cluster.replica_health[replica_index] == .down);
 
             cluster.network.process_enable(.{ .replica = replica_index });
-            cluster.replica_health[replica_index] = .up;
+            cluster.replica_health[replica_index] = .{ .up = .{ .paused = false } };
             cluster.log_replica(.recover, replica_index);
         }
 
@@ -608,7 +635,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 release,
             });
 
-            cluster.crash_replica(replica_index);
+            cluster.replica_crash(replica_index);
 
             const release_available = for (replica.releases_bundled.const_slice()) |r| {
                 if (r.value == release.value) break true;

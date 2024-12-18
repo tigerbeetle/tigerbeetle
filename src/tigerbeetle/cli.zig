@@ -31,7 +31,7 @@ const StateMachine = vsr.state_machine.StateMachineType(
 
 const CLIArgs = union(enum) {
     const Format = struct {
-        cluster: u128,
+        cluster: ?u128 = null,
         replica: ?u8 = null,
         // Experimental: standbys don't have a concrete practical use-case yet.
         standby: ?u8 = null,
@@ -236,7 +236,7 @@ const CLIArgs = union(enum) {
         \\
         \\  tigerbeetle [-h | --help]
         \\
-        \\  tigerbeetle format --cluster=<integer> --replica=<index> --replica-count=<integer> <path>
+        \\  tigerbeetle format [--cluster=<integer>] --replica=<index> --replica-count=<integer> <path>
         \\
         \\  tigerbeetle start --addresses=<addresses> [--cache-grid=<size><KiB|MiB|GiB>] <path>
         \\
@@ -247,7 +247,7 @@ const CLIArgs = union(enum) {
         \\Commands:
         \\
         \\  format     Create a TigerBeetle replica data file at <path>.
-        \\             The --cluster and --replica arguments are required.
+        \\             The --replica and --replica-count arguments are required.
         \\             Each TigerBeetle replica must have its own data file.
         \\
         \\  start      Run a TigerBeetle replica from the data file at <path>.
@@ -263,6 +263,7 @@ const CLIArgs = union(enum) {
         \\
         \\  --cluster=<integer>
         \\        Set the cluster ID to the provided 128-bit unsigned decimal integer.
+        \\        Defaults to generating a random cluster ID.
         \\
         \\  --replica=<index>
         \\        Set the zero-based index that will be used for the replica process.
@@ -565,8 +566,19 @@ fn parse_args_format(format: CLIArgs.Format) Command.Format {
     assert(replica < constants.members_max);
     assert(replica < format.replica_count + constants.standbys_max);
 
+    const cluster_random = std.crypto.random.int(u128);
+    assert(cluster_random != 0);
+    const cluster = format.cluster orelse cluster_random;
+    if (format.cluster == null) {
+        std.log.info("generated random cluster id: {}\n", .{cluster});
+    } else if (format.cluster.? == 0) {
+        std.log.warn("a cluster id of 0 is reserved for testing and benchmarking, " ++
+            "do not use in production", .{});
+        std.log.warn("omit --cluster=0 to randomly generate a suitable id\n", .{});
+    }
+
     return .{
-        .cluster = format.cluster, // just an ID, any value is allowed
+        .cluster = cluster, // just an ID, any value is allowed
         .replica = replica,
         .replica_count = format.replica_count,
         .development = format.development,

@@ -25,9 +25,7 @@ const Header = vsr.Header;
 const Timeout = vsr.Timeout;
 const Command = vsr.Command;
 const Version = vsr.Version;
-const VSRState = vsr.VSRState;
 const SyncStage = vsr.SyncStage;
-const SyncTarget = vsr.SyncTarget;
 const ClientSessions = vsr.ClientSessions;
 
 const log = marks.wrap_log(stdx.log.scoped(.replica));
@@ -715,7 +713,10 @@ pub fn ReplicaType(
                 // that SV to a DVC (dropping the hooks), and never finished the view change.
                 if (op_head == null) {
                     assert(self.view > self.log_view);
-                    if (self.journal.op_maximum() < self.op_checkpoint()) {
+                    if (self.journal.op_maximum() < self.op_checkpoint() or
+                        // Corrupted root prepare:
+                        (self.journal.op_maximum() == 0 and self.journal.header_with_op(0) == null))
+                    {
                         const header_checkpoint =
                             &self.superblock.working.vsr_state.checkpoint.header;
                         assert(header_checkpoint.op == self.op_checkpoint());
@@ -1146,7 +1147,7 @@ pub fn ReplicaType(
                 .prepare_timeout = Timeout{
                     .name = "prepare_timeout",
                     .id = replica_index,
-                    .after = 50,
+                    .after = 25,
                 },
                 .primary_abdicate_timeout = Timeout{
                     .name = "primary_abdicate_timeout",
@@ -2948,25 +2949,15 @@ pub fn ReplicaType(
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [constants.replicas_max]u8 = undefined;
             var waiting_len: usize = 0;
-            var ok_from_all_replicas_iterator = prepare.ok_from_all_replicas.iterator(.{
-                .kind = .unset,
-            });
-            while (ok_from_all_replicas_iterator.next()) |replica| {
-                // Ensure we don't wait for replicas that don't exist.
-                // The bits between `replica_count` and `replicas_max` are always unset,
-                // since they don't actually represent replicas.
-                if (replica == self.replica_count) {
-                    assert(self.replica_count < constants.replicas_max);
-                    break;
-                }
-                assert(replica < self.replica_count);
-
-                if (replica != self.replica) {
-                    waiting[waiting_len] = @intCast(replica);
+            for (1..self.replica_count) |ring_index| {
+                const replica: u8 = @intCast(
+                    (@as(usize, self.replica) + ring_index) % self.replica_count,
+                );
+                assert(replica != self.replica);
+                if (!prepare.ok_from_all_replicas.isSet(replica)) {
+                    waiting[waiting_len] = replica;
                     waiting_len += 1;
                 }
-            } else {
-                assert(self.replica_count == constants.replicas_max);
             }
 
             if (waiting_len == 0) {
@@ -6237,9 +6228,10 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
-            log.debug("{}: primary_pipeline_prepare: prepare {}", .{
+            log.debug("{}: primary_pipeline_prepare: prepare checksum={} op={}", .{
                 self.replica,
                 message.header.checksum,
+                message.header.op,
             });
 
             if (self.primary_pipeline_pending()) |_| {
@@ -6784,6 +6776,7 @@ pub fn ReplicaType(
         fn primary_repair_pipeline(self: *Replica) enum { done, busy } {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_stage == .idle);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
@@ -6849,6 +6842,7 @@ pub fn ReplicaType(
         fn primary_repair_pipeline_op(self: *const Replica) ?u64 {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_stage == .idle);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
@@ -6866,6 +6860,7 @@ pub fn ReplicaType(
         fn primary_repair_pipeline_read(self: *Replica) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_stage == .idle);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
@@ -6911,7 +6906,20 @@ pub fn ReplicaType(
                 return;
             }
 
-            // We may even be several views ahead and may now have a completely different pipeline.
+            if (self.commit_min != self.commit_max or self.commit_stage != .idle) {
+                log.debug("{}: repair_pipeline_read_callback: no longer repairing", .{
+                    self.replica,
+                });
+                return;
+            }
+
+            // We are in a state where we should be repairing the pipeline (cf. the end of repair).
+            assert(self.status == .view_change);
+            assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_stage == .idle);
+            assert(self.commit_min == self.commit_max);
+
+            // But we still need to check that we are reparing the right prepare.
             const op = self.primary_repair_pipeline_op() orelse {
                 log.debug("{}: repair_pipeline_read_callback: pipeline changed", .{self.replica});
                 return;
@@ -6929,9 +6937,6 @@ pub fn ReplicaType(
                 log.debug("{}: repair_pipeline_read_callback: checksum changed", .{self.replica});
                 return;
             }
-
-            assert(self.status == .view_change);
-            assert(self.primary_index(self.view) == self.replica);
 
             log.debug("{}: repair_pipeline_read_callback: op={} checksum={}", .{
                 self.replica,

@@ -3,8 +3,6 @@ const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
-const flags = @import("../../flags.zig");
-const fatal = flags.fatal;
 const Shell = @import("../../shell.zig");
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 

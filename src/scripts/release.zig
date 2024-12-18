@@ -25,8 +25,6 @@ const multiversioning = @import("../multiversioning.zig");
 const changelog = @import("./changelog.zig");
 
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
-const multiversion_binary_platform_size_max = multiversioning.multiversion_binary_platform_size_max;
-const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
 
 const Language = enum { dotnet, go, java, node, python, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
@@ -599,11 +597,16 @@ fn publish(
             \\minutes after the release for this version to appear in the package
             \\manager.
             \\
+            \\You cannot run a newer client against an older cluster: clients are only compatible
+            \\with replicas from their own release *or newer*, subject to the newer release's
+            \\`Oldest supported client version`.
+            \\
             \\* .NET: `dotnet add package tigerbeetle --version {[tag]s}`
             \\* Go: `go mod edit -require github.com/tigerbeetle/tigerbeetle-go@v{[tag]s}`
             \\* Java: Update the version of `com.tigerbeetle.tigerbeetle-java` in `pom.xml`
             \\  to `{[tag]s}`.
-            \\* Node.js: `npm install tigerbeetle-node@{[tag]s}`
+            \\* Node.js: `npm install --save-exact tigerbeetle-node@{[tag]s}`
+            \\* Python: `pip install tigerbeetle=={[tag]s}`
             \\
             \\## Changelog
             \\
