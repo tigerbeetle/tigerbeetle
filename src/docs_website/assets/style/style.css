@@ -152,7 +152,6 @@ nav.left-pane {
     color: var(--gray-12);
     font-size: 15px;
     line-height: 20px;
-    padding-bottom: 16px;
     container-type: inline-size;
 
     .logo {
@@ -192,6 +191,14 @@ nav.left-pane {
       flex: 1;
     }
 
+    .menu-button {
+      color: var(--gray-8);
+      cursor: pointer;
+      display: none;
+      width: 24px;
+      height: 24px;
+    }
+
     .collapse-button {
       color: var(--gray-8);
       cursor: pointer;
@@ -204,6 +211,7 @@ nav.left-pane {
   .search-box {
     position: relative;
     overflow: hidden;
+    margin-top: 16px;
 
     .search-icon {
       position: absolute;
@@ -567,11 +575,6 @@ article {
 
     p {
       text-wrap: pretty;
-      /* 
-      &:not(:last-child) {
-        margin-bottom: 16px;
-      }
-      */
     }
 
     strong {
@@ -749,6 +752,77 @@ article {
       tr:nth-child(2n) {
         background-color: var(--gray-1);
       }
+    }
+  }
+}
+
+@media (max-width: 809px) {
+  body {
+    flex-direction: column;
+    height: auto;
+    overflow-y: auto;
+
+    nav.left-pane {
+      width: 100% !important;
+      overflow: visible;
+
+      >.top-wrapper {
+        position: relative;
+
+        .menu-button {
+          display: block;
+
+          >.icon-burger {
+            display: block;
+          }
+
+          >.icon-x {
+            display: none;
+          }
+        }
+
+        .collapse-button {
+          display: none;
+        }
+
+        .search-box {
+          display: none;
+        }
+      }
+
+      >nav.side {
+        display: none;
+      }
+
+      &.mobile-expanded {
+        >.top-wrapper {
+          .menu-button {
+            >.icon-burger {
+              display: none;
+            }
+
+            >.icon-x {
+              display: block;
+            }
+          }
+
+          .search-box {
+            display: block;
+          }
+        }
+
+        >nav.side {
+          display: block;
+        }
+      }
+    }
+
+    >.resizer {
+      display: none;
+    }
+
+    article>.content {
+      padding: 48px 16px;
     }
   }
 }
