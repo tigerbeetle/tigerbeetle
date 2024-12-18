@@ -27,8 +27,9 @@ pub fn memory_lock_allocated(options: struct { allocated_size: usize }) MemoryLo
 }
 
 fn memory_lock_allocated_linux() MemoryLockError!void {
+    // https://github.com/torvalds/linux/blob/v6.12/include/uapi/asm-generic/mman.h#L18-L20
     const MCL_CURRENT = 1; // Lock all currently mapped pages.
-    const MCL_ONFAULT = 3; // Lock all pages faulted in (i.e. stack space).
+    const MCL_ONFAULT = 4; // Lock all pages faulted in (i.e. stack space).
     const result = os.linux.syscall1(.mlockall, MCL_CURRENT | MCL_ONFAULT);
     switch (os.linux.E.init(result)) {
         .SUCCESS => return,
