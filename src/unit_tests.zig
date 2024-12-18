@@ -7,8 +7,6 @@ comptime {
     _ = @import("flags.zig");
     _ = @import("io.zig");
     _ = @import("list.zig");
-    _ = @import("repl.zig");
-    _ = @import("repl/completion.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("shell.zig");
     _ = @import("stdx.zig");
@@ -43,6 +41,10 @@ comptime {
     _ = @import("lsm/table.zig");
     _ = @import("lsm/table_memory.zig");
     _ = @import("lsm/tree.zig");
+
+    _ = @import("repl.zig");
+    _ = @import("repl/completion.zig");
+    _ = @import("repl/parser.zig");
 
     _ = @import("state_machine.zig");
     _ = @import("state_machine/auditor.zig");
