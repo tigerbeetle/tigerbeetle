@@ -175,7 +175,7 @@ test "completion.zig: Split buffer and complete" {
         defer arena.deinit();
 
         var completion: Completion = undefined;
-        try completion.init(arena.allocator());
+        try completion.init();
         var c = &completion;
 
         try c.split_and_complete(t.buffer, t.idx);
