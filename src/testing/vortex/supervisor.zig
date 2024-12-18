@@ -28,8 +28,6 @@
 //!
 //! * Control the test duration by adding the `--test-duration-minutes=N` option (it's 10 minutes
 //!   by default).
-//! * Generate a trace JSON file compatible with `chrome://tracing` by adding the `--trace=<file>`
-//!   option.
 //! * Enable replica debug logging with `--log-debug`.
 //!
 //! If you have permissions troubles with unshare and Ubuntu, see:
@@ -106,8 +104,6 @@ pub const CLIArgs = struct {
     test_duration_minutes: u16 = 10,
     driver_command: ?[]const u8 = null,
     disable_faults: bool = false,
-    trace: ?[]const u8 = null,
-    output_directory: ?[]const u8 = null,
     log_debug: bool = false,
 };
 
@@ -127,10 +123,9 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         allocator.free(tmp_dir);
     }
 
-    var trace = if (args.trace) |trace_file_path|
-        try TraceWriter.from_file(trace_file_path)
-    else
-        .noop;
+    var trace_file_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const trace_file = try std.fmt.bufPrint(&trace_file_buffer, "{s}/vortex.trace", .{tmp_dir});
+    var trace = try TraceWriter.from_file(trace_file);
     defer trace.deinit();
 
     inline for (std.meta.fields(@TypeOf(vortex_process_ids))) |field| {
@@ -990,16 +985,13 @@ const TraceEvent = struct {
     name: ?EventName = null,
 };
 
-const TraceWriter = union(enum) {
-    chrome_tracing: struct {
-        trace_file: std.fs.File,
-        stream: std.json.WriteStream(
-            std.io.GenericWriter(std.fs.File, std.fs.File.WriteError, std.fs.File.write),
-            .{ .checked_to_fixed_depth = 16 },
-        ),
-        timestamp_start: u64,
-    },
-    noop: void,
+const TraceWriter = struct {
+    trace_file: std.fs.File,
+    stream: std.json.WriteStream(
+        std.io.GenericWriter(std.fs.File, std.fs.File.WriteError, std.fs.File.write),
+        .{ .checked_to_fixed_depth = 16 },
+    ),
+    timestamp_start: u64,
 
     fn from_file(trace_file_path: []const u8) !TraceWriter {
         const trace_file = try std.fs.cwd().createFile(trace_file_path, .{ .mode = 0o666 });
@@ -1009,89 +1001,70 @@ const TraceWriter = union(enum) {
         try stream.beginArray();
 
         return .{
-            .chrome_tracing = .{
-                .trace_file = trace_file,
-                .stream = stream,
-                .timestamp_start = @intCast(std.time.microTimestamp()),
-            },
+            .trace_file = trace_file,
+            .stream = stream,
+            .timestamp_start = @intCast(std.time.microTimestamp()),
         };
     }
 
     fn deinit(writer: *TraceWriter) void {
-        // The following pointer switching shenanigans are required due to:
-        // https://github.com/ziglang/zig/issues/13856
-        switch (writer.*) {
-            .chrome_tracing => |*file_writer| {
-                file_writer.stream.endArray() catch {};
-                file_writer.trace_file.close();
-            },
-            .noop => {},
-        }
+        writer.stream.endArray() catch {};
+        writer.trace_file.close();
     }
 
     fn process_name_assign(writer: *TraceWriter, process_id: u8, name: []const u8) !void {
-        switch (writer.*) {
-            .chrome_tracing => |*file_writer| {
-                try file_writer.stream.beginObject();
+        try writer.stream.beginObject();
 
-                try file_writer.stream.objectField("ph");
-                try file_writer.stream.write("M");
+        try writer.stream.objectField("ph");
+        try writer.stream.write("M");
 
-                try file_writer.stream.objectField("pid");
-                try file_writer.stream.write(process_id);
+        try writer.stream.objectField("pid");
+        try writer.stream.write(process_id);
 
-                try file_writer.stream.objectField("name");
-                try file_writer.stream.write("process_name");
+        try writer.stream.objectField("name");
+        try writer.stream.write("process_name");
 
-                try file_writer.stream.objectField("args");
-                try file_writer.stream.write(.{ .name = name });
+        try writer.stream.objectField("args");
+        try writer.stream.write(.{ .name = name });
 
-                try file_writer.stream.endObject();
-            },
-            .noop => {},
-        }
+        try writer.stream.endObject();
     }
 
     fn write(writer: *TraceWriter, event: TraceEvent, args: anytype) !void {
-        switch (writer.*) {
-            .chrome_tracing => |*file_writer| {
-                try file_writer.stream.beginObject();
+        try writer.stream.beginObject();
 
-                try file_writer.stream.objectField("pid");
-                try file_writer.stream.write(event.process_id);
+        try writer.stream.objectField("pid");
+        try writer.stream.write(event.process_id);
 
-                try file_writer.stream.objectField("tid");
-                try file_writer.stream.write(event.thread_id);
+        try writer.stream.objectField("tid");
+        try writer.stream.write(event.thread_id);
 
-                try file_writer.stream.objectField("ts");
-                const timestamp = event.timestamp_micros orelse
-                    @as(u64, @intCast(std.time.microTimestamp()));
-                try file_writer.stream.write(timestamp - file_writer.timestamp_start);
+        try writer.stream.objectField("ts");
+        const timestamp = event.timestamp_micros orelse
+            @as(u64, @intCast(std.time.microTimestamp()));
+        try writer.stream.write(timestamp - writer.timestamp_start);
 
-                if (event.duration) |dur| {
-                    try file_writer.stream.objectField("dur");
-                    try file_writer.stream.write(dur);
-                }
-
-                try file_writer.stream.objectField("ph");
-                try file_writer.stream.write(switch (event.phase) {
-                    .instant => "i",
-                    .complete => "X",
-                    .begin => "B",
-                    .end => "E",
-                });
-
-                if (event.name) |name| {
-                    try file_writer.stream.objectField("name");
-                    try file_writer.stream.write(@tagName(name));
-                }
-
-                try file_writer.stream.objectField("args");
-                try file_writer.stream.write(args);
-
-                try file_writer.stream.endObject();
-            },
-            .noop => {},
+        if (event.duration) |dur| {
+            try writer.stream.objectField("dur");
+            try writer.stream.write(dur);
         }
+
+        try writer.stream.objectField("ph");
+        try writer.stream.write(switch (event.phase) {
+            .instant => "i",
+            .complete => "X",
+            .begin => "B",
+            .end => "E",
+        });
+
+        if (event.name) |name| {
+            try writer.stream.objectField("name");
+            try writer.stream.write(@tagName(name));
+        }
+
+        try writer.stream.objectField("args");
+        try writer.stream.write(args);
+
+        try writer.stream.endObject();
     }
 };
