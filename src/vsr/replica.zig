@@ -6453,7 +6453,10 @@ pub fn ReplicaType(
                         .command = .request_headers,
                         .cluster = self.cluster,
                         .replica = self.replica,
-                        .op_min = range.op_min,
+                        // Pessimistically request as many headers as we might need.
+                        // Requesting/sending extra headers is inexpensive, and it may save us extra
+                        // round-trips to repair earlier breaks.
+                        .op_min = self.op_repair_min(),
                         .op_max = range.op_max,
                     }),
                 );
