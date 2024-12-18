@@ -1477,10 +1477,30 @@ pub const IO = struct {
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
-        posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
-            error.WouldBlock => @panic("another process holds the data file lock"),
-            else => return err,
-        };
+        //
+        // This is wrapped inside a retry loop with a sleep because of the interaction between
+        // io_uring semantics and flock: flocks are held per fd, but io_uring will keep a reference
+        // to the fd alive even once a process has been terminated, until all async operations have
+        // been completed.
+        //
+        // This means that when killing and starting a tigerbeetle process in an automated way, you
+        // can see "another process holds the data file lock" errors, even though the process really
+        // has terminated.
+        for (0..2) |_| {
+            posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
+                error.WouldBlock => {
+                    std.time.sleep(50 * std.time.ns_per_ms);
+                    continue;
+                },
+                else => return err,
+            };
+            break;
+        } else {
+            posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
+                error.WouldBlock => @panic("another process holds the data file lock"),
+                else => return err,
+            };
+        }
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
