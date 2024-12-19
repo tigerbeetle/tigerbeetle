@@ -309,7 +309,6 @@ nav.left-pane {
 }
 
 .search-results {
-  background-color: var(--gray-0);
   color: var(--gray-10);
   padding: 0 8px 16px 16px;
   font-size: 12px;
@@ -336,7 +335,7 @@ nav.left-pane {
     }
 
     &:hover {
-      background-color: var(--gray-2);
+      background-color: var(--gray-3);
       color: var(--gray-12);
     }
   }
@@ -367,18 +366,22 @@ nav.left-pane {
       -webkit-box-orient: vertical;
     }
 
-    &:hover,
-    &.selected {
-      background-color: var(--primary-3);
-      color: var(--primary-11);
-
-      h3 {
-        color: var(--primary-12);
-      }
+    &:hover {
+      background-color: var(--gray-3);
     }
 
     &.selected {
-      background-color: var(--primary-5);
+      background-color: var(--primary-9);
+      color: var(--gray-1);
+
+      h3 {
+        color: var(--gray-0);
+      }
+
+      .highlight {
+        background-color: #FFFA;
+        color: var(--gray-0);
+      }
     }
   }
 }
