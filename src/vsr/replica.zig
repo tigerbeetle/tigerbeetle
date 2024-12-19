@@ -420,6 +420,9 @@ pub fn ReplicaType(
         /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
         do_view_change_from_all_replicas: DVCQuorumMessages = dvc_quorum_messages_null,
 
+        // +1 to make it easier to decrement budget with -|.
+        repair_messages_budget: u32 = constants.vsr_repair_message_budget_max + 1,
+
         /// Whether the primary has received a quorum of do_view_change messages for the view
         /// change. Determines whether the primary may effect repairs according to the CTRL
         /// protocol.
@@ -3116,6 +3119,12 @@ pub fn ReplicaType(
 
         fn on_repair_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
+            assert(self.repair_messages_budget <= constants.vsr_repair_message_budget_max + 1);
+            self.repair_messages_budget = @min(
+                (self.repair_messages_budget + constants.vsr_repair_message_budget_refill),
+                // +1 to make it easier to decrement budget with -|.
+                constants.vsr_repair_message_budget_max + 1,
+            );
             self.repair();
         }
 
@@ -6411,17 +6420,19 @@ pub fn ReplicaType(
                         self.view_headers.array.get(0).op,
                     },
                 );
-
-                self.send_header_to_replica(
-                    self.primary_index(self.view),
-                    @bitCast(Header.RequestStartView{
-                        .command = .request_start_view,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        .view = self.view,
-                        .nonce = self.nonce,
-                    }),
-                );
+                self.repair_messages_budget -|= 1;
+                if (self.repair_messages_budget > 0) {
+                    self.send_header_to_replica(
+                        self.primary_index(self.view),
+                        @bitCast(Header.RequestStartView{
+                            .command = .request_start_view,
+                            .cluster = self.cluster,
+                            .replica = self.replica,
+                            .view = self.view,
+                            .nonce = self.nonce,
+                        }),
+                    );
+                }
             }
 
             if (self.op < self.op_repair_max()) return;
@@ -6450,16 +6461,19 @@ pub fn ReplicaType(
                     },
                 );
 
-                self.send_header_to_replica(
-                    self.choose_any_other_replica(),
-                    @bitCast(Header.RequestHeaders{
-                        .command = .request_headers,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        .op_min = range.op_min,
-                        .op_max = range.op_max,
-                    }),
-                );
+                self.repair_messages_budget -|= 1;
+                if (self.repair_messages_budget > 0) {
+                    self.send_header_to_replica(
+                        self.choose_any_other_replica(),
+                        @bitCast(Header.RequestHeaders{
+                            .command = .request_headers,
+                            .cluster = self.cluster,
+                            .replica = self.replica,
+                            .op_min = range.op_min,
+                            .op_max = range.op_max,
+                        }),
+                    );
+                }
             }
 
             if (self.journal.dirty.count > 0) {
@@ -7149,7 +7163,7 @@ pub fn ReplicaType(
                         reason,
                     },
                 );
-
+                // Not checking our repair budget here, as we are to be the primary.
                 self.send_header_to_other_replicas(@bitCast(request_prepare));
             } else {
                 const nature = if (op > self.commit_max) "uncommitted" else "committed";
@@ -7162,10 +7176,13 @@ pub fn ReplicaType(
                     reason,
                 });
 
-                self.send_header_to_replica(
-                    self.choose_any_other_replica(),
-                    @bitCast(request_prepare),
-                );
+                self.repair_messages_budget -|= 1;
+                if (self.repair_messages_budget > 0) {
+                    self.send_header_to_replica(
+                        self.choose_any_other_replica(),
+                        @bitCast(request_prepare),
+                    );
+                }
             }
 
             return true;
