@@ -150,7 +150,8 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .request_timeout = .{
                     .name = "request_timeout",
                     .id = options.id,
-                    .after = constants.rtt_ticks * constants.rtt_multiple,
+                    .after = 300 * constants.rtt_multiple,
+                    .rtt = 300,
                 },
                 .ping_timeout = .{
                     .name = "ping_timeout",
