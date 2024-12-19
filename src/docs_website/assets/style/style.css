@@ -121,7 +121,7 @@ code {
 nav.left-pane {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow-y: scroll;
   scrollbar-gutter: stable;
   width: 300px;
 
@@ -554,7 +554,7 @@ main {
 article {
   flex: 1;
   height: 100%;
-  overflow-y: auto;
+  overflow-y: scroll;
   scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
