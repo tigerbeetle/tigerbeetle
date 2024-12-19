@@ -817,8 +817,10 @@ article {
     >nav.side {
       display: none;
     }
+  }
 
-    &.mobile-expanded {
+  .mobile-expanded {
+    nav.left-pane {
       >.top-wrapper {
         .menu-button {
           >.icon-burger {
@@ -838,6 +840,10 @@ article {
       >nav.side {
         display: block;
       }
+    }
+
+    main {
+      display: none;
     }
   }
 
