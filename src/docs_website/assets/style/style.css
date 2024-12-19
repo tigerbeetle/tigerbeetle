@@ -19,6 +19,8 @@
   --yellow-10: #FFDC00;
   --sky-10: #74DAF8;
 
+  --highlight-active: #FFFFFF4D;
+
   --primary-1: #0080FF04;
   --primary-2: #008CFF0B;
   --primary-3: #008FF519;
@@ -54,6 +56,8 @@
     --orange-10: #FF801F;
     --yellow-10: #FFEF5C;
     --sky-10: #A8EEFF;
+
+    --highlight-active: #FFFFFFB2;
 
     --primary-1: #D1510004;
     --primary-2: #F9B4000B;
@@ -379,7 +383,7 @@ nav.left-pane {
       }
 
       .highlight {
-        background-color: #FFFA;
+        background-color: var(--highlight-active);
         color: var(--gray-0);
       }
     }
