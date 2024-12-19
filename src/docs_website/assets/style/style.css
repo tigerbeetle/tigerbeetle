@@ -101,10 +101,6 @@ body {
   background-color: var(--gray-0);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   -webkit-font-smoothing: antialiased;
-  display: flex;
-  flex-direction: row;
-  height: 100vh;
-  overflow: hidden;
   text-wrap-style: pretty;
 }
 
@@ -503,7 +499,7 @@ nav.side {
   content: "\25bc";
 }
 
-.resizer {
+body>.resizer {
   width: 8px;
   cursor: col-resize;
 
@@ -545,12 +541,6 @@ body.sidenav-collapsed {
   >.expand-button {
     display: block;
   }
-}
-
-main {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
 }
 
 #github-link {
@@ -777,76 +767,88 @@ article {
   }
 }
 
-@media (max-width: 809px) {
+@media (min-width: 810px) {
   body {
-    flex-direction: column;
-    height: auto;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: row;
+    height: 100vh;
+    overflow: hidden;
+  }
 
-    nav.left-pane {
-      width: 100% !important;
-      overflow: visible;
+  main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+}
 
-      >.top-wrapper {
-        position: relative;
+@media (max-width: 809px) {
+  nav.left-pane {
+    width: 100% !important;
+    overflow: visible;
 
-        .menu-button {
+    >.top-wrapper {
+      >.top {
+        padding-right: 16px;
+      }
+
+      .menu-button {
+        display: block;
+
+        >.icon-burger {
           display: block;
+        }
 
+        >.icon-x {
+          display: none;
+        }
+      }
+
+      .collapse-button {
+        display: none;
+      }
+
+      .search-box {
+        display: none;
+      }
+    }
+
+    >nav.side {
+      display: none;
+    }
+
+    &.mobile-expanded {
+      >.top-wrapper {
+        .menu-button {
           >.icon-burger {
-            display: block;
+            display: none;
           }
 
           >.icon-x {
-            display: none;
+            display: block;
           }
         }
 
-        .collapse-button {
-          display: none;
-        }
-
         .search-box {
-          display: none;
+          display: block;
         }
       }
 
       >nav.side {
-        display: none;
-      }
-
-      &.mobile-expanded {
-        >.top-wrapper {
-          .menu-button {
-            >.icon-burger {
-              display: none;
-            }
-
-            >.icon-x {
-              display: block;
-            }
-          }
-
-          .search-box {
-            display: block;
-          }
-        }
-
-        >nav.side {
-          display: block;
-        }
+        display: block;
       }
     }
+  }
 
-    >.resizer {
-      display: none;
-    }
+  body>.resizer {
+    display: none;
+  }
 
-    #github-link {
-      right: 0;
-    }
+  article {
+    height: auto;
+    overflow-y: visible;
 
-    article>.content {
+    >.content {
       padding: 40px 16px;
     }
   }
