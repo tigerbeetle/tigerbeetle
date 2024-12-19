@@ -814,8 +814,13 @@ article {
       }
     }
 
+    >.search-results {
+      padding-right: 16px;
+    }
+
     >nav.side {
       display: none;
+      padding-right: 16px;
     }
   }
 
@@ -839,6 +844,12 @@ article {
 
       >nav.side {
         display: block;
+      }
+
+      &.search-active {
+        >nav.side {
+          display: none;
+        }
       }
     }
 

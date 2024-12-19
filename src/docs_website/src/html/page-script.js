@@ -44,7 +44,7 @@ syncSideNavWithLocation();
 
 const menuButton = document.querySelector(".menu-button");
 menuButton.addEventListener("click", () => {
-  leftPane.classList.toggle("mobile-expanded");
+  document.body.classList.toggle("mobile-expanded");
   if (leftPane.classList.contains("search-active")) closeSearch();
 });
 
