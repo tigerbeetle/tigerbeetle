@@ -644,6 +644,7 @@ test "Cluster: repair: corrupt reply" {
     // (Pass A0 only to ensure that no other client forwards the reply.)
     t.replica(.A0).pass(.C_, .outgoing, .reply);
     t.run();
+    t.run();
 
     try expectEqual(c.replies(), 3);
 }
