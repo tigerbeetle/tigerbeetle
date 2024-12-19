@@ -74,6 +74,14 @@ comptime {
     assert(vsr_checkpoint_ops % lsm_compaction_ops == 0);
 }
 
+pub const vsr_repair_message_budget_max = replicas_max * 2;
+pub const vsr_repair_message_budget_refill = @divFloor(vsr_repair_message_budget_max, 2);
+
+comptime {
+    assert(vsr_repair_message_budget_max > 0);
+    assert(vsr_repair_message_budget_refill > 0);
+}
+
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.
 /// This determines the size of the VR client table used to cache replies to clients by client ID.
