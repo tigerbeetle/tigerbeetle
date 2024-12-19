@@ -17,6 +17,10 @@ const LoggedProcess = @This();
 pub const State = enum(u8) { running, stopped, terminated };
 const AtomicState = std.atomic.Value(State);
 
+const Options = struct {
+    stdout_behavior: std.process.Child.StdIo = .Ignore,
+};
+
 // Allocated by init
 child: std.process.Child,
 stdin_thread: std.Thread,
@@ -28,6 +32,7 @@ current_state: AtomicState,
 pub fn spawn(
     allocator: std.mem.Allocator,
     argv: []const []const u8,
+    options: Options,
 ) !*LoggedProcess {
     const self = try allocator.create(LoggedProcess);
     errdefer allocator.destroy(self);
@@ -40,7 +45,7 @@ pub fn spawn(
     };
 
     self.child.stdin_behavior = .Pipe;
-    self.child.stdout_behavior = .Ignore;
+    self.child.stdout_behavior = options.stdout_behavior;
     self.child.stderr_behavior = .Inherit;
 
     try self.child.spawn();
