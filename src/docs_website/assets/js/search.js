@@ -177,6 +177,10 @@ function makeContext(text, i, length) {
 }
 
 function selectResult(node) {
+  if (isMobileView()) {
+    location.href = node.href;
+    return;
+  }
   searchResults.querySelectorAll(".selected").forEach(r => r.classList.remove("selected"));
   node.classList.add("selected");
   scrollIntoViewIfNeeded(node, searchResults.parentNode);
@@ -293,4 +297,8 @@ function removeTextHighlight(container) {
 
 function escapeHtml(unsafe) {
   return unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+}
+
+function isMobileView() {
+  return window.innerWidth < 810;
 }
