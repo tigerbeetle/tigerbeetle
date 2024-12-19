@@ -43,7 +43,10 @@ menuHeads.forEach(e => e.addEventListener("click", ev => {
 syncSideNavWithLocation();
 
 const menuButton = document.querySelector(".menu-button");
-menuButton.addEventListener("click", () => leftPane.classList.toggle("mobile-expanded"));
+menuButton.addEventListener("click", () => {
+  leftPane.classList.toggle("mobile-expanded");
+  if (leftPane.classList.contains("search-active")) closeSearch();
+});
 
 // Restore and save the state of the side navigation
 const navSideState = JSON.parse(localStorage.getItem("navSideState"));
