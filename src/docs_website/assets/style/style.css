@@ -671,6 +671,7 @@ article {
       height: 16px;
       margin-left: 4px;
       opacity: 0;
+      transform-origin: bottom left;
     }
 
     .anchor:hover::after {
@@ -682,6 +683,14 @@ article {
       /* computed using https://codepen.io/sosuke/pen/Pjoqqp */
       filter: invert(52%) sepia(55%) saturate(5949%) hue-rotate(189deg) brightness(93%) contrast(105%);
       opacity: 1;
+    }
+
+    h1 .anchor::after {
+      scale: 1.5;
+    }
+
+    h2 .anchor::after {
+      scale: 1.25;
     }
 
     @media (prefers-color-scheme: dark) {
