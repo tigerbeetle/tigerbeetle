@@ -403,6 +403,10 @@ nav.side {
       background-color: var(--gray-3);
     }
 
+    &:has(a.target) {
+      background-color: var(--primary-9);
+    }
+
     a {
       color: var(--gray-11);
       text-decoration: none;
@@ -421,7 +425,7 @@ nav.side {
 
       &.target {
         font-weight: 600;
-        color: var(--gray-12);
+        color: var(--gray-0);
       }
     }
   }
@@ -491,8 +495,8 @@ nav.side {
   height: 16px;
 }
 
-.menu-head:hover:not(:has(a:hover))::before {
-  color: var(--gray-12);
+.menu-head:has(a.target)::before {
+  color: var(--gray-0);
 }
 
 .menu-head.expanded::before {
