@@ -427,7 +427,7 @@ nav.side {
       }
 
       &.target {
-        font-weight: 600;
+        font-weight: 500;
         color: var(--gray-0);
       }
     }
