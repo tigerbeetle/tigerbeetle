@@ -9,11 +9,6 @@ Released: 2024-12-19
 
 ### Safety And Performance
 
-- [#2587](https://github.com/tigerbeetle/tigerbeetle/pull/2587)
-
-  Temporarily decrease default RTT to mitigate slow timeouts in compromised clusters. This impacts
-  the `prepare_timeout` in particular. Leave client timeouts intact.
-
 - [#2584](https://github.com/tigerbeetle/tigerbeetle/pull/2584)
 
   Our repair can create a feedback loop. Repair requests prepares and headers, but, upon receiving
