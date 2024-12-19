@@ -822,8 +822,12 @@ article {
       display: none;
     }
 
+    #github-link {
+      right: 0;
+    }
+
     article>.content {
-      padding: 48px 16px;
+      padding: 40px 16px;
     }
   }
 }
