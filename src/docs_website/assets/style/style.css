@@ -565,6 +565,7 @@ article {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    width: 100%;
     max-width: 950px;
     padding: 48px 64px;
     padding-bottom: 50vh;
