@@ -3,6 +3,69 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.18
+
+Released: 2024-12-19
+
+### Safety And Performance
+
+- [#2587](https://github.com/tigerbeetle/tigerbeetle/pull/2587)
+
+  Temporarily decrease default RTT to mitigate slow timeouts in compromised clusters. This impacts
+  the `prepare_timeout` in particular. Leave client timeouts intact.
+
+- [#2584](https://github.com/tigerbeetle/tigerbeetle/pull/2584)
+
+  Our repair can create a feedback loop. Repair requests prepares and headers, but, upon receiving
+  back, we re-trigger repair, which could lead to duplicate repair work.
+
+  To avoid that, make sure that we are not sending more than two repair messages per replica per our
+  repair timeout.
+
+- [#2586](https://github.com/tigerbeetle/tigerbeetle/pull/2586)
+
+  Trace AOF write duration
+
+- [#2582](https://github.com/tigerbeetle/tigerbeetle/pull/2582)
+
+  Timeouts with exponential backoff should reset to their original delay when the timeout is
+  stopped.
+
+- [#2577](https://github.com/tigerbeetle/tigerbeetle/pull/2577)
+
+  Assert against ABA problem during commit.
+
+- [#2578](https://github.com/tigerbeetle/tigerbeetle/pull/2578)
+
+  Add retry for `flock`. `flock`s are cleaned up by the kernel when the file descriptor is closed,
+  but since that file descriptor is used by io_uring, it actually outlives the process itself.
+
+- [#2579](https://github.com/tigerbeetle/tigerbeetle/pull/2579)
+
+  Fix `mlock` flag value.
+
+- [#2571](https://github.com/tigerbeetle/tigerbeetle/pull/2571)
+
+  Don't crash if a round of view changes happened while repairing the pipeline.
+
+### Features
+
+- [#2423](https://github.com/tigerbeetle/tigerbeetle/pull/2423)
+
+  Tab completion in REPL
+
+- [#2566](https://github.com/tigerbeetle/tigerbeetle/pull/2566)
+
+  Fix `--account-count-hot` flag.
+
+- [#2576](https://github.com/tigerbeetle/tigerbeetle/pull/2576)
+
+  Fix multi-debit recipe.
+
+### TigerTracks 🎧
+
+- [By The Way](https://www.youtube.com/watch?v=qxQnSH3x3sg)
+
 ## TigerBeetle (unreleased)
 
 Released: 2024-12-16

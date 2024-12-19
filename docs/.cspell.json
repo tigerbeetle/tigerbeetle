@@ -117,6 +117,7 @@
         "memfd",
         "memlock",
         "mlns",
+        "mlock",
         "mojaloop",
         "mojaloop's",
         "multitenancy",
