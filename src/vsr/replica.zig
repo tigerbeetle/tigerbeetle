@@ -4440,10 +4440,16 @@ pub fn ReplicaType(
             // It should be impossible for a client to receive a response without the request
             // being logged by at least one replica.
             if (self.aof) |aof| {
+                self.trace.start(.replica_aof_write, .{
+                    .op = prepare.header.op,
+                });
                 aof.write(prepare, .{
                     .replica = self.replica,
                     .primary = self.primary_index(self.view),
                 }) catch @panic("aof failure");
+                self.trace.stop(.replica_aof_write, .{
+                    .op = prepare.header.op,
+                });
             }
 
             const reply_body_size = switch (prepare.header.operation) {
