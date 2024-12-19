@@ -3903,7 +3903,6 @@ pub fn ReplicaType(
                         commit_start_journal_callback,
                         op,
                         header.checksum,
-                        null,
                     );
                     return .pending;
                 }
@@ -3952,6 +3951,7 @@ pub fn ReplicaType(
 
             const op = self.commit_min + 1;
             assert(prepare.?.header.op == op);
+            assert(self.journal.has(prepare.?.header));
 
             self.commit_prepare = prepare.?.ref();
             return self.commit_dispatch_resume();
@@ -3974,6 +3974,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.operation != .reserved);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
             assert(self.commit_prepare.?.header.op <= self.op);
+            assert(self.journal.has(self.commit_prepare.?.header));
 
             const prepare = self.commit_prepare.?;
 
@@ -6873,7 +6874,7 @@ pub fn ReplicaType(
                 op,
                 op_checksum,
             });
-            self.journal.read_prepare(repair_pipeline_read_callback, op, op_checksum, null);
+            self.journal.read_prepare(repair_pipeline_read_callback, op, op_checksum);
         }
 
         fn repair_pipeline_read_callback(
