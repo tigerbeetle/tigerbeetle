@@ -290,6 +290,26 @@ nav.left-pane {
     text-overflow: ellipsis;
     overflow: hidden;
   }
+
+  &.search-active {
+    .search-box {
+      .clear-button {
+        display: block;
+      }
+    }
+
+    .search-stats {
+      display: block;
+    }
+
+    .search-results {
+      display: block;
+    }
+
+    nav.side {
+      display: none;
+    }
+  }
 }
 
 .search-results {

@@ -132,11 +132,11 @@ function onSearchInput() {
 
   highlightText(searchInput.value, searchResults);
 
-  const displaySearch = searchInput.value === "" ? "none" : "block";
-  searchClearButton.style.display = displaySearch;
-  searchResults.style.display = displaySearch;
-  searchStats.style.display = displaySearch;
-  navSide.style.display = searchInput.value === "" ? "block" : "none"
+  if (searchInput.value === "") {
+    leftPane.classList.remove("search-active");
+  } else {
+    leftPane.classList.add("search-active");
+  }
 }
 
 function search(term) {
