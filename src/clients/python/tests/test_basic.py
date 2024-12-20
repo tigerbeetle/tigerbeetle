@@ -5,7 +5,7 @@ from dataclasses import asdict
 import pytest
 
 import tigerbeetle as tb
-
+tb.configure_logging(debug=True)
 
 @pytest.fixture
 def client():

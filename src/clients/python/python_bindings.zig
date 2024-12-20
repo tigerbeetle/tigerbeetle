@@ -17,6 +17,7 @@ const mappings_vsr = .{
     .{ tb_client.tb_packet_t, "Packet" },
     .{ tb_client.tb_client_t, "Client" },
     .{ tb_client.tb_status_t, "Status" },
+    .{ tb_client.tb_register_log_callback_status_t, "RegisterLogCallbackStatus" },
 };
 
 /// State machine specific mappings: in future, these should be pulled automatically from the state
@@ -470,6 +471,7 @@ pub fn main() !void {
         \\# Don't be tempted to use c_char_p for bytes_ptr - it's for null terminated strings only.
         \\OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, Client, ctypes.POINTER(CPacket),
         \\                                ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
+        \\LogHandler = ctypes.CFUNCTYPE(None, ctypes.c_uint8, ctypes.c_void_p, ctypes.c_uint)
         \\
         \\# Initialize a new TigerBeetle client which connects to the addresses provided and
         \\# completes submitted packets by invoking the callback with the given context.
@@ -499,6 +501,13 @@ pub fn main() !void {
         \\tb_client_submit = tbclient.tb_client_submit
         \\tb_client_submit.restype = None
         \\tb_client_submit.argtypes = [Client, ctypes.POINTER(CPacket)]
+        \\
+        \\tb_client_register_log_callback = tbclient.tb_client_register_log_callback
+        \\tb_client_register_log_callback.restype = RegisterLogCallbackStatus
+        \\# Need to pass in None to clear - ctypes will error if argtypes is set.
+        \\#tb_client_register_log_callback.argtypes = [LogHandler, ctypes.c_bool]
+        \\
+        \\
         \\
     , .{});
 

@@ -236,3 +236,25 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
             raise inflight_packet.response
 
         return inflight_packet.response
+
+
+@bindings.LogHandler
+def log_handler(level_zig, message_ptr, message_len):
+    level_python = {
+        0: logging.ERROR,
+        1: logging.WARNING,
+        2: logging.INFO,
+        3: logging.DEBUG,
+    }[level_zig]
+    logger.log(level_python, ctypes.string_at(message_ptr, message_len).decode("utf-8"))
+
+tb_assert(bindings.tb_client_register_log_callback(log_handler, True) ==
+    bindings.RegisterLogCallbackStatus.SUCCESS)
+
+def configure_logging(*, debug, log_handler=log_handler):
+    # First disable the existing log handler, before enabling the new one.
+    tb_assert(bindings.tb_client_register_log_callback(None, debug) ==
+        bindings.RegisterLogCallbackStatus.SUCCESS)
+
+    tb_assert(bindings.tb_client_register_log_callback(log_handler, debug) ==
+        bindings.RegisterLogCallbackStatus.SUCCESS)
