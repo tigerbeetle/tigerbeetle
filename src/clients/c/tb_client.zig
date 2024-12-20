@@ -124,10 +124,12 @@ pub const Logging = struct {
 
 pub fn register_log_callback(
     callback_maybe: ?Logging.Callback,
+    debug: bool,
 ) callconv(.C) tb_register_log_callback_status_t {
     if (logging.callback == null) {
         if (callback_maybe) |callback| {
             logging.callback = callback;
+            logging.debug = debug;
             return .success;
         } else {
             return .not_registered;
@@ -135,6 +137,7 @@ pub fn register_log_callback(
     } else {
         if (callback_maybe == null) {
             logging.callback = null;
+            logging.debug = debug;
             return .success;
         } else {
             return .already_registered;
