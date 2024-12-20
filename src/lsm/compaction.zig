@@ -41,6 +41,7 @@ const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
+const vsr = @import("../vsr.zig");
 const trace = @import("../trace.zig");
 const FIFOType = @import("../fifo.zig").FIFOType;
 const IOPSType = @import("../iops.zig").IOPSType;
@@ -525,8 +526,9 @@ pub fn CompactionType(
         pub fn bar_commence(compaction: *Compaction, op: u64) void {
             assert(compaction.idle());
             assert(compaction.stage == .inactive);
-            compaction.stage = .paused;
             assert(op == compaction_op_min(op));
+
+            compaction.stage = .paused;
             compaction.op_min = op;
 
             if (compaction.level_b == 0) {
@@ -541,8 +543,51 @@ pub fn CompactionType(
                     return;
                 }
 
+                const table_value_count_limit =
+                    constants.lsm_compaction_ops * compaction.tree.options.batch_value_count_limit;
+                assert(table_value_count_limit <= Table.value_count_max);
+
                 assert(compaction.tree.table_immutable.count() > 0);
-                assert(compaction.tree.table_immutable.count() <= Table.value_count_max);
+                assert(compaction.tree.table_immutable.count() <= table_value_count_limit);
+
+                // If the mutable table will fit in the free capacity of the immutable table (even
+                // in the projected "worst" case of all full batches during the second half-bar),
+                // then defer compacting the immutable table into level 0.
+                //
+                // This optimization cannot apply to the last bar before a checkpoint trigger, since
+                // recovery from the checkpoint only replays that final bar, which must reconstruct
+                // the original immutable table.
+                // TODO(Snapshots) This optimization must be disabled to take a persistent snapshot.
+                const mutable_count_half_bar_first = compaction.tree.table_mutable.count();
+                const mutable_count_half_bar_last = @divExact(table_value_count_limit, 2);
+                const mutable_count = mutable_count_half_bar_first + mutable_count_half_bar_last;
+                const immutable_count = compaction.tree.table_immutable.count();
+                if (immutable_count + mutable_count <= table_value_count_limit) {
+                    const op_checkpoint =
+                        compaction.grid.superblock.working.vsr_state.checkpoint.header.op;
+                    const op_checkpoint_next = vsr.Checkpoint.checkpoint_after(op_checkpoint);
+                    const op_checkpoint_trigger_next =
+                        vsr.Checkpoint.trigger_for_checkpoint(op_checkpoint_next).?;
+                    const compaction_op_max = op + (half_bar_beat_count - 1);
+                    const last_half_bar_of_checkpoint =
+                        compaction_op_max == op_checkpoint_trigger_next;
+
+                    if (!last_half_bar_of_checkpoint) {
+                        assert(compaction.quotas.bar == 0);
+                        assert(compaction.quotas.bar_done());
+                        log.debug("{s}:{}: bar_commence: immutable table flush skipped " ++
+                            "({}+{}+{} ≤ {})", .{
+                            compaction.tree.config.name,
+                            compaction.level_b,
+                            immutable_count,
+                            mutable_count_half_bar_first,
+                            mutable_count_half_bar_last,
+                            table_value_count_limit,
+                        });
+                        return;
+                    }
+                }
+
                 compaction.table_info_a = .{
                     .immutable = compaction.tree.table_immutable.values_used(),
                 };
@@ -663,7 +708,10 @@ pub fn CompactionType(
                 assert(compaction.manifest_entries.count() == 0);
                 assert(compaction.quotas.bar == 0);
                 if (compaction.level_b == 0) {
-                    assert(compaction.tree.table_immutable.mutability.immutable.flushed);
+                    // Either:
+                    // - the immutable table is empty (already flushed), or
+                    // - the mutable table will be absorbed into the immutable table.
+                    maybe(compaction.tree.table_immutable.mutability.immutable.flushed);
                 }
                 return;
             }

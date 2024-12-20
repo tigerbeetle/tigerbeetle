@@ -513,23 +513,28 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn swap_mutable_and_immutable(tree: *Tree, snapshot_min: u64) void {
             assert(tree.table_mutable.mutability == .mutable);
             assert(tree.table_immutable.mutability == .immutable);
-            assert(tree.table_immutable.mutability.immutable.flushed);
             assert(snapshot_min > 0);
             assert(snapshot_min < snapshot_latest);
 
             tree.grid.trace.start(.compact_mutable, .{ .tree = tree.config.name });
             defer tree.grid.trace.stop(.compact_mutable, .{ .tree = tree.config.name });
 
+            if (tree.table_immutable.mutability.immutable.flushed) {
+                // The immutable table must be visible to the next bar.
+                // In addition, the immutable table is conceptually an output table of this
+                // compaction bar, and now its snapshot_min matches the snapshot_min of the
+                // Compactions' output tables.
+                tree.table_mutable.make_immutable(snapshot_min);
+                tree.table_immutable.make_mutable();
+                std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
+            } else {
+                // The immutable table wasn't flushed because there is enough room left over for the
+                // mutable table's values, allowing us to skip some compaction work.
+                tree.table_immutable.absorb(&tree.table_mutable, snapshot_min);
+            }
+
             // TODO
             // assert((tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
-
-            // The immutable table must be visible to the next bar.
-            // In addition, the immutable table is conceptually an output table of this compaction
-            // bar, and now its snapshot_min matches the snapshot_min of the Compactions' output
-            // tables.
-            tree.table_mutable.make_immutable(snapshot_min);
-            tree.table_immutable.make_mutable();
-            std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
 
             assert(tree.table_mutable.count() == 0);
             assert(tree.table_mutable.mutability == .mutable);

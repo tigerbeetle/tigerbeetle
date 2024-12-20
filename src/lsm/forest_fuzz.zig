@@ -96,12 +96,6 @@ const Environment = struct {
         2 * constants.lsm_compaction_ops,
     );
 
-    const compacts_per_checkpoint = std.math.divCeil(
-        usize,
-        constants.journal_slot_count,
-        constants.lsm_compaction_ops,
-    ) catch unreachable;
-
     const State = enum {
         init,
         superblock_format,
@@ -893,13 +887,12 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     log.info("modifier_distribution = {:.2}", .{modifier_distribution});
 
     log.info("puts_since_compact_max = {}", .{Environment.puts_since_compact_max});
-    log.info("compacts_per_checkpoint = {}", .{Environment.compacts_per_checkpoint});
 
     var id_to_account = std.hash_map.AutoHashMap(u128, Account).init(allocator);
     defer id_to_account.deinit();
 
     var op: u64 = 1;
-    var persisted_op: u64 = op;
+    var persisted_op: u64 = 0;
     var puts_since_compact: usize = 0;
     for (fuzz_ops, 0..) |*fuzz_op, fuzz_op_index| {
         const too_many_puts = puts_since_compact >= Environment.puts_since_compact_max;
@@ -911,14 +904,11 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             fuzz.random_enum(random, FuzzOpActionTag, action_distribution);
         const action = switch (action_tag) {
             .compact => action: {
-                const action = generate_compact(random, .{
-                    .op = op,
-                    .persisted_op = persisted_op,
-                });
-                op += 1;
+                const action = generate_compact(.{ .op = op, .persisted_op = persisted_op });
                 if (action.compact.checkpoint) {
                     persisted_op = op - constants.lsm_compaction_ops;
                 }
+                op += 1;
                 break :action action;
             },
             .put_account => action: {
@@ -1014,18 +1004,17 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     return fuzz_ops;
 }
 
-fn generate_compact(
-    random: std.rand.Random,
-    options: struct { op: u64, persisted_op: u64 },
-) FuzzOpAction {
+fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction {
     const checkpoint =
         // Can only checkpoint on the last beat of the bar.
         options.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
         options.op > constants.lsm_compaction_ops and
         // Never checkpoint at the same op twice
         options.op > options.persisted_op + constants.lsm_compaction_ops and
-        // Checkpoint at roughly the same rate as log wraparound.
-        random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
+        // Checkpoint at the normal rate.
+        options.op == vsr.Checkpoint.trigger_for_checkpoint(
+        vsr.Checkpoint.checkpoint_after(options.persisted_op),
+    );
     return FuzzOpAction{ .compact = .{
         .op = options.op,
         .checkpoint = checkpoint,
