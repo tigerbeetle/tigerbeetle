@@ -74,7 +74,7 @@
 //!
 //! Further reading:
 //!
-//! [Three Clocks are Better than One](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/)
+//! [Three Clocks are Better than One](https://tigerbeetle.com/blog/2021-08-30-three-clocks-are-better-than-one)
 //!
 //! And watching:
 //!

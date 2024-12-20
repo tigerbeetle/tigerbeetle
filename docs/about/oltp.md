@@ -77,7 +77,7 @@ smoothly.
 
 TigerBeetle is also built in a unique way that sets it apart from other OLTP databases. It is
 [written in Zig](./zig.md) instead of C or C++, uses
-[static memory allocation](https://tigerbeetle.com/blog/a-database-without-dynamic-memory), imposes
+[static memory allocation](https://tigerbeetle.com/blog/2022-10-12-a-database-without-dynamic-memory), imposes
 strict limits on everything it does, and makes heavy use of
 [assertions](https://tigerbeetle.com/blog/2023-12-27-it-takes-two-to-contract) and
 [simulation testing](https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness) to
