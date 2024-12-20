@@ -66,18 +66,22 @@ pub fn main() !void {
     var command = cli.parse_args(&arg_iterator);
 
     switch (command) {
+        .inspect, .version => {},
+        inline else => |*args| {
+            if (args.log_debug) {
+                log_level_runtime = .debug;
+            }
+        },
+    }
+
+    switch (command) {
         .format => |*args| try Command.format(allocator, args, .{
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
         }),
-        .start => |*args| {
-            if (args.log_debug) {
-                log_level_runtime = .debug;
-            }
-            try Command.start(arena.allocator(), args);
-        },
+        .start => |*args| try Command.start(arena.allocator(), args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(arena.allocator(), args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
