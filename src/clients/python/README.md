@@ -31,6 +31,10 @@ import os
 import tigerbeetle as tb
 
 print("Import OK!")
+
+# To enable debug logging, via Python's built in logging module:
+# logging.basicConfig(level=logging.DEBUG)
+# tb.configure_logging(debug=True)
 ```
 
 Finally, build and run:

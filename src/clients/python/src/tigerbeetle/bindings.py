@@ -47,6 +47,12 @@ class Status(enum.IntEnum):
     NETWORK_SUBSYSTEM = 6
 
 
+class RegisterLogCallbackStatus(enum.IntEnum):
+    SUCCESS = 0
+    ALREADY_REGISTERED = 1
+    NOT_REGISTERED = 2
+
+
 class AccountFlags(enum.IntFlag):
     NONE = 0
     LINKED = 1 << 0
@@ -612,6 +618,7 @@ CQueryFilter._fields_ = [ # noqa: SLF001
 # Don't be tempted to use c_char_p for bytes_ptr - it's for null terminated strings only.
 OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, Client, ctypes.POINTER(CPacket),
                                 ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
+LogHandler = ctypes.CFUNCTYPE(None, ctypes.c_uint8, ctypes.c_void_p, ctypes.c_uint)
 
 # Initialize a new TigerBeetle client which connects to the addresses provided and
 # completes submitted packets by invoking the callback with the given context.
@@ -641,6 +648,13 @@ tb_client_deinit.argtypes = [Client]
 tb_client_submit = tbclient.tb_client_submit
 tb_client_submit.restype = None
 tb_client_submit.argtypes = [Client, ctypes.POINTER(CPacket)]
+
+tb_client_register_log_callback = tbclient.tb_client_register_log_callback
+tb_client_register_log_callback.restype = RegisterLogCallbackStatus
+# Need to pass in None to clear - ctypes will error if argtypes is set.
+#tb_client_register_log_callback.argtypes = [LogHandler, ctypes.c_bool]
+
+
 class AsyncStateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
     async def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
