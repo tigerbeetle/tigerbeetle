@@ -48,7 +48,8 @@
     --gray-7: #484848;
     --gray-8: #606060;
     --gray-10: #7B7B7B;
-    --gray-11: #B4B4B4;
+    /* change to lighter gray for legibility */
+    --gray-11: #CCCCCC;
     --gray-12: #EEEEEE;
     --red-10: #EC5D5E;
     --blue-10: #3B9EFF;
