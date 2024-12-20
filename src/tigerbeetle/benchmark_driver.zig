@@ -72,6 +72,10 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
                 vsr.fatal(.cli, "--" ++ arg_name ++ ": incompatible with --addresses", .{});
             }
         }
+
+        if (args.log_debug_replica) {
+            vsr.fatal(.cli, "--log-debug-replica: incompatible with --addresses", .{});
+        }
     }
 
     const addresses = if (args.addresses) |*addresses|
@@ -179,11 +183,15 @@ fn start(allocator: std.mem.Allocator, options: struct {
         }
     }
 
+    if (options.args.log_debug_replica) {
+        try start_args.append(arena.allocator(), "--log-debug");
+    }
+
     // Some of the forwarded arguments require the "--experimental" flag.
     const experimental: bool = inline for (forward_args) |forward_arg| {
         if (forward_arg[0] != null) break true;
     } else false;
-    if (experimental) {
+    if (experimental or options.args.log_debug_replica) {
         try start_args.append(arena.allocator(), "--experimental");
     }
 

@@ -10,9 +10,6 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const panic = std.debug.panic;
 const log = std.log;
-pub const std_options = .{
-    .log_level = .info,
-};
 
 const vsr = @import("vsr");
 const constants = vsr.constants;

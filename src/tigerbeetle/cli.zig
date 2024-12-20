@@ -37,6 +37,7 @@ const CLIArgs = union(enum) {
         standby: ?u8 = null,
         replica_count: u8,
         development: bool = false,
+        log_debug: bool = false,
 
         positional: struct {
             path: [:0]const u8,
@@ -87,6 +88,7 @@ const CLIArgs = union(enum) {
         cluster: u128,
         verbose: bool = false,
         command: []const u8 = "",
+        log_debug: bool = false,
     };
 
     // Experimental: the interface is subject to change.
@@ -98,6 +100,8 @@ const CLIArgs = union(enum) {
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_count_hot: usize = 0,
+        log_debug: bool = false,
+        log_debug_replica: bool = false,
         /// The probability distribution used to select accounts when making
         /// transfers or queries.
         account_distribution: Command.Benchmark.Distribution = .uniform,
@@ -216,6 +220,7 @@ const CLIArgs = union(enum) {
 
     // Internal: used to validate multiversion binaries.
     const Multiversion = struct {
+        log_debug: bool = false,
         positional: struct {
             path: [:0]const u8,
         },
@@ -384,6 +389,7 @@ pub const Command = union(enum) {
         replica_count: u8,
         development: bool,
         path: [:0]const u8,
+        log_debug: bool,
     };
 
     pub const Start = struct {
@@ -419,6 +425,7 @@ pub const Command = union(enum) {
         cluster: u128,
         verbose: bool,
         statements: []const u8,
+        log_debug: bool,
     };
 
     pub const Benchmark = struct {
@@ -441,6 +448,8 @@ pub const Command = union(enum) {
         cache_transfers_pending: ?[]const u8,
         cache_account_balances: ?[]const u8,
         cache_grid: ?[]const u8,
+        log_debug: bool,
+        log_debug_replica: bool,
         account_count: usize,
         account_count_hot: usize,
         account_distribution: Distribution,
@@ -492,6 +501,7 @@ pub const Command = union(enum) {
 
     pub const Multiversion = struct {
         path: [:0]const u8,
+        log_debug: bool,
     };
 
     format: Format,
@@ -583,6 +593,7 @@ fn parse_args_format(format: CLIArgs.Format) Command.Format {
         .replica_count = format.replica_count,
         .development = format.development,
         .path = format.positional.path,
+        .log_debug = format.log_debug,
     };
 }
 
@@ -823,6 +834,7 @@ fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
         .cluster = repl.cluster,
         .verbose = repl.verbose,
         .statements = repl.command,
+        .log_debug = repl.log_debug,
     };
 }
 
@@ -842,6 +854,8 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .cache_transfers_pending = benchmark.cache_transfers_pending,
         .cache_account_balances = benchmark.cache_account_balances,
         .cache_grid = benchmark.cache_grid,
+        .log_debug = benchmark.log_debug,
+        .log_debug_replica = benchmark.log_debug_replica,
         .account_count = benchmark.account_count,
         .account_count_hot = benchmark.account_count_hot,
         .account_distribution = benchmark.account_distribution,
@@ -899,6 +913,7 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
 fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multiversion {
     return .{
         .path = multiversion.positional.path,
+        .log_debug = multiversion.log_debug,
     };
 }
 
