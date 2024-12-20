@@ -49,7 +49,7 @@ as MySQL or an in-memory database such as Redis:
   quantities of time with respect to transfer timeouts. To ensure that the leader's clock is within
   safe bounds of "true time", TigerBeetle combines all the clocks in the cluster to create a
   fault-tolerant clock that we call
-  ["cluster time"](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/).
+  ["cluster time"](https://tigerbeetle.com/blog/2021-08-30-three-clocks-are-better-than-one).
 
 ## Fault Models
 

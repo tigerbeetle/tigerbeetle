@@ -75,5 +75,5 @@ Watch this talk on
 on YouTube for more details.
 
 You can also read the blog post
-[Three Clocks are Better than One](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/)
+[Three Clocks are Better than One](https://tigerbeetle.com/blog/2021-08-30-three-clocks-are-better-than-one)
 for more on how nodes determine their own time and clock skew.

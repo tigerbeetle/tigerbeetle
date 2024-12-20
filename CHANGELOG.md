@@ -2803,7 +2803,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
   New tips for the style guide:
 
   - [write code top-down](https://www.teamten.com/lawrence/programming/write-code-top-down.html)
-  - [pair up assertions](https://tigerbeetle.com/blog/2023-12-27-it-takes-two-to-contract/)
+  - [pair up assertions](https://tigerbeetle.com/blog/2023-12-27-it-takes-two-to-contract)
 
 ### TigerTracks 🎧
 

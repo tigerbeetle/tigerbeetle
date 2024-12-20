@@ -41,7 +41,7 @@ A client session ends when either:
 
 When a client session is registering and the number of active sessions in the cluster is already at
 the cluster's concurrent client session
-[limit](https://tigerbeetle.com/blog/a-database-without-dynamic-memory/) (`config.clients_max`, 64
+[limit](https://tigerbeetle.com/blog/2022-10-12-a-database-without-dynamic-memory) (`config.clients_max`, 64
 by default), an existing client session must be evicted to make space for the new session.
 
 - After a session is evicted by the cluster, no future requests from that session will ever execute.

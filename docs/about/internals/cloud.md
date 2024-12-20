@@ -52,4 +52,4 @@ Credit to @tdaly61 from the Mojaloop community for prompting us with some great 
 Tigerbeetle in the cloud.
 
 You can read more about how we use io_uring in
-[A Programmer-Friendly I/O Abstraction Over io_uring and kqueue](https://tigerbeetle.com/blog/a-friendly-abstraction-over-iouring-and-kqueue).
+[A Programmer-Friendly I/O Abstraction Over io_uring and kqueue](https://tigerbeetle.com/blog/2022-11-23-a-friendly-abstraction-over-iouring-and-kqueue).
