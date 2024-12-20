@@ -6435,7 +6435,18 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.op < self.op_repair_max()) return;
+            if (self.op < self.op_repair_max()) {
+                const op_header_view = self.journal.header_with_op(self.op).?.view;
+                assert(op_header_view <= self.view);
+                if (op_header_view < self.view) {
+                    // Wait for an SV from the primary to make sure the op indeed hash-chains
+                    // to the actual view state.
+                    return;
+                } else {
+                    // The op is from the current view, anything that hash chains to it is worth
+                    // repairing.
+                }
+            }
 
             const header_break = self.journal.find_latest_headers_break_between(
                 self.op_repair_min(),
