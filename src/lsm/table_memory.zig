@@ -4,6 +4,8 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const binary_search = @import("binary_search.zig");
+const stdx = @import("../stdx.zig");
+const maybe = stdx.maybe;
 
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
@@ -29,8 +31,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                 suffix_offset: u32 = 0,
             },
             immutable: struct {
-                /// An empty table has nothing to flush
+                /// An empty table has nothing to flush.
                 flushed: bool = true,
+                /// This field is only used for assertions, to verify that we don't absorb the
+                /// mutable table immediately prior to checkpoint.
+                absorbed: bool = false,
                 snapshot_min: u64 = 0,
             },
         };
@@ -150,11 +155,50 @@ pub fn TableMemoryType(comptime Table: type) type {
             };
         }
 
+        /// Merge and sort the immutable/mutable tables (favoring values in the latter) into the
+        /// immutable table. Then reset the mutable table.
+        pub fn absorb(
+            table_immutable: *TableMemory,
+            table_mutable: *TableMemory,
+            snapshot_min: u64,
+        ) void {
+            assert(table_immutable.mutability == .immutable);
+            maybe(table_immutable.mutability.immutable.absorbed);
+            assert(table_immutable.value_context.sorted);
+            assert(table_mutable.mutability == .mutable);
+            maybe(table_mutable.value_context.sorted);
+
+            const values_count_limit = table_immutable.values.len;
+            assert(values_count_limit == values_count_limit);
+            assert(table_immutable.count() <= values_count_limit);
+            assert(table_mutable.count() <= values_count_limit);
+            assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
+
+            stdx.copy_disjoint(
+                .inexact,
+                Value,
+                table_immutable.values[table_immutable.count()..],
+                table_mutable.values[0..table_mutable.count()],
+            );
+
+            const tables_combined_count = table_immutable.count() + table_mutable.count();
+            table_immutable.value_context.count =
+                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
+            assert(table_immutable.count() <= tables_combined_count);
+
+            table_mutable.reset();
+            table_immutable.mutability = .{ .immutable = .{
+                .flushed = table_immutable.value_context.count == 0,
+                .absorbed = true,
+                .snapshot_min = snapshot_min,
+            } };
+        }
+
         pub fn sort(table: *TableMemory) void {
             assert(table.mutability == .mutable);
 
             if (!table.value_context.sorted) {
-                table.sort_suffix_from_offset(0);
+                table.mutable_sort_suffix_from_offset(0);
                 table.value_context.sorted = true;
             }
         }
@@ -163,37 +207,42 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .mutable);
             assert(table.mutability.mutable.suffix_offset <= table.count());
 
-            table.sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
+            table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
 
             assert(table.mutability.mutable.suffix_offset == table.count());
         }
 
-        fn sort_suffix_from_offset(table: *TableMemory, offset: u32) void {
+        fn mutable_sort_suffix_from_offset(table: *TableMemory, offset: u32) void {
             assert(table.mutability == .mutable);
             assert(offset == table.mutability.mutable.suffix_offset or offset == 0);
             assert(offset <= table.count());
 
-            std.mem.sort(
-                Value,
-                table.values_used()[offset..],
-                {},
-                sort_values_by_key_in_ascending_order,
-            );
+            const target_count = sort_suffix_from_offset(table.values_used(), offset);
+            table.value_context.count = target_count;
+            table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
+        }
+
+        /// Returns the new length of `values`. (Values are deduplicated after sorting, so the
+        /// returned count may be less than or equal to the original `values.len`.)
+        fn sort_suffix_from_offset(values: []Value, offset: u32) u32 {
+            assert(offset <= values.len);
+
+            std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
 
             // Merge values with identical keys (last one wins) and collapse tombstones for
             // secondary indexes.
-            const source_count: u32 = table.count();
+            const source_count: u32 = @intCast(values.len);
             var source_index: u32 = offset;
             var target_index: u32 = offset;
             while (source_index < source_count) {
-                const value = table.values[source_index];
-                table.values[target_index] = value;
+                const value = values[source_index];
+                values[target_index] = value;
 
                 // If we're at the end of the source, there is no next value, so the next value
                 // can't be equal.
                 const value_next_equal = source_index + 1 < source_count and
-                    key_from_value(&table.values[source_index]) ==
-                    key_from_value(&table.values[source_index + 1]);
+                    key_from_value(&values[source_index]) ==
+                    key_from_value(&values[source_index + 1]);
 
                 if (value_next_equal) {
                     if (Table.usage == .secondary_index) {
@@ -202,8 +251,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                         // still spend some extra CPU work to sort the entries in memory. Ideally,
                         // we annihilate tombstones immediately, before sorting, but that's tricky
                         // to do with scopes.
-                        assert(Table.tombstone(&table.values[source_index]) !=
-                            Table.tombstone(&table.values[source_index + 1]));
+                        assert(Table.tombstone(&values[source_index]) !=
+                            Table.tombstone(&values[source_index + 1]));
                         source_index += 2;
                         target_index += 0;
                     } else {
@@ -230,16 +279,14 @@ pub fn TableMemoryType(comptime Table: type) type {
             if (constants.verify) {
                 if (offset < target_count) {
                     for (
-                        table.values[offset .. target_count - 1],
-                        table.values[offset + 1 .. target_count],
+                        values[offset .. target_count - 1],
+                        values[offset + 1 .. target_count],
                     ) |*value, *value_next| {
                         assert(key_from_value(value) < key_from_value(value_next));
                     }
                 }
             }
-
-            table.value_context.count = target_count;
-            table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
+            return target_count;
         }
 
         fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
