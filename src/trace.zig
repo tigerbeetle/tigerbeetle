@@ -222,8 +222,9 @@ pub const Tracer = struct {
     options: Options,
     buffer: []u8,
 
-    events_enabled: [Event.stack_count]bool = .{false} ** Event.stack_count,
+    events_started: [Event.stack_count]?u64 = .{null} ** Event.stack_count,
     time_start: std.time.Instant,
+    timer: std.time.Timer,
 
     pub const Options = struct {
         /// The tracer still validates start/stop state even when writer=null.
@@ -243,6 +244,7 @@ pub const Tracer = struct {
             .options = options,
             .buffer = buffer,
             .time_start = std.time.Instant.now() catch @panic("std.time.Instant.now() unsupported"),
+            .timer = std.time.Timer.start() catch @panic("std.time.Timer.start() unsupported"),
         };
     }
 
@@ -255,8 +257,8 @@ pub const Tracer = struct {
         comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
 
         const stack = event.stack();
-        assert(!tracer.events_enabled[stack]);
-        tracer.events_enabled[stack] = true;
+        assert(tracer.events_started[stack] == null);
+        tracer.events_started[stack] = tracer.timer.read();
 
         log.debug(
             "{}: {}: start:{}",
@@ -299,11 +301,19 @@ pub const Tracer = struct {
     pub fn stop(tracer: *Tracer, event: Event, data: anytype) void {
         comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
 
-        log.debug("{}: {}: stop:{}", .{ tracer.replica_index, event, struct_format(data, .dense) });
-
         const stack = event.stack();
-        assert(tracer.events_enabled[stack]);
-        tracer.events_enabled[stack] = false;
+        const event_start_ns = tracer.events_started[stack].?;
+        const event_end_ns = tracer.timer.read();
+
+        assert(tracer.events_started[stack] != null);
+        tracer.events_started[stack] = null;
+
+        log.debug("{}: {}: stop:{} (duration={}ms)", .{
+            tracer.replica_index,
+            event,
+            struct_format(data, .dense),
+            @divFloor(event_end_ns - event_start_ns, std.time.ns_per_ms),
+        });
 
         tracer.write_stop(stack, data);
     }
@@ -312,10 +322,10 @@ pub const Tracer = struct {
         const stack_base = Event.event_stack_base.get(event_tag);
         const cardinality = Event.event_stack_cardinality.get(event_tag);
         for (stack_base..stack_base + cardinality) |stack| {
-            if (tracer.events_enabled[stack]) {
+            if (tracer.events_started[stack]) |_| {
                 log.debug("{}: {s}: reset", .{ tracer.replica_index, @tagName(event_tag) });
 
-                tracer.events_enabled[stack] = false;
+                tracer.events_started[stack] = null;
                 tracer.write_stop(@intCast(stack), .{});
             }
         }
