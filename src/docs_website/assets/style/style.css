@@ -740,8 +740,8 @@ article {
       th {
         text-align: left;
         font-weight: 600;
-        background-color: var(--gray-3);
-        border-top: 1px solid var(--gray-4);
+        background-color: var(--gray-2);
+        border-top: 1px solid var(--gray-5);
         font-size: 14px;
         line-height: 20px;
       }
@@ -757,13 +757,17 @@ article {
       th,
       td {
         padding: 8px 16px;
-        border-right: 1px solid var(--gray-4);
-        border-bottom: 1px solid var(--gray-4);
+        border-bottom: 1px solid var(--gray-5);
       }
 
       th:first-child,
       td:first-child {
-        border-left: 1px solid var(--gray-4);
+        border-left: 1px solid var(--gray-5);
+      }
+
+      th:last-child,
+      td:last-child {
+        border-right: 1px solid var(--gray-5);
       }
 
       tr:last-child {
@@ -774,15 +778,6 @@ article {
         td:last-child {
           border-bottom-right-radius: 8px;
         }
-      }
-
-      th,
-      th:first-child {
-        border-color: var(--gray-7);
-      }
-
-      tr:nth-child(2n) {
-        background-color: var(--gray-1);
       }
     }
   }
