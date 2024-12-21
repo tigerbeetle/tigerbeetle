@@ -17,13 +17,13 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
         const Client = @This();
 
         pub const StateMachine = StateMachine_;
-        pub const DemuxerType = StateMachine.DemuxerType;
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
                 operation: StateMachine.Operation,
                 timestamp: u64,
-                results: []u8,
+                results: []const u8,
+                batch_count: u16,
             ) void;
 
             pub const RegisterCallback = *const fn (
@@ -172,7 +172,10 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         pub fn deinit(self: *Client, allocator: std.mem.Allocator) void {
-            if (self.request_inflight) |inflight| self.release_message(inflight.message.base());
+            if (self.request_inflight) |inflight| {
+                self.release_message(inflight.message.base());
+                self.request_inflight = null;
+            }
             self.message_bus.deinit(allocator);
         }
 
@@ -278,7 +281,8 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             callback: Request.Callback,
             user_data: u128,
             operation: StateMachine.Operation,
-            events: []const u8,
+            output: []const u8,
+            batch_count: u16,
         ) void {
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| @sizeOf(
@@ -288,9 +292,9 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             assert(!self.evicted);
             assert(self.request_inflight == null);
             assert(self.request_number > 0);
-            assert(events.len <= constants.message_body_size_max);
-            assert(events.len <= self.batch_size_limit.?);
-            assert(events.len % event_size == 0);
+            assert(output.len <= constants.message_body_size_max);
+            assert(output.len <= self.batch_size_limit.?);
+            assert(output.len % event_size == 0);
 
             const message = self.get_message().build(.request);
             errdefer self.release_message(message.base());
@@ -302,11 +306,11 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .command = .request,
                 .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @intCast(@sizeOf(Header) + events.len),
-                .batch_count = 0,
+                .size = @intCast(@sizeOf(Header) + output.len),
+                .batch_count = batch_count,
             };
 
-            stdx.copy_disjoint(.exact, u8, message.body_used(), events);
+            stdx.copy_disjoint(.exact, u8, message.body_used(), output);
             self.raw_request(callback, user_data, message);
         }
 
@@ -568,6 +572,7 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                     inflight_vsr_operation.cast(StateMachine),
                     reply.header.timestamp,
                     reply.body_used(),
+                    reply.header.batch_count,
                 );
             }
         }
