@@ -1012,6 +1012,7 @@ fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction
         // Never checkpoint at the same op twice
         options.op > options.persisted_op + constants.lsm_compaction_ops and
         // Checkpoint at the normal rate.
+        // TODO Make LSM (and this fuzzer) unaware of VSR's checkpoint schedule.
         options.op == vsr.Checkpoint.trigger_for_checkpoint(
         vsr.Checkpoint.checkpoint_after(options.persisted_op),
     );

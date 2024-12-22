@@ -528,9 +528,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 tree.table_immutable.make_mutable();
                 std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
             } else {
+                assert(tree.table_immutable.value_context.count +
+                    tree.table_mutable.value_context.count <= tree.table_immutable.values.len);
+
                 // The immutable table wasn't flushed because there is enough room left over for the
                 // mutable table's values, allowing us to skip some compaction work.
                 tree.table_immutable.absorb(&tree.table_mutable, snapshot_min);
+
+                assert(tree.table_mutable.value_context.count == 0);
             }
 
             // TODO

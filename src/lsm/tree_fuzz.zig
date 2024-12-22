@@ -836,6 +836,7 @@ fn generate_compact(
         options.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
         options.op > constants.lsm_compaction_ops and
         // Checkpoint at the normal rate.
+        // TODO Make LSM (and this fuzzer) unaware of VSR's checkpoint schedule.
         options.op == vsr.Checkpoint.trigger_for_checkpoint(
         vsr.Checkpoint.checkpoint_after(options.persisted_op),
     );

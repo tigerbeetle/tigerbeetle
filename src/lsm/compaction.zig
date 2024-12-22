@@ -543,10 +543,7 @@ pub fn CompactionType(
                     return;
                 }
 
-                const table_value_count_limit =
-                    constants.lsm_compaction_ops * compaction.tree.options.batch_value_count_limit;
-                assert(table_value_count_limit <= Table.value_count_max);
-
+                const table_value_count_limit = Table.value_count_max;
                 assert(compaction.tree.table_immutable.count() > 0);
                 assert(compaction.tree.table_immutable.count() <= table_value_count_limit);
 
