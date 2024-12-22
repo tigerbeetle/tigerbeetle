@@ -21,7 +21,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     );
 
     try shell.exec("git fetch origin --quiet", .{});
-    try shell.exec("git switch --create release-{today} origin/main", .{ .today = today });
+    try shell.exec("git switch --track --create release-{today} origin/main", .{ .today = today });
 
     const merges = try shell.exec_stdout(
         \\git log --merges --first-parent origin/release..origin/main
@@ -87,7 +87,9 @@ fn format_changelog(buffer: std.ArrayList(u8).Writer, options: struct {
 
         try buffer.print(
             \\- [#{d}](https://github.com/tigerbeetle/tigerbeetle/pull/{d})
-            \\      {s}
+            \\
+            \\  {s}
+            \\
             \\
         , .{ merge.pr, merge.pr, merge.summary });
     } else @panic("suspiciously many PRs merged");
