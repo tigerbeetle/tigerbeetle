@@ -129,6 +129,72 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         "checksum message size max",
         "us",
     );
+    const format_time_ms = blk: {
+        timer.reset();
+
+        try shell.exec(
+            "./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 datafile",
+            .{},
+        );
+
+        break :blk timer.read() / std.time.ns_per_ms;
+    };
+    const startup_time_ms = blk: {
+        timer.reset();
+
+        var process = try shell.spawn(
+            .{
+                .stdin_behavior = .Pipe,
+                .stdout_behavior = .Pipe,
+                .stderr_behavior = .Inherit,
+            },
+            "./tigerbeetle start --addresses=0 --cache-grid=8GiB datafile",
+            .{},
+        );
+        errdefer _ = process.kill() catch unreachable;
+
+        var port_buf: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
+        const port_buf_len = try process.stdout.?.readAll(&port_buf);
+        const port = try std.fmt.parseInt(u16, port_buf[0 .. port_buf_len - 1], 10);
+
+        // TODO: This sends a ping manually; once register connection speed has been fixed, this can
+        // use the benchmark or repl via CLI.
+        //
+        // Use Header directly with a blocking TCP connection here, to avoid pulling in half of TB.
+        const Header = @import("../vsr/message_header.zig").Header;
+
+        var ping = Header.PingClient{
+            .command = .ping_client,
+            .cluster = 0,
+            .release = Release.minimum,
+            .client = 1,
+            .ping_timestamp_monotonic = 0,
+        };
+        ping.set_checksum_body(&[0]u8{});
+        ping.set_checksum();
+
+        // The release of the built binary is not readily available, since it's set by
+        // `zig build scripts -- release`. Instead, the ping above is sent with
+        // .release == Release.minimum. This will always be below a release build's
+        // release_client_min, so expect the eviction.
+        var eviction: Header.Eviction = undefined;
+
+        const peer = try std.net.Address.parseIp4("127.0.0.1", port);
+        const stream = try std.net.tcpConnectToAddress(peer);
+        defer stream.close();
+
+        var writer = stream.writer();
+        try writer.writeAll(std.mem.asBytes(&ping)[0..@sizeOf(Header)]);
+
+        const reader = stream.reader();
+        _ = try reader.readAll(std.mem.asBytes(&eviction)[0..@sizeOf(Header)]);
+
+        std.debug.assert(eviction.command == .eviction);
+        std.debug.assert(eviction.valid_checksum());
+        std.debug.assert(eviction.valid_checksum_body(&[0]u8{}));
+
+        break :blk timer.read() / std.time.ns_per_ms;
+    };
 
     const ci_pipeline_duration_s = blk: {
         const times_gh = try shell.exec_stdout("gh run list -c {sha} -e merge_group " ++
@@ -167,6 +233,8 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
                 .unit = "us",
             },
             .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
+            .{ .name = "format time", .value = format_time_ms, .unit = "ms" },
+            .{ .name = "startup time - 8GiB grid cache", .value = startup_time_ms, .unit = "ms" },
         },
     };
 
