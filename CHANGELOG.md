@@ -3,6 +3,38 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.19
+
+Released: 2024-12-22
+
+### Safety And Performance
+
+- [#2592](https://github.com/tigerbeetle/tigerbeetle/pull/2592)
+
+  Coalesce LSM tables in memory before writing them to disk. This significantly improves workloads
+  with small batch sizes, that would otherwise churn in the top level of the LSM while incurring
+  heavy write amplification.
+
+### Features
+
+- [#2590](https://github.com/tigerbeetle/tigerbeetle/pull/2590)
+
+  TigerBeetle recently gained the ability to do runtime debug logging with `--log-debug`. Extend
+  that to other subcommands - not just `start`.
+
+  Additionally, the Python client now has logs integrated with Python's native `logging` module,
+  which means no more printing to stderr!
+
+### Internals
+
+- [#2591](https://github.com/tigerbeetle/tigerbeetle/pull/2591)
+
+  Fix broken links to TigerBeetle blog posts, thanks @PThorpe92!
+
+### TigerTracks 🎧
+
+- [Unwritten](https://www.youtube.com/watch?v=b7k0a5hYnSI)
+
 ## TigerBeetle 0.16.18
 
 Released: 2024-12-19
