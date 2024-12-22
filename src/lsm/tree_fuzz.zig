@@ -95,10 +95,6 @@ const events_max = 10_000_000;
 // Every `lsm_compaction_ops` batches may put/remove `value_count_max` values.
 // Every `FuzzOp.put` issues one remove and one put.
 const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
-const compacts_per_checkpoint = stdx.div_ceil(
-    constants.journal_slot_count,
-    constants.lsm_compaction_ops,
-);
 
 fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
@@ -773,9 +769,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
     log.info("puts_since_compact_max = {}", .{puts_since_compact_max});
-    log.info("compacts_per_checkpoint = {}", .{compacts_per_checkpoint});
 
     var op: u64 = 1;
+    var persisted_op: u64 = 0;
     var puts_since_compact: usize = 0;
     for (fuzz_ops) |*fuzz_op| {
         const fuzz_op_tag = if (puts_since_compact >= puts_since_compact_max)
@@ -788,7 +784,11 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .compact => action: {
                 const action = generate_compact(random, .{
                     .op = op,
+                    .persisted_op = persisted_op,
                 });
+                if (action.compact.checkpoint) {
+                    persisted_op = op - constants.lsm_compaction_ops;
+                }
                 op += 1;
                 break :action action;
             },
@@ -828,15 +828,18 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
 
 fn generate_compact(
     random: std.rand.Random,
-    options: struct { op: u64 },
+    options: struct { op: u64, persisted_op: u64 },
 ) FuzzOp {
     const half_bar = @divExact(constants.lsm_compaction_ops, 2);
     const checkpoint =
         // Can only checkpoint on the last beat of the bar.
         options.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
         options.op > constants.lsm_compaction_ops and
-        // Checkpoint at roughly the same rate as log wraparound.
-        random.uintLessThan(usize, compacts_per_checkpoint) == 0;
+        // Checkpoint at the normal rate.
+        // TODO Make LSM (and this fuzzer) unaware of VSR's checkpoint schedule.
+        options.op == vsr.Checkpoint.trigger_for_checkpoint(
+        vsr.Checkpoint.checkpoint_after(options.persisted_op),
+    );
     return FuzzOp{ .compact = .{
         .op = options.op,
         .checkpoint = checkpoint,

@@ -547,6 +547,17 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 @field(forest.grooves, field.name).assert_between_bars();
             }
 
+            inline for (comptime std.enums.values(TreeID)) |tree_id| {
+                const tree = tree_for_id(forest, tree_id);
+
+                // The last immutable table constructed before the checkpoint must not absorb any
+                // mutable table, because otherwise recovering from checkpoint would construct a
+                // different immutable table.
+                assert(!tree.table_immutable.mutability.immutable.absorbed);
+                maybe(tree.table_immutable.count() > 0);
+                assert(tree.table_mutable.count() == 0);
+            }
+
             forest.manifest_log.checkpoint(checkpoint_manifest_log_callback);
         }
 
