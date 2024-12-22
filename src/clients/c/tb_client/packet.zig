@@ -32,10 +32,9 @@ pub const Packet = extern struct {
     };
 
     /// Thread-safe stack optimized for 1 consumer (io thread) and N producers (client threads),
-    /// `push` uses a spin lock, and `pop` is not thread-safe.
+    /// `push` uses a spin lock, and `flush` is atomic.
     pub const SubmissionStack = struct {
         pushed: Atomic(?*Packet) = Atomic(?*Packet).init(null),
-        popped: ?*Packet = null,
 
         pub fn push(self: *SubmissionStack, packet: *Packet) void {
             var pushed = self.pushed.load(.monotonic);
@@ -50,12 +49,11 @@ pub const Packet = extern struct {
             }
         }
 
-        pub fn pop(self: *SubmissionStack) ?*Packet {
-            if (self.popped == null) self.popped = self.pushed.swap(null, .acquire);
-            const packet = self.popped orelse return null;
-            self.popped = packet.next;
-            packet.next = null;
-            return packet;
+        /// Returns all packets added so far and clears the list,
+        /// allowing concurrent threads to continue adding new packets.
+        pub fn flush(self: *SubmissionStack) ?*Packet {
+            const list: ?*Packet = self.pushed.swap(null, .acquire);
+            return list;
         }
     };
 

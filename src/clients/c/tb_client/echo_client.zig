@@ -14,9 +14,10 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
         const EchoClient = @This();
 
         // Exposing the same types the real client does:
-        const VSRClient = vsr.ClientType(StateMachine_, MessageBus);
-        pub const StateMachine = VSRClient.StateMachine;
+        pub const StateMachine = EchoStateMachineType(StateMachine_);
         pub const Request = VSRClient.Request;
+
+        const VSRClient = vsr.ClientType(StateMachine, MessageBus);
 
         id: u128,
         cluster: u128,
@@ -62,6 +63,7 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
 
             self.reply_timestamp += 1;
             const timestamp = self.reply_timestamp;
+            const batch_count = inflight.message.header.batch_count;
 
             // Allocate a reply message.
             const reply = self.get_message().build(.request);
@@ -87,7 +89,7 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
                         operation.cast(EchoClient.StateMachine),
                         timestamp,
                         reply.body_used(),
-                        0,
+                        batch_count,
                     );
                 },
                 .register => |callback| {
@@ -137,6 +139,7 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
             user_data: u128,
             operation: StateMachine.Operation,
             events: []const u8,
+            batch_count: u16,
         ) void {
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| @sizeOf(
@@ -157,6 +160,7 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
                 .release = vsr.Release.minimum,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + events.len),
+                .batch_count = batch_count,
             };
 
             stdx.copy_disjoint(.exact, u8, message.body_used(), events);
@@ -194,5 +198,23 @@ pub fn EchoClientType(comptime StateMachine_: type, comptime MessageBus: type) t
         pub fn release_message(self: *EchoClient, message: *Message) void {
             self.message_pool.unref(message);
         }
+    };
+}
+
+/// Re-exports all StateMachine symbols used by the client, but making `Event` and `Result`
+/// the same types.
+fn EchoStateMachineType(comptime StateMachine: type) type {
+    return struct {
+        pub const Operation = StateMachine.Operation;
+
+        pub const EventType = StateMachine.EventType;
+        pub const event_size_bytes = StateMachine.event_size_bytes;
+        pub const event_is_slice = StateMachine.event_is_slice;
+
+        pub const ResultType = StateMachine.EventType; // Results are equal Events.
+        pub const result_size_bytes = StateMachine.event_size_bytes;
+
+        pub const operation_batch_max = StateMachine.operation_batch_max;
+        pub const operation_from_vsr = StateMachine.operation_from_vsr;
     };
 }
