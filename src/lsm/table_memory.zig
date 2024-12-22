@@ -67,7 +67,9 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .values = undefined,
             };
 
-            table.values = try allocator.alloc(Value, options.value_count_limit);
+            // TODO This would ideally be value_count_limit, but needs to be value_count_max to
+            // ensure that memory table coalescing is deterministic even if the batch limit changes.
+            table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
         }
 
