@@ -1301,6 +1301,89 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
+    pub const INVALID_EVENT = -1;
+
+    pub fn open_event(
+        self: *IO,
+        completion: *Completion,
+        comptime on_event: fn (*Completion) void,
+    ) !i32 {
+        // eventfd initialized with no (zero) previous write value,
+        const event_fd = posix.eventfd(0, linux.EFD.CLOEXEC) catch |err| switch (err) {
+            error.SystemResources,
+            error.SystemFdQuotaExceeded,
+            error.ProcessFdQuotaExceeded,
+            => return error.SystemResources,
+            error.Unexpected => return error.Unexpected,
+        };
+        assert(event_fd != INVALID_EVENT);
+        errdefer os.close(event_fd);
+
+        // Start listening for notifications on this event.
+        self.event_listen(event_fd, completion, on_event);
+        return event_fd;
+    }
+
+    fn event_listen(
+        self: *IO,
+        event_fd: posix.fd_t,
+        completion: *Completion,
+        comptime on_event: fn (*Completion) void,
+    ) void {
+        const Listener = struct {
+            var buffer: u64 = undefined;
+
+            fn on_read(
+                ctx: *anyopaque,
+                completion_inner: *Completion,
+                result: ReadError!usize,
+            ) void {
+                const bytes = result catch unreachable; // eventfd reads should not fail.
+                assert(bytes == @sizeOf(u64));
+
+                const event: posix.fd_t = @intCast(@intFromPtr(ctx));
+                assert(event != INVALID_EVENT);
+
+                on_event(completion_inner);
+
+                // Re-attach the listener.
+                completion_inner.io.event_listen(
+                    event,
+                    completion_inner,
+                    on_event,
+                );
+            }
+        };
+
+        self.read(
+            *anyopaque,
+            @ptrFromInt(@as(usize, @intCast(event_fd))),
+            Listener.on_read,
+            completion,
+            event_fd,
+            std.mem.asBytes(&Listener.buffer),
+            0, // eventfd reads must always start from 0 offset.
+        );
+    }
+
+    pub fn event_trigger(self: *IO, event_fd: posix.fd_t, completion: *Completion) void {
+        assert(event_fd != INVALID_EVENT);
+        _ = completion;
+        _ = self;
+
+        const value: u64 = 1;
+        const bytes = posix.write(event_fd, std.mem.asBytes(&value)) catch unreachable;
+        assert(bytes == @sizeOf(u64));
+    }
+
+    pub fn close_event(self: *IO, event_fd: posix.fd_t, completion: *Completion) void {
+        assert(event_fd != INVALID_EVENT);
+        _ = completion;
+        _ = self;
+
+        posix.close(event_fd);
+    }
+
     pub const INVALID_SOCKET = -1;
 
     /// Creates a socket that can be used for async operations with the IO instance.
