@@ -804,10 +804,10 @@ const Environment = struct {
     fn commit(env: *Environment) !void {
         env.op += 1;
 
-        const checkpoint =
-            // Can only checkpoint on the last beat of the bar.
-            env.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
-            env.op > constants.lsm_compaction_ops;
+        // TODO Make LSM (and this fuzzer) unaware of VSR's checkpoint schedule.
+        const checkpoint = env.op == vsr.Checkpoint.trigger_for_checkpoint(
+            vsr.Checkpoint.checkpoint_after(env.superblock.working.vsr_state.checkpoint.header.op),
+        );
 
         env.change_state(.fuzzing, .forest_compact);
         env.forest.compact(forest_compact_callback, env.op);
