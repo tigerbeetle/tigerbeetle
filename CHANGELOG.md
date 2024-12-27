@@ -3,6 +3,36 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.20
+
+Released: 2024-12-27
+
+### Safety And Performance
+
+- [#2608](https://github.com/tigerbeetle/tigerbeetle/pull/2608)
+
+  Improve replication reliability for tiny messages.
+
+### Features
+
+- [#2607](https://github.com/tigerbeetle/tigerbeetle/pull/2607)
+
+  Add info-level logging for basic progress events.
+
+- [#2603](https://github.com/tigerbeetle/tigerbeetle/pull/2603)
+
+  Add logging and runtime configuration parameters for state sync.
+
+### Internals
+
+- [#2604](https://github.com/tigerbeetle/tigerbeetle/pull/2604)
+
+  Fix `fuzz_lsm_scan` checkpoint schedule.
+
+### TigerTracks 🎧
+
+- [Street Spirit](https://open.spotify.com/track/2QwObYJWyJTiozvs0RI7CF?si=d0c0c7d6f9e946a4)
+
 ## TigerBeetle 0.16.19
 
 Released: 2024-12-22
