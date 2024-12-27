@@ -881,8 +881,8 @@ test "Cluster: view_change: lagging replica advances checkpoint during view chan
 
     // Ensure b1 only commits up till checkpoint_2_trigger - 1, so it stays at checkpoint_1 while
     // a0 moves to checkpoint_2.
+    try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
     b1.drop(.R_, .incoming, .commit);
-
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
 
     try expectEqual(a0.commit(), checkpoint_2_trigger);
@@ -1616,8 +1616,8 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
 
     // Ensure b1 only commits up till checkpoint_2_trigger - 1, so it stays at checkpoint_1 while
     // a0 moves to checkpoint_2.
+    try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
     b1.drop(.R_, .incoming, .commit);
-
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
 
     try expectEqual(a0.commit(), checkpoint_2_trigger);
@@ -1712,8 +1712,8 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
 
     // Ensure b1 only commits up till checkpoint_2_trigger - 1, so it stays at checkpoint_1 while
     // a0 moves to checkpoint_2.
+    try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
     b1.drop(.R_, .incoming, .commit);
-
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
 
     try expectEqual(a0.commit(), checkpoint_2_trigger);

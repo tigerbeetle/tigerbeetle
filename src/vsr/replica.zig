@@ -7320,8 +7320,23 @@ pub fn ReplicaType(
             // accordingly).
             maybe(message.header.op < self.op);
 
+            // TODO: Prepares are normally ring replicated, but commits are broadcast. It's possible
+            // for a commit to arrive before prepares, because they are broadcast directly from the
+            // primary whereas the prepares have to go through the ring. This will result in that
+            // replica not replicating, even though it should!
             if (message.header.op <= self.commit_max) {
                 log.debug("{}: replicate: not replicating (committed)", .{self.replica});
+                return;
+            }
+
+            // Broadcasting uses 5x the bandwidth of ring topology, but is significantly faster for
+            // smaller messages. Only broadcast if the message size is 5x less than
+            // message_size_max, to keep the maximum total bandwidth usage around the same.
+            const broadcast_threshold = @divFloor(constants.message_size_max, 5);
+            if (self.status == .normal and self.primary() and
+                message.header.size < broadcast_threshold)
+            {
+                self.send_message_to_other_replicas_and_standbys(message.base());
                 return;
             }
 
