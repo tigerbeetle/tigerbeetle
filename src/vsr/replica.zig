@@ -9290,7 +9290,9 @@ pub fn ReplicaType(
                     );
 
                     switch (enqueue_result) {
-                        .insert => {},
+                        .insert => self.trace.start(.{ .replica_sync_table = .{
+                            .index = self.grid_repair_tables.index(table),
+                        } }, .{}),
                         .duplicate => {
                             // Duplicates are only possible due to move-table.
                             assert(table_info.label.level > 0);
@@ -9337,6 +9339,9 @@ pub fn ReplicaType(
 
                 const table: *RepairTable = @fieldParentPtr("table", queue_table);
                 self.grid_repair_tables.release(table);
+                self.trace.stop(.{ .replica_sync_table = .{
+                    .index = self.grid_repair_tables.index(table),
+                } }, .{});
             }
             assert(self.grid_repair_tables.available() <= constants.grid_missing_tables_max);
 
