@@ -70,6 +70,8 @@ const CLIArgs = union(enum) {
         memory_lsm_compaction: ?flags.ByteSize = null,
         trace: ?[:0]const u8 = null,
         log_debug: bool = false,
+        timeout_prepare_ms: ?u64 = null,
+        timeout_grid_repair_message_ms: ?u64 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
@@ -408,6 +410,8 @@ pub const Command = union(enum) {
         cache_grid_blocks: u32,
         lsm_forest_compaction_block_count: u32,
         lsm_forest_node_count: u32,
+        timeout_prepare_ticks: ?u64,
+        timeout_grid_repair_message_ticks: ?u64,
         trace: ?[:0]const u8,
         development: bool,
         experimental: bool,
@@ -811,6 +815,14 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         ),
         .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
         .lsm_forest_node_count = lsm_forest_node_count,
+        .timeout_prepare_ticks = parse_timeout_to_ticks(
+            start.timeout_prepare_ms,
+            "--timeout-prepare-ms",
+        ),
+        .timeout_grid_repair_message_ticks = parse_timeout_to_ticks(
+            start.timeout_grid_repair_message_ms,
+            "--timeout-grid-repair-message-ms",
+        ),
         .development = start.development,
         .experimental = start.experimental,
         .trace = start.trace,
@@ -970,4 +982,24 @@ fn parse_cache_size_to_count(
     assert(@as(u64, result) * @sizeOf(T) <= size.bytes());
 
     return result;
+}
+
+fn parse_timeout_to_ticks(timeout_ms: ?u64, cli_flag: []const u8) ?u64 {
+    if (timeout_ms) |ms| {
+        if (ms == 0) {
+            vsr.fatal(.cli, "{s}: timeout {}ms be nonzero", .{ cli_flag, ms });
+        }
+
+        if (ms % constants.tick_ms != 0) {
+            vsr.fatal(
+                .cli,
+                "{s}: timeout {}ms must be a multiple of {}ms",
+                .{ cli_flag, ms, constants.tick_ms },
+            );
+        }
+
+        return @divExact(ms, constants.tick_ms);
+    } else {
+        return null;
+    }
 }

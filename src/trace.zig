@@ -106,6 +106,7 @@ const trace_span_size_max = 1024;
 pub const Event = union(enum) {
     replica_commit,
     replica_aof_write,
+    replica_sync_table: struct { index: usize },
 
     compact_beat,
     compact_beat_merge,
@@ -146,6 +147,7 @@ pub const Event = union(enum) {
     const event_stack_cardinality = std.enums.EnumArray(EventTag, u32).init(.{
         .replica_commit = 1,
         .replica_aof_write = 1,
+        .replica_sync_table = constants.grid_missing_tables_max,
         .compact_beat = 1,
         .compact_beat_merge = 1,
         .compact_manifest = 1,
@@ -180,10 +182,12 @@ pub const Event = union(enum) {
     // Stack is a u32 since it must be losslessly encoded as a JSON integer.
     fn stack(event: *const Event) u32 {
         switch (event.*) {
-            .lookup_worker => |data| {
+            inline .replica_sync_table,
+            .lookup_worker,
+            => |data| {
                 assert(data.index < event_stack_cardinality.get(event.*));
                 const stack_base = event_stack_base.get(event.*);
-                return stack_base + data.index;
+                return stack_base + @as(u32, @intCast(data.index));
             },
             .scan_tree => |data| {
                 assert(data.index < constants.lsm_scans_max);

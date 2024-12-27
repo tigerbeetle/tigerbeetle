@@ -541,6 +541,8 @@ pub fn ReplicaType(
             release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
             release_execute_context: ?*anyopaque,
             test_context: ?*anyopaque = null,
+            timeout_prepare_ticks: ?u64 = null,
+            timeout_grid_repair_message_ticks: ?u64 = null,
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -616,6 +618,8 @@ pub fn ReplicaType(
                 .release_execute = options.release_execute,
                 .release_execute_context = options.release_execute_context,
                 .test_context = options.test_context,
+                .timeout_prepare_ticks = options.timeout_prepare_ticks,
+                .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
             });
 
             // Disable all dynamic allocation from this point onwards.
@@ -962,6 +966,8 @@ pub fn ReplicaType(
             release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
             release_execute_context: ?*anyopaque,
             test_context: ?*anyopaque,
+            timeout_prepare_ticks: ?u64,
+            timeout_grid_repair_message_ticks: ?u64,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -1150,7 +1156,7 @@ pub fn ReplicaType(
                 .prepare_timeout = Timeout{
                     .name = "prepare_timeout",
                     .id = replica_index,
-                    .after = 25,
+                    .after = options.timeout_prepare_ticks orelse 25,
                 },
                 .primary_abdicate_timeout = Timeout{
                     .name = "primary_abdicate_timeout",
@@ -1205,7 +1211,7 @@ pub fn ReplicaType(
                 .grid_repair_message_timeout = Timeout{
                     .name = "grid_repair_message_timeout",
                     .id = replica_index,
-                    .after = 50,
+                    .after = options.timeout_grid_repair_message_ticks orelse 50,
                 },
                 .grid_scrub_timeout = Timeout{
                     .name = "grid_scrub_timeout",
@@ -9203,6 +9209,20 @@ pub fn ReplicaType(
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
 
+            {
+                self.sync_tables = .{};
+                var table_count: u32 = 0;
+                var table_count_by_level = [_]u32{0} ** constants.lsm_levels;
+                while (self.sync_tables.?.next(&self.state_machine.forest)) |table| {
+                    table_count += 1;
+                    table_count_by_level[table.label.level] += 1;
+                }
+                log.info(
+                    "{}: sync: {} tables (by level: {any})",
+                    .{ self.replica, table_count, table_count_by_level },
+                );
+            }
+
             self.sync_tables = .{};
             if (self.grid_repair_tables.available() > 0) {
                 self.sync_enqueue_tables();
@@ -9273,7 +9293,9 @@ pub fn ReplicaType(
                     );
 
                     switch (enqueue_result) {
-                        .insert => {},
+                        .insert => self.trace.start(.{ .replica_sync_table = .{
+                            .index = self.grid_repair_tables.index(table),
+                        } }, .{}),
                         .duplicate => {
                             // Duplicates are only possible due to move-table.
                             assert(table_info.label.level > 0);
@@ -9308,8 +9330,21 @@ pub fn ReplicaType(
 
         fn sync_reclaim_tables(self: *Replica) void {
             while (self.grid.blocks_missing.reclaim_table()) |queue_table| {
+                log.info(
+                    "sync_reclaim_tables: table synced: address={} checksum={} wrote={}/{?}",
+                    .{
+                        queue_table.index_address,
+                        queue_table.index_checksum,
+                        queue_table.table_blocks_written,
+                        queue_table.table_blocks_total,
+                    },
+                );
+
                 const table: *RepairTable = @fieldParentPtr("table", queue_table);
                 self.grid_repair_tables.release(table);
+                self.trace.stop(.{ .replica_sync_table = .{
+                    .index = self.grid_repair_tables.index(table),
+                } }, .{});
             }
             assert(self.grid_repair_tables.available() <= constants.grid_missing_tables_max);
 
