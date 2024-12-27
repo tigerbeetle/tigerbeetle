@@ -9206,6 +9206,20 @@ pub fn ReplicaType(
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
 
+            {
+                self.sync_tables = .{};
+                var table_count: u32 = 0;
+                var table_count_by_level = [_]u32{0} ** constants.lsm_levels;
+                while (self.sync_tables.?.next(&self.state_machine.forest)) |table| {
+                    table_count += 1;
+                    table_count_by_level[table.label.level] += 1;
+                }
+                log.info(
+                    "{}: sync: {} tables (by level: {any})",
+                    .{ self.replica, table_count, table_count_by_level },
+                );
+            }
+
             self.sync_tables = .{};
             if (self.grid_repair_tables.available() > 0) {
                 self.sync_enqueue_tables();
@@ -9311,6 +9325,16 @@ pub fn ReplicaType(
 
         fn sync_reclaim_tables(self: *Replica) void {
             while (self.grid.blocks_missing.reclaim_table()) |queue_table| {
+                log.info(
+                    "sync_reclaim_tables: table synced: address={} checksum={} wrote={}/{?}",
+                    .{
+                        queue_table.index_address,
+                        queue_table.index_checksum,
+                        queue_table.table_blocks_written,
+                        queue_table.table_blocks_total,
+                    },
+                );
+
                 const table: *RepairTable = @fieldParentPtr("table", queue_table);
                 self.grid_repair_tables.release(table);
             }
