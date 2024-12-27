@@ -377,6 +377,7 @@ const Command = struct {
             .message_pool = &message_pool,
             .nonce = nonce,
             .time = .{},
+            .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
             .state_machine_options = .{
                 .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
                 .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,

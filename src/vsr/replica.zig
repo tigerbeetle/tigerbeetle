@@ -541,6 +541,7 @@ pub fn ReplicaType(
             release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
             release_execute_context: ?*anyopaque,
             test_context: ?*anyopaque = null,
+            timeout_grid_repair_message_ticks: ?u64 = null,
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -616,6 +617,7 @@ pub fn ReplicaType(
                 .release_execute = options.release_execute,
                 .release_execute_context = options.release_execute_context,
                 .test_context = options.test_context,
+                .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
             });
 
             // Disable all dynamic allocation from this point onwards.
@@ -962,6 +964,7 @@ pub fn ReplicaType(
             release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
             release_execute_context: ?*anyopaque,
             test_context: ?*anyopaque,
+            timeout_grid_repair_message_ticks: ?u64,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -1205,7 +1208,7 @@ pub fn ReplicaType(
                 .grid_repair_message_timeout = Timeout{
                     .name = "grid_repair_message_timeout",
                     .id = replica_index,
-                    .after = 50,
+                    .after = options.timeout_grid_repair_message_ticks orelse 50,
                 },
                 .grid_scrub_timeout = Timeout{
                     .name = "grid_scrub_timeout",
