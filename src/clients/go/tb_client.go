@@ -321,7 +321,7 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEven
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.TransferEventResult{}))
+	resultCount := wrote / int(unsafe.Sizeof(types.AccountEventResult{}))
 	return results[0:resultCount], nil
 }
 
