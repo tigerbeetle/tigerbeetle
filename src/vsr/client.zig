@@ -73,6 +73,10 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
         /// The request number of the next request.
         request_number: u32 = 0,
 
+        /// Measures the time elapsed between sending a request (in `raw_request`) and receiving the
+        /// corresponding reply (in `on_reply`).
+        request_completion_timer: std.time.Timer,
+
         /// The maximum body size for `command=request` messages.
         /// Set by the `register`'s reply.
         batch_size_limit: ?u32 = null,
@@ -147,6 +151,9 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .id = options.id,
                 .cluster = options.cluster,
                 .replica_count = options.replica_count,
+                .request_completion_timer = std.time.Timer.start() catch @panic(
+                    "std.time.Timer.start() unsupported",
+                ),
                 .request_timeout = .{
                     .name = "request_timeout",
                     .id = options.id,
@@ -335,6 +342,7 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
 
             message.header.request = self.request_number;
             self.request_number += 1;
+            self.request_completion_timer.reset();
 
             log.debug("{}: request: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -502,6 +510,20 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
             assert(reply.header.cluster == self.cluster);
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.operation == inflight_vsr_operation);
+
+            const request_completion_time_ms = @divFloor(
+                self.request_completion_timer.read(),
+                std.time.ns_per_ms,
+            );
+            if (request_completion_time_ms > constants.client_request_completion_warn_ms) {
+                log.warn("{}: on_reply: request={} size={} {s} time={}ms", .{
+                    self.id,
+                    reply.header.request,
+                    reply.header.size,
+                    reply.header.operation.tag_name(StateMachine),
+                    request_completion_time_ms,
+                });
+            }
 
             // The context of this reply becomes the parent of our next request:
             self.parent = reply.header.context;
