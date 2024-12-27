@@ -1102,9 +1102,7 @@ pub fn ReplicaType(
             self.* = .{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
-                .commit_completion_timer = std.time.Timer.start() catch @panic(
-                    "std.time.Timer.start() unsupported",
-                ),
+                .commit_completion_timer = try std.time.Timer.start(),
                 .replica_count = replica_count,
                 .standby_count = standby_count,
                 .node_count = node_count,

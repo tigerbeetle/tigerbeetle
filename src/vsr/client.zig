@@ -151,9 +151,7 @@ pub fn ClientType(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .id = options.id,
                 .cluster = options.cluster,
                 .replica_count = options.replica_count,
-                .request_completion_timer = std.time.Timer.start() catch @panic(
-                    "std.time.Timer.start() unsupported",
-                ),
+                .request_completion_timer = try std.time.Timer.start(),
                 .request_timeout = .{
                     .name = "request_timeout",
                     .id = options.id,
