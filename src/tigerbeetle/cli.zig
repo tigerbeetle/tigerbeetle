@@ -70,6 +70,7 @@ const CLIArgs = union(enum) {
         memory_lsm_compaction: ?flags.ByteSize = null,
         trace: ?[:0]const u8 = null,
         log_debug: bool = false,
+        timeout_prepare_ms: ?u64 = null,
         timeout_grid_repair_message_ms: ?u64 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
@@ -409,6 +410,7 @@ pub const Command = union(enum) {
         cache_grid_blocks: u32,
         lsm_forest_compaction_block_count: u32,
         lsm_forest_node_count: u32,
+        timeout_prepare_ticks: ?u64,
         timeout_grid_repair_message_ticks: ?u64,
         trace: ?[:0]const u8,
         development: bool,
@@ -813,6 +815,10 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         ),
         .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
         .lsm_forest_node_count = lsm_forest_node_count,
+        .timeout_prepare_ticks = parse_timeout_to_ticks(
+            start.timeout_prepare_ms,
+            "--timeout-prepare-ms",
+        ),
         .timeout_grid_repair_message_ticks = parse_timeout_to_ticks(
             start.timeout_grid_repair_message_ms,
             "--timeout-grid-repair-message-ms",

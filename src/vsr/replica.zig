@@ -541,6 +541,7 @@ pub fn ReplicaType(
             release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
             release_execute_context: ?*anyopaque,
             test_context: ?*anyopaque = null,
+            timeout_prepare_ticks: ?u64 = null,
             timeout_grid_repair_message_ticks: ?u64 = null,
         };
 
@@ -617,6 +618,7 @@ pub fn ReplicaType(
                 .release_execute = options.release_execute,
                 .release_execute_context = options.release_execute_context,
                 .test_context = options.test_context,
+                .timeout_prepare_ticks = options.timeout_prepare_ticks,
                 .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
             });
 
@@ -964,6 +966,7 @@ pub fn ReplicaType(
             release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
             release_execute_context: ?*anyopaque,
             test_context: ?*anyopaque,
+            timeout_prepare_ticks: ?u64,
             timeout_grid_repair_message_ticks: ?u64,
         };
 
@@ -1153,7 +1156,7 @@ pub fn ReplicaType(
                 .prepare_timeout = Timeout{
                     .name = "prepare_timeout",
                     .id = replica_index,
-                    .after = 25,
+                    .after = options.timeout_prepare_ticks orelse 25,
                 },
                 .primary_abdicate_timeout = Timeout{
                     .name = "primary_abdicate_timeout",
