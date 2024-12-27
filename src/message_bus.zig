@@ -23,7 +23,10 @@ pub const MessageBusReplica = MessageBusType(.replica);
 pub const MessageBusClient = MessageBusType(.client);
 
 fn MessageBusType(comptime process_type: vsr.ProcessType) type {
-    const SendQueue = RingBufferType(*Message, .{
+    // To avoid sending tinygrams, message bus concatenates small messages together.
+    // Invariant: message.header.size ≤ size
+    const MessageBatch = struct { message: *Message, size: usize };
+    const SendQueue = RingBufferType(MessageBatch, .{
         .array = switch (process_type) {
             .replica => constants.connection_send_queue_max_replica,
             // A client has at most 1 in-flight request, plus pings.
@@ -184,7 +187,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 }
 
                 if (connection.recv_message) |message| bus.unref(message);
-                while (connection.send_queue.pop()) |message| bus.unref(message);
+                while (connection.send_queue.pop()) |batch| bus.unref(batch.message);
             }
             allocator.free(bus.connections);
             allocator.free(bus.replicas);
@@ -651,14 +654,24 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     .terminating => return,
                     .free, .accepting => unreachable,
                 }
-                if (connection.send_queue.full()) {
-                    log.info("message queue for peer {} full, dropping {s} message", .{
-                        connection.peer,
-                        @tagName(message.header.command),
-                    });
-                    return;
+                const batched = send_message_add_to_batch(connection, bus, message);
+                if (batched) {
+                    assert(connection.send_queue.tail().?.size > message.header.size);
+                } else {
+                    if (connection.send_queue.full()) {
+                        log.info("message queue for peer {} full, dropping {s} message", .{
+                            connection.peer,
+                            @tagName(message.header.command),
+                        });
+                        return;
+                    } else {
+                        connection.send_queue.push_assume_capacity(.{
+                            .message = message.ref(),
+                            .size = message.header.size,
+                        });
+                    }
                 }
-                connection.send_queue.push_assume_capacity(message.ref());
+
                 // If the connection has not yet been established we can't send yet.
                 // Instead on_connect() will call send().
                 if (connection.state == .connecting) {
@@ -667,6 +680,50 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 }
                 // If there is no send operation currently in progress, start one.
                 if (!connection.send_submitted) connection.send(bus);
+            }
+
+            fn send_message_add_to_batch(
+                connection: *Connection,
+                bus: *MessageBus,
+                message: *Message,
+            ) bool {
+                // The head message could be in the kernel already, can't batch with it.
+                if (connection.send_queue.count < 2) return false;
+
+                const batch: *MessageBatch = connection.send_queue.tail_ptr().?;
+                if (batch.size + message.header.size > constants.message_size_max) {
+                    return false; // To big to batch.
+                }
+
+                if (batch.message.header.size == batch.size) {
+                    // Get a fresh message from a message bus to avoid aliasing.
+                    const fresh = bus.pool.get_message(null);
+                    defer bus.pool.unref(fresh);
+
+                    stdx.copy_disjoint(
+                        .inexact,
+                        u8,
+                        fresh.buffer,
+                        batch.message.buffer[0..batch.size],
+                    );
+                    bus.pool.unref(batch.message);
+                    batch.message = fresh.ref();
+                } else {
+                    assert(batch.message.header.size < batch.size);
+                }
+                assert(batch.message.references == 1);
+
+                stdx.copy_disjoint(
+                    .inexact,
+                    u8,
+                    batch.message.buffer[batch.size..],
+                    message.buffer[0..message.header.size],
+                );
+                batch.size += message.header.size;
+                assert(batch.size > message.header.size);
+                assert(batch.size > batch.message.header.size);
+                assert(batch.size <= constants.message_size_max);
+                return true;
             }
 
             /// Clean up an active connection and reset it to its initial, unused, state.
@@ -1003,7 +1060,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.peer == .client or connection.peer == .replica);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
-                const message = connection.send_queue.head() orelse return;
+                const batch = connection.send_queue.head() orelse return;
+                assert(batch.message.header.size <= batch.size);
                 assert(!connection.send_submitted);
                 connection.send_submitted = true;
                 bus.io.send(
@@ -1012,7 +1070,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     on_send,
                     &connection.send_completion,
                     connection.fd,
-                    message.buffer[connection.send_progress..message.header.size],
+                    batch.message.buffer[connection.send_progress..batch.size],
                 );
             }
 
@@ -1041,11 +1099,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     connection.terminate(bus, .shutdown);
                     return;
                 };
-                assert(connection.send_progress <= connection.send_queue.head().?.header.size);
+                assert(connection.send_progress <= connection.send_queue.head().?.size);
                 // If the message has been fully sent, move on to the next one.
-                if (connection.send_progress == connection.send_queue.head().?.header.size) {
+                if (connection.send_progress == connection.send_queue.head().?.size) {
                     connection.send_progress = 0;
-                    const message = connection.send_queue.pop().?;
+                    const message = connection.send_queue.pop().?.message;
                     bus.unref(message);
                 }
                 connection.send(bus);
@@ -1061,8 +1119,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.send_submitted = true;
                 connection.recv_submitted = true;
                 // We can free resources now that there is no longer any I/O in progress.
-                while (connection.send_queue.pop()) |message| {
-                    bus.unref(message);
+                while (connection.send_queue.pop()) |batch| {
+                    bus.unref(batch.message);
                 }
                 if (connection.recv_message) |message| {
                     bus.unref(message);
