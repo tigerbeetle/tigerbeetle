@@ -525,6 +525,9 @@ pub const client_replies_iops_read_max = config.process.client_replies_iops_read
 /// The maximum number of concurrent writes to the client-replies zone.
 /// Client replies are written after every commit.
 pub const client_replies_iops_write_max = config.process.client_replies_iops_write_max;
+/// The amount of time (in milliseconds) within which a client must receive a response from the
+/// cluster, after which it emits a warning log (for alerting/metrics).
+pub const client_request_completion_warn_ms = config.process.client_request_completion_warn_ms;
 
 /// The maximum number of concurrent grid read I/O operations to allow at once.
 pub const grid_iops_read_max = config.process.grid_iops_read_max;

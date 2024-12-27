@@ -114,6 +114,7 @@ const ConfigProcess = struct {
     journal_iops_write_max: usize = 8,
     client_replies_iops_read_max: usize = 1,
     client_replies_iops_write_max: usize = 2,
+    client_request_completion_warn_ms: u64 = 200,
     tick_ms: u63 = 10,
     rtt_ms: u64 = 300,
     rtt_multiple: u8 = 2,

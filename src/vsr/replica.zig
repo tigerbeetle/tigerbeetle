@@ -370,6 +370,10 @@ pub fn ReplicaType(
         commit_stage: CommitStage = .idle,
         commit_dispatch_entered: bool = false,
 
+        /// Measures the time taken to commit a prepare, across the following stages:
+        /// prefetch → reply_setup → execute → compact → checkpoint_data → checkpoint_superblock
+        commit_completion_timer: std.time.Timer,
+
         /// Whether we are reading a prepare from storage to construct the pipeline.
         pipeline_repairing: bool = false,
 
@@ -1104,6 +1108,7 @@ pub fn ReplicaType(
             self.* = .{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
+                .commit_completion_timer = try std.time.Timer.start(),
                 .replica_count = replica_count,
                 .standby_count = standby_count,
                 .node_count = node_count,
@@ -2297,7 +2302,7 @@ pub fn ReplicaType(
                     .awaiting_checkpoint => {},
                 }
 
-                log.mark.debug(
+                log.mark.info(
                     \\{}: on_start_view: sync started view={} op_checkpoint={} op_checkpoint_new={}
                 , .{
                     self.replica,
@@ -3717,6 +3722,7 @@ pub fn ReplicaType(
 
                 if (self.commit_stage == .check_prepare) {
                     self.commit_stage = .prefetch;
+                    self.commit_completion_timer.reset();
                     self.trace.start(.replica_commit, .{
                         .stage = @tagName(self.commit_stage),
                         .op = self.commit_prepare.?.header.op,
@@ -4131,7 +4137,7 @@ pub fn ReplicaType(
 
             assert(op <= self.op);
             assert((op + 1) % constants.lsm_compaction_ops == 0);
-            log.debug("{}: commit_checkpoint_data: checkpoint_data start " ++
+            log.info("{}: commit_checkpoint_data: checkpoint_data start " ++
                 "(op={} current_checkpoint={} next_checkpoint={})", .{
                 self.replica,
                 self.op,
@@ -4165,6 +4171,11 @@ pub fn ReplicaType(
             self.client_replies.checkpoint(commit_checkpoint_data_client_replies_callback);
             // The grid checkpoint must begin after the manifest/trailers have acquired all
             // their blocks, since it encodes the free set:
+            log.info("{}: commit_checkpoint_data: free_set.acquired={} free_set.released={}", .{
+                self.replica,
+                self.grid.free_set.count_acquired(),
+                self.grid.free_set.count_released(),
+            });
             self.grid.checkpoint(commit_checkpoint_data_grid_callback);
             return .pending;
         }
@@ -4211,6 +4222,13 @@ pub fn ReplicaType(
             if (self.commit_stage.checkpoint_data.count() ==
                 CommitStage.CheckpointDataProgress.len)
             {
+                log.info("{}: commit_checkpoint_data_callback_join: checkpoint_data done " ++
+                    "(op={} current_checkpoint={} next_checkpoint={})", .{
+                    self.replica,
+                    self.op,
+                    self.op_checkpoint(),
+                    self.op_checkpoint_next(),
+                });
                 self.grid.assert_only_repairing();
 
                 {
@@ -4306,7 +4324,7 @@ pub fn ReplicaType(
 
             assert(self.view_headers.array.get(0).op >= self.op_checkpoint_next_trigger());
 
-            log.debug("{}: commit_checkpoint_superblock: checkpoint_superblock start " ++
+            log.info("{}: commit_checkpoint_superblock: checkpoint_superblock start " ++
                 "(op={} checkpoint={}..{} view_durable={}..{} " ++
                 "log_view_durable={}..{})", .{
                 self.replica,
@@ -4364,9 +4382,9 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.checkpoint.header.op);
             self.grid.assert_only_repairing();
 
-            log.debug(
+            log.info(
                 "{}: commit_checkpoint_superblock_callback: " ++
-                    "checkpoint done (op={} new_checkpoint={})",
+                    "checkpoint_superblock done (op={} new_checkpoint={})",
                 .{ self.replica, self.op, self.op_checkpoint() },
             );
 
@@ -4381,6 +4399,20 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
+
+            const commit_completion_time_ms = @divFloor(
+                self.commit_completion_timer.read(),
+                std.time.ns_per_ms,
+            );
+            if (commit_completion_time_ms > constants.client_request_completion_warn_ms) {
+                log.warn("{}: commit_dispatch: request={} size={} {s} time={}ms", .{
+                    self.replica,
+                    self.commit_prepare.?.header.request,
+                    self.commit_prepare.?.header.size,
+                    self.commit_prepare.?.header.operation.tag_name(StateMachine),
+                    commit_completion_time_ms,
+                });
+            }
 
             self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
@@ -8612,7 +8644,7 @@ pub fn ReplicaType(
 
             if (self.primary()) {
                 assert(self.solo());
-                log.debug(
+                log.info(
                     "{}: transition_to_normal_from_recovering_status: view={} primary",
                     .{
                         self.replica,
@@ -8634,7 +8666,7 @@ pub fn ReplicaType(
                     .pipeline_request_queue_limit = self.pipeline_request_queue_limit,
                 } };
             } else {
-                log.debug(
+                log.info(
                     "{}: transition_to_normal_from_recovering_status: view={} backup",
                     .{
                         self.replica,
@@ -8719,7 +8751,7 @@ pub fn ReplicaType(
             self.status = .normal;
 
             if (self.primary()) {
-                log.debug(
+                log.info(
                     "{}: transition_to_normal_from_view_change_status: view={}..{} primary",
                     .{ self.replica, self.view, view_new },
                 );
@@ -8759,7 +8791,7 @@ pub fn ReplicaType(
                     self.primary_abdicate_timeout.start();
                 }
             } else {
-                log.debug("{}: transition_to_normal_from_view_change_status: view={}..{} backup", .{
+                log.info("{}: transition_to_normal_from_view_change_status: view={}..{} backup", .{
                     self.replica,
                     self.view,
                     view_new,
@@ -8830,7 +8862,7 @@ pub fn ReplicaType(
                 }
             };
 
-            log.debug("{}: transition_to_view_change_status: view={}..{} status={}..{}", .{
+            log.info("{}: transition_to_view_change_status: view={}..{} status={}..{}", .{
                 self.replica,
                 self.view,
                 view_new,
@@ -9318,7 +9350,7 @@ pub fn ReplicaType(
             if (self.grid_repair_tables.executing() == 0) {
                 assert(self.sync_tables.?.next(&self.state_machine.forest) == null);
 
-                log.debug("{}: sync_enqueue_tables: all tables synced (commit={}..{})", .{
+                log.info("{}: sync_enqueue_tables: all tables synced (commit={}..{})", .{
                     self.replica,
                     sync_op_min,
                     sync_op_max,

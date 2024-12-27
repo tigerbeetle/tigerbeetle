@@ -168,7 +168,7 @@ pub fn ContextType(
                 cluster_id,
                 context.addresses.const_slice(),
             });
-            context.client = try Client.init(
+            context.client = Client.init(
                 allocator,
                 .{
                     .id = context.client_id,
@@ -181,7 +181,17 @@ pub fn ContextType(
                     },
                     .eviction_callback = client_eviction_callback,
                 },
-            );
+            ) catch |err| {
+                log.err("{}: failed to initialize Client: {s}", .{
+                    context.client_id,
+                    @errorName(err),
+                });
+                return switch (err) {
+                    error.TimerUnsupported => error.Unexpected,
+                    error.OutOfMemory => error.OutOfMemory,
+                    else => unreachable,
+                };
+            };
             errdefer context.client.deinit(context.allocator);
 
             context.completion_fn = completion_fn;
