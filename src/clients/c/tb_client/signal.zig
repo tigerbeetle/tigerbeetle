@@ -211,6 +211,7 @@ pub const Signal = struct {
     }
 
     fn wake(self: *Signal) void {
+        assert(self.state.load(.monotonic) == .notified);
         assert(self.accept_socket != IO.INVALID_SOCKET);
         self.send_buffer[0] = 0;
 
@@ -226,12 +227,8 @@ pub const Signal = struct {
     }
 
     fn wait(self: *Signal) void {
-        const state = self.state.cmpxchgStrong(
-            .running,
-            .waiting,
-            .acquire,
-            .acquire,
-        ) orelse return self.io.recv(
+        const state = self.state.swap(.waiting, .acquire);
+        self.io.recv(
             *Signal,
             self,
             on_recv,
@@ -241,18 +238,16 @@ pub const Signal = struct {
         );
 
         switch (state) {
-            .running => unreachable, // Not possible due to CAS semantics.
-            .waiting => unreachable, // We should be the only ones who could've started waiting.
-            .notified => {}, // A thread woke us up before we started waiting so reschedule below.
+            // We should be the only ones who could've started waiting.
+            .waiting => unreachable,
+            // Wait for a `notify`.
+            .running => {},
+            // A `notify` was already called in the meantime.
+            // Not react to stimuli: since `notify` is triggered by the user,
+            // avoid calling it again in a loop (e.g., via a zero-timeout IO operation)
+            // to prevent starving the IO thread and allow other pending IO operations to complete.
+            .notified => self.notify(),
         }
-
-        self.io.timeout(
-            *Signal,
-            self,
-            on_timeout,
-            &self.completion,
-            0, // zero-timeout functions as a yield.
-        );
     }
 
     fn on_recv(
@@ -262,16 +257,6 @@ pub const Signal = struct {
     ) void {
         assert(completion == &self.completion);
         _ = result catch |err| std.debug.panic("Signal recv error: {}", .{err});
-        self.on_signal();
-    }
-
-    fn on_timeout(
-        self: *Signal,
-        completion: *IO.Completion,
-        result: IO.TimeoutError!void,
-    ) void {
-        assert(completion == &self.completion);
-        _ = result catch |err| std.debug.panic("Signal timeout error: {}", .{err});
         self.on_signal();
     }
 
