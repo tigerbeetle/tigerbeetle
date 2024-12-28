@@ -1600,6 +1600,14 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
 
+            // Replication balances two goals:
+            // - replicate anything that the next replica is likely missing,
+            // - avoid a feedback loop of cascading needless replication.
+            // Replicate anything that we didn't previously had ourselves.
+            if (message.header.op > self.commit_min and !self.journal.has(message.header)) {
+                self.replicate(message);
+            }
+
             if (self.syncing == .updating_checkpoint) {
                 log.debug("{}: on_prepare: ignoring (sync)", .{self.replica});
                 return;
@@ -1613,8 +1621,6 @@ pub fn ReplicaType(
                 self.on_repair(message);
                 return;
             }
-
-            self.replicate(message);
 
             if (self.status != .normal) {
                 log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
@@ -7314,31 +7320,16 @@ pub fn ReplicaType(
         /// TODO Use recent heartbeat data for next replica to leapfrog if faulty (optimization).
         fn replicate(self: *Replica, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
-            assert(message.header.view >= self.view);
-            // We may replicate older prepares from either a primary of the current or future view
-            // whose start view we're waiting on (to truncate our log and set our self.op
-            // accordingly).
+
+            // Older prepares should be replicated --- if we missed such a prepare in the past,
+            // our next-in-ring is likely missing it too!
             maybe(message.header.op < self.op);
+            maybe(message.header.op < self.commit_max);
+            maybe(message.header.view < self.view);
 
-            // TODO: Prepares are normally ring replicated, but commits are broadcast. It's possible
-            // for a commit to arrive before prepares, because they are broadcast directly from the
-            // primary whereas the prepares have to go through the ring. This will result in that
-            // replica not replicating, even though it should!
-            if (message.header.op <= self.commit_max) {
-                log.debug("{}: replicate: not replicating (committed)", .{self.replica});
-                return;
-            }
-
-            // Broadcasting uses 5x the bandwidth of ring topology, but is significantly faster for
-            // smaller messages. Only broadcast if the message size is 5x less than
-            // message_size_max, to keep the maximum total bandwidth usage around the same.
-            const broadcast_threshold = @divFloor(constants.message_size_max, 5);
-            if (self.status == .normal and self.primary() and
-                message.header.size < broadcast_threshold)
-            {
-                self.send_message_to_other_replicas_and_standbys(message.base());
-                return;
-            }
+            // But each prepare should be replicated at most once, to avoid feedback loops.
+            assert(!self.journal.has(message.header));
+            assert(message.header.op > self.commit_min);
 
             const next = next: {
                 // Replication in the ring of active replicas.
