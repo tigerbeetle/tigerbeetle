@@ -7320,14 +7320,16 @@ pub fn ReplicaType(
         /// TODO Use recent heartbeat data for next replica to leapfrog if faulty (optimization).
         fn replicate(self: *Replica, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
-            assert(message.header.view >= self.view);
-            // We may replicate older prepares from either a primary of the current or future view
-            // whose start view we're waiting on (to truncate our log and set our self.op
-            // accordingly).
+
+            // Older prepares should be replicated --- if we missed such a prepare in the past,
+            // our next-in-ring is likely missing it too!
             maybe(message.header.op < self.op);
-            // Replicating committed ops is useful --- the replica can learn commit_max via a
-            // commit message, without receiving or replicating the message before that.
-            maybe(message.header.op > self.commit_max);
+            maybe(message.header.op < self.commit_max);
+            maybe(message.header.view < self.view);
+
+            // But each prepare should be replicated at most once, to avoid feedback loops.
+            assert(!self.journal.has(message.header));
+            assert(message.header.op > self.commit_min);
 
             const next = next: {
                 // Replication in the ring of active replicas.
