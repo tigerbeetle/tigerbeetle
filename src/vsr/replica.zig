@@ -9248,12 +9248,22 @@ pub fn ReplicaType(
             assert(self.grid_repair_tables.executing() == 0);
 
             {
-                self.sync_tables = .{};
+                // Log an approximation of how much sync work there is to do.
+                // Note that this isn't completely accurate:
+                // - It doesn't consider that tables might be added/removed by local compaction.
+                const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
+                const sync_op_min = self.superblock.working.vsr_state.sync_op_min;
+                const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
+                var tables = ForestTableIterator{};
                 var table_count: u32 = 0;
                 var table_count_by_level = [_]u32{0} ** constants.lsm_levels;
-                while (self.sync_tables.?.next(&self.state_machine.forest)) |table| {
-                    table_count += 1;
-                    table_count_by_level[table.label.level] += 1;
+                while (tables.next(&self.state_machine.forest)) |table_info| {
+                    if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
+                        table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
+                    {
+                        table_count += 1;
+                        table_count_by_level[table_info.label.level] += 1;
+                    }
                 }
                 log.info(
                     "{}: sync: {} tables (by level: {any})",
