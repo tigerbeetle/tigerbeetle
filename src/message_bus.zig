@@ -1003,8 +1003,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.peer == .client or connection.peer == .replica);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
-                const message = connection.send_queue.head() orelse return;
                 assert(!connection.send_submitted);
+
+                connection.send_now(bus);
+
+                const message = connection.send_queue.head() orelse return;
                 connection.send_submitted = true;
                 bus.io.send(
                     *MessageBus,
@@ -1014,6 +1017,42 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     connection.fd,
                     message.buffer[connection.send_progress..message.header.size],
                 );
+            }
+
+            // Optimization/fast path: try to immediately copy the send queue over to the in-kernel
+            // send buffer, falling back to asynchronous send if that's not possible.
+            fn send_now(connection: *Connection, bus: *MessageBus) void {
+                assert(connection.state == .connected);
+                assert(connection.fd != IO.INVALID_SOCKET);
+                assert(!connection.send_submitted);
+                // We rely on linux-specific DONTWAIT here.
+                if (builtin.os.tag != .linux) return;
+
+                for (0..SendQueue.count_max) |_| {
+                    const message = connection.send_queue.head() orelse return;
+                    assert(connection.send_progress < message.header.size);
+                    const write_size = std.posix.send(
+                        connection.fd,
+                        message.buffer[connection.send_progress..message.header.size],
+                        std.posix.MSG.DONTWAIT,
+                    ) catch |err| switch (err) {
+                        // Fall back to asynchronous send via io_uring.
+                        error.WouldBlock => return,
+                        // We could handle genuine errors here, but, for simplicity, fallback to
+                        // io_uring as well.
+                        else => return,
+                    };
+                    connection.send_progress += write_size;
+                    assert(connection.send_progress <= message.header.size);
+                    if (connection.send_progress == message.header.size) {
+                        _ = connection.send_queue.pop();
+                        bus.unref(message);
+                        connection.send_progress = 0;
+                    } else {
+                        assert(connection.send_progress < message.header.size);
+                        return;
+                    }
+                }
             }
 
             fn on_send(
