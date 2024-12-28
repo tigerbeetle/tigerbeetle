@@ -1600,6 +1600,14 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
 
+            // Replication balances two goals:
+            // - replicate anything that the next replica is likely missing,
+            // - avoid a feedback loop of cascading needless replication.
+            // Replicate anything that we didn't previously had ourselves.
+            if (message.header.op > self.commit_min and !self.journal.has(message.header)) {
+                self.replicate(message);
+            }
+
             if (self.syncing == .updating_checkpoint) {
                 log.debug("{}: on_prepare: ignoring (sync)", .{self.replica});
                 return;
@@ -1613,8 +1621,6 @@ pub fn ReplicaType(
                 self.on_repair(message);
                 return;
             }
-
-            self.replicate(message);
 
             if (self.status != .normal) {
                 log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
@@ -7319,11 +7325,9 @@ pub fn ReplicaType(
             // whose start view we're waiting on (to truncate our log and set our self.op
             // accordingly).
             maybe(message.header.op < self.op);
-
-            if (message.header.op <= self.commit_max) {
-                log.debug("{}: replicate: not replicating (committed)", .{self.replica});
-                return;
-            }
+            // Replicating committed ops is useful --- the replica can learn commit_max via a
+            // commit message, without receiving or replicating the message before that.
+            maybe(message.header.op > self.commit_max);
 
             const next = next: {
                 // Replication in the ring of active replicas.
