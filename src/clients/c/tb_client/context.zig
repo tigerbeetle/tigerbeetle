@@ -652,7 +652,7 @@ pub fn ContextType(
                     result_size,
                     reply,
                     batch_count,
-                );
+                ) catch unreachable;
 
                 var it: ?*Packet = packet;
                 while (it) |batched| {
