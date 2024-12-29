@@ -728,10 +728,15 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
 
+                var count: u32 = 0;
                 while (connection.parse_message(bus)) |message| {
                     defer bus.unref(message);
 
+                    count += 1;
                     connection.on_message(bus, message);
+                }
+                if (count > constants.bus_message_burst_warn_min) {
+                    log.warn("parse_messages: message count={}", .{count});
                 }
             }
 

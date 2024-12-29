@@ -807,3 +807,6 @@ pub const compaction_block_memory_size_max = std.math.maxInt(u32) * block_size;
 /// Maximum number of tree scans that can be performed by a single query.
 /// NOTE: Each condition in a query is a scan, for example `WHERE a=0 AND b=1` needs 2 scans.
 pub const lsm_scans_max = config.cluster.lsm_scans_max;
+
+/// Processing more than this amount of messages in a single event loop turn issues a warning.
+pub const bus_message_burst_warn_min = 8;
