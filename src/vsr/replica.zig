@@ -1604,7 +1604,13 @@ pub fn ReplicaType(
             // - replicate anything that the next replica is likely missing,
             // - avoid a feedback loop of cascading needless replication.
             // Replicate anything that we didn't previously had ourselves.
-            if (message.header.op > self.commit_min and !self.journal.has(message.header)) {
+            //
+            // Use `has_clean` (checks whether a replica has both the header and the corresponding
+            // prepare) instead of `has` (checks whether the replica has the header). The latter
+            // is prone to a race wherein a replica that receives a future header *before* the
+            // corresponding prepare (via `start_view` for instance) would end up not forwarding
+            // the prepare, thereby breaking the replication chain.
+            if (message.header.op > self.commit_min and !self.journal.has_clean(message.header)) {
                 self.replicate(message);
             }
 
@@ -7328,7 +7334,7 @@ pub fn ReplicaType(
             maybe(message.header.view < self.view);
 
             // But each prepare should be replicated at most once, to avoid feedback loops.
-            assert(!self.journal.has(message.header));
+            assert(!self.journal.has_clean(message.header));
             assert(message.header.op > self.commit_min);
 
             const next = next: {
