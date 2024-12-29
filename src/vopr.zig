@@ -559,7 +559,7 @@ pub const Simulator = struct {
             if (simulator.core.isSet(replica.replica)) {
                 for (replica.op_checkpoint() + 1..commit_max + 1) |op| {
                     const header = simulator.cluster.state_checker.header_with_op(op);
-                    if (!replica.journal.has_clean(&header)) return "pending journal";
+                    if (!replica.journal.has_prepare(&header)) return "pending journal";
                 }
                 // It's okay for a replica to miss some prepares older than the current checkpoint.
                 maybe(replica.journal.faulty.count > 0);
@@ -731,7 +731,7 @@ pub const Simulator = struct {
                     // Find earliest missing prepare as we repair prepares from low -> high ops.
                     for (op_repair_min..commit_max + 1) |op| {
                         const header = simulator.cluster.state_checker.header_with_op(op);
-                        if (!replica.journal.has_clean(&header)) {
+                        if (!replica.journal.has_prepare(&header)) {
                             if (missing_prepare_op == null or missing_prepare_op.? > op) {
                                 missing_prepare_op = op;
                             }
@@ -748,7 +748,7 @@ pub const Simulator = struct {
 
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
-                if (replica.journal.has_clean(&missing_header)) {
+                if (replica.journal.has_prepare(&missing_header)) {
                     // Prepare *was* found on an active core replica, so the header isn't
                     // actually missing.
                     return null;
