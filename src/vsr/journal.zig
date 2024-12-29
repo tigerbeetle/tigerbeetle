@@ -1832,7 +1832,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const write = journal.writes.acquire() orelse {
                 assert(!replica.solo());
 
-                journal.write_prepare_debug(message.header, "waiting for IOP");
+                journal.write_prepare_warn(message.header, "waiting for IOP");
                 callback(replica, null, trigger);
                 return;
             };
@@ -1967,11 +1967,28 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             header: *const Header.Prepare,
             status: []const u8,
         ) void {
+            journal.write_prepare_fn(header, status, log.debug);
+        }
+
+        fn write_prepare_warn(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+            status: []const u8,
+        ) void {
+            journal.write_prepare_fn(header, status, log.warn);
+        }
+
+        fn write_prepare_fn(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+            status: []const u8,
+            comptime log_fn: anytype,
+        ) void {
             assert(journal.status == .recovered);
             assert(header.command == .prepare);
             assert(header.operation != .reserved);
 
-            log.debug("{}: write: view={} slot={} op={} len={}: {} {s}", .{
+            log_fn("{}: write: view={} slot={} op={} len={}: {} {s}", .{
                 journal.replica,
                 header.view,
                 journal.slot_for_header(header).index,

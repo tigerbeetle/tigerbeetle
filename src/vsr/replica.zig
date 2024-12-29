@@ -1612,10 +1612,17 @@ pub fn ReplicaType(
             // the prepare, thereby breaking the replication chain.
             if (message.header.op > self.commit_min and !self.journal.has_clean(message.header)) {
                 self.replicate(message);
+            } else {
+                log.warn("{}: on_prepare: not replicating op={} commit_min={} present={}", .{
+                    self.replica,
+                    message.header.op,
+                    self.commit_min,
+                    self.journal.has_clean(message.header),
+                });
             }
 
             if (self.syncing == .updating_checkpoint) {
-                log.debug("{}: on_prepare: ignoring (sync)", .{self.replica});
+                log.warn("{}: on_prepare: ignoring (sync)", .{self.replica});
                 return;
             }
 
@@ -1629,12 +1636,12 @@ pub fn ReplicaType(
             }
 
             if (self.status != .normal) {
-                log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
+                log.warn("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
                 return;
             }
 
             if (message.header.view > self.view) {
-                log.debug("{}: on_prepare: ignoring (newer view)", .{self.replica});
+                log.warn("{}: on_prepare: ignoring (newer view)", .{self.replica});
                 return;
             }
 
@@ -1642,7 +1649,7 @@ pub fn ReplicaType(
                 // This would be safe to prepare, but rejecting it simplifies assertions.
                 assert(message.header.op > self.op_checkpoint_next_trigger());
 
-                log.debug("{}: on_prepare: ignoring (newer release)", .{self.replica});
+                log.warn("{}: on_prepare: ignoring (newer release)", .{self.replica});
                 return;
             }
 
@@ -1673,7 +1680,7 @@ pub fn ReplicaType(
 
             // Verify that the new request will fit in the WAL.
             if (message.header.op > self.op_prepare_max()) {
-                log.debug("{}: on_prepare: ignoring op={} (too far ahead, prepare_max={})", .{
+                log.warn("{}: on_prepare: ignoring op={} (too far ahead, prepare_max={})", .{
                     self.replica,
                     message.header.op,
                     self.op_prepare_max(),
