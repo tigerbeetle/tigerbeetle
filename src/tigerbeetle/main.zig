@@ -274,10 +274,15 @@ const Command = struct {
         defer message_pool.deinit(allocator);
 
         var aof: ?AOF = if (args.aof) blk: {
-            const aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
+            const aof_path = try std.fmt.allocPrint(
+                allocator,
+                "{s}.aof",
+                .{std.fs.path.basename(args.path)},
+            );
             defer allocator.free(aof_path);
+            std.log.info("{s}", .{aof_path});
 
-            break :blk try AOF.from_absolute_path(aof_path);
+            break :blk try AOF.init(command.dir_fd, aof_path, &command.io);
         } else null;
         defer if (aof != null) aof.?.close();
 

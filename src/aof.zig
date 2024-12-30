@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const constants = @import("constants.zig");
@@ -16,42 +17,29 @@ const Header = vsr.Header;
 const Client = vsr.ClientType(StateMachine, MessageBus);
 const log = std.log.scoped(.aof);
 
-const magic_number: u128 = 312960301372567410560647846651901451202;
-
-/// On-disk format for AOF Metadata.
-pub const AOFEntryMetadata = extern struct {
-    primary: u64,
-    replica: u64,
-    // Use large padding here to align the message itself to the sector boundary.
-    reserved: [4064]u8 = std.mem.zeroes([4064]u8),
-
-    comptime {
-        assert(stdx.no_padding(AOFEntryMetadata));
-    }
-};
+const magic_number: u128 = 0xbcd8d3fee406119ed192c4f4c4fc82;
 
 pub const AOFEntry = extern struct {
     /// In case of extreme corruption, start each entry with a fixed random integer,
     /// to allow skipping over corrupted entries.
     magic_number: u128 = magic_number,
 
-    /// Arbitrary metadata we want to record
-    metadata: AOFEntryMetadata,
-
-    /// The main Message to log. The actual length of the entire payload will be sector
-    /// aligned, so we might write past what the VSR header in here indicates.
-    message: [constants.message_size_max]u8 align(constants.sector_size),
+    /// The main Message to log. This is written _without_ O_DIRECT, so sector alignment is not
+    /// a concern.
+    message: [constants.message_size_max]u8 align(16),
 
     comptime {
         assert(stdx.no_padding(AOFEntry));
     }
 
-    /// Calculate the actual length of the AOFEntry that needs to be written to disk,
-    /// accounting for sector alignment.
-    pub fn calculate_disk_size(self: *AOFEntry) u64 {
-        const unaligned_size = @sizeOf(AOFEntry) - self.message.len + self.header().size;
+    /// Calculate the actual length of the AOFEntry that needs to be written to disk.
+    pub fn size_disk(self: *AOFEntry) u64 {
+        return @sizeOf(AOFEntry) - self.message.len + self.header().size;
+    }
 
-        return vsr.sector_ceil(unaligned_size);
+    /// The minimum size of an AOFEntry is when `message` is a Header with no body.
+    pub fn size_minimum(self: *AOFEntry) u64 {
+        return @sizeOf(AOFEntry) - self.message.len + @sizeOf(Header);
     }
 
     pub fn header(self: *AOFEntry) *Header.Prepare {
@@ -66,7 +54,6 @@ pub const AOFEntry = extern struct {
     pub fn from_message(
         self: *AOFEntry,
         message: *const Message.Prepare,
-        options: struct { replica: u64, primary: u64 },
         last_checksum: *?u128,
     ) void {
         assert(message.header.size <= self.message.len);
@@ -74,15 +61,13 @@ pub const AOFEntry = extern struct {
         // When writing, entries can backtrack / duplicate, so we don't necessarily have a valid
         // chain. Still, log when that happens. The `aof merge` command can generate a consistent
         // file from entries like these.
-        log.debug("{}: from_message: parent {} (should == {?}) our checksum {}", .{
-            options.replica,
+        log.debug("from_message: parent {} (should == {?}) our checksum {}", .{
             message.header.parent,
             last_checksum.*,
             message.header.checksum,
         });
         if (last_checksum.* == null or last_checksum.*.? != message.header.parent) {
-            log.info("{}: from_message: parent {}, expected {?} instead", .{
-                options.replica,
+            log.info("from_message: parent {}, expected {?} instead", .{
                 message.header.parent,
                 last_checksum.*,
             });
@@ -90,11 +75,11 @@ pub const AOFEntry = extern struct {
         last_checksum.* = message.header.checksum;
 
         // The cluster identifier is in the VSR header so we don't need to store it explicitly.
+        // The replica that this was logged on will be the replica with this file. If uploaded to
+        // object storage, this must be embedded in the filename or path.
+        // Whether this replica is the primary can be determined by the view number from the
+        // relevant op.
         self.* = AOFEntry{
-            .metadata = AOFEntryMetadata{
-                .replica = options.replica,
-                .primary = options.primary,
-            },
             .message = undefined,
         };
 
@@ -127,7 +112,11 @@ pub fn IteratorType(comptime File: type) type {
             const buf = std.mem.asBytes(target);
             const bytes_read = try it.file.readAll(buf);
 
-            if (bytes_read < target.calculate_disk_size()) {
+            // size_disk relies on information that was stored on disk, so further verify we have
+            // read at least the minimum permissible.
+            if (bytes_read < target.size_minimum() or
+                bytes_read < target.size_disk())
+            {
                 return error.AOFShortRead;
             }
 
@@ -153,7 +142,7 @@ pub fn IteratorType(comptime File: type) type {
 
             it.last_checksum = header.checksum;
 
-            it.offset += target.calculate_disk_size();
+            it.offset += target.size_disk();
 
             return target;
         }
@@ -200,29 +189,54 @@ pub fn IteratorType(comptime File: type) type {
 /// CLI command does it by hashing together all checksum_body, operation and timestamp
 /// fields.
 pub const AOF = struct {
-    fd: std.posix.fd_t,
+    file: std.fs.File,
     last_checksum: ?u128 = null,
+    io: *IO,
 
-    /// Create an AOF given an absolute path. Handles opening the
-    /// dir_fd and ensuring everything (including the dir) is
-    /// fsync'd appropriately.
-    pub fn from_absolute_path(absolute_path: []const u8) !AOF {
-        const dirname = std.fs.path.dirname(absolute_path) orelse ".";
-        const dir_fd = try IO.open_dir(dirname);
-        errdefer std.posix.close(dir_fd);
+    state: union(enum) {
+        /// Store the number of unflushed entries - that is, calls to write() without checkpoint()
+        /// to ensure we don't ever buffer more than the WAL can hold.
+        writing: struct { unflushed: u64 },
 
-        const basename = std.fs.path.basename(absolute_path);
+        /// Keep an opaque pointer to the replica to workaround AOF being ?*AOF in Replica, and
+        /// @fieldParentPtr being cumbersome with that.
+        checkpoint: struct {
+            replica: *anyopaque,
+            replica_callback: *const fn (*anyopaque) void,
+            fsync_completion: IO.Completion,
+        },
+    } = .{ .writing = .{ .unflushed = 0 } },
 
-        return AOF.init(dir_fd, basename);
-    }
+    /// Create an AOF in the dir_fd when given a file name. dir_fd must be opened read write
+    /// (except on Windows). This ensures everything (including the dir) is fsync'd appropriately.
+    /// Closing dir_fd is the responsibility of the caller.
+    pub fn init(dir_fd: std.posix.fd_t, relative_path: []const u8, io: *IO) !AOF {
+        assert(!std.fs.path.isAbsolute(relative_path));
 
-    fn init(dir_fd: std.posix.fd_t, relative_path: []const u8) !AOF {
-        const fd = try IO.open_file(dir_fd, relative_path, 0, .create_or_open, .direct_io_required);
-        errdefer std.posix.close(fd);
+        const dir = std.fs.Dir{ .fd = dir_fd };
+        // Closing dir_fd is up to the caller.
 
-        try std.posix.lseek_END(fd, 0);
+        const file = try dir.createFile(relative_path, .{
+            .read = true,
+            .truncate = false,
+            .exclusive = false,
+            .lock = .exclusive,
+        });
 
-        return AOF{ .fd = fd };
+        try file.sync();
+
+        // We cannot fsync the directory handle on Windows.
+        // We have no way to open a directory with write access.
+        if (builtin.os.tag != .windows) {
+            try std.posix.fsync(dir.fd);
+        }
+
+        try file.seekFromEnd(0);
+
+        return .{
+            .file = file,
+            .io = io,
+        };
     }
 
     /// If a message should be replayed when recovering the AOF. This allows skipping over things
@@ -242,43 +256,62 @@ pub const AOF = struct {
     }
 
     pub fn close(self: *AOF) void {
-        std.posix.close(self.fd);
+        self.file.close();
+        self.file = undefined;
     }
 
-    /// Write a message to disk. Once this function returns, the data passed in
-    /// is guaranteed to have been written using O_DIRECT and O_SYNC and
-    /// can be considered safely persisted for recovery purposes once this
-    /// call returns.
-    ///
-    /// We purposefully use standard disk IO here, and not IO_uring. It'll
-    /// be slower and have syscall overhead, but it's considerably more
-    /// battle tested.
-    ///
-    /// We don't bother returning a count of how much we wrote. Not being
-    /// able to fully write the entire payload is an error, not an expected
-    /// condition.
-    pub fn write(self: *AOF, message: *const Message.Prepare, options: struct {
-        replica: u64,
-        primary: u64,
-    }) !void {
+    /// Write a message to disk, with standard blocking IO but using the OS's page cache. The AOF
+    /// borrows durability from the write ahead log: if the AOF hasn't been flushed, and the machine
+    /// loses power, the op is guaranteed to still be in the WAL.
+    pub fn write(self: *AOF, message: *const Message.Prepare) !void {
+        assert(self.state == .writing);
+        assert(self.state.writing.unflushed < constants.journal_slot_count);
+
         var entry: AOFEntry align(constants.sector_size) = undefined;
         entry.from_message(
             message,
-            .{ .replica = options.replica, .primary = options.primary },
             &self.last_checksum,
         );
 
-        const disk_size = entry.calculate_disk_size();
+        const size_disk = entry.size_disk();
 
         const bytes = std.mem.asBytes(&entry);
+        try self.file.writeAll(bytes[0..size_disk]);
 
-        // We don't need writeAll logic here. write() on Linux can't be interrupted
-        // by signals, and a single write supports up to 0x7ffff000 bytes, which is
-        // much greater than the size of our struct could ever be. Zig handles EINTR
-        // for us automatically.
-        const bytes_written = try std.posix.write(self.fd, bytes[0..disk_size]);
+        self.state.writing.unflushed += 1;
+    }
 
-        assert(bytes_written == disk_size);
+    pub fn checkpoint(self: *AOF, replica: *anyopaque, callback: *const fn (*anyopaque) void) void {
+        assert(self.state == .writing);
+        assert(self.state.writing.unflushed < constants.journal_slot_count);
+
+        self.state = .{
+            .checkpoint = .{
+                .replica = replica,
+                .fsync_completion = undefined,
+                .replica_callback = callback,
+            },
+        };
+
+        self.io.fsync(
+            *AOF,
+            self,
+            on_fsync,
+            &self.state.checkpoint.fsync_completion,
+            self.file.handle,
+        );
+    }
+
+    fn on_fsync(self: *AOF, completion: *IO.Completion, result: IO.FsyncError!void) void {
+        _ = completion;
+        _ = result catch @panic("aof fsync failure");
+
+        assert(self.state == .checkpoint);
+        const replica = self.state.checkpoint.replica;
+        const replica_callback = self.state.checkpoint.replica_callback;
+        self.state = .{ .writing = .{ .unflushed = 0 } };
+
+        replica_callback(replica);
     }
 
     pub const Iterator = IteratorType(std.fs.File);
@@ -458,7 +491,13 @@ pub fn aof_merge(
     var target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
 
-    var output_aof = try AOF.from_absolute_path(output_path);
+    var io = try IO.init(32, 0);
+    defer io.deinit();
+
+    const dir_fd = try IO.open_dir(std.fs.path.dirname(output_path) orelse ".");
+    defer std.posix.close(dir_fd);
+
+    var output_aof = try AOF.init(dir_fd, std.fs.path.basename(output_path), &io);
 
     // First, iterate all AOFs and build a mapping between parent checksums and where the entry is
     // located.
@@ -532,8 +571,8 @@ pub fn aof_merge(
             } else {
                 v.value_ptr.* = .{
                     .aof = aof,
-                    .index = aof.offset - entry.?.calculate_disk_size(),
-                    .size = entry.?.calculate_disk_size(),
+                    .index = aof.offset - entry.?.size_disk(),
+                    .size = entry.?.size_disk(),
                     .checksum = checksum,
                     .parent = parent,
                 };
@@ -559,7 +598,7 @@ pub fn aof_merge(
         const bytes_read = try entry.aof.file.readAll(buf);
 
         // None of these conditions should happen, but double check them to prevent any TOCTOUs
-        if (bytes_read != target.calculate_disk_size()) {
+        if (bytes_read != target.size_disk()) {
             @panic("unexpected short read while reading AOF entry");
         }
 
@@ -575,7 +614,6 @@ pub fn aof_merge(
         target.to_message(message);
         try output_aof.write(
             message,
-            .{ .replica = target.metadata.replica, .primary = target.metadata.primary },
         );
 
         current_parent = entry.checksum;
@@ -611,13 +649,19 @@ pub fn aof_merge(
 const testing = std.testing;
 
 test "aof write / read" {
-    const aof_file = "./test.aof";
+    const aof_file = "test.aof";
     std.fs.cwd().deleteFile(aof_file) catch {};
     defer std.fs.cwd().deleteFile(aof_file) catch {};
 
     const allocator = std.testing.allocator;
 
-    var aof = try AOF.from_absolute_path(aof_file);
+    var io = try IO.init(32, 0);
+    defer io.deinit();
+
+    const dir_fd = try IO.open_dir(".");
+    defer std.posix.close(dir_fd);
+
+    var aof = try AOF.init(dir_fd, aof_file, &io);
 
     var message_pool = try MessagePool.init_capacity(allocator, 2);
     defer message_pool.deinit(allocator);
@@ -652,7 +696,7 @@ test "aof write / read" {
     demo_message.header.set_checksum_body(demo_payload);
     demo_message.header.set_checksum();
 
-    try aof.write(demo_message, .{ .replica = 1, .primary = 1 });
+    try aof.write(demo_message);
     aof.close();
 
     var it = try AOF.iterator(aof_file);
@@ -671,8 +715,6 @@ test "aof write / read" {
         read_message.buffer[0..read_message.header.size],
     ));
 
-    try testing.expect(read_entry.metadata.replica == 1);
-    try testing.expect(read_entry.metadata.primary == 1);
     try testing.expect(std.mem.eql(
         u8,
         demo_message.buffer[0..demo_message.header.size],
@@ -783,10 +825,8 @@ pub fn main() !void {
             const header = entry.header();
             if (!AOF.replay_message(header)) continue;
 
-            try stdout.print("{} aof.AOFEntryMetadata{{ .primary = {}, .replica = {} }}\n", .{
+            try stdout.print("{}\n", .{
                 header,
-                entry.metadata.primary,
-                entry.metadata.replica,
             });
 
             // The body isn't the only important information, there's also the operation

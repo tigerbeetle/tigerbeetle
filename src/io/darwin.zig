@@ -208,6 +208,9 @@ pub const IO = struct {
             address: std.net.Address,
             initiated: bool,
         },
+        fsync: struct {
+            fd: fd_t,
+        },
         read: struct {
             fd: fd_t,
             buf: [*]u8,
@@ -427,6 +430,36 @@ pub const IO = struct {
 
                     op.initiated = true;
                     return result;
+                }
+            },
+        );
+    }
+
+    pub const FsyncError = posix.SyncError || posix.UnexpectedError;
+
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
+        completion: *Completion,
+        fd: fd_t,
+    ) void {
+        self.submit(
+            context,
+            callback,
+            completion,
+            .fsync,
+            .{
+                .fd = fd,
+            },
+            struct {
+                fn do_operation(op: anytype) FsyncError!void {
+                    return fs_sync(op.fd);
                 }
             },
         );
@@ -793,6 +826,9 @@ pub const IO = struct {
     /// instead.
     /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
     fn fs_sync(fd: fd_t) !void {
+        // TODO: This is of dubious safety - it's _not_ safe to fall back on posix.fsync unless it's
+        // known at startup that the disk (eg, an external disk on a Mac) doesn't support
+        // F_FULLFSYNC.
         _ = posix.fcntl(fd, posix.F.FULLFSYNC, 1) catch return posix.fsync(fd);
     }
 

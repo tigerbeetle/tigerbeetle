@@ -207,6 +207,9 @@ pub const IO = struct {
                 overlapped: Overlapped,
                 pending: bool,
             },
+            fsync: struct {
+                fd: fd_t,
+            },
             send: Transfer,
             recv: Transfer,
             read: struct {
@@ -557,6 +560,37 @@ pub const IO = struct {
                         .WSA_INVALID_HANDLE => unreachable, // we dont use hEvent in OVERLAPPED
                         else => |err| os.windows.unexpectedWSAError(err),
                     };
+                }
+            },
+        );
+    }
+
+    pub const FsyncError = std.posix.SyncError || std.posix.UnexpectedError;
+
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
+        completion: *Completion,
+        fd: fd_t,
+    ) void {
+        self.submit(
+            context,
+            callback,
+            completion,
+            .fsync,
+            .{
+                .fd = fd,
+            },
+            struct {
+                fn do_operation(ctx: Completion.Context, op: anytype) FsyncError!void {
+                    _ = ctx;
+                    return std.posix.fsync(op.fd);
                 }
             },
         );
