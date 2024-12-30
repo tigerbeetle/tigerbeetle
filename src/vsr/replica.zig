@@ -5222,15 +5222,6 @@ pub fn ReplicaType(
                     log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
                     return true;
                 },
-                .request_headers, .request_prepare, .request_reply => {
-                    if (self.primary_index(self.view) != message.header.replica) {
-                        log.debug("{}: on_{s}: ignoring (view change, requested by backup)", .{
-                            self.replica,
-                            command,
-                        });
-                        return true;
-                    }
-                },
                 .headers => {
                     if (self.primary_index(self.view) != self.replica) {
                         log.debug("{}: on_{s}: ignoring (view change, received by backup)", .{
@@ -5245,6 +5236,11 @@ pub fn ReplicaType(
                         });
                         return true;
                     }
+                },
+                .request_headers, .request_prepare, .request_reply => {
+                    // on_headers, on_prepare, and on_reply have the appropriate logic to handle
+                    // incorrect headers, prepares, and replies.
+                    return false;
                 },
                 else => unreachable,
             }
