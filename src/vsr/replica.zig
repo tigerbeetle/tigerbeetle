@@ -714,7 +714,7 @@ pub fn ReplicaType(
                 {
                     op_head = vsr_header.op;
 
-                    if (!self.journal.has(vsr_header)) {
+                    if (!self.journal.has_header(vsr_header)) {
                         self.journal.set_header_as_dirty(vsr_header);
                     }
                     break;
@@ -731,7 +731,7 @@ pub fn ReplicaType(
                         const header_checkpoint =
                             &self.superblock.working.vsr_state.checkpoint.header;
                         assert(header_checkpoint.op == self.op_checkpoint());
-                        assert(!self.journal.has(header_checkpoint));
+                        assert(!self.journal.has_header(header_checkpoint));
                         self.journal.set_header_as_dirty(header_checkpoint);
                     }
                     op_head = self.journal.op_maximum();
@@ -1605,19 +1605,19 @@ pub fn ReplicaType(
             // - avoid a feedback loop of cascading needless replication.
             // Replicate anything that we didn't previously had ourselves.
             //
-            // Use `has_clean` (checks whether a replica has both the header and the corresponding
-            // prepare) instead of `has` (checks whether the replica has the header). The latter
-            // is prone to a race wherein a replica that receives a future header *before* the
-            // corresponding prepare (via `start_view` for instance) would end up not forwarding
+            // Use `has_prepare` (checks whether a replica has both the header and the corresponding
+            // prepare) instead of `has_header` (checks whether the replica has the header). The
+            // latter is prone to a race wherein a replica that receives a future header *before*
+            // the corresponding prepare (via `start_view` for instance) would end up not forwarding
             // the prepare, thereby breaking the replication chain.
-            if (message.header.op > self.commit_min and !self.journal.has_clean(message.header)) {
+            if (message.header.op > self.commit_min and !self.journal.has_prepare(message.header)) {
                 self.replicate(message);
             } else {
                 log.warn("{}: on_prepare: not replicating op={} commit_min={} present={}", .{
                     self.replica,
                     message.header.op,
                     self.commit_min,
-                    self.journal.has_clean(message.header),
+                    self.journal.has_prepare(message.header),
                 });
             }
 
@@ -1982,7 +1982,7 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view);
             assert(message.header.op <= self.op); // Repairs may never advance `self.op`.
 
-            if (self.journal.has_clean(message.header)) {
+            if (self.journal.has_prepare(message.header)) {
                 log.debug("{}: on_repair: ignoring (duplicate)", .{self.replica});
 
                 self.send_prepare_ok(message.header);
@@ -3894,7 +3894,7 @@ pub fn ReplicaType(
             assert(self.commit_min == self.commit_max);
             assert(self.commit_min + 1 == prepare.message.header.op);
             assert(self.commit_min + self.pipeline.queue.prepare_queue.count == self.op);
-            assert(self.journal.has(prepare.message.header));
+            assert(self.journal.has_header(prepare.message.header));
 
             if (!prepare.ok_quorum_received) {
                 // Eventually handled by on_prepare_timeout().
@@ -3992,7 +3992,7 @@ pub fn ReplicaType(
 
             const op = self.commit_min + 1;
             assert(prepare.?.header.op == op);
-            assert(self.journal.has(prepare.?.header));
+            assert(self.journal.has_header(prepare.?.header));
 
             self.commit_prepare = prepare.?.ref();
             return self.commit_dispatch_resume();
@@ -4015,7 +4015,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.operation != .reserved);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
             assert(self.commit_prepare.?.header.op <= self.op);
-            assert(self.journal.has(self.commit_prepare.?.header));
+            assert(self.journal.has_header(self.commit_prepare.?.header));
 
             const prepare = self.commit_prepare.?;
 
@@ -4459,7 +4459,7 @@ pub fn ReplicaType(
             // relate to subsequent ops, since by now we have already verified the hash chain for
             // this commit.
 
-            assert(self.journal.has(prepare.header));
+            assert(self.journal.has_header(prepare.header));
             if (self.op_checkpoint() == self.commit_min) {
                 // op_checkpoint's slot may have been overwritten in the WAL — but we can
                 // always use the VSRState to anchor the hash chain.
@@ -6691,7 +6691,7 @@ pub fn ReplicaType(
                     header.checksum,
                 });
                 return false;
-            } else if (header.op == self.op and !self.journal.has(header)) {
+            } else if (header.op == self.op and !self.journal.has_header(header)) {
                 assert(self.journal.header_with_op(self.op) != null);
                 log.debug("{}: repair_header: op={} checksum={} (changes hash chain head)", .{
                     self.replica,
@@ -6710,23 +6710,23 @@ pub fn ReplicaType(
                 return false;
             }
 
-            if (self.journal.header_for_prepare(header)) |existing| {
-                if (existing.checksum == header.checksum) {
-                    if (self.journal.has_clean(header)) {
-                        log.debug("{}: repair_header: op={} checksum={} (checksum clean)", .{
-                            self.replica,
-                            header.op,
-                            header.checksum,
-                        });
-                        return false;
-                    } else {
-                        log.debug("{}: repair_header: op={} checksum={} (checksum dirty)", .{
-                            self.replica,
-                            header.op,
-                            header.checksum,
-                        });
-                    }
-                } else if (existing.view == header.view) {
+            if (self.journal.has_header(header)) {
+                if (self.journal.has_prepare(header)) {
+                    log.debug("{}: repair_header: op={} checksum={} (checksum clean)", .{
+                        self.replica,
+                        header.op,
+                        header.checksum,
+                    });
+                    return false;
+                } else {
+                    log.debug("{}: repair_header: op={} checksum={} (checksum dirty)", .{
+                        self.replica,
+                        header.op,
+                        header.checksum,
+                    });
+                }
+            } else if (self.journal.header_for_prepare(header)) |existing| {
+                if (existing.view == header.view) {
                     // The journal must have wrapped:
                     // We expect that the same view and op would have had the same checksum.
                     assert(existing.op != header.op);
@@ -6745,7 +6745,6 @@ pub fn ReplicaType(
                     }
                 } else {
                     assert(existing.view != header.view);
-                    assert(existing.op == header.op or existing.op != header.op);
 
                     log.debug("{}: repair_header: op={} checksum={} (different view)", .{
                         self.replica,
@@ -6764,7 +6763,12 @@ pub fn ReplicaType(
             assert(header.op < self.op or
                 self.journal.header_with_op(self.op).?.checksum == header.checksum);
 
-            if (!self.repair_header_would_connect_hash_chain(header)) {
+            if (self.journal.header_with_op(self.op).?.view == header.view) {
+                // Fast path for cases where the header being replaced is from the same view
+                // as the head. In this case, we can skip checking if our hash chain connects
+                // up till the head, as the primary for that view would have already done so in
+                // `on_prepare` (by invoking `panic_if_hash_chain_would_break_in_the_same_view`).
+            } else if (!self.repair_header_would_connect_hash_chain(header)) {
                 // We cannot replace this op until we are sure that this would not:
                 // 1. undermine any prior prepare_ok guarantee made to the primary, and
                 // 2. leak stale ops back into our in-memory headers (and so into a view change).
@@ -6780,7 +6784,7 @@ pub fn ReplicaType(
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
-                assert(self.journal.has(header));
+                assert(self.journal.has_header(header));
             }
 
             self.journal.set_header_as_dirty(header);
@@ -6916,7 +6920,7 @@ pub fn ReplicaType(
                 assert(prepare.header.op <= self.op);
                 assert(prepare.header.checksum == journal_header.checksum);
                 assert(prepare.header.parent == parent);
-                assert(self.journal.has(prepare.header));
+                assert(self.journal.has_header(prepare.header));
 
                 pipeline_queue.push_prepare(prepare);
                 parent = prepare.header.checksum;
@@ -7339,7 +7343,7 @@ pub fn ReplicaType(
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
-                assert(self.syncing == .updating_checkpoint or self.journal.has(header));
+                assert(self.syncing == .updating_checkpoint or self.journal.has_header(header));
             }
 
             if (header.op == self.op_checkpoint() + 1) {
@@ -7353,7 +7357,7 @@ pub fn ReplicaType(
             // We must not set an op as dirty if we already have it exactly because:
             // 1. this would trigger a repair and delay the view change, or worse,
             // 2. prevent repairs to another replica when we have the op.
-            if (!self.journal.has(header)) self.journal.set_header_as_dirty(header);
+            if (!self.journal.has_header(header)) self.journal.set_header_as_dirty(header);
         }
 
         /// Replicates to the next replica in the configuration (until we get back to the primary):
@@ -7371,7 +7375,7 @@ pub fn ReplicaType(
             maybe(message.header.view < self.view);
 
             // But each prepare should be replicated at most once, to avoid feedback loops.
-            assert(!self.journal.has_clean(message.header));
+            assert(!self.journal.has_prepare(message.header));
             assert(message.header.op > self.commit_min);
 
             const next = next: {
@@ -7523,7 +7527,7 @@ pub fn ReplicaType(
             assert(header.view <= self.view);
             assert(header.op <= self.op);
 
-            if (self.journal.has_clean(header)) {
+            if (self.journal.has_prepare(header)) {
                 log.debug("{}: send_prepare_ok: op={} checksum={}", .{
                     self.replica,
                     header.op,
@@ -8596,7 +8600,7 @@ pub fn ReplicaType(
 
                 var pipeline_prepares = pipeline_queue.prepare_queue.iterator();
                 while (pipeline_prepares.next()) |prepare| {
-                    assert(self.journal.has(prepare.message.header));
+                    assert(self.journal.has_header(prepare.message.header));
                     assert(!prepare.ok_quorum_received);
                     assert(prepare.ok_from_all_replicas.count() == 0);
 
@@ -9752,7 +9756,7 @@ pub fn ReplicaType(
             assert(message.header.op >= self.op_repair_min());
             assert(message.header.release.value <= self.release.value);
 
-            if (!self.journal.has(message.header)) {
+            if (!self.journal.has_header(message.header)) {
                 log.debug("{}: write_prepare: ignoring op={} checksum={} (header changed)", .{
                     self.replica,
                     message.header.op,
