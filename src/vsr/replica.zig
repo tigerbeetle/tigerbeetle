@@ -7087,26 +7087,45 @@ pub fn ReplicaType(
                 return;
             }
 
-            // Repair prepares in chronological order. Older prepares will be overwritten by the
-            // cluster earlier, so we prioritize their repair. This also encourages concurrent
-            // commit/repair.
-            var op = op_min;
-            while (op <= self.op) : (op += 1) {
-                const slot = self.journal.slot_with_op(op).?;
-                if (self.journal.dirty.bit(slot)) {
-                    // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
-                    // Continue to request prepares until our budget is depleted.
-                    if (self.repair_prepare(op)) {
-                        budget -= 1;
-                        if (budget == 0) {
-                            log.debug("{}: repair_prepares: request budget used", .{self.replica});
-                            return;
+            // Iterate through op_min..=self.op, but make sure to iterate commit_min+1..=self.op
+            // sub range first:
+            // - our first priority is to commit further,
+            // - afterwards, repair commited prepares which are at risk of getting evicted from
+            //   the journal, to help repair any lagging replicas.
+            const repair_ranges_exclusive: [2]struct { u64, u64 } = .{
+                .{ @max(op_min, self.commit_min + 1), self.op + 1 },
+                .{ op_min, @max(self.commit_min + 1, op_min) },
+            };
+            const range_count_a = self.op - op_min + 1;
+            const range_count_b = (repair_ranges_exclusive[0][1] - repair_ranges_exclusive[0][0]) +
+                (repair_ranges_exclusive[1][1] - repair_ranges_exclusive[1][0]);
+            assert(range_count_a == range_count_b);
+
+            var range_count_c: u64 = 0;
+            for (repair_ranges_exclusive) |repair_range_exclusive| {
+                const range_min, const range_max = repair_range_exclusive;
+                assert(range_min <= range_max);
+                for (range_min..range_max) |op| {
+                    range_count_c += 1;
+                    const slot = self.journal.slot_with_op(op).?;
+                    if (self.journal.dirty.bit(slot)) {
+                        // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
+                        // Continue to request prepares until our budget is depleted.
+                        if (self.repair_prepare(op)) {
+                            budget -= 1;
+                            if (budget == 0) {
+                                log.debug("{}: repair_prepares: request budget used", .{
+                                    self.replica,
+                                });
+                                return;
+                            }
                         }
+                    } else {
+                        assert(!self.journal.faulty.bit(slot));
                     }
-                } else {
-                    assert(!self.journal.faulty.bit(slot));
                 }
             }
+            assert(range_count_c == range_count_a);
 
             // Clean up out-of-bounds dirty slots so repair() can finish.
             const slots_repaired = vsr.SlotRange{
