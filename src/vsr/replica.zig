@@ -3930,10 +3930,11 @@ pub fn ReplicaType(
                 // prepare if it is from the same view as the head --- the primary for that view
                 // made sure that the hash chain is valid. If it is from the different view, we
                 // additionally verify ourselves that the hash-chain is not broken
-                const safe_to_commit = self.valid_hash_chain(@src()) or (self.status == .normal and
+                const valid_hash_chain_or_same_view = self.valid_hash_chain(@src()) or
+                    (self.status == .normal and
                     header.view == self.journal.header_with_op(self.op).?.view);
 
-                if (!safe_to_commit) {
+                if (!valid_hash_chain_or_same_view) {
                     assert(!self.solo());
                     return .ready;
                 }
