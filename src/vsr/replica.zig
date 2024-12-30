@@ -1605,10 +1605,10 @@ pub fn ReplicaType(
             // - avoid a feedback loop of cascading needless replication.
             // Replicate anything that we didn't previously had ourselves.
             //
-            // Use `has_clean` (checks whether a replica has both the header and the corresponding
-            // prepare) instead of `has` (checks whether the replica has the header). The latter
-            // is prone to a race wherein a replica that receives a future header *before* the
-            // corresponding prepare (via `start_view` for instance) would end up not forwarding
+            // Use `has_prepare` (checks whether a replica has both the header and the corresponding
+            // prepare) instead of `has_header` (checks whether the replica has the header). The
+            // latter is prone to a race wherein a replica that receives a future header *before*
+            // the corresponding prepare (via `start_view` for instance) would end up not forwarding
             // the prepare, thereby breaking the replication chain.
             if (message.header.op > self.commit_min and !self.journal.has_prepare(message.header)) {
                 self.replicate(message);
@@ -6710,23 +6710,23 @@ pub fn ReplicaType(
                 return false;
             }
 
-            if (self.journal.header_for_prepare(header)) |existing| {
-                if (existing.checksum == header.checksum) {
-                    if (self.journal.has_prepare(header)) {
-                        log.debug("{}: repair_header: op={} checksum={} (checksum clean)", .{
-                            self.replica,
-                            header.op,
-                            header.checksum,
-                        });
-                        return false;
-                    } else {
-                        log.debug("{}: repair_header: op={} checksum={} (checksum dirty)", .{
-                            self.replica,
-                            header.op,
-                            header.checksum,
-                        });
-                    }
-                } else if (existing.view == header.view) {
+            if (self.journal.has_header(header)) {
+                if (self.journal.has_prepare(header)) {
+                    log.debug("{}: repair_header: op={} checksum={} (checksum clean)", .{
+                        self.replica,
+                        header.op,
+                        header.checksum,
+                    });
+                    return false;
+                } else {
+                    log.debug("{}: repair_header: op={} checksum={} (checksum dirty)", .{
+                        self.replica,
+                        header.op,
+                        header.checksum,
+                    });
+                }
+            } else if (self.journal.header_for_prepare(header)) |existing| {
+                if (existing.view == header.view) {
                     // The journal must have wrapped:
                     // We expect that the same view and op would have had the same checksum.
                     assert(existing.op != header.op);
@@ -6763,7 +6763,12 @@ pub fn ReplicaType(
             assert(header.op < self.op or
                 self.journal.header_with_op(self.op).?.checksum == header.checksum);
 
-            if (!self.repair_header_would_connect_hash_chain(header)) {
+            if (self.journal.header_with_op(self.op).?.view == header.view) {
+                // Fast path for cases where the header being replaced is from the same view
+                // as the head. In this case, we can skip checking if our hash chain connects
+                // up till the head, as the primary for that view would have already done so in
+                // `on_prepare` (by invoking `panic_if_hash_chain_would_break_in_the_same_view`).
+            } else if (!self.repair_header_would_connect_hash_chain(header)) {
                 // We cannot replace this op until we are sure that this would not:
                 // 1. undermine any prior prepare_ok guarantee made to the primary, and
                 // 2. leak stale ops back into our in-memory headers (and so into a view change).
