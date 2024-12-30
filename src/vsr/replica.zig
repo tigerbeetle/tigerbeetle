@@ -9106,6 +9106,13 @@ pub fn ReplicaType(
                 @tagName(self.syncing),
             });
 
+            if (state_old != .idle) {
+                self.trace.stop(.replica_sync_stage, .{ .stage = @tagName(state_old) });
+            }
+            if (state_new != .idle) {
+                self.trace.start(.replica_sync_stage, .{ .stage = @tagName(state_new) });
+            }
+
             if (self.event_callback) |hook| hook(self, .sync_stage_changed);
 
             switch (self.syncing) {
