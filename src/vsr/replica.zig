@@ -1289,6 +1289,8 @@ pub fn ReplicaType(
                 self.commit_prepare = null;
             }
 
+            if (self.sync_start_view) |message| self.message_bus.unref(message);
+
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |read| self.message_bus.unref(read.message);
 
@@ -1399,9 +1401,7 @@ pub fn ReplicaType(
                     // Ignore further messages until finishing (asynchronous) processing of sync SV.
                     // Notably, this prevents our view from jumping ahead of SV.
                     assert(self.sync_start_view != null);
-                    log.debug("{}: on_message: ignoring (syncing)", .{
-                        self.replica,
-                    });
+                    log.warn("{}: on_message: ignoring (syncing)", .{self.replica});
                     return;
                 },
                 .updating_checkpoint => {},
@@ -2234,6 +2234,22 @@ pub fn ReplicaType(
             assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message.base_const())) return;
 
+            if (self.status == .recovering_head) {
+                if (message.header.view > self.view or
+                    message.header.op >= self.op_prepare_max() or
+                    message.header.nonce == self.nonce)
+                {
+                    // This SV is guaranteed to have originated after the replica crash,
+                    // it is safe to use to determine the head op.
+                } else {
+                    log.mark.debug(
+                        "{}: on_start_view: ignoring (recovering_head, nonce mismatch)",
+                        .{self.replica},
+                    );
+                    return;
+                }
+            }
+
             assert(self.status == .view_change or
                 self.status == .normal or
                 self.status == .recovering_head);
@@ -2266,6 +2282,21 @@ pub fn ReplicaType(
                 return;
             }
 
+            if (self.status == .recovering_head) {
+                self.view = message.header.view;
+                maybe(self.view == self.log_view);
+            } else {
+                if (self.view < message.header.view) {
+                    self.transition_to_view_change_status(message.header.view);
+                }
+
+                if (self.status == .normal) {
+                    assert(self.backup());
+                    assert(self.view == self.log_view);
+                }
+            }
+            assert(self.view == message.header.view);
+
             // Logically, SV atomically updates both the checkpoint state and the log suffix.
             // Physically, updating the checkpoint is an asynchronous operation: it requires waiting
             // for in-progress write IOPs to complete. If the checkpoint needs to be updated
@@ -2276,6 +2307,9 @@ pub fn ReplicaType(
                     .idle => {
                         assert(self.commit_stage == .checkpoint_data or
                             self.commit_stage == .checkpoint_superblock);
+                        assert(self.sync_start_view == null);
+                    },
+                    .updating_checkpoint => {
                         assert(self.sync_start_view == null);
                     },
                     .canceling_commit, .canceling_grid => {
@@ -2307,9 +2341,9 @@ pub fn ReplicaType(
                 return false;
             }
 
-            //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
-            //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
-            //  prepares in this replica's WAL are no longer needed.
+            // Cluster is at least two checkpoints ahead. Although SV's checkpoint is not guaranteed
+            // be durable on a quorum of replicas, it is safe to sync to it, because prepares in
+            // this replica's WAL are no longer needed.
             const far_behind = vsr.Checkpoint.durable(self.op_checkpoint_next() +
                 constants.vsr_checkpoint_ops, message.header.commit_max);
             // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
@@ -2329,6 +2363,7 @@ pub fn ReplicaType(
             // need state sync after all.
             if (self.commit_stage == .checkpoint_superblock) return true;
             if (self.commit_stage == .checkpoint_data) return true;
+            if (self.syncing == .updating_checkpoint) return true;
 
             // Otherwise, cancel in progress commit and prepare to sync.
             log.mark.debug(
@@ -2353,28 +2388,13 @@ pub fn ReplicaType(
                 self.status == .normal or
                 self.status == .recovering_head);
             assert(self.sync_start_view == null);
-            assert(message.header.view >= self.view);
+            assert(message.header.view == self.view);
             assert(message.header.replica != self.replica);
             assert(message.header.replica == self.primary_index(message.header.view));
             assert(message.header.commit_max >= message.header.checkpoint_op);
             assert(message.header.op >= message.header.commit_max);
             assert(message.header.op - message.header.commit_max <=
                 constants.pipeline_prepare_queue_max);
-
-            if (self.status == .recovering_head) {
-                self.view = message.header.view;
-                maybe(self.view == self.log_view);
-            } else {
-                if (self.view < message.header.view) {
-                    self.transition_to_view_change_status(message.header.view);
-                }
-
-                if (self.status == .normal) {
-                    assert(self.backup());
-                    assert(self.view == self.log_view);
-                }
-            }
-            assert(self.view == message.header.view);
 
             const view_headers = start_view_message_headers(message);
             assert(view_headers[0].op == message.header.op);
@@ -5825,22 +5845,6 @@ pub fn ReplicaType(
                         return true;
                     }
 
-                    if (self.status == .recovering_head) {
-                        if (message_header.view > self.view or
-                            message_header.op >= self.op_prepare_max() or
-                            message_header.nonce == self.nonce)
-                        {
-                            // This SV is guaranteed to have originated after the replica crash,
-                            // it is safe to use to determine the head op.
-                        } else {
-                            log.mark.debug(
-                                "{}: on_{s}: ignoring (recovering_head, nonce mismatch)",
-                                .{ self.replica, command },
-                            );
-                            return true;
-                        }
-                    }
-
                     // Syncing replicas must be careful about receiving SV messages, since they
                     // may have fast-forwarded their commit_max via their checkpoint target.
                     if (message_header.commit_max < self.op_checkpoint()) {
@@ -9226,7 +9230,7 @@ pub fn ReplicaType(
             var grid_repair_writes = self.grid_repair_writes.iterate();
             while (grid_repair_writes.next()) |write| self.grid_repair_writes.release(write);
 
-            // Resume SV/sync flow
+            // Resume SV/sync flow.
             const message = self.sync_start_view.?;
             self.sync_start_view = null;
             defer self.message_bus.unref(message);

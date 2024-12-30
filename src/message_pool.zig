@@ -64,6 +64,7 @@ pub const Options = union(vsr.ProcessType) {
                 sum += 1; // Replica.loopback_queue
                 sum += pipeline_limit; // Replica.Pipeline{Queue|Cache}
                 sum += 1; // Replica.commit_prepare
+                sum += 1; // Replica.sync_start_view
                 // Replica.do_view_change_from_all_replicas quorum:
                 // All other quorums are bitsets.
                 //
