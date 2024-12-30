@@ -714,7 +714,7 @@ pub fn ReplicaType(
                 {
                     op_head = vsr_header.op;
 
-                    if (!self.journal.has(vsr_header)) {
+                    if (!self.journal.has_header(vsr_header)) {
                         self.journal.set_header_as_dirty(vsr_header);
                     }
                     break;
@@ -731,7 +731,7 @@ pub fn ReplicaType(
                         const header_checkpoint =
                             &self.superblock.working.vsr_state.checkpoint.header;
                         assert(header_checkpoint.op == self.op_checkpoint());
-                        assert(!self.journal.has(header_checkpoint));
+                        assert(!self.journal.has_header(header_checkpoint));
                         self.journal.set_header_as_dirty(header_checkpoint);
                     }
                     op_head = self.journal.op_maximum();
@@ -1600,8 +1600,29 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
 
+            // Replication balances two goals:
+            // - replicate anything that the next replica is likely missing,
+            // - avoid a feedback loop of cascading needless replication.
+            // Replicate anything that we didn't previously had ourselves.
+            //
+            // Use `has_prepare` (checks whether a replica has both the header and the corresponding
+            // prepare) instead of `has_header` (checks whether the replica has the header). The
+            // latter is prone to a race wherein a replica that receives a future header *before*
+            // the corresponding prepare (via `start_view` for instance) would end up not forwarding
+            // the prepare, thereby breaking the replication chain.
+            if (message.header.op > self.commit_min and !self.journal.has_prepare(message.header)) {
+                self.replicate(message);
+            } else {
+                log.warn("{}: on_prepare: not replicating op={} commit_min={} present={}", .{
+                    self.replica,
+                    message.header.op,
+                    self.commit_min,
+                    self.journal.has_prepare(message.header),
+                });
+            }
+
             if (self.syncing == .updating_checkpoint) {
-                log.debug("{}: on_prepare: ignoring (sync)", .{self.replica});
+                log.warn("{}: on_prepare: ignoring (sync)", .{self.replica});
                 return;
             }
 
@@ -1614,15 +1635,13 @@ pub fn ReplicaType(
                 return;
             }
 
-            self.replicate(message);
-
             if (self.status != .normal) {
-                log.debug("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
+                log.warn("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
                 return;
             }
 
             if (message.header.view > self.view) {
-                log.debug("{}: on_prepare: ignoring (newer view)", .{self.replica});
+                log.warn("{}: on_prepare: ignoring (newer view)", .{self.replica});
                 return;
             }
 
@@ -1630,7 +1649,7 @@ pub fn ReplicaType(
                 // This would be safe to prepare, but rejecting it simplifies assertions.
                 assert(message.header.op > self.op_checkpoint_next_trigger());
 
-                log.debug("{}: on_prepare: ignoring (newer release)", .{self.replica});
+                log.warn("{}: on_prepare: ignoring (newer release)", .{self.replica});
                 return;
             }
 
@@ -1661,7 +1680,7 @@ pub fn ReplicaType(
 
             // Verify that the new request will fit in the WAL.
             if (message.header.op > self.op_prepare_max()) {
-                log.debug("{}: on_prepare: ignoring op={} (too far ahead, prepare_max={})", .{
+                log.warn("{}: on_prepare: ignoring op={} (too far ahead, prepare_max={})", .{
                     self.replica,
                     message.header.op,
                     self.op_prepare_max(),
@@ -1963,7 +1982,7 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view);
             assert(message.header.op <= self.op); // Repairs may never advance `self.op`.
 
-            if (self.journal.has_clean(message.header)) {
+            if (self.journal.has_prepare(message.header)) {
                 log.debug("{}: on_repair: ignoring (duplicate)", .{self.replica});
 
                 self.send_prepare_ok(message.header);
@@ -1976,6 +1995,9 @@ pub fn ReplicaType(
 
                 log.debug("{}: on_repair: repairing journal", .{self.replica});
                 self.write_prepare(message, .repair);
+                // Write prepare adds it synchronously to in-memory pipeline cache.
+                // Optimistically start committing without waiting for the disk write to finish.
+                if (self.status == .normal and self.backup()) self.commit_journal();
             }
         }
 
@@ -3875,7 +3897,7 @@ pub fn ReplicaType(
             assert(self.commit_min == self.commit_max);
             assert(self.commit_min + 1 == prepare.message.header.op);
             assert(self.commit_min + self.pipeline.queue.prepare_queue.count == self.op);
-            assert(self.journal.has(prepare.message.header));
+            assert(self.journal.has_header(prepare.message.header));
 
             if (!prepare.ok_quorum_received) {
                 // Eventually handled by on_prepare_timeout().
@@ -3901,16 +3923,24 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
             maybe(self.commit_max <= self.op);
 
-            if (!self.valid_hash_chain(@src())) {
-                assert(!self.solo());
-                return .ready;
-            }
-
             // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
             // Even a naive state sync may fail to correct for this.
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
-                const header = self.journal.header_with_op(op).?;
+                const header = self.journal.header_with_op(op) orelse return .ready;
+
+                // Assuming that the head op is correct, it is definitely safe to commit the next
+                // prepare if it is from the same view as the head --- the primary for that view
+                // made sure that the hash chain is valid. If it is from the different view, we
+                // additionally verify ourselves that the hash-chain is not broken
+                const valid_hash_chain_or_same_view = self.valid_hash_chain(@src()) or
+                    (self.status == .normal and
+                    header.view == self.journal.header_with_op(self.op).?.view);
+
+                if (!valid_hash_chain_or_same_view) {
+                    assert(!self.solo());
+                    return .ready;
+                }
 
                 if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.checksum)) |prepare| {
                     log.debug("{}: commit_start_journal: cached prepare op={} checksum={}", .{
@@ -3973,7 +4003,7 @@ pub fn ReplicaType(
 
             const op = self.commit_min + 1;
             assert(prepare.?.header.op == op);
-            assert(self.journal.has(prepare.?.header));
+            assert(self.journal.has_header(prepare.?.header));
 
             self.commit_prepare = prepare.?.ref();
             return self.commit_dispatch_resume();
@@ -3996,7 +4026,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.operation != .reserved);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
             assert(self.commit_prepare.?.header.op <= self.op);
-            assert(self.journal.has(self.commit_prepare.?.header));
+            assert(self.journal.has_header(self.commit_prepare.?.header));
 
             const prepare = self.commit_prepare.?;
 
@@ -4440,7 +4470,7 @@ pub fn ReplicaType(
             // relate to subsequent ops, since by now we have already verified the hash chain for
             // this commit.
 
-            assert(self.journal.has(prepare.header));
+            assert(self.journal.has_header(prepare.header));
             if (self.op_checkpoint() == self.commit_min) {
                 // op_checkpoint's slot may have been overwritten in the WAL — but we can
                 // always use the VSRState to anchor the hash chain.
@@ -5195,15 +5225,6 @@ pub fn ReplicaType(
                     log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
                     return true;
                 },
-                .request_headers, .request_prepare, .request_reply => {
-                    if (self.primary_index(self.view) != message.header.replica) {
-                        log.debug("{}: on_{s}: ignoring (view change, requested by backup)", .{
-                            self.replica,
-                            command,
-                        });
-                        return true;
-                    }
-                },
                 .headers => {
                     if (self.primary_index(self.view) != self.replica) {
                         log.debug("{}: on_{s}: ignoring (view change, received by backup)", .{
@@ -5218,6 +5239,11 @@ pub fn ReplicaType(
                         });
                         return true;
                     }
+                },
+                .request_headers, .request_prepare, .request_reply => {
+                    // on_headers, on_prepare, and on_reply have the appropriate logic to handle
+                    // incorrect headers, prepares, and replies.
+                    return false;
                 },
                 else => unreachable,
             }
@@ -6473,7 +6499,18 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.op < self.op_repair_max()) return;
+            if (self.op < self.op_repair_max()) {
+                const op_header_view = self.journal.header_with_op(self.op).?.view;
+                assert(op_header_view <= self.view);
+                if (op_header_view < self.view) {
+                    // Wait for an SV from the primary to make sure the op indeed hash-chains
+                    // to the actual view state.
+                    return;
+                } else {
+                    // The op is from the current view, anything that hash chains to it is worth
+                    // repairing.
+                }
+            }
 
             const header_break = self.journal.find_latest_headers_break_between(
                 self.op_repair_min(),
@@ -6507,7 +6544,10 @@ pub fn ReplicaType(
                             .command = .request_headers,
                             .cluster = self.cluster,
                             .replica = self.replica,
-                            .op_min = range.op_min,
+                            // Pessimistically request as many headers as we might need.
+                            // Requesting/sending extra headers is inexpensive, and it may save us
+                            // extra round-trips to repair earlier breaks.
+                            .op_min = self.op_repair_min(),
                             .op_max = range.op_max,
                         }),
                     );
@@ -6661,7 +6701,7 @@ pub fn ReplicaType(
                     header.checksum,
                 });
                 return false;
-            } else if (header.op == self.op and !self.journal.has(header)) {
+            } else if (header.op == self.op and !self.journal.has_header(header)) {
                 assert(self.journal.header_with_op(self.op) != null);
                 log.debug("{}: repair_header: op={} checksum={} (changes hash chain head)", .{
                     self.replica,
@@ -6680,23 +6720,23 @@ pub fn ReplicaType(
                 return false;
             }
 
-            if (self.journal.header_for_prepare(header)) |existing| {
-                if (existing.checksum == header.checksum) {
-                    if (self.journal.has_clean(header)) {
-                        log.debug("{}: repair_header: op={} checksum={} (checksum clean)", .{
-                            self.replica,
-                            header.op,
-                            header.checksum,
-                        });
-                        return false;
-                    } else {
-                        log.debug("{}: repair_header: op={} checksum={} (checksum dirty)", .{
-                            self.replica,
-                            header.op,
-                            header.checksum,
-                        });
-                    }
-                } else if (existing.view == header.view) {
+            if (self.journal.has_header(header)) {
+                if (self.journal.has_prepare(header)) {
+                    log.debug("{}: repair_header: op={} checksum={} (checksum clean)", .{
+                        self.replica,
+                        header.op,
+                        header.checksum,
+                    });
+                    return false;
+                } else {
+                    log.debug("{}: repair_header: op={} checksum={} (checksum dirty)", .{
+                        self.replica,
+                        header.op,
+                        header.checksum,
+                    });
+                }
+            } else if (self.journal.header_for_prepare(header)) |existing| {
+                if (existing.view == header.view) {
                     // The journal must have wrapped:
                     // We expect that the same view and op would have had the same checksum.
                     assert(existing.op != header.op);
@@ -6715,7 +6755,6 @@ pub fn ReplicaType(
                     }
                 } else {
                     assert(existing.view != header.view);
-                    assert(existing.op == header.op or existing.op != header.op);
 
                     log.debug("{}: repair_header: op={} checksum={} (different view)", .{
                         self.replica,
@@ -6734,7 +6773,12 @@ pub fn ReplicaType(
             assert(header.op < self.op or
                 self.journal.header_with_op(self.op).?.checksum == header.checksum);
 
-            if (!self.repair_header_would_connect_hash_chain(header)) {
+            if (self.journal.header_with_op(self.op).?.view == header.view) {
+                // Fast path for cases where the header being replaced is from the same view
+                // as the head. In this case, we can skip checking if our hash chain connects
+                // up till the head, as the primary for that view would have already done so in
+                // `on_prepare` (by invoking `panic_if_hash_chain_would_break_in_the_same_view`).
+            } else if (!self.repair_header_would_connect_hash_chain(header)) {
                 // We cannot replace this op until we are sure that this would not:
                 // 1. undermine any prior prepare_ok guarantee made to the primary, and
                 // 2. leak stale ops back into our in-memory headers (and so into a view change).
@@ -6750,7 +6794,7 @@ pub fn ReplicaType(
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
-                assert(self.journal.has(header));
+                assert(self.journal.has_header(header));
             }
 
             self.journal.set_header_as_dirty(header);
@@ -6886,7 +6930,7 @@ pub fn ReplicaType(
                 assert(prepare.header.op <= self.op);
                 assert(prepare.header.checksum == journal_header.checksum);
                 assert(prepare.header.parent == parent);
-                assert(self.journal.has(prepare.header));
+                assert(self.journal.has_header(prepare.header));
 
                 pipeline_queue.push_prepare(prepare);
                 parent = prepare.header.checksum;
@@ -7057,26 +7101,45 @@ pub fn ReplicaType(
                 return;
             }
 
-            // Repair prepares in chronological order. Older prepares will be overwritten by the
-            // cluster earlier, so we prioritize their repair. This also encourages concurrent
-            // commit/repair.
-            var op = op_min;
-            while (op <= self.op) : (op += 1) {
-                const slot = self.journal.slot_with_op(op).?;
-                if (self.journal.dirty.bit(slot)) {
-                    // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
-                    // Continue to request prepares until our budget is depleted.
-                    if (self.repair_prepare(op)) {
-                        budget -= 1;
-                        if (budget == 0) {
-                            log.debug("{}: repair_prepares: request budget used", .{self.replica});
-                            return;
+            // Iterate through op_min..=self.op, but make sure to iterate commit_min+1..=self.op
+            // sub range first:
+            // - our first priority is to commit further,
+            // - afterwards, repair commited prepares which are at risk of getting evicted from
+            //   the journal, to help repair any lagging replicas.
+            const repair_ranges_exclusive: [2]struct { u64, u64 } = .{
+                .{ @max(op_min, self.commit_min + 1), self.op + 1 },
+                .{ op_min, @max(self.commit_min + 1, op_min) },
+            };
+            const range_count_a = self.op - op_min + 1;
+            const range_count_b = (repair_ranges_exclusive[0][1] - repair_ranges_exclusive[0][0]) +
+                (repair_ranges_exclusive[1][1] - repair_ranges_exclusive[1][0]);
+            assert(range_count_a == range_count_b);
+
+            var range_count_c: u64 = 0;
+            for (repair_ranges_exclusive) |repair_range_exclusive| {
+                const range_min, const range_max = repair_range_exclusive;
+                assert(range_min <= range_max);
+                for (range_min..range_max) |op| {
+                    range_count_c += 1;
+                    const slot = self.journal.slot_with_op(op).?;
+                    if (self.journal.dirty.bit(slot)) {
+                        // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
+                        // Continue to request prepares until our budget is depleted.
+                        if (self.repair_prepare(op)) {
+                            budget -= 1;
+                            if (budget == 0) {
+                                log.debug("{}: repair_prepares: request budget used", .{
+                                    self.replica,
+                                });
+                                return;
+                            }
                         }
+                    } else {
+                        assert(!self.journal.faulty.bit(slot));
                     }
-                } else {
-                    assert(!self.journal.faulty.bit(slot));
                 }
             }
+            assert(range_count_c == range_count_a);
 
             // Clean up out-of-bounds dirty slots so repair() can finish.
             const slots_repaired = vsr.SlotRange{
@@ -7290,7 +7353,7 @@ pub fn ReplicaType(
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
-                assert(self.syncing == .updating_checkpoint or self.journal.has(header));
+                assert(self.syncing == .updating_checkpoint or self.journal.has_header(header));
             }
 
             if (header.op == self.op_checkpoint() + 1) {
@@ -7304,7 +7367,7 @@ pub fn ReplicaType(
             // We must not set an op as dirty if we already have it exactly because:
             // 1. this would trigger a repair and delay the view change, or worse,
             // 2. prevent repairs to another replica when we have the op.
-            if (!self.journal.has(header)) self.journal.set_header_as_dirty(header);
+            if (!self.journal.has_header(header)) self.journal.set_header_as_dirty(header);
         }
 
         /// Replicates to the next replica in the configuration (until we get back to the primary):
@@ -7314,31 +7377,16 @@ pub fn ReplicaType(
         /// TODO Use recent heartbeat data for next replica to leapfrog if faulty (optimization).
         fn replicate(self: *Replica, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
-            assert(message.header.view >= self.view);
-            // We may replicate older prepares from either a primary of the current or future view
-            // whose start view we're waiting on (to truncate our log and set our self.op
-            // accordingly).
+
+            // Older prepares should be replicated --- if we missed such a prepare in the past,
+            // our next-in-ring is likely missing it too!
             maybe(message.header.op < self.op);
+            maybe(message.header.op < self.commit_max);
+            maybe(message.header.view < self.view);
 
-            // TODO: Prepares are normally ring replicated, but commits are broadcast. It's possible
-            // for a commit to arrive before prepares, because they are broadcast directly from the
-            // primary whereas the prepares have to go through the ring. This will result in that
-            // replica not replicating, even though it should!
-            if (message.header.op <= self.commit_max) {
-                log.debug("{}: replicate: not replicating (committed)", .{self.replica});
-                return;
-            }
-
-            // Broadcasting uses 5x the bandwidth of ring topology, but is significantly faster for
-            // smaller messages. Only broadcast if the message size is 5x less than
-            // message_size_max, to keep the maximum total bandwidth usage around the same.
-            const broadcast_threshold = @divFloor(constants.message_size_max, 5);
-            if (self.status == .normal and self.primary() and
-                message.header.size < broadcast_threshold)
-            {
-                self.send_message_to_other_replicas_and_standbys(message.base());
-                return;
-            }
+            // But each prepare should be replicated at most once, to avoid feedback loops.
+            assert(!self.journal.has_prepare(message.header));
+            assert(message.header.op > self.commit_min);
 
             const next = next: {
                 // Replication in the ring of active replicas.
@@ -7489,7 +7537,7 @@ pub fn ReplicaType(
             assert(header.view <= self.view);
             assert(header.op <= self.op);
 
-            if (self.journal.has_clean(header)) {
+            if (self.journal.has_prepare(header)) {
                 log.debug("{}: send_prepare_ok: op={} checksum={}", .{
                     self.replica,
                     header.op,
@@ -8562,7 +8610,7 @@ pub fn ReplicaType(
 
                 var pipeline_prepares = pipeline_queue.prepare_queue.iterator();
                 while (pipeline_prepares.next()) |prepare| {
-                    assert(self.journal.has(prepare.message.header));
+                    assert(self.journal.has_header(prepare.message.header));
                     assert(!prepare.ok_quorum_received);
                     assert(prepare.ok_from_all_replicas.count() == 0);
 
@@ -9257,12 +9305,22 @@ pub fn ReplicaType(
             assert(self.grid_repair_tables.executing() == 0);
 
             {
-                self.sync_tables = .{};
+                // Log an approximation of how much sync work there is to do.
+                // Note that this isn't completely accurate:
+                // - It doesn't consider that tables might be added/removed by local compaction.
+                const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
+                const sync_op_min = self.superblock.working.vsr_state.sync_op_min;
+                const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
+                var tables = ForestTableIterator{};
                 var table_count: u32 = 0;
                 var table_count_by_level = [_]u32{0} ** constants.lsm_levels;
-                while (self.sync_tables.?.next(&self.state_machine.forest)) |table| {
-                    table_count += 1;
-                    table_count_by_level[table.label.level] += 1;
+                while (tables.next(&self.state_machine.forest)) |table_info| {
+                    if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
+                        table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
+                    {
+                        table_count += 1;
+                        table_count_by_level[table_info.label.level] += 1;
+                    }
                 }
                 log.info(
                     "{}: sync: {} tables (by level: {any})",
@@ -9708,7 +9766,7 @@ pub fn ReplicaType(
             assert(message.header.op >= self.op_repair_min());
             assert(message.header.release.value <= self.release.value);
 
-            if (!self.journal.has(message.header)) {
+            if (!self.journal.has_header(message.header)) {
                 log.debug("{}: write_prepare: ignoring op={} checksum={} (header changed)", .{
                     self.replica,
                     message.header.op,

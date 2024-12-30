@@ -521,6 +521,85 @@ pub fn StateMachineType(
             }
         };
 
+        const Metrics = struct {
+            const TimingSummary = struct {
+                duration_min_us: ?u64 = null,
+                duration_max_us: ?u64 = null,
+                duration_sum_us: u64 = 0,
+
+                count: u64 = 0,
+
+                /// If an operation supports batching (eg, lookup_accounts) this is a count of the
+                /// number of internal operations.
+                count_batch: u64 = 0,
+            };
+
+            /// Technically 'timer' can't be used, but that'll error out at comptime.
+            const MetricEnum = std.meta.FieldEnum(Metrics);
+
+            create_accounts: TimingSummary = .{},
+            create_transfers: TimingSummary = .{},
+            lookup_accounts: TimingSummary = .{},
+            lookup_transfers: TimingSummary = .{},
+            get_account_transfers: TimingSummary = .{},
+            get_account_balances: TimingSummary = .{},
+            query_accounts: TimingSummary = .{},
+            query_transfers: TimingSummary = .{},
+
+            compact: TimingSummary = .{},
+            checkpoint: TimingSummary = .{},
+
+            timer: std.time.Timer,
+
+            pub fn log_and_reset(metrics: *Metrics) void {
+                inline for (comptime std.meta.fieldNames(Metrics)) |field_name| {
+                    if (comptime !std.mem.eql(u8, field_name, "timer")) {
+                        const timing: *TimingSummary = &@field(metrics, field_name);
+                        if (timing.count > 0) {
+                            log.info("{s}: p0={?}us mean={}us p100={?}us " ++
+                                "sum={}us count={} count_batch={}", .{
+                                field_name,
+                                timing.duration_min_us,
+                                @divFloor(timing.duration_sum_us, timing.count),
+                                timing.duration_max_us,
+                                timing.duration_sum_us,
+                                timing.count,
+                                timing.count_batch,
+                            });
+                        }
+                    }
+                }
+
+                metrics.* = .{
+                    .timer = metrics.timer,
+                };
+            }
+
+            pub fn record(
+                metrics: *Metrics,
+                comptime metric: MetricEnum,
+                duration_us: u64,
+                count_batch: u64,
+            ) void {
+                const timing: *Metrics.TimingSummary = &@field(
+                    metrics,
+                    @tagName(metric),
+                );
+
+                timing.duration_min_us = if (timing.duration_min_us) |duration_min_us|
+                    @min(duration_min_us, duration_us)
+                else
+                    duration_us;
+                timing.duration_max_us = if (timing.duration_max_us) |duration_max_us|
+                    @max(duration_max_us, duration_us)
+                else
+                    duration_us;
+                timing.duration_sum_us += duration_us;
+                timing.count += 1;
+                timing.count_batch += count_batch;
+            }
+        };
+
         batch_size_limit: u32,
         prefetch_timestamp: u64,
         prepare_timestamp: u64,
@@ -542,6 +621,9 @@ pub fn StateMachineType(
         compact_callback: ?*const fn (*StateMachine) void = null,
         checkpoint_callback: ?*const fn (*StateMachine) void = null,
 
+        /// Temporary metrics, until proper ones are merged.
+        metrics: Metrics,
+
         pub fn init(
             self: *StateMachine,
             allocator: mem.Allocator,
@@ -561,6 +643,10 @@ pub fn StateMachineType(
 
                 .forest = undefined,
                 .scan_lookup_buffer = undefined,
+
+                .metrics = .{
+                    .timer = try std.time.Timer.start(),
+                },
             };
 
             try self.forest.init(
@@ -596,6 +682,10 @@ pub fn StateMachineType(
                 .commit_timestamp = 0,
                 .forest = self.forest,
                 .scan_lookup_buffer = self.scan_lookup_buffer,
+
+                .metrics = .{
+                    .timer = self.metrics.timer,
+                },
             };
         }
 
@@ -710,6 +800,9 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.prefetch_setup(null);
             self.forest.grooves.transfers.prefetch_setup(null);
             self.forest.grooves.transfers_pending.prefetch_setup(null);
+
+            // Prefetch starts timing for an operation.
+            self.metrics.timer.reset();
 
             return switch (operation) {
                 .pulse => {
@@ -1559,6 +1652,34 @@ pub fn StateMachineType(
                 .query_transfers => self.execute_query_transfers(input, output),
             };
 
+            @setEvalBranchQuota(10_000);
+            switch (operation) {
+                .pulse => {},
+                inline else => |comptime_operation| {
+                    const event_size: usize = switch (operation) {
+                        .get_account_transfers, .get_account_balances => blk: {
+                            break :blk if (AccountFilterFormer.required(client_release))
+                                @sizeOf(AccountFilterFormer)
+                            else
+                                @sizeOf(AccountFilter);
+                        },
+                        else => @sizeOf(EventType(comptime_operation)),
+                    };
+
+                    const count_batch = @divExact(
+                        input.len,
+                        event_size,
+                    );
+                    const duration_us = @divFloor(self.metrics.timer.read(), std.time.ns_per_us);
+
+                    self.metrics.record(
+                        std.meta.stringToEnum(Metrics.MetricEnum, @tagName(comptime_operation)).?,
+                        duration_us,
+                        count_batch,
+                    );
+                },
+            }
+
             return result;
         }
 
@@ -1570,6 +1691,8 @@ pub fn StateMachineType(
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 
+            self.metrics.timer.reset();
+
             self.compact_callback = callback;
             self.forest.compact(compact_finish, op);
         }
@@ -1579,12 +1702,17 @@ pub fn StateMachineType(
             const callback = self.compact_callback.?;
             self.compact_callback = null;
 
+            const duration_us = @divFloor(self.metrics.timer.read(), std.time.ns_per_us);
+            self.metrics.record(.compact, duration_us, 1);
+
             callback(self);
         }
 
         pub fn checkpoint(self: *StateMachine, callback: *const fn (*StateMachine) void) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
+
+            self.metrics.timer.reset();
 
             self.checkpoint_callback = callback;
             self.forest.checkpoint(checkpoint_finish);
@@ -1594,6 +1722,12 @@ pub fn StateMachineType(
             const self: *StateMachine = @fieldParentPtr("forest", forest);
             const callback = self.checkpoint_callback.?;
             self.checkpoint_callback = null;
+
+            const duration_us = @divFloor(self.metrics.timer.read(), std.time.ns_per_us);
+            self.metrics.record(.checkpoint, duration_us, 1);
+
+            self.metrics.log_and_reset();
+
             callback(self);
         }
 

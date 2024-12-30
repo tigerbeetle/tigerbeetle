@@ -515,27 +515,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             return op;
         }
 
-        pub fn has(journal: *const Journal, header: *const Header.Prepare) bool {
+        pub fn has_header(journal: *const Journal, header: *const Header.Prepare) bool {
             assert(journal.status == .recovered);
             assert(header.command == .prepare);
             assert(header.operation != .reserved);
 
-            const slot = journal.slot_for_op(header.op);
-            const existing = &journal.headers[slot.index];
-            if (existing.operation == .reserved) {
-                return false;
+            if (journal.header_with_op_and_checksum(header.op, header.checksum)) |_| {
+                return true;
             } else {
-                if (existing.checksum == header.checksum) {
-                    assert(existing.checksum_body == header.checksum_body);
-                    assert(existing.op == header.op);
-                    return true;
-                } else {
-                    return false;
-                }
+                return false;
             }
         }
 
-        pub fn has_clean(journal: *const Journal, header: *const Header.Prepare) bool {
+        pub fn has_prepare(journal: *const Journal, header: *const Header.Prepare) bool {
             if (journal.slot_with_op_and_checksum(header.op, header.checksum)) |slot| {
                 if (!journal.dirty.bit(slot)) {
                     assert(journal.prepare_inhabited[slot.index]);
@@ -547,7 +539,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn has_dirty(journal: *const Journal, header: *const Header.Prepare) bool {
-            return journal.has(header) and journal.dirty.bit(journal.slot_with_header(header).?);
+            return journal.has_header(header) and journal.dirty.bit(
+                journal.slot_with_header(header).?,
+            );
         }
 
         /// Copies latest headers between `op_min` and `op_max` (both inclusive) as fit in `dest`.
@@ -1764,7 +1758,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             const slot = journal.slot_for_header(header);
 
-            if (journal.has(header)) {
+            if (journal.has_header(header)) {
                 assert(journal.dirty.bit(slot));
                 maybe(journal.faulty.bit(slot));
                 // Do not clear any faulty bit for the same entry.
@@ -1806,7 +1800,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.operation != .reserved);
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
-            assert(journal.has(message.header));
+            assert(journal.has_header(message.header));
             assert(!journal.writing(message.header.op, message.header.checksum));
             if (replica.solo()) assert(journal.writes.executing() == 0);
 
@@ -1832,7 +1826,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const write = journal.writes.acquire() orelse {
                 assert(!replica.solo());
 
-                journal.write_prepare_debug(message.header, "waiting for IOP");
+                journal.write_prepare_warn(message.header, "waiting for IOP");
                 callback(replica, null, trigger);
                 return;
             };
@@ -1918,7 +1912,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const journal = write.journal;
             const message = write.message;
 
-            if (!journal.has(message.header)) {
+            if (!journal.has_header(message.header)) {
                 journal.write_prepare_debug(message.header, "entry changed while writing headers");
                 journal.write_prepare_release(write, null);
                 return;
@@ -1967,11 +1961,28 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             header: *const Header.Prepare,
             status: []const u8,
         ) void {
+            journal.write_prepare_fn(header, status, log.debug);
+        }
+
+        fn write_prepare_warn(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+            status: []const u8,
+        ) void {
+            journal.write_prepare_fn(header, status, log.warn);
+        }
+
+        fn write_prepare_fn(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+            status: []const u8,
+            comptime log_fn: anytype,
+        ) void {
             assert(journal.status == .recovered);
             assert(header.command == .prepare);
             assert(header.operation != .reserved);
 
-            log.debug("{}: write: view={} slot={} op={} len={}: {} {s}", .{
+            log_fn("{}: write: view={} slot={} op={} len={}: {} {s}", .{
                 journal.replica,
                 header.view,
                 journal.slot_for_header(header).index,
