@@ -3923,16 +3923,24 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
             maybe(self.commit_max <= self.op);
 
-            if (!self.valid_hash_chain(@src())) {
-                assert(!self.solo());
-                return .ready;
-            }
-
             // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
             // Even a naive state sync may fail to correct for this.
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
-                const header = self.journal.header_with_op(op).?;
+                const header = self.journal.header_with_op(op) orelse return .ready;
+
+                // Assuming that the head op is correct, it is definitely safe to commit the next
+                // prepare if it is from the same view as the head --- the primary for that view
+                // made sure that the hash chain is valid. If it is from the different view, we
+                // additionally verify ourselves that the hash-chain is not broken
+                const valid_hash_chain_or_same_view = self.valid_hash_chain(@src()) or
+                    (self.status == .normal and
+                    header.view == self.journal.header_with_op(self.op).?.view);
+
+                if (!valid_hash_chain_or_same_view) {
+                    assert(!self.solo());
+                    return .ready;
+                }
 
                 if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.checksum)) |prepare| {
                     log.debug("{}: commit_start_journal: cached prepare op={} checksum={}", .{
@@ -5217,15 +5225,6 @@ pub fn ReplicaType(
                     log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
                     return true;
                 },
-                .request_headers, .request_prepare, .request_reply => {
-                    if (self.primary_index(self.view) != message.header.replica) {
-                        log.debug("{}: on_{s}: ignoring (view change, requested by backup)", .{
-                            self.replica,
-                            command,
-                        });
-                        return true;
-                    }
-                },
                 .headers => {
                     if (self.primary_index(self.view) != self.replica) {
                         log.debug("{}: on_{s}: ignoring (view change, received by backup)", .{
@@ -5240,6 +5239,11 @@ pub fn ReplicaType(
                         });
                         return true;
                     }
+                },
+                .request_headers, .request_prepare, .request_reply => {
+                    // on_headers, on_prepare, and on_reply have the appropriate logic to handle
+                    // incorrect headers, prepares, and replies.
+                    return false;
                 },
                 else => unreachable,
             }
