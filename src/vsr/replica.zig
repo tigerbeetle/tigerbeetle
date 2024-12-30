@@ -1995,6 +1995,9 @@ pub fn ReplicaType(
 
                 log.debug("{}: on_repair: repairing journal", .{self.replica});
                 self.write_prepare(message, .repair);
+                // Write prepare adds it synchronously to in-memory pipeline cache.
+                // Optimistically start committing without waiting for the disk write to finish.
+                if (self.status == .normal and self.backup()) self.commit_journal();
             }
         }
 
