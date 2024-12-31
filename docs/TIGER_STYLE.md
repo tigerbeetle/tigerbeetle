@@ -263,7 +263,7 @@ Beyond these rules:
 
   In particular, extract hot loops into stand-alone functions with primitive arguments without
   `self` (see [an example](https://github.com/tigerbeetle/tigerbeetle/blob/0.16.19/src/lsm/compaction.zig#L1932-L1937)).
-  That way, the complier doesn't need to prove that it can cache struct's fields in registers, and a
+  That way, the compiler doesn't need to prove that it can cache struct's fields in registers, and a
   human reader can spot redundant computations easier.
 
 ## Developer Experience
