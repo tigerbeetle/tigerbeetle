@@ -7070,7 +7070,7 @@ pub fn ReplicaType(
 
             // We may be appending to or repairing the journal concurrently.
             // We do not want to re-request any of these prepares unnecessarily.
-            if (self.journal.writing(op, checksum)) {
+            if (self.journal.writing(op, checksum) == .exact) {
                 log.debug("{}: repair_prepare: op={} checksum={} (already writing)", .{
                     self.replica,
                     op,
@@ -7093,6 +7093,9 @@ pub fn ReplicaType(
                 assert(prepare.header.checksum == checksum);
 
                 if (self.solo()) {
+                    // Solo replicas don't change views and rewrite prepares.
+                    assert(self.journal.writing(op, checksum) == .none);
+
                     // This op won't start writing until all ops in the pipeline preceding it have
                     // been written.
                     log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
@@ -7568,7 +7571,7 @@ pub fn ReplicaType(
                     // that we can help the new primary to repair this prepare.
                     if ((self.journal.prepare_inhabited[slot.index] and
                         self.journal.prepare_checksums[slot.index] == header.checksum) or
-                        self.journal.writing(header.op, header.checksum) or
+                        self.journal.writing(header.op, header.checksum) == .exact or
                         self.pipeline_prepare_by_op_and_checksum(
                         header.op,
                         header.checksum,
@@ -9605,8 +9608,8 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.journal.writing(message.header.op, message.header.checksum)) {
-                log.debug("{}: write_prepare: ignoring op={} checksum={} (already writing)", .{
+            if (self.journal.writing(message.header.op, message.header.checksum) != .none) {
+                log.debug("{}: write_prepare: ignoring op={} checksum={} (already writing slot)", .{
                     self.replica,
                     message.header.op,
                     message.header.checksum,

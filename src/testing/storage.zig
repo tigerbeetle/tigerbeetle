@@ -45,6 +45,7 @@ const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
 
 const log = std.log.scoped(.storage);
 
+// FIXME tidy:
 // TODOs:
 // less than a majority of replicas may have corruption
 // have an option to enable/disable the following corruption types:

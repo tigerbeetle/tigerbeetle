@@ -927,6 +927,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             };
 
             if (error_reason) |reason| {
+                // If the write is in-progress, don't set the entry as faulty -- we probably just
+                // read some partially-written data. If this slot truly is faulty we will discover
+                // it later driven by a retry.
+                var writes = journal.writes.iterate_const();
+                while (writes.next()) |write| {
+                    if (write.message.header.op == op and
+                        write.message.header.checksum == checksum)
+                    {
+                        callback(replica, write.message, destination_replica);
+                        return;
+                    }
+                }
+
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
@@ -1728,6 +1741,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         pub fn remove_entry(journal: *Journal, slot: Slot) void {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
 
+            std.debug.print("{}: REMOVE_ENTRY: {}\n", .{journal.replica, slot.index});
+
             const reserved = Header.Prepare.reserved(replica.cluster, slot.index);
             journal.headers[slot.index] = reserved;
             journal.headers_redundant[slot.index] = reserved;
@@ -1809,7 +1824,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
             assert(journal.has(message.header));
-            assert(!journal.writing(message.header.op, message.header.checksum));
+            assert(journal.writing(message.header.op, message.header.checksum) == .none);
             if (replica.solo()) assert(journal.writes.executing() == 0);
 
             // The underlying header memory must be owned by the buffer and not by journal.headers:
@@ -2008,6 +2023,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         /// Start the write on the current range or add it to the proper queue
         /// if an overlapping range is currently being written.
+        /// FIXME write_headers should annihilate on collisions
         fn lock_sectors(journal: *Journal, write: *Journal.Write) void {
             assert(!write.range.locked);
             assert(write.range.next == null);
@@ -2018,6 +2034,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (!other.range.locked) continue;
 
                 if (other.range.overlaps(&write.range)) {
+                    assert(other.range.ring == .headers);
                     assert(other.range.offset == write.range.offset);
                     assert(other.range.buffer.len == write.range.buffer.len);
 
@@ -2079,6 +2096,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var current = range.next;
             range.next = null;
             while (current) |waiting| {
+                assert(waiting.ring == .headers);
                 assert(waiting.locked == false);
                 current = waiting.next;
                 waiting.next = null;
@@ -2133,25 +2151,35 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             return sector;
         }
 
-        pub fn writing(journal: *Journal, op: u64, checksum: u128) bool {
-            const slot = journal.slot_for_op(op);
-            var found: bool = false;
-            var it = journal.writes.iterate();
-            while (it.next()) |write| {
-                const write_slot = journal.slot_for_op(write.message.header.op);
+        const Writing = enum {
+            none,
+            /// Either the prepare or the redundant header of a message with the same slot as the
+            /// given op is being written. It may be a different version of the same op, or a
+            /// different op which shares the prepare slot.
+            slot,
+            /// Either the prepare or the redundant header of a message with the exact op/checksum
+            /// is being written.
+            exact,
+        };
 
-                // It's possible that we might be writing the same op but with a different checksum.
-                // For example, if the op we are writing did not survive the view change and was
-                // replaced by another op. We must therefore do the search primarily on checksum.
-                // However, we compare against the 64-bit op first, since it's a cheap machine word.
-                if (write.message.header.op == op and write.message.header.checksum == checksum) {
-                    // If we truly are writing, then the dirty bit must be set:
-                    assert(journal.dirty.bit(journal.slot_for_op(op)));
-                    found = true;
-                } else if (write_slot.index == slot.index) {
-                    // If the in-progress write of '{op, checksum}' will be overwritten by another
-                    // write to the same slot, writing() must return false.
-                    found = false;
+        // FIXME assert new invariant elsewhere
+        pub fn writing(journal: *Journal, op: u64, checksum: u128) Writing {
+            const slot = journal.slot_for_op(op);
+            var found: Writing = .none;
+            var writes = journal.writes.iterate();
+            while (writes.next()) |write| {
+                const write_slot = journal.slot_for_op(write.message.header.op);
+                if (write.message.header.op == op and
+                    write.message.header.checksum == checksum)
+                {
+                    assert(write_slot.index == slot.index);
+                    assert(found == .none);
+                    found = .exact;
+                } else {
+                    if (write_slot.index == slot.index) {
+                        assert(found == .none);
+                        found = .slot;
+                    }
                 }
             }
             return found;
