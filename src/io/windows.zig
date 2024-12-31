@@ -1117,37 +1117,24 @@ pub const IO = struct {
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
         assert((attributes & os.windows.FILE_WRITE_THROUGH) > 0);
 
-        // TODO: Add ReadFileEx/WriteFileEx support.
-        // Not currently needed for O_DIRECT disk IO.
-        // attributes |= os.windows.FILE_FLAG_OVERLAPPED;
-        // const handle = try windows_open_file(path_w.span(), .{
-        //     .access_mask = access_mask,
-        //     .dir = dir_handle,
-        //     .sa = null,
-        //     .share_access = shared_mode,
-        //     .creation = creation_disposition,
-        //     .filter = .file_only,
-        //     .follow_symlinks = true,
-        // }, attributes);
-        // Add overlapped IO support if the IO instance was provided.
-
-        attributes |= os.windows.FILE_FLAG_OVERLAPPED;
-        const handle = os.windows.kernel32.CreateFileW(
-            path_w.span(),
-            access_mask,
-            shared_mode,
-            null, // no security attributes required
-            creation_disposition,
-            attributes,
-            null, // no existing template file
-        );
+        // It's a little confusing, but with NtCreateFile, which is what windows_open_file uses
+        // under the hood, not specifying anything gets you a file capable of overlapped IO.
+        // FILE_FLAG_OVERLAPPED and co belong to the higher level ... API.
+        const handle = try windows_open_file(path_w.span(), .{
+            .access_mask = access_mask,
+            .dir = dir_handle,
+            .sa = null,
+            .share_access = shared_mode,
+            .creation = creation_disposition,
+            .filter = .file_only,
+            .follow_symlinks = false,
+        }, attributes);
 
         if (handle == os.windows.INVALID_HANDLE_VALUE) {
             return switch (os.windows.kernel32.GetLastError()) {
                 .FILE_NOT_FOUND => error.FileNotFound,
                 .SHARING_VIOLATION, .ACCESS_DENIED => error.AccessDenied,
                 else => |err| {
-                    log.warn("CreateFileW(): {}", .{err});
                     return os.windows.unexpectedError(err);
                 },
             };
@@ -1183,16 +1170,24 @@ pub const IO = struct {
         _ = direct_io;
 
         const handle = switch (method) {
-            .open => try open_file_handle(self, dir_handle, relative_path, .open),
-            .open_read_only => try open_file_handle(self, dir_handle, relative_path, .open_read_only),
-            .create => try open_file_handle(self, dir_handle, relative_path, .create),
+            .open => try self.open_file_handle(dir_handle, relative_path, .open),
+            .open_read_only => try self.open_file_handle(
+                dir_handle,
+                relative_path,
+                .open_read_only,
+            ),
+            .create => try self.open_file_handle(dir_handle, relative_path, .create),
             .create_or_open => open_file_handle(
                 self,
                 dir_handle,
                 relative_path,
                 .open,
             ) catch |err| switch (err) {
-                error.FileNotFound => try open_file_handle(self, dir_handle, relative_path, .create),
+                error.FileNotFound => try self.open_file_handle(
+                    dir_handle,
+                    relative_path,
+                    .create,
+                ),
                 else => return err,
             },
         };
@@ -1408,18 +1403,15 @@ pub fn windows_open_file(
         .SecurityQualityOfService = null,
     };
     var io: os.windows.IO_STATUS_BLOCK = undefined;
-    const blocking_flag: os.windows.ULONG = os.windows.FILE_SYNCHRONOUS_IO_NONALERT;
     const file_or_dir_flag: os.windows.ULONG = switch (options.filter) {
         .file_only => os.windows.FILE_NON_DIRECTORY_FILE,
         .dir_only => os.windows.FILE_DIRECTORY_FILE,
         .any => 0,
     };
-    // If we're not following symlinks, we need to ensure we don't pass in any synchronization
-    // flags such as FILE_SYNCHRONOUS_IO_NONALERT.
-    const flags: os.windows.ULONG = if (options.follow_symlinks)
-        file_or_dir_flag | blocking_flag
-    else
-        file_or_dir_flag | os.windows.FILE_OPEN_REPARSE_POINT;
+    // This code is changed slightly from Zig's stdlib: there, options.follow_symlinks enforces
+    // FILE_SYNCHRONOUS_IO_NONALERT which stops overlapped IO.
+    assert(!options.follow_symlinks);
+    const flags: os.windows.ULONG = file_or_dir_flag | os.windows.FILE_OPEN_REPARSE_POINT;
 
     while (true) {
         const rc = os.windows.ntdll.NtCreateFile(

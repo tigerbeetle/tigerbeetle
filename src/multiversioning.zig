@@ -1288,6 +1288,20 @@ pub const Multiversion = struct {
 
 pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    if (builtin.target.os.tag == .windows) {
+        // Special case: Wine doesn't support selfExePath.
+        const ntdll = os.windows.kernel32.GetModuleHandleW(
+            std.unicode.utf8ToUtf16LeStringLiteral("ntdll.dll"),
+        ).?;
+        const wine_get_version = os.windows.kernel32.GetProcAddress(ntdll, "wine_get_version");
+
+        if (wine_get_version != null) {
+            log.warn("wine doesn't support std.fs.selfExePath", .{});
+            return allocator.dupeZ(u8, "");
+        }
+    }
+
     const native_self_exe_path = try std.fs.selfExePath(&buf);
 
     if (builtin.target.os.tag == .linux and std.mem.eql(
