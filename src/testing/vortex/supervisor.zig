@@ -1063,7 +1063,7 @@ const TraceWriter = struct {
         }
 
         const datetime = stdx.DateTimeUTC.from_timestamp_ms(timestamp / 1000);
-        var datetime_buffer: [128]u8 = undefined;
+        var datetime_buffer: [24]u8 = undefined;
         var datetime_stream = std.io.fixedBufferStream(&datetime_buffer);
         stdx.DateTimeUTC.format(datetime, "", .{}, datetime_stream.writer()) catch return;
 
