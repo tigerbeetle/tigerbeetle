@@ -285,7 +285,7 @@ pub const Tracer = struct {
             "\"ts\":{[timestamp]}," ++
             "\"cat\":\"{[category]s}\"," ++
             "\"name\":\"{[name]s}{[data]}\"," ++
-            "\"args\":{[args]}" ++
+            "\"args\":{[args]s}" ++
             "}},\n", .{
             .process_id = tracer.replica_index,
             .thread_id = event.stack(),
@@ -294,7 +294,10 @@ pub const Tracer = struct {
             .timestamp = time_elapsed_us,
             .name = event,
             .data = struct_format(data, .sparse),
-            .args = std.json.Formatter(@TypeOf(data)){ .value = data, .options = .{} },
+            .args = if (comptime @TypeOf(data) == @TypeOf(.{}))
+                "{}" // Serialize `.{}` as an empty object, not as an empty array.
+            else
+                std.json.Formatter(@TypeOf(data)){ .value = data, .options = .{} },
         }) catch unreachable;
 
         writer.writeAll(buffer_stream.getWritten()) catch |err| {
@@ -460,7 +463,7 @@ test "trace json" {
     try snap(@src(),
         \\[
         \\{"pid":0,"tid":0,"ph":"B","ts":<snap:ignore>,"cat":"replica_commit","name":"replica_commit","args":{"foo":123}},
-        \\{"pid":0,"tid":4,"ph":"B","ts":<snap:ignore>,"cat":"compact_beat","name":"compact_beat","args":[]},
+        \\{"pid":0,"tid":4,"ph":"B","ts":<snap:ignore>,"cat":"compact_beat","name":"compact_beat","args":{}},
         \\{"pid":0,"tid":4,"ph":"E","ts":<snap:ignore>},
         \\{"pid":0,"tid":0,"ph":"E","ts":<snap:ignore>},
         \\
