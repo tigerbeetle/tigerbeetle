@@ -142,12 +142,15 @@ const Inspector = struct {
             .superblock_headers = undefined,
         };
 
+        inspector.io = try vsr.io.IO.init(128, 0);
+        errdefer inspector.io.deinit();
+
         const dirname = std.fs.path.dirname(path) orelse ".";
         inspector.dir_fd = try vsr.io.IO.open_dir(dirname);
         errdefer std.posix.close(inspector.dir_fd);
 
         const basename = std.fs.path.basename(path);
-        inspector.fd = try vsr.io.IO.open_file(
+        inspector.fd = try inspector.io.open_file(
             inspector.dir_fd,
             basename,
             vsr.superblock.data_file_size_min,
@@ -155,9 +158,6 @@ const Inspector = struct {
             .direct_io_optional,
         );
         errdefer std.posix.close(inspector.fd);
-
-        inspector.io = try vsr.io.IO.init(128, 0);
-        errdefer inspector.io.deinit();
 
         inspector.storage = try Storage.init(&inspector.io, inspector.fd);
         errdefer inspector.storage.deinit();

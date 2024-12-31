@@ -732,7 +732,7 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        self: ?*IO,
+        self: *IO,
         dir_fd: fd_t,
         relative_path: []const u8,
         size: u64,

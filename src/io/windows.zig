@@ -1075,7 +1075,7 @@ pub const IO = struct {
 
     // TODO open_read_only should open the file as read-only.
     fn open_file_handle(
-        self: ?*IO,
+        self: *IO,
         dir_handle: fd_t,
         relative_path: []const u8,
         method: enum { create, open, open_read_only },
@@ -1130,10 +1130,8 @@ pub const IO = struct {
         //     .follow_symlinks = true,
         // }, attributes);
         // Add overlapped IO support if the IO instance was provided.
-        if (self != null) {
-            attributes |= os.windows.FILE_FLAG_OVERLAPPED;
-        }
 
+        attributes |= os.windows.FILE_FLAG_OVERLAPPED;
         const handle = os.windows.kernel32.CreateFileW(
             path_w.span(),
             access_mask,
@@ -1157,10 +1155,8 @@ pub const IO = struct {
 
         errdefer os.windows.CloseHandle(handle);
 
-        // Register the file with the IO handle (if provided) for overlapped operations.
-        if (self) |io| {
-            try io.register_handle(handle);
-        }
+        // Register the file with the IO handle for overlapped operations.
+        try self.register_handle(handle);
 
         return handle;
     }
@@ -1174,7 +1170,7 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        self: ?*IO,
+        self: *IO,
         dir_handle: fd_t,
         relative_path: []const u8,
         size: u64,
