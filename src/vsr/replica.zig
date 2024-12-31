@@ -3663,6 +3663,7 @@ pub fn ReplicaType(
 
         const CommitStage = union(enum) {
             const CheckpointData = enum {
+                aof,
                 state_machine,
                 client_replies,
                 client_sessions,
@@ -4194,6 +4195,11 @@ pub fn ReplicaType(
                 // parallel (as much possible) rather than in sequence.
                 self.send_commit();
             }
+            if (self.aof) |aof| {
+                aof.checkpoint(self, commit_checkpoint_data_aof_callback);
+            } else {
+                self.commit_checkpoint_data_callback_join(.aof);
+            }
             self.grid_scrubber.checkpoint();
             self.state_machine.checkpoint(commit_checkpoint_data_state_machine_callback);
             self.client_sessions_checkpoint
@@ -4208,6 +4214,12 @@ pub fn ReplicaType(
             });
             self.grid.checkpoint(commit_checkpoint_data_grid_callback);
             return .pending;
+        }
+
+        fn commit_checkpoint_data_aof_callback(replica: *anyopaque) void {
+            const self: *Replica = @alignCast(@ptrCast(replica));
+            assert(self.commit_stage == .checkpoint_data);
+            self.commit_checkpoint_data_callback_join(.aof);
         }
 
         fn commit_checkpoint_data_state_machine_callback(state_machine: *StateMachine) void {
@@ -4520,10 +4532,7 @@ pub fn ReplicaType(
                 self.trace.start(.replica_aof_write, .{
                     .op = prepare.header.op,
                 });
-                aof.write(prepare, .{
-                    .replica = self.replica,
-                    .primary = self.primary_index(self.view),
-                }) catch @panic("aof failure");
+                aof.write(prepare) catch @panic("aof failure");
                 self.trace.stop(.replica_aof_write, .{
                     .op = prepare.header.op,
                 });

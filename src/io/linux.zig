@@ -416,6 +416,9 @@ pub const IO = struct {
                         op.address.getOsSockLen(),
                     );
                 },
+                .fsync => |op| {
+                    sqe.prep_fsync(op.fd, op.flags);
+                },
                 .openat => |op| {
                     sqe.prep_openat(
                         op.dir_fd,
@@ -556,6 +559,26 @@ pub const IO = struct {
                                 .PROTOTYPE => error.ProtocolNotSupported,
                                 .TIMEDOUT => error.ConnectionTimedOut,
                                 else => |errno| stdx.unexpected_errno("connect", errno),
+                            };
+                            break :blk err;
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
+                    completion.callback(completion.context, completion, &result);
+                },
+                .fsync => {
+                    const result: anyerror!void = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .BADF => error.FileDescriptorInvalid,
+                                .IO => error.InputOutput,
+                                .INVAL => unreachable,
+                                else => |errno| stdx.unexpected_errno("fsync", errno),
                             };
                             break :blk err;
                         } else {
@@ -789,6 +812,10 @@ pub const IO = struct {
             socket: posix.socket_t,
             address: std.net.Address,
         },
+        fsync: struct {
+            fd: fd_t,
+            flags: u32,
+        },
         openat: struct {
             dir_fd: fd_t,
             file_path: [*:0]const u8,
@@ -962,6 +989,45 @@ pub const IO = struct {
                 .connect = .{
                     .socket = socket,
                     .address = address,
+                },
+            },
+        };
+        self.enqueue(completion);
+    }
+
+    pub const FsyncError = error{
+        FileDescriptorInvalid,
+        InputOutput,
+    } || posix.UnexpectedError;
+
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
+        completion: *Completion,
+        fd: fd_t,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @ptrCast(@alignCast(ctx)),
+                        comp,
+                        @as(*const FsyncError!void, @ptrCast(@alignCast(res))).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .fsync = .{
+                    .fd = fd,
+                    .flags = os.linux.IORING_FSYNC_DATASYNC,
                 },
             },
         };

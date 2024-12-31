@@ -107,29 +107,29 @@ pub const AOF = struct {
         }
     }
 
-    pub fn write(
-        self: *AOF,
-        message: *const Message.Prepare,
-        options: struct { replica: u8, primary: u8 },
-    ) !void {
-        var entry: AOFEntry align(constants.sector_size) = undefined;
+    pub fn write(self: *AOF, message: *const Message.Prepare) !void {
+        var entry: AOFEntry align(16) = undefined;
         entry.from_message(
             message,
-            .{ .replica = options.replica, .primary = options.primary },
             &self.last_checksum,
         );
 
-        const disk_size = entry.calculate_disk_size();
-        assert(self.index + disk_size <= self.backing_store.len);
+        const size_disk = entry.size_disk();
+        assert(self.index + size_disk <= self.backing_store.len);
         stdx.copy_disjoint(
             .exact,
             u8,
-            self.backing_store[self.index..][0..disk_size],
-            std.mem.asBytes(&entry)[0..disk_size],
+            self.backing_store[self.index..][0..size_disk],
+            std.mem.asBytes(&entry)[0..size_disk],
         );
-        self.index += disk_size;
+        self.index += size_disk;
 
-        log.debug("wrote {} bytes, {} used / {}", .{ disk_size, self.index, backing_size });
+        log.debug("wrote {} bytes, {} used / {}", .{ size_disk, self.index, backing_size });
+    }
+
+    pub fn checkpoint(self: *AOF, replica: *anyopaque, callback: *const fn (*anyopaque) void) void {
+        _ = self;
+        callback(replica);
     }
 
     pub const Iterator = AOFIteratorType(InMemoryAOF);
