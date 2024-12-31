@@ -228,14 +228,43 @@ const TimeIt = struct {
     inner: std.time.Timer,
 
     /// Prints elapsed time to stderr and resets the internal timer.
-    pub fn lap(self: *TimeIt, comptime label: []const u8) void {
+    pub fn print(self: *TimeIt, comptime label: []const u8) void {
         const label_alignment = comptime " " ** (1 + (12 -| label.len));
 
-        const nanos = self.inner.lap();
+        const elapsed_ns = self.inner.lap();
         std.debug.print(
             label ++ ":" ++ label_alignment ++ "{}\n",
-            .{std.fmt.fmtDuration(nanos)},
+            .{std.fmt.fmtDuration(elapsed_ns)},
         );
+    }
+
+    pub fn print_if_longer_than_ms(
+        self: *TimeIt,
+        threshold_ms: u64,
+        comptime label: []const u8,
+    ) void {
+        self.if_longer_than(label, threshold_ms, false);
+    }
+
+    pub fn backtrace_if_longer_than_ms(
+        self: *TimeIt,
+        threshold_ms: u64,
+        comptime label: []const u8,
+    ) void {
+        self.if_longer_than(label, threshold_ms, true);
+    }
+
+    fn if_longer_than(
+        self: *TimeIt,
+        comptime label: []const u8,
+        threshold_ms: u64,
+        backtrace: bool,
+    ) void {
+        const elapsed_ns = self.inner.lap();
+        if (elapsed_ns > threshold_ms * std.time.ns_per_ms) {
+            std.debug.print(label ++ ": {}\n", .{std.fmt.fmtDuration(elapsed_ns)});
+            if (backtrace) std.debug.dumpCurrentStackTrace(null);
+        }
     }
 };
 
