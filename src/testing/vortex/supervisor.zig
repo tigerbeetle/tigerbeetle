@@ -1032,7 +1032,7 @@ const TraceWriter = struct {
         try writer.stream.endObject();
     }
 
-    fn write(writer: *TraceWriter, event: TraceEvent, args: anytype) !void {
+    fn write(writer: *TraceWriter, event: TraceEvent, metadata: anytype) !void {
         try writer.stream.beginObject();
 
         try writer.stream.objectField("pid");
@@ -1064,8 +1064,16 @@ const TraceWriter = struct {
             try writer.stream.write(@tagName(name));
         }
 
+        const datetime = stdx.DateTimeUTC.from_timestamp_ms(timestamp / 1000);
+        var datetime_buffer: [24]u8 = undefined;
+        var datetime_stream = std.io.fixedBufferStream(&datetime_buffer);
+        stdx.DateTimeUTC.format(datetime, "", .{}, datetime_stream.writer()) catch return;
+
         try writer.stream.objectField("args");
-        try writer.stream.write(args);
+        try writer.stream.write(.{
+            .metadata = metadata,
+            .timestamp = datetime_stream.getWritten(),
+        });
 
         try writer.stream.endObject();
     }
