@@ -270,6 +270,11 @@ pub fn ReplicaType(
         opened: bool,
 
         syncing: SyncStage = .idle,
+        // Holds onto the SV message that triggered a state sync during async cancelation phase.
+        //
+        // Invariants:
+        // - (sync_start_view ≠ null) ⇔ (syncing ∈ {.canceling_commit, .canceling_checkpoint})
+        sync_start_view: ?*Message.StartView = null,
         /// Invariants:
         /// - If syncing≠idle then sync_tables=null.
         sync_tables: ?ForestTableIterator = null,
@@ -1284,6 +1289,8 @@ pub fn ReplicaType(
                 self.commit_prepare = null;
             }
 
+            if (self.sync_start_view) |message| self.message_bus.unref(message);
+
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |read| self.message_bus.unref(read.message);
 
@@ -1386,6 +1393,18 @@ pub fn ReplicaType(
                     message.header.cluster,
                 });
                 return;
+            }
+
+            switch (self.syncing) {
+                .idle => {},
+                .canceling_commit, .canceling_grid => {
+                    // Ignore further messages until finishing (asynchronous) processing of sync SV.
+                    // Notably, this prevents our view from jumping ahead of SV.
+                    assert(self.sync_start_view != null);
+                    log.warn("{}: on_message: ignoring (syncing)", .{self.replica});
+                    return;
+                },
+                .updating_checkpoint => {},
             }
 
             self.jump_view(message.header);
@@ -2211,13 +2230,34 @@ pub fn ReplicaType(
         // is the op-number. Then they execute all operations known to be committed that they
         // haven’t executed previously, advance their commit number, and update the information in
         // their client table.
-        fn on_start_view(self: *Replica, message: *const Message.StartView) void {
+        fn on_start_view(self: *Replica, message: *Message.StartView) void {
             assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message.base_const())) return;
+
+            if (self.status == .recovering_head) {
+                if (message.header.view > self.view or
+                    message.header.op >= self.op_prepare_max() or
+                    message.header.nonce == self.nonce)
+                {
+                    // This SV is guaranteed to have originated after the replica crash,
+                    // it is safe to use to determine the head op.
+                } else {
+                    log.mark.debug(
+                        "{}: on_start_view: ignoring (recovering_head, nonce mismatch)",
+                        .{self.replica},
+                    );
+                    return;
+                }
+            }
 
             assert(self.status == .view_change or
                 self.status == .normal or
                 self.status == .recovering_head);
+            switch (self.syncing) {
+                .idle, .updating_checkpoint => {},
+                .canceling_commit, .canceling_grid => unreachable,
+            }
+            assert(self.sync_start_view == null);
             assert(message.header.view >= self.view);
             assert(message.header.replica != self.replica);
             assert(message.header.replica == self.primary_index(message.header.view));
@@ -2257,6 +2297,31 @@ pub fn ReplicaType(
             }
             assert(self.view == message.header.view);
 
+            // Logically, SV atomically updates both the checkpoint state and the log suffix.
+            // Physically, updating the checkpoint is an asynchronous operation: it requires waiting
+            // for in-progress write IOPs to complete. If the checkpoint needs to be updated
+            // (set_checkpoint returns true), the replica doesn't update the journal here, and
+            // instead arranges that to happen after the checkpoint update.
+            if (self.on_start_view_set_checkpoint(message)) {
+                switch (self.syncing) {
+                    .idle => {
+                        assert(self.commit_stage == .checkpoint_data or
+                            self.commit_stage == .checkpoint_superblock);
+                        assert(self.sync_start_view == null);
+                    },
+                    .updating_checkpoint => {
+                        assert(self.sync_start_view == null);
+                    },
+                    .canceling_commit, .canceling_grid => {
+                        assert(self.sync_start_view == message);
+                    },
+                }
+            } else {
+                self.on_start_view_set_journal(message);
+            }
+        }
+
+        fn on_start_view_set_checkpoint(self: *Replica, message: *Message.StartView) bool {
             const view_checkpoint = start_view_message_checkpoint(message);
             if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
                 assert(message.header.commit_max >= trigger);
@@ -2272,75 +2337,69 @@ pub fn ReplicaType(
                 ).?,
             );
 
+            if (!vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit_max)) {
+                return false;
+            }
+
+            // Cluster is at least two checkpoints ahead. Although SV's checkpoint is not guaranteed
+            // be durable on a quorum of replicas, it is safe to sync to it, because prepares in
+            // this replica's WAL are no longer needed.
+            const far_behind = vsr.Checkpoint.durable(self.op_checkpoint_next() +
+                constants.vsr_checkpoint_ops, message.header.commit_max);
+            // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
+            // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
+            // there's evidence that the repair can't be completed.
+            const likely_stuck = self.syncing == .idle and self.repair_stuck();
+
+            if (!far_behind and !likely_stuck) return false;
+
+            // State sync: at this point, we know we want to replace our checkpoint
+            // with the one from this SV.
+
+            assert(message.header.commit_max > self.op_checkpoint_next_trigger());
+            assert(view_checkpoint.header.op > self.op_checkpoint());
+
+            // If we are already checkpointing, let that finish first --- perhaps we won't
+            // need state sync after all.
+            if (self.commit_stage == .checkpoint_superblock) return true;
+            if (self.commit_stage == .checkpoint_data) return true;
+            if (self.syncing == .updating_checkpoint) return true;
+
+            // Otherwise, cancel in progress commit and prepare to sync.
+            log.mark.debug(
+                \\{}: on_start_view_set_checkpoint: sync started view={} op_checkpoint={} op_checkpoint_new={}
+            , .{
+                self.replica,
+                self.log_view,
+                self.op_checkpoint(),
+                view_checkpoint.header.op,
+            });
+
+            self.sync_start_from_committing();
+            assert(self.syncing == .canceling_commit or self.syncing == .canceling_grid);
+            assert(self.sync_start_view == null);
+            self.sync_start_view = message.ref();
+            return true;
+        }
+
+        fn on_start_view_set_journal(self: *Replica, message: *const Message.StartView) void {
+            assert(!self.ignore_view_change_message(message.base_const()));
+            assert(self.status == .view_change or
+                self.status == .normal or
+                self.status == .recovering_head);
+            assert(self.sync_start_view == null);
+            assert(message.header.view == self.view);
+            assert(message.header.replica != self.replica);
+            assert(message.header.replica == self.primary_index(message.header.view));
+            assert(message.header.commit_max >= message.header.checkpoint_op);
+            assert(message.header.op >= message.header.commit_max);
+            assert(message.header.op - message.header.commit_max <=
+                constants.pipeline_prepare_queue_max);
+
             const view_headers = start_view_message_headers(message);
             assert(view_headers[0].op == message.header.op);
             assert(view_headers[0].op >= view_headers[view_headers.len - 1].op);
-
-            if (vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit_max) and (
-            //  Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
-            //  guaranteed to be durable on a quorum of replicas, it is safe to sync to it, because
-            //  prepares in this replica's WAL are no longer needed.
-                vsr.Checkpoint.durable(self.op_checkpoint_next() +
-                constants.vsr_checkpoint_ops, message.header.commit_max) or
-                // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
-                // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
-                // there's evidence that the repair can't be completed.
-                (self.syncing == .idle and self.repair_stuck()) or
-                // Completing previously starting state sync.
-                self.syncing == .awaiting_checkpoint))
-            {
-                // State sync: at this point, we know we want to replace our checkpoint
-                // with the one from this SV.
-
-                assert(message.header.commit_max > self.op_checkpoint_next_trigger());
-                assert(view_checkpoint.header.op > self.op_checkpoint());
-
-                if (self.syncing == .idle) {
-                    // If we are already checkpointing, let that finish first --- perhaps we won't
-                    // need state sync after all.
-                    if (self.commit_stage == .checkpoint_superblock) return;
-                    if (self.commit_stage == .checkpoint_data) return;
-                    // Otherwise, cancel in progress commit and prepare to sync.
-                    self.sync_start_from_committing();
-                    assert(self.syncing != .idle);
-                }
-                switch (self.syncing) {
-                    .idle => unreachable,
-                    .canceling_commit,
-                    .canceling_grid,
-                    .updating_checkpoint,
-                    => {
-                        log.debug(
-                            \\{}: on_start_view: sync {s} view={} op_checkpoint={} op_checkpoint_new={}
-                        , .{
-                            self.replica,
-                            @tagName(self.syncing),
-                            self.log_view,
-                            self.op_checkpoint(),
-                            view_checkpoint.header.op,
-                        });
-                        return;
-                    },
-                    .awaiting_checkpoint => {},
-                }
-
-                log.mark.info(
-                    \\{}: on_start_view: sync started view={} op_checkpoint={} op_checkpoint_new={}
-                , .{
-                    self.replica,
-                    self.log_view,
-                    self.op_checkpoint(),
-                    view_checkpoint.header.op,
-                });
-
-                self.sync_dispatch(.{ .updating_checkpoint = view_checkpoint.* });
-
-                // The new checkpoint will be written to the superblock asynchronously.
-                // From this point on, we are in a delicate state where we must be using this
-                // in-memory checkpoint to check validity of log messages.
-                assert(self.syncing == .updating_checkpoint);
-                assert(!self.state_machine_opened);
-            }
+            assert(self.syncing == .idle or self.syncing == .updating_checkpoint);
 
             {
                 // Replace our log with the suffix from SV. Transition to sync above guarantees
@@ -3175,7 +3234,7 @@ pub fn ReplicaType(
                 .advanced = commit_min_previous < self.commit_min,
             };
 
-            if (self.syncing == .awaiting_checkpoint or self.repair_stuck()) {
+            if (self.repair_stuck()) {
                 log.warn("{}: on_repair_sync_timeout: request sync; lagging behind cluster " ++
                     "(op_head={} commit_min={} commit_max={} commit_stage={s})", .{
                     self.replica,
@@ -5793,22 +5852,6 @@ pub fn ReplicaType(
                             command,
                         });
                         return true;
-                    }
-
-                    if (self.status == .recovering_head) {
-                        if (message_header.view > self.view or
-                            message_header.op >= self.op_prepare_max() or
-                            message_header.nonce == self.nonce)
-                        {
-                            // This SV is guaranteed to have originated after the replica crash,
-                            // it is safe to use to determine the head op.
-                        } else {
-                            log.mark.debug(
-                                "{}: on_{s}: ignoring (recovering_head, nonce mismatch)",
-                                .{ self.replica, command },
-                            );
-                            return true;
-                        }
                     }
 
                     // Syncing replicas must be careful about receiving SV messages, since they
@@ -9160,7 +9203,6 @@ pub fn ReplicaType(
                     assert(self.grid_repair_tables.executing() == 0);
                     assert(self.grid.read_global_queue.empty());
                 },
-                .awaiting_checkpoint => {}, // Waiting for a usable sync target.
                 .updating_checkpoint => self.sync_superblock_update_start(),
             }
         }
@@ -9168,6 +9210,7 @@ pub fn ReplicaType(
         fn sync_cancel_grid_callback(grid: *Grid) void {
             const self: *Replica = @alignCast(@fieldParentPtr("grid", grid));
             assert(self.syncing == .canceling_grid);
+            assert(self.sync_start_view != null);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
@@ -9196,7 +9239,17 @@ pub fn ReplicaType(
             var grid_repair_writes = self.grid_repair_writes.iterate();
             while (grid_repair_writes.next()) |write| self.grid_repair_writes.release(write);
 
-            self.sync_dispatch(.awaiting_checkpoint);
+            // Resume SV/sync flow.
+            const message = self.sync_start_view.?;
+            self.sync_start_view = null;
+            defer self.message_bus.unref(message);
+
+            const checkpoint = start_view_message_checkpoint(message);
+            self.sync_dispatch(.{
+                .updating_checkpoint = checkpoint.*,
+            });
+
+            self.on_start_view_set_journal(message);
         }
 
         fn sync_superblock_update_start(self: *Replica) void {
@@ -9658,6 +9711,8 @@ pub fn ReplicaType(
         }
 
         fn jump_view(self: *Replica, header: *const Header) void {
+            assert(self.sync_start_view == null);
+
             if (header.view < self.view) return;
             if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
 
