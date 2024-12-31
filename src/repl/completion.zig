@@ -1,8 +1,8 @@
 const std = @import("std");
-const stdx = @import("stdx.zig");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 
-const RingBuffer = @import("ring_buffer.zig").RingBufferType;
+const RingBuffer = @import("../ring_buffer.zig").RingBufferType;
 const BoundedArray = stdx.BoundedArrayType;
 
 const keywords = [_][]const u8{
