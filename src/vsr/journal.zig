@@ -1861,19 +1861,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const message = write.message;
             assert(journal.status == .recovered);
 
-            {
-                // `prepare_inhabited[slot.index]` is usually false here, but may be true if two
-                // (or more) writes to the same slot were queued concurrently and this is not the
-                // first to finish writing its prepare.
-                const slot = journal.slot_for_header(message.header);
-                journal.prepare_inhabited[slot.index] = true;
-                journal.prepare_checksums[slot.index] = message.header.checksum;
-            }
+            // `prepare_inhabited[slot.index]` is usually false here, but may be true if two
+            // (or more) writes to the same slot were queued concurrently and this is not the
+            // first to finish writing its prepare.
+            const slot = journal.slot_for_header(message.header);
+            journal.prepare_inhabited[slot.index] = true;
+            journal.prepare_checksums[slot.index] = message.header.checksum;
 
-            if (journal.slot_with_op_and_checksum(
-                message.header.op,
-                message.header.checksum,
-            )) |slot| {
+            if (journal.slot_with_header(message.header)) |_| {
                 journal.headers_redundant[slot.index] = message.header.*;
             } else {
                 journal.write_prepare_debug(message.header, "entry changed while writing sectors");
@@ -1886,12 +1881,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // For this, we'll need to have a way to tweak write_prepare_release() to release locks.
             // At present, we don't return early here simply because it doesn't yet do that.
 
-            const slot_of_message = journal.slot_for_header(message.header);
-            const offset = Ring.headers.offset(slot_of_message);
+            const offset = Ring.headers.offset(slot);
             assert(offset % constants.sector_size == 0);
 
             const buffer: []u8 = journal.header_sector(
-                @divFloor(slot_of_message.index, headers_per_sector),
+                @divFloor(slot.index, headers_per_sector),
                 write,
             );
 
