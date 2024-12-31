@@ -930,6 +930,17 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
+                    // Redundant faulty headers are deliberately written as invalid until the
+                    // corresponding prepare is repaired.
+                    //
+                    // This ensures that faulty headers are still faulty when they are read back
+                    // from disk during recovery. This prevents faulty entries from changing to
+                    // reserved (and clean) after a crash and restart (e.g. accidentally converting
+                    // a case `@D` to a `@I` after a restart).
+                    journal.headers_redundant[s.index] =
+                        Header.Prepare.reserved(replica.cluster, s.index);
+                    journal.headers_redundant[s.index].checksum = 0; // Invalidate the checksum.
+                    assert(!journal.headers_redundant[s.index].valid_checksum());
                 }
 
                 journal.read_prepare_log(op, checksum, reason);
@@ -1562,6 +1573,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 },
             }
 
+            journal.headers_redundant[slot.index] = journal.headers[slot.index];
+            if (journal.faulty.bit(slot)) {
+                assert(journal.headers_redundant[slot.index].operation == .reserved);
+                journal.headers_redundant[slot.index].checksum = 0; // Invalidate the checksum.
+            }
+
             switch (decision) {
                 .eql, .nil => {
                     log.debug("{}: recover_slot: recovered " ++
@@ -2075,7 +2092,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.writes.items.len == journal.headers_iops.len);
             assert(sector_index < @divFloor(slot_count, headers_per_sector));
 
-            const replica: *const Replica = @alignCast(@fieldParentPtr("journal", journal));
             const sector_slot = Slot{ .index = sector_index * headers_per_sector };
             assert(sector_slot.index < slot_count);
 
@@ -2092,21 +2108,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             while (i < headers_per_sector) : (i += 1) {
                 const slot = Slot{ .index = sector_slot.index + i };
 
-                if (journal.faulty.bit(slot)) {
-                    // Redundant faulty headers are deliberately written as invalid.
-                    // This ensures that faulty headers are still faulty when they are read back
-                    // from disk during recovery. This prevents faulty entries from changing to
-                    // reserved (and clean) after a crash and restart (e.g. accidentally converting
-                    // a case `@D` to a `@I` after a restart).
-                    sector_headers[i] = Header.Prepare.reserved(replica.cluster, i);
-                    sector_headers[i].checksum = 0; // Invalidate the checksum.
-                    assert(!sector_headers[i].valid_checksum());
-                } else {
-                    // Write headers from `headers_redundant` instead of `headers` — we need to
-                    // avoid writing (leaking) a redundant header before its corresponding prepare
-                    // is on disk.
-                    sector_headers[i] = journal.headers_redundant[slot.index];
-                }
+                // Write headers from `headers_redundant` instead of `headers` — we need to
+                // avoid writing (leaking) a redundant header before its corresponding prepare
+                // is on disk.
+                sector_headers[i] = journal.headers_redundant[slot.index];
             }
             return sector;
         }
