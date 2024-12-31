@@ -453,11 +453,15 @@ test "trace json" {
     defer trace.deinit(std.testing.allocator);
 
     trace.start(.replica_commit, .{ .foo = 123 });
+    trace.start(.compact_beat, .{});
+    trace.stop(.compact_beat, .{});
     trace.stop(.replica_commit, .{ .bar = 456 });
 
     try snap(@src(),
         \\[
         \\{"pid":0,"tid":0,"ph":"B","ts":<snap:ignore>,"cat":"replica_commit","name":"replica_commit","args":{"foo":123}},
+        \\{"pid":0,"tid":4,"ph":"B","ts":<snap:ignore>,"cat":"compact_beat","name":"compact_beat","args":[]},
+        \\{"pid":0,"tid":4,"ph":"E","ts":<snap:ignore>},
         \\{"pid":0,"tid":0,"ph":"E","ts":<snap:ignore>},
         \\
     ).diff(trace_buffer.items);
