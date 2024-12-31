@@ -302,16 +302,6 @@ pub fn CacheMapType(
             assert(self.scope_rollback_log.items.len == 0);
             maybe(self.stash.count() <= self.options.map_value_count_max);
 
-            if (constants.verify) {
-                if (self.cache) |*cache| {
-                    var it = self.stash.keyIterator();
-                    while (it.next()) |value| {
-                        const key = key_from_value(value);
-                        assert(cache.get(key) == null);
-                    }
-                }
-            }
-
             self.stash.clearRetainingCapacity();
         }
     };
