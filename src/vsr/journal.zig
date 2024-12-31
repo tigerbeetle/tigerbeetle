@@ -1873,6 +1873,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             } else {
                 journal.write_prepare_debug(message.header, "entry changed while writing sectors");
                 journal.write_prepare_release(write, null);
+                // We just overwrote a (potentially-clean) prepare with the "wrong" header.
+                journal.dirty.set(slot);
                 return;
             }
             // TODO It's possible within this section that the header has since been replaced but we
