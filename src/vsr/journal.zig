@@ -1751,6 +1751,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn set_header_as_dirty(journal: *Journal, header: *const Header.Prepare) void {
+            const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             assert(journal.status == .recovered);
             assert(header.command == .prepare);
             assert(header.operation != .reserved);
@@ -1780,6 +1781,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // The WAL definitely did not hold this exact header, so it is safe to reset the
                     // faulty bit + nack this header.
                     journal.faulty.clear(slot);
+                    journal.headers_redundant[slot.index] =
+                        Header.Prepare.reserved(replica.cluster, slot.index);
                 }
 
                 journal.headers[slot.index] = header.*;
@@ -1883,6 +1886,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 journal.write_prepare_release(write, null);
                 return;
             };
+
+            if (journal.headers_redundant[slot.index].operation == .reserved and
+                journal.headers_redundant[slot.index].checksum == 0)
+            {
+                assert(journal.faulty.bit(slot));
+            }
             journal.headers_redundant[slot.index] = message.header.*;
 
             // TODO It's possible within this section that the header has since been replaced but we
@@ -2105,6 +2114,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var i: usize = 0;
             while (i < headers_per_sector) : (i += 1) {
                 const slot = Slot{ .index = sector_slot.index + i };
+
+                if (journal.headers_redundant[slot.index].operation == .reserved and
+                    journal.headers_redundant[slot.index].checksum == 0)
+                {
+                    // Deliberately write an invalid header until the corresponding prepare is
+                    // repaired. (See read_prepare_with_op_and_checksum_callback()).
+                    assert(journal.faulty.bit(slot));
+                } else {
+                    maybe(journal.faulty.bit(slot));
+                }
 
                 // Write headers from `headers_redundant` instead of `headers` — we need to
                 // avoid writing (leaking) a redundant header before its corresponding prepare
