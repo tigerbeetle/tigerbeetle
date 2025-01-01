@@ -1073,7 +1073,6 @@ pub const IO = struct {
     pub const fd_t = std.posix.fd_t;
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
-    // TODO open_read_only should open the file as read-only.
     fn open_file_handle(
         self: *IO,
         dir_handle: fd_t,
@@ -1105,7 +1104,10 @@ pub const IO = struct {
         var access_mask: os.windows.DWORD = 0;
         access_mask |= os.windows.SYNCHRONIZE;
         access_mask |= os.windows.GENERIC_READ;
-        access_mask |= os.windows.GENERIC_WRITE;
+
+        if (method != .open_read_only) {
+            access_mask |= os.windows.GENERIC_WRITE;
+        }
 
         // O_DIRECT | O_DSYNC
         // NB: These are NtDll flags, not to be confused with the Win32 style flags that are
@@ -1227,7 +1229,9 @@ pub const IO = struct {
         // making decisions on data that was never durably written by a previously crashed process.
         // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
-        try std.posix.fsync(handle);
+        if (method != .open_read_only) {
+            try std.posix.fsync(handle);
+        }
 
         // We cannot fsync the directory handle on Windows.
         // We have no way to open a directory with write access.
