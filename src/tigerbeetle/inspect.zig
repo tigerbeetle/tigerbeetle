@@ -150,7 +150,7 @@ const Inspector = struct {
         errdefer std.posix.close(inspector.dir_fd);
 
         const basename = std.fs.path.basename(path);
-        inspector.fd = try inspector.io.open_file(
+        inspector.fd = try inspector.io.open_data_file(
             inspector.dir_fd,
             basename,
             vsr.superblock.data_file_size_min,

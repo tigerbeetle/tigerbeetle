@@ -1119,7 +1119,7 @@ pub const IO = struct {
 
         // It's a little confusing, but with NtCreateFile, which is what windows_open_file uses
         // under the hood, not specifying anything gets you a file capable of overlapped IO.
-        // FILE_FLAG_OVERLAPPED and co belong to the higher level ... API.
+        // FILE_FLAG_OVERLAPPED and co belong to the higher level kernel32 API.
         const handle = try windows_open_file(path_w.span(), .{
             .access_mask = access_mask,
             .dir = dir_handle,
@@ -1156,7 +1156,7 @@ pub const IO = struct {
     /// - Ensures that the file data is durable on disk.
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
-    pub fn open_file(
+    pub fn open_data_file(
         self: *IO,
         dir_handle: fd_t,
         relative_path: []const u8,
