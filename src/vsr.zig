@@ -749,18 +749,22 @@ pub const Timeout = struct {
         assert(self.after_dynamic.? > 0);
     }
 
-    pub fn set_rtt(self: *Timeout, rtt_ticks: u64) void {
+    pub fn set_rtt_ns(self: *Timeout, rtt_ns: u64) void {
         assert(self.rtt > 0);
-        assert(rtt_ticks > 0);
 
-        log.debug("{}: {s} rtt={}..{}", .{
-            self.id,
-            self.name,
-            self.rtt,
-            rtt_ticks,
-        });
+        const rtt_ms = @divFloor(rtt_ns, std.time.ns_per_ms);
+        const rtt_ticks = @max(1, @divFloor(rtt_ms, constants.tick_ms));
 
-        self.rtt = rtt_ticks;
+        if (self.rtt != rtt_ticks) {
+            log.debug("{}: {s} rtt={}..{}", .{
+                self.id,
+                self.name,
+                self.rtt,
+                rtt_ticks,
+            });
+
+            self.rtt = rtt_ticks;
+        }
     }
 
     pub fn start(self: *Timeout) void {

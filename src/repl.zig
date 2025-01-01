@@ -25,8 +25,8 @@ const repl_history_entry_bytes_without_nul = 511;
 
 const ReplBufferBoundedArray = stdx.BoundedArrayType(u8, repl_history_entry_bytes_without_nul);
 
-pub fn ReplType(comptime MessageBus: type) type {
-    const Client = vsr.ClientType(StateMachine, MessageBus);
+pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
+    const Client = vsr.ClientType(StateMachine, MessageBus, Time);
 
     // Requires 512 * 256 == 128KiB of stack space.
     const HistoryBuffer = RingBufferType(
@@ -508,8 +508,11 @@ pub fn ReplType(comptime MessageBus: type) type {
         pub fn init(
             allocator: std.mem.Allocator,
             addresses: []const std.net.Address,
-            cluster_id: u128,
-            verbose: bool,
+            options: struct {
+                cluster_id: u128,
+                verbose: bool,
+                time: Time,
+            },
         ) !Repl {
             var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
                 allocator,
@@ -534,8 +537,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                 allocator,
                 .{
                     .id = client_id,
-                    .cluster = cluster_id,
+                    .cluster = options.cluster_id,
                     .replica_count = @intCast(addresses.len),
+                    .time = options.time,
                     .message_pool = message_pool,
                     .message_bus_options = .{
                         .configuration = addresses,
@@ -547,7 +551,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             return .{
                 .client = client,
-                .debug_logs = verbose,
+                .debug_logs = options.verbose,
                 .request_done = true,
                 .event_loop_done = false,
                 .interactive = false,
