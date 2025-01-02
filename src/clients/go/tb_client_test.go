@@ -421,9 +421,8 @@ func doTestClient(t *testing.T, client Client) {
 						Code:            1,
 					},
 				})
-
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 
 				assert.Empty(t, results)
@@ -477,9 +476,8 @@ func doTestClient(t *testing.T, client Client) {
 						Flags:           flags,
 					},
 				})
-
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 
 				if i%10 == 0 {
