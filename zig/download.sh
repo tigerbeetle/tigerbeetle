@@ -115,6 +115,11 @@ case "$ZIG_ARCHIVE_EXT" in
 esac
 rm "$ZIG_ARCHIVE"
 
+#check if the zig directory already exists if not create zig directory
+if [ ! -d "zig" ]; then
+    mkdir zig
+fi
+
 # Replace these existing directories and files so that we can install or upgrade:
 rm -rf zig/doc
 rm -rf zig/lib
