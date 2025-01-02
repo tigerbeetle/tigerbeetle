@@ -25,7 +25,7 @@ const log = std.log.scoped(.client_replies);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
+const RingBufferType = stdx.RingBufferType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const vsr = @import("../vsr.zig");
 const Message = @import("../message_pool.zig").MessagePool.Message;

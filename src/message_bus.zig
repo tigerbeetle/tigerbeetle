@@ -14,7 +14,7 @@ const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
 const stdx = @import("stdx.zig");
-const RingBufferType = @import("ring_buffer.zig").RingBufferType;
+const RingBufferType = stdx.RingBufferType;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;

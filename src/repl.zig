@@ -11,7 +11,7 @@ const StateMachine = vsr.state_machine.StateMachineType(
     constants.state_machine_config,
 );
 const MessagePool = vsr.message_pool.MessagePool;
-const RingBufferType = @import("ring_buffer.zig").RingBufferType;
+const RingBufferType = stdx.RingBufferType;
 
 const tb = vsr.tigerbeetle;
 

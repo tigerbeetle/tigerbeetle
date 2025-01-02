@@ -10,7 +10,6 @@ const log = std.log.scoped(.vsr);
 pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
 pub const fifo = @import("fifo.zig");
-pub const ring_buffer = @import("ring_buffer.zig");
 pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
 pub const state_machine = @import("state_machine.zig");
