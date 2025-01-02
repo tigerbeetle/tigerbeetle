@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const Atomic = std.atomic.Value;
 
@@ -109,7 +110,7 @@ pub fn ContextType(
         evicted: ?vsr.Header.Eviction.Reason,
 
         signal: Signal,
-        submitted: Packet.SubmissionStack,
+        submitted: Packet.SubmissionQueue,
         pending: FIFOType(Packet),
         shutdown: Atomic(bool),
         thread: std.Thread,
@@ -202,8 +203,11 @@ pub fn ContextType(
             };
 
             context.submitted = .{};
+            context.pending = .{
+                .name = null,
+                .verify_push = builtin.is_test,
+            };
             context.shutdown = Atomic(bool).init(false);
-            context.pending = .{ .name = null };
             context.canceled = false;
             context.evicted = null;
 
@@ -308,8 +312,26 @@ pub fn ContextType(
                 return;
             }
 
-            while (self.submitted.pop()) |packet| {
+            // Prevents IO thread starvation under heavy client load.
+            // Process only the minimal number of packets for the next pending request.
+            const enqueued_count = self.pending.count;
+            const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
+            for (0..safety_limit) |_| {
+                const packet = self.submitted.pop() orelse return;
                 self.request(packet);
+
+                // Packets can be processed without increasing `pending.count`:
+                // - If the packet is invalid.
+                // - If there's no in-flight request, the packet is sent immediately without
+                //   using the pending queue.
+                // - If the packet can be batched with another previously enqueued packet.
+                if (self.pending.count > enqueued_count) break;
+            }
+
+            // Defer this work to later,
+            // allowing the IO thread to remain free for processing completions.
+            if (!self.submitted.empty()) {
+                self.signal.notify();
             }
         }
 

@@ -1292,15 +1292,11 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that async tasks will respect client's concurrencyMax.
+     * This test asserts that async calls will not block.
      */
     @Test
     public void testAsyncTasks() throws Throwable {
         final int TASKS_COUNT = 1_000_000;
-        final int CONCURRENCY_MAX = 8192;
-        final var semaphore = new Semaphore(CONCURRENCY_MAX);
-
-        final var executor = Executors.newFixedThreadPool(4);
 
         try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
@@ -1325,11 +1321,7 @@ public class IntegrationTest {
                 transfers.setAmount(100);
 
                 // Starting async batch.
-                semaphore.acquire();
-                tasks[i] = client.createTransfersAsync(transfers).thenApplyAsync((result) -> {
-                    semaphore.release();
-                    return result;
-                }, executor);
+                tasks[i] = client.createTransfersAsync(transfers);
             }
 
             // Wait for all tasks.
