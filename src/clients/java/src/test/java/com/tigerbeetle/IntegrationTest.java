@@ -1050,11 +1050,11 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that the client can handle parallel threads up to concurrencyMax.
+     * This test asserts that the client can handle parallel threads.
      */
     @Test
     public void testConcurrentTasks() throws Throwable {
-        final int TASKS_COUNT = 100;
+        final int TASKS_COUNT = 1000;
         final var barrier = new CountDownLatch(TASKS_COUNT);
 
         try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
@@ -1292,16 +1292,11 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that async tasks will respect client's concurrencyMax.
+     * This test asserts that async calls will not block.
      */
     @Test
     public void testAsyncTasks() throws Throwable {
         final int TASKS_COUNT = 1_000_000;
-        final int CONCURRENCY_MAX = 8192;
-        final var semaphore = new Semaphore(CONCURRENCY_MAX);
-
-        final var executor = Executors.newFixedThreadPool(4);
-
         try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
             final var account1Id = UInt128.id();
@@ -1324,17 +1319,10 @@ public class IntegrationTest {
                 transfers.setCode(1);
                 transfers.setAmount(100);
 
-                // Starting async batch.
-                semaphore.acquire();
-                tasks[i] = client.createTransfersAsync(transfers).thenApplyAsync((result) -> {
-                    semaphore.release();
-                    return result;
-                }, executor);
+                tasks[i] = client.createTransfersAsync(transfers);
             }
 
             // Wait for all tasks.
-            CompletableFuture.allOf(tasks).join();
-
             for (int i = 0; i < TASKS_COUNT; i++) {
                 @SuppressWarnings("unchecked")
                 final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];

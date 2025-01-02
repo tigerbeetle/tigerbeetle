@@ -791,6 +791,7 @@ const Benchmark = struct {
             @intCast(@intFromPtr(b)),
             operation,
             payload,
+            0,
         );
     }
 
@@ -798,8 +799,11 @@ const Benchmark = struct {
         user_data: u128,
         operation: StateMachine.Operation,
         timestamp: u64,
-        result: []u8,
+        result: []const u8,
+        batch_count: u16,
     ) void {
+        assert(batch_count == 0);
+
         const b: *Benchmark = @ptrFromInt(@as(usize, @intCast(user_data)));
         const callback = b.callback.?;
         b.callback = null;

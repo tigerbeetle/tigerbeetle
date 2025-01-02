@@ -251,7 +251,8 @@ pub const Signal = struct {
             self,
             on_timeout,
             &self.completion,
-            0, // zero-timeout functions as a yield.
+            // TODO: apply new Signal PR #2611
+            1, // zero-timeout functions as a yield.
         );
     }
 
