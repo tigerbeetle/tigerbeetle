@@ -230,6 +230,7 @@ pub const IO = struct {
             timeout: struct {
                 deadline: u64,
             },
+            event: Overlapped,
         };
     };
 
@@ -980,6 +981,55 @@ pub const IO = struct {
                 }
             },
         );
+    }
+
+    pub const INVALID_EVENT = 0;
+
+    pub fn open_event(
+        self: *IO,
+        completion: *Completion,
+        comptime on_event: fn (*Completion) void,
+    ) !i32 {
+        completion.* = .{
+            .next = null,
+            .context = null,
+            .operation = undefined,
+            .callback = struct {
+                fn on_complete(ctx: Completion.Context) void {
+                    on_event(ctx.completion);
+                    ctx.io.io_pending += 1;
+                }
+            }.on_complete,
+        };
+
+        // Conceptually start listening by bumping the io_pending count.
+        // Then return an event that isn't invalid.
+        self.io_pending += 1;
+        return INVALID_EVENT + 1;
+    }
+
+    pub fn event_trigger(self: *IO, event: i32, completion: *Completion) void {
+        assert(event == INVALID_EVENT + 1);
+        completion.operation = .{
+            .event = .{
+                .raw = std.mem.zeroes(os.windows.OVERLAPPED),
+                .completion = completion,
+            },
+        };
+
+        os.windows.PostQueuedCompletionStatus(
+            self.iocp,
+            undefined,
+            undefined,
+            &completion.operation.event.raw,
+        ) catch unreachable;
+    }
+
+    pub fn close_event(self: *IO, event: i32, completion: *Completion) void {
+        // Nothing to close as events are just intrusive OVERLAPPED structs.
+        assert(event == INVALID_EVENT + 1);
+        _ = completion;
+        _ = self;
     }
 
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
