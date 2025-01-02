@@ -33,7 +33,7 @@ const arbitrary = @import("./arbitrary.zig");
 const tb = @import("../../tigerbeetle.zig");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
-const RingBufferType = @import("../../ring_buffer.zig").RingBufferType;
+const RingBufferType = stdx.RingBufferType;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;

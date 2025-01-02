@@ -52,7 +52,7 @@ const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");
-const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
+const RingBufferType = stdx.RingBufferType;
 
 /// The upper-bound count of input tables to a single tree's compaction.
 ///

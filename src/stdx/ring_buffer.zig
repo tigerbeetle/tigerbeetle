@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const stdx = @import("stdx.zig");
+const stdx = @import("../stdx.zig");
 
 /// A First In, First Out ring buffer.
 pub fn RingBufferType(
