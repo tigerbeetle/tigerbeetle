@@ -7451,6 +7451,14 @@ pub fn ReplicaType(
             assert(!self.journal.has_prepare(message.header));
             assert(message.header.op > self.commit_min);
 
+            if (self.replicate_options.star) {
+                if (self.status == .normal and self.primary()) {
+                    self.send_message_to_other_replicas_and_standbys(message.base());
+                }
+
+                return;
+            }
+
             const next = next: {
                 // Replication in the ring of active replicas.
                 if (!self.standby()) {
