@@ -400,6 +400,10 @@ const Command = struct {
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
             .tracer_options = .{ .writer = if (trace_writer) |writer| writer.any() else null },
+            .replicate_options = .{
+                .closed_loop = args.replicate_closed_loop,
+                .star = args.replicate_star,
+            },
         }) catch |err| switch (err) {
             error.NoAddress => vsr.fatal(.cli, "all --addresses must be provided", .{}),
             else => |e| return e,

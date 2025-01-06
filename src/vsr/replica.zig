@@ -114,6 +114,11 @@ pub fn ReplicaType(
         const Clock = vsr.ClockType(Time);
         const ForestTableIterator = ForestTableIteratorType(StateMachine.Forest);
 
+        const ReplicateOptions = struct {
+            closed_loop: bool = false,
+            star: bool = false,
+        };
+
         const BlockRead = struct {
             read: Grid.Read,
             replica: *Replica,
@@ -531,6 +536,8 @@ pub fn ReplicaType(
 
         aof: ?*AOF,
 
+        replicate_options: ReplicateOptions,
+
         const OpenOptions = struct {
             node_count: u8,
             pipeline_requests_limit: u32,
@@ -552,6 +559,7 @@ pub fn ReplicaType(
             test_context: ?*anyopaque = null,
             timeout_prepare_ticks: ?u64 = null,
             timeout_grid_repair_message_ticks: ?u64 = null,
+            replicate_options: ReplicateOptions = .{},
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -629,6 +637,7 @@ pub fn ReplicaType(
                 .test_context = options.test_context,
                 .timeout_prepare_ticks = options.timeout_prepare_ticks,
                 .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
+                .replicate_options = options.replicate_options,
             });
 
             // Disable all dynamic allocation from this point onwards.
@@ -977,6 +986,7 @@ pub fn ReplicaType(
             test_context: ?*anyopaque,
             timeout_prepare_ticks: ?u64,
             timeout_grid_repair_message_ticks: ?u64,
+            replicate_options: ReplicateOptions,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -1243,6 +1253,7 @@ pub fn ReplicaType(
                 .trace = self.trace,
                 .test_context = options.test_context,
                 .aof = options.aof,
+                .replicate_options = options.replicate_options,
             };
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
