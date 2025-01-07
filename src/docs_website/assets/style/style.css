@@ -106,6 +106,7 @@ body {
   background-color: var(--gray-0);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
   text-wrap-style: pretty;
 }
 
