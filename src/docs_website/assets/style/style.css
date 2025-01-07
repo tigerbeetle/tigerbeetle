@@ -804,6 +804,9 @@ article {
   nav.left-pane {
     width: 100% !important;
     overflow: visible;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 
     >.top-wrapper {
       >.top {
@@ -885,6 +888,15 @@ article {
 
     >.content {
       padding: 40px 16px;
+
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
+        scroll-margin-top: 72px;
+      }
     }
   }
 }
