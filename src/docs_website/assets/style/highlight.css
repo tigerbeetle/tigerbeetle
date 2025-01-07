@@ -11,15 +11,6 @@
     color: var(--gray-12);
   }
 
-  code::-webkit-scrollbar {
-    width: 16px;
-    height: 16px;
-  }
-
-  code::-webkit-scrollbar-thumb {
-    border: 5px solid var(--gray-1);
-  }
-
   code .co {
     color: var(--gray-10);
   }

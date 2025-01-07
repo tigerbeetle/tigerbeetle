@@ -13,7 +13,7 @@ resizer.addEventListener("mousedown", () => {
   document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
   function onMouseMove(e) {
-    leftPane.style.width = Math.max(160, e.clientX) + "px";
+    leftPane.style.width = Math.max(176, e.clientX) + "px";
     if (e.clientX < 130) {
       document.body.classList.add("sidenav-collapsed");
     } else if (e.clientX > 140) {
