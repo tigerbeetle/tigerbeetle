@@ -471,23 +471,33 @@ nav.side {
 }
 
 .menu-head::before {
-  content: "\25b6";
+  content: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+Cgk8cGF0aCBkPSJNNi41IDQuNSAxMCA4IDYuNSAxMS41IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgLz4KPC9zdmc+");
   text-align: center;
   flex-shrink: 0;
-  font-size: 9px;
-  line-height: 16px;
-  color: var(--gray-11);
+  /* color: var(--gray-11); */
+  filter: invert(30%);
   display: block;
   width: 16px;
   height: 16px;
 }
 
 .menu-head:has(a.target)::before {
-  color: var(--gray-0);
+  /* color: var(--gray-0); */
+  filter: invert(100%);
 }
 
 .menu-head.expanded::before {
-  content: "\25bc";
+  transform: rotate(90deg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .menu-head::before {
+    filter: invert(80%);
+  }
+
+  .menu-head:has(a.target)::before {
+    filter: none;
+  }
 }
 
 body>.resizer {
