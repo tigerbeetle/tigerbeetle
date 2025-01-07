@@ -709,8 +709,11 @@ article {
       margin-left: 32px;
     }
 
+    div.table {
+      overflow: auto;
+    }
+
     table {
-      display: block;
       width: 100%;
       overflow-x: auto;
       border-collapse: separate;
