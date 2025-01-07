@@ -592,7 +592,7 @@ article {
     max-width: 950px;
     padding: 48px 64px;
     padding-bottom: 50vh;
-    overflow: clip;
+    overflow-x: clip;
 
     color: var(--gray-11);
     font-size: 16px;
