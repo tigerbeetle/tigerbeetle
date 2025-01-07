@@ -788,15 +788,12 @@ article {
 @media (min-width: 810px) {
   body {
     display: flex;
-    flex-direction: row;
     height: 100vh;
-    overflow: hidden;
   }
 
   main {
     flex: 1;
-    display: flex;
-    overflow: hidden;
+    overflow-x: hidden;
   }
 }
 
