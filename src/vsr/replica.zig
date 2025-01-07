@@ -3105,6 +3105,12 @@ pub fn ReplicaType(
                     }
                 } else {
                     self.prepare_timeout.stop();
+
+                    // There are no prepares in the pipeline waiting for a prepare_ok quorum, give
+                    // the primary another shot at staying primary even if it currently abdicating.
+                    maybe(self.primary_abdicating);
+                    self.primary_abdicating = false;
+                    self.primary_abdicate_timeout.stop();
                 }
 
                 return self.commit_pipeline();
