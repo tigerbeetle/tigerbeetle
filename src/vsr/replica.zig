@@ -114,6 +114,11 @@ pub fn ReplicaType(
         const Clock = vsr.ClockType(Time);
         const ForestTableIterator = ForestTableIteratorType(StateMachine.Forest);
 
+        const ReplicateOptions = struct {
+            closed_loop: bool = false,
+            star: bool = false,
+        };
+
         const BlockRead = struct {
             read: Grid.Read,
             replica: *Replica,
@@ -531,6 +536,8 @@ pub fn ReplicaType(
 
         aof: ?*AOF,
 
+        replicate_options: ReplicateOptions,
+
         const OpenOptions = struct {
             node_count: u8,
             pipeline_requests_limit: u32,
@@ -552,6 +559,7 @@ pub fn ReplicaType(
             test_context: ?*anyopaque = null,
             timeout_prepare_ticks: ?u64 = null,
             timeout_grid_repair_message_ticks: ?u64 = null,
+            replicate_options: ReplicateOptions = .{},
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -629,6 +637,7 @@ pub fn ReplicaType(
                 .test_context = options.test_context,
                 .timeout_prepare_ticks = options.timeout_prepare_ticks,
                 .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
+                .replicate_options = options.replicate_options,
             });
 
             // Disable all dynamic allocation from this point onwards.
@@ -977,6 +986,7 @@ pub fn ReplicaType(
             test_context: ?*anyopaque,
             timeout_prepare_ticks: ?u64,
             timeout_grid_repair_message_ticks: ?u64,
+            replicate_options: ReplicateOptions,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -1243,6 +1253,7 @@ pub fn ReplicaType(
                 .trace = self.trace,
                 .test_context = options.test_context,
                 .aof = options.aof,
+                .replicate_options = options.replicate_options,
             };
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
@@ -1802,8 +1813,22 @@ pub fn ReplicaType(
             assert(prepare.message.header.checkpoint_id ==
                 self.checkpoint_id_for_op(prepare.message.header.op).?);
 
-            // Wait until we have a quorum of prepare_ok messages (including ourself):
-            const threshold = self.quorum_replication;
+            // Wait until we have a quorum of prepare_ok messages (including ourself).
+            //
+            // When running with replicate_options.closed_loop this is changed significantly.
+            // Instead, the primary will try and wait for all replicas to respond, within a
+            // `prepare_timeout`. If the timeout fires, the quorum requirement for the whole
+            // pipeline is lowered to `self.quorum_replication` and checked again.
+            const threshold = if (self.replicate_options.closed_loop)
+                // It's possible that the on_prepare_timeout fires between reaching a replication
+                // quorum and receiving another prepare_ok. In that case, consider the threshold
+                // to have been quorum_replication, so following logic is skipped accordingly.
+                if (prepare.ok_quorum_received)
+                    self.quorum_replication
+                else
+                    self.replica_count
+            else
+                self.quorum_replication;
 
             if (!prepare.ok_from_all_replicas.isSet(message.header.replica)) {
                 self.primary_abdicating = false;
@@ -1818,7 +1843,6 @@ pub fn ReplicaType(
                 threshold,
             ) orelse return;
 
-            const prepare_pending = self.primary_pipeline_pending().?;
             assert(count == threshold);
             assert(!prepare.ok_quorum_received);
             prepare.ok_quorum_received = true;
@@ -1831,8 +1855,10 @@ pub fn ReplicaType(
             assert(self.prepare_timeout.ticking);
             assert(self.primary_abdicate_timeout.ticking);
             assert(!self.primary_abdicating);
-            if (self.primary_pipeline_pending()) |_| {
-                if (prepare_pending == prepare) self.prepare_timeout.reset();
+            if (self.primary_pipeline_pending()) |prepare_pending| {
+                if (prepare_pending == prepare) {
+                    self.prepare_timeout.reset();
+                }
             } else {
                 self.prepare_timeout.stop();
                 self.primary_abdicate_timeout.stop();
@@ -3039,6 +3065,55 @@ pub fn ReplicaType(
 
                 self.prepare_timeout.reset();
                 return;
+            }
+
+            // Special case: replicate_options.closed_loop is set, and while we haven't yet received
+            // all prepare_oks, we have received enough to form a regular quorum. The head of the
+            // pipeline blocks anything further down, so checking the rest of the pipeline is gated
+            // by the head.
+            if (self.replicate_options.closed_loop and
+                prepare.ok_from_all_replicas.count() >= self.quorum_replication)
+            {
+                log.warn("{}: on_prepare_timeout: received quorum " ++
+                    "(prepare_oks={} quorum_replication={} replica_count={})", .{
+                    self.replica,
+                    prepare.ok_from_all_replicas.count(),
+                    self.quorum_replication,
+                    self.replica_count,
+                });
+
+                // If the head has received enough prepare_oks, it's possible the rest of the
+                // pipeline has too. Check the head (again) and do the same for all other prepares
+                // in the pipeline.
+                var prepares = self.pipeline.queue.prepare_queue.iterator_mutable();
+                while (prepares.next_ptr()) |prepare_pipelined| {
+                    assert(prepare_pipelined.message.header.command == .prepare);
+                    if (prepare_pipelined.ok_quorum_received) {
+                        continue;
+                    }
+
+                    if (prepare_pipelined.ok_from_all_replicas.count() >= self.quorum_replication) {
+                        prepare_pipelined.ok_quorum_received = true;
+                    }
+                }
+
+                if (self.primary_pipeline_pending()) |prepare_pending| {
+                    if (prepare_pending == prepare) {
+                        self.prepare_timeout.backoff(self.prng.random());
+                    } else {
+                        self.prepare_timeout.reset();
+                    }
+                } else {
+                    self.prepare_timeout.stop();
+
+                    // There are no prepares in the pipeline waiting for a prepare_ok quorum, give
+                    // the primary another shot at staying primary even if it currently abdicating.
+                    maybe(self.primary_abdicating);
+                    self.primary_abdicating = false;
+                    self.primary_abdicate_timeout.stop();
+                }
+
+                return self.commit_pipeline();
             }
 
             // The list of remote replicas yet to send a prepare_ok:
@@ -7439,6 +7514,14 @@ pub fn ReplicaType(
             // But each prepare should be replicated at most once, to avoid feedback loops.
             assert(!self.journal.has_prepare(message.header));
             assert(message.header.op > self.commit_min);
+
+            if (self.replicate_options.star) {
+                if (self.status == .normal and self.primary()) {
+                    self.send_message_to_other_replicas_and_standbys(message.base());
+                }
+
+                return;
+            }
 
             const next = next: {
                 // Replication in the ring of active replicas.
