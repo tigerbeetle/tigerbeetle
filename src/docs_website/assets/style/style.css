@@ -312,6 +312,11 @@ nav.left-pane {
     font-weight: 400;
     cursor: pointer;
 
+    &::before {
+      /* color: var(--gray-10); */
+      filter: invert(51%);
+    }
+
     p {
       white-space: nowrap;
       overflow: hidden;
@@ -321,6 +326,11 @@ nav.left-pane {
     &:hover {
       background-color: var(--gray-3);
       color: var(--gray-12);
+
+      &::before {
+        /* color: var(--gray-12); */
+        filter: invert(12%);
+      }
     }
   }
 
@@ -497,6 +507,16 @@ nav.side {
 
   .menu-head:has(a.target)::before {
     filter: none;
+  }
+
+  .search-results {
+    .menu-head::before {
+      filter: invert(48%);
+    }
+
+    .menu-head:hover::before {
+      filter: invert(93%);
+    }
   }
 }
 
