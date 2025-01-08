@@ -45,7 +45,7 @@ pub fn build(b: *std.Build) !void {
         .target = b.graph.host,
     });
     const service_worker_writer_run = b.addRunArtifact(service_worker_writer_exe);
-    service_worker_writer_run.addArgs(&.{url_prefix, git_commit, "zig-out"});
+    service_worker_writer_run.addArgs(&.{ url_prefix, git_commit, "zig-out" });
     service_worker_writer_run.step.dependOn(&file_checker_run.step);
 
     b.getInstallStep().dependOn(&service_worker_writer_run.step);
