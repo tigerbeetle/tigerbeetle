@@ -97,6 +97,11 @@ code {
 .highlight {
   background-color: var(--primary-6);
   color: var(--primary-12);
+
+  &.active {
+    background-color: var(--primary-11);
+    color: var(--gray-0);
+  }
 }
 
 nav.left-pane {

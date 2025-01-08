@@ -200,6 +200,22 @@ function selectResult(node) {
   }
   handleAnchor();
   highlightText(searchInput.value, content);
+  markActiveHighlight(content);
+}
+
+function markActiveHighlight(container) {
+  let element = container.firstElementChild;
+  if (location.hash) {
+    element = document.getElementById(location.hash.slice(1));
+  }
+  for (; element; element = element.nextElementSibling) {
+    const highlight = element.querySelector(".highlight");
+    if (highlight) {
+      highlight.classList.add("active");
+      scrollIntoViewIfNeeded(highlight, container.parentNode);
+      return;
+    }
+  }
 }
 
 let statePathname = location.pathname;
