@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const log = std.log.scoped(.service_worker_writer);
 const Html = @import("html.zig").Html;
 

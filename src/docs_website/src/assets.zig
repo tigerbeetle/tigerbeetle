@@ -1,6 +1,5 @@
 const std = @import("std");
 const Build = std.Build;
-const LazyPath = Build.LazyPath;
 
 pub const supported_file_types = [_][]const u8{
     "avif",

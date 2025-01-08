@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const log = std.log.scoped(.file_checker);
 const assets = @import("assets.zig");
 

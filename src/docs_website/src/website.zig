@@ -1,7 +1,6 @@
 const std = @import("std");
 const LazyPath = std.Build.LazyPath;
 const Compile = std.Build.Step.Compile;
-const log = std.log.scoped(.website);
 
 pub const Website = @This();
 
