@@ -101,7 +101,9 @@ function onSearchInput() {
     menus.push(menuHead);
     menuHead.classList.add("menu-head");
     menuHead.classList.add("expanded");
-    menuHead.innerHTML = `<p>${pages[group.pageIndex].title}</p>`;
+    const p = document.createElement("p");
+    p.innerText = pages[group.pageIndex].title;
+    menuHead.appendChild(p);
     menuHead.addEventListener("click", () => menuHead.classList.toggle("expanded"));
     const menu = document.createElement("div");
     menus.push(menu);
@@ -120,7 +122,7 @@ function onSearchInput() {
       h3.innerText = result.section.title;
       const p = document.createElement("p");
       a.appendChild(p);
-      p.innerHTML = result.context;
+      p.innerText = result.context;
     }
   }
   searchResults.replaceChildren(...menus);
