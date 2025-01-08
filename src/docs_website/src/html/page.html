@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' plausible.io 'sha256-$page_script_hash'">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'sha256-$page_script_hash'">
     <meta name="description" content="The financial transactions database to power the next 30 years of Online Transaction Processing.">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@TigerBeetleDB">
@@ -18,7 +18,6 @@
     <meta name="author" content="$author">
     <title id="title">$title</title>
     <link rel="icon" href="$url_prefix/img/favicon.png">
-    <link rel="alternate" type="application/atom+xml" href="$url_prefix/blog/atom.xml">
     <link rel="stylesheet" type="text/css" href="$url_prefix/style/style.css">
     <link rel="stylesheet" type="text/css" href="$url_prefix/style/highlight.css">
   </head>
@@ -80,6 +79,13 @@
         <div class="glass-edge"></div>
       </div>
       <div class="search-results"></div>
+      <div class="search-notfound">
+        <img width="64" height="85" src="$url_prefix/img/notfound.webp">
+        <p>
+          Can't find what you're looking for?<br>
+          <a href="https://join.slack.com/t/tigerbeetle/shared_invite/zt-21xk62q7l-p~~G7~H01zQb88rQn7tWfQ">Ask the TigerBeetle Slack Community.</a>
+        </p>
+      </div>
       <nav class="side">
         $nav
       </nav>

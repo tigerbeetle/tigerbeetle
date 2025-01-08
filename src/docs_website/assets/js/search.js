@@ -95,18 +95,16 @@ function onSearchInput() {
     }
     currentGroup.results.push(result);
   }
-  const rootMenu = document.createElement("div");
-  rootMenu.classList.add("menu");
-  searchResults.replaceChildren(rootMenu);
+  let menus = [];
   for (const group of groups) {
     const menuHead = document.createElement("div");
-    rootMenu.appendChild(menuHead);
+    menus.push(menuHead);
     menuHead.classList.add("menu-head");
     menuHead.classList.add("expanded");
     menuHead.innerHTML = `<p>${pages[group.pageIndex].title}</p>`;
     menuHead.addEventListener("click", () => menuHead.classList.toggle("expanded"));
     const menu = document.createElement("div");
-    rootMenu.appendChild(menu);
+    menus.push(menu);
     menu.classList.add("menu");
     for (const result of group.results) {
       const a = document.createElement("a");
@@ -125,6 +123,7 @@ function onSearchInput() {
       p.innerHTML = result.context;
     }
   }
+  searchResults.replaceChildren(...menus);
 
   const resultText = results.length === 1 ? "result" : "results";
   const pageText = groups.length === 1 ? "page" : "pages";

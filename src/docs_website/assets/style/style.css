@@ -286,6 +286,12 @@ nav.left-pane {
       display: block;
     }
 
+    &:has(.search-results:empty) {
+      .search-notfound {
+        display: flex;
+      }
+    }
+
     nav.side {
       display: none;
     }
@@ -376,6 +382,31 @@ nav.left-pane {
         background-color: var(--highlight-active);
         color: var(--gray-0);
       }
+    }
+  }
+}
+
+.search-notfound {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  color: var(--gray-10);
+
+  a {
+    color: var(--gray-11);
+    text-underline-offset: 2px;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  .search-notfound {
+    img {
+      opacity: 70%;
     }
   }
 }
