@@ -481,7 +481,7 @@ nav.side {
 }
 
 .menu-head::before {
-  content: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+Cgk8cGF0aCBkPSJNNi41IDQuNSAxMCA4IDYuNSAxMS41IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgLz4KPC9zdmc+");
+  content: url('data:image/svg+xml,<svg width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 4.5 10 8 6.5 11.5" stroke="black" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" /></svg>');
   text-align: center;
   flex-shrink: 0;
   /* color: var(--gray-11); */
@@ -681,7 +681,7 @@ article {
     .anchor::after {
       content: "";
       display: inline-block;
-      background: url("../img/link.svg");
+      background: url('data:image/svg+xml,<svg width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="m6.56 9.43c-1.07-1.07-1.07-2.81 0-3.88l2-2c2.36-2.29 6 0.71 4.23 3.45m-3.36-0.43c1.07 1.07 1.07 2.81 0 3.88l-2 2c-2.36 2.29-6-0.71-4.23-3.45" stroke="black" stroke-linecap="round" stroke-width="1.5"/></svg>');
       background-position-y: 2px;
       width: 16px;
       height: 16px;
