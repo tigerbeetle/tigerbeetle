@@ -211,7 +211,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
 }
 
 fn tidy_control_characters(file: SourceFile) ?u8 {
-    const binary_file_extensions: []const []const u8 = &.{ ".ico", ".png" };
+    const binary_file_extensions: []const []const u8 = &.{ ".ico", ".png", ".webp" };
     for (binary_file_extensions) |extension| {
         if (std.mem.endsWith(u8, file.path, extension)) return null;
     }
@@ -707,10 +707,13 @@ test "tidy extensions" {
         .{".gitignore"},
         .{"exclude-pmd.properties"},
         .{"favicon.png"},
+        .{"notfound.webp"},
+        .{"preview.webp"},
         .{"LICENSE"},
         .{"module-info.test"},
         .{"anchor-links.lua"},
         .{"markdown-links.lua"},
+        .{"table-wrapper.lua"},
         .{"zig/download.sh"},
         .{"src/scripts/cfo_supervisor.sh"},
         .{".github/ci/docs_check.sh"},
