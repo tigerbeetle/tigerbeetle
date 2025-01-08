@@ -298,12 +298,25 @@ function highlightText(term, container) {
   while (node = walker.nextNode()) {
     const parent = node.parentNode;
     if (parent && node.nodeValue.match(regex)) {
-      const span = document.createElement("span");
-      span.innerHTML = node.nodeValue.replace(regex, '<span class="highlight">$1</span>');
-      replacements.push({ parent, node, span });
+      const fragment = document.createDocumentFragment();
+      let lastIndex = 0;
+      node.nodeValue.replace(regex, (match, p1, index) => {
+        if (index > lastIndex) {
+          fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex, index)));
+        }
+        const span = document.createElement("span");
+        span.className = "highlight";
+        span.textContent = match;
+        fragment.appendChild(span);
+        lastIndex = index + match.length;
+      });
+      if (lastIndex < node.nodeValue.length) {
+        fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex)));
+      }
+      replacements.push({parent, fragment, node});
     }
   }
-  replacements.forEach(r => r.parent.replaceChild(r.span, r.node));
+  replacements.forEach(r => r.parent.replaceChild(r.fragment, r.node));
 }
 
 function removeTextHighlight(container) {
