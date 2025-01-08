@@ -278,6 +278,10 @@ nav.left-pane {
 
   &.search-active {
     .search-box {
+      .hotkey {
+        display: none;
+      }
+
       .clear-button {
         display: block;
       }
