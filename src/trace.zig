@@ -99,140 +99,28 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.trace);
 
-const constants = @import("constants.zig");
+const Metrics = @import("trace/metric.zig").Metrics;
+const Event = @import("trace/event.zig").Event;
+const EventTracing = @import("trace/event.zig").EventTracing;
+const EventTiming = @import("trace/event.zig").EventTiming;
 
 const trace_span_size_max = 1024;
-
-pub const Event = union(enum) {
-    replica_commit,
-    replica_aof_write,
-    replica_sync_table: struct { index: usize },
-
-    compact_beat,
-    compact_beat_merge,
-    compact_manifest,
-    compact_mutable,
-    compact_mutable_suffix,
-
-    lookup,
-    lookup_worker: struct { index: u8 },
-
-    scan_tree: struct { index: u8 },
-    scan_tree_level: struct { index: u8, level: u8 },
-
-    grid_read: struct { iop: usize },
-    grid_write: struct { iop: usize },
-
-    pub fn format(
-        event: *const Event,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
-        try writer.writeAll(@tagName(event.*));
-        switch (event.*) {
-            inline else => |data| {
-                if (@TypeOf(data) != void) {
-                    try writer.print(":{}", .{struct_format(data, .dense)});
-                }
-            },
-        }
-    }
-
-    const EventTag = std.meta.Tag(Event);
-
-    const event_stack_cardinality = std.enums.EnumArray(EventTag, u32).init(.{
-        .replica_commit = 1,
-        .replica_aof_write = 1,
-        .replica_sync_table = constants.grid_missing_tables_max,
-        .compact_beat = 1,
-        .compact_beat_merge = 1,
-        .compact_manifest = 1,
-        .compact_mutable = 1,
-        .compact_mutable_suffix = 1,
-        .lookup = 1,
-        .lookup_worker = constants.grid_iops_read_max,
-        .scan_tree = constants.lsm_scans_max,
-        .scan_tree_level = constants.lsm_scans_max * @as(u32, constants.lsm_levels),
-        .grid_read = constants.grid_iops_read_max,
-        .grid_write = constants.grid_iops_write_max,
-    });
-
-    const stack_count = count: {
-        var count: u32 = 0;
-        for (std.enums.values(EventTag)) |event_type| {
-            count += event_stack_cardinality.get(event_type);
-        }
-        break :count count;
-    };
-
-    const event_stack_base = array: {
-        var array = std.enums.EnumArray(EventTag, u32).initDefault(0, .{});
-        var next: u32 = 0;
-        for (std.enums.values(EventTag)) |event_type| {
-            array.set(event_type, next);
-            next += event_stack_cardinality.get(event_type);
-        }
-        break :array array;
-    };
-
-    // Stack is a u32 since it must be losslessly encoded as a JSON integer.
-    fn stack(event: *const Event) u32 {
-        switch (event.*) {
-            inline .replica_sync_table,
-            .lookup_worker,
-            => |data| {
-                assert(data.index < event_stack_cardinality.get(event.*));
-                const stack_base = event_stack_base.get(event.*);
-                return stack_base + @as(u32, @intCast(data.index));
-            },
-            .scan_tree => |data| {
-                assert(data.index < constants.lsm_scans_max);
-                // This event has "nested" sub-events, so its offset is calculated
-                // with padding to accommodate `scan_tree_level` events in between.
-                const stack_base = event_stack_base.get(event.*);
-                const scan_tree_offset = (constants.lsm_levels + 1) * data.index;
-                return stack_base + scan_tree_offset;
-            },
-            .scan_tree_level => |data| {
-                assert(data.index < constants.lsm_scans_max);
-                assert(data.level < constants.lsm_levels);
-                // This is a "nested" event, so its offset is calculated
-                // relative to the parent `scan_tree`'s offset.
-                const stack_base = event_stack_base.get(.scan_tree);
-                const scan_tree_offset = (constants.lsm_levels + 1) * data.index;
-                const scan_tree_level_offset = data.level + 1;
-                return stack_base + scan_tree_offset + scan_tree_level_offset;
-            },
-            inline .grid_read, .grid_write => |data| {
-                assert(data.iop < event_stack_cardinality.get(event.*));
-                const stack_base = event_stack_base.get(event.*);
-                return stack_base + @as(u32, @intCast(data.iop));
-            },
-            inline else => |data, event_tag| {
-                comptime assert(@TypeOf(data) == void);
-                comptime assert(event_stack_cardinality.get(event_tag) == 1);
-                return comptime event_stack_base.get(event_tag);
-            },
-        }
-    }
-};
 
 pub const Tracer = struct {
     replica_index: u8,
     options: Options,
     buffer: []u8,
 
-    events_started: [Event.stack_count]?u64 = .{null} ** Event.stack_count,
+    events_started: [EventTracing.stack_count]?u64 = .{null} ** EventTracing.stack_count,
+    metrics: Metrics,
+
     time_start: std.time.Instant,
     timer: std.time.Timer,
 
     pub const Options = struct {
         /// The tracer still validates start/stop state even when writer=null.
         writer: ?std.io.AnyWriter = null,
+        statsd_options: Metrics.StatsDOptions = null,
     };
 
     pub fn init(allocator: std.mem.Allocator, replica_index: u8, options: Options) !Tracer {
@@ -243,10 +131,18 @@ pub const Tracer = struct {
         const buffer = try allocator.alloc(u8, trace_span_size_max);
         errdefer allocator.free(buffer);
 
+        const metrics = try Metrics.init(allocator, .{
+            .statsd = options.statsd_options,
+        });
+        errdefer metrics.deinit(allocator);
+
         return .{
             .replica_index = replica_index,
             .options = options,
             .buffer = buffer,
+
+            .metrics = metrics,
+
             .time_start = std.time.Instant.now() catch @panic("std.time.Instant.now() unsupported"),
             .timer = std.time.Timer.start() catch @panic("std.time.Timer.start() unsupported"),
         };
@@ -254,19 +150,21 @@ pub const Tracer = struct {
 
     pub fn deinit(tracer: *Tracer, allocator: std.mem.Allocator) void {
         allocator.free(tracer.buffer);
+        tracer.metrics.deinit(allocator);
         tracer.* = undefined;
     }
 
-    pub fn start(tracer: *Tracer, event: Event, data: anytype) void {
-        comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
+    pub fn start(tracer: *Tracer, event: Event) void {
+        const event_tracing = event.as(EventTracing);
+        const event_timing = event.as(EventTiming);
+        const stack = event_tracing.stack();
 
-        const stack = event.stack();
         assert(tracer.events_started[stack] == null);
         tracer.events_started[stack] = tracer.timer.read();
 
         log.debug(
-            "{}: {}: start:{}",
-            .{ tracer.replica_index, event, struct_format(data, .dense) },
+            "{}: {s}({}): start: {}",
+            .{ tracer.replica_index, @tagName(event), event_tracing, event_timing },
         );
 
         const writer = tracer.options.writer orelse return;
@@ -284,20 +182,17 @@ pub const Tracer = struct {
             "\"ph\":\"{[event]c}\"," ++
             "\"ts\":{[timestamp]}," ++
             "\"cat\":\"{[category]s}\"," ++
-            "\"name\":\"{[name]s}{[data]}\"," ++
+            "\"name\":\"{[category]s} {[event_tracing]s} {[event_timing]}\"," ++
             "\"args\":{[args]s}" ++
             "}},\n", .{
             .process_id = tracer.replica_index,
-            .thread_id = event.stack(),
+            .thread_id = event_tracing.stack(),
             .category = @tagName(event),
             .event = 'B',
             .timestamp = time_elapsed_us,
-            .name = event,
-            .data = struct_format(data, .sparse),
-            .args = if (comptime @TypeOf(data) == @TypeOf(.{}))
-                "{}" // Serialize `.{}` as an empty object, not as an empty array.
-            else
-                std.json.Formatter(@TypeOf(data)){ .value = data, .options = .{} },
+            .event_tracing = event_tracing,
+            .event_timing = event_timing,
+            .args = std.json.Formatter(Event){ .value = event, .options = .{} },
         }) catch unreachable;
 
         writer.writeAll(buffer_stream.getWritten()) catch |err| {
@@ -305,42 +200,55 @@ pub const Tracer = struct {
         };
     }
 
-    pub fn stop(tracer: *Tracer, event: Event, data: anytype) void {
-        comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
+    pub fn stop(tracer: *Tracer, event: Event) void {
+        const us_log_threshold_ns = 5 * std.time.ns_per_ms;
 
-        const stack = event.stack();
+        const event_tracing = event.as(EventTracing);
+        const event_timing = event.as(EventTiming);
+        const stack = event_tracing.stack();
+
         const event_start_ns = tracer.events_started[stack].?;
         const event_end_ns = tracer.timer.read();
+        const duration_ns = event_end_ns - event_start_ns;
+        const duration_us = @divFloor(duration_ns, std.time.ns_per_us);
 
         assert(tracer.events_started[stack] != null);
         tracer.events_started[stack] = null;
 
-        log.debug("{}: {}: stop:{} (duration={}ms)", .{
+        // Double leading space to align with 'start: '.
+        log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
             tracer.replica_index,
-            event,
-            struct_format(data, .dense),
-            @divFloor(event_end_ns - event_start_ns, std.time.ns_per_ms),
+            @tagName(event),
+            event_tracing,
+            event_timing,
+            if (duration_ns < us_log_threshold_ns)
+                duration_us
+            else
+                @divFloor(duration_ns, std.time.ns_per_ms),
+            if (duration_ns < us_log_threshold_ns) "us" else "ms",
         });
 
-        tracer.write_stop(stack, data);
+        tracer.metrics.timing(event_timing, duration_us);
+
+        tracer.write_stop(stack);
     }
 
     pub fn reset(tracer: *Tracer, event_tag: Event.EventTag) void {
-        const stack_base = Event.event_stack_base.get(event_tag);
-        const cardinality = Event.event_stack_cardinality.get(event_tag);
+        const stack_base = EventTracing.stack_bases.get(event_tag);
+        const cardinality = EventTracing.stack_limits.get(event_tag);
         for (stack_base..stack_base + cardinality) |stack| {
             if (tracer.events_started[stack]) |_| {
                 log.debug("{}: {s}: reset", .{ tracer.replica_index, @tagName(event_tag) });
 
                 tracer.events_started[stack] = null;
-                tracer.write_stop(@intCast(stack), .{});
+                tracer.write_stop(@intCast(stack));
             }
         }
+
+        tracer.metrics.reset_all();
     }
 
-    fn write_stop(tracer: *Tracer, stack: u32, data: anytype) void {
-        comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
-
+    fn write_stop(tracer: *Tracer, stack: u32) void {
         const writer = tracer.options.writer orelse return;
         const time_now = std.time.Instant.now() catch unreachable;
         const time_elapsed_ns = time_now.since(tracer.time_start);
@@ -367,81 +275,13 @@ pub const Tracer = struct {
             std.debug.panic("Tracer.stop: {}\n", .{err});
         };
     }
+
+    pub fn emit(tracer: *Tracer) void {
+        tracer.start(.metrics_emit);
+        tracer.metrics.emit();
+        tracer.stop(.metrics_emit);
+    }
 };
-
-const DataFormatterCardinality = enum { dense, sparse };
-
-fn StructFormatterType(comptime Data: type, comptime cardinality: DataFormatterCardinality) type {
-    assert(@typeInfo(Data) == .Struct);
-
-    return struct {
-        data: Data,
-
-        pub fn format(
-            formatter: *const @This(),
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = fmt;
-            _ = options;
-
-            inline for (std.meta.fields(Data)) |data_field| {
-                if (cardinality == .sparse) {
-                    if (data_field.type != bool and
-                        data_field.type != u8 and
-                        data_field.type != []const u8 and
-                        data_field.type != [:0]const u8 and
-                        @typeInfo(data_field.type) != .Enum and
-                        @typeInfo(data_field.type) != .Union)
-                    {
-                        continue;
-                    }
-                }
-
-                const data_field_value = @field(formatter.data, data_field.name);
-                try writer.writeByte(' ');
-                try writer.writeAll(data_field.name);
-                try writer.writeByte('=');
-
-                if (data_field.type == []const u8 or
-                    data_field.type == [:0]const u8)
-                {
-                    // This is an arbitrary limit, to ensure that the logging isn't too noisy.
-                    // (Logged strings should be low-cardinality as well, but we can't explicitly
-                    // check that.)
-                    const string_length_max = 256;
-                    assert(data_field_value.len <= string_length_max);
-
-                    // Since the string is not properly escaped before printing, assert that it
-                    // doesn't contain any special characters that would mess with the JSON.
-                    if (constants.verify) {
-                        for (data_field_value) |char| {
-                            assert(char != '\n');
-                            assert(char != '\\');
-                            assert(char != '"');
-                        }
-                    }
-
-                    try writer.print("{s}", .{data_field_value});
-                } else if (@typeInfo(data_field.type) == .Enum or
-                    @typeInfo(data_field.type) == .Union)
-                {
-                    try writer.print("{s}", .{@tagName(data_field_value)});
-                } else {
-                    try writer.print("{}", .{data_field_value});
-                }
-            }
-        }
-    };
-}
-
-fn struct_format(
-    data: anytype,
-    comptime cardinality: DataFormatterCardinality,
-) StructFormatterType(@TypeOf(data), cardinality) {
-    return StructFormatterType(@TypeOf(data), cardinality){ .data = data };
-}
 
 test "trace json" {
     const Snap = @import("testing/snaptest.zig").Snap;
@@ -455,15 +295,15 @@ test "trace json" {
     });
     defer trace.deinit(std.testing.allocator);
 
-    trace.start(.replica_commit, .{ .foo = 123 });
-    trace.start(.compact_beat, .{});
-    trace.stop(.compact_beat, .{});
-    trace.stop(.replica_commit, .{ .bar = 456 });
+    trace.start(.{ .replica_commit = .{ .stage = .idle, .op = 123 } });
+    trace.start(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
+    trace.stop(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
+    trace.stop(.{ .replica_commit = .{ .stage = .idle, .op = 456 } });
 
     try snap(@src(),
         \\[
-        \\{"pid":0,"tid":0,"ph":"B","ts":<snap:ignore>,"cat":"replica_commit","name":"replica_commit","args":{"foo":123}},
-        \\{"pid":0,"tid":4,"ph":"B","ts":<snap:ignore>,"cat":"compact_beat","name":"compact_beat","args":{}},
+        \\{"pid":0,"tid":0,"ph":"B","ts":<snap:ignore>,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
+        \\{"pid":0,"tid":4,"ph":"B","ts":<snap:ignore>,"cat":"compact_beat","name":"compact_beat  tree=Account.id level_b=1","args":{"tree":"Account.id","level_b":1}},
         \\{"pid":0,"tid":4,"ph":"E","ts":<snap:ignore>},
         \\{"pid":0,"tid":0,"ph":"E","ts":<snap:ignore>},
         \\

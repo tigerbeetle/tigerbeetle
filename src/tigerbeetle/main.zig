@@ -402,7 +402,13 @@ const Command = struct {
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
-            .tracer_options = .{ .writer = if (trace_writer) |writer| writer.any() else null },
+            .tracer_options = .{
+                .writer = if (trace_writer) |writer| writer.any() else null,
+                .statsd_options = if (args.statsd) |statsd_address| .{
+                    .io = &command.io,
+                    .address = statsd_address,
+                } else null,
+            },
             .replicate_options = .{
                 .closed_loop = args.replicate_closed_loop,
                 .star = args.replicate_star,
