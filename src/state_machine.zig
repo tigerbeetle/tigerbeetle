@@ -37,6 +37,46 @@ const CreateTransferResult = tb.CreateTransferResult;
 const AccountFilter = tb.AccountFilter;
 const QueryFilter = tb.QueryFilter;
 
+pub const tree_ids = struct {
+    pub const Account = .{
+        .id = 1,
+        .user_data_128 = 2,
+        .user_data_64 = 3,
+        .user_data_32 = 4,
+        .ledger = 5,
+        .code = 6,
+        .timestamp = 7,
+        .imported = 23,
+        .closed = 25,
+    };
+
+    pub const Transfer = .{
+        .id = 8,
+        .debit_account_id = 9,
+        .credit_account_id = 10,
+        .amount = 11,
+        .pending_id = 12,
+        .user_data_128 = 13,
+        .user_data_64 = 14,
+        .user_data_32 = 15,
+        .ledger = 16,
+        .code = 17,
+        .timestamp = 18,
+        .expires_at = 19,
+        .imported = 24,
+        .closing = 26,
+    };
+
+    pub const TransferPending = .{
+        .timestamp = 20,
+        .status = 21,
+    };
+
+    pub const AccountBalance = .{
+        .timestamp = 22,
+    };
+};
+
 pub fn StateMachineType(
     comptime Storage: type,
     comptime config: global_constants.StateMachineConfig,
@@ -81,46 +121,6 @@ pub fn StateMachineType(
                     assert(query_accounts > 0);
                     assert(query_transfers > 0);
                 }
-            };
-
-            pub const tree_ids = struct {
-                pub const accounts = .{
-                    .id = 1,
-                    .user_data_128 = 2,
-                    .user_data_64 = 3,
-                    .user_data_32 = 4,
-                    .ledger = 5,
-                    .code = 6,
-                    .timestamp = 7,
-                    .imported = 23,
-                    .closed = 25,
-                };
-
-                pub const transfers = .{
-                    .id = 8,
-                    .debit_account_id = 9,
-                    .credit_account_id = 10,
-                    .amount = 11,
-                    .pending_id = 12,
-                    .user_data_128 = 13,
-                    .user_data_64 = 14,
-                    .user_data_32 = 15,
-                    .ledger = 16,
-                    .code = 17,
-                    .timestamp = 18,
-                    .expires_at = 19,
-                    .imported = 24,
-                    .closing = 26,
-                };
-
-                pub const transfers_pending = .{
-                    .timestamp = 20,
-                    .status = 21,
-                };
-
-                pub const account_balances = .{
-                    .timestamp = 22,
-                };
             };
         };
 
@@ -191,7 +191,7 @@ pub fn StateMachineType(
             Storage,
             Account,
             .{
-                .ids = constants.tree_ids.accounts,
+                .ids = tree_ids.Account,
                 .batch_value_count_max = batch_value_count_max.accounts,
                 .ignored = &[_][]const u8{
                     "debits_posted",
@@ -226,7 +226,7 @@ pub fn StateMachineType(
             Storage,
             Transfer,
             .{
-                .ids = constants.tree_ids.transfers,
+                .ids = tree_ids.Transfer,
                 .batch_value_count_max = batch_value_count_max.transfers,
                 .ignored = &[_][]const u8{ "timeout", "flags" },
                 .optional = &[_][]const u8{
@@ -267,7 +267,7 @@ pub fn StateMachineType(
             Storage,
             TransferPending,
             .{
-                .ids = constants.tree_ids.transfers_pending,
+                .ids = tree_ids.TransferPending,
                 .batch_value_count_max = batch_value_count_max.transfers_pending,
                 .ignored = &[_][]const u8{"padding"},
                 .optional = &[_][]const u8{"status"},
@@ -292,7 +292,7 @@ pub fn StateMachineType(
             Storage,
             AccountBalancesGrooveValue,
             .{
-                .ids = constants.tree_ids.account_balances,
+                .ids = tree_ids.AccountBalance,
                 .batch_value_count_max = batch_value_count_max.account_balances,
                 .ignored = &[_][]const u8{
                     "dr_account_id",

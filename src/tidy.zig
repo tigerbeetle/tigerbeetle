@@ -201,7 +201,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
                 if (std.mem.startsWith(u8, string_value, "OPS: ")) continue;
 
                 // trace.zig's JSON snapshot test.
-                if (std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":0,\"ph\":")) continue;
+                if (std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":")) continue;
             }
 
             return line_index;

@@ -70,6 +70,41 @@ pub const ReplicaEvent = union(enum) {
     client_evicted: u128,
 };
 
+pub const CommitStage = union(enum) {
+    pub const CommitStageTag = std.meta.Tag(CommitStage);
+
+    const CheckpointData = enum {
+        aof,
+        state_machine,
+        client_replies,
+        client_sessions,
+        grid,
+    };
+
+    const CheckpointDataProgress = std.enums.EnumSet(CheckpointData);
+
+    /// Not committing.
+    idle,
+    /// Get the next prepare to commit from the journal or pipeline and...
+    start,
+    /// ...if there isn't any, break out of commit loop.
+    check_prepare,
+    /// Load required data from LSM tree on disk into memory.
+    prefetch,
+    /// Ensure that the ClientReplies has at least one Write available.
+    reply_setup,
+    /// Execute state machine logic.
+    execute,
+    /// Every vsr_checkpoint_ops, mark the current checkpoint as durable.
+    checkpoint_durable,
+    /// Run one beat of LSM compaction.
+    compact,
+    /// Every vsr_checkpoint_ops, persist the current state to disk and...
+    checkpoint_data: CheckpointDataProgress,
+    /// ...update the superblock.
+    checkpoint_superblock,
+};
+
 const Nonce = u128;
 
 const Prepare = struct {
@@ -534,6 +569,7 @@ pub fn ReplicaType(
         commit_prepare: ?*Message.Prepare = null,
 
         trace: vsr.trace.Tracer,
+        trace_emit_timeout: Timeout,
 
         aof: ?*AOF,
 
@@ -816,6 +852,8 @@ pub fn ReplicaType(
             // can repair grid blocks if necessary:
             self.grid.open(grid_open_callback);
             self.invariants();
+
+            self.trace_emit_timeout.start();
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -1244,6 +1282,11 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 500,
                 },
+                .trace_emit_timeout = Timeout{
+                    .name = "trace_emit_timeout",
+                    .id = replica_index,
+                    .after = 100,
+                },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
                 .trace = self.trace,
@@ -1347,6 +1390,7 @@ pub fn ReplicaType(
                 .{ &self.upgrade_timeout, on_upgrade_timeout },
                 .{ &self.pulse_timeout, on_pulse_timeout },
                 .{ &self.grid_scrub_timeout, on_grid_scrub_timeout },
+                .{ &self.trace_emit_timeout, on_trace_emit_timeout },
             };
 
             inline for (timeouts) |timeout| {
@@ -3402,6 +3446,13 @@ pub fn ReplicaType(
             } else unreachable;
         }
 
+        fn on_trace_emit_timeout(self: *Replica) void {
+            assert(self.trace_emit_timeout.ticking);
+            self.trace_emit_timeout.reset();
+
+            self.trace.emit();
+        }
+
         fn on_pulse_timeout(self: *Replica) void {
             assert(!constants.aof_recovery);
             assert(self.status == .normal);
@@ -3813,39 +3864,6 @@ pub fn ReplicaType(
             self.commit_dispatch_enter();
         }
 
-        const CommitStage = union(enum) {
-            const CheckpointData = enum {
-                aof,
-                state_machine,
-                client_replies,
-                client_sessions,
-                grid,
-            };
-
-            const CheckpointDataProgress = std.enums.EnumSet(CheckpointData);
-
-            /// Not committing.
-            idle,
-            /// Get the next prepare to commit from the journal or pipeline and...
-            start,
-            /// ...if there isn't any, break out of commit loop.
-            check_prepare,
-            /// Load required data from LSM tree on disk into memory.
-            prefetch,
-            /// Ensure that the ClientReplies has at least one Write available.
-            reply_setup,
-            /// Execute state machine logic.
-            execute,
-            /// Every vsr_checkpoint_ops, mark the current checkpoint as durable.
-            checkpoint_durable,
-            /// Run one beat of LSM compaction.
-            compact,
-            /// Every vsr_checkpoint_ops, persist the current state to disk and...
-            checkpoint_data: CheckpointDataProgress,
-            /// ...update the superblock.
-            checkpoint_superblock,
-        };
-
         /// Commit flow.
         ///
         /// This is a manual desugaring of asynchronous function of the following shape:
@@ -3900,81 +3918,79 @@ pub fn ReplicaType(
                 if (self.commit_stage == .check_prepare) {
                     self.commit_stage = .prefetch;
                     self.commit_completion_timer.reset();
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
                     if (self.commit_prefetch() == .pending) return;
                 }
 
                 if (self.commit_stage == .prefetch) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .reply_setup;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
                     if (self.commit_reply_setup() == .pending) return;
                 }
 
                 if (self.commit_stage == .reply_setup) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .execute;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
 
                     self.commit_execute();
                 }
 
                 if (self.commit_stage == .execute) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .checkpoint_durable;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
 
                     if (self.commit_checkpoint_durable() == .pending) return;
                 }
 
                 if (self.commit_stage == .checkpoint_durable) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .compact;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
                     if (self.commit_compact() == .pending) return;
                 }
 
                 if (self.commit_stage == .compact) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .{ .checkpoint_data = .{} };
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
 
                     if (self.commit_checkpoint_data() == .pending) return;
                 }
 
                 if (self.commit_stage == .checkpoint_data) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .checkpoint_superblock;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
 
                     if (self.commit_checkpoint_superblock() == .pending) return;
                 }
 
                 if (self.commit_stage == .checkpoint_superblock) {
-                    self.trace.stop(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
-                    });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .idle;
                     self.commit_finish();
 
@@ -4721,13 +4737,13 @@ pub fn ReplicaType(
             // It should be impossible for a client to receive a response without the request
             // being logged by at least one replica.
             if (self.aof) |aof| {
-                self.trace.start(.replica_aof_write, .{
+                self.trace.start(.{ .replica_aof_write = .{
                     .op = prepare.header.op,
-                });
+                } });
                 aof.write(prepare) catch @panic("aof failure");
-                self.trace.stop(.replica_aof_write, .{
+                self.trace.stop(.{ .replica_aof_write = .{
                     .op = prepare.header.op,
-                });
+                } });
             }
 
             const reply_body_size = switch (prepare.header.operation) {
@@ -9631,7 +9647,7 @@ pub fn ReplicaType(
                     switch (enqueue_result) {
                         .insert => self.trace.start(.{ .replica_sync_table = .{
                             .index = self.grid_repair_tables.index(table),
-                        } }, .{}),
+                        } }),
                         .duplicate => {
                             // Duplicates are only possible due to move-table.
                             assert(table_info.label.level > 0);
@@ -9683,7 +9699,7 @@ pub fn ReplicaType(
                 self.grid_repair_tables.release(table);
                 self.trace.stop(.{ .replica_sync_table = .{
                     .index = self.grid_repair_tables.index(table),
-                } }, .{});
+                } });
             }
             assert(self.grid_repair_tables.available() <= constants.grid_missing_tables_max);
 

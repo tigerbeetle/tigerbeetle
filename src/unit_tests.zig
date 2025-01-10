@@ -16,6 +16,9 @@ comptime {
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
     _ = @import("trace.zig");
+    _ = @import("trace/event.zig");
+    _ = @import("trace/metric.zig");
+    _ = @import("trace/statsd.zig");
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client/context.zig");
