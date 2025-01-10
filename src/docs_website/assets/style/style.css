@@ -412,14 +412,6 @@ nav.left-pane {
   }
 }
 
-@media (prefers-color-scheme: light) {
-  .search-notfound {
-    img {
-      opacity: 70%;
-    }
-  }
-}
-
 nav.side {
   padding: 0 16px 16px 16px;
   font-size: 14px;
