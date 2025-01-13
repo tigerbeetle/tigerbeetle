@@ -114,7 +114,7 @@ jobs:
           - { os: 'ubuntu-latest',  language: 'node',    language_version: '20.x'  }
 
           # Support Python 3.7 explicitly, even though it's EOL.
-          - { os: 'ubuntu-latest',  language: 'python',  language_version: '3.7'  }
+          - { os: 'ubuntu-22.04',  language: 'python',  language_version: '3.7'    }
           - { os: 'ubuntu-latest',  language: 'python',  language_version: '3.13'  }
 
           - { os: 'windows-latest', language: 'dotnet',  language_version: '8.0.x' }
