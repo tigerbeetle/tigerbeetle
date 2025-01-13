@@ -15,6 +15,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         return error.GoFmt;
     }
 
+    try shell.exec("go vet", .{});
+
     // `go build`  won't compile the native library automatically, we need to do that ourselves.
     try shell.exec_zig("build clients:go -Drelease", .{});
     try shell.exec_zig("build -Drelease", .{});
