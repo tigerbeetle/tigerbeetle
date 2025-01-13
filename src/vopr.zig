@@ -342,9 +342,26 @@ pub fn main() !void {
             .{ simulator.options.requests_max, simulator.requests_replied },
         );
         simulator.cluster.log_cluster();
+
         if (cli_args.lite) return;
-        output.err("you can reproduce this failure with seed={}", .{seed});
-        fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
+
+        // Cluster may be correctly unavailable because too many replicas are in recovering_head.
+        // This is possible as `Cluster.replica_release_execute()` does not heal WAL faults while
+        // while restarting replicas (unlike `Simulator.replica_restart`).
+        var replicas_recovering_head: usize = 0;
+        const view_change_quorum = vsr.quorums(replica_count).view_change;
+
+        for (simulator.cluster.replicas) |*replica| {
+            replicas_recovering_head +=
+                @intFromBool(!replica.standby() and replica.status == .recovering_head);
+        }
+        if (view_change_quorum > replica_count - replicas_recovering_head) {
+            output.warn("no liveness, too many replicas replicas in recovering_head", .{});
+            return;
+        } else {
+            output.err("you can reproduce this failure with seed={}", .{seed});
+            fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
+        }
     }
 
     if (cli_args.lite) return;
