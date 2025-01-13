@@ -657,11 +657,7 @@ pub const Simulator = struct {
     }
 
     /// The core contains at least a view-change quorum of replicas. But if one or more of those
-    /// replicas are in status=recovering_head (due to corruption or state sync), then that may be
-    /// insufficient.
-    /// TODO: State sync can trigger recovering_head without any crashes, and we should be able to
-    /// recover in that case.
-    /// (See https://github.com/tigerbeetle/tigerbeetle/pull/933#discussion_r1245440623)
+    /// replicas are in status=recovering_head (due to corruption), then that may be insufficient.
     pub fn core_missing_quorum(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
 
@@ -678,6 +674,20 @@ pub const Simulator = struct {
 
         const quorums = vsr.quorums(simulator.options.cluster.replica_count);
         return quorums.view_change > core_replicas - core_recovering_head;
+    }
+
+    fn smallest_missing_prepare_between(
+        simulator: *const Simulator,
+        replica: *const Cluster.Replica,
+        op_min: u64, // Inclusive
+        op_max: u64, // Inclusive
+    ) ?u64 {
+        assert(op_min <= op_max);
+        for (op_min..op_max + 1) |op| {
+            const header = simulator.cluster.state_checker.header_with_op(op);
+            if (!replica.journal.has_prepare(&header)) return op;
+        }
+        return null;
     }
 
     // Returns a header for a prepare which can't be repaired by the core due to storage faults.
@@ -717,24 +727,41 @@ pub const Simulator = struct {
                 const commit_max = @min(replica.op, cluster_commit_max);
                 const op_repair_min = replica.op_repair_min();
 
-                // Check if replica's commit pipeline was stuck due to missing headers.
-                // Find latest missing header as we repair headers from high -> low ops.
                 if (replica.journal.find_latest_headers_break_between(
                     op_repair_min,
                     commit_max,
                 )) |range| {
+                    // Check if replica's commit pipeline was stuck due to missing headers.
+                    // Find latest missing header as we repair headers from high -> low ops.
                     if (missing_header_op == null or missing_header_op.? < range.op_max) {
                         missing_header_op = range.op_max;
                     }
                 } else {
                     // Check if replica's commit pipeline was stuck due to missing prepares.
                     // Find earliest missing prepare as we repair prepares from low -> high ops.
-                    for (op_repair_min..commit_max + 1) |op| {
-                        const header = simulator.cluster.state_checker.header_with_op(op);
-                        if (!replica.journal.has_prepare(&header)) {
-                            if (missing_prepare_op == null or missing_prepare_op.? > op) {
-                                missing_prepare_op = op;
-                            }
+
+                    // Check prepares between (commit_min, commit_max], replicas repair these first
+                    // as commit progress depends on them. Then, check prepares between
+                    // [op_repair_min, commit_min] as view changing replicas cannot step up as
+                    // primary unless they have all prepares intact.
+                    if (simulator.smallest_missing_prepare_between(
+                        &replica,
+                        replica.commit_min + 1,
+                        commit_max,
+                    )) |op| {
+                        if (missing_prepare_op == null or op < missing_prepare_op.?) {
+                            missing_prepare_op = op;
+                            continue;
+                        }
+                    }
+
+                    if (simulator.smallest_missing_prepare_between(
+                        &replica,
+                        op_repair_min,
+                        replica.commit_min,
+                    )) |op| {
+                        if (missing_prepare_op == null or op < missing_prepare_op.?) {
+                            missing_prepare_op = op;
                         }
                     }
                 }
