@@ -30,12 +30,26 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     var stdout_writer = stdout_buffer.writer();
 
-    const stdout = stdout_writer.any();
+    const inspect_result = main_inspect(allocator, cli_args, stdout_writer.any());
+    const flush_result = stdout_buffer.flush();
+    try inspect_result;
+    try flush_result;
+}
 
-    var inspector = try Inspector.create(allocator, cli_args.path);
+fn main_inspect(
+    allocator: std.mem.Allocator,
+    cli_args: *const cli.Command.Inspect,
+    stdout: std.io.AnyWriter,
+) !void {
+    const data_file = switch (cli_args.*) {
+        .constants => return try inspect_constants(stdout),
+        .data_file => |data_file| data_file,
+    };
+
+    var inspector = try Inspector.create(allocator, data_file.path);
     defer inspector.destroy();
 
-    switch (cli_args.query) {
+    switch (data_file.query) {
         .superblock => try inspector.inspect_superblock(stdout),
         .wal => |args| {
             if (args.slot) |slot| {
@@ -111,8 +125,91 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
             });
         },
     }
+}
 
-    try stdout_buffer.flush();
+fn inspect_constants(output: std.io.AnyWriter) !void {
+    try output.print("Data File Layout:\n", .{});
+    inline for (comptime std.enums.values(vsr.Zone)) |zone| {
+        try print_header(output, 0, @tagName(zone));
+        switch (zone) {
+            inline else => |zone_sized| {
+                try print_size_count(
+                    output,
+                    zone_sized.size().?,
+                    1,
+                );
+            },
+            .grid => {
+                try output.print("elastic\n", .{});
+            },
+        }
+        switch (zone) {
+            .superblock => {
+                try print_header(output, 1, "copy");
+                try print_size_count(
+                    output,
+                    vsr.superblock.superblock_copy_size,
+                    constants.superblock_copies,
+                );
+            },
+            .wal_headers => {
+                try print_header(output, 1, "sector");
+                try print_size_count(
+                    output,
+                    constants.sector_size,
+                    @divExact(vsr.Zone.wal_headers.size().?, constants.sector_size),
+                );
+
+                try print_header(output, 2, "header");
+                try print_size_count(
+                    output,
+                    @sizeOf(vsr.Header),
+                    @divExact(constants.sector_size, @sizeOf(vsr.Header)),
+                );
+            },
+            .wal_prepares => {
+                try print_header(output, 1, "prepare");
+                try print_size_count(
+                    output,
+                    constants.message_size_max,
+                    constants.journal_slot_count,
+                );
+            },
+            .client_replies => {
+                try print_header(output, 1, "reply");
+                try print_size_count(
+                    output,
+                    constants.message_size_max,
+                    constants.clients_max,
+                );
+            },
+            .grid => {
+                try print_header(output, 1, "block");
+                try print_size_count(output, constants.block_size, 1);
+            },
+            else => {},
+        }
+        try output.print("\n", .{});
+    }
+}
+
+fn print_header(output: std.io.AnyWriter, comptime level: u8, comptime header: []const u8) !void {
+    const width_total = 20;
+    const pad_left = "  " ** level;
+    const pad_right = " " ** (width_total -| level * 2 -| header.len);
+    try output.print(pad_left ++ header ++ pad_right, .{});
+}
+
+fn print_size_count(output: std.io.AnyWriter, comptime size: u64, comptime count: u64) !void {
+    if (count == 1) {
+        try output.print("{}\n", .{stdx.fmt_int_size_bin_exact(size)});
+    } else {
+        const size_formatted = comptime if (size < 1024)
+            std.fmt.comptimePrint("{}B", .{size})
+        else
+            std.fmt.comptimePrint("{}", .{stdx.fmt_int_size_bin_exact(size)});
+        try output.print("{s<8} x{}\n", .{ size_formatted, count });
+    }
 }
 
 const Inspector = struct {
