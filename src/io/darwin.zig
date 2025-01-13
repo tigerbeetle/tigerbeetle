@@ -731,13 +731,16 @@ pub const IO = struct {
     /// - Ensures that the file data (and file inode in the parent directory) is durable on disk.
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
-    pub fn open_file(
+    pub fn open_data_file(
+        self: *IO,
         dir_fd: fd_t,
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open, open_read_only },
         direct_io: DirectIO,
     ) !fd_t {
+        _ = self;
+
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
 

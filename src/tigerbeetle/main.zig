@@ -198,8 +198,11 @@ const Command = struct {
         else
             .direct_io_required;
 
+        command.io = try IO.init(128, 0);
+        errdefer command.io.deinit();
+
         const basename = std.fs.path.basename(path);
-        command.fd = try IO.open_file(
+        command.fd = try command.io.open_data_file(
             command.dir_fd,
             basename,
             data_file_size_min,
