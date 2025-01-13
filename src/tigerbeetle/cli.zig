@@ -140,6 +140,7 @@ const CLIArgs = union(enum) {
 
     // Experimental: the interface is subject to change.
     const Inspect = union(enum) {
+        constants,
         superblock: struct {
             positional: struct { path: []const u8 },
         },
@@ -173,6 +174,8 @@ const CLIArgs = union(enum) {
             \\
             \\  tigerbeetle inspect [-h | --help]
             \\
+            \\  tigerbeetle inspect constants
+            \\
             \\  tigerbeetle inspect superblock <path>
             \\
             \\  tigerbeetle inspect wal [--slot=<slot>] <path>
@@ -192,6 +195,9 @@ const CLIArgs = union(enum) {
             \\
             \\  -h, --help
             \\        Print this help message and exit.
+            \\
+            \\  constants
+            \\        Print most important compile-time parameters.
             \\
             \\  superblock
             \\        Inspect the superblock header copies.
@@ -483,30 +489,35 @@ pub const Command = union(enum) {
         seed: ?[]const u8,
     };
 
-    pub const Inspect = struct {
-        path: []const u8,
-        query: union(enum) {
-            superblock,
-            wal: struct {
-                slot: ?usize,
+    pub const Inspect = union(enum) {
+        constants,
+        data_file: DataFile,
+
+        pub const DataFile = struct {
+            path: []const u8,
+            query: union(enum) {
+                superblock,
+                wal: struct {
+                    slot: ?usize,
+                },
+                replies: struct {
+                    slot: ?usize,
+                    superblock_copy: ?u8,
+                },
+                grid: struct {
+                    block: ?u64,
+                    superblock_copy: ?u8,
+                },
+                manifest: struct {
+                    superblock_copy: ?u8,
+                },
+                tables: struct {
+                    superblock_copy: ?u8,
+                    tree: []const u8,
+                    level: ?u6,
+                },
             },
-            replies: struct {
-                slot: ?usize,
-                superblock_copy: ?u8,
-            },
-            grid: struct {
-                block: ?u64,
-                superblock_copy: ?u8,
-            },
-            manifest: struct {
-                superblock_copy: ?u8,
-            },
-            tables: struct {
-                superblock_copy: ?u8,
-                tree: []const u8,
-                level: ?u6,
-            },
-        },
+        };
     };
 
     pub const Multiversion = struct {
@@ -902,12 +913,14 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
 
 fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
+        .constants => return .constants,
         inline else => |args| args.positional.path,
     };
 
-    return .{
+    return .{ .data_file = .{
         .path = path,
         .query = switch (inspect) {
+            .constants => unreachable,
             .superblock => .superblock,
             .wal => |args| .{ .wal = .{ .slot = args.slot } },
             .replies => |args| .{ .replies = .{
@@ -927,7 +940,7 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
                 .level = args.level,
             } },
         },
-    };
+    } };
 }
 
 fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multiversion {
