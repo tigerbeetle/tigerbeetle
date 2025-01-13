@@ -14,7 +14,7 @@ const BlockPtr = @import("grid.zig").BlockPtr;
 const IOPSType = @import("../iops.zig").IOPSType;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const RingBufferType = @import("../ring_buffer.zig").RingBufferType;
+const RingBufferType = stdx.RingBufferType;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
