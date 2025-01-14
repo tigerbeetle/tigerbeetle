@@ -754,16 +754,17 @@ pub const Timeout = struct {
 
         const rtt_ms = @divFloor(rtt_ns, std.time.ns_per_ms);
         const rtt_ticks = @max(1, @divFloor(rtt_ms, constants.tick_ms));
+        const rtt_ticks_clamped = @min(rtt_ticks, constants.rtt_max_ticks);
 
-        if (self.rtt != rtt_ticks) {
+        if (self.rtt != rtt_ticks_clamped) {
             log.debug("{}: {s} rtt={}..{}", .{
                 self.id,
                 self.name,
                 self.rtt,
-                rtt_ticks,
+                rtt_ticks_clamped,
             });
 
-            self.rtt = rtt_ticks;
+            self.rtt = rtt_ticks_clamped;
         }
     }
 
