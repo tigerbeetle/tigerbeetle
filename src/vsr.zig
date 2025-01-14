@@ -720,7 +720,7 @@ pub const Timeout = struct {
     /// Sets the value of `after` as a function of `rtt` and `attempts`.
     /// Adds exponential backoff and jitter.
     /// May be called only after a timeout has been stopped or reset, to prevent backward jumps.
-    pub fn set_after_for_rtt_and_attempts(self: *Timeout, random: std.rand.Random) void {
+    fn set_after_for_rtt_and_attempts(self: *Timeout, random: std.rand.Random) void {
         // If `after` is reduced by this function to less than `ticks`, then `fired()` will panic:
         assert(self.ticks == 0);
         assert(self.rtt > 0);

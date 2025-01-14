@@ -379,7 +379,7 @@ pub fn ClockType(comptime Time: type) type {
                 }
             }
 
-            if (one_way_delays.count() == 0) {
+            if (one_way_delays.count() < self.quorum) {
                 return null;
             } else {
                 std.mem.sort(u64, one_way_delays.slice(), {}, std.sort.asc(u64));

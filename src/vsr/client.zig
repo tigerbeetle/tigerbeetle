@@ -460,6 +460,7 @@ pub fn ClientType(
                     }
                 }
                 std.mem.sort(u64, round_trip_times_ns.slice(), {}, std.sort.asc(u64));
+                assert(round_trip_times_ns.count() > 0);
 
                 const rtt_median_ns =
                     round_trip_times_ns.get(@divFloor(round_trip_times_ns.count(), 2));
