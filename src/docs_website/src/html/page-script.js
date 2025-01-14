@@ -70,19 +70,20 @@ function syncSideNavWithLocation() {
   const target = document.querySelector("nav.side .target");
   if (target) target.classList.remove("target");
 
-  let path = location.pathname;
-  if (path.endsWith("/")) path = path.slice(0, -1);
-  document.querySelectorAll("nav.side a").forEach(a => {
-    if (a.href.endsWith(path)) {
-      a.classList.add("target");
-      for (let parent = a.parentElement; parent; parent = parent.parentElement) {
-        if (parent.matches(".menu")) {
-          const head = parent.previousSibling;
-          if (head?.matches?.(".menu-head")) head.classList.add("expanded");
-        } else if (parent.matches(".menu-head")) {
-          parent.classList.add("expanded"); // expand for discoverability
+  const path = location.pathname;
+  if (path.length > 1) {
+    document.querySelectorAll("nav.side a").forEach(a => {
+      if (a.href.endsWith(path)) {
+        a.classList.add("target");
+        for (let parent = a.parentElement; parent; parent = parent.parentElement) {
+          if (parent.matches(".menu")) {
+            const head = parent.previousSibling;
+            if (head?.matches?.(".menu-head")) head.classList.add("expanded");
+          } else if (parent.matches(".menu-head")) {
+            parent.classList.add("expanded"); // expand for discoverability
+          }
         }
       }
-    }
-  });
+    });
+  }
 }
