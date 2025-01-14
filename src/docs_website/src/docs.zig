@@ -126,7 +126,7 @@ const Menu = struct {
             try html.write("<div class=\"item menu-head\">", .{});
             if (menu.index_page) |page| {
                 try html.write(
-                    \\<a href="$url_prefix/$url">$title</a>
+                    \\<a href="$url_prefix/$url/">$title</a>
                 , .{
                     .url_prefix = website.url_prefix,
                     .url = page.path_target,
@@ -142,7 +142,7 @@ const Menu = struct {
         }
         for (self.pages) |page| {
             try html.write(
-                \\<div class="item"><a href="$url_prefix/$url">$title</a></div>
+                \\<div class="item"><a href="$url_prefix/$url/">$title</a></div>
             , .{
                 .url_prefix = website.url_prefix,
                 .url = page.path_target,
