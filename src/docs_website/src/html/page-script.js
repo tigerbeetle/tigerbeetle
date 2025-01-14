@@ -27,7 +27,7 @@ resizer.addEventListener("mousedown", () => {
     document.removeEventListener("mousemove", onMouseMove);
   }
 });
-resizer.addEventListener("dblclick", () => leftPane.style.width = "300px");
+resizer.addEventListener("dblclick", () => leftPane.style.removeProperty("width"));
 
 const collapseButton = document.querySelector(".collapse-button");
 collapseButton.addEventListener("click", () => document.body.classList.add("sidenav-collapsed"));
@@ -35,10 +35,7 @@ const expandButton = document.querySelector(".expand-button");
 expandButton.addEventListener("click", () => document.body.classList.remove("sidenav-collapsed"));
 
 const navSide = document.querySelector("nav.side");
-const menuHeads = [...navSide.querySelectorAll(".menu-head")];
-menuHeads.forEach(e => e.addEventListener("click", ev => {
-  if (ev.target == e) e.classList.toggle("expanded");
-}));
+const details = [...navSide.querySelectorAll("details")];
 
 syncSideNavWithLocation();
 
@@ -53,14 +50,14 @@ const navSideState = JSON.parse(localStorage.getItem("navSideState"));
 if (navSideState) {
   leftPane.style.width = navSideState.width;
   if (navSideState.collapsed) document.body.classList.add("sidenav-collapsed");
-  navSideState.expanded.forEach((e, i) => { if (e) menuHeads[i].classList.add("expanded"); });
+  navSideState.expanded.forEach((expanded, i) => details[i].open = expanded);
   leftPane.scrollTop = navSideState.scrollTop;
 }
 window.addEventListener("beforeunload", () => {
   const navSideState = {
     width: leftPane.style.width,
     collapsed: document.body.classList.contains("sidenav-collapsed"),
-    expanded: menuHeads.map(e => e.classList.contains("expanded")),
+    expanded: details.map(detail => detail.open),
     scrollTop: leftPane.scrollTop,
   };
   localStorage.setItem("navSideState", JSON.stringify(navSideState));

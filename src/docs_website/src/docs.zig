@@ -23,16 +23,10 @@ pub fn build(
     const arena = b.allocator;
     const docs = b.addWriteFiles();
 
-    const menu = try create_root_menu(arena, "TigerBeetle Docs", source_dir);
-
-    var nav_html = try Html.create(arena);
-    try menu.write_links(website, nav_html);
-    const temp = b.addWriteFiles();
-    const nav = temp.add("nav.html", nav_html.string());
-
     var search_index = SearchIndex.init(arena);
 
-    try menu.install(b, website, nav, docs, &search_index);
+    const root_menu = try create_root_menu(arena, "TigerBeetle Docs", source_dir);
+    try root_menu.install(b, website, &root_menu, docs, &search_index);
 
     const search_index_writer_exe = b.addExecutable(.{
         .name = "search_index_writer",
@@ -120,11 +114,28 @@ const Menu = struct {
         return std.mem.lessThan(u8, lhs.title, rhs.title);
     }
 
-    fn write_links(self: Menu, website: Website, html: *Html) !void {
-        try html.write("<div class=\"menu\">", .{});
+    fn contains_page(self: *const Menu, target: *const DocPage) bool {
         for (self.menus) |menu| {
-            try html.write("<div class=\"item menu-head\">", .{});
-            if (menu.index_page) |page| {
+            if (menu.contains_page(target)) return true;
+        }
+        for (self.pages) |*page| {
+            if (page == target) return true;
+        }
+        return false;
+    }
+
+    fn write_links(
+        self: *const Menu,
+        website: Website,
+        html: *Html,
+        page_target: *const DocPage,
+    ) !void {
+        try html.write("<ol>", .{});
+        for (self.menus) |menu| {
+            try html.write("<li><details", .{});
+            if (menu.contains_page(page_target)) try html.write(" open", .{});
+            try html.write("><summary class=\"item\">", .{});
+            if (menu.index_page) |*page| {
                 try html.write(
                     \\<a href="$url_prefix/$url/">$title</a>
                 , .{
@@ -137,37 +148,39 @@ const Menu = struct {
                     .title = try html.from_md(menu.title),
                 });
             }
-            try html.write("</div>", .{});
-            try menu.write_links(website, html);
+            try html.write("</summary>", .{});
+            try menu.write_links(website, html, page_target);
+            try html.write("</details></li>", .{});
         }
-        for (self.pages) |page| {
+        for (self.pages) |*page| {
             try html.write(
-                \\<div class="item"><a href="$url_prefix/$url/">$title</a></div>
+                \\<li class="item"><a href="$url_prefix/$url/"$page_target>$title</a></li>
             , .{
                 .url_prefix = website.url_prefix,
                 .url = page.path_target,
+                .page_target = if (page == page_target) " class=\"target\"" else "",
                 .title = try html.from_md(page.title),
             });
         }
-        try html.write("</div>", .{});
+        try html.write("</ol>", .{});
     }
 
     fn install(
-        self: Menu,
+        self: *const Menu,
         b: *std.Build,
         website: Website,
-        nav: LazyPath,
+        root_menu: *const Menu,
         docs: *std.Build.Step.WriteFile,
         search_index: *SearchIndex,
     ) !void {
         if (self.index_page) |index_page| {
-            try index_page.install(b, website, nav, docs, search_index);
+            try index_page.install(b, website, root_menu, docs, search_index);
         }
-        for (self.menus) |menu| {
-            try menu.install(b, website, nav, docs, search_index);
+        for (self.menus) |*menu| {
+            try menu.install(b, website, root_menu, docs, search_index);
         }
-        for (self.pages) |page| {
-            try page.install(b, website, nav, docs, search_index);
+        for (self.pages) |*page| {
+            try page.install(b, website, root_menu, docs, search_index);
         }
     }
 };
@@ -276,10 +289,10 @@ const DocPage = struct {
     }
 
     fn install(
-        self: DocPage,
+        self: *const DocPage,
         b: *std.Build,
         website: Website,
-        nav: LazyPath,
+        root_menu: *const Menu,
         docs: *std.Build.Step.WriteFile,
         search_index: *SearchIndex,
     ) !void {
@@ -306,9 +319,12 @@ const DocPage = struct {
             break :blk try std.mem.join(b.allocator, " | ", &.{ self.title, title_suffix });
         };
 
+        const nav_html = try Html.create(b.allocator);
+        try root_menu.write_links(website, nav_html, self);
+
         const page_path = website.write_page(.{
             .title = page_title,
-            .nav = nav,
+            .nav = nav_html.string(),
             .content = pandoc_out,
         });
         _ = docs.addCopyFile(page_path, b.pathJoin(&.{ self.path_target, "index.html" }));

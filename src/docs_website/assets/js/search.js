@@ -97,20 +97,22 @@ function onSearchInput() {
   }
   let menus = [];
   for (const group of groups) {
-    const menuHead = document.createElement("div");
-    menus.push(menuHead);
-    menuHead.classList.add("menu-head");
-    menuHead.classList.add("expanded");
+    const details = document.createElement("details");
+    menus.push(details);
+    details.open = true;
+    const summary = document.createElement("summary");
+    details.appendChild(summary);
     const p = document.createElement("p");
+    summary.appendChild(p);
     p.innerText = pages[group.pageIndex].title;
-    menuHead.appendChild(p);
-    menuHead.addEventListener("click", () => menuHead.classList.toggle("expanded"));
-    const menu = document.createElement("div");
-    menus.push(menu);
-    menu.classList.add("menu");
+    const menu = document.createElement("ol");
+    details.appendChild(menu);
     for (const result of group.results) {
+      const li = document.createElement("li");
+      menu.appendChild(li);
+      li.className = "item";
       const a = document.createElement("a");
-      menu.appendChild(a);
+      li.appendChild(a);
       a.addEventListener("click", (e) => {
         e.preventDefault();
         selectResult(a);
@@ -250,7 +252,7 @@ window.addEventListener("load", () => {
 });
 
 function selectNextResult() {
-  const nodes = [...searchResults.querySelectorAll(".menu-head.expanded+.menu a")];
+  const nodes = [...searchResults.querySelectorAll("details[open] a")];
   if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
   const i = selected ? nodes.indexOf(selected) + 1 : 0;
@@ -258,7 +260,7 @@ function selectNextResult() {
 }
 
 function selectPreviousResult() {
-  const nodes = [...searchResults.querySelectorAll(".menu-head.expanded+.menu a")];
+  const nodes = [...searchResults.querySelectorAll("details[open] a")];
   if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
   const i = selected ? nodes.indexOf(selected) - 1 : -1;

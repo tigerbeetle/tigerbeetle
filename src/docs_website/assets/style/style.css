@@ -305,6 +305,18 @@ nav.left-pane {
       display: none;
     }
   }
+
+  ol {
+    list-style: none;
+  }
+
+  summary {
+    list-style: none;
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+  }
 }
 
 .search-results {
@@ -316,7 +328,7 @@ nav.left-pane {
   user-select: none;
   display: none;
 
-  .menu-head {
+  summary {
     display: flex;
     align-items: center;
     padding: 6px 8px;
@@ -459,60 +471,35 @@ nav.side {
     }
   }
 
-  .menu .item {
-    padding-left: 32px;
-
-    &:not(.menu-head) a {
-      margin-left: -32px;
+  /* indentation */
+  ol {
+    li.item {
       padding-left: 32px;
     }
 
-    &.menu-head {
-      padding-left: 8px;
-    }
-  }
+    ol {
+      summary.item {
+        padding-left: 16px;
+      }
 
-  .menu .menu .item {
-    padding-left: 40px;
+      li.item {
+        padding-left: 40px;
+      }
 
-    &:not(.menu-head) a {
-      margin-left: -40px;
-      padding-left: 40px;
-    }
+      ol {
+        summary.item {
+          padding-left: 24px;
+        }
 
-    &.menu-head {
-      padding-left: 16px;
-    }
-  }
-
-  .menu .menu .menu .item {
-    padding-left: 48px;
-
-    &:not(.menu-head) a {
-      margin-left: -48px;
-      padding-left: 48px;
-    }
-
-    &.menu-head {
-      padding-left: 24px;
+        li.item {
+          padding-left: 48px;
+        }
+      }
     }
   }
 }
 
-.menu {
-  display: flex;
-  flex-direction: column;
-}
-
-.menu-head+.menu {
-  display: none;
-}
-
-.menu-head.expanded+.menu {
-  display: flex;
-}
-
-.menu-head::before {
+summary::before {
   content: url('data:image/svg+xml,<svg width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 4.5 10 8 6.5 11.5" stroke="black" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" /></svg>');
   text-align: center;
   flex-shrink: 0;
@@ -523,30 +510,30 @@ nav.side {
   height: 16px;
 }
 
-.menu-head:has(a.target)::before {
+summary:has(a.target)::before {
   /* color: var(--gray-0); */
   filter: invert(100%);
 }
 
-.menu-head.expanded::before {
+details[open]>summary::before {
   transform: rotate(90deg);
 }
 
 @media (prefers-color-scheme: dark) {
-  .menu-head::before {
+  summary::before {
     filter: invert(80%);
   }
 
-  .menu-head:has(a.target)::before {
+  summary:has(a.target)::before {
     filter: none;
   }
 
   .search-results {
-    .menu-head::before {
+    summary::before {
       filter: invert(48%);
     }
 
-    .menu-head:hover::before {
+    summary:hover::before {
       filter: invert(93%);
     }
   }
