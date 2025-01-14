@@ -701,6 +701,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 @intCast(@intFromPtr(repl)),
                 operation,
                 arguments,
+                0,
             );
         }
 
@@ -848,8 +849,10 @@ pub fn ReplType(comptime MessageBus: type) type {
             user_data: u128,
             operation: StateMachine.Operation,
             timestamp: u64,
-            result: []u8,
+            result: []const u8,
+            batch_count: u16,
         ) void {
+            assert(batch_count == 0);
             client_request_callback_error(
                 user_data,
                 operation,
