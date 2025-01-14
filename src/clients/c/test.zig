@@ -244,10 +244,6 @@ test "c_client tb_status" {
     // All other status are not testable.
 }
 
-test {
-    _ = @import("tb_client/signal.zig");
-}
-
 // Asserts the validation rules associated with the "TB_PACKET_STATUS" enum.
 test "c_client tb_packet_status" {
     const RequestContext = RequestContextType(constants.message_body_size_max);

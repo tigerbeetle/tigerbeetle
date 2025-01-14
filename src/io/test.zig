@@ -342,7 +342,7 @@ test "event" {
         event: IO.Event = IO.INVALID_EVENT,
         event_completion: IO.Completion = undefined,
 
-        const delay = 100 * std.time.ns_per_ms;
+        const delay = 5 * std.time.ns_per_ms;
         const events_count = 5;
 
         fn run_test() !void {

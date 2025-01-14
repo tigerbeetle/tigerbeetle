@@ -137,7 +137,7 @@ test "signal" {
         main_thread_id: std.Thread.Id,
         signal: Signal,
 
-        const delay = 100 * std.time.ns_per_ms;
+        const delay = 5 * std.time.ns_per_ms;
         const events_count = 5;
 
         fn run_test() !void {
