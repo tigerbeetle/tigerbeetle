@@ -12,6 +12,9 @@
   --gray-11: #4B4B4B;
   /* change to darker gray for legibility */
   --gray-12: #202020;
+
+  --gray-alpha-5: #00000017;
+
   --red-10: #E3325E;
   --blue-10: #0588F0;
   --green-10: #2B9A66;
@@ -51,6 +54,9 @@
     /* change to lighter gray for legibility */
     --gray-11: #CCCCCC;
     --gray-12: #EEEEEE;
+
+    --gray-alpha-5: #FFFFFF1A;
+
     --red-10: #EC5D5E;
     --blue-10: #3B9EFF;
     --green-10: #33B074;
@@ -756,6 +762,9 @@ article {
 
     code {
       color: var(--gray-12);
+      background-color: var(--gray-alpha-5);
+      border-radius: 4px;
+      padding: 4px;
     }
 
     img {

@@ -9,6 +9,7 @@
     padding: 12px 16px;
     overflow: auto;
     color: var(--gray-12);
+    background-color: unset;
   }
 
   code .co {
