@@ -681,8 +681,14 @@ article {
 
     h3 {
       font-weight: 600;
+      font-size: 24px;
+      line-height: 32px;
+    }
+
+    h4 {
+      font-weight: 600;
       font-size: 18px;
-      line-height: 27px;
+      line-height: 24px;
     }
 
     h1,
