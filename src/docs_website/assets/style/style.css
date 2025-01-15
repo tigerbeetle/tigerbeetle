@@ -663,13 +663,13 @@ article {
 
     h1 {
       font-weight: 600;
-      font-size: 36px;
+      font-size: 48px;
       line-height: 54px;
     }
 
     h2 {
       font-weight: 600;
-      font-size: 24px;
+      font-size: 32px;
       line-height: 36px;
     }
 
@@ -698,6 +698,10 @@ article {
           color: var(--gray-12);
         }
       }
+    }
+
+    h2 {
+      margin-top: 40px;
     }
 
     h1,
