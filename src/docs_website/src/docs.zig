@@ -62,13 +62,18 @@ fn create_root_menu(arena: std.mem.Allocator) !Menu {
 }
 
 fn create_coding_menu(arena: std.mem.Allocator) !Menu {
+    const page_names = .{
+        "system-architecture.md",
+        "data-modeling.md",
+        "financial-accounting.md",
+        "two-phase-transfers.md",
+        "reliable-transaction-submission.md",
+        "time.md",
+    };
     var items = std.ArrayList(Menu.Item).init(arena);
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/system-architecture.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/data-modeling.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/financial-accounting.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/two-phase-transfers.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/reliable-transaction-submission.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/time.md") });
+    inline for (page_names) |page_name| {
+        try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/" ++ page_name) });
+    }
     try items.append(.{ .menu = try create_recipes_menu(arena) });
 
     return .{
@@ -79,15 +84,22 @@ fn create_coding_menu(arena: std.mem.Allocator) !Menu {
 }
 
 fn create_recipes_menu(arena: std.mem.Allocator) !Menu {
+    const page_names = .{
+        "currency-exchange.md",
+        "multi-debit-credit-transfers.md",
+        "close-account.md",
+        "balance-conditional-transfers.md",
+        "balance-bounds.md",
+        "correcting-transfers.md",
+        "rate-limiting.md",
+        "balance-invariant-transfers.md",
+    };
     var items = std.ArrayList(Menu.Item).init(arena);
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/currency-exchange.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/multi-debit-credit-transfers.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/close-account.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/balance-conditional-transfers.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/balance-bounds.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/correcting-transfers.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/rate-limiting.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/balance-invariant-transfers.md") });
+    inline for (page_names) |page_name| {
+        try items.append(.{
+            .page = try Page.init(arena, base_path ++ "/coding/recipes/" ++ page_name),
+        });
+    }
 
     return .{
         .title = "Recipes",
@@ -97,13 +109,20 @@ fn create_recipes_menu(arena: std.mem.Allocator) !Menu {
 }
 
 fn create_operating_menu(arena: std.mem.Allocator) !Menu {
+    const page_names = .{
+        "deploy.md",
+        "hardware.md",
+        "linux.md",
+        "docker.md",
+        "managed-service.md",
+        "upgrading.md",
+    };
     var items = std.ArrayList(Menu.Item).init(arena);
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/deploy.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/hardware.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/linux.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/docker.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/managed-service.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/upgrading.md") });
+    inline for (page_names) |page_name| {
+        try items.append(.{
+            .page = try Page.init(arena, base_path ++ "/operating/" ++ page_name),
+        });
+    }
 
     return .{
         .title = "Operating",
@@ -133,14 +152,15 @@ fn create_clients_menu(arena: std.mem.Allocator) !Menu {
 }
 
 fn create_reference_menu(arena: std.mem.Allocator) !Menu {
+    const path = base_path ++ "/reference/";
     var items = std.ArrayList(Menu.Item).init(arena);
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/account.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/transfer.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/account-balance.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/account-filter.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/query-filter.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "account.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "transfer.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "account-balance.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "account-filter.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "query-filter.md") });
     try items.append(.{ .menu = try create_requests_menu(arena) });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/sessions.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "sessions.md") });
 
     return .{
         .title = "Reference",
@@ -150,15 +170,16 @@ fn create_reference_menu(arena: std.mem.Allocator) !Menu {
 }
 
 fn create_requests_menu(arena: std.mem.Allocator) !Menu {
+    const path = base_path ++ "/reference/requests/";
     var items = std.ArrayList(Menu.Item).init(arena);
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/create_accounts.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/create_transfers.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/get_account_balances.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/get_account_transfers.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/lookup_accounts.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/lookup_transfers.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/query_accounts.md") });
-    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/query_transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "create_accounts.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "create_transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "get_account_balances.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "get_account_transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "lookup_accounts.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "lookup_transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "query_accounts.md") });
+    try items.append(.{ .page = try Page.init(arena, path ++ "query_transfers.md") });
 
     return .{
         .title = "Requests",
@@ -235,7 +256,8 @@ const Menu = struct {
                         , .{
                             .url_prefix = website.url_prefix,
                             .url = page.path_target,
-                            .title = try html.from_md(menu.title), // Fabio: index page titles are too long
+                            // Fabio: index page titles are too long
+                            .title = try html.from_md(menu.title),
                         });
                     } else {
                         try html.write("$title", .{
