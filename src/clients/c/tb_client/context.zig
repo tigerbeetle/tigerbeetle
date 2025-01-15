@@ -1,6 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
-const Atomic = std.atomic.Value;
 
 // When referenced from unit_test.zig, there is no vsr import module so use path.
 const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
@@ -105,7 +105,7 @@ pub fn ContextType(
         completion_fn: tb_completion_t,
         implementation: ContextImplementation,
 
-        submitted: Packet.SubmissionStack,
+        submitted: Packet.SubmissionQueue,
         pending: FIFOType(Packet),
 
         signal: Signal,
@@ -202,7 +202,11 @@ pub fn ContextType(
             };
 
             context.submitted = .{};
-            context.pending = .{ .name = null };
+            context.pending = .{
+                .name = null,
+                .verify_push = builtin.is_test,
+            };
+            context.canceled = false;
             context.evicted = null;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
@@ -299,8 +303,26 @@ pub fn ContextType(
                 return;
             }
 
-            while (self.submitted.pop()) |packet| {
+            // Prevents IO thread starvation under heavy client load.
+            // Process only the minimal number of packets for the next pending request.
+            const enqueued_count = self.pending.count;
+            const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
+            for (0..safety_limit) |_| {
+                const packet = self.submitted.pop() orelse return;
                 self.request(packet);
+
+                // Packets can be processed without increasing `pending.count`:
+                // - If the packet is invalid.
+                // - If there's no in-flight request, the packet is sent immediately without
+                //   using the pending queue.
+                // - If the packet can be batched with another previously enqueued packet.
+                if (self.pending.count > enqueued_count) break;
+            }
+
+            // Defer this work to later,
+            // allowing the IO thread to remain free for processing completions.
+            if (!self.submitted.empty()) {
+                self.signal.notify();
             }
         }
 
