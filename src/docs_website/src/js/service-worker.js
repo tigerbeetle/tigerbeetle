@@ -40,9 +40,6 @@ self.addEventListener('fetch', event => {
 function normalizeUrl(url) {
   const urlObj = new URL(url);
 
-  if (urlObj.pathname && !urlObj.pathname.includes('.') && !urlObj.pathname.endsWith('/')) {
-    urlObj.pathname += '/';
-  }
   if (urlObj.search) {
     urlObj.search = "";
   }
