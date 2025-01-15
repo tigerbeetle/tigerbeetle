@@ -19,19 +19,15 @@ const log = std.log;
 
 pub const CLIArgs = struct {
     sha: []const u8,
+    kcov: []const u8,
 };
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     try devhub_metrics(shell, cli_args);
-    try devhub_coverage(shell);
+    try devhub_coverage(shell, cli_args.kcov);
 }
 
-fn devhub_coverage(shell: *Shell) !void {
-    const kcov_version = shell.exec_stdout("kcov --version", .{}) catch {
-        return error.NoKcov;
-    };
-    log.info("kcov version {s}", .{kcov_version});
-
+fn devhub_coverage(shell: *Shell, kcov_path: []const u8) !void {
     try shell.exec_zig("build test:unit:build", .{});
     try shell.exec_zig("build vopr:build", .{});
     try shell.exec_zig("build fuzz:build", .{});
@@ -40,7 +36,8 @@ fn devhub_coverage(shell: *Shell) !void {
     try shell.project_root.deleteTree("./src/devhub/coverage");
     try shell.project_root.makePath("./src/devhub/coverage");
 
-    const kcov: []const []const u8 = &.{ "kcov", "--include-path=./src", "./src/devhub/coverage" };
+    const kcov: []const []const u8 =
+        &.{ kcov_path, "--include-path=./src", "./src/devhub/coverage" };
     inline for (.{
         "{kcov} ./zig-out/bin/test",
         "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_tree 92",
