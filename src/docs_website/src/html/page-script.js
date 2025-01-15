@@ -50,7 +50,9 @@ const navSideState = JSON.parse(localStorage.getItem("navSideState"));
 if (navSideState) {
   leftPane.style.width = navSideState.width;
   if (navSideState.collapsed) document.body.classList.add("sidenav-collapsed");
-  navSideState.expanded.forEach((expanded, i) => details[i].open = expanded);
+  navSideState.expanded.forEach((expanded, i) => {
+    if (i < details.length) details[i].open = expanded
+  });
   leftPane.scrollTop = navSideState.scrollTop;
 }
 window.addEventListener("beforeunload", () => {
