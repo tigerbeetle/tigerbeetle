@@ -875,9 +875,25 @@ fn build_scripts(
         .optimize = options.mode,
     });
     scripts.root_module.addOptions("vsr_options", options.vsr_options);
+
     const scripts_run = b.addRunArtifact(scripts);
     scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
-    if (b.args) |args| scripts_run.addArgs(args);
+    if (b.args) |args| {
+        scripts_run.addArgs(args);
+
+        // To reduce downloads, add kcov dependency only when actually running devhub.
+        const fetch_kcov = for (args) |arg| {
+            if (std.mem.eql(u8, arg, "devhub")) break true;
+        } else false;
+        if (fetch_kcov) {
+            scripts_run.addPrefixedFileArg("--kcov=", fetch(b, .{
+                .url = "https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz",
+                .file_name = "./local/bin/kcov",
+                .hash = "122026f03aad84f56f321790926fdaaf56ff0d21c69a9ebd1ce8786e7ea47355ded7",
+            }));
+        }
+    }
+
     step_scripts.dependOn(&scripts_run.step);
 }
 
