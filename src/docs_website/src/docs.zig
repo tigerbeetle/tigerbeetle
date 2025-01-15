@@ -9,6 +9,8 @@ const Html = @import("html.zig").Html;
 
 const enforce_readme_md = false;
 
+const base_path = "../../docs";
+
 const SearchIndexEntry = struct {
     page_path: []const u8,
     html_path: LazyPath,
@@ -18,15 +20,14 @@ const SearchIndex = std.ArrayList(SearchIndexEntry);
 pub fn build(
     b: *std.Build,
     website: Website,
-    source_dir: []const u8,
 ) !LazyPath {
     const arena = b.allocator;
     const docs = b.addWriteFiles();
 
     var search_index = SearchIndex.init(arena);
 
-    const root_menu = try create_root_menu(arena, "TigerBeetle Docs", source_dir);
-    try root_menu.install(b, website, &root_menu, docs, &search_index);
+    const root_menu = try create_root_menu(arena);
+    try root_menu.install(b, website, root_menu, docs, &search_index);
 
     const search_index_writer_exe = b.addExecutable(.{
         .name = "search_index_writer",
@@ -44,69 +45,160 @@ pub fn build(
     return docs.getDirectory();
 }
 
-fn create_root_menu(arena: std.mem.Allocator, title: []const u8, base_path: []const u8) !Menu {
-    var pages = std.ArrayList(DocPage).init(arena);
-    var menus = std.ArrayList(Menu).init(arena);
-
-    const index_path = try std.fs.path.join(arena, &.{ base_path, "README.md" });
-    const index_page = try DocPage.init(arena, base_path, index_path);
-    const quick_start_path = try std.fs.path.join(arena, &.{ base_path, "quick-start.md" });
-    try pages.append(try DocPage.init(arena, base_path, quick_start_path));
-
-    var dir = std.fs.cwd().openDir(base_path, .{ .iterate = true }) catch |err| {
-        log.err("unable to open path '{s}'", .{base_path});
-        return err;
-    };
-    defer dir.close();
-
-    var it = dir.iterate();
-    while (try it.next()) |entry| {
-        if (entry.kind == .directory) {
-            const menu_path = try std.fs.path.join(arena, &.{ base_path, entry.name });
-            const menu_title = try make_title(arena, entry.name);
-            try menus.append(try DocPage.find_all(arena, menu_title, base_path, menu_path));
-        }
-    }
-
-    try menus.append(try create_clients_menu(arena));
-
-    std.mem.sort(DocPage, pages.items, {}, DocPage.asc);
-    std.mem.sort(Menu, menus.items, {}, Menu.asc);
+fn create_root_menu(arena: std.mem.Allocator) !Menu {
+    var items = std.ArrayList(Menu.Item).init(arena);
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/quick-start.md") });
+    try items.append(.{ .menu = try create_coding_menu(arena) });
+    try items.append(.{ .menu = try create_operating_menu(arena) });
+    try items.append(.{ .menu = try create_clients_menu(arena) });
+    try items.append(.{ .menu = try create_reference_menu(arena) });
+    try items.append(.{ .menu = try create_about_menu(arena) });
 
     return .{
-        .title = title,
-        .index_page = index_page,
-        .menus = menus.items,
-        .pages = pages.items,
+        .title = "TigerBeetle Docs",
+        .index = try Page.init(arena, base_path ++ "/README.md"),
+        .items = items.items,
+    };
+}
+
+fn create_coding_menu(arena: std.mem.Allocator) !Menu {
+    var items = std.ArrayList(Menu.Item).init(arena);
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/system-architecture.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/data-modeling.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/financial-accounting.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/two-phase-transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/reliable-transaction-submission.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/time.md") });
+    try items.append(.{ .menu = try create_recipes_menu(arena) });
+
+    return .{
+        .title = "Coding",
+        .index = try Page.init(arena, base_path ++ "/coding/README.md"),
+        .items = items.items,
+    };
+}
+
+fn create_recipes_menu(arena: std.mem.Allocator) !Menu {
+    var items = std.ArrayList(Menu.Item).init(arena);
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/currency-exchange.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/multi-debit-credit-transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/close-account.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/balance-conditional-transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/balance-bounds.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/correcting-transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/rate-limiting.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/coding/recipes/balance-invariant-transfers.md") });
+
+    return .{
+        .title = "Recipes",
+        .index = null,
+        .items = items.items,
+    };
+}
+
+fn create_operating_menu(arena: std.mem.Allocator) !Menu {
+    var items = std.ArrayList(Menu.Item).init(arena);
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/deploy.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/hardware.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/linux.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/docker.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/managed-service.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/operating/upgrading.md") });
+
+    return .{
+        .title = "Operating",
+        .index = null,
+        .items = items.items,
     };
 }
 
 fn create_clients_menu(arena: std.mem.Allocator) !Menu {
-    var pages = std.ArrayList(DocPage).init(arena);
+    var pages = std.ArrayList(Menu.Item).init(arena);
 
     const clients = &.{ "go", "java", "dotnet", "node", "python" };
     const titles = &.{ "Go", "Java", ".NET", "Node.js", "Python" };
     inline for (clients, titles) |client, title| {
-        try pages.append(.{
+        try pages.append(.{ .page = .{
             .path_source = "../clients/" ++ client ++ "/README.md",
             .path_target = "clients/" ++ client,
             .title = title,
-        });
+        } });
     }
 
     return .{
-        .title = "Clients",
-        .index_page = null,
-        .menus = &.{},
-        .pages = pages.items,
+        .title = "Client Libraries",
+        .index = null,
+        .items = pages.items,
+    };
+}
+
+fn create_reference_menu(arena: std.mem.Allocator) !Menu {
+    var items = std.ArrayList(Menu.Item).init(arena);
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/account.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/transfer.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/account-balance.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/account-filter.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/query-filter.md") });
+    try items.append(.{ .menu = try create_requests_menu(arena) });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/sessions.md") });
+
+    return .{
+        .title = "Reference",
+        .index = null,
+        .items = items.items,
+    };
+}
+
+fn create_requests_menu(arena: std.mem.Allocator) !Menu {
+    var items = std.ArrayList(Menu.Item).init(arena);
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/create_accounts.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/create_transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/get_account_balances.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/get_account_transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/lookup_accounts.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/lookup_transfers.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/query_accounts.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/reference/requests/query_transfers.md") });
+
+    return .{
+        .title = "Requests",
+        .index = null,
+        .items = items.items,
+    };
+}
+
+fn create_about_menu(arena: std.mem.Allocator) !Menu {
+    var items = std.ArrayList(Menu.Item).init(arena);
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/about/oltp.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/about/performance.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/about/safety.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/about/vopr.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/about/architecture.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/about/production-ready.md") });
+    try items.append(.{ .page = try Page.init(arena, base_path ++ "/about/zig.md") });
+    // (internals intentionally hidden)
+
+    return .{
+        .title = "About",
+        .index = try Page.init(arena, base_path ++ "/about/README.md"),
+        .items = items.items,
     };
 }
 
 const Menu = struct {
+    const Item = union(Type) {
+        const Type = enum {
+            menu,
+            page,
+        };
+
+        menu: Menu,
+        page: Page,
+    };
+
     title: []const u8,
-    index_page: ?DocPage,
-    menus: []Menu,
-    pages: []DocPage,
+    index: ?Page,
+    items: []const Item,
 
     fn asc(context: void, lhs: Menu, rhs: Menu) bool {
         _ = context;
@@ -114,85 +206,89 @@ const Menu = struct {
         return std.mem.lessThan(u8, lhs.title, rhs.title);
     }
 
-    fn contains_page(self: *const Menu, target: *const DocPage) bool {
-        for (self.menus) |menu| {
-            if (menu.contains_page(target)) return true;
-        }
-        for (self.pages) |*page| {
-            if (page == target) return true;
+    fn contains_page(self: Menu, target: Page) bool {
+        for (self.items) |item| {
+            switch (item) {
+                .menu => |menu| if (menu.contains_page(target)) return true,
+                .page => |page| if (page.eql(target)) return true,
+            }
         }
         return false;
     }
 
     fn write_links(
-        self: *const Menu,
+        self: Menu,
         website: Website,
         html: *Html,
-        page_target: *const DocPage,
+        target_page: Page,
     ) !void {
         try html.write("<ol>", .{});
-        for (self.menus) |menu| {
-            try html.write("<li><details", .{});
-            if (menu.contains_page(page_target)) try html.write(" open", .{});
-            try html.write("><summary class=\"item\">", .{});
-            if (menu.index_page) |*page| {
-                try html.write(
-                    \\<a href="$url_prefix/$url/">$title</a>
-                , .{
-                    .url_prefix = website.url_prefix,
-                    .url = page.path_target,
-                    .title = try html.from_md(menu.title), // Fabio: index page titles are too long
-                });
-            } else {
-                try html.write("$title", .{
-                    .title = try html.from_md(menu.title),
-                });
+        for (self.items) |item| {
+            switch (item) {
+                .menu => |menu| {
+                    try html.write("<li><details", .{});
+                    if (menu.contains_page(target_page)) try html.write(" open", .{});
+                    try html.write("><summary class=\"item\">", .{});
+                    if (menu.index) |page| {
+                        try html.write(
+                            \\<a href="$url_prefix/$url/">$title</a>
+                        , .{
+                            .url_prefix = website.url_prefix,
+                            .url = page.path_target,
+                            .title = try html.from_md(menu.title), // Fabio: index page titles are too long
+                        });
+                    } else {
+                        try html.write("$title", .{
+                            .title = try html.from_md(menu.title),
+                        });
+                    }
+                    try html.write("</summary>", .{});
+                    try menu.write_links(website, html, target_page);
+                    try html.write("</details></li>", .{});
+                },
+                .page => |page| {
+                    try html.write(
+                        \\<li class="item"><a href="$url_prefix/$url/"$target_page>$title</a></li>
+                    , .{
+                        .url_prefix = website.url_prefix,
+                        .url = page.path_target,
+                        .target_page = if (page.eql(target_page)) " class=\"target\"" else "",
+                        .title = try html.from_md(page.title),
+                    });
+                },
             }
-            try html.write("</summary>", .{});
-            try menu.write_links(website, html, page_target);
-            try html.write("</details></li>", .{});
-        }
-        for (self.pages) |*page| {
-            try html.write(
-                \\<li class="item"><a href="$url_prefix/$url/"$page_target>$title</a></li>
-            , .{
-                .url_prefix = website.url_prefix,
-                .url = page.path_target,
-                .page_target = if (page == page_target) " class=\"target\"" else "",
-                .title = try html.from_md(page.title),
-            });
         }
         try html.write("</ol>", .{});
     }
 
     fn install(
-        self: *const Menu,
+        self: Menu,
         b: *std.Build,
         website: Website,
-        root_menu: *const Menu,
+        root_menu: Menu,
         docs: *std.Build.Step.WriteFile,
         search_index: *SearchIndex,
     ) !void {
-        if (self.index_page) |index_page| {
-            try index_page.install(b, website, root_menu, docs, search_index);
-        }
-        for (self.menus) |*menu| {
-            try menu.install(b, website, root_menu, docs, search_index);
-        }
-        for (self.pages) |*page| {
+        if (self.index) |page| {
             try page.install(b, website, root_menu, docs, search_index);
+        }
+        for (self.items) |item| {
+            switch (item) {
+                .menu => |menu| try menu.install(b, website, root_menu, docs, search_index),
+                .page => |page| try page.install(b, website, root_menu, docs, search_index),
+            }
         }
     }
 };
 
-const DocPage = struct {
+const Page = struct {
     path_source: []const u8,
     path_target: []const u8,
 
     // Parsed from Markdown content.
     title: []const u8,
 
-    fn init(arena: Allocator, base_path: []const u8, path_source: []const u8) !DocPage {
+    fn init(arena: Allocator, path_source: []const u8) !Page {
         assert(std.mem.endsWith(u8, path_source, ".md"));
 
         var path_target = path_source[base_path.len + 1 ..];
@@ -204,7 +300,7 @@ const DocPage = struct {
             path_target = path_target[0 .. path_target.len - ".md".len];
         }
 
-        var post: DocPage = .{
+        var post: Page = .{
             .path_source = path_source,
             .path_target = path_target,
             .title = undefined,
@@ -214,7 +310,7 @@ const DocPage = struct {
         return post;
     }
 
-    fn load(self: *DocPage, arena: Allocator) !void {
+    fn load(self: *Page, arena: Allocator) !void {
         errdefer log.err("error while loading '{s}'", .{self.path_source});
 
         const source = try std.fs.cwd().readFileAlloc(
@@ -231,68 +327,21 @@ const DocPage = struct {
         self.title = title_line[2..];
     }
 
-    fn asc(context: void, lhs: DocPage, rhs: DocPage) bool {
+    fn eql(lhs: Page, rhs: Page) bool {
+        return std.mem.eql(u8, lhs.path_source, rhs.path_source);
+    }
+
+    fn asc(context: void, lhs: Page, rhs: Page) bool {
         _ = context;
         assert(!std.mem.eql(u8, lhs.title, rhs.title));
         return std.mem.lessThan(u8, lhs.title, rhs.title);
     }
 
-    fn find_all(
-        arena: Allocator,
-        title: []const u8,
-        base_path: []const u8,
-        path: []const u8,
-    ) !Menu {
-        var index_page: ?DocPage = null;
-        var pages = std.ArrayList(DocPage).init(arena);
-        var menus = std.ArrayList(Menu).init(arena);
-
-        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
-            log.err("unable to open path '{s}'", .{path});
-            return err;
-        };
-        defer dir.close();
-
-        var it = dir.iterate();
-        while (try it.next()) |entry| {
-            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".md")) {
-                const page_path = try std.fs.path.join(arena, &.{ path, entry.name });
-                const page = try DocPage.init(arena, base_path, page_path);
-                if (std.mem.eql(u8, entry.name, "README.md")) {
-                    assert(index_page == null);
-                    index_page = page;
-                } else {
-                    try pages.append(page);
-                }
-            } else if (entry.kind == .directory) {
-                if (std.mem.eql(u8, entry.name, "internals")) continue; // hide internals
-                const menu_path = try std.fs.path.join(arena, &.{ path, entry.name });
-                const menu_title = try make_title(arena, entry.name);
-                try menus.append(try find_all(arena, menu_title, base_path, menu_path));
-            }
-        }
-
-        if (enforce_readme_md and index_page == null) {
-            log.err("README.md not found in '{s}'", .{path});
-            return error.MissingReadmeMd;
-        }
-
-        std.mem.sort(DocPage, pages.items, {}, DocPage.asc);
-        std.mem.sort(Menu, menus.items, {}, Menu.asc);
-
-        return .{
-            .title = title,
-            .index_page = index_page,
-            .menus = menus.items,
-            .pages = pages.items,
-        };
-    }
-
     fn install(
-        self: *const DocPage,
+        self: Page,
         b: *std.Build,
         website: Website,
-        root_menu: *const Menu,
+        root_menu: Menu,
         docs: *std.Build.Step.WriteFile,
         search_index: *SearchIndex,
     ) !void {

@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) !void {
     const install_assets = assets.install(b, .{ .source = "assets", .target = "." });
     file_checker_run.step.dependOn(&install_assets.step);
 
-    const docs_dir = try docs.build(b, website, "../../docs");
+    const docs_dir = try docs.build(b, website);
     const install_docs = b.addInstallDirectory(.{
         .source_dir = docs_dir,
         .install_dir = .prefix,
