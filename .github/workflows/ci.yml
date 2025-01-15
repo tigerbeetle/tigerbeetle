@@ -180,7 +180,7 @@ jobs:
 
   devhub:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     environment: devhub
     permissions:
       pages: write
