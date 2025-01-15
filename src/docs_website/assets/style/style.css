@@ -473,26 +473,44 @@ nav.side {
 
   /* indentation */
   ol {
+    background-repeat: repeat-y;
+
     li.item {
       padding-left: 32px;
     }
 
     ol {
+      background-image: url('data:image/svg+xml,<svg width="64" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15.5 0V16" stroke="%23E8E8E8" /></svg>');
+
       summary.item {
-        padding-left: 16px;
+        padding-left: 24px;
       }
 
       li.item {
-        padding-left: 40px;
+        padding-left: 48px;
       }
 
       ol {
+        background-image: url('data:image/svg+xml,<svg width="64" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M31.5 0V16" stroke="%23E8E8E8" /></svg>');
+
         summary.item {
-          padding-left: 24px;
+          padding-left: 40px;
         }
 
         li.item {
-          padding-left: 48px;
+          padding-left: 64px;
+        }
+      }
+    }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    ol {
+      ol {
+        background-image: url('data:image/svg+xml,<svg width="64" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15.5 0V16" stroke="%232A2A2A" /></svg>');
+
+        ol {
+          background-image: url('data:image/svg+xml,<svg width="64" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M31.5 0V16" stroke="%232A2A2A" /></svg>');
         }
       }
     }
