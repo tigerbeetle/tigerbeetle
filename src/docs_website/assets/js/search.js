@@ -3,6 +3,7 @@ let sections = [];
 
 const searchInput = document.querySelector("input[type=search]");
 const searchResults = document.querySelector(".search-results");
+const searchNotFound = document.querySelector(".search-notfound");
 const searchStats = document.querySelector(".search-stats");
 const searchHotkey = document.querySelector(".search-box>.hotkey");
 const searchClearButton = document.querySelector(".search-box>.clear-button");
@@ -135,11 +136,13 @@ function onSearchInput() {
 
   highlightText(searchInput.value, searchResults);
 
-  if (searchInput.value === "") {
-    leftPane.classList.remove("search-active");
-  } else {
+  const searchActive = searchInput.value !== "";
+  if (searchActive) {
     leftPane.classList.add("search-active");
+  } else {
+    leftPane.classList.remove("search-active");
   }
+  searchNotFound.style.display = searchActive && results.length === 0 ? "flex" : "none";
 }
 
 function search(term) {

@@ -295,12 +295,6 @@ nav.left-pane {
       display: block;
     }
 
-    &:has(.search-results:empty) {
-      .search-notfound {
-        display: flex;
-      }
-    }
-
     nav.side {
       display: none;
     }
