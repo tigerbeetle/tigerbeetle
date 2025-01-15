@@ -84,7 +84,8 @@ pub fn string(self: Html) []const u8 {
 pub fn from_md(self: *Html, string_md: []const u8) ![]const u8 {
     if (string_md[0] == '`') {
         var buffer = std.ArrayList(u8).init(self.arena);
-        try buffer.writer().print("<code>{s}</code>", .{std.mem.trim(u8, string_md, "`")});
+        // try buffer.writer().print("<code>{s}</code>", .{std.mem.trim(u8, string_md, "`")});
+        try buffer.writer().print("{s}", .{std.mem.trim(u8, string_md, "`")});
         return buffer.items;
     } else {
         return string_md;
