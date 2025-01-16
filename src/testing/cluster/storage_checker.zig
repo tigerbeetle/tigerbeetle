@@ -54,12 +54,13 @@ const Checkpoint = std.enums.EnumMap(CheckpointArea, u128);
 
 pub const StorageChecker = struct {
     const SuperBlock = vsr.SuperBlockType(Storage);
-
+    const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
     compactions: Compactions,
     checkpoints: Checkpoints,
 
     free_set: vsr.FreeSet,
-    free_set_buffer: []align(@alignOf(u64)) u8,
+    free_set_blocks_acquired_encoded: []align(@alignOf(u64)) u8,
+    free_set_blocks_released_encoded: []align(@alignOf(u64)) u8,
 
     client_sessions: vsr.ClientSessions,
     client_sessions_buffer: []align(@sizeOf(u256)) u8,
@@ -71,18 +72,33 @@ pub const StorageChecker = struct {
         var checkpoints = Checkpoints.init(allocator);
         errdefer checkpoints.deinit();
 
-        var free_set = try vsr.FreeSet.init(allocator, Storage.grid_blocks_max);
+        const free_set_encoded_blocks_max =
+            CheckpointTrailer.block_count_max(vsr.FreeSet.encode_size_max(Storage.grid_blocks_max));
+        var free_set = try vsr.FreeSet.init(
+            allocator,
+            .{
+                .blocks_count = Storage.grid_blocks_max,
+                .blocks_released_prior_checkpoint_durability_max = 2 * free_set_encoded_blocks_max,
+            },
+        );
         errdefer free_set.deinit(allocator);
 
         var client_sessions = try vsr.ClientSessions.init(allocator);
         errdefer client_sessions.deinit(allocator);
 
-        const free_set_buffer = try allocator.alignedAlloc(
+        const free_set_blocks_acquired_encoded = try allocator.alignedAlloc(
             u8,
             @alignOf(u64),
             vsr.FreeSet.encode_size_max(Storage.grid_blocks_max),
         );
-        errdefer allocator.free(free_set_buffer);
+        errdefer allocator.free(free_set_blocks_acquired_encoded);
+
+        const free_set_blocks_released_encoded = try allocator.alignedAlloc(
+            u8,
+            @alignOf(u64),
+            vsr.FreeSet.encode_size_max(Storage.grid_blocks_max),
+        );
+        errdefer allocator.free(free_set_blocks_released_encoded);
 
         const client_sessions_buffer =
             try allocator.alignedAlloc(u8, @sizeOf(u256), vsr.ClientSessions.encode_size);
@@ -92,7 +108,8 @@ pub const StorageChecker = struct {
             .compactions = compactions,
             .checkpoints = checkpoints,
             .free_set = free_set,
-            .free_set_buffer = free_set_buffer,
+            .free_set_blocks_acquired_encoded = free_set_blocks_acquired_encoded,
+            .free_set_blocks_released_encoded = free_set_blocks_released_encoded,
             .client_sessions = client_sessions,
             .client_sessions_buffer = client_sessions_buffer,
         };
@@ -100,7 +117,8 @@ pub const StorageChecker = struct {
 
     pub fn deinit(checker: *StorageChecker, allocator: std.mem.Allocator) void {
         allocator.free(checker.client_sessions_buffer);
-        allocator.free(checker.free_set_buffer);
+        allocator.free(checker.free_set_blocks_acquired_encoded);
+        allocator.free(checker.free_set_blocks_released_encoded);
         checker.client_sessions.deinit(allocator);
         checker.free_set.deinit(allocator);
         checker.checkpoints.deinit();
@@ -122,27 +140,7 @@ pub const StorageChecker = struct {
         const bar_beat_count = constants.lsm_compaction_ops;
         if ((replica.commit_min + 1) % bar_beat_count != 0) return;
 
-        // The ManifestLog acquires a single address (for the "open" block) potentially multiple
-        // bars before writing the corresponding block. (The open block is closed and written when
-        // it fills up, or at the next checkpoint.) The StorageChecker must avoid checking that
-        // block – until it is written, the content in the grid is undefined.
-        //
-        // See also: ManifestLog.acquire_block().
-        const manifest_address_open = address: {
-            const manifest_log = &replica.state_machine.forest.manifest_log;
-            if (manifest_log.blocks_closed == manifest_log.blocks.count) {
-                break :address null;
-            } else {
-                const open_block = manifest_log.blocks.tail().?;
-                const open_block_header =
-                    std.mem.bytesAsValue(vsr.Header.Block, open_block[0..@sizeOf(vsr.Header)]);
-                assert(open_block_header.checksum == 0);
-                assert(open_block_header.address > 0);
-                break :address open_block_header.address;
-            }
-        };
-
-        const checksum = checker.checksum_grid(superblock, manifest_address_open);
+        const checksum = checker.checksum_grid(Replica, replica, false);
         log.debug("{?}: replica_compact: op={} area=grid checksum={x:0>32}", .{
             superblock.replica_index,
             replica.commit_min,
@@ -174,7 +172,8 @@ pub const StorageChecker = struct {
         const syncing = replica.superblock.working.vsr_state.sync_op_max > 0;
         try checker.check(
             "replica_checkpoint",
-            &replica.superblock,
+            Replica,
+            replica,
             std.enums.EnumSet(CheckpointArea).init(.{
                 .superblock_checkpoint = true,
                 .client_replies = !syncing,
@@ -186,13 +185,18 @@ pub const StorageChecker = struct {
     }
 
     /// Invoked when both superblock and content sync is complete.
-    pub fn replica_sync(checker: *StorageChecker, superblock: *const SuperBlock) !void {
+    pub fn replica_sync(
+        checker: *StorageChecker,
+        comptime Replica: type,
+        replica: *const Replica,
+    ) !void {
         try checker.check(
             "replica_sync",
-            superblock,
+            Replica,
+            replica,
             std.enums.EnumSet(CheckpointArea).init(.{
                 .superblock_checkpoint = true,
-                // The replica may have have already committed some addition prepares atop the
+                // The replica may have have already committed some additional prepares atop the
                 // checkpoint, so its client-replies zone will have mutated.
                 .client_replies = false,
                 .grid = true,
@@ -203,9 +207,11 @@ pub const StorageChecker = struct {
     fn check(
         checker: *StorageChecker,
         caller: []const u8,
-        superblock: *const SuperBlock,
+        comptime Replica: type,
+        replica: *const Replica,
         areas: std.enums.EnumSet(CheckpointArea),
     ) !void {
+        const superblock: *const SuperBlock = &replica.superblock;
         const checkpoint_actual = checkpoint: {
             var checkpoint = Checkpoint.init(.{
                 .superblock_checkpoint = null,
@@ -222,23 +228,22 @@ pub const StorageChecker = struct {
                 checkpoint.put(.client_replies, checker.checksum_client_replies(superblock));
             }
             if (areas.contains(.grid)) {
-                checkpoint.put(.grid, checker.checksum_grid(superblock, null));
+                checkpoint.put(.grid, checker.checksum_grid(Replica, replica, true));
             }
             break :checkpoint checkpoint;
         };
 
-        const replica_checkpoint_op = superblock.working.vsr_state.checkpoint.header.op;
         for (std.enums.values(CheckpointArea)) |area| {
             log.debug("{}: {s}: checkpoint={} area={s} value={?x:0>32}", .{
-                superblock.replica_index.?,
+                replica.replica,
                 caller,
-                replica_checkpoint_op,
+                replica.op_checkpoint(),
                 @tagName(area),
                 checkpoint_actual.get(area),
             });
         }
 
-        if (checker.checkpoints.getPtr(replica_checkpoint_op)) |checkpoint_expect| {
+        if (checker.checkpoints.getPtr(replica.op_checkpoint())) |checkpoint_expect| {
             var mismatch: bool = false;
             for (std.enums.values(CheckpointArea)) |area| {
                 const checksum_actual = checkpoint_actual.get(area) orelse continue;
@@ -246,7 +251,7 @@ pub const StorageChecker = struct {
                     if (checksum_expect != checksum_actual) {
                         log.warn("{}: {s}: mismatch " ++
                             "area={s} expect={x:0>32} actual={x:0>32}", .{
-                            superblock.replica_index.?,
+                            replica.replica,
                             caller,
                             @tagName(area),
                             checksum_expect,
@@ -261,7 +266,7 @@ pub const StorageChecker = struct {
         } else {
             // This replica is the first to reach op_checkpoint.
             // Save its state for other replicas to check themselves against.
-            try checker.checkpoints.putNoClobber(replica_checkpoint_op, checkpoint_actual);
+            try checker.checkpoints.putNoClobber(replica.op_checkpoint(), checkpoint_actual);
         }
     }
 
@@ -320,20 +325,26 @@ pub const StorageChecker = struct {
         return checksum.checksum();
     }
 
-    fn checksum_grid(
+    fn decode_free_set_from_superblock(
         checker: *StorageChecker,
+        bitset: vsr.FreeSet.BitsetKind,
         superblock: *const SuperBlock,
-        // If non-null, ignore this one (acquired) block.
-        address_skip: ?u64,
-    ) u128 {
-        const free_set_size = superblock.working.vsr_state.checkpoint.free_set_size;
+    ) void {
+        const free_set_reference = superblock.working.free_set_reference(bitset);
+
+        const free_set_buffer: []align(@alignOf(u64)) u8 = switch (bitset) {
+            .blocks_acquired => checker.free_set_blocks_acquired_encoded,
+            .blocks_released => checker.free_set_blocks_released_encoded,
+        };
+        const free_set_size = free_set_reference.trailer_size;
+        const free_set_checksum = free_set_reference.checksum;
 
         if (free_set_size > 0) {
             // Read free set from the grid by manually following the linked list of blocks.
             // Note that free set is written in direct order, and must be read backwards.
             var free_set_block: ?vsr.BlockReference = .{
-                .address = superblock.working.vsr_state.checkpoint.free_set_last_block_address,
-                .checksum = superblock.working.vsr_state.checkpoint.free_set_last_block_checksum,
+                .address = free_set_reference.last_block_address,
+                .checksum = free_set_reference.last_block_checksum,
             };
 
             const free_set_block_count =
@@ -349,7 +360,7 @@ pub const StorageChecker = struct {
                 stdx.copy_disjoint(
                     .inexact,
                     u8,
-                    checker.free_set_buffer[free_set_cursor..],
+                    free_set_buffer[free_set_cursor..],
                     encoded_words,
                 );
 
@@ -358,41 +369,82 @@ pub const StorageChecker = struct {
             assert(free_set_block == null);
             assert(free_set_cursor == 0);
         }
-        assert(vsr.checksum(checker.free_set_buffer[0..free_set_size]) ==
-            superblock.working.vsr_state.checkpoint.free_set_checksum);
 
-        checker.free_set.decode(checker.free_set_buffer[0..free_set_size]);
+        assert(vsr.checksum(free_set_buffer[0..free_set_size]) == free_set_checksum);
+    }
+
+    fn checksum_grid(
+        checker: *StorageChecker,
+        comptime Replica: type,
+        replica: *const Replica,
+        use_free_set_from_superblock: bool,
+    ) u128 {
+        const superblock: *const SuperBlock = &replica.superblock;
+        const manifest_log = &replica.state_machine.forest.manifest_log;
+        const free_set = free_set: {
+            if (use_free_set_from_superblock) {
+                checker.decode_free_set_from_superblock(.blocks_acquired, superblock);
+                checker.decode_free_set_from_superblock(.blocks_released, superblock);
+                const free_set_blocks_acquired_size =
+                    superblock.working.free_set_reference(.blocks_acquired).trailer_size;
+                const free_set_blocks_released_size =
+                    superblock.working.free_set_reference(.blocks_released).trailer_size;
+                checker.free_set.decode_chunks(
+                    &.{checker.free_set_blocks_acquired_encoded[0..free_set_blocks_acquired_size]},
+                    &.{checker.free_set_blocks_released_encoded[0..free_set_blocks_released_size]},
+                );
+                checker.free_set.opened = true;
+                break :free_set checker.free_set;
+            } else {
+                break :free_set replica.grid.free_set;
+            }
+        };
         defer checker.free_set.reset();
 
-        // address_skip lets us ignore a block that has been acquired but not yet written.
-        if (address_skip) |address| assert(!checker.free_set.is_free(address));
+        var blocks_acquired = free_set.blocks_acquired.iterator(.{});
+        var blocks_missing: usize = 0;
 
         var stream = vsr.ChecksumStream.init();
-        var blocks_missing: usize = 0;
-        var blocks_acquired = checker.free_set.blocks.iterator(.{});
+
         while (blocks_acquired.next()) |block_address_index| {
             const block_address: u64 = block_address_index + 1;
-            if (block_address == address_skip) continue;
 
-            const block = superblock.storage.grid_block(block_address) orelse {
-                log.err("{}: checksum_grid: missing block_address={}", .{
-                    superblock.replica_index.?,
-                    block_address,
-                });
+            // Calculate the checksum over acquired, unreleased blocks, as the state of released
+            // blocks is uncertain during state sync. State sync involves syncing the FreeSet
+            // encoded in a replica's superblock at checkpoint, and the current grid state, both of
+            // which may not be in sync. Blocks marked released in the FreeSet encoded in the
+            // superblock are freed at checkpoint durability, and may be overwritten.
+            if (free_set.is_released(block_address)) continue;
 
-                blocks_missing += 1;
-                continue;
-            };
+            // The StorageChecker must skip checking open ManifestLog blocks, these have not been
+            // flushed yet – until they are written, their content in the grid is undefined.
+            var manifest_log_open_blocks = manifest_log.blocks.iterator();
+            while (manifest_log_open_blocks.next()) |open_block| {
+                const open_block_header =
+                    std.mem.bytesAsValue(vsr.Header.Block, open_block[0..@sizeOf(vsr.Header)]);
+                assert(open_block_header.address > 0);
+                if (block_address == open_block_header.address) break;
+            } else {
+                const block = superblock.storage.grid_block(block_address) orelse {
+                    log.err("{}: checksum_grid: missing block_address={}", .{
+                        replica.replica,
+                        block_address,
+                    });
 
-            const block_header = schema.header_from_block(block);
-            assert(block_header.address == block_address);
+                    blocks_missing += 1;
+                    continue;
+                };
 
-            stream.add(block[0..block_header.size]);
-            // Extra guard against identical blocks:
-            stream.add(std.mem.asBytes(&block_address));
+                const block_header = schema.header_from_block(block);
+                assert(block_header.address == block_address);
 
-            // Grid block sector padding is zeroed:
-            assert(stdx.zeroed(block[block_header.size..vsr.sector_ceil(block_header.size)]));
+                stream.add(block[0..block_header.size]);
+                // Extra guard against identical blocks:
+                stream.add(std.mem.asBytes(&block_address));
+
+                // Grid block sector padding is zeroed:
+                assert(stdx.zeroed(block[block_header.size..vsr.sector_ceil(block_header.size)]));
+            }
         }
         assert(blocks_missing == 0);
 
