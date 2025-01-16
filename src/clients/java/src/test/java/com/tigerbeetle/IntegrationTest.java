@@ -10,8 +10,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -1381,14 +1379,18 @@ public class IntegrationTest {
             barrier.await();
 
             // Interrupt all threads.
-            for (int i = 0; i < TASKS_COUNT; i++) {
-                tasks[i].interrupt();
-                tasks[i].join();
+            for (final var task : tasks) {
+                task.interrupt();
+                task.join();
 
-                assertTrue(tasks[i].getState() == Thread.State.TERMINATED);
-                assertTrue(tasks[i].result == null);
-                assertTrue(tasks[i].exception instanceof AssertionError);
-                assertTrue(tasks[i].exception.getCause() instanceof InterruptedException);
+                assertTrue(task.getState() == Thread.State.TERMINATED);
+                assertTrue(task.result == null);
+                assertTrue(task.exception != null);
+                assertTrue(task.exception instanceof InterruptedException ||
+                // TODO: Interrupted operations throw unchecked `AssertionError`.
+                // We should change the client API adding `throws InterruptedException` instead.
+                        (task.exception instanceof AssertionError
+                                && task.exception.getCause() instanceof InterruptedException));
             }
         }
     }
@@ -2325,13 +2327,9 @@ public class IntegrationTest {
             try {
                 enterBarrier.countDown();
                 enterBarrier.await();
-                try {
-                    result = client.createTransfers(transfers);
-                } catch (Throwable any) {
-                    exception = any;
-                }
-            } catch (InterruptedException interruptedException) {
-                return;
+                result = client.createTransfers(transfers);
+            } catch (Throwable any) {
+                exception = any;
             } finally {
                 exitBarrier.countDown();
             }
