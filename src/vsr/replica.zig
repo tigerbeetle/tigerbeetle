@@ -1314,7 +1314,7 @@ pub fn ReplicaType(
         }
 
         pub fn invariants(self: *const Replica) void {
-            _ = self;
+            assert(self.journal.header_with_op(self.op) != null);
         }
 
         /// Time is measured in logical ticks that are incremented on every call to tick().
@@ -1645,7 +1645,8 @@ pub fn ReplicaType(
             // Sanity check --- if the prepare is definitely from the current log-wrap, it should be
             // appended.
             defer {
-                if (self.status == .normal and message.header.view == self.view and
+                if (self.status == .normal and self.syncing == .idle and
+                    message.header.view == self.view and
                     message.header.op > self.op_checkpoint() and
                     message.header.op <= self.op_checkpoint_next_trigger())
                 {
