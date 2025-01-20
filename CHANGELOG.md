@@ -3,6 +3,59 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.22
+
+Released: 2025-01-20
+
+### Safety And Performance
+
+- [#2652](https://github.com/tigerbeetle/tigerbeetle/pull/2652)
+
+  Fix Python client initialization with long address strings.
+
+- [#2614](https://github.com/tigerbeetle/tigerbeetle/pull/2614)
+
+  Prevent Client IO thread starvation.
+
+- [#2583](https://github.com/tigerbeetle/tigerbeetle/pull/2583)
+
+  Set prepare/request timeout RTTs dynamically. Previously our backoff was almost always much too
+  high, leading to much lower throughput when ring replication failed.
+
+### Features
+
+- [#2580](https://github.com/tigerbeetle/tigerbeetle/pull/2580)
+
+  Add `--clients` flag to `tigerbeetle benchmark` for generating load from multiple concurrent
+  clients.
+
+### Internals
+
+- [#2651](https://github.com/tigerbeetle/tigerbeetle/pull/2651)
+
+  For test/verify only functions, assert `constants.verify` at compile-time, not runtime.
+
+- [#2650](https://github.com/tigerbeetle/tigerbeetle/pull/2650)
+
+  Fix flaky Java client test `testConcurrentInterruptedTasks`.
+
+- [#2646](https://github.com/tigerbeetle/tigerbeetle/pull/2646)
+
+  Fix VOPR false positive due to `smallest_missing_prepare_between` bug.
+
+- [#2611](https://github.com/tigerbeetle/tigerbeetle/pull/2611)
+
+  In clients, add `Event`s for efficient cross-thread notification.
+
+- [#2644](https://github.com/tigerbeetle/tigerbeetle/pull/2644),
+  [#2648](https://github.com/tigerbeetle/tigerbeetle/pull/2648)
+
+  Devhub fixes due to Ubuntu/kcov.
+
+### TigerTracks 🎧
+
+- [Have You Ever Seen The Rain?](https://www.youtube.com/watch?v=bO28lB1uwp4)
+
 ## TigerBeetle 0.16.21
 
 Released: 2025-01-13
