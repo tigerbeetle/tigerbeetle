@@ -1908,6 +1908,23 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
 
             const slot = journal.slot_with_header(message.header).?;
+            if (journal.headers_redundant[slot.index].checksum != message.header.checksum) {
+                // Scenario:
+                // 1. write_prepare(h₁)
+                // 2. write_prepare_header(h₁)
+                // 3. remove_entry(h₁)
+                // 4. set_header_as_dirty(h₁)
+                // 5. write_prepare_on_write_header(h₁)
+                // `prepare_checksums` is still correct, but `remove_entry()` cleared the
+                // `headers_redundant`.
+                journal.write_prepare_debug(
+                    message.header,
+                    "entry removed then added while writing headers",
+                );
+                journal.write_prepare_release(write, null);
+                return;
+            }
+
             if (!journal.prepare_inhabited[slot.index] or
                 journal.prepare_checksums[slot.index] != message.header.checksum)
             {
