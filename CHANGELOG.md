@@ -3,9 +3,15 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
-## TigerBeetle 0.16.22
+## TigerBeetle 0.16.23
 
 Released: 2025-01-20
+
+## TigerBeetle (unreleased)
+
+Released: 2025-01-20
+
+(Unreleased due to CI flake.)
 
 ### Safety And Performance
 
