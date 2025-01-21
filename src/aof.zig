@@ -79,10 +79,18 @@ pub const AOFEntry = extern struct {
         // object storage, this must be embedded in the filename or path.
         // Whether this replica is the primary can be determined by the view number from the
         // relevant op.
-        self.* = AOFEntry{
-            .message = undefined,
-        };
+        comptime {
+            const fields = std.meta.fieldNames(AOFEntry);
+            assert(fields.len == 2);
+            assert(std.mem.eql(u8, fields[0], "magic_number"));
+            assert(std.mem.eql(u8, fields[1], "message"));
+        }
 
+        // Using self.* = .{ .message = undefined } notation causes a `constants.message_size_max`
+        // increase in binary size, since Zig embeds the entire static initialization payload in the
+        // binary.
+        self.* = undefined;
+        self.magic_number = magic_number;
         stdx.copy_disjoint(
             .exact,
             u8,
