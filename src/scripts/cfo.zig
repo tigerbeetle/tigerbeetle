@@ -608,7 +608,7 @@ const SeedRecord = struct {
             order_by_field(a.fuzzer, b.fuzzer) orelse
             order_by_field(a.ok, b.ok) orelse
             order_by_field(b.count, a.count) orelse // NB: reverse order.
-            order_by_field(a.seed_duration(), b.seed_duration()) orelse // Coarse seed minimization.
+            order_by_seed_duration(a, b) orelse
             order_by_seed_timestamp_start(a, b) orelse
             order_by_field(a.seed_timestamp_end, b.seed_timestamp_end) orelse
             order_by_field(a.seed, b.seed) orelse
@@ -633,6 +633,18 @@ const SeedRecord = struct {
             order_by_field(b.seed_timestamp_start, a.seed_timestamp_start)
         else
             order_by_field(a.seed_timestamp_start, b.seed_timestamp_start);
+    }
+
+    fn order_by_seed_duration(a: SeedRecord, b: SeedRecord) ?std.math.Order {
+        assert(a.ok == b.ok);
+        if (a.ok) {
+            // Passing seeds: prefer long durations -- near-timeouts might be interesting, and it
+            // gives us a p100 for the fuzzer's runtime.
+            return order_by_field(b.seed_duration(), a.seed_duration());
+        } else {
+            // Failing seeds: prefer short duration, as coarse seed minimization.
+            return order_by_field(a.seed_duration(), b.seed_duration());
+        }
     }
 
     fn less_than(_: void, a: SeedRecord, b: SeedRecord) bool {
