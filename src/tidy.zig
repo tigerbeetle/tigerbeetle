@@ -695,11 +695,11 @@ test "tidy no large blobs" {
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
-        .{".bat"}, .{".c"},   .{".cs"},    .{".csproj"}, .{".css"}, .{".go"},
-        .{".h"},   .{".hcl"}, .{".html"},  .{".java"},   .{".js"},  .{".json"},
-        .{".md"},  .{".mod"}, .{".props"}, .{".ps1"},    .{".py"},  .{".service"},
-        .{".sln"}, .{".sum"}, .{".svg"},   .{".ts"},     .{".txt"}, .{".xml"},
-        .{".yml"}, .{".zig"}, .{".zon"},
+        .{".bat"},     .{".c"},   .{".cs"},    .{".csproj"}, .{".css"},  .{".go"},
+        .{".h"},       .{".hcl"}, .{".html"},  .{".java"},   .{".js"},   .{".json"},
+        .{".md"},      .{".mod"}, .{".props"}, .{".ps1"},    .{".py"},   .{".rs"},
+        .{".service"}, .{".sln"}, .{".sum"},   .{".svg"},    .{".toml"}, .{".ts"},
+        .{".txt"},     .{".xml"}, .{".yml"},   .{".zig"},    .{".zon"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{

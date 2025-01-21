@@ -1,0 +1,18 @@
+[package]
+name = "tigerbeetle"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = "2.6.0"
+futures = "0.3.31"
+thiserror = "2.0.3"
+
+[build-dependencies]
+anyhow = "1.0.93"
+bindgen = "0.70.1"
+ignore = "0.4.23"
+
+[dev-dependencies]
+anyhow = "1.0.93"
+tempfile = "3.15.0"
