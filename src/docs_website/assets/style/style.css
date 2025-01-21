@@ -771,6 +771,7 @@ article {
       background-color: var(--gray-alpha-5);
       border-radius: 4px;
       padding: 4px;
+      word-break: break-all;
     }
 
     img {
