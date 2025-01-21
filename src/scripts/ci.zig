@@ -62,6 +62,17 @@ fn run_tests(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Languag
             }
         }
     }
+
+    if (language_requested == null and builtin.os.tag == .linux and builtin.cpu.arch.isX86()) {
+        try build_docs(shell);
+    }
+}
+
+fn build_docs(shell: *Shell) !void {
+    try shell.pushd("./src/docs_website");
+    defer shell.popd();
+
+    try shell.exec_zig("build", .{});
 }
 
 fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Language) !void {
