@@ -954,6 +954,26 @@ article {
       h6 {
         scroll-margin-top: 72px;
       }
+
+      h1 {
+        font-size: 36px;
+        line-height: 40px;
+      }
+  
+      h2 {
+        font-size: 24px;
+        line-height: 36px;
+      }
+  
+      h3 {
+        font-size: 18px;
+        line-height: 27px;
+      }
+  
+      h4 {
+        font-size: 18px;
+        line-height: 24px;
+      }
     }
   }
 }
