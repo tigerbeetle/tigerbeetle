@@ -1564,14 +1564,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
-                .cut_view_range => {
-                    maybe(header == null);
-                    maybe(prepare == null);
-                    assert(header != null or prepare != null);
-                    journal.headers[slot.index] = Header.Prepare.reserved(cluster, slot.index);
-                    journal.dirty.clear(slot);
-                    journal.faulty.clear(slot);
-                },
             }
 
             switch (decision) {
@@ -1587,7 +1579,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         journal.headers[slot.index].view,
                     });
                 },
-                .fix, .vsr, .cut_torn, .cut_view_range => {
+                .fix, .vsr, .cut_torn => {
                     log.warn("{}: recover_slot: recovered " ++
                         "slot={:0>4} label={s} decision={s} operation={} op={} view={}", .{
                         journal.replica,
@@ -2320,7 +2312,6 @@ const RecoveryDecision = enum {
     vsr,
     /// Truncate the op, setting it to reserved. Dirty/faulty are clear.
     cut_torn,
-    cut_view_range,
 };
 
 const Matcher = enum { any, is_false, is_true, assert_is_false, assert_is_true };
