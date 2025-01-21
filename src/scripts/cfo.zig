@@ -28,7 +28,7 @@
 //! call-site to cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to
 //! arrange that.
 //!
-//! Every `args.upload_minutes`, and at the end of the fuzzing loop:
+//! Every `args.refresh_minutes`, and at the end of the fuzzing loop:
 //! 1. CFO collects a list of seeds (some of which are failing),
 //! 2. merges this list into the previous set of seeds,
 //! 3. pushes the new list to https://github.com/tigerbeetle/devhubdb/
@@ -45,6 +45,10 @@
 //!
 //! The idea here is that we want to keep the set of failing seeds stable, while maintaining some
 //! measure of how much fuzzing work was done in total.
+//!
+//! TODO: Right now task weights directly determine which task to run next. Instead we could track
+//! cumulative runtime of each fuzzer and select tasks to balance runtime instead, to avoid
+//! disproportionately favoring long fuzzers.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -59,7 +63,7 @@ pub const CLIArgs = struct {
     budget_minutes: u64 = 40,
     /// The interval for flushing accumulated seeds to the devhub.
     /// In addition to this interval, any remaining seeds will be uploaded at the end of the budget.
-    upload_minutes: u64 = 5,
+    refresh_minutes: u64 = 5,
     /// A fuzzer which takes longer than this timeout is killed and counts as a failure.
     timeout_minutes: u64 = 30,
     concurrency: ?u32 = null,
@@ -131,7 +135,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     try run_fuzzers(shell, gpa, gh_token_option, .{
         .concurrency = cli_args.concurrency orelse try std.Thread.getCpuCount(),
         .budget_seconds = cli_args.budget_minutes * std.time.s_per_min,
-        .upload_seconds = cli_args.upload_minutes * std.time.s_per_min,
+        .refresh_seconds = cli_args.refresh_minutes * std.time.s_per_min,
         .timeout_seconds = cli_args.timeout_minutes * std.time.s_per_min,
         .devhub_token = devhub_token_option,
     });
@@ -144,25 +148,13 @@ fn run_fuzzers(
     options: struct {
         concurrency: usize,
         budget_seconds: u64,
-        upload_seconds: u64,
+        refresh_seconds: u64,
         timeout_seconds: u64,
         devhub_token: ?[]const u8,
     },
 ) !void {
     var seeds = std.ArrayList(SeedRecord).init(gpa);
     defer seeds.deinit();
-
-    const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
-    log.info("fuzzing {} tasks", .{tasks.seed_record.len});
-    for (tasks.seed_record, tasks.weight) |seed_record, weight| {
-        log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
-            seed_record.commit_sha[0..7],
-            seed_record.commit_timestamp,
-            seed_record.fuzzer,
-            seed_record.branch,
-            weight,
-        });
-    }
 
     const random = std.crypto.random;
 
@@ -180,9 +172,32 @@ fn run_fuzzers(
         }
     };
 
+    var tasks_cache: ?Tasks = null;
     var args = std.ArrayList([]const u8).init(shell.arena.allocator());
     for (0..options.budget_seconds) |second| {
-        const last_iteration = second == options.budget_seconds - 1;
+        const iteration_last = second == options.budget_seconds - 1;
+        const iteration_pull = second % options.refresh_seconds == 0;
+        const iteration_push = (second % options.refresh_seconds == 0 and second > 0) or
+            iteration_last;
+
+        // Note that tasks are allocated by the arena, so they accumulate over the lifetime of CFO.
+        if (iteration_pull) tasks_cache = null;
+        const tasks = tasks_cache orelse tasks: {
+            const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
+
+            log.info("fuzzing {} tasks", .{tasks.seed_record.len});
+            for (tasks.seed_record, tasks.weight) |seed_record, weight| {
+                log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
+                    seed_record.commit_sha[0..7],
+                    seed_record.commit_timestamp,
+                    seed_record.fuzzer,
+                    seed_record.branch,
+                    weight,
+                });
+            }
+            break :tasks tasks;
+        };
+        tasks_cache = tasks;
 
         // Start new fuzzer processes.
         for (children) |*child_or_null| {
@@ -272,7 +287,7 @@ fn run_fuzzers(
                     @as(u64, @intCast(std.time.timestamp())) - fuzzer.seed.seed_timestamp_start;
                 const seed_expired = !fuzzer_done and seed_duration > options.timeout_seconds;
 
-                if (fuzzer_done or seed_expired or last_iteration) {
+                if (fuzzer_done or seed_expired or iteration_last) {
                     log.debug(
                         "will reap '{s}'{s}",
                         .{ fuzzer.seed.command, if (fuzzer_done) "" else " (timeout)" },
@@ -283,7 +298,7 @@ fn run_fuzzers(
                         // neither as a success, nor as a failure.
                         log.info("ignored SIGKILL for '{s}'", .{fuzzer.seed.command});
                     } else if (std.meta.eql(term, .{ .Signal = std.posix.SIG.TERM }) and
-                        last_iteration)
+                        iteration_last)
                     {
                         // We killed the fuzzer because our budgeted time is expired, but the seed
                         // itself is indeterminate.
@@ -301,22 +316,33 @@ fn run_fuzzers(
         }
         assert(running_count == options.concurrency);
 
-        if (second > 0 and second % options.upload_seconds == 0) {
-            std.debug.print("s={}\n", .{second});
-            try upload_or_print_results(shell, gpa, options.devhub_token, seeds.items);
+        if (iteration_push) {
+            if (options.devhub_token) |token| {
+                try upload_results(shell, gpa, token, seeds.items);
+            } else {
+                log.info("skipping upload, no token", .{});
+                for (seeds.items) |seed_record| {
+                    const seed_record_json = try std.json.stringifyAlloc(
+                        shell.arena.allocator(),
+                        seed_record,
+                        .{},
+                    );
+                    log.info("{s}", .{seed_record_json});
+                }
+            }
             seeds.clearRetainingCapacity();
         }
     }
-    if (seeds.items.len > 0) {
-        try upload_or_print_results(shell, gpa, options.devhub_token, seeds.items);
-    }
+    assert(seeds.items.len == 0);
 }
 
-fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !struct {
+const Tasks = struct {
     working_directory: [][]const u8,
     seed_record: []SeedRecord,
     weight: []u32,
-} {
+};
+
+fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
     var working_directory = std.ArrayList([]const u8).init(shell.arena.allocator());
     var seed_record = std.ArrayList(SeedRecord).init(shell.arena.allocator());
 
@@ -500,27 +526,6 @@ fn run_fuzzers_commit_info(shell: *Shell) !Commit {
         break :commit_timestamp try std.fmt.parseInt(u64, timestamp, 10);
     };
     return .{ .sha = commit_sha, .timestamp = commit_timestamp };
-}
-
-fn upload_or_print_results(
-    shell: *Shell,
-    gpa: std.mem.Allocator,
-    devhub_token: ?[]const u8,
-    seeds_new: []const SeedRecord,
-) !void {
-    if (devhub_token) |token| {
-        try upload_results(shell, gpa, token, seeds_new);
-    } else {
-        log.info("skipping upload, no token", .{});
-        for (seeds_new) |seed_record| {
-            const seed_record_json = try std.json.stringifyAlloc(
-                shell.arena.allocator(),
-                seed_record,
-                .{},
-            );
-            log.info("{s}", .{seed_record_json});
-        }
-    }
 }
 
 fn upload_results(
