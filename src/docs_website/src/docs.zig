@@ -7,8 +7,6 @@ const Website = @import("website.zig").Website;
 const assets = @import("assets.zig");
 const Html = @import("html.zig").Html;
 
-const enforce_readme_md = false;
-
 const base_path = "../../docs";
 
 const SearchIndexEntry = struct {
