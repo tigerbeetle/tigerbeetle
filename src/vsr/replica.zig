@@ -1394,6 +1394,14 @@ pub fn ReplicaType(
                 return;
             }
 
+            if (message.header.command == .start_view_new) {
+                log.err("{}: on_message: ignoring (command={})", .{
+                    self.replica,
+                    message.header.command,
+                });
+                return;
+            }
+
             // No client or replica should ever send a .reserved message.
             assert(message.header.command != .reserved);
 
@@ -1433,6 +1441,7 @@ pub fn ReplicaType(
                 .start_view_change => |m| self.on_start_view_change(m),
                 .do_view_change => |m| self.on_do_view_change(m),
                 .start_view => |m| self.on_start_view(m),
+                .start_view_new => unreachable,
                 .request_start_view => |m| self.on_request_start_view(m),
                 .request_prepare => |m| self.on_request_prepare(m),
                 .request_headers => |m| self.on_request_headers(m),
@@ -8148,6 +8157,7 @@ pub fn ReplicaType(
                     assert(header.commit_max == self.commit_max);
                     assert(header.checkpoint_op == self.op_checkpoint());
                 },
+                .start_view_new => unreachable, // Only a future version of a replica can send this.
                 .headers => {
                     assert(!self.standby());
                     assert(message.header.view == self.view);
