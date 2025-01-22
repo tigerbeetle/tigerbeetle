@@ -769,8 +769,8 @@ pub const Simulator = struct {
                         )) |op| {
                             if (missing_prepare_op == null or op < missing_prepare_op.?) {
                                 missing_prepare_op = op;
-                                continue;
                             }
+                            continue;
                         }
                     }
                     if (op_repair_min <= replica.commit_min) {
