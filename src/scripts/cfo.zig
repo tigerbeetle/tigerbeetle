@@ -113,6 +113,17 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         return error.NotSupported;
     }
 
+    if (cli_args.budget_minutes == 0) fatal("--budget-minutes: must be greater than zero", .{});
+    if (cli_args.refresh_minutes == 0) fatal("--refresh-minutes: must be greater than zero", .{});
+    if (cli_args.timeout_minutes == 0) fatal("--timeout-minutes: must be greater than zero", .{});
+
+    if (cli_args.budget_minutes < cli_args.timeout_minutes) {
+        log.warn("budget={}m is less than timeout={}m; no seeds will time out", .{
+            cli_args.budget_minutes,
+            cli_args.timeout_minutes,
+        });
+    }
+
     log.info("start {}", .{stdx.DateTimeUTC.now()});
     defer log.info("end {}", .{stdx.DateTimeUTC.now()});
 
@@ -139,6 +150,15 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         .timeout_seconds = cli_args.timeout_minutes * std.time.s_per_min,
         .devhub_token = devhub_token_option,
     });
+
+    log.info("memory = {}B", .{shell.arena.queryCapacity()});
+}
+
+/// Format and print an error message to stderr, then exit with an exit code of 1.
+fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
+    const stderr = std.io.getStdErr().writer();
+    stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
+    std.process.exit(1);
 }
 
 fn run_fuzzers(
@@ -183,6 +203,8 @@ fn run_fuzzers(
         // Note that tasks are allocated by the arena, so they accumulate over the lifetime of CFO.
         if (iteration_pull) tasks_cache = null;
         const tasks = tasks_cache orelse tasks: {
+            // TODO: This is a race -- run_fuzzers_prepare_tasks() removes the working directory,
+            // which may still be in use by a running fuzzer.
             const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
 
             log.info("fuzzing {} tasks", .{tasks.seed_record.len});
