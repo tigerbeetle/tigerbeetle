@@ -408,22 +408,6 @@ const Page = struct {
     }
 };
 
-fn make_title(arena: Allocator, input: []const u8) ![]const u8 {
-    const output = try arena.dupe(u8, input);
-    var needs_upper = true;
-    for (output) |*c| {
-        if (needs_upper) {
-            c.* = std.ascii.toUpper(c.*);
-            needs_upper = false;
-        }
-        switch (c.*) {
-            ' ' => needs_upper = true,
-            else => {},
-        }
-    }
-    return output;
-}
-
 fn path_exists(path: []const u8) !bool {
     std.fs.cwd().access(path, .{}) catch |err| switch (err) {
         error.FileNotFound => return false,

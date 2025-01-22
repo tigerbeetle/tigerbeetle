@@ -216,6 +216,11 @@ pub const Command = enum(u8) {
 
     start_view = 23,
 
+    // A reserved command for a StartView message that sends the new CheckpointState format.
+    // At the moment, replica ignores this command (as opposed to panicking on an unknown command),
+    // to allow the next release to send both versions of StartView.
+    start_view_new = 24,
+
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
     const gaps = .{
         12, // start_view without checkpoint
