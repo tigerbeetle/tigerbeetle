@@ -1341,14 +1341,14 @@ pub fn GridType(comptime Storage: type) type {
 
             if (grid.superblock.storage.options.grid_checker) |checker| {
                 checker.assert_coherent(
-                    grid.superblock.working.checkpoint_id(),
+                    &grid.superblock.working.vsr_state.checkpoint,
                     grid.free_set.checkpoint_durable,
                     address,
                     checksum,
                 );
 
                 checker.assert_coherent(
-                    grid.superblock.staging.checkpoint_id(),
+                    &grid.superblock.staging.vsr_state.checkpoint,
                     checkpoint_durable: {
                         if (grid.superblock.working.checkpoint_id() ==
                             grid.superblock.staging.checkpoint_id())
