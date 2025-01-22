@@ -23,6 +23,8 @@
 //! `args.timeout_minutes` is terminated and recorded as a failure. At the end of the fuzzing loop,
 //! any fuzzers that are still running are cancelled. Cancelled seeds are not recorded.
 //!
+//! Note that the budget/refresh timers do not count time spent cloning or compiling code.
+//!
 //! It is important that the caller (systemd typically) arranges for CFO to be a process group
 //! leader. It is not possible to reliably wait for (grand) children with POSIX, so its on the
 //! call-site to cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to
@@ -60,7 +62,7 @@ const Shell = @import("../shell.zig");
 
 pub const CLIArgs = struct {
     /// How long to run the cfo before exiting (so that cfo_supervisor can refresh our code).
-    budget_minutes: u64 = 40,
+    budget_minutes: u64 = 60,
     /// The interval for flushing accumulated seeds to the devhub.
     /// In addition to this interval, any remaining seeds will be uploaded at the end of the budget.
     refresh_minutes: u64 = 5,
@@ -142,6 +144,9 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     } else {
         try shell.exec("gh --version", .{});
     }
+
+    // Only garbage-collect the working directory once per run, so that we can reuse the Zig cache.
+    shell.project_root.deleteTree("working") catch {};
 
     try run_fuzzers(shell, gpa, gh_token_option, .{
         .concurrency = cli_args.concurrency orelse try std.Thread.getCpuCount(),
@@ -368,10 +373,6 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
     var working_directory = std.ArrayList([]const u8).init(shell.arena.allocator());
     var seed_record = std.ArrayList(SeedRecord).init(shell.arena.allocator());
 
-    // Fuzz an independent clone of the repository, so that CFO and the fuzzer could be on
-    // different branches (to fuzz PRs and releases).
-    shell.project_root.deleteTree("working") catch {};
-
     { // Main branch fuzzing.
         const commit = if (gh_token == null)
             // Fuzz in-place when no token is specified, as a convenient shortcut for local
@@ -382,6 +383,8 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
             try shell.pushd("./working/main");
             defer shell.popd();
 
+            // Fuzz an independent clone of the repository, so that CFO and the fuzzer could be on
+            // different branches (to fuzz PRs and releases).
             break :commit try run_fuzzers_prepare_repository(shell, .main_branch);
         };
 
@@ -508,30 +511,17 @@ fn run_fuzzers_prepare_repository(shell: *Shell, target: union(enum) {
     main_branch,
     pull_request: u32,
 }) !Commit {
-    const commit = switch (target) {
-        .main_branch => commit: {
-            // NB: for the main branch, carefully checkout the commit of the CFO itself, and not
-            // just the current tip of the branch. This way, it is easier to atomically adjust
-            // fuzzers and CFO.
-            const commit = try run_fuzzers_commit_info(shell);
-            try shell.exec("git clone https://github.com/tigerbeetle/tigerbeetle .", .{});
-            try shell.exec(
-                "git switch --detach {commit}",
-                .{ .commit = @as([]const u8, &commit.sha) },
-            );
-            break :commit commit;
-        },
-        .pull_request => |pr_number| commit: {
-            try shell.exec("git clone https://github.com/tigerbeetle/tigerbeetle .", .{});
-            try shell.exec(
-                "git fetch origin refs/pull/{pr_number}/head",
-                .{ .pr_number = pr_number },
-            );
-            try shell.exec("git switch --detach FETCH_HEAD", .{});
-            break :commit try run_fuzzers_commit_info(shell);
-        },
-    };
-    return commit;
+    // When possible, reuse checkouts so that we can also reuse the zig cache.
+    if (!try shell.dir_exists(".git")) {
+        try shell.exec("git clone https://github.com/tigerbeetle/tigerbeetle .", .{});
+    }
+
+    switch (target) {
+        .main_branch => try shell.exec("git fetch origin main", .{}),
+        .pull_request => |pr| try shell.exec("git fetch origin refs/pull/{pr}/head", .{ .pr = pr }),
+    }
+    try shell.exec("git switch --detach FETCH_HEAD", .{});
+    return run_fuzzers_commit_info(shell);
 }
 
 fn run_fuzzers_commit_info(shell: *Shell) !Commit {
