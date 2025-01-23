@@ -19,6 +19,7 @@ const schema = vsr.lsm.schema;
 const constants = vsr.constants;
 const Storage = vsr.storage.StorageType(vsr.io.IO);
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
+const SuperBlockVersion = vsr.superblock.SuperBlockVersion;
 const SuperBlockQuorums = vsr.superblock.Quorums;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const BlockPtr = vsr.grid.BlockPtr;
@@ -276,6 +277,18 @@ const Inspector = struct {
             ));
         }
 
+        const superblock = try inspector.read_superblock(null);
+        if (superblock.version != SuperBlockVersion) {
+            return vsr.fatal(
+                .cli,
+                "invalid superblock version; inspector supports version={}, version in {s}={}",
+                .{
+                    SuperBlockVersion,
+                    basename,
+                    superblock.version,
+                },
+            );
+        }
         return inspector;
     }
 
