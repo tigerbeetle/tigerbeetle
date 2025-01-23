@@ -24,10 +24,9 @@ pub fn ClientType(
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
-                operation: StateMachine.Operation,
+                operation: vsr.Operation,
                 timestamp: u64,
                 results: []const u8,
-                batch_count: u16,
             ) void;
 
             pub const RegisterCallback = *const fn (
@@ -261,7 +260,6 @@ pub fn ClientType(
                 .command = .request,
                 .operation = .register,
                 .release = self.release,
-                .batch_count = 0,
             };
 
             std.mem.bytesAsValue(
@@ -295,7 +293,6 @@ pub fn ClientType(
             user_data: u128,
             operation: StateMachine.Operation,
             output: []const u8,
-            batch_count: u16,
         ) void {
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| @sizeOf(
@@ -320,7 +317,6 @@ pub fn ClientType(
                 .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + output.len),
-                .batch_count = batch_count,
             };
 
             stdx.copy_disjoint(.exact, u8, message.body_used(), output);
@@ -351,7 +347,8 @@ pub fn ClientType(
             assert(message.header.request == 0);
 
             if (!constants.aof_recovery) {
-                assert(!message.header.operation.vsr_reserved());
+                assert(message.header.operation == .batched or
+                    !message.header.operation.vsr_reserved());
             }
 
             // TODO: Re-investigate this state for AOF as it currently traps.
@@ -606,13 +603,11 @@ pub fn ClientType(
                 inflight.callback.register(inflight.user_data, result);
             } else {
                 // The message is the result of raw_request(), so invoke the user callback.
-                // NOTE: the callback is allowed to mutate `reply.body_used()` here.
                 inflight.callback.request(
                     inflight.user_data,
-                    inflight_vsr_operation.cast(StateMachine),
+                    inflight_vsr_operation,
                     reply.header.timestamp,
                     reply.body_used(),
-                    reply.header.batch_count,
                 );
             }
         }

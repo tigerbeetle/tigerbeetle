@@ -705,7 +705,6 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                 @intCast(@intFromPtr(repl)),
                 operation,
                 arguments,
-                0,
             );
         }
 
@@ -851,15 +850,13 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
         fn client_request_callback(
             user_data: u128,
-            operation: StateMachine.Operation,
+            operation: vsr.Operation,
             timestamp: u64,
             result: []const u8,
-            batch_count: u16,
         ) void {
-            assert(batch_count == 0);
             client_request_callback_error(
                 user_data,
-                operation,
+                operation.cast(StateMachine),
                 timestamp,
                 result,
             ) catch |err| {

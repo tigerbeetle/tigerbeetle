@@ -267,6 +267,8 @@ pub const Operation = enum(u8) {
     pulse = 4,
     /// The value 5 is is reserved for release-upgrade requests.
     upgrade = 5,
+    /// Batched message that includes multiple state machine operations. See `vsr.batch`.
+    batched = constants.vsr_operations_reserved - 1,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.
@@ -1270,7 +1272,6 @@ pub const Headers = struct {
             .commit = 0,
             .timestamp = 0,
             .request = 0,
-            .batch_count = 0,
         };
     }
 
