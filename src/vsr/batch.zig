@@ -8,537 +8,796 @@ const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
-/// The trailer is a `[]u16` containing the number of elements in each batch.
-/// To encode the trailer, `batch_count * @sizeOf(u16)` bytes are needed, but the total
-/// space occupied by the trailer may be larger, as it must align with the element size.
-/// In the case of operations where `element_size` is zero, the trailer must be aligned
-/// to `@alignOf(u16)` (2 bytes).
-pub fn batch_trailer_total_size(options: struct {
-    element_size: usize,
+const Postamble = packed struct(u32) {
+    /// Number of batches.
     batch_count: u16,
-}) usize {
-    assert(options.batch_count > 0);
-    maybe(options.element_size == 0);
-    const alignment = @max(options.element_size, @alignOf(u16));
-    return stdx.div_ceil(
-        @as(usize, options.batch_count) * @sizeOf(u16),
-        alignment,
-    ) * alignment;
+    reserved: u16,
+};
+
+const TrailerItem = packed struct(u32) {
+    /// The size in bytes of each batch.
+    /// The size of each element is operation-specific, and padding bytes may be added
+    /// at the beginning of the batch to maintain alignment.
+    /// Use `std.mem.alignForward` to compute the correct starting position for the required
+    /// alignment. Padding bytes are zeroed.
+    size: u24,
+
+    /// The batch operation.
+    operation: vsr.Operation,
+
+    comptime {
+        assert(@sizeOf(TrailerItem) == @sizeOf(Postamble));
+        assert(@alignOf(TrailerItem) == @alignOf(Postamble));
+    }
+};
+
+/// The trailer is a `[]BatchItem` containing the operation and the number of elements
+/// in each batch. To encode the trailer, `batch_count * @sizeOf(BatchItem)` bytes are
+/// needed, plus a `Postamble`.
+fn trailer_total_size(batch_count: u16) usize {
+    return (@as(usize, batch_count) * @sizeOf(TrailerItem)) + @sizeOf(Postamble);
 }
 
-pub const BatchDecoder = struct {
-    /// The batch element size.
-    element_size: usize,
-    /// The message body, excluding the trailer containing the batch metadata.
-    payload: []const u8,
-    /// The batching metadata, containing the number of events for each batch.
-    batch_events: []const u16,
+fn align_padding(target: anytype, alignment: usize) u16 {
+    const address: usize = switch (@TypeOf(target)) {
+        []u8, []const u8 => @intFromPtr(target.ptr),
+        usize => target,
+        else => unreachable,
+    };
+    assert(alignment > 0);
 
-    pub fn init(
-        /// The size of each element.
-        element_size: usize,
-        /// The message body used, including the trailer.
-        body: []const u8,
-        /// The number of batches encoded in this body.
-        batch_count: u16,
-    ) error{BatchInvalid}!BatchDecoder {
-        if (batch_count == 0) return error.BatchInvalid;
-        if (body.len == 0) return error.BatchInvalid;
-        if ((element_size > 0 and body.len % element_size != 0) or
-            (element_size == 0 and body.len % @sizeOf(u16) != 0))
-        {
-            return error.BatchInvalid;
+    const aligned_address: usize = std.mem.alignForward(
+        usize,
+        address,
+        alignment,
+    );
+    if (aligned_address == address) return 0;
+    assert(aligned_address > address);
+
+    const padding: u16 = @intCast(aligned_address - address);
+    return padding;
+}
+
+/// Calculates the total size required to encode the payload and the trailer of a batch.
+fn EncoderCountingType(
+    comptime Context: type,
+    comptime adapter: struct {
+        is_valid: fn (Context, vsr.Operation) bool,
+        element_size: fn (Context, vsr.Operation) usize,
+        alignment: fn (Context, vsr.Operation) usize,
+    },
+) type {
+    return struct {
+        fn total_size(options: struct {
+            context: Context,
+            current_payload_size: usize,
+            current_batch_count: u16,
+            next_operation: vsr.Operation,
+            next_payload_size: usize,
+        }) struct {
+            payload_size: u32,
+            trailer_size: u32,
+        } {
+            assert(adapter.is_valid(options.context, options.next_operation));
+            maybe(options.current_payload_size == 0);
+            maybe(options.current_batch_count == 0);
+            maybe(options.next_payload_size == 0);
+
+            const element_size = adapter.element_size(options.context, options.next_operation);
+            assert(element_size > 0 or options.next_payload_size == 0);
+            assert(element_size == 0 or options.next_payload_size % element_size == 0);
+
+            const alignment: usize = adapter.alignment(options.context, options.next_operation);
+            const padding: u16 = padding: {
+                if (options.next_payload_size == 0) break :padding 0;
+                const padding: u16 = align_padding(
+                    options.current_payload_size,
+                    alignment,
+                );
+                // Assuming aligned buffers, so the first batch will not require padding.
+                assert(padding == 0 or options.current_payload_size > 0);
+                assert(std.mem.isAligned(
+                    options.current_payload_size + padding,
+                    alignment,
+                ));
+                break :padding padding;
+            };
+
+            const payload_size: usize = options.current_payload_size +
+                options.next_payload_size + padding;
+            const trailer_padding: u16 = align_padding(payload_size, @alignOf(TrailerItem));
+            const trailer_size: usize = trailer_total_size(options.current_batch_count + 1);
+            return .{
+                .payload_size = @intCast(payload_size),
+                .trailer_size = @intCast(trailer_padding + trailer_size),
+            };
         }
+    };
+}
 
-        const trailer_size = batch_trailer_total_size(.{
-            .element_size = element_size,
-            .batch_count = batch_count,
-        });
-        if ((element_size > 0 and body.len < trailer_size) or
-            (element_size == 0 and body.len != trailer_size))
-        {
-            return error.BatchInvalid;
-        }
+pub fn BatchDecoderType(
+    comptime Context: type,
+    comptime adapter: struct {
+        is_valid: fn (Context, vsr.Operation) bool,
+        element_size: fn (Context, vsr.Operation) usize,
+        alignment: fn (Context, vsr.Operation) usize,
+    },
+) type {
+    return struct {
+        const BatchDecoder = @This();
 
-        const payload: []const u8 = body[0 .. body.len - trailer_size];
-        if ((element_size > 0 and payload.len % element_size != 0) or
-            (element_size == 0 and payload.len != 0))
-        {
-            return error.BatchInvalid;
-        }
-        if (!std.mem.isAligned(
-            @intFromPtr(body[body.len - trailer_size ..].ptr),
-            @alignOf(u16),
-        )) {
-            return error.BatchInvalid;
-        }
-
-        const batch_events: []const u16 = @alignCast(
-            std.mem.bytesAsSlice(u16, body[body.len - trailer_size ..]),
-        );
-        if (batch_events.len < batch_count) return error.BatchInvalid;
-
-        const batch_events_used: []const u16 = batch_events[batch_events.len - batch_count ..];
-        assert(batch_events_used.len == batch_count);
-
-        if (batch_events.len > batch_count) {
-            // MaxInt is used as sentinel for the extra slots used for alignment.
-            if (!std.mem.allEqual(
-                u16,
-                batch_events[0 .. batch_events.len - batch_count],
-                std.math.maxInt(u16),
-            )) return error.BatchInvalid;
-        }
-
-        var events_count_total: usize = 0;
-        for (batch_events_used) |count| events_count_total += count;
-        if ((element_size > 0 and payload.len != events_count_total * element_size) or
-            (element_size == 0 and events_count_total != 0))
-        {
-            return error.BatchInvalid;
-        }
-
-        return .{
-            .element_size = element_size,
-            .payload = payload,
-            .batch_events = batch_events_used,
+        pub const BatchItem = struct {
+            operation: vsr.Operation,
+            batched: []const u8,
         };
-    }
 
-    pub fn next(self: *BatchDecoder) ?[]const u8 {
-        if (self.batch_events.len == 0) {
-            assert(self.payload.len == 0);
-            return null;
+        /// The message payload, excluding the trailer.
+        payload: []const u8,
+        /// The batching metadata, excluding the postamble.
+        trailer_items: []const TrailerItem,
+
+        context: Context,
+        batch_index: u16,
+        payload_index: usize,
+
+        /// Calculates the total size required to encode the payload and the trailer of a batch.
+        pub const encoded_total_size = EncoderCountingType(Context, .{
+            .is_valid = adapter.is_valid,
+            .element_size = adapter.element_size,
+            .alignment = adapter.alignment,
+        }).total_size;
+
+        pub fn init(
+            context: Context,
+            /// The message body used, including the trailer.
+            body: []const u8,
+        ) error{BatchInvalid}!BatchDecoder {
+            if (body.len < @sizeOf(Postamble)) return error.BatchInvalid;
+
+            if (!std.mem.isAligned(
+                @intFromPtr(&body[body.len - @sizeOf(Postamble)]),
+                @alignOf(Postamble),
+            )) {
+                return error.BatchInvalid;
+            }
+
+            const postamble: *const Postamble = @alignCast(std.mem.bytesAsValue(
+                Postamble,
+                body[body.len - @sizeOf(Postamble) ..],
+            ));
+            if (postamble.batch_count == 0) return error.BatchInvalid;
+            if (postamble.reserved != 0) return error.BatchInvalid;
+
+            const trailer_size = trailer_total_size(postamble.batch_count);
+            if (body.len < trailer_size) return error.BatchInvalid;
+
+            const payload_end = body.len - trailer_size;
+            const payload: []const u8 = body[0..payload_end];
+            const trailer: []const u8 = body[payload_end..];
+            assert(body.len == payload.len + trailer.len);
+            assert(trailer.len == trailer_size);
+            maybe(payload.len == 0);
+            if (!std.mem.isAligned(@intFromPtr(trailer.ptr), @alignOf(TrailerItem))) {
+                return error.BatchInvalid;
+            }
+
+            const trailer_items: []const TrailerItem = @alignCast(
+                std.mem.bytesAsSlice(TrailerItem, trailer[0 .. trailer.len - @sizeOf(Postamble)]),
+            );
+            if (trailer_items.len != postamble.batch_count) {
+                return error.BatchInvalid;
+            }
+
+            var elements_size_total: usize = 0;
+            for (0..trailer_items.len) |index| {
+                // Batch metadata is stacked from the end of the message, so the last element
+                // of the array corresponds to the first batch added.
+                // Ordering is important to correctly skip padding bytes between batches.
+                const trailer_item: *const TrailerItem =
+                    &trailer_items[trailer_items.len - index - 1];
+
+                // Validate `operation`:
+                if (!adapter.is_valid(context, trailer_item.operation)) {
+                    return error.BatchInvalid;
+                }
+
+                // Validate the batch `size`:
+                maybe(trailer_item.size == 0);
+                if (elements_size_total + trailer_item.size > payload.len) {
+                    return error.BatchInvalid;
+                }
+
+                // Validate the batch alignment:
+                const alignment = adapter.alignment(context, trailer_item.operation);
+                const batch_padding: u16 = padding: {
+                    if (trailer_item.size == 0) break :padding 0;
+                    const batch_padding: u16 = align_padding(
+                        payload[elements_size_total..],
+                        alignment,
+                    );
+                    if (batch_padding >= trailer_item.size) {
+                        return error.BatchInvalid;
+                    }
+                    if (payload.len <= elements_size_total + batch_padding) {
+                        return error.BatchInvalid;
+                    }
+                    if (!std.mem.isAligned(
+                        @intFromPtr(&payload[elements_size_total + batch_padding]),
+                        alignment,
+                    )) {
+                        return error.BatchInvalid;
+                    }
+                    break :padding batch_padding;
+                };
+
+                // Validate the padding bytes:
+                if (!stdx.zeroed(payload[elements_size_total..][0..batch_padding])) {
+                    return error.BatchInvalid;
+                }
+
+                // Validate the element size:
+                const element_size = adapter.element_size(context, trailer_item.operation);
+                if ((trailer_item.size - batch_padding) % element_size != 0) {
+                    return error.BatchInvalid;
+                }
+
+                elements_size_total += trailer_item.size;
+            }
+            if (elements_size_total > payload.len) {
+                return error.BatchInvalid;
+            }
+
+            const trailer_padding: usize = align_padding(
+                elements_size_total,
+                @alignOf(TrailerItem),
+            );
+            if (elements_size_total + trailer_padding != payload.len) {
+                return error.BatchInvalid;
+            }
+            if (trailer_padding > 0 and !stdx.zeroed(payload[payload.len - trailer_padding ..])) {
+                return error.BatchInvalid;
+            }
+
+            return .{
+                .context = context,
+                .payload = payload[0 .. payload.len - trailer_padding],
+                .trailer_items = trailer_items,
+                .batch_index = 0,
+                .payload_index = 0,
+            };
         }
 
-        const batch_length = batch_length: {
-            assert(self.batch_events.len > 0);
+        pub fn reset(
+            self: *BatchDecoder,
+        ) void {
+            self.* = .{
+                .payload = self.payload,
+                .trailer_items = self.trailer_items,
+                .context = self.context,
+                .payload_index = 0,
+                .batch_index = 0,
+            };
+        }
+
+        pub fn batch_count(self: *const BatchDecoder) usize {
+            return self.trailer_items.len;
+        }
+
+        pub fn set_batch_index(
+            self: *BatchDecoder,
+            /// The batch index to move.
+            batch_index: usize,
+        ) void {
+            assert(batch_index < self.trailer_items.len);
+            assert(self.trailer_items.len > 0);
+            maybe(self.payload.len == 0);
+            self.reset();
+
+            for (0..batch_index) |index| {
+                assert(self.batch_index == index);
+                const moved = self.move_next();
+                assert(moved);
+            }
+            assert(self.batch_index == batch_index);
+        }
+
+        pub fn pop(self: *BatchDecoder) ?BatchItem {
+            const batch_item = self.peek() orelse return null;
+            _ = self.move_next();
+            return batch_item;
+        }
+
+        pub fn peek(self: *const BatchDecoder) ?BatchItem {
+            if (self.batch_index == self.trailer_items.len) return null;
+            assert(self.trailer_items.len > 0);
+            assert(self.payload_index <= self.payload.len);
             maybe(self.payload.len == 0);
 
             // Batch metadata is written from the end of the message, so the last
             // element corresponds to the first batch.
-            const batch_event_count = self.batch_events[self.batch_events.len - 1];
-            assert(batch_event_count != std.math.maxInt(u16));
-            maybe(batch_event_count == 0);
+            const trailer_item: *const TrailerItem =
+                &self.trailer_items[self.trailer_items.len - self.batch_index - 1];
+            assert(adapter.is_valid(self.context, trailer_item.operation));
+            assert(trailer_item.size <= self.payload.len);
+            maybe(trailer_item.size == 0);
 
-            const batch_length = batch_event_count * self.element_size;
-            assert(batch_length <= self.payload.len);
-            assert(batch_length % self.element_size == 0); // Must be aligned.
-
-            break :batch_length batch_length;
-        };
-
-        defer {
-            self.batch_events = self.batch_events[0 .. self.batch_events.len - 1];
-            self.payload = if (self.payload.len > batch_length)
-                self.payload[batch_length..]
-            else
-                &.{};
-        }
-
-        return self.payload[0..batch_length];
-    }
-};
-
-pub const BatchEncoder = struct {
-    element_size: usize,
-    buffer: ?[]u8,
-    bytes_written: usize,
-    batch_count: u16,
-
-    pub fn init(
-        element_size: usize,
-        buffer: []u8,
-    ) BatchEncoder {
-        assert(buffer.len > 0);
-        assert(element_size == 0 or buffer.len % element_size == 0);
-
-        return .{
-            .element_size = element_size,
-            .buffer = buffer,
-            .bytes_written = 0,
-            .batch_count = 0,
-        };
-    }
-
-    pub fn writable(self: *const BatchEncoder) []u8 {
-        assert(self.buffer != null);
-        assert(self.bytes_written % self.element_size == 0);
-
-        const trailer_size = batch_trailer_total_size(.{
-            .element_size = self.element_size,
-            // Takes into account extra trailer bytes that will need to be included.
-            .batch_count = self.batch_count + 1,
-        });
-
-        const buffer: []u8 = self.buffer.?;
-        return if (buffer.len >= self.bytes_written + trailer_size)
-            buffer[self.bytes_written .. buffer.len - trailer_size]
-        else
-            &.{};
-    }
-
-    pub fn add(self: *BatchEncoder, bytes_written: usize) void {
-        assert(self.buffer != null);
-        assert(bytes_written % self.element_size == 0);
-
-        const buffer: []u8 = self.buffer.?;
-        self.batch_count += 1;
-        self.bytes_written += bytes_written;
-
-        const trailer_size = batch_trailer_total_size(.{
-            .element_size = self.element_size,
-            .batch_count = self.batch_count,
-        });
-        assert(buffer.len >= self.bytes_written + trailer_size);
-
-        const batch_events: []u16 = @alignCast(std.mem.bytesAsSlice(
-            u16,
-            buffer[buffer.len - trailer_size ..],
-        ));
-        assert(batch_events.len >= self.batch_count);
-
-        // Batch metadata is written from the end of the message, so the last
-        // element corresponds to the first batch.
-        const batch_event_index = batch_events.len - self.batch_count;
-        if (self.element_size > 0) {
-            maybe(bytes_written == 0);
-            batch_events[batch_event_index] = @intCast(@divExact(bytes_written, self.element_size));
-        } else {
-            assert(bytes_written == 0);
-            batch_events[batch_event_index] = 0;
-        }
-    }
-
-    pub fn finish(self: *BatchEncoder) void {
-        assert(self.buffer != null);
-        assert(self.batch_count > 0);
-        assert(self.bytes_written % self.element_size == 0);
-        assert(self.buffer.?.len > self.bytes_written);
-        maybe(self.bytes_written == 0);
-
-        const buffer = self.buffer.?;
-
-        const trailer_size = batch_trailer_total_size(.{
-            .element_size = self.element_size,
-            .batch_count = self.batch_count,
-        });
-        assert(buffer.len >= self.bytes_written + trailer_size);
-
-        const batch_events: []u16 = @alignCast(std.mem.bytesAsSlice(
-            u16,
-            buffer[self.bytes_written..][0..trailer_size],
-        ));
-
-        // Filling in the extra alignment bytes with `maxInt`.
-        @memset(
-            batch_events[0 .. batch_events.len - self.batch_count],
-            std.math.maxInt(u16),
-        );
-        // While batches are being encoded, the trailer is written at the end of the buffer.
-        // Once all batches are encoded, the trailer needs to be moved closer to the last
-        // element written, along with sentinels to maintain alignment.
-        const source: []u16 = @alignCast(std.mem.bytesAsSlice(
-            u16,
-            buffer[buffer.len - (@as(usize, self.batch_count) * @sizeOf(u16)) ..],
-        ));
-        const target: []u16 = batch_events[batch_events.len - self.batch_count ..];
-        assert(@intFromPtr(target.ptr) <= @intFromPtr(source.ptr));
-        assert(target.len == source.len);
-        if (target.ptr != source.ptr) {
-            stdx.copy_left(
-                .exact,
-                u16,
-                target,
-                source,
-            );
-        }
-
-        // Update `bytes_written` to include the trailer and
-        // set buffer to null to prevent misuse.
-        self.buffer = null;
-        self.bytes_written = self.bytes_written + trailer_size;
-        assert(self.bytes_written % self.element_size == 0);
-
-        if (constants.verify) {
-            assert(BatchDecoder.init(
-                self.element_size,
-                buffer[0..self.bytes_written],
-                self.batch_count,
-            ) != error.BatchInvalid);
-        }
-    }
-};
-
-const test_batch = struct {
-    fn run(options: struct {
-        random: std.rand.Random,
-        element_size: usize,
-        buffer: []u8,
-        batch_count: u16,
-        elements_per_batch: ?u32 = null,
-    }) !usize {
-        const allocator = testing.allocator;
-        const expected = try allocator.alloc(u16, options.batch_count);
-        defer allocator.free(expected);
-
-        const trailer_size = batch_trailer_total_size(.{
-            .element_size = options.element_size,
-            .batch_count = options.batch_count,
-        });
-
-        // Cleaning the buffer first, so it can assert the bytes.
-        @memset(options.buffer, std.math.maxInt(u8));
-
-        var encoder = BatchEncoder.init(options.element_size, options.buffer);
-        for (0..options.batch_count) |index| {
-            const bytes_available = options.buffer.len - encoder.bytes_written - trailer_size;
-
-            const bytes_written: usize = if (options.elements_per_batch) |elements_per_batch|
-                elements_per_batch * options.element_size
-            else random: {
-                if (index == options.batch_count - 1) {
-                    const batch_full = options.random.uintLessThanBiased(u8, 100) < 30;
-                    if (batch_full) break :random bytes_available;
+            const slice: []const u8 = slice: {
+                if (trailer_item.size == 0) {
+                    assert(self.payload_index <= self.payload.len);
+                    break :slice &.{};
                 }
 
-                const batch_empty = options.random.uintLessThanBiased(u8, 100) < 30;
-                if (batch_empty) break :random 0;
+                assert(self.payload_index < self.payload.len);
+                assert(self.payload_index + trailer_item.size <= self.payload.len);
+                const alignment: usize = adapter.alignment(self.context, trailer_item.operation);
+                const padding: u16 = align_padding(
+                    self.payload[self.payload_index..],
+                    alignment,
+                );
+                assert(padding < trailer_item.size);
 
-                break :random @divFloor(
-                    options.random.intRangeAtMostBiased(usize, 0, bytes_available),
-                    options.element_size,
-                ) * options.element_size;
+                const slice: []const u8 =
+                    self.payload[self.payload_index + padding ..][0 .. trailer_item.size - padding];
+                assert(std.mem.isAligned(@intFromPtr(slice.ptr), alignment));
+
+                const element_size = adapter.element_size(self.context, trailer_item.operation);
+                assert(slice.len > 0);
+                assert(slice.len % element_size == 0);
+                break :slice slice;
             };
 
-            try testing.expect(encoder.writable().len >= bytes_written);
-
-            const slice = encoder.writable();
-            @memset(std.mem.bytesAsSlice(u16, slice[0..bytes_written]), @intCast(index));
-            encoder.add(bytes_written);
-
-            expected[index] = @intCast(@divExact(bytes_written, options.element_size));
+            return .{
+                .operation = trailer_item.operation,
+                .batched = slice,
+            };
         }
-        encoder.finish();
-        try testing.expect(encoder.batch_count == options.batch_count);
 
-        var decoder = BatchDecoder.init(
-            options.element_size,
-            options.buffer[0..encoder.bytes_written],
-            encoder.batch_count,
-        ) catch unreachable;
-        var batch_read_index: usize = 0;
-        while (decoder.next()) |batch| : (batch_read_index += 1) {
-            const event_count = @divExact(batch.len, options.element_size);
-            try testing.expect(expected[batch_read_index] == event_count);
-            try testing.expect(std.mem.allEqual(
-                u16,
-                @alignCast(std.mem.bytesAsSlice(u16, batch)),
-                @intCast(batch_read_index),
+        pub fn move_next(self: *BatchDecoder) bool {
+            if (self.batch_index == self.trailer_items.len) return false;
+
+            const trailer_item: *const TrailerItem =
+                &self.trailer_items[self.trailer_items.len - self.batch_index - 1];
+
+            self.payload_index += trailer_item.size;
+            self.batch_index += 1;
+
+            assert(self.batch_index <= self.trailer_items.len);
+            assert(self.payload_index <= self.payload.len);
+            return self.batch_index < self.trailer_items.len;
+        }
+    };
+}
+
+pub fn BatchEncoderType(
+    comptime Context: type,
+    comptime adapter: struct {
+        is_valid: fn (Context, vsr.Operation) bool,
+        element_size: fn (Context, vsr.Operation) usize,
+        alignment: fn (Context, vsr.Operation) usize,
+    },
+) type {
+    return struct {
+        const BatchEncoder = @This();
+
+        context: Context,
+        buffer: ?[]u8,
+
+        batch_count: u16,
+        buffer_index: usize,
+
+        /// Calculates the total size required to encode the payload and the trailer of a batch.
+        pub const encoded_total_size = EncoderCountingType(Context, .{
+            .is_valid = adapter.is_valid,
+            .element_size = adapter.element_size,
+            .alignment = adapter.alignment,
+        }).total_size;
+
+        pub fn init(context: Context, buffer: []u8) BatchEncoder {
+            assert(buffer.len > @sizeOf(Postamble));
+
+            // The end of the buffer must be aligned to store the `Postamble`.
+            // If not, the buffer is reduced to achieve the required alignment.
+            const postamble_address: usize = @intFromPtr(&buffer[buffer.len - @sizeOf(Postamble)]);
+            const aligned_address: usize = std.mem.alignBackward(
+                usize,
+                postamble_address,
+                @alignOf(Postamble),
+            );
+            const trimming_bytes: usize = trimming: {
+                if (aligned_address == postamble_address) break :trimming 0;
+                assert(aligned_address < postamble_address);
+                const bytes = postamble_address - aligned_address;
+                assert(buffer.len > @sizeOf(Postamble) + bytes);
+                break :trimming bytes;
+            };
+            assert(std.mem.isAligned(
+                @intFromPtr(&buffer[buffer.len - @sizeOf(Postamble) - trimming_bytes]),
+                @alignOf(Postamble),
             ));
-        }
-        try testing.expect(options.batch_count == batch_read_index);
 
-        return encoder.bytes_written;
+            // The buffer must be large enough for at least one batch.
+            assert(buffer.len - trimming_bytes >= trailer_total_size(1));
+
+            return .{
+                .context = context,
+                .buffer = buffer[0 .. buffer.len - trimming_bytes],
+                .batch_count = 0,
+                .buffer_index = 0,
+            };
+        }
+
+        pub fn reset(self: *BatchEncoder) void {
+            assert(self.buffer != null);
+            self.* = .{
+                .context = self.context,
+                .buffer = self.buffer,
+                .batch_count = 0,
+                .buffer_index = 0,
+            };
+        }
+
+        /// Returns a writable slice aligned and sized appropriately for the current operation.
+        /// May return an empty slice if there isn't sufficient space in the buffer.
+        pub fn writable(self: *const BatchEncoder, operation: vsr.Operation) []u8 {
+            maybe(self.batch_count == 0);
+
+            // Takes into account extra trailer bytes that will need to be included.
+            const trailer_size: usize = trailer_total_size(
+                self.batch_count + 1,
+            );
+
+            const buffer: []u8 = self.buffer.?;
+            const padding: u16 = align_padding(
+                buffer[self.buffer_index..],
+                adapter.alignment(self.context, operation),
+            );
+            // The first batch must not include padding since the buffer is expected to be aligned.
+            assert(padding == 0 or self.buffer_index > 0);
+
+            if (buffer.len <= self.buffer_index + padding + trailer_size) {
+                // Insuficient space for one more batch.
+                return &.{};
+            }
+
+            if (constants.verify) {
+                assert(buffer.len >= trailer_size);
+                const trailer: []u8 = buffer[buffer.len - trailer_size ..];
+                const trailer_items: []TrailerItem = @alignCast(std.mem.bytesAsSlice(
+                    TrailerItem,
+                    trailer[0 .. trailer.len - @sizeOf(Postamble)],
+                ));
+                assert(trailer_items.len == self.batch_count + 1);
+                trailer_items[0] = .{
+                    .operation = operation, // Set the current operation for asserting later.
+                    .size = 0,
+                };
+            }
+
+            // Get an aligned slice.
+            const aligned: []u8 = buffer[self.buffer_index + padding .. buffer.len - trailer_size];
+
+            // Trim the slice to the maximum number of elements that can fit.
+            const element_size = adapter.element_size(self.context, operation);
+            const size: usize = @divFloor(aligned.len, element_size) * element_size;
+
+            return aligned[0..size];
+        }
+
+        /// Records how many bytes were writen in the slice previously acquired by `writable()`.
+        /// The same operation must be used in both functions.
+        pub fn add(self: *BatchEncoder, operation: vsr.Operation, bytes_written: usize) void {
+            maybe(self.batch_count == 0);
+            assert(adapter.is_valid(self.context, operation));
+
+            const element_size = adapter.element_size(self.context, operation);
+            assert(element_size > 0 or bytes_written == 0);
+            assert(element_size == 0 or bytes_written % element_size == 0);
+
+            const buffer: []u8 = self.buffer.?;
+            const alignment: usize = adapter.alignment(self.context, operation);
+            const padding: u16 = padding: {
+                if (bytes_written == 0) break :padding 0;
+                const padding: u16 = align_padding(
+                    buffer[self.buffer_index..],
+                    alignment,
+                );
+                assert(std.mem.isAligned(
+                    @intFromPtr(&buffer[self.buffer_index + padding]),
+                    alignment,
+                ));
+                break :padding padding;
+            };
+
+            @memset(buffer[self.buffer_index..][0..padding], 0);
+            self.batch_count += 1;
+            self.buffer_index += bytes_written + padding;
+
+            const trailer_size = trailer_total_size(self.batch_count);
+            assert(buffer.len >= self.buffer_index + trailer_size);
+
+            const trailer: []u8 = buffer[buffer.len - trailer_size ..];
+            const trailer_items: []TrailerItem = @alignCast(std.mem.bytesAsSlice(
+                TrailerItem,
+                trailer[0 .. trailer.len - @sizeOf(Postamble)],
+            ));
+            assert(trailer_items.len == self.batch_count);
+            if (constants.verify) {
+                assert(trailer_items[0].operation == operation);
+                assert(trailer_items[0].size == 0);
+            }
+
+            // Batch metadata is stacked from the end of the message, so the first element
+            // of the array corresponds to the last batch added.
+            trailer_items[0] = .{
+                .operation = operation,
+                .size = @intCast(bytes_written + padding),
+            };
+        }
+
+        /// Finalizes the batch by writing the trailer with proper encoding.
+        /// Returns the total number of bytes written (payload + padding + trailer).
+        /// At least one batch must be inserted, and the encoder should not be used after
+        /// being finished.
+        pub fn finish(self: *BatchEncoder) usize {
+            assert(self.batch_count > 0);
+
+            const buffer = self.buffer.?;
+            assert(buffer.len > self.buffer_index);
+            maybe(self.buffer_index == 0);
+
+            const trailer_size = trailer_total_size(self.batch_count);
+            assert(buffer.len >= self.buffer_index + trailer_size);
+
+            // While batches are being encoded, the trailer is written at the end of the buffer.
+            // Once all batches are encoded, the trailer needs to be moved closer to the last
+            // element written.
+            const trailer_padding: u16 = align_padding(
+                buffer[self.buffer_index..],
+                @alignOf(TrailerItem),
+            );
+            assert(buffer.len >= self.buffer_index + trailer_padding + trailer_size);
+            assert(std.mem.isAligned(
+                @intFromPtr(&buffer[self.buffer_index + trailer_padding]),
+                @alignOf(TrailerItem),
+            ));
+
+            const trailer_source: []const u8 = buffer[buffer.len - trailer_size ..];
+            const trailer_target: []u8 =
+                buffer[self.buffer_index + trailer_padding ..][0..trailer_size];
+            assert(trailer_target.len == trailer_source.len);
+            assert(@intFromPtr(trailer_target.ptr) <= @intFromPtr(trailer_source.ptr));
+            if (trailer_target.ptr != trailer_source.ptr) {
+                stdx.copy_left(
+                    .exact,
+                    u8,
+                    trailer_target,
+                    trailer_source,
+                );
+            }
+            @memset(buffer[self.buffer_index..][0..trailer_padding], 0);
+
+            const postamble: *Postamble = @alignCast(std.mem.bytesAsValue(
+                Postamble,
+                trailer_target[trailer_target.len - @sizeOf(Postamble) ..],
+            ));
+            postamble.* = .{
+                .batch_count = self.batch_count,
+                .reserved = 0,
+            };
+
+            // Reset the encoder to prevent misuse.
+            defer self.* = .{
+                .buffer = null,
+                .batch_count = 0,
+                .buffer_index = 0,
+                .context = self.context,
+            };
+
+            const bytes_written = self.buffer_index + trailer_size + trailer_padding;
+            if (constants.verify) {
+                const BatchDecoder = BatchDecoderType(Context, .{
+                    .is_valid = adapter.is_valid,
+                    .element_size = adapter.element_size,
+                    .alignment = adapter.alignment,
+                });
+                assert(BatchDecoder.init(
+                    self.context,
+                    buffer[0..bytes_written],
+                ) != error.BatchInvalid);
+            }
+
+            return bytes_written;
+        }
+    };
+}
+
+const test_batch = struct {
+    const Context = struct {
+        const empty: Context = .{};
+    };
+    const Operation = enum(u8) {
+        size_2 = constants.vsr_operations_reserved + 1,
+        size_4 = constants.vsr_operations_reserved + 2,
+        size_8 = constants.vsr_operations_reserved + 3,
+        size_16 = constants.vsr_operations_reserved + 4,
+        size_32 = constants.vsr_operations_reserved + 5,
+        size_64 = constants.vsr_operations_reserved + 6,
+        size_128 = constants.vsr_operations_reserved + 7,
+        size_256 = constants.vsr_operations_reserved + 8,
+
+        fn to_vsr(operation: Operation) vsr.Operation {
+            return @enumFromInt(@intFromEnum(operation));
+        }
+
+        fn from_vsr(operation: vsr.Operation) Operation {
+            return @enumFromInt(@intFromEnum(operation));
+        }
+    };
+
+    fn ElementType(comptime operation: Operation) type {
+        const size = Adapter.element_size(
+            Context.empty,
+            operation.to_vsr(),
+        );
+
+        const alignment = Adapter.alignment(
+            Context.empty,
+            operation.to_vsr(),
+        );
+
+        const Element = extern struct {
+            value: [size]u8 align(alignment),
+        };
+        assert(@sizeOf(Element) == size);
+        assert(@alignOf(Element) == alignment);
+
+        return Element;
+    }
+
+    const Adapter = struct {
+        fn is_valid(context: Context, vsr_operation: vsr.Operation) bool {
+            _ = context;
+            if (vsr_operation.vsr_reserved()) return false;
+            const pow = @intFromEnum(vsr_operation) - vsr.constants.vsr_operations_reserved;
+            return pow >= 1 and pow <= 8; // Test sizes between 2^1 and 2^8.
+        }
+
+        fn element_size(context: Context, vsr_operation: vsr.Operation) usize {
+            assert(is_valid(context, vsr_operation));
+            const pow = @intFromEnum(vsr_operation) - vsr.constants.vsr_operations_reserved;
+            return std.math.pow(usize, 2, pow);
+        }
+
+        fn alignment(context: Context, vsr_operation: vsr.Operation) usize {
+            assert(is_valid(context, vsr_operation));
+            const operation: Operation = @enumFromInt(@intFromEnum(vsr_operation));
+            return switch (operation) {
+                .size_2 => @alignOf(u16),
+                .size_4 => @alignOf(u32),
+                .size_8 => @alignOf(u64),
+                .size_16 => @alignOf(u128),
+                .size_32 => @alignOf(u32),
+                .size_64 => @alignOf(u64),
+                .size_128 => @alignOf(u128),
+                .size_256 => @alignOf(u128),
+            };
+        }
+    };
+
+    fn run(options: struct {
+        random: std.rand.Random,
+        buffer: []u8,
+    }) !void {
+        const BatchEncoder = BatchEncoderType(Context, .{
+            .is_valid = Adapter.is_valid,
+            .element_size = Adapter.element_size,
+            .alignment = Adapter.alignment,
+        });
+
+        var encoder = BatchEncoder.init(Context.empty, options.buffer);
+        var expected: [8190]struct { operation: Operation, elements_count: usize } = undefined;
+        const batch_count_max: u16 = options.random.intRangeAtMostBiased(
+            u16,
+            1,
+            expected.len,
+        );
+
+        var batch_count: u16 = 0;
+        for (0..batch_count_max) |_| {
+            const operation = options.random.enumValue(Operation);
+            switch (operation) {
+                inline else => |operation_comptime| {
+                    const Element = ElementType(operation_comptime);
+
+                    // Assert the slice is aligned:
+                    const writable: []u8 = encoder.writable(operation.to_vsr());
+                    const elements: []Element = @alignCast(std.mem.bytesAsSlice(
+                        Element,
+                        writable,
+                    ));
+                    if (elements.len == 0) {
+                        break;
+                    }
+
+                    const elements_count: usize =
+                        switch (options.random.enumValue(enum { zero, one, random })) {
+                        .zero => 0,
+                        .one => 1,
+                        .random => options.random.intRangeAtMost(usize, 1, @intCast(elements.len)),
+                    };
+                    for (elements[0..elements_count]) |*element| {
+                        @memset(&element.value, @intCast(batch_count % 255));
+                    }
+
+                    encoder.add(operation.to_vsr(), elements_count * @sizeOf(Element));
+                    expected[batch_count] = .{
+                        .operation = operation,
+                        .elements_count = elements_count,
+                    };
+                    batch_count += 1;
+                },
+            }
+        }
+        try testing.expectEqual(encoder.batch_count, batch_count);
+        const bytes_written = encoder.finish();
+
+        const BatchDecoder = BatchDecoderType(Context, .{
+            .is_valid = Adapter.is_valid,
+            .element_size = Adapter.element_size,
+            .alignment = Adapter.alignment,
+        });
+        var decoder = try BatchDecoder.init(
+            Context.empty,
+            options.buffer[0..bytes_written],
+        );
+        var index: u16 = 0;
+        while (decoder.pop()) |batch_item| {
+            const operation = Operation.from_vsr(batch_item.operation);
+            try testing.expectEqual(expected[index].operation, operation);
+            switch (operation) {
+                inline else => |operation_comptime| {
+                    const Element = ElementType(operation_comptime);
+                    const elements: []const Element = @alignCast(std.mem.bytesAsSlice(
+                        Element,
+                        batch_item.batched,
+                    ));
+                    try testing.expectEqual(expected[index].elements_count, elements.len);
+                    for (elements) |element| {
+                        try testing.expect(std.mem.allEqual(
+                            u8,
+                            &element.value,
+                            @intCast(index % 255),
+                        ));
+                    }
+                    index += 1;
+                },
+            }
+        }
+        try testing.expectEqual(batch_count, index);
     }
 };
 
 test "batch: encode/decode" {
     var rng = std.rand.DefaultPrng.init(42);
+    const message_body_size_min = constants.sector_size - @sizeOf(vsr.Header);
+    const message_body_size_max = (1024 * 1024) - @sizeOf(vsr.Header);
     const buffer = try testing.allocator.alignedAlloc(
         u8,
         @alignOf(vsr.Header),
-        constants.message_body_size_max,
+        message_body_size_max,
     );
     defer testing.allocator.free(buffer);
 
-    for (0..2048) |_| {
-        const random = rng.random();
-
-        // Element size ranging from 2^4 to 2^8:
-        const element_size = std.math.pow(
+    const random = rng.random();
+    for (0..1024) |_| {
+        const buffer_size: usize = random.intRangeAtMost(
             usize,
-            2,
-            random.intRangeAtMostBiased(usize, 4, 8),
+            message_body_size_min,
+            message_body_size_max,
         );
-
-        // The maximum `batch_count` is a `u16`.
-        // Depending on the element size, this limit can overflow. However, it is large enough
-        // to support a 1MiB message body with batches containing a single 16-byte element each.
-        const batch_count_max: u16 = @intCast(@divExact(buffer.len, element_size) - 1);
-        const batch_count = random.intRangeAtMostBiased(u16, 1, batch_count_max);
-
         _ = try test_batch.run(.{
             .random = random,
-            .element_size = element_size,
-            .buffer = buffer,
-            .batch_count = batch_count,
+            .buffer = buffer[0..buffer_size],
         });
     }
-}
-
-// The maximum number of batches, all with zero elements.
-test "batch: maximum batches with no elements" {
-    var rng = std.rand.DefaultPrng.init(42);
-    const random = rng.random();
-
-    const batch_count = std.math.maxInt(u16);
-    const element_size = 128;
-    const buffer_size = batch_trailer_total_size(.{
-        .element_size = element_size,
-        .batch_count = batch_count,
-    });
-
-    const buffer = try testing.allocator.alignedAlloc(
-        u8,
-        @alignOf(vsr.Header),
-        buffer_size,
-    );
-    defer testing.allocator.free(buffer);
-    const written_bytes = try test_batch.run(.{
-        .random = random,
-        .element_size = element_size,
-        .buffer = buffer,
-        .batch_count = batch_count,
-        .elements_per_batch = 0,
-    });
-    try testing.expectEqual(buffer_size, written_bytes);
-}
-
-// The maximum number of batches, when each one has one single element.
-test "batch: maximum batches with a single element" {
-    var rng = std.rand.DefaultPrng.init(42);
-    const random = rng.random();
-
-    const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
-    const batch_count_max: u16 = @divExact(buffer_size, (element_size + @sizeOf(u16)));
-
-    const buffer = try testing.allocator.alignedAlloc(u8, @alignOf(vsr.Header), buffer_size);
-    defer testing.allocator.free(buffer);
-    const written_bytes = try test_batch.run(.{
-        .random = random,
-        .element_size = element_size,
-        .buffer = buffer,
-        .batch_count = batch_count_max,
-        .elements_per_batch = 1,
-    });
-    try testing.expectEqual(buffer_size, written_bytes);
-}
-
-// The maximum number of elements on a single batch.
-test "batch: maximum elements on a single batch" {
-    var rng = std.rand.DefaultPrng.init(42);
-    const random = rng.random();
-
-    const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
-    const batch_size_max = 8189; // maximum number of elements in a single-batch request.
-    assert(batch_size_max == @divExact(buffer_size - element_size, element_size));
-
-    const buffer = try testing.allocator.alignedAlloc(u8, @alignOf(vsr.Header), buffer_size);
-    defer testing.allocator.free(buffer);
-    const written_bytes = try test_batch.run(.{
-        .random = random,
-        .element_size = element_size,
-        .buffer = buffer,
-        .batch_count = 1,
-        .elements_per_batch = batch_size_max,
-    });
-    try testing.expectEqual(buffer_size, written_bytes);
-}
-
-test "batch: invalid format" {
-    var rng = std.rand.DefaultPrng.init(42);
-    const random = rng.random();
-
-    const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
-    const buffer = try testing.allocator.alignedAlloc(u8, @alignOf(vsr.Header), buffer_size);
-    defer testing.allocator.free(buffer);
-
-    const batch_count = 10;
-    const trailer_size = batch_trailer_total_size(.{
-        .element_size = element_size,
-        .batch_count = batch_count,
-    });
-
-    var encoder = BatchEncoder.init(element_size, buffer);
-    var event_total_count: usize = 0;
-    for (0..batch_count) |_| {
-        const event_count = random.intRangeAtMostBiased(usize, 0, 100);
-        try testing.expect(encoder.writable().len >= element_size * event_count);
-        encoder.add(element_size * event_count);
-        event_total_count += event_count;
-    }
-    encoder.finish();
-
-    try testing.expect(encoder.batch_count == batch_count);
-    try testing.expect(encoder.bytes_written == (element_size * event_total_count) + trailer_size);
-
-    try testing.expect(BatchDecoder.init(
-        element_size,
-        buffer[0..encoder.bytes_written],
-        10,
-    ) != error.BatchInvalid);
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size,
-        buffer[0..encoder.bytes_written],
-        batch_count + 1,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size,
-        buffer[0..encoder.bytes_written],
-        batch_count - 1,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size,
-        buffer[0 .. encoder.bytes_written - element_size],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size,
-        buffer[element_size..encoder.bytes_written],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size,
-        buffer[0 .. encoder.bytes_written - element_size],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size,
-        buffer[1 .. encoder.bytes_written + 1],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size,
-        buffer[0 .. encoder.bytes_written + 1],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size,
-        buffer[1..encoder.bytes_written],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size + 1,
-        buffer[0..encoder.bytes_written],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size - 1,
-        buffer[0..encoder.bytes_written],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size * 2,
-        buffer[0..encoder.bytes_written],
-        batch_count,
-    ));
-    try testing.expectError(error.BatchInvalid, BatchDecoder.init(
-        element_size / 2,
-        buffer[0..encoder.bytes_written],
-        batch_count,
-    ));
 }
