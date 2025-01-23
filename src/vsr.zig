@@ -215,12 +215,12 @@ pub const Command = enum(u8) {
     request_blocks = 19,
     block = 20,
 
-    start_view = 23,
+    // Historical version of SV, with the CheckpointStateOld format. Currently, both
+    // `start_view_deprecated` and `start_view` are handled. Next release will ignore
+    // `start_view_deprecated`.
+    start_view_deprecated = 23,
 
-    // A reserved command for a StartView message that sends the new CheckpointState format.
-    // At the moment, replica ignores this command (as opposed to panicking on an unknown command),
-    // to allow the next release to send both versions of StartView.
-    start_view_new = 24,
+    start_view = 24,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
     const gaps = .{

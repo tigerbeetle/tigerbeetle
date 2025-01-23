@@ -1403,7 +1403,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .snapshots_block_checksum = checkpoint_old.snapshots_block_checksum,
                         .snapshots_block_address = checkpoint_old.snapshots_block_address,
 
-                        .storage_size = data_file_size_min,
+                        .storage_size = checkpoint_old.storage_size,
                         .release = checkpoint_old.release,
                     };
 

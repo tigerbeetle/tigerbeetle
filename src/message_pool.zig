@@ -33,6 +33,7 @@ pub const Options = union(vsr.ProcessType) {
                 // Handle bursts.
                 // (e.g. Connection.parse_message(), or sending a ping when the send queue is full).
                 sum += 1;
+                sum += 1; // Extra burst from sending two SV variants.
 
                 // This conditions is necessary (but not sufficient) to prevent deadlocks.
                 assert(sum > 1);
@@ -105,6 +106,10 @@ pub const MessagePool = struct {
         pub const StartViewChange = CommandMessageType(.start_view_change);
         pub const DoViewChange = CommandMessageType(.do_view_change);
         pub const StartView = CommandMessageType(.start_view);
+        pub const StartViewDeprecated = CommandMessageType(.start_view_deprecated);
+        comptime {
+            assert(StartView == StartViewDeprecated);
+        }
         pub const RequestStartView = CommandMessageType(.request_start_view);
         pub const RequestHeaders = CommandMessageType(.request_headers);
         pub const RequestPrepare = CommandMessageType(.request_prepare);
@@ -284,9 +289,11 @@ pub const MessagePool = struct {
 };
 
 fn CommandMessageType(comptime command: vsr.Command) type {
+    const CommandHeaderUnified = Header.Type(command);
+
     return extern struct {
         const CommandMessage = @This();
-        const CommandHeader = Header.Type(command);
+        const CommandHeader = CommandHeaderUnified;
         const Message = MessagePool.Message;
 
         // The underlying structure of Message and CommandMessage should be identical, so that their
