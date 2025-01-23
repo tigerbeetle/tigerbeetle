@@ -1331,6 +1331,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 assert(quorum.copies.count() >= threshold.count());
 
                 const working = quorum.header;
+
+                // TODO: Remove the second condition when logic to translate CheckpointStateOld to
+                // CheckpointState is removed.
+                if (working.version != SuperBlockVersion and working.version != 1) {
+                    log.err("found incompatible superblock version {}", .{working.version});
+                    @panic("cannot read superblock with incompatible version");
+                }
+
                 if (threshold == .verify) {
                     if (working.checksum != superblock.staging.checksum) {
                         @panic("superblock failed verification after writing");
@@ -1368,7 +1376,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 // The SuperBlock on disk is an older version wherein @TypeOf(VSRState.checkpoint)
                 // is CheckpointStateOld. Translate CheckpointStateOld → CheckpointState (zeroing
                 // out new fields) and update the working and staging superblocks.
-                if (working.version < SuperBlockVersion) {
+                if (working.version == 1) {
                     const checkpoint_old: *const vsr.CheckpointStateOld =
                         @ptrCast(&working.vsr_state.checkpoint);
                     const checkpoint_new = vsr.CheckpointState{

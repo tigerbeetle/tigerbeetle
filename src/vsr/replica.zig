@@ -2549,14 +2549,14 @@ pub fn ReplicaType(
             assert(self.primary());
 
             const start_view_messages = self.create_start_view_message(message.header.nonce);
-            defer self.message_bus.unref(start_view_messages.current);
+            defer self.message_bus.unref(start_view_messages.deprecated);
             defer self.message_bus.unref(start_view_messages.next);
 
-            assert(start_view_messages.current.header.command == .start_view_deprecated);
+            assert(start_view_messages.deprecated.header.command == .start_view_deprecated);
             assert(start_view_messages.next.header.command == .start_view);
 
             for ([_]*Message.StartView{
-                start_view_messages.current,
+                start_view_messages.deprecated,
                 start_view_messages.next,
             }) |start_view_message| {
                 assert(start_view_message.references == 1);
@@ -5105,7 +5105,7 @@ pub fn ReplicaType(
         /// Construct a SV message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_start_view_message(self: *Replica, nonce: u128) struct {
-            current: *Message.StartView,
+            deprecated: *Message.StartView,
             next: *Message.StartView,
         } {
             assert(self.status == .normal or self.status == .view_change);
@@ -5161,11 +5161,11 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
-            const message_copy = self.message_bus.get_message(.start_view_deprecated);
-            defer self.message_bus.unref(message_copy);
+            const message_deprecated = self.message_bus.get_message(.start_view_deprecated);
+            defer self.message_bus.unref(message_deprecated);
 
-            message_copy.header.* = message.header.*;
-            message_copy.header.command = .start_view_deprecated;
+            message_deprecated.header.* = message.header.*;
+            message_deprecated.header.command = .start_view_deprecated;
 
             const checkpoint_new: *const vsr.CheckpointState =
                 &self.superblock.working.vsr_state.checkpoint;
@@ -5204,23 +5204,23 @@ pub fn ReplicaType(
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                message_copy.body_used()[0..@sizeOf(vsr.CheckpointState)],
+                message_deprecated.body_used()[0..@sizeOf(vsr.CheckpointState)],
                 std.mem.asBytes(&checkpoint_old),
             );
 
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                message_copy.body_used()[@sizeOf(vsr.CheckpointState)..],
+                message_deprecated.body_used()[@sizeOf(vsr.CheckpointState)..],
                 message.body_used()[@sizeOf(vsr.CheckpointState)..],
             );
-            message_copy.header.set_checksum_body(message_copy.body_used());
-            message_copy.header.set_checksum();
+            message_deprecated.header.set_checksum_body(message_deprecated.body_used());
+            message_deprecated.header.set_checksum();
 
             assert(message.header.invalid() == null);
-            assert(message_copy.header.invalid() == null);
+            assert(message_deprecated.header.invalid() == null);
             return .{
-                .current = message_copy.ref(),
+                .deprecated = message_deprecated.ref(),
                 .next = message.ref(),
             };
         }
@@ -8553,15 +8553,15 @@ pub fn ReplicaType(
             const nonce = 0;
 
             const start_view_messages = self.create_start_view_message(nonce);
-            defer self.message_bus.unref(start_view_messages.current);
+            defer self.message_bus.unref(start_view_messages.deprecated);
             defer self.message_bus.unref(start_view_messages.next);
 
-            assert(start_view_messages.current.header.command == .start_view_deprecated);
+            assert(start_view_messages.deprecated.header.command == .start_view_deprecated);
             assert(start_view_messages.next.header.command == .start_view);
-            assert(start_view_messages.current.header.nonce == 0);
+            assert(start_view_messages.deprecated.header.nonce == 0);
             assert(start_view_messages.next.header.nonce == 0);
 
-            self.send_message_to_other_replicas(start_view_messages.current);
+            self.send_message_to_other_replicas(start_view_messages.deprecated);
             self.send_message_to_other_replicas(start_view_messages.next);
         }
 
