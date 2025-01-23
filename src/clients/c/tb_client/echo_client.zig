@@ -68,7 +68,6 @@ pub fn EchoClientType(
 
             self.reply_timestamp += 1;
             const timestamp = self.reply_timestamp;
-            const batch_count = inflight.message.header.batch_count;
 
             // Allocate a reply message.
             const reply = self.get_message().build(.request);
@@ -91,10 +90,9 @@ pub fn EchoClientType(
                 .request => |callback| {
                     callback(
                         inflight.user_data,
-                        operation.cast(EchoClient.StateMachine),
+                        operation,
                         timestamp,
                         reply.body_used(),
-                        batch_count,
                     );
                 },
                 .register => |callback| {
@@ -125,7 +123,6 @@ pub fn EchoClientType(
                 .command = .request,
                 .operation = .register,
                 .release = vsr.Release.minimum,
-                .batch_count = 0,
             };
 
             assert(self.request_number == 0);
@@ -144,7 +141,6 @@ pub fn EchoClientType(
             user_data: u128,
             operation: StateMachine.Operation,
             events: []const u8,
-            batch_count: u16,
         ) void {
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| @sizeOf(
@@ -165,7 +161,6 @@ pub fn EchoClientType(
                 .release = vsr.Release.minimum,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + events.len),
-                .batch_count = batch_count,
             };
 
             stdx.copy_disjoint(.exact, u8, message.body_used(), events);
@@ -181,9 +176,10 @@ pub fn EchoClientType(
             assert(message.header.client == self.id);
             assert(message.header.cluster == self.cluster);
             assert(message.header.release.value == self.release.value);
-            assert(!message.header.operation.vsr_reserved());
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= constants.message_size_max);
+            assert(message.header.operation == .batched or
+                !message.header.operation.vsr_reserved());
 
             message.header.request = self.request_number;
             self.request_number += 1;

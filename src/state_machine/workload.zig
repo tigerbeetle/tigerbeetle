@@ -305,7 +305,6 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) struct {
             operation: Operation,
             size: usize,
-            batch_count: u16,
         } {
             assert(client_index < self.auditor.options.client_count);
             assert(body.len == constants.message_size_max - @sizeOf(vsr.Header));
@@ -466,12 +465,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             timestamp: u64,
             request_body: []const u8,
             reply_body: []const u8,
-            batch_count: u16,
         ) void {
             assert(timestamp != 0);
             assert(request_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
             assert(reply_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
-
+            const batch_count = 0;
             if (batch_count > 0) {
                 const event_size: usize, const result_size: usize =
                     switch (operation) {

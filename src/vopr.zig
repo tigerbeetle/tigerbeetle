@@ -971,14 +971,12 @@ pub const Simulator = struct {
                 }
 
                 if (!commit.prepare.header.operation.vsr_reserved()) {
-                    assert(commit.prepare.header.batch_count == commit.reply.header.batch_count);
                     simulator.workload.on_reply(
                         commit.client_index.?,
                         commit.reply.header.operation.cast(StateMachine),
                         commit.reply.header.timestamp,
                         commit.prepare.body_used(),
                         commit.reply.body_used(),
-                        commit.reply.header.batch_count,
                     );
                 }
             }
@@ -1068,7 +1066,6 @@ pub const Simulator = struct {
             request_metadata.operation,
             request_message,
             request_metadata.size,
-            request_metadata.batch_count,
         );
         // Since we already checked the client's request queue for free space, `client.request()`
         // should always queue the request.
