@@ -1,6 +1,8 @@
 is_readme = PANDOC_STATE.input_files[1]:sub(-9) == "README.md"
 
 function Link (link)
+  local is_external = link.target:sub(1, 8) == "https://"
+
   if not is_readme then
     -- We have to adjust relative links to go up one more level.
     if link.target:sub(1, 2) == "./"  then
@@ -21,8 +23,10 @@ function Link (link)
     end
   end
 
-  link.target = link.target:gsub("README.md", "")
-  link.target = link.target:gsub(".md", "")
+  if not is_external then
+    link.target = link.target:gsub("README.md", "")
+    link.target = link.target:gsub(".md", "")
+  end
 
   return link
 end
