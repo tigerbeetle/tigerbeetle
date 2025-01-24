@@ -419,7 +419,7 @@ const Page = struct {
         const page_dir = self.path_source[0 .. self.path_source.len - ".md".len];
         if (try path_exists(b.pathFromRoot(page_dir))) {
             _ = docs.addCopyDirectory(b.path(page_dir), self.path_target, .{
-                .include_extensions = &assets.supported_file_types,
+                .exclude_extensions = &assets.exclude_extensions,
             });
         }
     }
