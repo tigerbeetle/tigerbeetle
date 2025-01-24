@@ -367,7 +367,7 @@ const Page = struct {
     ) !void {
         const pandoc_step = std.Build.Step.Run.create(b, "run pandoc");
         pandoc_step.addFileArg(website.pandoc_bin);
-        pandoc_step.addArgs(&.{ "--from", "gfm", "--to", "html5" });
+        pandoc_step.addArgs(&.{ "--from", "gfm+smart", "--to", "html5" });
         pandoc_step.addArg("--lua-filter");
         pandoc_step.addFileArg(b.path("pandoc/markdown-links.lua"));
         pandoc_step.addArg("--lua-filter");
