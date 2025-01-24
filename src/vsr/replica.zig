@@ -7330,7 +7330,8 @@ pub fn ReplicaType(
         /// resources of many replicas, for faster recovery.
         fn repair_prepare(self: *Replica, op: u64) bool {
             const slot = self.journal.slot_with_op(op).?;
-            const checksum = self.journal.header_with_op(op).?.checksum;
+            const header = self.journal.header_with_op(op).?;
+            const checksum = header.checksum;
 
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
@@ -7338,7 +7339,7 @@ pub fn ReplicaType(
 
             // We may be appending to or repairing the journal concurrently.
             // We do not want to re-request any of these prepares unnecessarily.
-            if (self.journal.writing(op, checksum)) {
+            if (self.journal.writing(header) == .exact) {
                 log.debug("{}: repair_prepare: op={} checksum={} (already writing)", .{
                     self.replica,
                     op,
@@ -7361,6 +7362,9 @@ pub fn ReplicaType(
                 assert(prepare.header.checksum == checksum);
 
                 if (self.solo()) {
+                    // Solo replicas don't change views and rewrite prepares.
+                    assert(self.journal.writing(header) == .none);
+
                     // This op won't start writing until all ops in the pipeline preceding it have
                     // been written.
                     log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
@@ -7847,7 +7851,7 @@ pub fn ReplicaType(
                     // that we can help the new primary to repair this prepare.
                     if ((self.journal.prepare_inhabited[slot.index] and
                         self.journal.prepare_checksums[slot.index] == header.checksum) or
-                        self.journal.writing(header.op, header.checksum) or
+                        self.journal.writing(header) == .exact or
                         self.pipeline_prepare_by_op_and_checksum(
                         header.op,
                         header.checksum,
@@ -9936,7 +9940,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.journal.writing(message.header.op, message.header.checksum)) {
+            if (self.journal.writing(message.header) != .none) {
                 log.debug("{}: write_prepare: ignoring op={} checksum={} (already writing)", .{
                     self.replica,
                     message.header.op,
