@@ -37,7 +37,6 @@
 
     canvas {
       width: 600px;
-      /* height: 150px; */
       max-width: 100vw;
       image-rendering: pixelated;
     }
@@ -59,7 +58,7 @@
         <section class="four-oh-four">
           <canvas width="600" height="150"></canvas>
           <h2>Page not found</h2>
-          <p>Take me <a class="button" href="/">home</a>, country roads...</p>
+          <p>Take me <a href="/">home</a>, country roads...</p>
         </section>
         <div id="resources">
           <img id="fontb" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABAAQMAAADoGO08AAAABlBMVEUAAAAAAAClZ7nPAAAAAXRSTlMAQObYZgAAAdJJREFUeF7N0qGO20AQBuAB1SrAwNDgwMLCgQanU8oKDQsKDAsCDKoqqkZWHqCv0LK+QlU4oPrRKiqKgk5FB6Ogk8HK6symd6eklSoV9Wf+NJ5/1zLli1C6yD/A70v/mv/mHNR01BH19fIB2q5bvxyix2BhQNP3r/tljJNDQzRQNw1vKZrQREzU0/Tqzd5giORPlu7Y+UQXe+pttZqYeku0AYfHlGZhkTTLLFJMCAOQNghA3zfEoC2HkLJWDjw1gXZ8fZ1CbmT0zqqiO+7DHNAilImGwIoKBuij7fCWWSqRVsRbXZ6yKXAjWfI8C3iGAkIvYFEFOCQ93IE+AmqgBnud70GfkRU5b2cOR93dGsxlAmUCW9Cnxx1IxqAlvEUFLMjeckMXyX4OACnldtMawMIFPkRd1AXUYZ2a2C+eFxCDHa858sJ33ObAWM1rtus7aEpgtIfE3+KiwHsIS43EuaWWhP4QpUBXpFwpO8QC/AT1mGUUHjORrclCBE8GuNrzF8BBMbNBOp5gCyMeDX5N3NuOkQN4nQwez3H+B/MJm5rPIdbltuN+zPBkg8FbJ2Vgt0KzrJ+9dvgh/j3akR9e0cDb9rAK/Qk0aL56VwOSvcWBzvIT9ibJYPzvOOUAAAAASUVORK5CYII=">
@@ -183,7 +182,7 @@
         }
       } else if (gamestate == STATE_OVER) {
         gamestate = STATE_INIT;
-        const score = int(distance / 10); 
+        const score = int(distance / 10);
         if (score > highscore) highscore = score;
         distance = 0;
         jumping = false;
