@@ -183,7 +183,7 @@ fn create_requests_menu(arena: std.mem.Allocator) !Menu {
 
     return .{
         .title = "Requests",
-        .index = null,
+        .index = try Page.init(arena, path ++ "README.md"),
         .items = items.items,
     };
 }
