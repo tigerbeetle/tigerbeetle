@@ -962,17 +962,22 @@ article {
   
       h2 {
         font-size: 24px;
-        line-height: 36px;
+        line-height: 32px;
       }
   
       h3 {
         font-size: 18px;
-        line-height: 27px;
+        line-height: 24px;
       }
   
       h4 {
-        font-size: 18px;
+        font-size: 16px;
         line-height: 24px;
+      }
+  
+      h5 {
+        font-size: 14px;
+        line-height: 20px;
       }
     }
   }
