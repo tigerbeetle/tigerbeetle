@@ -40,6 +40,8 @@ pub fn build(
         run_search_index_writer.addFileArg(entry.html_path);
     }
 
+    try write_404_page(b, website, docs);
+
     return docs.getDirectory();
 }
 
@@ -202,6 +204,21 @@ fn create_about_menu(arena: std.mem.Allocator) !Menu {
         .index = try Page.init(arena, base_path ++ "/about/README.md"),
         .items = items.items,
     };
+}
+
+fn write_404_page(
+    b: *std.Build,
+    website: Website,
+    docs: *std.Build.Step.WriteFile,
+) !void {
+    const template = @embedFile("html/404.html");
+    var html = try Html.create(b.allocator);
+    try html.write(template, .{
+        .url_prefix = website.url_prefix,
+        .title = "Page not found | TigerBeetle Docs",
+        .author = "TigerBeetle Team",
+    });
+    _ = docs.add("404.html", html.string());
 }
 
 const Menu = struct {
