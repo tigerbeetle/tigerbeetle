@@ -443,29 +443,14 @@ pub const Storage = struct {
             }
         }
 
-        const faulty = storage.faulty and faulty: {
-            if (read.zone != .wal_prepares) break :faulty true;
-
-            // Don't corrupt a WAL prepare if the corresponding WAL header write was misdirected, to
-            // avoid a double-fault which the journal interprets as a torn prepare.
-            const header_slot = @divExact(read.offset, constants.message_size_max);
-            const header_offset = vsr.sector_floor(header_slot * @sizeOf(vsr.Header));
-
-            var overlays_iterator = storage.overlays.iterate();
-            while (overlays_iterator.next()) |overlay| {
-                if (overlay.zone == .wal_headers and overlay.offset == header_offset) {
-                    break :faulty false;
-                }
-            }
-            break :faulty true;
-        };
+        const faults_eligible = storage.read_sectors_fault_eligible(read);
 
         var sectors = SectorRange.from_zone(read.zone, read.offset, read.buffer.len);
         const sectors_min = sectors.min;
         while (sectors.next()) |sector| {
             const sector_offset = (sector - sectors_min) * constants.sector_size;
             const sector_bytes = read.buffer[sector_offset..][0..constants.sector_size];
-            const sector_corrupt = faulty and storage.faults.isSet(sector);
+            const sector_corrupt = faults_eligible != .none and storage.faults.isSet(sector);
             const sector_uninitialized = !storage.memory_written.isSet(sector);
 
             if (sector_corrupt) {
@@ -487,7 +472,7 @@ pub const Storage = struct {
         }
 
         // Apply misdirected data.
-        if (storage.faulty) {
+        if (faults_eligible == .corrupt_or_misdirect) {
             var overlays_iterator = storage.overlays.iterate();
             while (overlays_iterator.next()) |overlay| {
                 if (overlay.zone == read.zone and
@@ -509,6 +494,42 @@ pub const Storage = struct {
         }
 
         read.callback(read);
+    }
+
+    fn read_sectors_fault_eligible(storage: *const Storage, read: *const Storage.Read) enum {
+        none,
+        corrupt,
+        corrupt_or_misdirect,
+    } {
+        if (!storage.faulty) return .none;
+
+        if (read.zone == .wal_prepares) {
+            const header_slot = @divExact(read.offset, constants.message_size_max);
+            const header_offset = vsr.sector_floor(header_slot * @sizeOf(vsr.Header));
+
+            {
+                // Don't fault a WAL prepare if the corresponding WAL header write was misdirected,
+                // to avoid a double-fault which the journal interprets as a torn prepare.
+                var overlays_iterator = storage.overlays.iterate_const();
+                while (overlays_iterator.next()) |overlay| {
+                    if (overlay.zone == .wal_headers and overlay.offset == header_offset) {
+                        return .none;
+                    }
+                }
+            }
+
+            {
+                // Don't misdirect a WAL prepare if the corresponding WAL header doesn't match, to
+                // avoid a double-fault in which the journal tries to `fix` the old prepare.
+                const wal_header = &storage.wal_headers()[header_slot];
+                const wal_prepare = &storage.wal_prepares()[header_slot];
+                if (wal_header.checksum != wal_prepare.header.checksum) {
+                    return .corrupt;
+                }
+            }
+        }
+
+        return .corrupt_or_misdirect;
     }
 
     pub fn write_sectors(
