@@ -8,6 +8,7 @@
   --gray-6: #D9D9D9;
   --gray-7: #CECECE;
   --gray-8: #BBBBBB;
+  --gray-9: #8D8D8D;
   --gray-10: #838383;
   --gray-11: #4B4B4B;
   /* change to darker gray for legibility */
@@ -50,6 +51,7 @@
     --gray-6: #3A3A3A;
     --gray-7: #484848;
     --gray-8: #606060;
+    --gray-9: #6E6E6E;
     --gray-10: #7B7B7B;
     /* change to lighter gray for legibility */
     --gray-11: #CCCCCC;
@@ -842,6 +844,37 @@ article {
         }
       }
     }
+
+    #footnotes {
+      margin-top: 24px;
+      font-size: 13px;
+      line-height: 20px;
+
+      >hr {
+        border: none;
+        border-top: 1px solid var(--gray-4);
+      }
+
+      >ol {
+        padding: 12px 0;
+
+        >li {
+          margin-left: 20px;
+
+          >p {
+            color: var(--gray-11);
+
+            >a {
+              color: var(--gray-9);
+
+              &:hover {
+                text-decoration: none;
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -959,22 +992,22 @@ article {
         font-size: 36px;
         line-height: 40px;
       }
-  
+
       h2 {
         font-size: 24px;
         line-height: 32px;
       }
-  
+
       h3 {
         font-size: 18px;
         line-height: 24px;
       }
-  
+
       h4 {
         font-size: 16px;
         line-height: 24px;
       }
-  
+
       h5 {
         font-size: 14px;
         line-height: 20px;
