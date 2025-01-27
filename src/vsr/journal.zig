@@ -1228,7 +1228,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1   1  !1
         ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !0  !1
         ///   prepare.op < checkpoint  _   _   _   _   _   _   _   _   _   _   _   0   1   _
-        ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr nil fix vsr vsr fix eql
+        ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr nil fix vsr vsr vsr eql
         ///   decision (replicas=1)              fix fix
         ///
         /// Legend:
@@ -1566,7 +1566,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             journal.headers_redundant[slot.index] = journal.headers[slot.index];
             if (journal.faulty.bit(slot)) {
-                assert(journal.headers_redundant[slot.index].operation == .reserved);
                 journal.headers_redundant[slot.index].checksum = 0; // Invalidate the checksum.
             }
             assert(journal.faulty.bit(slot) !=
@@ -1691,7 +1690,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(header.op % slot_count == index);
                     assert(journal.prepare_inhabited[index]);
                     assert(journal.prepare_checksums[index] == header.checksum);
-                    assert(!journal.faulty.bit(Slot{ .index = index }));
+                    maybe(journal.faulty.bit(Slot{ .index = index }));
                 }
             }
             callback(journal);
@@ -2291,13 +2290,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///   (This last case is the most likely.)
 ///
 /// @M:
-/// The message was rewritten due to a view change, but belongs to a previous checkpoint.
-/// Unlike @L, the decision is "fix" to avoid a replica entering `status=recovering_head` (via
-/// `!op_head_certain`).
 ///
-/// This exact prepare is not necessarily committed – it might have been rewritten again, and then
-/// the replica skipped past it via state sync. But the replica won't replay this op anyway (since
-/// it precedes the checkpoint) so it doesn't matter.
+/// Either:
+/// - The message was rewritten due to a view change, but belongs to a previous checkpoint.
+///
+///   This exact prepare is not necessarily committed – it might have been rewritten again, and then
+///   the replica skipped past it via state sync. But the replica won't replay this op anyway (since
+///   it precedes the checkpoint) so it doesn't matter.
+///
+/// - The prepare write was lost, leaving behind an outdated prepare and a valid redundant header,
+///   with matching ops but different views. decision=fix would repair the wrong one.
+///
+///   Even though we don't know the exact header, we do know the op, so we can avoid
+///   `status=recovering_head`. (TODO)
 ///
 ///
 /// @N:
@@ -2339,7 +2344,7 @@ const recovery_cases = table: {
         Case.init("@J", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _0, _1, __, __ }), // header.op < prepare.op
         Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _0, __, __ }), // header.op > prepare.op
         Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, _0, a0 }), // header.op ≥ op_checkpoint
-        Case.init("@M", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _1, a0, _1, a0 }), // header.op < op_checkpoint
+        Case.init("@M", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, _1, a0 }), // header.op < op_checkpoint
         Case.init("@N", .eql, .eql, .{ _1, _0, _1, _0, __, _1, a1, a0, __, a1 }), // normal path: prepare
     };
 };
