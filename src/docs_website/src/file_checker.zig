@@ -16,7 +16,9 @@ pub fn main() !void {
 }
 
 fn check_files(arena: std.mem.Allocator, path: []const u8) !void {
-    const dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+    var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+    defer dir.close();
+
     var walker = try dir.walk(arena);
     while (try walker.next()) |entry| {
         if (entry.kind != .file) continue;
