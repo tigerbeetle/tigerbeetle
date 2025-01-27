@@ -44,16 +44,6 @@ const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
 
 const log = std.log.scoped(.storage);
 
-// TODOs:
-// less than a majority of replicas may have corruption
-// have an option to enable/disable the following corruption types:
-// bitrot
-// misdirected read/write
-// corrupt sector
-// latent sector error
-// - emulate by zeroing sector, as this is how we handle this in the real Storage implementation
-// - likely that surrounding sectors also corrupt
-// - likely that stuff written at the same time is also corrupt even if written to a far away sector
 pub const Storage = struct {
     /// Options for fault injection during fuzz testing
     pub const Options = struct {
