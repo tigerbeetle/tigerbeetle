@@ -40,6 +40,8 @@ pub fn build(
         run_search_index_writer.addFileArg(entry.html_path);
     }
 
+    try write_404_page(b, website, docs);
+
     return docs.getDirectory();
 }
 
@@ -181,7 +183,7 @@ fn create_requests_menu(arena: std.mem.Allocator) !Menu {
 
     return .{
         .title = "Requests",
-        .index = null,
+        .index = try Page.init(arena, path ++ "README.md"),
         .items = items.items,
     };
 }
@@ -202,6 +204,21 @@ fn create_about_menu(arena: std.mem.Allocator) !Menu {
         .index = try Page.init(arena, base_path ++ "/about/README.md"),
         .items = items.items,
     };
+}
+
+fn write_404_page(
+    b: *std.Build,
+    website: Website,
+    docs: *std.Build.Step.WriteFile,
+) !void {
+    const template = @embedFile("html/404.html");
+    var html = try Html.create(b.allocator);
+    try html.write(template, .{
+        .url_prefix = website.url_prefix,
+        .title = "Page not found | TigerBeetle Docs",
+        .author = "TigerBeetle Team",
+    });
+    _ = docs.add("404.html", html.string());
 }
 
 const Menu = struct {
@@ -367,7 +384,7 @@ const Page = struct {
     ) !void {
         const pandoc_step = std.Build.Step.Run.create(b, "run pandoc");
         pandoc_step.addFileArg(website.pandoc_bin);
-        pandoc_step.addArgs(&.{ "--from", "gfm", "--to", "html5" });
+        pandoc_step.addArgs(&.{ "--from", "gfm+smart", "--to", "html5" });
         pandoc_step.addArg("--lua-filter");
         pandoc_step.addFileArg(b.path("pandoc/markdown-links.lua"));
         pandoc_step.addArg("--lua-filter");
@@ -402,7 +419,7 @@ const Page = struct {
         const page_dir = self.path_source[0 .. self.path_source.len - ".md".len];
         if (try path_exists(b.pathFromRoot(page_dir))) {
             _ = docs.addCopyDirectory(b.path(page_dir), self.path_target, .{
-                .include_extensions = &assets.supported_file_types,
+                .exclude_extensions = &assets.exclude_extensions,
             });
         }
     }

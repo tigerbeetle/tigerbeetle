@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="description" content="The financial transactions database to power the next 30 years of Online Transaction Processing.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@TigerBeetleDB">
+  <meta name="twitter:author" content="@TigerBeetleDB">
+  <meta name="twitter:description" content="The financial transactions database to power the next 30 years of Online Transaction Processing.">
+  <meta name="twitter:title" content="$title">
+  <meta name="twitter:image" content="https://docs.tigerbeetle.com/img/preview.webp">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="$title">
+  <meta property="og:image" content="https://docs.tigerbeetle.com/img/preview.webp">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="author" content="$author">
+  <title id="title">Page not found | TigerBeetle</title>
+  <link rel="icon" href="$url_prefix/img/favicon.png">
+  <link rel="stylesheet" type="text/css" href="$url_prefix/style/style.css">
+  <style>
+    article>.content {
+      padding: 0;
+      height: 100vh;
+      height: 100dvh;
+    }
+
+    section.four-oh-four {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 30px;
+      text-align: center;
+      margin: auto;
+
+      h2 {
+        margin: 0;
+      }
+
+      * {
+        -webkit-user-select: none;
+        user-select: none;
+      }
+    }
+
+    canvas {
+      width: 60px;
+      max-width: 100vw;
+      image-rendering: pixelated;
+      transition: width 0.5s ease-in-out;
+    }
+
+    #resources {
+      display: none;
+
+      img {
+        image-rendering: pixelated;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <article>
+      <div class="content">
+        <section class="four-oh-four">
+          <canvas width="60" height="150"></canvas>
+          <h2>Page not found</h2>
+          <p>Take me <a href="$url_prefix/">home</a>, country roads...</p>
+        </section>
+        <div id="resources">
+          <img id="fontb" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABAAQMAAADoGO08AAAABlBMVEUAAAAAAAClZ7nPAAAAAXRSTlMAQObYZgAAAdJJREFUeF7N0qGO20AQBuAB1SrAwNDgwMLCgQanU8oKDQsKDAsCDKoqqkZWHqCv0LK+QlU4oPrRKiqKgk5FB6Ogk8HK6symd6eklSoV9Wf+NJ5/1zLli1C6yD/A70v/mv/mHNR01BH19fIB2q5bvxyix2BhQNP3r/tljJNDQzRQNw1vKZrQREzU0/Tqzd5giORPlu7Y+UQXe+pttZqYeku0AYfHlGZhkTTLLFJMCAOQNghA3zfEoC2HkLJWDjw1gXZ8fZ1CbmT0zqqiO+7DHNAilImGwIoKBuij7fCWWSqRVsRbXZ6yKXAjWfI8C3iGAkIvYFEFOCQ93IE+AmqgBnud70GfkRU5b2cOR93dGsxlAmUCW9Cnxx1IxqAlvEUFLMjeckMXyX4OACnldtMawMIFPkRd1AXUYZ2a2C+eFxCDHa858sJ33ObAWM1rtus7aEpgtIfE3+KiwHsIS43EuaWWhP4QpUBXpFwpO8QC/AT1mGUUHjORrclCBE8GuNrzF8BBMbNBOp5gCyMeDX5N3NuOkQN4nQwez3H+B/MJm5rPIdbltuN+zPBkg8FbJ2Vgt0KzrJ+9dvgh/j3akR9e0cDb9rAK/Qk0aL56VwOSvcWBzvIT9ibJYPzvOOUAAAAASUVORK5CYII=">
+          <img id="fontw" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABAAgMAAACvuJfsAAAADFBMVEUAAAD////////9/f3nfOxoAAAAAnRSTlMA/bWfQ5kAAAJsSURBVHja7ZO9ilRBEIXPNl64dLQLs/kwUVGRgZFsMIIPcIV9AAN9jwploxHcZKOzgytNP4PBPsqgmfoQTvUPc3HZURCMPE1d+uejqs50DzKPD/C4/gnw2yb/Xv9/h66T9RmAFVzPELDELxr2wApqS1M8wdhGkxUAyLbFlW3taTnM1oHgwHkpkE2hS2BsCEpEpxbwxcrEtlYBRc8gcNUM++gZVvu4AHBRG54aUtVdjAVABx7qFE06RSiVZE5aQnnAlNgsFBQKaaBAfC6QYjD6zuYyAn7ATALsQES2YBC8X0RERpKQzGBKTegGCeLDIvpCcvL00SiYZQiGzR6g1yIb4CXG2kN34b2DSmU0/3aTjjyi9QEYLpWZHjl5Jopn3AmLeSVOTyhtoG667R2JlJJQ8OJVPWwAKvDFiJyyAy/PKJmEfzOZcnLgG4itbFMBcpplkJ6hzJOX+PiwB5Ye6i5OQekuiOpCuZPM5mJ4g+PKVNZohUhmRjNEg6t3EHEAjCMIWJgB6IAaGWyEADYaOqCswNZbtIgREbDWwzZlopQQ5uTH9bobQNBVgGgp0XMtR+AA6LtaQhlAccBdAB5K/JHYXmnY+DwCEzGgaZwBAxrAGRCg6Y5KTcoBmj4VmtOAG15P55MvpI+3U7vu6XY94Eo2i82iA6DkNKAC03SHOZBaBniJCtzaDMiSaw9pAEqG8zWnWACdHlw+HlPEXMEC4jFgROi3eT09//z1XlN+fbCbWQF1YLPYXXy/J/p7EFKCLR1YrtiAH1D29xBNU5yXuNmX2KE8mOTvQQiRObABLnbIDFQJ7R+d2Vx04NhT+Ams/j80neoPTgAAAABJRU5ErkJggg==">
+          <img id="bgtilesb" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAYCAYAAABKtPtEAAAAO0lEQVR4Ae3UAQYAIBREwe5/6Q2oEJAof4YVIB7VgFUEmBFSLXJ2u3bHQ1J8AnAo4wTwJwgA3rYAAF/olNaXaZ3eoTUAAAAASUVORK5CYII=">
+          <img id="bgtilesw" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAYAQAAAABiz8bpAAAAAnRSTlMAAHaTzTgAAAAsSURBVHgBY8ADBGAMKQYGDjDDnoFBBsz4DwUIBhJYwEAYcCEYBIEGgkE0AABP5BGCOTOf8AAAAABJRU5ErkJggg==">
+          <img id="beetle" src="data:image/png;base64,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">
+          <img id="bug" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAAAoAgMAAADyLsu6AAAADFBMVEUAAAAAAAAprf////9DRhisAAAAAXRSTlMAQObYZgAABCtJREFUeF6tlbFu5DYQhgWoJu5pWPspZokoOqhysTocLOCwXRZ+CsVPQBxEY3HVlYEJuHZJGQjSps426jbHzAxFjSzAiRF4KmLB/+M3JJcq/lfFeC7esz4ANO+AlrAGAC/oN2X/1St8egidoN/gWoJHwCWjNl7lzrnfakG/wVUBCmiTURsvVTl3bwQtrq8C9REFgkx4GVatc+5Z0OL6OvC+RsAkE16ENQF7v6A3rtsqI0YcAquTAJcw7bx2WN+9oBfXDemSgtip3hNwEOASBrTQvzpnrwkjaHGVUiYFoaND2QBzGAyO+v0A1z4KWlzXpdMhBNyKEmKMO7sC5vBN8AgEAPsIPqPLs7iuKkzdVbwUIx5IEQOYzSmn8MOEGAuws0/HbkZ7VYvrqsbTF8T40SFQAcDBMIgWoUphBn4NDQIfuhnt1R/ZtVhHxuGIkY6BuvprahhUoiubcngD5BEZZtdiHQn2gJg6DAgMzn1jQXblvUzhb38icKj6yj7tF2B5zq4vIhoYo6Hja+pCEqNFBNj2fj7RR8hon5fjkUSUYcwTTiyr+cyya8xhMHTnvo7urohyWdZAaa+MjHmMJN229rqj39j1Ea3lYquqB0eJjMYS11V7ioB8+dT1TxV87siaXZ+gpvDv7i6eKdEDbbSg1665vegRg16fGbgHMAOONPAihxuDYbtL4SLkg1qhEciu2esLdMlrn4DGNgQMEy9ycM8YHnbD9u0L17u+SxT0Nyz4N7FPR6jFq1CfmtMtjcYTL3KgxUPr+s3rfDXJK26r2RXIYY9NiRc28OP+x9BFPw68CAHF68M5fz/CbUbLchpmh2fxStYDbkOwvMihNSsvXS+fnjrG6Gl0WZYLU3bIXnxrhskNuA0aeBHakCu/eBl6hbFUgyPglsyy3HhiBwYmr4jWrUUmboMCXoSOLHTZywSv2Ea12BbU3KcnVwYO5MBNpUaP4MNUIdDiNiiYf6tLCqb2qu9eJ6/2rtA3Jj197EpDyw4cqbBRe4BuPDFwcneageQq7ZWV9YE/SKoyhXbP3Gc3uxZzBKBTwBicOw70OPQIDBMtQq7SHt5mT68wHwoC77jPbnZFLl9sMF4fdwjscW6wgECjWyOu0h4dyujYJnQzMFgapQ9qYODPwet7xuBcDVPlbK2AXBFIrtJeoesMvKK3zKRDITQDzW4A17e40Q4Ig0Bl+I0soRNXaQ8vdsGvMFfaBoXUDKx6dMC2vN5/JAzOLS/pFY9eXKW9/K3lygd1KdiVgRYjHxGo4BYxF55bxnSLk+svmJL22Eu+iNGLa36BsKrelzBBnAzPVWhaL38pgymJcCoWUuK6PG4cKmJADDxGbqmBZBPI20vktRJXXfUxDFCT7NDsLGeCI+dCfpPIf5Z21o+uOfPb3VQDh0c8d8tA+Y3rzcC6eCfgP0K6h/+J1dO6AAAAAElFTkSuQmCC">
+          <img id="clouds" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAYgAAAAeAQMAAAAMxRuPAAAABlBMVEUAAACAgICSabkkAAAAAnRSTlMAgJsrThgAAACeSURBVHgBtJKBBcAwFESTICBkhKzQDdpRMkpH60gBBOX6hVLc4aPHL8I9v/cvuATAZ6g2g3EkabMplENJpsMmMQ4jLZ02kXKMpB301d71Vi7HDuD+ZqS20lmPl4OrknxJRkVeSv1VkpdSyUWdiXbw3Ll6CNnnaMDUW+mu0kvprnJ5usrlaAVv3j+Ovr7ZkWVbL/PZaFhS4ipEqkRNlwCV20KRVNRwUgAAAABJRU5ErkJggg==">
+          <img id="backgrounds" src="data:image/png;base64,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">
+        </div>
+      </div>
+    </article>
+  </main>
+  <script>
+    const fontb = document.querySelector("img#fontb");
+    const fontw = document.querySelector("img#fontw");
+    const bgtilesb = document.querySelector("img#bgtilesb");
+    const bgtilesw = document.querySelector("img#bgtilesw");
+    const beetle = document.querySelector("img#beetle");
+    const bug = document.querySelector("img#bug");
+    const clouds = document.querySelector("img#clouds");
+    const backgrounds = document.querySelector("img#backgrounds");
+    const canvas = document.querySelector("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const STATE_INIT = 0;
+    const STATE_GAME = 1;
+    const STATE_OVER = 2;
+    const SPEED_MIN = 200;
+    const SPEED_MAX = 1000;
+
+    let highscore = 0;
+    let gamestate = STATE_OVER;
+    let distance = 0;
+    let jumping = false;
+    let playery = 0;
+    let playerdy = 0;
+    let gameovertime = -1000;
+
+    function init() {
+      canvas.removeEventListener("click", init);
+      document.onpointerdown = onAction;
+      document.onkeydown = onAction;
+      document.ondblclick = (e) => e.preventDefault();
+
+      gamestate = STATE_INIT;
+      canvas.style.width = "600px";
+    }
+    canvas.addEventListener("click", init);
+
+    let oldTime = performance.now() / 1000;
+    function draw() {
+      if (canvas.style.width == "600px" && window.innerWidth < 600) {
+        canvas.width = 600;
+        canvas.style.transition = "none";
+      } else {
+        canvas.width = canvas.clientWidth;
+      }
+      ctx.imageSmoothingEnabled = false;
+
+      const time = performance.now() / 1000;
+      const deltaTime = time - oldTime;
+      oldTime = time;
+
+      const score = int(distance / 10);
+      const speed = Math.min(SPEED_MAX, SPEED_MIN + int(score / 100) * 10);
+      if (gamestate == STATE_GAME) {
+        distance += speed * deltaTime;
+      }
+
+      if (gamestate == STATE_GAME || gamestate == STATE_OVER) {
+        if (jumping) {
+          playerdy -= 1000 * deltaTime;
+          playery += playerdy * deltaTime;
+          if (playery < 0) {
+            jumping = false;
+            playery = 0;
+            playerdy = 0;
+          }
+        }
+      }
+
+      const bugtype = rand(int(distance / 700)) < 0.7 ? 0 : 1;
+      let bugframe = int(time * 10) % 4 + 4 * bugtype;
+      const bugx = 600 - (int(distance) % 700);
+      const bugy = 90 - 60 * bugtype;
+
+      const playerbox = { x: 15, y: 90 - playery + 7, w: 34, h: 28 };
+      const bugbox = bugtype ?
+        { x: bugx + 4, y: bugy + 2, w: 24, h: 32 } :
+        { x: bugx + 2, y: bugy + 12, w: 32, h: 28 };
+      if (gamestate == STATE_GAME && overlap(playerbox, bugbox)) {
+        gamestate = STATE_OVER;
+        gameovertime = time;
+        playHitSound();
+      }
+
+      let playerframe = int(time * 10) % 4;
+      if (gamestate == STATE_GAME) {
+        playerframe = int(time * speed / 20) % 4 + 4;
+        if (jumping) playerframe = playerdy > 0 ? 4 : playery > 60 ? 5 : 6;
+      } else if (gamestate == STATE_OVER) {
+        playerframe += 10;
+        const hurttime = time - gameovertime;
+        if (hurttime < 0.3 || jumping) playerframe = int(hurttime * 10) % 2 + 8;
+        bugframe = 4 * bugtype + 1;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let i = int(distance / 8 / 1640), x = -distance / 8 % 1640; x < 600; x += 1640, i++) {
+        ctx.drawImage(clouds, int(x) + 100, 10);
+        ctx.drawImage(backgrounds, 0, (i % 3) * 120, 1040, 120, int(x) + 600, 0, 1040, 120);
+      }
+
+      const bgtiles = isDarkmode() ? bgtilesw : bgtilesb;
+      for (let i = int(distance / 32), x = -distance % 32; x < 600; x += 32, i++) {
+        ctx.drawImage(bgtiles, rand(i) < 0.75 ? 0 : 32, 0, 32, 24, int(x), 114, 32, 24);
+      }
+      ctx.drawImage(bug, 40 * bugframe, 0, 40, 40, bugx, bugy, 40, 40);
+      ctx.drawImage(beetle, 40 * playerframe, 0, 40, 40, 10, 90 - playery, 40, 40);
+
+      let scorestr = String(score).padStart(5, "0");
+      if (highscore) scorestr = "HI " + String(highscore).padStart(5, "0") + " " + scorestr;
+      drawText(scorestr, 600 - scorestr.length * 8, 0, 1);
+      if (gamestate == STATE_GAME) {
+        if (score >= 100 && score < 8000 && score % 100 < 20 && score & 2) {
+          drawText("SPEED UP", 600 - 64, 12, 1);
+        }
+      } else if (gamestate == STATE_OVER) {
+        if (time > gameovertime + 0.75) {
+          drawText("G A M E   O V E R", 300 - 17 * 8, 75 - 8, 2);
+          if (time - deltaTime <= gameovertime + 0.75) {
+            playGameOverSound();
+          }
+        }
+      }
+
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+
+    function onAction(e) {
+      e.preventDefault();
+      if (gamestate == STATE_INIT) {
+        gamestate = STATE_GAME;
+        playStartGameSound();
+      } else if (gamestate == STATE_GAME) {
+        if (!jumping) {
+          jumping = true;
+          playerdy = 400;
+          playJumpSound();
+        }
+      } else if (gamestate == STATE_OVER) {
+        if (performance.now() / 1000 > gameovertime + 1) {
+          gamestate = STATE_INIT;
+          const score = int(distance / 10);
+          if (score > highscore) highscore = score;
+          distance = 0;
+          jumping = false;
+          playery = 0;
+          playerdy = 0;
+        }
+      }
+    }
+
+    function drawText(text, x, y, s) {
+      const font = isDarkmode() ? fontw : fontb;
+      for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        ctx.drawImage(font, code % 16 * 8, int(code / 16) * 8, 8, 8, x + s * 8 * i, y, s * 8, s * 8);
+      }
+    }
+
+    function overlap(b1, b2) {
+      return b1.x < b2.x + b2.w && b1.x + b1.w > b2.x && b1.y < b2.y + b2.h && b1.y + b1.h > b2.y;
+    }
+
+    function int(x) {
+      return Math.floor(x);
+    }
+
+    function hash32(i) {
+      return (i * 2654435761) >>> 0;
+    }
+
+    function rand(seed) {
+      return hash32(seed) / 0xffffffff;
+    }
+
+    function isDarkmode() {
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    function playJumpSound() {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(600, audioCtx.currentTime);
+      const gainNode = audioCtx.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
+      oscillator.frequency.exponentialRampToValueAtTime(400, audioCtx.currentTime + 0.3);
+      gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      oscillator.start(audioCtx.currentTime);
+      oscillator.stop(audioCtx.currentTime + 0.3);
+      setTimeout(() => audioCtx.close(), 1000);
+    }
+
+    function playHitSound() {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const bufferSize = audioCtx.sampleRate * 0.2;
+      const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      const noiseSource = audioCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+      const gainNode = audioCtx.createGain();
+      noiseSource.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(500, audioCtx.currentTime);
+      gainNode.connect(filter);
+      filter.connect(audioCtx.destination);
+
+      noiseSource.start();
+      noiseSource.stop(audioCtx.currentTime + 0.2);
+
+      setTimeout(() => audioCtx.close(), 1000);
+  }
+
+  function playStartGameSound() {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function createOscillator(frequency, type, startTime, duration) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = type; // Wave type (e.g., square, triangle, sawtooth)
+      osc.frequency.setValueAtTime(frequency, startTime); // Initial frequency
+      gain.gain.setValueAtTime(0.5, startTime); // Volume
+      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration); // Fade out
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    }
+
+    const now = audioCtx.currentTime;
+
+    // Add an arpeggio for the "start game" sequence
+    const baseFrequency = 220; // Base pitch
+    const notes = [baseFrequency, baseFrequency * 1.25, baseFrequency * 1.5, baseFrequency * 2];
+    const durationPerNote = 0.15;
+
+    // Play the arpeggio
+    notes.forEach((freq, index) => {
+      createOscillator(freq, 'square', now + index * durationPerNote, durationPerNote);
+    });
+
+    // Add a dramatic rising pitch sweep
+    const sweepOsc = audioCtx.createOscillator();
+    const sweepGain = audioCtx.createGain();
+
+    sweepOsc.type = 'sawtooth';
+    sweepOsc.frequency.setValueAtTime(100, now); // Start low
+    sweepOsc.frequency.exponentialRampToValueAtTime(800, now + 1); // Dramatic rise
+    sweepGain.gain.setValueAtTime(0.3, now); // Start volume
+    sweepGain.gain.exponentialRampToValueAtTime(0.01, now + 1); // Fade out
+
+    sweepOsc.connect(sweepGain);
+    sweepGain.connect(audioCtx.destination);
+
+    sweepOsc.start(now);
+    sweepOsc.stop(now + 1);
+
+    setTimeout(() => audioCtx.close(), 2000);
+  }
+
+  function playGameOverSound() {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Helper function to create a tone
+    function createTone(frequency, startTime, duration, type = 'sine') {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = type; // Wave type (sine, square, triangle, etc.)
+        osc.frequency.setValueAtTime(frequency, startTime); // Frequency of the tone
+        gain.gain.setValueAtTime(0.5, startTime); // Start volume
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration); // Fade out
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start(startTime);
+        osc.stop(startTime + duration);
+    }
+
+    const now = audioCtx.currentTime;
+
+    // Descending melody (Game Over tune)
+    const melody = [
+        { frequency: 440, duration: 0.3 }, // A4
+        { frequency: 392, duration: 0.3 }, // G4
+        { frequency: 349, duration: 0.3 }, // F4
+        { frequency: 330, duration: 0.3 }, // E4
+        { frequency: 294, duration: 0.6 }  // D4 (longer note for finality)
+    ];
+
+    // Play each note
+    melody.forEach((note, index) => {
+        createTone(note.frequency, now + index * 0.3, note.duration, 'triangle');
+    });
+
+    // Add a bass tone for depth
+    melody.forEach((note, index) => {
+        createTone(note.frequency / 2, now + index * 0.3, note.duration, 'sine'); // One octave lower
+    });
+
+    setTimeout(() => audioCtx.close(), 2000);
+  }
+  </script>
+</body>
+
+</html>

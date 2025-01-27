@@ -40,8 +40,6 @@ expandButton.addEventListener("click", () => document.body.classList.remove("sid
 const navSide = document.querySelector("nav.side");
 const details = [...navSide.querySelectorAll("details")];
 
-syncSideNavWithLocation();
-
 const menuButton = document.querySelector(".menu-button");
 menuButton.addEventListener("click", () => {
   document.body.classList.toggle("mobile-expanded");
@@ -78,14 +76,13 @@ function syncSideNavWithLocation() {
       if (a.href.endsWith(path)) {
         a.classList.add("target");
         for (let parent = a.parentElement; parent; parent = parent.parentElement) {
-          if (parent.matches(".menu")) {
-            const head = parent.previousSibling;
-            if (head?.matches?.(".menu-head")) head.classList.add("expanded");
-          } else if (parent.matches(".menu-head")) {
-            parent.classList.add("expanded"); // expand for discoverability
+          if (parent.tagName === "DETAILS") {
+            parent.open = true;
           }
         }
       }
     });
   }
 }
+
+syncSideNavWithLocation();
