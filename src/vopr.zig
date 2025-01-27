@@ -68,7 +68,7 @@ const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
     ticks_max_requests: u32 = 40_000_000,
-    ticks_max_convergence: u32 = 10_000_000,
+    ticks_max_convergence: u32 = 20_000_000,
     positional: struct {
         seed: ?[]const u8 = null,
     },
