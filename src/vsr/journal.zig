@@ -253,6 +253,15 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         reads_commit_count: u6 = 0,
 
         /// Statically allocated write IO operation context data.
+        ///
+        /// Each acquired write in this list is either:
+        /// - executing (`write.range.locked`), or
+        /// - queued (`!write.range.locked`).
+        ///
+        /// Invariants:
+        /// - When there are multiple Writes to the same location, only one of them is executing at
+        ///   any time -- the others are queued behind it.
+        /// - There is at most one Write to a given slot at any time.
         writes: IOPSType(Write, constants.journal_iops_write_max) = .{},
 
         /// Whether an entry is in memory only and needs to be written or is being written:
@@ -2024,11 +2033,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var it = journal.writes.iterate();
             while (it.next()) |other| {
                 if (other == write) continue;
+                assert(journal.slot_for_header(write.message.header).index !=
+                    journal.slot_for_header(other.message.header).index);
+
                 if (!other.range.locked) continue;
 
                 if (other.range.overlaps(&write.range)) {
                     assert(other.range.offset == write.range.offset);
                     assert(other.range.buffer.len == write.range.buffer.len);
+                    assert(other.range.ring == write.range.ring);
+                    assert(other.range.ring == .headers);
 
                     var tail = &other.range;
                     while (tail.next) |next| tail = next;
@@ -2162,17 +2176,18 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var writes = journal.writes.iterate();
             while (writes.next()) |write| {
                 const write_slot = journal.slot_for_op(write.message.header.op);
-                if (write.message.header.op == header.op and
-                    write.message.header.checksum == header.checksum)
-                {
-                    assert(write_slot.index == slot.index);
+                if (write_slot.index == slot.index) {
                     assert(found == .none);
-                    found = .exact;
-                } else {
-                    if (write_slot.index == slot.index) {
-                        assert(found == .none);
+
+                    if (write.message.header.checksum == header.checksum) {
+                        assert(write.message.header.op == header.op);
+                        found = .exact;
+                    } else {
+                        maybe(write.message.header.op == header.op);
                         found = .slot;
                     }
+                } else {
+                    assert(write.message.header.op != header.op);
                 }
             }
             return found;

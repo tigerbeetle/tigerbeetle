@@ -7355,6 +7355,11 @@ pub fn ReplicaType(
             // 3. View=4: Replica 1 is primary again, and is repairing op 5
             //    (which is still in the pipeline).
             //
+            // Alternatively, we might have not started the write when we initially received the
+            // prepare because:
+            // - the journal already had another running write to the same slot, or
+            // - the journal had no IOPs available.
+            //
             // Using the pipeline to repair is faster than a `request_prepare`.
             // Also, messages in the pipeline are never corrupt.
             if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
@@ -9940,13 +9945,20 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.journal.writing(message.header) != .none) {
-                log.debug("{}: write_prepare: ignoring op={} checksum={} (already writing)", .{
-                    self.replica,
-                    message.header.op,
-                    message.header.checksum,
-                });
-                return;
+            switch (self.journal.writing(message.header)) {
+                .none => {},
+                .slot, .exact => |reason| {
+                    log.debug(
+                        "{}: write_prepare: ignoring op={} checksum={} (already writing {s})",
+                        .{
+                            self.replica,
+                            message.header.op,
+                            message.header.checksum,
+                            @tagName(reason),
+                        },
+                    );
+                    return;
+                },
             }
 
             // Criteria for caching:
