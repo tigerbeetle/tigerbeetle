@@ -102,7 +102,8 @@ pub fn ReplicaType(
     comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
-    const GridScrubber = vsr.GridScrubberType(StateMachine.Forest);
+    const Forest = StateMachine.Forest;
+    const GridScrubber = vsr.GridScrubberType(Forest);
 
     return struct {
         const Replica = @This();
@@ -112,7 +113,7 @@ pub fn ReplicaType(
         const Journal = vsr.JournalType(Replica, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
-        const ForestTableIterator = ForestTableIteratorType(StateMachine.Forest);
+        const ForestTableIterator = ForestTableIteratorType(Forest);
 
         const ReplicateOptions = struct {
             closed_loop: bool = false,
@@ -842,11 +843,14 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
-            assert(self.grid.free_set.count_released() ==
-                self.grid.free_set_checkpoint.block_count());
+
             assert(std.meta.eql(
-                grid.free_set_checkpoint.checkpoint_reference(),
-                self.superblock.working.free_set_reference(),
+                grid.free_set_checkpoint_blocks_acquired.checkpoint_reference(),
+                self.superblock.working.free_set_reference(.blocks_acquired),
+            ));
+            assert(std.meta.eql(
+                grid.free_set_checkpoint_blocks_released.checkpoint_reference(),
+                self.superblock.working.free_set_reference(.blocks_released),
             ));
 
             // TODO This can probably be performed concurrently to StateMachine.open().
@@ -872,16 +876,8 @@ pub fn ReplicaType(
                 self.superblock.working.client_sessions_reference(),
             ));
 
-            {
-                const checkpoint = &self.client_sessions_checkpoint;
-                var address_previous: u64 = 0;
-                for (checkpoint.block_addresses[0..checkpoint.block_count()]) |address| {
-                    assert(address > 0);
-                    assert(address > address_previous);
-                    address_previous = address;
-                    self.grid.release(address);
-                }
-            }
+            const checkpoint = &self.client_sessions_checkpoint;
+            self.grid.release(checkpoint.block_addresses[0..checkpoint.block_count()]);
 
             const trailer_size = self.client_sessions_checkpoint.size;
             const trailer_chunks = self.client_sessions_checkpoint.decode_chunks();
@@ -1097,6 +1093,10 @@ pub fn ReplicaType(
                 .cache_blocks_count = options.grid_cache_blocks_count,
                 .missing_blocks_max = constants.grid_missing_blocks_max,
                 .missing_tables_max = constants.grid_missing_tables_max,
+                .blocks_released_prior_checkpoint_durability_max = Forest
+                    .compaction_blocks_released_per_pipeline_max() +
+                    Grid.free_set_checkpoints_blocks_max(self.superblock.storage_size_limit) +
+                    CheckpointTrailer.block_count_for_trailer_size(ClientSessions.encode_size),
             });
             errdefer self.grid.deinit(allocator);
 
@@ -1394,14 +1394,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (message.header.command == .start_view_new) {
-                log.err("{}: on_message: ignoring (command={})", .{
-                    self.replica,
-                    message.header.command,
-                });
-                return;
-            }
-
             // No client or replica should ever send a .reserved message.
             assert(message.header.command != .reserved);
 
@@ -1440,8 +1432,8 @@ pub fn ReplicaType(
                 .commit => |m| self.on_commit(m),
                 .start_view_change => |m| self.on_start_view_change(m),
                 .do_view_change => |m| self.on_do_view_change(m),
+                .start_view_deprecated => |m| self.on_start_view(m),
                 .start_view => |m| self.on_start_view(m),
-                .start_view_new => unreachable,
                 .request_start_view => |m| self.on_request_start_view(m),
                 .request_prepare => |m| self.on_request_prepare(m),
                 .request_headers => |m| self.on_request_headers(m),
@@ -2270,7 +2262,8 @@ pub fn ReplicaType(
         // haven’t executed previously, advance their commit number, and update the information in
         // their client table.
         fn on_start_view(self: *Replica, message: *Message.StartView) void {
-            assert(message.header.command == .start_view);
+            assert(message.header.command == .start_view or
+                message.header.command == .start_view_deprecated);
             if (self.ignore_view_change_message(message.base_const())) return;
 
             if (self.status == .recovering_head) {
@@ -2361,7 +2354,18 @@ pub fn ReplicaType(
         }
 
         fn on_start_view_set_checkpoint(self: *Replica, message: *Message.StartView) bool {
+            // Accept SV messages for state sync only from replicas that are on the new
+            // CheckpointState.
+            if (message.header.command == .start_view_deprecated) {
+                log.warn("{}: on_start_view_set_checkpoint: ignoring {s}", .{
+                    self.replica,
+                    @tagName(message.header.command),
+                });
+                return false;
+            }
+
             const view_checkpoint = start_view_message_checkpoint(message);
+
             if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
                 assert(message.header.commit_max >= trigger);
             }
@@ -2464,7 +2468,14 @@ pub fn ReplicaType(
                             break;
                         }
                     }
-                } else unreachable;
+                } else {
+                    assert(message.header.command == .start_view_deprecated);
+                    log.warn("{}: on_start_view_set_journal: {s} headers too far ahead", .{
+                        self.replica,
+                        @tagName(message.header.command),
+                    });
+                    return;
+                }
 
                 for (view_headers) |*header| {
                     if (header.op <= self.op_prepare_max_sync()) {
@@ -2537,17 +2548,24 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
             assert(self.primary());
 
-            const start_view_message = self.create_start_view_message(message.header.nonce);
-            defer self.message_bus.unref(start_view_message);
+            const start_view_messages = self.create_start_view_message(message.header.nonce);
+            defer self.message_bus.unref(start_view_messages.deprecated);
+            defer self.message_bus.unref(start_view_messages.next);
 
-            assert(start_view_message.header.command == .start_view);
-            assert(start_view_message.references == 1);
-            assert(start_view_message.header.view == self.view);
-            assert(start_view_message.header.op == self.op);
-            assert(start_view_message.header.commit_max == self.commit_max);
-            assert(start_view_message.header.nonce == message.header.nonce);
+            assert(start_view_messages.deprecated.header.command == .start_view_deprecated);
+            assert(start_view_messages.next.header.command == .start_view);
 
-            self.send_message_to_replica(message.header.replica, start_view_message);
+            for ([_]*Message.StartView{
+                start_view_messages.deprecated,
+                start_view_messages.next,
+            }) |start_view_message| {
+                assert(start_view_message.references == 1);
+                assert(start_view_message.header.view == self.view);
+                assert(start_view_message.header.op == self.op);
+                assert(start_view_message.header.commit_max == self.commit_max);
+                assert(start_view_message.header.nonce == message.header.nonce);
+                self.send_message_to_replica(message.header.replica, start_view_message);
+            }
         }
 
         /// If the requested prepare has been guaranteed by this replica:
@@ -3823,7 +3841,7 @@ pub fn ReplicaType(
             idle,
             /// Get the next prepare to commit from the journal or pipeline and...
             start,
-            /// ...if there isn't there, break out of commit loop.
+            /// ...if there isn't any, break out of commit loop.
             check_prepare,
             /// Load required data from LSM tree on disk into memory.
             prefetch,
@@ -3831,6 +3849,8 @@ pub fn ReplicaType(
             reply_setup,
             /// Execute state machine logic.
             execute,
+            /// Every vsr_checkpoint_ops, mark the current checkpoint as durable.
+            checkpoint_durable,
             /// Run one beat of LSM compaction.
             compact,
             /// Every vsr_checkpoint_ops, persist the current state to disk and...
@@ -3923,12 +3943,22 @@ pub fn ReplicaType(
 
                 if (self.commit_stage == .execute) {
                     self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
-                    self.commit_stage = .compact;
+                    self.commit_stage = .checkpoint_durable;
                     self.trace.start(.replica_commit, .{
                         .stage = @tagName(self.commit_stage),
                         .op = self.commit_prepare.?.header.op,
                     });
 
+                    if (self.commit_checkpoint_durable() == .pending) return;
+                }
+
+                if (self.commit_stage == .checkpoint_durable) {
+                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.commit_stage = .compact;
+                    self.trace.start(.replica_commit, .{
+                        .stage = @tagName(self.commit_stage),
+                        .op = self.commit_prepare.?.header.op,
+                    });
                     if (self.commit_compact() == .pending) return;
                 }
 
@@ -4285,11 +4315,16 @@ pub fn ReplicaType(
 
         fn commit_compact(self: *Replica) enum { pending } {
             assert(self.commit_stage == .compact);
-            self.state_machine.compact(
-                commit_compact_callback,
-                self.commit_prepare.?.header.op,
-            );
+            self.state_machine.compact(commit_compact_callback, self.commit_prepare.?.header.op);
             return .pending;
+        }
+
+        fn commit_checkpoint_durable_grid_callback(grid: *Grid) void {
+            const self: *Replica = @alignCast(@fieldParentPtr("grid", grid));
+            assert(self.commit_stage == .checkpoint_durable);
+            assert(self.grid.free_set.checkpoint_durable);
+            assert(vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_min));
+            self.commit_dispatch_resume();
         }
 
         fn commit_compact_callback(state_machine: *StateMachine) void {
@@ -4300,6 +4335,25 @@ pub fn ReplicaType(
 
             if (self.event_callback) |hook| hook(self, .compaction_completed);
             return self.commit_dispatch_resume();
+        }
+
+        fn commit_checkpoint_durable(self: *Replica) enum { ready, pending } {
+            assert(self.commit_stage == .checkpoint_durable);
+            if (self.grid.free_set.checkpoint_durable) return .ready;
+            if (!vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_min)) return .ready;
+
+            // Checkpoint is guaranteed to be durable on a commit quorum when a replica is
+            // committing the (pipeline + 1)ᵗʰ prepare after checkpoint trigger. It might already be
+            // durable before this point (some part of the cluster may be lagging while a commit
+            // quorum may already be on the next checkpoint), but it is crucial for storage
+            // determinism that each replica marks it as durable at the same time.
+            if (vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint())) |trigger| {
+                assert(self.commit_min == trigger + constants.pipeline_prepare_queue_max + 1);
+            }
+
+            self.grid_scrubber.checkpoint_durable();
+            self.grid.checkpoint_durable(commit_checkpoint_durable_grid_callback);
+            return .pending;
         }
 
         fn commit_checkpoint_data(self: *Replica) enum { ready, pending } {
@@ -4316,11 +4370,14 @@ pub fn ReplicaType(
             assert(op <= self.op);
             assert((op + 1) % constants.lsm_compaction_ops == 0);
             log.info("{}: commit_checkpoint_data: checkpoint_data start " ++
-                "(op={} current_checkpoint={} next_checkpoint={})", .{
+                "(op={} current_checkpoint={} next_checkpoint={} " ++
+                "free_set.acquired={} free_set.released={})", .{
                 self.replica,
                 self.op,
                 self.op_checkpoint(),
                 self.op_checkpoint_next(),
+                self.grid.free_set.count_acquired(),
+                self.grid.free_set.count_released(),
             });
 
             if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
@@ -4347,18 +4404,13 @@ pub fn ReplicaType(
             } else {
                 self.commit_checkpoint_data_callback_join(.aof);
             }
-            self.grid_scrubber.checkpoint();
             self.state_machine.checkpoint(commit_checkpoint_data_state_machine_callback);
             self.client_sessions_checkpoint
                 .checkpoint(commit_checkpoint_data_client_sessions_callback);
             self.client_replies.checkpoint(commit_checkpoint_data_client_replies_callback);
+
             // The grid checkpoint must begin after the manifest/trailers have acquired all
             // their blocks, since it encodes the free set:
-            log.info("{}: commit_checkpoint_data: free_set.acquired={} free_set.released={}", .{
-                self.replica,
-                self.grid.free_set.count_acquired(),
-                self.grid.free_set.count_released(),
-            });
             self.grid.checkpoint(commit_checkpoint_data_grid_callback);
             return .pending;
         }
@@ -4396,8 +4448,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op <= self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.grid.free_set.opened);
-            assert(self.grid.free_set.count_released() ==
-                self.grid.free_set_checkpoint.block_count());
+
             self.commit_checkpoint_data_callback_join(.grid);
         }
 
@@ -4419,20 +4470,6 @@ pub fn ReplicaType(
                     self.op_checkpoint_next(),
                 });
                 self.grid.assert_only_repairing();
-
-                {
-                    const checkpoint = &self.client_sessions_checkpoint;
-                    var address_previous: u64 = 0;
-                    for (checkpoint.block_addresses[0..checkpoint.block_count()]) |address| {
-                        assert(address > 0);
-                        assert(address > address_previous);
-                        address_previous = address;
-                        self.grid.release(address);
-                    }
-                }
-                assert(self.grid.free_set.count_released() ==
-                    self.grid.free_set_checkpoint.block_count() +
-                    self.client_sessions_checkpoint.block_count());
 
                 return self.commit_dispatch_resume();
             }
@@ -4482,10 +4519,14 @@ pub fn ReplicaType(
                 var storage_size = vsr.superblock.data_file_size_min;
                 if (self.grid.free_set.highest_address_acquired()) |address| {
                     assert(address > 0);
-                    assert(self.grid.free_set_checkpoint.size > 0);
+                    assert(self.grid.free_set_checkpoint_blocks_acquired.size > 0);
+                    assert(self.grid.free_set_checkpoint_blocks_released.size > 0);
+
                     storage_size += address * constants.block_size;
                 } else {
-                    assert(self.grid.free_set_checkpoint.size == 0);
+                    assert(self.grid.free_set_checkpoint_blocks_acquired.size == 0);
+                    assert(self.grid.free_set_checkpoint_blocks_released.size == 0);
+
                     assert(self.grid.free_set.count_released() == 0);
                 }
                 break :storage_size storage_size;
@@ -4547,8 +4588,12 @@ pub fn ReplicaType(
                     .sync_op_max = sync_op_max,
                     .manifest_references = self.state_machine.forest
                         .manifest_log.checkpoint_references(),
-                    .free_set_reference = self.grid
-                        .free_set_checkpoint.checkpoint_reference(),
+                    .free_set_references = .{
+                        .blocks_acquired = self.grid
+                            .free_set_checkpoint_blocks_acquired.checkpoint_reference(),
+                        .blocks_released = self.grid
+                            .free_set_checkpoint_blocks_released.checkpoint_reference(),
+                    },
                     .client_sessions_reference = self
                         .client_sessions_checkpoint.checkpoint_reference(),
                     .storage_size = storage_size,
@@ -4569,7 +4614,6 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.commit_min - constants.lsm_compaction_ops);
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.checkpoint.header.op);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.checkpoint.header.op);
-            self.grid.assert_only_repairing();
 
             log.info(
                 "{}: commit_checkpoint_superblock_callback: " ++
@@ -4577,7 +4621,21 @@ pub fn ReplicaType(
                 .{ self.replica, self.op, self.op_checkpoint() },
             );
 
-            // Send prepare_oks that may have been wittheld by virtue of `op_prepare_ok_max`.
+            self.grid.assert_only_repairing();
+
+            // Mark the current checkpoint as not durable, then release the blocks acquired for the
+            // ClientSessions and FreeSet checkpoints (to be freed when the *next* checkpoint
+            // becomes durable).
+            self.grid.mark_checkpoint_not_durable();
+            self.grid.release(self.client_sessions_checkpoint
+                .block_addresses[0..self.client_sessions_checkpoint.block_count()]);
+
+            assert(self.grid.free_set.count_released() >=
+                self.grid.free_set_checkpoint_blocks_acquired.block_count() +
+                self.grid.free_set_checkpoint_blocks_released.block_count() +
+                self.client_sessions_checkpoint.block_count());
+
+            // Send prepare_oks that may have been withheld by virtue of `op_prepare_ok_max`.
             self.send_prepare_oks_after_checkpoint();
 
             if (self.event_callback) |hook| hook(self, .checkpoint_completed);
@@ -5046,7 +5104,10 @@ pub fn ReplicaType(
 
         /// Construct a SV message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_start_view_message(self: *Replica, nonce: u128) *Message.StartView {
+        fn create_start_view_message(self: *Replica, nonce: u128) struct {
+            deprecated: *Message.StartView,
+            next: *Message.StartView,
+        } {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.syncing != .updating_checkpoint);
             assert(self.replica == self.primary_index(self.view));
@@ -5100,7 +5161,68 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
-            return message.ref();
+            const message_deprecated = self.message_bus.get_message(.start_view_deprecated);
+            defer self.message_bus.unref(message_deprecated);
+
+            message_deprecated.header.* = message.header.*;
+            message_deprecated.header.command = .start_view_deprecated;
+
+            const checkpoint_new: *const vsr.CheckpointState =
+                &self.superblock.working.vsr_state.checkpoint;
+            const checkpoint_old: vsr.CheckpointStateOld = vsr.CheckpointStateOld{
+                .header = checkpoint_new.header,
+                .parent_checkpoint_id = checkpoint_new.parent_checkpoint_id,
+                .grandparent_checkpoint_id = checkpoint_new.grandparent_checkpoint_id,
+
+                .free_set_checksum = checkpoint_new.free_set_blocks_acquired_checksum,
+                .free_set_last_block_checksum = checkpoint_new
+                    .free_set_blocks_acquired_last_block_checksum,
+                .free_set_last_block_address = checkpoint_new
+                    .free_set_blocks_acquired_last_block_address,
+                .free_set_size = checkpoint_new.free_set_blocks_acquired_size,
+
+                .client_sessions_checksum = checkpoint_new.client_sessions_checksum,
+                .client_sessions_last_block_checksum = checkpoint_new
+                    .client_sessions_last_block_checksum,
+                .client_sessions_last_block_address = checkpoint_new
+                    .client_sessions_last_block_address,
+                .client_sessions_size = checkpoint_new.client_sessions_size,
+
+                .manifest_oldest_checksum = checkpoint_new.manifest_oldest_checksum,
+                .manifest_oldest_address = checkpoint_new.manifest_oldest_address,
+                .manifest_newest_checksum = checkpoint_new.manifest_newest_checksum,
+                .manifest_newest_address = checkpoint_new.manifest_newest_address,
+                .manifest_block_count = checkpoint_new.manifest_block_count,
+
+                .snapshots_block_checksum = checkpoint_new.snapshots_block_checksum,
+                .snapshots_block_address = checkpoint_new.snapshots_block_address,
+
+                .storage_size = checkpoint_new.storage_size,
+                .release = checkpoint_new.release,
+            };
+            assert(@sizeOf(vsr.CheckpointState) == @sizeOf(vsr.CheckpointStateOld));
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                message_deprecated.body_used()[0..@sizeOf(vsr.CheckpointState)],
+                std.mem.asBytes(&checkpoint_old),
+            );
+
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                message_deprecated.body_used()[@sizeOf(vsr.CheckpointState)..],
+                message.body_used()[@sizeOf(vsr.CheckpointState)..],
+            );
+            message_deprecated.header.set_checksum_body(message_deprecated.body_used());
+            message_deprecated.header.set_checksum();
+
+            assert(message.header.invalid() == null);
+            assert(message_deprecated.header.invalid() == null);
+            return .{
+                .deprecated = message_deprecated.ref(),
+                .next = message.ref(),
+            };
         }
 
         fn update_start_view_headers(self: *Replica) void {
@@ -5920,7 +6042,8 @@ pub fn ReplicaType(
 
         fn ignore_view_change_message(self: *const Replica, message: *const Message) bool {
             assert(message.header.command == .do_view_change or
-                message.header.command == .start_view);
+                message.header.command == .start_view or
+                message.header.command == .start_view_deprecated);
             assert(self.status != .recovering); // Single node clusters don't have view changes.
             assert(message.header.replica < self.replica_count);
 
@@ -5932,7 +6055,7 @@ pub fn ReplicaType(
             }
 
             switch (message.header.into_any()) {
-                .start_view => |message_header| {
+                .start_view, .start_view_deprecated => |message_header| {
                     // This may be caused by faults in the network topology.
                     if (message.header.replica == self.replica) {
                         log.warn("{}: on_{s}: misdirected message (self)", .{
@@ -8155,7 +8278,7 @@ pub fn ReplicaType(
                     assert(header.checkpoint_op == self.op_checkpoint());
                     assert(header.log_view == self.log_view);
                 },
-                .start_view => |header| {
+                .start_view, .start_view_deprecated => |header| {
                     assert(!self.standby());
                     assert(self.status == .normal or self.status == .view_change);
                     assert(self.replica == self.primary_index(self.view));
@@ -8166,7 +8289,6 @@ pub fn ReplicaType(
                     assert(header.commit_max == self.commit_max);
                     assert(header.checkpoint_op == self.op_checkpoint());
                 },
-                .start_view_new => unreachable, // Only a future version of a replica can send this.
                 .headers => {
                     assert(!self.standby());
                     assert(message.header.view == self.view);
@@ -8260,6 +8382,7 @@ pub fn ReplicaType(
                 // - A SV or a prepare_ok imply the log_view.
                 if (message.header.command == .do_view_change or
                     message.header.command == .start_view or
+                    message.header.command == .start_view_deprecated or
                     message.header.command == .prepare_ok)
                 {
                     if (self.log_view_durable() < self.log_view) {
@@ -8437,12 +8560,18 @@ pub fn ReplicaType(
             // Only replies to `request_start_view` need a nonce,
             // to guarantee freshness of the message.
             const nonce = 0;
-            const start_view = self.create_start_view_message(nonce);
-            defer self.message_bus.unref(start_view);
 
-            assert(start_view.header.command == .start_view);
-            assert(start_view.header.nonce == 0);
-            self.send_message_to_other_replicas(start_view);
+            const start_view_messages = self.create_start_view_message(nonce);
+            defer self.message_bus.unref(start_view_messages.deprecated);
+            defer self.message_bus.unref(start_view_messages.next);
+
+            assert(start_view_messages.deprecated.header.command == .start_view_deprecated);
+            assert(start_view_messages.next.header.command == .start_view);
+            assert(start_view_messages.deprecated.header.nonce == 0);
+            assert(start_view_messages.next.header.nonce == 0);
+
+            self.send_message_to_other_replicas(start_view_messages.deprecated);
+            self.send_message_to_other_replicas(start_view_messages.next);
         }
 
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
@@ -9278,6 +9407,7 @@ pub fn ReplicaType(
                 .idle, // (StateMachine.open() may be running.)
                 .prefetch,
                 .compact,
+                .checkpoint_durable,
                 => self.sync_dispatch(.canceling_grid),
             }
         }
@@ -9350,10 +9480,9 @@ pub fn ReplicaType(
             self.sync_start_view = null;
             defer self.message_bus.unref(message);
 
+            assert(message.header.command == .start_view);
             const checkpoint = start_view_message_checkpoint(message);
-            self.sync_dispatch(.{
-                .updating_checkpoint = checkpoint.*,
-            });
+            self.sync_dispatch(.{ .updating_checkpoint = checkpoint.* });
 
             self.on_start_view_set_journal(message);
         }
@@ -9377,7 +9506,9 @@ pub fn ReplicaType(
             self.state_machine.reset();
 
             self.grid.free_set.reset();
-            self.grid.free_set_checkpoint.reset();
+            self.grid.free_set_checkpoint_blocks_acquired.reset();
+            self.grid.free_set_checkpoint_blocks_released.reset();
+
             self.client_sessions_checkpoint.reset();
             self.client_sessions.reset();
             // Faulty bits will be set in sync_content().
@@ -9579,7 +9710,7 @@ pub fn ReplicaType(
 
                     if (self.grid_repair_tables.available() == 0) break;
                 } else {
-                    if (StateMachine.Forest.Storage == TestStorage) {
+                    if (Forest.Storage == TestStorage) {
                         self.superblock.storage.verify_table(
                             table_info.address,
                             table_info.checksum,
@@ -9836,7 +9967,7 @@ pub fn ReplicaType(
                 => if (self.status == .recovering_head) Status.normal else .view_change,
                 // on_start_view() handles the (possible) transition to view-change manually, before
                 // transitioning to normal.
-                .start_view => return,
+                .start_view, .start_view_deprecated => return,
                 else => return,
             };
 
@@ -10157,13 +10288,9 @@ pub fn ReplicaType(
         /// 1. Index blocks across all tables in the forest
         /// 2. Value blocks across all tables in the forest
         /// 3. ManifestLog blocks
-        /// 4. CheckpointTrailer blocks (client sessions & free set)
         pub fn assert_free_set_consistent(self: *const Replica) void {
             assert(self.grid.free_set.opened);
             assert(self.state_machine.forest.manifest_log.opened);
-            assert(self.grid.free_set.count_released() ==
-                self.grid.free_set_checkpoint.block_count() +
-                self.client_sessions_checkpoint.block_count());
 
             // Must be invoked either on startup, or after checkpoint completes.
             assert(!self.state_machine_opened or self.commit_stage == .checkpoint_superblock);
@@ -10172,7 +10299,7 @@ pub fn ReplicaType(
             var tables_index_block_count: u64 = 0;
             var tables_value_block_count: u64 = 0;
             while (forest_tables_iterator.next(&self.state_machine.forest)) |table| {
-                const block_value_count = switch (StateMachine.Forest.tree_id_cast(table.tree_id)) {
+                const block_value_count = switch (Forest.tree_id_cast(table.tree_id)) {
                     inline else => |tree_id| self.state_machine.forest.tree_for_id_const(
                         tree_id,
                     ).block_value_count_max(),
@@ -10183,10 +10310,9 @@ pub fn ReplicaType(
                     block_value_count,
                 );
             }
-            assert(self.grid.free_set.count_acquired() ==
+
+            assert((self.grid.free_set.count_acquired() - self.grid.free_set.count_released()) ==
                 (tables_index_block_count + tables_value_block_count +
-                self.client_sessions_checkpoint.block_count() +
-                self.grid.free_set_checkpoint.block_count() +
                 self.state_machine.forest.manifest_log.log_block_checksums.count));
         }
     };
@@ -10741,7 +10867,8 @@ fn start_view_message_checkpoint(message: *const Message.StartView) *const vsr.C
 }
 
 fn start_view_message_headers(message: *const Message.StartView) []const Header.Prepare {
-    assert(message.header.command == .start_view);
+    assert(message.header.command == .start_view or
+        message.header.command == .start_view_deprecated);
 
     // Body must contain at least one header.
     assert(message.header.size > @sizeOf(Header) + @sizeOf(vsr.CheckpointState));

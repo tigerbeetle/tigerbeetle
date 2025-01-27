@@ -58,6 +58,7 @@ pub const SuperBlockManifestReferences = superblock.ManifestReferences;
 pub const SuperBlockTrailerReference = superblock.TrailerReference;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
+pub const CheckpointStateOld = superblock.SuperBlockHeader.CheckpointStateOld;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
@@ -214,12 +215,12 @@ pub const Command = enum(u8) {
     request_blocks = 19,
     block = 20,
 
-    start_view = 23,
+    // Historical version of SV, with the CheckpointStateOld format. Currently, both
+    // `start_view_deprecated` and `start_view` are handled. Next release will ignore
+    // `start_view_deprecated`.
+    start_view_deprecated = 23,
 
-    // A reserved command for a StartView message that sends the new CheckpointState format.
-    // At the moment, replica ignores this command (as opposed to panicking on an unknown command),
-    // to allow the next release to send both versions of StartView.
-    start_view_new = 24,
+    start_view = 24,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
     const gaps = .{
@@ -1576,11 +1577,11 @@ pub const Checkpoint = struct {
         }
     }
 
-    pub fn durable(checkpoint: u64, commit_max: u64) bool {
+    pub fn durable(checkpoint: u64, commit: u64) bool {
         assert(valid(checkpoint));
 
         if (trigger_for_checkpoint(checkpoint)) |trigger| {
-            return commit_max > (trigger + constants.pipeline_prepare_queue_max);
+            return commit > (trigger + constants.pipeline_prepare_queue_max);
         } else {
             return true;
         }
@@ -1703,3 +1704,11 @@ pub const Snapshot = struct {
         return op + 1;
     }
 };
+
+pub fn block_count_max(storage_size_limit: u64) usize {
+    const shard_count_limit: usize = @intCast(@divFloor(
+        storage_size_limit - superblock.data_file_size_min,
+        constants.block_size * FreeSet.shard_bits,
+    ));
+    return shard_count_limit * FreeSet.shard_bits;
+}
