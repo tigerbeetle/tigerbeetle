@@ -39,6 +39,8 @@ fn check_files(arena: std.mem.Allocator, path: []const u8) !void {
             return error.FileSizeExceeded;
         }
 
+        if (std.mem.eql(u8, entry.path, "CNAME")) continue; // Exception
+
         const file_type = for (assets.supported_file_types) |file_type| {
             if (std.mem.endsWith(u8, entry.path, file_type.extension)) break file_type;
         } else {

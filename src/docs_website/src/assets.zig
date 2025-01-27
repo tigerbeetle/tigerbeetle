@@ -20,6 +20,7 @@ pub const supported_file_types = [_]FileType{
     .{ .extension = "webp", .is_binary = true },
     .{ .extension = "woff2", .is_binary = true },
     .{ .extension = "xml", .is_binary = false },
+    .{ .extension = "nojekyll", .is_binary = true },
 };
 
 pub const exclude_extensions = [_][]const u8{
