@@ -3,6 +3,62 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.24
+
+Released: 2025-01-27
+
+### Safety And Performance
+
+- [#2653](https://github.com/tigerbeetle/tigerbeetle/pull/2653)
+
+  Avoid considering just-repaired journal headers as faulty during WAL recovery.
+
+- [#2655](https://github.com/tigerbeetle/tigerbeetle/pull/2655)
+
+  Reduce the minimum exponential backoff delay from 100ms (which is too pessimistic) to 10ms,
+  a value more appropriate for fast networks.
+
+- [#2662](https://github.com/tigerbeetle/tigerbeetle/pull/2662)
+
+  Introduce a new `CheckpointState` format on disk, which ensures that blocks released during
+  a checkpoint are freed only when the next checkpoint is durable, solving a known
+  [liveness issue](https://github.com/tigerbeetle/tigerbeetle/pull/2600).
+  The previous format is still supported and will be removed in a future release to ensure the
+  proper upgrade path.
+
+- [#2605](https://github.com/tigerbeetle/tigerbeetle/pull/2605)
+
+  Demote a clock skew _warning_ to a _debug message_ when the ping time is legitimately behind
+  the window. On the other hand, assert that the monotonic clock is within the window.
+
+- [#2659](https://github.com/tigerbeetle/tigerbeetle/pull/2659)
+
+  Workaround to prevent the initialization value for the AOF message from being embedded as a
+  binary resource, saving `constants.message_size_max` bytes in the executable size!
+
+- [#2654](https://github.com/tigerbeetle/tigerbeetle/pull/2654)
+
+  Fix a VOPR false positive where it erroneously infers that a replica has lost a prepare that
+  it has acknowledged.
+
+### Features
+
+- [#2479](https://github.com/tigerbeetle/tigerbeetle/pull/2479),
+  [#2663](https://github.com/tigerbeetle/tigerbeetle/pull/2663)
+
+  New statically generated docs website, featuring many UX improvements while removing tons of
+  dependencies! Check it out at https://docs.tigerbeetle.com/
+
+### Internals
+
+- [#2661](https://github.com/tigerbeetle/tigerbeetle/pull/2661)
+
+  Make the CFO utilize all cores all the time for running tests, pushing updates every 5 minutes.
+
+### TigerTracks 🎧
+
+- [Correnteza](https://www.youtube.com/watch?v=6m4DSpZgxZw)
+
 ## TigerBeetle 0.16.23
 
 Released: 2025-01-20
