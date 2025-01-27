@@ -320,7 +320,7 @@ function plotSeries(seriesList, rootNode, batchCount) {
         categories: Array(series.value[series.value.length - 1][0]).fill("")
           .concat(
             series.timestamp.map((timestamp) =>
-              new Date(timestamp * 1000).toLocaleDateString()
+              formatDateDay(new Date(timestamp * 1000))
             ).reverse(),
           ),
         min: 0,
@@ -339,8 +339,9 @@ function plotSeries(seriesList, rootNode, batchCount) {
         intersect: true,
         x: {
           formatter: function (val, { dataPointIndex }) {
-            const timestamp = new Date(series.timestamp[dataPointIndex] * 1000);
-            const formattedDate = timestamp.toLocaleString();
+            const formattedDate = formatDateDayTime(
+              new Date(series.timestamp[dataPointIndex] * 1000),
+            );
             return `<div>${
               series.git_commit[dataPointIndex]
             }</div><div>${formattedDate}</div>`;
@@ -394,4 +395,28 @@ function formatBytes(bytes) {
   }
 
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
+function formatDateDay(date) {
+  return formatDate(date, false);
+}
+
+function formatDateDayTime(date) {
+  return formatDate(date, true);
+}
+
+function formatDate(date, include_time) {
+  assert(date instanceof Date);
+
+  const pad = (number) => String(number).padStart(2, "0");
+
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1); // Months are 0-based.
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+  return include_time
+    ? `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+    : `${year}-${month}-${day}`;
 }
