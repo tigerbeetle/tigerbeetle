@@ -61,8 +61,7 @@ type Client interface {
 }
 
 type request struct {
-	result unsafe.Pointer
-	ready  chan struct{}
+	ready chan []uint8
 }
 
 type c_client struct {
@@ -178,11 +177,9 @@ func (c *c_client) doRequest(
 	op C.TB_OPERATION,
 	count int,
 	data unsafe.Pointer,
-	result unsafe.Pointer,
-) (int, error) {
+) ([]uint8, error) {
 	var req request
-	req.result = result
-	req.ready = make(chan struct{}, 1) // buffered chan prevents completion handler blocking for Go.
+	req.ready = make(chan []uint8, 1) // buffered chan prevents completion handler blocking for Go.
 
 	// NOTE: packet must be its own allocation and cannot live in request as then CGO is unable to
 	// correctly track it (panic: runtime error: cgo argument has Go pointer to unpinned Go pointer)
@@ -200,9 +197,6 @@ func (c *c_client) doRequest(
 	if data != nil {
 		pinner.Pin(data)
 	}
-	if result != nil {
-		pinner.Pin(result)
-	}
 
 	// Lock the mutex when accessing the `c.tb_client` handle.
 	c.mutex.Lock()
@@ -211,31 +205,30 @@ func (c *c_client) doRequest(
 		c.mutex.Unlock()
 	} else {
 		c.mutex.Unlock()
-		return 0, errors.ErrClientClosed{}
+		return nil, errors.ErrClientClosed{}
 	}
 
 	// Wait for the request to complete.
-	<-req.ready
+	reply := <-req.ready
 	status := C.TB_PACKET_STATUS(packet.status)
-	wrote := int(packet.data_size)
 
 	// Handle packet error
 	if status != C.TB_PACKET_OK {
 		switch status {
 		case C.TB_PACKET_TOO_MUCH_DATA:
-			return 0, errors.ErrMaximumBatchSizeExceeded{}
+			return nil, errors.ErrMaximumBatchSizeExceeded{}
 		case C.TB_PACKET_CLIENT_EVICTED:
-			return 0, errors.ErrClientEvicted{}
+			return nil, errors.ErrClientEvicted{}
 		case C.TB_PACKET_CLIENT_RELEASE_TOO_LOW:
-			return 0, errors.ErrClientReleaseTooLow{}
+			return nil, errors.ErrClientReleaseTooLow{}
 		case C.TB_PACKET_CLIENT_RELEASE_TOO_HIGH:
-			return 0, errors.ErrClientReleaseTooHigh{}
+			return nil, errors.ErrClientReleaseTooHigh{}
 		case C.TB_PACKET_CLIENT_SHUTDOWN:
-			return 0, errors.ErrClientClosed{}
+			return nil, errors.ErrClientClosed{}
 		case C.TB_PACKET_INVALID_OPERATION:
 			// we control what C.TB_OPERATION is given
 			// but allow an invalid opcode to be passed to emulate a client nop
-			return 0, errors.ErrInvalidOperation{}
+			return nil, errors.ErrInvalidOperation{}
 		case C.TB_PACKET_INVALID_DATA_SIZE:
 			panic("unreachable") // we control what type of data is given
 		default:
@@ -244,7 +237,7 @@ func (c *c_client) doRequest(
 	}
 
 	// Return the amount of bytes written into result
-	return wrote, nil
+	return reply, nil
 }
 
 //export onGoPacketCompletion
@@ -262,8 +255,7 @@ func onGoPacketCompletion(
 
 	// Get the request from the packet user data.
 	req := (*request)(unsafe.Pointer(packet.user_data))
-
-	var wrote C.uint32_t = 0
+	var reply []uint8 = nil
 	if result_len > 0 && result_ptr != nil {
 		op := C.TB_OPERATION(packet.operation)
 
@@ -286,211 +278,204 @@ func onGoPacketCompletion(
 		}
 
 		// Write the result data into the request's result.
-		if req.result != nil {
-			wrote = result_len
-			C.memcpy(req.result, unsafe.Pointer(result_ptr), C.size_t(result_len))
-		}
+		reply = make([]uint8, result_len)
+		C.memcpy(unsafe.Pointer(&reply[0]), unsafe.Pointer(result_ptr), C.size_t(result_len))
 	}
 
 	// Signal to the goroutine which owns this request that it's ready.
-	packet.data_size = wrote
-	req.ready <- struct{}{}
+	req.ready <- reply
 }
 
 func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error) {
 	count := len(accounts)
-	results := make([]types.AccountEventResult, count)
-
-	var dataPtr, resultPtr unsafe.Pointer
+	var dataPtr unsafe.Pointer
 	if count > 0 {
 		dataPtr = unsafe.Pointer(&accounts[0])
-		resultPtr = unsafe.Pointer(&results[0])
 	} else {
 		dataPtr = nil
-		resultPtr = nil
 	}
 
-	wrote, err := c.doRequest(
+	reply, err := c.doRequest(
 		C.TB_OPERATION_CREATE_ACCOUNTS,
 		count,
 		dataPtr,
-		resultPtr,
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.AccountEventResult{}))
-	return results[0:resultCount], nil
+	if reply == nil {
+		return make([]types.AccountEventResult, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.AccountEventResult{}))
+	results := unsafe.Slice((*types.AccountEventResult)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
 }
 
 func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error) {
 	count := len(transfers)
-	results := make([]types.TransferEventResult, count)
-
-	var dataPtr, resultPtr unsafe.Pointer
+	var dataPtr unsafe.Pointer
 	if count > 0 {
 		dataPtr = unsafe.Pointer(&transfers[0])
-		resultPtr = unsafe.Pointer(&results[0])
 	} else {
 		dataPtr = nil
-		resultPtr = nil
 	}
 
-	wrote, err := c.doRequest(
+	reply, err := c.doRequest(
 		C.TB_OPERATION_CREATE_TRANSFERS,
 		count,
 		dataPtr,
-		resultPtr,
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.TransferEventResult{}))
-	return results[0:resultCount], nil
+	if reply == nil {
+		return make([]types.TransferEventResult, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.TransferEventResult{}))
+	results := unsafe.Slice((*types.TransferEventResult)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
 }
 
 func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error) {
 	count := len(accountIDs)
-	results := make([]types.Account, count)
-
-	var dataPtr, resultPtr unsafe.Pointer
+	var dataPtr unsafe.Pointer
 	if count > 0 {
 		dataPtr = unsafe.Pointer(&accountIDs[0])
-		resultPtr = unsafe.Pointer(&results[0])
 	} else {
 		dataPtr = nil
-		resultPtr = nil
 	}
 
-	wrote, err := c.doRequest(
+	reply, err := c.doRequest(
 		C.TB_OPERATION_LOOKUP_ACCOUNTS,
 		count,
 		dataPtr,
-		resultPtr,
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.Account{}))
-	return results[0:resultCount], nil
+	if reply == nil {
+		return make([]types.Account, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.Account{}))
+	results := unsafe.Slice((*types.Account)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
 }
 
 func (c *c_client) LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error) {
 	count := len(transferIDs)
-	results := make([]types.Transfer, count)
-
-	var dataPtr, resultPtr unsafe.Pointer
+	var dataPtr unsafe.Pointer
 	if count > 0 {
 		dataPtr = unsafe.Pointer(&transferIDs[0])
-		resultPtr = unsafe.Pointer(&results[0])
 	} else {
 		dataPtr = nil
-		resultPtr = nil
 	}
 
-	wrote, err := c.doRequest(
+	reply, err := c.doRequest(
 		C.TB_OPERATION_LOOKUP_TRANSFERS,
 		count,
 		dataPtr,
-		resultPtr,
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.Transfer{}))
-	return results[0:resultCount], nil
+	if reply == nil {
+		return make([]types.Transfer, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.Transfer{}))
+	results := unsafe.Slice((*types.Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
 }
 
 func (c *c_client) GetAccountTransfers(filter types.AccountFilter) ([]types.Transfer, error) {
-	//TODO(batiati): we need to expose the max message size to the client.
-	//since queries have asymmetric events and results, we can't allocate
-	//the results array based on the number of events.
-	results := make([]types.Transfer, 8190)
-
-	wrote, err := c.doRequest(
+	reply, err := c.doRequest(
 		C.TB_OPERATION_GET_ACCOUNT_TRANSFERS,
 		1,
 		unsafe.Pointer(&filter),
-		unsafe.Pointer(&results[0]),
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.Transfer{}))
-	return results[0:resultCount], nil
+	if reply == nil {
+		return make([]types.Transfer, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.Transfer{}))
+	results := unsafe.Slice((*types.Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
 }
 
 func (c *c_client) GetAccountBalances(filter types.AccountFilter) ([]types.AccountBalance, error) {
-	//TODO(batiati): we need to expose the max message size to the client.
-	//since queries have asymmetric events and results, we can't allocate
-	//the results array based on the number of events.
-	results := make([]types.AccountBalance, 8190)
-
-	wrote, err := c.doRequest(
+	reply, err := c.doRequest(
 		C.TB_OPERATION_GET_ACCOUNT_BALANCES,
 		1,
 		unsafe.Pointer(&filter),
-		unsafe.Pointer(&results[0]),
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.AccountBalance{}))
-	return results[0:resultCount], nil
+	if reply == nil {
+		return make([]types.AccountBalance, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.AccountBalance{}))
+	results := unsafe.Slice((*types.AccountBalance)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
 }
 
 func (c *c_client) QueryAccounts(filter types.QueryFilter) ([]types.Account, error) {
-	//TODO(batiati): we need to expose the max message size to the client.
-	//since queries have asymmetric events and results, we can't allocate
-	//the results array based on the number of events.
-	results := make([]types.Account, 8190)
-
-	wrote, err := c.doRequest(
+	reply, err := c.doRequest(
 		C.TB_OPERATION_QUERY_ACCOUNTS,
 		1,
 		unsafe.Pointer(&filter),
-		unsafe.Pointer(&results[0]),
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.Account{}))
-	return results[0:resultCount], nil
+	if reply == nil {
+		return make([]types.Account, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.Account{}))
+	results := unsafe.Slice((*types.Account)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
 }
 
 func (c *c_client) QueryTransfers(filter types.QueryFilter) ([]types.Transfer, error) {
-	//TODO(batiati): we need to expose the max message size to the client.
-	//since queries have asymmetric events and results, we can't allocate
-	//the results array based on the number of events.
-	results := make([]types.Transfer, 8190)
-
-	wrote, err := c.doRequest(
+	reply, err := c.doRequest(
 		C.TB_OPERATION_QUERY_TRANSFERS,
 		1,
 		unsafe.Pointer(&filter),
-		unsafe.Pointer(&results[0]),
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.Transfer{}))
-	return results[0:resultCount], nil
+	if reply == nil {
+		return make([]types.Transfer, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.Transfer{}))
+	results := unsafe.Slice((*types.Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
 }
 
 func (c *c_client) Nop() error {
@@ -499,12 +484,12 @@ func (c *c_client) Nop() error {
 	ptr := unsafe.Pointer(&dummyData)
 
 	reservedOp := C.TB_OPERATION(0)
-	wrote, err := c.doRequest(reservedOp, 1, ptr, ptr)
+	reply, err := c.doRequest(reservedOp, 1, ptr)
 
 	if !e.Is(err, errors.ErrInvalidOperation{}) {
 		return err
 	}
 
-	_ = wrote
+	_ = reply
 	return nil
 }
