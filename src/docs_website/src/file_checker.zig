@@ -50,6 +50,7 @@ fn check_files(arena: std.mem.Allocator, path: []const u8) !void {
         if (!file_type.is_binary) {
             const file = try dir.openFile(entry.path, .{});
             defer file.close();
+
             try file.seekFromEnd(-1);
             const last_byte = try file.reader().readByte();
             if (last_byte != '\n') {
