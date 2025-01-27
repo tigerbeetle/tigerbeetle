@@ -112,6 +112,35 @@ code {
   }
 }
 
+summary {
+  list-style: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+}
+
+summary::before {
+  content: url('data:image/svg+xml,<svg width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 4.5 10 8 6.5 11.5" stroke="black" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" /></svg>');
+  text-align: center;
+  flex-shrink: 0;
+  /* color: var(--gray-11); */
+  filter: invert(30%);
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  summary::before {
+    filter: invert(80%);
+  }
+}
+
+details[open]>summary::before {
+  transform: rotate(90deg);
+}
+
 nav.left-pane {
   display: flex;
   flex-direction: column;
@@ -312,39 +341,12 @@ nav.left-pane {
     list-style: none;
   }
 
-  summary {
-    list-style: none;
-
-    &::-webkit-details-marker {
-      display: none;
-    }
-  }
-
-  summary::before {
-    content: url('data:image/svg+xml,<svg width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 4.5 10 8 6.5 11.5" stroke="black" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" /></svg>');
-    text-align: center;
-    flex-shrink: 0;
-    /* color: var(--gray-11); */
-    filter: invert(30%);
-    display: block;
-    width: 16px;
-    height: 16px;
-  }
-
   summary:has(a.target)::before {
     /* color: var(--gray-0); */
     filter: invert(100%);
   }
 
-  details[open]>summary::before {
-    transform: rotate(90deg);
-  }
-
   @media (prefers-color-scheme: dark) {
-    summary::before {
-      filter: invert(80%);
-    }
-
     summary:has(a.target)::before {
       filter: none;
     }
@@ -842,6 +844,37 @@ article {
         td:last-child {
           border-bottom-right-radius: 8px;
         }
+      }
+    }
+
+    details {
+      background-color: var(--gray-0);
+      border: 1px solid var(--gray-4);
+      border-radius: 8px;
+      padding: 16px 12px;
+
+      >summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        line-height: 24px;
+        font-weight: 600;
+        background-color: var(--gray-1);
+        border-radius: 8px;
+        padding: 8px 12px;
+        margin: -16px -12px;
+        cursor: pointer;
+
+        &:hover {
+          background-color: var(--gray-3);
+        }
+      }
+
+      &[open]>summary {
+        border-bottom: 1px solid var(--gray-4);
+        border-radius: 8px 8px 0px 0px;
+        margin-bottom: 16px;
       }
     }
 
