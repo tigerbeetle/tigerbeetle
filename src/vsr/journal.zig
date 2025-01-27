@@ -236,7 +236,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         /// We copy-on-write to these buffers, as the in-memory headers may change while writing.
         /// The buffers belong to the IOP at the corresponding index in IOPS.
-        headers_iops: *align(constants.sector_size) [
+        write_headers_sectors: *align(constants.sector_size) [
             constants.journal_iops_write_max
         ][constants.sector_size]u8,
 
@@ -321,12 +321,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             errdefer allocator.free(prepare_inhabited);
             @memset(prepare_inhabited, false);
 
-            const headers_iops = (try allocator.alignedAlloc(
+            const write_headers_sectors = (try allocator.alignedAlloc(
                 [constants.sector_size]u8,
                 constants.sector_size,
                 constants.journal_iops_write_max,
             ))[0..constants.journal_iops_write_max];
-            errdefer allocator.free(headers_iops);
+            errdefer allocator.free(write_headers_sectors);
 
             log.debug("{}: slot_count={} size={} headers_size={} prepares_size={}", .{
                 replica,
@@ -345,7 +345,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .faulty = faulty,
                 .prepare_checksums = prepare_checksums,
                 .prepare_inhabited = prepare_inhabited,
-                .headers_iops = headers_iops,
+                .write_headers_sectors = write_headers_sectors,
             };
 
             assert(@mod(@intFromPtr(&journal.headers[0]), constants.sector_size) == 0);
@@ -369,7 +369,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.faulty.deinit(allocator);
             allocator.free(journal.headers);
             allocator.free(journal.headers_redundant);
-            allocator.free(journal.headers_iops);
+            allocator.free(journal.write_headers_sectors);
             allocator.free(journal.prepare_checksums);
             allocator.free(journal.prepare_inhabited);
 
@@ -871,84 +871,62 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            // Check that the `headers` slot belongs to the same op that it did when the read began.
-            // The slot may not match the Read's op/checksum due to either:
-            // * The in-memory header changed since the read began.
-            // * The in-memory header is reserved+faulty; the read was via `prepare_checksums`
-            const slot = journal.slot_with_op_and_checksum(op, checksum);
+            const error_reason: ?[]const u8 = reason: {
+                if (!message.header.valid_checksum()) {
+                    break :reason "corrupt header after read";
+                }
+                assert(message.header.invalid() == null);
 
-            if (!message.header.valid_checksum()) {
-                if (slot) |s| {
+                if (message.header.cluster != replica.cluster) {
+                    // This could be caused by a misdirected read or write.
+                    // Though when a prepare spans multiple sectors, a misdirected read/write will
+                    // likely manifest as a checksum failure instead.
+                    break :reason "wrong cluster";
+                }
+
+                if (message.header.op != op) {
+                    // Possible causes:
+                    // * The prepare was rewritten since the read began.
+                    // * Misdirected read/write.
+                    // * The combination of:
+                    //   * The primary is responding to a `request_prepare`.
+                    //   * The `request_prepare` did not include a checksum.
+                    //   * The requested op's slot is faulty, but the prepare is valid. Since the
+                    //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on
+                    //     reading this entry it turns out not to have the right op.
+                    //   (This case (and the accompanying unnecessary read) could be prevented by
+                    //   storing the op along with the checksum in `prepare_checksums`.)
+                    break :reason "op changed during read";
+                }
+
+                if (message.header.checksum != checksum) {
+                    // This can also be caused by a misdirected read/write.
+                    break :reason "checksum changed during read";
+                }
+
+                if (!message.header.valid_checksum_body(message.body_used())) {
+                    break :reason "corrupt body after read";
+                }
+                break :reason null;
+            };
+
+            if (error_reason) |reason| {
+                // Check that the `headers` slot belongs to the same op that it did when the read
+                // began. The slot may not match the Read's op/checksum due to either:
+                // * The in-memory header changed since the read began.
+                // * The in-memory header is reserved+faulty; the read was via `prepare_checksums`
+                if (journal.slot_with_op_and_checksum(op, checksum)) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
                 }
 
-                journal.read_prepare_log(op, checksum, "corrupt header after read");
+                journal.read_prepare_log(op, checksum, reason);
                 callback(replica, null, null);
-                return;
+            } else {
+                assert(message.header.checksum == checksum);
+
+                callback(replica, message, destination_replica);
             }
-            assert(message.header.invalid() == null);
-
-            if (message.header.cluster != replica.cluster) {
-                // This could be caused by a misdirected read or write.
-                // Though when a prepare spans multiple sectors, a misdirected read/write will
-                // likely manifest as a checksum failure instead.
-                if (slot) |s| {
-                    journal.faulty.set(s);
-                    journal.dirty.set(s);
-                }
-
-                journal.read_prepare_log(op, checksum, "wrong cluster");
-                callback(replica, null, null);
-                return;
-            }
-
-            if (message.header.op != op) {
-                // Possible causes:
-                // * The prepare was rewritten since the read began.
-                // * Misdirected read/write.
-                // * The combination of:
-                //   * The primary is responding to a `request_prepare`.
-                //   * The `request_prepare` did not include a checksum.
-                //   * The requested op's slot is faulty, but the prepare is valid. Since the
-                //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on reading
-                //     this entry it turns out not to have the right op.
-                //   (This case (and the accompanying unnecessary read) could be prevented by
-                //   storing the op along with the checksum in `prepare_checksums`.)
-                if (slot) |s| {
-                    journal.faulty.set(s);
-                    journal.dirty.set(s);
-                }
-
-                journal.read_prepare_log(op, checksum, "op changed during read");
-                callback(replica, null, null);
-                return;
-            }
-
-            if (message.header.checksum != checksum) {
-                // This can also be caused by a misdirected read/write.
-                if (slot) |s| {
-                    journal.faulty.set(s);
-                    journal.dirty.set(s);
-                }
-
-                journal.read_prepare_log(op, checksum, "checksum changed during read");
-                callback(replica, null, null);
-                return;
-            }
-
-            if (!message.header.valid_checksum_body(message.body_used())) {
-                if (slot) |s| {
-                    journal.faulty.set(s);
-                    journal.dirty.set(s);
-                }
-
-                journal.read_prepare_log(op, checksum, "corrupt body after read");
-                callback(replica, null, null);
-                return;
-            }
-
-            callback(replica, message, destination_replica);
         }
 
         fn read_prepare_log(journal: *Journal, op: u64, checksum: ?u128, notice: []const u8) void {
@@ -1566,6 +1544,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 },
             }
 
+            journal.headers_redundant[slot.index] = journal.headers[slot.index];
+            if (journal.faulty.bit(slot)) {
+                assert(journal.headers_redundant[slot.index].operation == .reserved);
+                journal.headers_redundant[slot.index].checksum = 0; // Invalidate the checksum.
+            }
+            assert(journal.faulty.bit(slot) !=
+                journal.headers_redundant[slot.index].valid_checksum());
+
             switch (decision) {
                 .eql, .nil => {
                     log.debug("{}: recover_slot: recovered " ++
@@ -1767,6 +1753,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // The WAL definitely did not hold this exact header, so it is safe to reset the
                     // faulty bit + nack this header.
                     journal.faulty.clear(slot);
+                    journal.headers_redundant[slot.index] =
+                        Header.Prepare.reserved(header.cluster, slot.index);
                 }
 
                 journal.headers[slot.index] = header.*;
@@ -1860,15 +1848,21 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.prepare_inhabited[slot.index] = true;
             journal.prepare_checksums[slot.index] = message.header.checksum;
 
-            if (journal.slot_with_header(message.header)) |_| {
-                journal.headers_redundant[slot.index] = message.header.*;
-            } else {
+            if (!journal.has_header(message.header)) {
                 journal.write_prepare_debug(message.header, "entry changed while writing sectors");
                 journal.write_prepare_release(write, null);
                 // We just overwrote a (potentially-clean) prepare with the "wrong" header.
                 journal.dirty.set(slot);
                 return;
             }
+
+            if (journal.headers_redundant[slot.index].operation == .reserved and
+                journal.headers_redundant[slot.index].checksum == 0)
+            {
+                assert(journal.faulty.bit(slot));
+            }
+            journal.headers_redundant[slot.index] = message.header.*;
+
             // TODO It's possible within this section that the header has since been replaced but we
             // continue writing, even when the dirty bit is no longer set. This is not a problem
             // but it would be good to stop writing as soon as we see we no longer need to.
@@ -1907,6 +1901,24 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
 
             const slot = journal.slot_with_header(message.header).?;
+            if (journal.headers_redundant[slot.index].checksum != message.header.checksum) {
+                assert(journal.dirty.bit(slot));
+                // Scenario:
+                // 1. write_prepare(h₁)
+                // 2. write_prepare_header(h₁)
+                // 3. remove_entry(h₁)
+                // 4. set_header_as_dirty(h₁)
+                // 5. write_prepare_on_write_header(h₁)
+                // `prepare_checksums` is still correct, but `remove_entry()` cleared the
+                // `headers_redundant`.
+                journal.write_prepare_debug(
+                    message.header,
+                    "entry removed then added while writing headers",
+                );
+                journal.write_prepare_release(write, null);
+                return;
+            }
+
             if (!journal.prepare_inhabited[slot.index] or
                 journal.prepare_checksums[slot.index] != message.header.checksum)
             {
@@ -2090,10 +2102,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             write: *const Journal.Write,
         ) Sector {
             assert(journal.status != .init);
-            assert(journal.writes.items.len == journal.headers_iops.len);
+            assert(journal.writes.items.len == journal.write_headers_sectors.len);
             assert(sector_index < @divFloor(slot_count, headers_per_sector));
 
-            const replica: *const Replica = @alignCast(@fieldParentPtr("journal", journal));
             const sector_slot = Slot{ .index = sector_index * headers_per_sector };
             assert(sector_slot.index < slot_count);
 
@@ -2102,30 +2113,32 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 @sizeOf(Journal.Write),
             );
 
-            const sector: Sector = &journal.headers_iops[write_index];
+            const sector: Sector = &journal.write_headers_sectors[write_index];
             const sector_headers = std.mem.bytesAsSlice(Header.Prepare, sector);
             assert(sector_headers.len == headers_per_sector);
 
-            var i: usize = 0;
-            while (i < headers_per_sector) : (i += 1) {
-                const slot = Slot{ .index = sector_slot.index + i };
+            // Write headers from `headers_redundant` instead of `headers` — we need to avoid
+            // writing (leaking) a redundant header before its corresponding prepare is on disk.
+            stdx.copy_disjoint(
+                .exact,
+                Header.Prepare,
+                sector_headers,
+                journal.headers_redundant[sector_slot.index..][0..headers_per_sector],
+            );
 
-                if (journal.faulty.bit(slot)) {
-                    // Redundant faulty headers are deliberately written as invalid.
-                    // This ensures that faulty headers are still faulty when they are read back
-                    // from disk during recovery. This prevents faulty entries from changing to
-                    // reserved (and clean) after a crash and restart (e.g. accidentally converting
-                    // a case `@D` to a `@I` after a restart).
-                    sector_headers[i] = Header.Prepare.reserved(replica.cluster, i);
-                    sector_headers[i].checksum = 0; // Invalidate the checksum.
-                    assert(!sector_headers[i].valid_checksum());
+            for (sector_headers, 0..) |sector_header, i| {
+                const slot = Slot{ .index = sector_slot.index + i };
+                if (sector_header.operation == .reserved and
+                    sector_header.checksum == 0)
+                {
+                    // Deliberately write an invalid header until the corresponding prepare is
+                    // repaired. (See read_prepare_with_op_and_checksum_callback()).
+                    assert(journal.faulty.bit(slot));
                 } else {
-                    // Write headers from `headers_redundant` instead of `headers` — we need to
-                    // avoid writing (leaking) a redundant header before its corresponding prepare
-                    // is on disk.
-                    sector_headers[i] = journal.headers_redundant[slot.index];
+                    maybe(journal.faulty.bit(slot));
                 }
             }
+
             return sector;
         }
 
