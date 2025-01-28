@@ -161,7 +161,9 @@ nav.left-pane {
       gap: 4px;
     }
 
-    >.glass-edge {
+    &::after {
+      content: "";
+      display: block;
       height: 1px;
       backdrop-filter: blur(20px);
     }
@@ -932,10 +934,6 @@ article {
     z-index: 1;
 
     >.top-wrapper {
-      >.top {
-        padding-right: 16px;
-      }
-
       .menu-button {
         display: block;
 
