@@ -211,13 +211,13 @@ fn run_fuzzers(
             // which may still be in use by a running fuzzer.
             const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
 
-            log.info("fuzzing {} tasks", .{tasks.seed_record.len});
-            for (tasks.seed_record, tasks.weight) |seed_record, weight| {
+            log.info("fuzzing {} tasks", .{tasks.seed_template.len});
+            for (tasks.seed_template, tasks.weight) |seed_template, weight| {
                 log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
-                    seed_record.commit_sha[0..7],
-                    seed_record.commit_timestamp,
-                    seed_record.fuzzer,
-                    seed_record.branch,
+                    seed_template.commit_sha[0..7],
+                    seed_template.commit_timestamp,
+                    @tagName(seed_template.fuzzer),
+                    seed_template.branch,
                     weight,
                 });
             }
@@ -230,13 +230,12 @@ fn run_fuzzers(
             if (child_or_null.* == null) {
                 const task_index = random.weightedIndex(u32, tasks.weight);
                 const working_directory = tasks.working_directory[task_index];
-                const seed_record = tasks.seed_record[task_index];
-                const fuzzer = std.meta.stringToEnum(Fuzzer, seed_record.fuzzer).?;
+                const seed_template = tasks.seed_template[task_index];
                 const seed = random.int(u64);
 
                 const child = try run_fuzzers_start_fuzzer(shell, .{
                     .working_directory = working_directory,
-                    .fuzzer = fuzzer,
+                    .fuzzer = seed_template.fuzzer,
                     .seed = seed,
                 });
                 // NB: take timestamp after spawning to exclude build time.
@@ -245,12 +244,12 @@ fn run_fuzzers(
                 child_or_null.* = .{
                     .child = child.process,
                     .seed = .{
-                        .commit_timestamp = seed_record.commit_timestamp,
-                        .commit_sha = seed_record.commit_sha,
-                        .fuzzer = seed_record.fuzzer,
-                        .count = seed_record.count,
-                        .branch = seed_record.branch,
+                        .commit_timestamp = seed_template.commit_timestamp,
+                        .commit_sha = seed_template.commit_sha,
+                        .fuzzer = @tagName(seed_template.fuzzer),
+                        .branch = seed_template.branch,
 
+                        .count = 1,
                         .seed_timestamp_start = seed_timestamp_start,
                         .seed = seed,
                         .command = child.commandline,
@@ -335,13 +334,13 @@ fn run_fuzzers(
 
 const Tasks = struct {
     working_directory: [][]const u8,
-    seed_record: []SeedRecord,
+    seed_template: []SeedRecord.Template,
     weight: []u32,
 };
 
 fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
     var working_directory = std.ArrayList([]const u8).init(shell.arena.allocator());
-    var seed_record = std.ArrayList(SeedRecord).init(shell.arena.allocator());
+    var seed_template = std.ArrayList(SeedRecord.Template).init(shell.arena.allocator());
 
     { // Main branch fuzzing.
         const commit = if (gh_token == null)
@@ -360,15 +359,15 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             try working_directory.append(if (gh_token == null) "." else "./working/main");
-            try seed_record.append(.{
+            try seed_template.append(.{
                 .commit_timestamp = commit.timestamp,
                 .commit_sha = commit.sha,
-                .fuzzer = @tagName(fuzzer),
+                .fuzzer = fuzzer,
                 .branch = "https://github.com/tigerbeetle/tigerbeetle",
             });
         }
     }
-    const task_main_count: u32 = @intCast(seed_record.items.len);
+    const task_main_count: u32 = @intCast(seed_template.items.len);
 
     if (gh_token != null) {
         // Any PR labeled like 'fuzz lsm_tree'
@@ -422,10 +421,10 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
                 if (labeled or fuzzer == .canary) {
                     pr_fuzzers_count += 1;
                     try working_directory.append(pr_directory);
-                    try seed_record.append(.{
+                    try seed_template.append(.{
                         .commit_timestamp = commit.timestamp,
                         .commit_sha = commit.sha,
-                        .fuzzer = @tagName(fuzzer),
+                        .fuzzer = fuzzer,
                         .branch = try shell.fmt(
                             "https://github.com/tigerbeetle/tigerbeetle/pull/{d}",
                             .{pr.number},
@@ -436,7 +435,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
             assert(pr_fuzzers_count >= 2); // The canary and at least one different fuzzer.
         }
     }
-    const task_pr_count: u32 = @intCast(seed_record.items.len - task_main_count);
+    const task_pr_count: u32 = @intCast(seed_template.items.len - task_main_count);
 
     // Split time 50:50 between fuzzing main and fuzzing labeled PRs.
     const weight = try shell.arena.allocator().alloc(u32, working_directory.items.len);
@@ -454,10 +453,9 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
         assert(weight_main_total == weight_pr_total);
     }
 
-    for (weight, seed_record.items) |*weight_ptr, seed| {
-        const fuzzer = std.meta.stringToEnum(Fuzzer, seed.fuzzer).?;
-        if (fuzzer == .vopr or fuzzer == .vopr_lite or
-            fuzzer == .vopr_testing or fuzzer == .vopr_testing_lite)
+    for (weight, seed_template.items) |*weight_ptr, seed| {
+        if (seed.fuzzer == .vopr or seed.fuzzer == .vopr_lite or
+            seed.fuzzer == .vopr_testing or seed.fuzzer == .vopr_testing_lite)
         {
             weight_ptr.* *= 2; // Bump relative priority of VOPR runs.
         }
@@ -465,7 +463,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
 
     return .{
         .working_directory = working_directory.items,
-        .seed_record = seed_record.items,
+        .seed_template = seed_template.items,
         .weight = weight,
     };
 }
@@ -655,6 +653,13 @@ const SeedRecord = struct {
     command: []const u8 = "",
     // Branch is an GitHub URL. It only affects the UI, where the seeds are grouped by the branch.
     branch: []const u8,
+
+    const Template = struct {
+        branch: []const u8,
+        commit_timestamp: u64,
+        commit_sha: [40]u8,
+        fuzzer: Fuzzer,
+    };
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
         return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse // NB: reverse order.
