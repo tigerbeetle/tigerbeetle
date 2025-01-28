@@ -970,10 +970,12 @@ pub const Simulator = struct {
                     );
                 }
 
-                if (!commit.prepare.header.operation.vsr_reserved()) {
+                if (commit.prepare.header.operation == .batched or
+                    !commit.prepare.header.operation.vsr_reserved())
+                {
                     simulator.workload.on_reply(
                         commit.client_index.?,
-                        commit.reply.header.operation.cast(StateMachine),
+                        commit.reply.header.operation,
                         commit.reply.header.timestamp,
                         commit.prepare.body_used(),
                         commit.reply.body_used(),
@@ -1071,7 +1073,7 @@ pub const Simulator = struct {
         // should always queue the request.
         assert(request_message == client.request_inflight.?.message.base());
         assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
-        assert(request_message.header.into(.request).?.operation.cast(StateMachine) ==
+        assert(request_message.header.into(.request).?.operation ==
             request_metadata.operation);
 
         simulator.requests_sent += 1;

@@ -688,7 +688,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn request(
             cluster: *Cluster,
             client_index: usize,
-            request_operation: StateMachine.Operation,
+            request_operation: vsr.Operation,
             request_message: *Message,
             request_body_size: usize,
         ) void {
@@ -703,7 +703,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .request = 0, // Set by client.raw_request.
                 .cluster = client.cluster,
                 .command = .request,
-                .operation = vsr.Operation.from(StateMachine, request_operation),
+                .operation = request_operation,
                 .size = @intCast(@sizeOf(vsr.Header) + request_body_size),
             };
 
@@ -722,7 +722,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// See `on_reply`.
         fn request_callback(
             user_data: u128,
-            operation: StateMachine.Operation,
+            operation: vsr.Operation,
             timestamp: u64,
             result: []const u8,
         ) void {

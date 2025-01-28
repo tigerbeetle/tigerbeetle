@@ -35,6 +35,7 @@ const InFlightQueue = std.AutoHashMapUnmanaged(struct {
     client_index: usize,
     /// This index corresponds to Auditor.creates_sent/Auditor.creates_delivered.
     client_request: usize,
+    batch_index: ?u16,
 }, InFlight);
 
 const PendingTransfer = struct {
@@ -281,10 +282,12 @@ pub const AccountingAuditor = struct {
     pub fn expect_create_accounts(
         self: *AccountingAuditor,
         client_index: usize,
+        batch_index: ?u16,
     ) []CreateAccountResultSet {
         const result = self.in_flight.getOrPutAssumeCapacity(.{
             .client_index = client_index,
             .client_request = self.creates_sent[client_index],
+            .batch_index = batch_index,
         });
         assert(!result.found_existing);
 
@@ -296,10 +299,12 @@ pub const AccountingAuditor = struct {
     pub fn expect_create_transfers(
         self: *AccountingAuditor,
         client_index: usize,
+        batch_index: ?u16,
     ) []CreateTransferResultSet {
         const result = self.in_flight.getOrPutAssumeCapacity(.{
             .client_index = client_index,
             .client_request = self.creates_sent[client_index],
+            .batch_index = batch_index,
         });
         assert(!result.found_existing);
 
@@ -344,6 +349,7 @@ pub const AccountingAuditor = struct {
     pub fn on_create_accounts(
         self: *AccountingAuditor,
         client_index: usize,
+        batch_index: ?u16,
         timestamp: u64,
         accounts: []const tb.Account,
         results: []const tb.CreateAccountsResult,
@@ -353,7 +359,7 @@ pub const AccountingAuditor = struct {
             (accounts.len == 0 and self.timestamp == timestamp));
         defer self.timestamp = timestamp;
 
-        const results_expect = self.take_in_flight(client_index).create_accounts;
+        const results_expect = self.take_in_flight(client_index, batch_index).create_accounts;
         var results_iterator = IteratorForCreateType(tb.CreateAccountsResult).init(results);
         defer assert(results_iterator.results.len == 0);
 
@@ -401,13 +407,14 @@ pub const AccountingAuditor = struct {
         timestamp: u64,
         transfers: []const tb.Transfer,
         results: []const tb.CreateTransfersResult,
+        batch_index: ?u16,
     ) void {
         assert(transfers.len >= results.len);
         assert(self.timestamp < timestamp or
             (transfers.len == 0 and self.timestamp == timestamp));
         defer self.timestamp = timestamp;
 
-        const results_expect = self.take_in_flight(client_index).create_transfers;
+        const results_expect = self.take_in_flight(client_index, batch_index).create_transfers;
         var results_iterator = IteratorForCreateType(tb.CreateTransfersResult).init(results);
         defer assert(results_iterator.results.len == 0);
 
@@ -642,10 +649,11 @@ pub const AccountingAuditor = struct {
         return if (index < self.accounts_state.len) &self.accounts_state[index] else null;
     }
 
-    fn take_in_flight(self: *AccountingAuditor, client_index: usize) InFlight {
+    fn take_in_flight(self: *AccountingAuditor, client_index: usize, batch_index: ?u16) InFlight {
         const key = .{
             .client_index = client_index,
             .client_request = self.creates_delivered[client_index],
+            .batch_index = batch_index,
         };
         self.creates_delivered[client_index] += 1;
 

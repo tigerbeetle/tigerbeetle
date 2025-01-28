@@ -2499,7 +2499,7 @@ const TestClients = struct {
                         @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
                         t.cluster.request(
                             c,
-                            .echo,
+                            vsr.Operation.from(Cluster.StateMachine, .echo),
                             message,
                             body_size,
                         );
