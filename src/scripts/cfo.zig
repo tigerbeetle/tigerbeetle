@@ -101,11 +101,17 @@ const Fuzzer = enum {
 
     fn args_run(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
-            .vopr => &.{ "vopr", "--" },
-            .vopr_lite => &.{ "vopr", "--", "--lite" },
-            .vopr_testing => &.{ "vopr", "-Dvopr-state-machine=testing", "--" },
-            .vopr_testing_lite => &.{ "vopr", "-Dvopr-state-machine=testing", "--", "--lite" },
-            else => |f| &.{ "fuzz", "--", @tagName(f) },
+            inline .vopr, .vopr_lite => .{"vopr"},
+            inline .vopr_testing, .vopr_testing_lite => .{ "vopr", "-Dvopr-state-machine=testing" },
+            inline else => .{"fuzz"},
+        } ++ .{"--"} ++ args_exec(fuzzer);
+    }
+
+    fn args_exec(comptime fuzzer: Fuzzer) []const []const u8 {
+        return comptime switch (fuzzer) {
+            .vopr, .vopr_testing => &.{},
+            .vopr_lite, .vopr_testing_lite => &.{"--lite"},
+            else => |f| &.{@tagName(f)},
         };
     }
 };
@@ -198,7 +204,6 @@ fn run_fuzzers(
     };
 
     var tasks_cache: ?Tasks = null;
-    var args = std.ArrayList([]const u8).init(shell.arena.allocator());
     for (0..options.budget_seconds) |second| {
         const iteration_last = second == options.budget_seconds - 1;
         const iteration_pull = second % options.refresh_seconds == 0;
@@ -212,13 +217,13 @@ fn run_fuzzers(
             // which may still be in use by a running fuzzer.
             const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
 
-            log.info("fuzzing {} tasks", .{tasks.seed_record.len});
-            for (tasks.seed_record, tasks.weight) |seed_record, weight| {
+            log.info("fuzzing {} tasks", .{tasks.seed_template.len});
+            for (tasks.seed_template, tasks.weight) |seed_template, weight| {
                 log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
-                    seed_record.commit_sha[0..7],
-                    seed_record.commit_timestamp,
-                    seed_record.fuzzer,
-                    seed_record.branch,
+                    seed_template.commit_sha[0..7],
+                    seed_template.commit_timestamp,
+                    @tagName(seed_template.fuzzer),
+                    seed_template.branch,
                     weight,
                 });
             }
@@ -231,64 +236,34 @@ fn run_fuzzers(
             if (child_or_null.* == null) {
                 const task_index = random.weightedIndex(u32, tasks.weight);
                 const working_directory = tasks.working_directory[task_index];
-                var seed_record = tasks.seed_record[task_index];
-                const fuzzer = std.meta.stringToEnum(Fuzzer, seed_record.fuzzer).?;
+                const seed_template = tasks.seed_template[task_index];
+                const seed = random.int(u64);
 
-                try shell.pushd(working_directory);
-                defer shell.popd();
-
-                assert(try shell.dir_exists(".git") or shell.file_exists(".git"));
-
-                {
-                    // First, build the fuzzer separately to exclude compilation from the
-                    // recorded timings.
-                    args.clearRetainingCapacity();
-                    try args.appendSlice(&.{ "build", "-Drelease" });
-                    try args.appendSlice(switch (fuzzer) {
-                        inline else => |f| comptime f.args_build(),
-                    });
-                    shell.exec_zig("{args}", .{ .args = args.items }) catch {
-                        // Ignore the error, it'll get recorded by the run anyway.
-                    };
-                }
-
-                seed_record.seed = random.int(u64);
-                seed_record.seed_timestamp_start = @intCast(std.time.timestamp());
-
-                args.clearRetainingCapacity();
-                try args.appendSlice(&.{ "build", "-Drelease" });
-                try args.appendSlice(switch (fuzzer) {
-                    inline else => |f| comptime f.args_run(),
+                const child = try run_fuzzers_start_fuzzer(shell, .{
+                    .working_directory = working_directory,
+                    .fuzzer = seed_template.fuzzer,
+                    .seed = seed,
                 });
-                try args.append(try shell.fmt("{d}", .{seed_record.seed}));
+                // NB: take timestamp after spawning to exclude build time.
+                const seed_timestamp_start: u64 = @intCast(std.time.timestamp());
 
-                var command = std.ArrayList(u8).init(shell.arena.allocator());
-                try command.appendSlice("./zig/zig");
-                for (args.items) |arg| {
-                    try command.append(' ');
-                    try command.appendSlice(arg);
-                }
-
-                seed_record.command = command.items;
-
-                log.debug("will start '{s}'", .{seed_record.command});
                 child_or_null.* = .{
-                    .seed = seed_record,
-                    .child = try shell.spawn(
-                        .{ .stdin_behavior = .Pipe },
-                        "{zig} {args}",
-                        .{ .zig = shell.zig_exe.?, .args = args.items },
-                    ),
-                };
+                    .child = child.process,
+                    .seed = .{
+                        .commit_timestamp = seed_template.commit_timestamp,
+                        .commit_sha = seed_template.commit_sha,
+                        .fuzzer = @tagName(seed_template.fuzzer),
+                        .branch = seed_template.branch,
 
-                // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
-                // on writing to child's stdin to detect if a child is dead in a non-blocking
-                // manner.
-                _ = try std.posix.fcntl(
-                    child_or_null.*.?.child.stdin.?.handle,
-                    std.posix.F.SETFL,
-                    @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
-                );
+                        .count = 1,
+                        .seed_timestamp_start = seed_timestamp_start,
+                        .seed = seed,
+                        .command = child.command,
+
+                        .ok = false,
+                        .seed_timestamp_end = 0,
+                    },
+                };
             }
         }
 
@@ -365,13 +340,13 @@ fn run_fuzzers(
 
 const Tasks = struct {
     working_directory: [][]const u8,
-    seed_record: []SeedRecord,
+    seed_template: []SeedRecord.Template,
     weight: []u32,
 };
 
 fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
     var working_directory = std.ArrayList([]const u8).init(shell.arena.allocator());
-    var seed_record = std.ArrayList(SeedRecord).init(shell.arena.allocator());
+    var seed_template = std.ArrayList(SeedRecord.Template).init(shell.arena.allocator());
 
     { // Main branch fuzzing.
         const commit = if (gh_token == null)
@@ -390,15 +365,15 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             try working_directory.append(if (gh_token == null) "." else "./working/main");
-            try seed_record.append(.{
+            try seed_template.append(.{
                 .commit_timestamp = commit.timestamp,
                 .commit_sha = commit.sha,
-                .fuzzer = @tagName(fuzzer),
+                .fuzzer = fuzzer,
                 .branch = "https://github.com/tigerbeetle/tigerbeetle",
             });
         }
     }
-    const task_main_count: u32 = @intCast(seed_record.items.len);
+    const task_main_count: u32 = @intCast(seed_template.items.len);
 
     if (gh_token != null) {
         // Any PR labeled like 'fuzz lsm_tree'
@@ -452,10 +427,10 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
                 if (labeled or fuzzer == .canary) {
                     pr_fuzzers_count += 1;
                     try working_directory.append(pr_directory);
-                    try seed_record.append(.{
+                    try seed_template.append(.{
                         .commit_timestamp = commit.timestamp,
                         .commit_sha = commit.sha,
-                        .fuzzer = @tagName(fuzzer),
+                        .fuzzer = fuzzer,
                         .branch = try shell.fmt(
                             "https://github.com/tigerbeetle/tigerbeetle/pull/{d}",
                             .{pr.number},
@@ -466,7 +441,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
             assert(pr_fuzzers_count >= 2); // The canary and at least one different fuzzer.
         }
     }
-    const task_pr_count: u32 = @intCast(seed_record.items.len - task_main_count);
+    const task_pr_count: u32 = @intCast(seed_template.items.len - task_main_count);
 
     // Split time 50:50 between fuzzing main and fuzzing labeled PRs.
     const weight = try shell.arena.allocator().alloc(u32, working_directory.items.len);
@@ -484,10 +459,9 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
         assert(weight_main_total == weight_pr_total);
     }
 
-    for (weight, seed_record.items) |*weight_ptr, seed| {
-        const fuzzer = std.meta.stringToEnum(Fuzzer, seed.fuzzer).?;
-        if (fuzzer == .vopr or fuzzer == .vopr_lite or
-            fuzzer == .vopr_testing or fuzzer == .vopr_testing_lite)
+    for (weight, seed_template.items) |*weight_ptr, seed| {
+        if (seed.fuzzer == .vopr or seed.fuzzer == .vopr_lite or
+            seed.fuzzer == .vopr_testing or seed.fuzzer == .vopr_testing_lite)
         {
             weight_ptr.* *= 2; // Bump relative priority of VOPR runs.
         }
@@ -495,7 +469,7 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
 
     return .{
         .working_directory = working_directory.items,
-        .seed_record = seed_record.items,
+        .seed_template = seed_template.items,
         .weight = weight,
     };
 }
@@ -538,6 +512,85 @@ fn run_fuzzers_commit_info(shell: *Shell) !Commit {
         break :commit_timestamp try std.fmt.parseInt(u64, timestamp, 10);
     };
     return .{ .sha = commit_sha, .timestamp = commit_timestamp };
+}
+
+fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
+    working_directory: []const u8,
+    fuzzer: Fuzzer,
+    seed: u64,
+}) !struct {
+    command: []const u8, // User-visible string on devhub.
+    process: std.process.Child,
+} {
+    try shell.pushd(options.working_directory);
+    defer shell.popd();
+
+    const arg_count_max = comptime arg_count_max: {
+        var arg_max: u32 = 0;
+        for (std.enums.values(Fuzzer)) |fuzzer| {
+            arg_max = @max(arg_max, fuzzer.args_build().len, fuzzer.args_run().len);
+        }
+        assert(arg_max > 0);
+
+        // +4: zig/zig build -Drelease SEED
+        break :arg_count_max arg_max + 4;
+    };
+    var args: stdx.BoundedArrayType([]const u8, arg_count_max) = .{};
+
+    assert(try shell.dir_exists(".git") or shell.file_exists(".git"));
+
+    // DevHub displays `./zig/zig build run` invocation which you can paste in your shell directly.
+    // But CFO actually builds and execs in two separate steps such that:
+    // - build time is excluded from overall runtime,
+    // - the exit status of the fuzzer process can be inspected, to determine if OOM happened.
+    args.clear();
+    args.append_slice_assume_capacity(&.{ "./zig/zig", "build", "-Drelease" });
+    args.append_slice_assume_capacity(switch (options.fuzzer) {
+        inline else => |f| comptime f.args_run(),
+    });
+    var seed_buffer: [32]u8 = undefined;
+    args.append_assume_capacity(stdx.array_print(32, &seed_buffer, "{d}", .{options.seed}));
+    const command = try std.mem.join(shell.arena.allocator(), " ", args.const_slice());
+
+    const exe = exe: {
+        args.clear();
+        args.append_slice_assume_capacity(&.{ "build", "-Drelease", "-Dprint-exe" });
+        args.append_slice_assume_capacity(switch (options.fuzzer) {
+            inline else => |f| comptime f.args_build(),
+        });
+        break :exe shell.exec_stdout("{zig} {args}", .{
+            .zig = shell.zig_exe.?,
+            .args = args.const_slice(),
+        }) catch "false"; // Make sure that subsequent run fails if we can't build.
+    };
+    assert(exe.len > 0);
+
+    log.debug("will start '{s}'", .{command});
+    const process = try shell.spawn(
+        .{ .stdin_behavior = .Pipe },
+        "{exe} {args} {seed}",
+        .{
+            .exe = exe,
+            .args = switch (options.fuzzer) {
+                inline else => |f| comptime f.args_exec(),
+            },
+            .seed = options.seed,
+        },
+    );
+
+    // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
+    // on writing to child's stdin to detect if a child is dead in a non-blocking
+    // manner.
+    _ = try std.posix.fcntl(
+        process.stdin.?.handle,
+        std.posix.F.SETFL,
+        @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
+    );
+
+    return .{
+        .command = command,
+        .process = process,
+    };
 }
 
 fn upload_results(
@@ -613,6 +666,13 @@ const SeedRecord = struct {
     command: []const u8 = "",
     // Branch is an GitHub URL. It only affects the UI, where the seeds are grouped by the branch.
     branch: []const u8,
+
+    const Template = struct {
+        branch: []const u8,
+        commit_timestamp: u64,
+        commit_sha: [40]u8,
+        fuzzer: Fuzzer,
+    };
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
         return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse // NB: reverse order.
