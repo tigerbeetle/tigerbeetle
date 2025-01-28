@@ -27,9 +27,6 @@ const Command = vsr.Command;
 const Version = vsr.Version;
 const SyncStage = vsr.SyncStage;
 const ClientSessions = vsr.ClientSessions;
-const BatchDecoder = vsr.batch.BatchDecoder;
-const BatchEncoder = vsr.batch.BatchEncoder;
-
 const log = marks.wrap_log(stdx.log.scoped(.replica));
 
 pub const Status = enum {
@@ -106,6 +103,48 @@ pub fn ReplicaType(
     const Grid = GridType(Storage);
     const Forest = StateMachine.Forest;
     const GridScrubber = vsr.GridScrubberType(Forest);
+
+    const BatchBodyDecoder = vsr.batch.BatchDecoderType(vsr.Release, .{
+        .is_valid = struct {
+            fn is_valid(_: vsr.Release, vsr_operation: vsr.Operation) bool {
+                const operation = StateMachine.operation_from_vsr(vsr_operation);
+                return operation != null;
+            }
+        }.is_valid,
+        .element_size = struct {
+            fn element_size(release: vsr.Release, vsr_operation: vsr.Operation) usize {
+                const operation = StateMachine.operation_from_vsr(vsr_operation).?;
+                return StateMachine.event_size_bytes(release, operation);
+            }
+        }.element_size,
+        .alignment = struct {
+            fn alignment(release: vsr.Release, vsr_operation: vsr.Operation) usize {
+                const operation = StateMachine.operation_from_vsr(vsr_operation).?;
+                return StateMachine.event_alignment(release, operation);
+            }
+        }.alignment,
+    });
+
+    const BatchReplyEncoder = vsr.batch.BatchEncoderType(vsr.Release, .{
+        .is_valid = struct {
+            fn is_valid(_: vsr.Release, vsr_operation: vsr.Operation) bool {
+                const operation = StateMachine.operation_from_vsr(vsr_operation);
+                return operation != null;
+            }
+        }.is_valid,
+        .element_size = struct {
+            fn element_size(release: vsr.Release, vsr_operation: vsr.Operation) usize {
+                const operation = StateMachine.operation_from_vsr(vsr_operation).?;
+                return StateMachine.result_size_bytes(release, operation);
+            }
+        }.element_size,
+        .alignment = struct {
+            fn alignment(release: vsr.Release, vsr_operation: vsr.Operation) usize {
+                const operation = StateMachine.operation_from_vsr(vsr_operation).?;
+                return StateMachine.result_alignment(release, operation);
+            }
+        }.alignment,
+    });
 
     return struct {
         const Replica = @This();
@@ -382,6 +421,15 @@ pub fn ReplicaType(
         /// Guards against concurrent commits, and tracks the commit progress.
         commit_stage: CommitStage = .idle,
         commit_dispatch_entered: bool = false,
+
+        /// Keeps the state while iterating through batched operations across multiple
+        /// cycles of prefetch → execute.
+        commit_batched: ?struct {
+            decoder: BatchBodyDecoder,
+            prepare_timestamp: u64,
+            reply: ?MessagePool.GetMessageType(.reply) = null,
+            encoder: ?BatchReplyEncoder = null,
+        } = null,
 
         /// Measures the time taken to commit a prepare, across the following stages:
         /// prefetch → reply_setup → execute → compact → checkpoint_data → checkpoint_superblock
@@ -1299,9 +1347,16 @@ pub fn ReplicaType(
 
             if (self.commit_prepare) |message| {
                 assert(self.commit_stage != .idle);
+                if (self.commit_batched) |*commit_batched| {
+                    assert(message.header.operation == .batched);
+                    if (commit_batched.reply) |reply| self.message_bus.unref(reply);
+                    self.commit_batched = null;
+                }
+
                 self.message_bus.unref(message);
                 self.commit_prepare = null;
             }
+            assert(self.commit_batched == null);
 
             if (self.sync_start_view) |message| self.message_bus.unref(message);
 
@@ -3870,6 +3925,8 @@ pub fn ReplicaType(
             reply_setup,
             /// Execute state machine logic.
             execute,
+            /// Prefetch the next batch.
+            prefetch_batch,
             /// Every vsr_checkpoint_ops, mark the current checkpoint as durable.
             checkpoint_durable,
             /// Run one beat of LSM compaction.
@@ -3962,7 +4019,40 @@ pub fn ReplicaType(
                     self.commit_execute();
                 }
 
+                if (self.commit_stage == .prefetch_batch) {
+                    assert(self.commit_prepare.?.header.operation == .batched);
+                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.commit_stage = .execute;
+                    self.trace.start(.replica_commit, .{
+                        .stage = @tagName(self.commit_stage),
+                        .op = self.commit_prepare.?.header.op,
+                    });
+
+                    self.commit_execute();
+                }
+
                 if (self.commit_stage == .execute) {
+                    if (self.commit_batched) |*commit_batched| {
+                        assert(self.commit_prepare.?.header.operation == .batched);
+                        self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                        self.commit_stage = .prefetch_batch;
+                        self.commit_completion_timer.reset();
+                        self.trace.start(.replica_commit, .{
+                            .stage = @tagName(self.commit_stage),
+                            .op = self.commit_prepare.?.header.op,
+                            .batch_index = commit_batched.decoder.batch_index,
+                            .batch_count = commit_batched.decoder.batch_count(),
+                        });
+
+                        const result = self.commit_prefetch();
+                        assert(result == .pending);
+                        return;
+                    }
+
+                    assert(self.commit_batched == null);
+                    maybe(self.commit_prepare.?.header.operation == .batched);
+
+                    // Compacting.
                     self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
                     self.commit_stage = .checkpoint_durable;
                     self.trace.start(.replica_commit, .{
@@ -4063,9 +4153,18 @@ pub fn ReplicaType(
             assert(self.commit_stage != .idle);
             assert(self.commit_dispatch_entered);
 
-            if (self.commit_prepare) |prepare| self.message_bus.unref(prepare);
+            if (self.commit_prepare) |prepare| {
+                if (self.commit_batched) |*commit_batched| {
+                    assert(prepare.header.operation == .batched);
+                    if (commit_batched.reply) |reply| self.message_bus.unref(reply);
+                    self.commit_batched = null;
+                }
+                self.message_bus.unref(prepare);
+                self.commit_prepare = null;
+            }
+            assert(self.commit_batched == null);
+
             self.trace.reset(.replica_commit);
-            self.commit_prepare = null;
             self.commit_stage = .idle;
             self.commit_dispatch_entered = false;
         }
@@ -4219,7 +4318,8 @@ pub fn ReplicaType(
             assert(self.state_machine_opened);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
-            assert(self.commit_stage == .prefetch);
+            assert(self.commit_stage == .prefetch or
+                self.commit_stage == .prefetch_batch);
             assert(self.commit_prepare.?.header.command == .prepare);
             assert(self.commit_prepare.?.header.operation != .root);
             assert(self.commit_prepare.?.header.operation != .reserved);
@@ -4242,43 +4342,153 @@ pub fn ReplicaType(
                 @panic("Cannot commit prepare; batch limit too low.");
             }
 
-            if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
-                const body: []const u8 = body: {
-                    if (prepare.header.batch_count == 0) break :body prepare.body_used();
+            return switch (prepare.header.operation) {
+                .reserved, .root => unreachable,
+                .register => .ready,
+                .reconfigure => .ready,
+                .upgrade => .ready,
+                .batched => batched: {
+                    self.prefetch_op_batched(prepare);
+                    break :batched .pending;
+                },
+                else => operation: {
+                    assert(self.commit_stage == .prefetch);
+                    assert(self.commit_batched == null);
 
-                    // If it's a batched request, the message body must be decoded to
-                    // remove the trailer.
-                    // The `prefetch` can process all batches at once.
-                    const event_size = StateMachine.event_size_bytes(
+                    self.state_machine.prefetch_timestamp = prepare.header.timestamp;
+                    self.state_machine.prefetch(
+                        commit_prefetch_callback,
                         prepare.header.release,
-                        prepare_operation,
-                    );
-                    const decoder = BatchDecoder.init(
-                        event_size,
+                        prepare.header.op,
+                        prepare.header.operation.cast(StateMachine),
                         prepare.body_used(),
-                        prepare.header.batch_count,
-                    ) catch unreachable; // Validated during `ignore_request_message()`.
+                    );
+                    break :operation .pending;
+                },
+            };
+        }
 
-                    break :body decoder.payload;
-                };
-                self.state_machine.prefetch_timestamp = prepare.header.timestamp;
-                self.state_machine.prefetch(
-                    commit_prefetch_callback,
-                    prepare.header.release,
-                    prepare.header.op,
-                    prepare_operation,
-                    body,
-                );
-                return .pending;
+        fn commit_decode_batch(
+            self: *Replica,
+            prepare: *const Message.Prepare,
+        ) void {
+            assert(prepare.header.operation == .batched);
+            assert(self.commit_batched == null);
+            defer assert(self.commit_batched != null);
+
+            var body_decoder = BatchBodyDecoder.init(
+                prepare.header.release,
+                prepare.body_used(),
+            ) catch unreachable;
+
+            const prepare_timestamp: u64 = prepare_timestamp: {
+                // The timestamp is relative to the last object committed within the `op`.
+                // To execute multiple batches, the timestamp must be adjusted.
+                defer body_decoder.reset();
+                var delta: u64 = 0;
+                while (body_decoder.pop()) |batch_item| {
+                    delta += self.state_machine.prepare_nanoseconds(
+                        prepare.header.release,
+                        batch_item.operation.cast(StateMachine),
+                        batch_item.batched,
+                    );
+                }
+                assert(prepare.header.timestamp > delta);
+                break :prepare_timestamp prepare.header.timestamp - delta;
+            };
+
+            self.commit_batched = .{
+                .decoder = body_decoder,
+                .prepare_timestamp = prepare_timestamp,
+            };
+        }
+
+        fn prefetch_op_batched(
+            self: *Replica,
+            prepare: *const Message.Prepare,
+        ) void {
+            assert(prepare.header.operation == .batched);
+            maybe(self.commit_batched == null);
+
+            // It's a batched request, the message body must be decoded to
+            // remove the trailer.
+            if (self.commit_batched) |*commit_batched| {
+                assert(self.commit_stage == .prefetch_batch);
+                assert(commit_batched.decoder.batch_index > 0);
+                assert(commit_batched.decoder.batch_index < commit_batched.decoder.batch_count());
+                assert(commit_batched.encoder != null);
+                assert(commit_batched.decoder.batch_index == commit_batched.encoder.?.batch_count);
             } else {
-                assert(prepare.header.operation.vsr_reserved());
-                return .ready;
+                assert(self.commit_stage == .prefetch);
+                self.commit_decode_batch(prepare);
             }
+            assert(self.commit_batched != null);
+
+            // Prefetching is performed per operation, although it may be possible
+            // to prefetch multiple batches of the same operation together since the
+            // payload consists of contiguous regions of the message payload.
+            const operation, const prefetch_timestamp, const batch = contiguous: {
+                const body_decoder: *BatchBodyDecoder = &self.commit_batched.?.decoder;
+                const batch_index = body_decoder.batch_index;
+
+                var prefetch_timestamp: u64 = self.commit_batched.?.prepare_timestamp;
+                defer {
+                    assert(body_decoder.batch_index > batch_index);
+                    assert(prefetch_timestamp >= self.commit_batched.?.prepare_timestamp);
+                    body_decoder.set_batch_index(batch_index); // Reset to the previous position.
+                }
+
+                var operation: ?StateMachine.Operation = null;
+                const payload_index: usize = body_decoder.payload_index;
+                var length: usize = 0;
+                while (body_decoder.peek()) |batch_item| {
+                    if (operation == null) {
+                        operation = batch_item.operation.cast(StateMachine);
+                    } else {
+                        if (batch_item.operation.cast(StateMachine) != operation.? or
+                            !StateMachine.event_is_slice(operation.?)) break;
+                    }
+
+                    defer {
+                        const moved = body_decoder.move_next();
+                        assert(body_decoder.payload_index == payload_index + length);
+                        maybe(moved);
+                    }
+
+                    // The next batch starts where the previous one ends.
+                    // Since they are from the same operation, there must be no padding
+                    // between the slices.
+                    length += batch_item.batched.len;
+                    prefetch_timestamp += self.state_machine.prepare_nanoseconds(
+                        prepare.header.release,
+                        batch_item.operation.cast(StateMachine),
+                        batch_item.batched,
+                    );
+                }
+                assert(operation != null);
+                assert(body_decoder.payload.len >= payload_index + length);
+
+                break :contiguous .{
+                    operation.?,
+                    prefetch_timestamp,
+                    body_decoder.payload[payload_index..][0..length],
+                };
+            };
+
+            self.state_machine.prefetch_timestamp = prefetch_timestamp;
+            self.state_machine.prefetch(
+                commit_prefetch_callback,
+                prepare.header.release,
+                prepare.header.op,
+                operation,
+                batch,
+            );
         }
 
         fn commit_prefetch_callback(state_machine: *StateMachine) void {
             const self: *Replica = @alignCast(@fieldParentPtr("state_machine", state_machine));
-            assert(self.commit_stage == .prefetch);
+            assert(self.commit_stage == .prefetch or
+                self.commit_stage == .prefetch_batch);
             assert(self.commit_prepare != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
 
@@ -4303,9 +4513,17 @@ pub fn ReplicaType(
         }
 
         fn commit_execute(self: *Replica) void {
-            self.execute_op(self.commit_prepare.?);
-            assert(self.commit_min == self.commit_prepare.?.header.op);
-            assert(self.commit_min <= self.commit_max);
+            switch (self.execute_op(self.commit_prepare.?)) {
+                .pending => {
+                    // Keep processing the rest of the batch.
+                    assert(self.commit_prepare.?.header.operation == .batched);
+                    return;
+                },
+                .ready => {
+                    assert(self.commit_min == self.commit_prepare.?.header.op);
+                    assert(self.commit_min <= self.commit_max);
+                },
+            }
 
             if (self.status == .normal and self.primary()) {
                 assert(!self.view_durable_updating());
@@ -4704,7 +4922,7 @@ pub fn ReplicaType(
             self.commit_prepare = null;
         }
 
-        fn execute_op(self: *Replica, prepare: *const Message.Prepare) void {
+        fn execute_op(self: *Replica, prepare: *const Message.Prepare) enum { pending, ready } {
             // TODO Can we add more checks around allowing execute_op() during a view change?
             assert(self.commit_stage == .execute);
             assert(self.commit_prepare.? == prepare);
@@ -4746,15 +4964,12 @@ pub fn ReplicaType(
                 prepare.header.operation.tag_name(StateMachine),
             });
 
-            const reply = self.message_bus.get_message(.reply);
-            defer self.message_bus.unref(reply);
-
             log.debug("{}: execute_op: commit_timestamp={} prepare.header.timestamp={}", .{
                 self.replica,
                 self.state_machine.commit_timestamp,
                 prepare.header.timestamp,
             });
-            assert(self.state_machine.commit_timestamp < prepare.header.timestamp or
+            assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or
                 constants.aof_recovery);
 
             // Synchronously record this request in our AOF. This can be used for disaster recovery
@@ -4782,7 +4997,22 @@ pub fn ReplicaType(
                 });
             }
 
-            const reply_body_size = switch (prepare.header.operation) {
+            const reply = reply: {
+                if (prepare.header.operation == .batched) {
+                    assert(self.commit_batched != null);
+                    const message = self.commit_batched.?.reply orelse message: {
+                        const message = self.message_bus.get_message(.reply);
+                        self.commit_batched.?.reply = message;
+                        break :message message;
+                    };
+                    break :reply message.ref();
+                }
+
+                break :reply self.message_bus.get_message(.reply);
+            };
+            defer self.message_bus.unref(reply);
+
+            const reply_body_size: usize = switch (prepare.header.operation) {
                 .reserved, .root => unreachable,
                 .register => self.execute_op_register(prepare, reply.buffer[@sizeOf(Header)..]),
                 .reconfigure => self.execute_op_reconfiguration(
@@ -4790,87 +5020,29 @@ pub fn ReplicaType(
                     reply.buffer[@sizeOf(Header)..],
                 ),
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
-                else => reply_body_size: {
-                    const operation = prepare.header.operation.cast(StateMachine);
-                    if (prepare.header.batch_count == 0) {
-                        // No batching required, commiting the entire payload at once.
-                        const bytes_written = self.state_machine.commit(
-                            prepare.header.client,
-                            prepare.header.release,
-                            prepare.header.op,
-                            prepare.header.timestamp,
-                            operation,
-                            prepare.body_used(),
-                            reply.buffer[@sizeOf(Header)..],
-                        );
-                        break :reply_body_size bytes_written;
-                    } else {
-                        var body_decoder = BatchDecoder.init(
-                            StateMachine.event_size_bytes(prepare.header.release, operation),
-                            prepare.body_used(), // The message's with the trailer.
-                            prepare.header.batch_count,
-                        ) catch unreachable; // Validated during `ignore_request_message()`.
-                        var reply_encoder = BatchEncoder.init(
-                            StateMachine.result_size_bytes(prepare.header.release, operation),
-                            reply.buffer[@sizeOf(Header)..],
-                        );
-
-                        var prepare_timestamp: u64 = prepare.header.timestamp -
-                            self.state_machine.prepare_nanoseconds(
-                            prepare.header.release,
-                            operation,
-                            body_decoder.payload, // The entire message's body without the trailer.
-                        );
-                        log.debug(
-                            "{}: execute_op: op={} batch_count={} operation={s}",
-                            .{
-                                self.replica,
-                                prepare.header.op,
-                                prepare.header.batch_count,
-                                @tagName(operation),
-                            },
-                        );
-
-                        while (body_decoder.next()) |batch| {
-                            // Commit each batched set of events
-                            // using the timestamp of the highest result of the response.
-                            prepare_timestamp += self.state_machine.prepare_nanoseconds(
-                                prepare.header.release,
-                                operation,
-                                batch, // The batch's body.
-                            );
-                            const bytes_written = self.state_machine.commit(
-                                prepare.header.client,
-                                prepare.header.release,
-                                prepare.header.op,
-                                prepare_timestamp,
-                                operation,
-                                batch,
-                                reply_encoder.writable(),
-                            );
-                            reply_encoder.add(bytes_written);
-
-                            log.debug(
-                                "{}: execute_op: batch={} elements={} " ++
-                                    "prepare_timestamp={} commit_timestamp={}",
-                                .{
-                                    self.replica,
-                                    reply_encoder.batch_count,
-                                    @divExact(batch.len, body_decoder.element_size),
-                                    prepare_timestamp,
-                                    self.state_machine.commit_timestamp,
-                                },
-                            );
-                        }
-                        reply_encoder.finish();
-                        assert(reply_encoder.batch_count == prepare.header.batch_count);
-                        assert(prepare_timestamp == prepare.header.timestamp);
-
-                        break :reply_body_size reply_encoder.bytes_written;
-                    }
+                .batched => switch (self.execute_op_batched(prepare, reply)) {
+                    .pending => {
+                        assert(self.commit_batched != null);
+                        assert(self.commit_batched.?.reply != null);
+                        return .pending;
+                    },
+                    .ready => |reply_body_size| ready: {
+                        self.message_bus.unref(self.commit_batched.?.reply.?);
+                        self.commit_batched = null;
+                        break :ready reply_body_size;
+                    },
                 },
+                else => self.state_machine.commit(
+                    prepare.header.client,
+                    prepare.header.release,
+                    prepare.header.op,
+                    prepare.header.timestamp,
+                    prepare.header.operation.cast(StateMachine),
+                    prepare.body_used(),
+                    reply.buffer[@sizeOf(Header)..],
+                ),
             };
-
+            assert(self.commit_batched == null);
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or
                 constants.aof_recovery);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
@@ -4906,7 +5078,6 @@ pub fn ReplicaType(
                 .timestamp = prepare.header.timestamp,
                 .commit = prepare.header.op,
                 .size = @sizeOf(Header) + @as(u32, @intCast(reply_body_size)),
-                .batch_count = prepare.header.batch_count,
             };
             assert(reply.header.epoch == 0);
 
@@ -4963,6 +5134,8 @@ pub fn ReplicaType(
                     self.send_reply_message_to_client(reply);
                 }
             }
+
+            return .ready;
         }
 
         fn execute_op_register(
@@ -5106,6 +5279,95 @@ pub fn ReplicaType(
             // The cluster is sending this request to itself, so there is no reply.
             _ = output_buffer;
             return 0;
+        }
+
+        fn execute_op_batched(
+            self: *Replica,
+            prepare: *const Message.Prepare,
+            reply: MessagePool.GetMessageType(.reply),
+        ) union(enum) {
+            pending,
+            ready: usize,
+        } {
+            assert(prepare.header.operation == .batched);
+            assert(self.commit_batched != null);
+            assert(self.commit_batched.?.reply == reply);
+
+            if (self.commit_batched.?.encoder == null) {
+                self.commit_batched.?.encoder = BatchReplyEncoder.init(
+                    prepare.header.release,
+                    reply.buffer[@sizeOf(Header)..],
+                );
+            }
+            assert(self.commit_batched.?.encoder != null);
+
+            const body_decoder: *BatchBodyDecoder = &self.commit_batched.?.decoder;
+            const reply_encoder: *BatchReplyEncoder = &self.commit_batched.?.encoder.?;
+            assert(body_decoder.batch_index == reply_encoder.batch_count);
+
+            // Assert that we've made progress.
+            const batch_index = body_decoder.batch_index;
+            defer assert(body_decoder.batch_index > batch_index);
+
+            var prepare_timestamp: u64 = self.commit_batched.?.prepare_timestamp;
+            defer self.commit_batched.?.prepare_timestamp = prepare_timestamp;
+
+            var current_operation: ?vsr.Operation = null;
+            while (body_decoder.peek()) |batch_item| {
+                const operation = batch_item.operation.cast(StateMachine);
+                if (current_operation) |vsr_operation| {
+                    if (vsr_operation != batch_item.operation or
+                        !StateMachine.event_is_slice(operation)) break;
+                } else {
+                    current_operation = batch_item.operation;
+                }
+
+                defer {
+                    const moved = body_decoder.move_next();
+                    assert(body_decoder.batch_index == reply_encoder.batch_count);
+                    maybe(moved);
+                }
+
+                // Commit each batched set of events
+                // using the timestamp of the highest result of the response.
+                prepare_timestamp += self.state_machine.prepare_nanoseconds(
+                    prepare.header.release,
+                    operation,
+                    batch_item.batched,
+                );
+                const bytes_written = self.state_machine.commit(
+                    prepare.header.client,
+                    prepare.header.release,
+                    prepare.header.op,
+                    prepare_timestamp,
+                    operation,
+                    batch_item.batched,
+                    reply_encoder.writable(batch_item.operation),
+                );
+                reply_encoder.add(batch_item.operation, bytes_written);
+
+                log.debug("{}: execute_op_batched: batch={} operation={s} " ++
+                    "batched.len={} bytes_written={} " ++
+                    "prepare_timestamp={} commit_timestamp={}", .{
+                    self.replica,
+                    reply_encoder.batch_count,
+                    @tagName(operation),
+                    batch_item.batched.len,
+                    bytes_written,
+                    prepare_timestamp,
+                    self.state_machine.commit_timestamp,
+                });
+            }
+            assert(current_operation != null);
+
+            const last_batch: bool = reply_encoder.batch_count == body_decoder.batch_count();
+            if (last_batch) {
+                assert(prepare_timestamp == prepare.header.timestamp);
+                return .{ .ready = reply_encoder.finish() };
+            } else {
+                assert(prepare_timestamp <= prepare.header.timestamp);
+                return .pending;
+            }
         }
 
         /// Creates an entry in the client table when registering a new client session.
@@ -5715,43 +5977,64 @@ pub fn ReplicaType(
                 );
                 return true;
             }
-            if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
-                const input_valid = input_valid: {
-                    if (message.header.batch_count == 0) {
-                        break :input_valid self.state_machine.input_valid(
-                            message.header.release,
-                            operation,
-                            message.body_used(),
-                        );
-                    } else {
-                        const decoder = BatchDecoder.init(
-                            StateMachine.event_size_bytes(
-                                message.header.release,
-                                operation,
-                            ),
-                            message.body_used(),
-                            message.header.batch_count,
-                        ) catch |err| switch (err) {
-                            error.BatchInvalid => break :input_valid false,
-                        };
 
-                        break :input_valid self.state_machine.input_valid(
-                            message.header.release,
-                            operation,
-                            decoder.payload,
-                        );
-                    }
-                };
+            if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
+                const input_valid = self.state_machine.input_valid(
+                    message.header.release,
+                    operation,
+                    message.body_used(),
+                );
 
                 if (!input_valid) {
                     log.warn(
                         "{}: on_request: ignoring invalid body " ++
-                            "(operation={s}, body.len={}, batch_count={})",
+                            "(client={} operation={} body.len={})",
                         .{
                             self.replica,
-                            @tagName(operation),
+                            message.header.client,
+                            operation,
                             message.body_used().len,
-                            message.header.batch_count,
+                        },
+                    );
+                    self.send_eviction_message_to_client(
+                        message.header.client,
+                        .invalid_request_body,
+                    );
+                    return true;
+                }
+            }
+
+            if (message.header.operation == .batched) {
+                const input_valid: bool = input_valid: {
+                    var decoder = BatchBodyDecoder.init(
+                        message.header.release,
+                        message.body_used(),
+                    ) catch |err| switch (err) {
+                        error.BatchInvalid => break :input_valid false,
+                    };
+                    while (decoder.pop()) |batch_item| {
+                        const operation = StateMachine.operation_from_vsr(
+                            batch_item.operation,
+                        ) orelse break :input_valid false;
+
+                        if (!self.state_machine.input_valid(
+                            message.header.release,
+                            operation,
+                            batch_item.batched,
+                        )) break :input_valid false;
+                    }
+
+                    break :input_valid true;
+                };
+
+                if (!input_valid) {
+                    log.warn(
+                        "{}: on_request: ignoring invalid batched body " ++
+                            "(client={} body.len={})",
+                        .{
+                            self.replica,
+                            message.header.client,
+                            message.body_used().len,
                         },
                     );
                     self.send_eviction_message_to_client(
@@ -6653,31 +6936,32 @@ pub fn ReplicaType(
                         assert(op_checkpoint_trigger > self.op + 1);
                     }
                 },
+                .batched => {
+                    // If it's a batched request, the message body must be decoded to
+                    // remove the trailer.
+                    var decoder = BatchBodyDecoder.init(
+                        request.message.header.release,
+                        request.message.body_used(),
+                    ) catch unreachable; // Validated during `ignore_request_message()`.
+
+                    // The timestamp is relative to the last object committed within the `op`.
+                    // To execute multiple batches, the timestamp must be adjusted.
+                    var delta: u64 = 0;
+                    while (decoder.pop()) |batch_item| {
+                        delta += self.state_machine.prepare_nanoseconds(
+                            request.message.header.release,
+                            batch_item.operation.cast(StateMachine),
+                            batch_item.batched,
+                        );
+                    }
+                    self.state_machine.prepare_timestamp += delta;
+                },
                 else => {
                     const operation = request.message.header.operation.cast(StateMachine);
-                    const body: []const u8 = body: {
-                        if (request.message.header.batch_count == 0) {
-                            break :body request.message.body_used();
-                        }
-
-                        // If it's a batched request, the message body must be decoded to
-                        // remove the trailer.
-                        const event_size = StateMachine.event_size_bytes(
-                            request.message.header.release,
-                            operation,
-                        );
-                        const decoder = BatchDecoder.init(
-                            event_size,
-                            request.message.body_used(),
-                            request.message.header.batch_count,
-                        ) catch unreachable; // Validated during `ignore_request_message()`.
-
-                        break :body decoder.payload;
-                    };
                     self.state_machine.prepare_timestamp += self.state_machine.prepare_nanoseconds(
                         request.message.header.release,
                         operation,
-                        body,
+                        request.message.body_used(),
                     );
                 },
             }
@@ -6723,7 +7007,6 @@ pub fn ReplicaType(
                 },
                 .request = request_header.request,
                 .operation = request_header.operation,
-                .batch_count = request_header.batch_count,
             };
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
@@ -9576,6 +9859,7 @@ pub fn ReplicaType(
 
                 .idle, // (StateMachine.open() may be running.)
                 .prefetch,
+                .prefetch_batch,
                 .compact,
                 .checkpoint_durable,
                 => self.sync_dispatch(.canceling_grid),
@@ -10440,7 +10724,6 @@ pub fn ReplicaType(
                 .parent = 0,
                 .client = 0,
                 .session = 0,
-                .batch_count = 0,
             };
 
             stdx.copy_disjoint(.exact, u8, request.body_used(), body);

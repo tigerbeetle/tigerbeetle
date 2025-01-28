@@ -58,6 +58,24 @@ pub fn StateMachineType(
             return @sizeOf(u8);
         }
 
+        pub fn event_is_slice(_: Operation) bool {
+            return true;
+        }
+
+        pub fn event_alignment(
+            _: vsr.Release,
+            _: Operation,
+        ) usize {
+            return 1;
+        }
+
+        pub fn result_alignment(
+            _: vsr.Release,
+            _: Operation,
+        ) usize {
+            return 1;
+        }
+
         pub const Forest = ForestType(Storage, .{ .things = ThingGroove });
 
         const ThingGroove = GrooveType(
