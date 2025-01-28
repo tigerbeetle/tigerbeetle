@@ -86,6 +86,8 @@ pub const Storage = struct {
         /// Does not impact crash faults or manual faults.
         fault_atlas: ?*const ClusterFaultAtlas = null,
 
+        fault_granularity: enum { sector, byte } = .sector,
+
         /// Accessed by the Grid for extra verification of grid coherence.
         grid_checker: ?*GridChecker = null,
     };
@@ -407,14 +409,22 @@ pub const Storage = struct {
             const sector_uninitialized = !storage.memory_written.isSet(sector);
 
             if (sector_corrupt) {
-                // Rather than corrupting the entire sector, inject a localized error.
-                // (In some cases this will just corrupt sector padding.)
-                // Inject the fault at a deterministic position (by using the pristine bytes as
-                // consistent seed) so that read-retries don't resolve the corruption.
-                const corrupt_seed: u64 = @bitCast(sector_bytes[0..@sizeOf(u64)].*);
-                var corrupt_prng = std.rand.DefaultPrng.init(corrupt_seed);
-                const corrupt_byte = corrupt_prng.random().uintLessThan(u32, sector_bytes.len);
-                sector_bytes[corrupt_byte] +%= 1;
+                switch (storage.options.fault_granularity) {
+                    .byte => {
+                        // Rather than corrupting the entire sector, inject a localized error.
+                        // (In some cases this will just corrupt sector padding.)
+                        // Inject the fault at a deterministic position (by using the pristine bytes
+                        // as consistent seed) so that read-retries don't resolve the corruption.
+                        const corrupt_seed: u64 = @bitCast(sector_bytes[0..@sizeOf(u64)].*);
+                        var corrupt_prng = std.rand.DefaultPrng.init(corrupt_seed);
+                        const corrupt_byte =
+                            corrupt_prng.random().uintLessThan(u32, sector_bytes.len);
+                        sector_bytes[corrupt_byte] +%= 1;
+                    },
+                    .sector => {
+                        storage.prng.random().bytes(sector_bytes);
+                    },
+                }
             }
 
             if (sector_uninitialized) {
