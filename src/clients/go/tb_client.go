@@ -236,7 +236,6 @@ func (c *c_client) doRequest(
 		}
 	}
 
-	// Return the amount of bytes written into result
 	return reply, nil
 }
 
@@ -277,7 +276,7 @@ func onGoPacketCompletion(
 			}
 		}
 
-		// Write the result data into the request's result.
+		// Copy the result data into a new buffer.
 		reply = make([]uint8, result_len)
 		C.memcpy(unsafe.Pointer(&reply[0]), unsafe.Pointer(result_ptr), C.size_t(result_len))
 	}
