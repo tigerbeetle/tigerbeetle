@@ -17,9 +17,8 @@ const IO = vsr.io.IO;
 const FIFOType = vsr.fifo.FIFOType;
 const message_pool = vsr.message_pool;
 
-const BatchEncoder = vsr.batch.BatchEncoder;
-const BatchDecoder = vsr.batch.BatchDecoder;
-const batch_trailer_total_size = vsr.batch.batch_trailer_total_size;
+const BatchEncoderType = vsr.batch.BatchEncoderType;
+const BatchDecoderType = vsr.batch.BatchDecoderType;
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
@@ -58,6 +57,127 @@ pub fn ContextType(
             .query_accounts,
             .query_transfers,
         };
+
+        const BatchEncoder = BatchEncoderType(void, .{
+            .is_valid = struct {
+                fn is_valid(_: void, vsr_operation: vsr.Operation) bool {
+                    const operation = StateMachine.operation_from_vsr(vsr_operation) orelse {
+                        return false;
+                    };
+                    return operation != .pulse;
+                }
+            }.is_valid,
+            .element_size = struct {
+                fn element_size(_: void, vsr_operation: vsr.Operation) usize {
+                    const operation = StateMachine.operation_from_vsr(vsr_operation).?;
+                    return switch (operation) {
+                        .pulse => unreachable,
+                        inline else => |comptime_operation| @sizeOf(
+                            StateMachine.EventType(comptime_operation),
+                        ),
+                    };
+                }
+            }.element_size,
+            .alignment = struct {
+                fn alignment(_: void, vsr_operation: vsr.Operation) usize {
+                    const operation = StateMachine.operation_from_vsr(vsr_operation).?;
+                    return switch (operation) {
+                        .pulse => unreachable,
+                        inline else => |comptime_operation| @alignOf(
+                            StateMachine.EventType(comptime_operation),
+                        ),
+                    };
+                }
+            }.alignment,
+        });
+
+        const BatchDecoder = BatchDecoderType(void, .{
+            .is_valid = struct {
+                fn is_valid(_: void, vsr_operation: vsr.Operation) bool {
+                    const operation = StateMachine.operation_from_vsr(vsr_operation) orelse {
+                        return false;
+                    };
+                    return operation != .pulse;
+                }
+            }.is_valid,
+            .element_size = struct {
+                fn element_size(_: void, vsr_operation: vsr.Operation) usize {
+                    const operation = StateMachine.operation_from_vsr(vsr_operation).?;
+                    return switch (operation) {
+                        .pulse => unreachable,
+                        inline else => |comptime_operation| @sizeOf(
+                            StateMachine.ResultType(comptime_operation),
+                        ),
+                    };
+                }
+            }.element_size,
+            .alignment = struct {
+                fn alignment(_: void, vsr_operation: vsr.Operation) usize {
+                    const operation = StateMachine.operation_from_vsr(vsr_operation).?;
+                    return switch (operation) {
+                        .pulse => unreachable,
+                        inline else => |comptime_operation| @alignOf(
+                            StateMachine.ResultType(comptime_operation),
+                        ),
+                    };
+                }
+            }.alignment,
+        });
+
+        fn result_expected_size(
+            self: *const Context,
+            operation: StateMachine.Operation,
+            input: []const u8,
+        ) error{InvalidDataSize}!u32 {
+            switch (operation) {
+                .pulse => unreachable,
+                inline .get_account_transfers,
+                .get_account_balances,
+                .query_accounts,
+                .query_transfers,
+                => |operation_comptime| {
+                    comptime assert(!StateMachine.event_is_slice(operation_comptime));
+
+                    const Filter = StateMachine.EventType(operation_comptime);
+                    comptime assert(@sizeOf(Filter) > 0);
+
+                    const Result = StateMachine.ResultType(operation_comptime);
+                    comptime assert(@sizeOf(Result) > 0);
+
+                    if (input.len != @sizeOf(Filter)) return error.InvalidDataSize;
+
+                    // User memory is not required to be aligned.
+                    maybe(std.mem.isAligned(@intFromPtr(input.ptr), @alignOf(Filter)));
+                    const filter: *align(1) const Filter = std.mem.bytesAsValue(
+                        Filter,
+                        input,
+                    );
+
+                    return @min(
+                        filter.limit,
+                        // TODO: Should we err with `TooMuchData` if the `limit` is too high?
+                        @divFloor(self.batch_size_limit.?, @sizeOf(Result)),
+                    ) * @sizeOf(Result);
+                },
+                inline else => |operation_comptime| {
+                    comptime assert(StateMachine.event_is_slice(operation_comptime));
+
+                    const Event = StateMachine.EventType(operation_comptime);
+                    comptime assert(@sizeOf(Event) > 0);
+
+                    const Result = StateMachine.ResultType(operation_comptime);
+                    comptime assert(@sizeOf(Result) > 0);
+
+                    // Clients do not validate batch size == 0,
+                    // and even the simulator can generate requests with no events.
+                    maybe(input.len == 0);
+                    if (input.len % @sizeOf(Event) != 0) return error.InvalidDataSize;
+                    const events: u32 = @intCast(@divExact(input.len, @sizeOf(Event)));
+
+                    return @sizeOf(Result) * events;
+                },
+            }
+        }
 
         const UserData = extern struct {
             self: *Context,
@@ -342,107 +462,157 @@ pub fn ContextType(
                 return;
             };
 
-            const event_size: usize, const events_batch_max: usize = switch (operation) {
-                .pulse => unreachable,
-                inline else => |operation_comptime| blk: {
-                    // Make sure the packet.data wouldn't overflow a request,
-                    // and that the corresponding results won't overflow a reply.
-                    const Event = StateMachine.EventType(operation_comptime);
-                    const event_size = @sizeOf(Event);
-                    const slice: []const u8 = packet.slice();
+            if (packet.data_size > self.batch_size_limit.?) {
+                self.notify_completion(packet, error.TooMuchData);
+                return;
+            }
 
-                    if (slice.len % event_size != 0) {
-                        self.notify_completion(packet, error.InvalidDataSize);
-                        return;
-                    }
-
-                    if (slice.len > self.batch_size_limit.?) {
-                        self.notify_completion(packet, error.TooMuchData);
-                        return;
-                    }
-
-                    const events_batch_max = if (StateMachine.event_is_slice(operation))
-                        StateMachine.operation_batch_max(
-                            operation_comptime,
-                            self.batch_size_limit.?,
-                        )
-                    else
-                        1;
-
-                    if (@divExact(slice.len, event_size) > events_batch_max) {
-                        self.notify_completion(packet, error.TooMuchData);
-                        return;
-                    }
-
-                    break :blk .{ event_size, events_batch_max };
-                },
+            const results_size: u32 = self.result_expected_size(
+                operation,
+                packet.slice(),
+            ) catch |err| {
+                self.notify_completion(packet, err);
+                return;
             };
-            assert(self.batch_size_limit.? >= event_size * events_batch_max);
+            if (results_size > self.batch_size_limit.?) {
+                self.notify_completion(packet, error.TooMuchData);
+                return;
+            }
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
                 assert(self.pending.count == 0);
-
                 packet.phase = .pending;
                 self.packet_send(packet);
                 return;
             }
 
-            // If allowed, try to batch the packet with another already in `pending`.
-            if (events_batch_max > 1) {
-                var it = self.pending.peek();
-                while (it) |root| {
-                    root.assert_phase(.pending);
-                    it = root.next;
+            var it = self.pending.peek();
+            while (it) |root| {
+                root.assert_phase(.pending);
+                it = root.next;
 
-                    if (root.operation != packet.operation) continue;
+                if (root.operation != packet.operation) continue;
 
+                const encoded_events = BatchEncoder.encoded_total_size(.{
+                    .context = {},
+                    .current_payload_size = root.batch_events_size,
+                    .current_batch_count = @max(1, root.batch_count) + 1,
+                    .next_operation = vsr.Operation.from(StateMachine, operation),
+                    .next_payload_size = packet.data_size,
+                });
+                if (self.batch_size_limit.? <
+                    encoded_events.payload_size + encoded_events.trailer_size) continue;
+
+                const encoded_results = BatchDecoder.encoded_total_size(.{
+                    .context = {},
+                    .current_payload_size = root.batch_results_size,
+                    .current_batch_count = @max(1, root.batch_count) + 1,
+                    .next_operation = vsr.Operation.from(StateMachine, operation),
+                    .next_payload_size = results_size,
+                });
+                if (self.batch_size_limit.? <
+                    encoded_results.payload_size + encoded_results.trailer_size) continue;
+
+                if (root.batch_count == 0) {
+                    assert(root.batch_next == null);
                     // Although the protocol allows `batch_count == 1`,
                     // the client never packages a single packet into a batched request.
-                    // Instead, it sends a non-batched request with `batch_count == 0` to avoid
-                    // wasting message body bytes with the batch trailer.
-                    if (root.batch_count == 0) {
-                        assert(root.batch_next == null);
-                        const total_size = root.data_size + packet.data_size +
-                            batch_trailer_total_size(.{
-                            .element_size = event_size,
-                            .batch_count = 2,
-                        });
-                        if (total_size > self.batch_size_limit.?) continue;
-                        if (@divExact(total_size, event_size) > events_batch_max) continue;
-
-                        root.batch_count = 2;
-                        root.batch_next = packet;
-                        root.batch_tail = packet;
-                        root.batch_events = @intCast(@divExact(
-                            root.data_size + packet.data_size,
-                            event_size,
-                        ));
-                    } else {
-                        assert(root.batch_count > 1);
-                        assert(root.batch_next != null);
-                        const total_size = (root.batch_events * event_size) +
-                            packet.data_size + batch_trailer_total_size(.{
-                            .element_size = event_size,
-                            .batch_count = root.batch_count + 1,
-                        });
-                        if (total_size > self.batch_size_limit.?) continue;
-                        if (@divExact(total_size, event_size) > events_batch_max) continue;
-
-                        root.batch_count += 1;
-                        root.batch_tail.?.batch_next = packet;
-                        root.batch_tail = packet;
-                        root.batch_events += @intCast(@divExact(packet.data_size, event_size));
-                    }
-
-                    packet.phase = .batched;
-                    return;
+                    // Instead, it sends a non-batched request to avoid wasting message
+                    // body bytes with the batch trailer.
+                    root.batch_count = 2;
+                    root.batch_next = packet;
+                    root.batch_tail = packet;
+                } else {
+                    assert(root.batch_count > 1);
+                    assert(root.batch_next != null);
+                    root.batch_count += 1;
+                    root.batch_tail.?.batch_next = packet;
+                    root.batch_tail = packet;
                 }
+
+                root.batch_events_size = encoded_events.payload_size;
+                root.batch_results_size = encoded_results.payload_size;
+                packet.phase = .batched;
+                return;
             }
 
             // Couldn't batch with existing packet so push to pending directly.
             packet.phase = .pending;
+            packet.batch_events_size = packet.data_size;
+            packet.batch_results_size = results_size;
             self.pending.push(packet);
+        }
+
+        fn batch_merge(self: *Context) ?*Packet {
+            assert(self.batch_size_limit != null);
+
+            const root = self.pending.pop() orelse return null;
+            root.assert_phase(.pending);
+            assert(root.batch_events_size <= self.batch_size_limit.?);
+            assert(root.batch_results_size <= self.batch_size_limit.?);
+            maybe(root.batch_count == 0);
+
+            while (self.pending.peek()) |next| {
+                next.assert_phase(.pending);
+                assert(next.batch_events_size <= self.batch_size_limit.?);
+                assert(next.batch_results_size <= self.batch_size_limit.?);
+
+                const operation = vsr.Operation.from(
+                    StateMachine,
+                    operation_from_int(next.operation).?,
+                );
+
+                const encoded_events = BatchEncoder.encoded_total_size(.{
+                    .context = {},
+                    .current_payload_size = root.batch_events_size,
+                    .current_batch_count = @max(1, root.batch_count) + 1,
+                    .next_operation = operation,
+                    .next_payload_size = next.batch_events_size,
+                });
+                if (self.batch_size_limit.? <
+                    encoded_events.payload_size + encoded_events.trailer_size) break;
+
+                const encoded_results = BatchDecoder.encoded_total_size(.{
+                    .context = {},
+                    .current_payload_size = root.batch_results_size,
+                    .current_batch_count = @max(1, root.batch_count) + 1,
+                    .next_operation = operation,
+                    .next_payload_size = next.batch_results_size,
+                });
+                if (self.batch_size_limit.? <
+                    encoded_results.payload_size + encoded_results.trailer_size) break;
+
+                assert(next == self.pending.pop().?);
+                if (root.batch_count == 0) {
+                    assert(root.batch_next == null);
+                    assert(root.batch_tail == null);
+                    root.batch_count = @max(1, next.batch_count) + 1;
+                    root.batch_next = next;
+                    root.batch_tail = next.batch_tail orelse next;
+                } else {
+                    assert(root.batch_count > 1);
+                    assert(root.batch_next != null);
+                    assert(root.batch_tail != null);
+                    assert(root.batch_tail.?.batch_next == null);
+                    root.batch_count += @max(1, next.batch_count);
+                    root.batch_tail.?.batch_next = next;
+                    root.batch_tail = next.batch_tail orelse next;
+                }
+                root.batch_events_size = encoded_events.payload_size;
+                root.batch_results_size = encoded_results.payload_size;
+
+                next.phase = .batched;
+                next.batch_tail = null;
+                next.batch_count = 0;
+                next.batch_events_size = 0;
+                next.batch_results_size = 0;
+                next.assert_phase(.batched);
+            }
+
+            assert(root.batch_events_size <= self.batch_size_limit.?);
+            assert(root.batch_results_size <= self.batch_size_limit.?);
+            return root;
         }
 
         /// Sends the packet (the entire batched linked list of packets) through the vsr client.
@@ -457,23 +627,16 @@ pub fn ContextType(
                 return;
             }
 
-            const operation: StateMachine.Operation = operation_from_int(packet.operation).?;
-            const event_size: usize = switch (operation) {
-                .pulse => unreachable,
-                inline else => |operation_comptime| @sizeOf(
-                    StateMachine.EventType(operation_comptime),
-                ),
-            };
-
             const message = self.client.get_message().build(.request);
             defer {
                 self.client.release_message(message.base());
                 packet.assert_phase(.sent);
             }
 
-            const bytes_written: usize = bytes_written: {
+            const bytes_written: usize, const vsr_operation: vsr.Operation = request: {
                 if (packet.batch_count == 0) {
                     assert(packet.batch_next == null);
+                    const operation = operation_from_int(packet.operation).?;
                     const slice: []const u8 = packet.slice();
                     stdx.copy_disjoint(
                         .inexact,
@@ -481,36 +644,40 @@ pub fn ContextType(
                         message.buffer[@sizeOf(Header)..],
                         slice,
                     );
-                    break :bytes_written slice.len;
+
+                    break :request .{
+                        slice.len,
+                        vsr.Operation.from(StateMachine, operation),
+                    };
                 } else {
                     // Although the protocol allows `batch_count == 1`,
                     // the client never packages a single packet into a batched request.
                     assert(packet.batch_count > 1);
                     assert(packet.batch_next != null);
 
-                    var encoder = BatchEncoder.init(
-                        event_size,
-                        message.buffer[@sizeOf(Header)..],
-                    );
-
+                    var encoder = BatchEncoder.init({}, message.buffer[@sizeOf(Header)..]);
                     var it: ?*Packet = packet;
                     while (it) |batched| {
                         it = batched.batch_next;
                         if (encoder.batch_count > 0) batched.assert_phase(.batched);
-
-                        const slice: []const u8 = batched.slice();
-                        stdx.copy_disjoint(.inexact, u8, encoder.writable(), slice);
-                        encoder.add(slice.len);
+                        const operation = operation_from_int(batched.operation).?;
+                        const vsr_operation = vsr.Operation.from(StateMachine, operation);
+                        const source: []const u8 = batched.slice();
+                        const target: []u8 = encoder.writable(vsr_operation);
+                        assert(source.len <= target.len);
+                        stdx.copy_disjoint(.inexact, u8, target, source);
+                        encoder.add(vsr_operation, source.len);
                     }
                     assert(encoder.batch_count == packet.batch_count);
-                    assert(packet.batch_events == @divExact(encoder.bytes_written, event_size));
-                    encoder.finish();
+                    assert(encoder.buffer_index == packet.batch_events_size);
 
-                    break :bytes_written encoder.bytes_written;
+                    const bytes_written = encoder.finish();
+                    break :request .{ bytes_written, .batched };
                 }
             };
-            assert(bytes_written % event_size == 0);
             assert(bytes_written <= self.batch_size_limit.?);
+            assert(vsr_operation == .batched or
+                StateMachine.operation_from_vsr(vsr_operation) != null);
 
             message.header.* = .{
                 .release = self.client.release,
@@ -518,9 +685,8 @@ pub fn ContextType(
                 .request = 0, // Set by client.raw_request.
                 .cluster = self.client.cluster,
                 .command = .request,
-                .operation = vsr.Operation.from(StateMachine, operation),
+                .operation = vsr_operation,
                 .size = @intCast(@sizeOf(vsr.Header) + bytes_written),
-                .batch_count = packet.batch_count,
             };
 
             packet.phase = .sent;
@@ -601,38 +767,38 @@ pub fn ContextType(
 
         fn client_result_callback(
             raw_user_data: u128,
-            operation: StateMachine.Operation,
+            vsr_operation: vsr.Operation,
             timestamp: u64,
             reply: []const u8,
-            batch_count: u16,
         ) void {
             const user_data: UserData = @bitCast(raw_user_data);
             const self = user_data.self;
             const packet = user_data.packet;
-            assert(packet.operation == @intFromEnum(operation));
-            assert(packet.batch_count == batch_count);
             assert(timestamp > 0);
             packet.assert_phase(.sent);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);
-            while (self.pending.pop()) |packet_next| {
+            while (self.batch_merge()) |packet_next| {
                 self.packet_send(packet_next);
                 if (self.client.request_inflight != null) break;
             }
 
-            const result_size: usize = switch (operation) {
-                .pulse => unreachable,
-                inline else => |operation_comptime| @sizeOf(
-                    // `StateMachine.result_size_bytes` is intended for use on the replica side,
-                    // as it provides backward compatibility with older clients.
-                    StateMachine.ResultType(operation_comptime),
-                ),
-            };
-            assert(reply.len % result_size == 0);
-
-            if (batch_count == 0) {
+            if (StateMachine.operation_from_vsr(vsr_operation)) |operation| {
+                assert(packet.operation == @intFromEnum(operation));
                 assert(packet.batch_next == null);
+                assert(packet.batch_count == 0);
+                switch (operation) {
+                    .pulse => unreachable,
+                    inline else => |operation_comptime| {
+                        const Result = StateMachine.ResultType(operation_comptime);
+                        assert(reply.len % @sizeOf(Result) == 0);
+                        assert(std.mem.isAligned(
+                            @intFromPtr(reply.ptr),
+                            @alignOf(Result),
+                        ));
+                    },
+                }
                 self.notify_completion(packet, .{
                     .timestamp = timestamp,
                     .reply = reply,
@@ -640,34 +806,39 @@ pub fn ContextType(
             } else {
                 // Although the protocol allows `batch_count == 1`,
                 // the client never packages a single packet into a batched request.
-                assert(batch_count > 1);
+                assert(vsr_operation == .batched);
                 assert(packet.batch_next != null);
-                var decoder = BatchDecoder.init(
-                    result_size,
-                    reply,
-                    batch_count,
-                ) catch std.debug.panic("client_result_callback: invalid batch: " ++
-                    "operation={s} reply.len={} batch_count={}", .{
-                    @tagName(operation),
-                    reply.len,
-                    batch_count,
-                });
+                assert(packet.batch_count > 1);
+
+                var decoder = BatchDecoder.init({}, reply) catch {
+                    std.debug.panic("client_result_callback: invalid batch: " ++
+                        "reply.len={}", .{
+                        reply.len,
+                    });
+                };
+                assert(packet.batch_count == decoder.batch_count());
 
                 var it: ?*Packet = packet;
                 while (it) |batched| {
                     it = batched.batch_next;
                     if (batched != packet) batched.assert_phase(.batched);
 
-                    const batched_reply: []const u8 = decoder.next().?;
-                    maybe(batched_reply.len == 0);
-                    assert(batched_reply.len % result_size == 0);
-
+                    const batch_item = decoder.pop().?;
+                    assert(batched.operation == @intFromEnum(batch_item.operation));
+                    maybe(batch_item.batched.len == 0);
+                    switch (batch_item.operation.cast(StateMachine)) {
+                        .pulse => unreachable,
+                        inline else => |operation_comptime| {
+                            const Result = StateMachine.ResultType(operation_comptime);
+                            assert(batch_item.batched.len % @sizeOf(Result) == 0);
+                        },
+                    }
                     self.notify_completion(batched, .{
                         .timestamp = timestamp,
-                        .reply = batched_reply,
+                        .reply = batch_item.batched,
                     });
                 }
-                assert(decoder.next() == null);
+                assert(!decoder.move_next());
             }
         }
 

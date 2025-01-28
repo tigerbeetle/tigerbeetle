@@ -399,6 +399,22 @@ pub fn StateMachineType(
             };
         }
 
+        pub fn event_alignment(
+            client_release: vsr.Release,
+            operation: Operation,
+        ) usize {
+            return switch (operation) {
+                .pulse => unreachable,
+                .get_account_transfers,
+                .get_account_balances,
+                => if (AccountFilterFormer.required(client_release))
+                    @alignOf(AccountFilterFormer)
+                else
+                    @alignOf(AccountFilter),
+                inline else => |comptime_operation| @alignOf(EventType(comptime_operation)),
+            };
+        }
+
         pub fn result_size_bytes(
             client_release: vsr.Release,
             operation: Operation,
@@ -407,6 +423,17 @@ pub fn StateMachineType(
             return switch (operation) {
                 .pulse => unreachable,
                 inline else => |comptime_operation| @sizeOf(ResultType(comptime_operation)),
+            };
+        }
+
+        pub fn result_alignment(
+            client_release: vsr.Release,
+            operation: Operation,
+        ) usize {
+            _ = client_release;
+            return switch (operation) {
+                .pulse => unreachable,
+                inline else => |comptime_operation| @alignOf(ResultType(comptime_operation)),
             };
         }
 
@@ -1620,10 +1647,10 @@ pub fn StateMachineType(
             assert(op != 0);
             assert(self.input_valid(client_release, operation, input));
             assert(input.len <= self.batch_size_limit);
-            assert(timestamp > self.commit_timestamp or
-                // In case of empty batches, the timestamp may be the same as the last commit.
-                (timestamp == self.commit_timestamp and input.len == 0) or
-                global_constants.aof_recovery);
+            assert(global_constants.aof_recovery or
+                // For operations that don't increment `commit_timestamp` (e.g., lookups),
+                // the `timestamp` will match the last commit if batched within the same message.
+                timestamp >= self.commit_timestamp);
 
             maybe(self.scan_lookup_result_count != null);
             defer assert(self.scan_lookup_result_count == null);
@@ -1776,6 +1803,7 @@ pub fn StateMachineType(
 
             const events: []const Event = @alignCast(mem.bytesAsSlice(Event, input));
             var results: []Result = @alignCast(mem.bytesAsSlice(Result, output));
+            assert(events.len <= results.len);
             var count: usize = 0;
 
             var chain: ?usize = null;

@@ -28,7 +28,7 @@ pub const Packet = extern struct {
         tag: u16,
         operation: u8,
         status: Status,
-        reserved: [32]u8 = [_]u8{0} ** 32,
+        reserved: [40]u8 = [_]u8{0} ** 40,
 
         pub fn cast(self: *Extern) *Packet {
             return @ptrCast(self);
@@ -81,10 +81,11 @@ pub const Packet = extern struct {
 
     batch_next: ?*Packet,
     batch_tail: ?*Packet,
+    batch_events_size: u32,
+    batch_results_size: u32,
     batch_count: u16,
-    batch_events: u16,
     phase: Phase,
-    reserved: [3]u8 = [_]u8{0} ** 3,
+    reserved: [5]u8 = [_]u8{0} ** 5,
 
     pub fn cast(self: *Packet) *Extern {
         return @ptrCast(self);
@@ -115,20 +116,23 @@ pub const Packet = extern struct {
                 assert(packet.batch_next == null);
                 assert(packet.batch_tail == null);
                 assert(packet.batch_count == 0);
-                assert(packet.batch_events == 0);
+                assert(packet.batch_events_size == 0);
+                assert(packet.batch_results_size == 0);
             },
             .pending => {
                 assert(packet.batch_count == 0 or packet.batch_next != null);
                 assert(packet.batch_count == 0 or packet.batch_tail != null);
                 maybe(packet.next == null);
                 maybe(packet.batch_count > 0);
-                maybe(packet.batch_events == 0);
+                maybe(packet.batch_events_size == 0);
+                maybe(packet.batch_results_size == 0);
             },
             .batched => {
                 assert(packet.next == null);
                 assert(packet.batch_count == 0);
-                assert(packet.batch_events == 0);
                 assert(packet.batch_tail == null);
+                assert(packet.batch_events_size == 0);
+                assert(packet.batch_results_size == 0);
                 maybe(packet.batch_next != null);
             },
             .sent => {
@@ -136,7 +140,8 @@ pub const Packet = extern struct {
                 assert(packet.batch_count == 0 or packet.batch_tail != null);
                 assert(packet.next == null);
                 maybe(packet.batch_count > 0);
-                maybe(packet.batch_events == 0);
+                maybe(packet.batch_events_size == 0);
+                maybe(packet.batch_results_size == 0);
             },
             .complete => {
                 // The packet pointer isn't available afer completed,
