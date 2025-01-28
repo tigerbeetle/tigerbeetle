@@ -408,9 +408,12 @@ const Page = struct {
         const nav_html = try Html.create(b.allocator);
         try root_menu.write_links(website, nav_html, self);
 
+        const url_page_source = self.path_source["../../".len..];
+
         const page_path = website.write_page(.{
             .title = page_title,
             .nav = nav_html.string(),
+            .url_page_source = url_page_source,
             .content = pandoc_out,
         });
         _ = docs.addCopyFile(page_path, b.pathJoin(&.{ self.path_target, "index.html" }));
