@@ -256,7 +256,7 @@ typedef struct tb_packet_t {
     uint16_t tag;
     uint8_t operation;
     uint8_t status;
-    uint8_t reserved[32];
+    uint8_t reserved[40];
 } tb_packet_t;
 
 typedef void* tb_client_t; 
