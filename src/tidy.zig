@@ -705,6 +705,8 @@ test "tidy extensions" {
     const exceptions = std.StaticStringMap(void).initComptime(.{
         .{".editorconfig"},
         .{".gitignore"},
+        .{".nojekyll"},
+        .{"CNAME"},
         .{"exclude-pmd.properties"},
         .{"favicon.png"},
         .{"notfound-light.webp"},
