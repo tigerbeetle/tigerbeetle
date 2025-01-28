@@ -101,11 +101,17 @@ const Fuzzer = enum {
 
     fn args_run(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
-            .vopr => &.{ "vopr", "--" },
-            .vopr_lite => &.{ "vopr", "--", "--lite" },
-            .vopr_testing => &.{ "vopr", "-Dvopr-state-machine=testing", "--" },
-            .vopr_testing_lite => &.{ "vopr", "-Dvopr-state-machine=testing", "--", "--lite" },
-            else => |f| &.{ "fuzz", "--", @tagName(f) },
+            inline .vopr, .vopr_lite => .{"vopr"},
+            inline .vopr_testing, .vopr_testing_lite => .{ "vopr", "-Dvopr-state-machine=testing" },
+            inline else => .{"fuzz"},
+        } ++ .{"--"} ++ args_exec(fuzzer);
+    }
+
+    fn args_exec(comptime fuzzer: Fuzzer) []const []const u8 {
+        return comptime switch (fuzzer) {
+            .vopr, .vopr_testing => &.{},
+            .vopr_lite, .vopr_testing_lite => &.{"--lite"},
+            else => |f| &.{@tagName(f)},
         };
     }
 };
@@ -533,35 +539,43 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
 
     assert(try shell.dir_exists(".git") or shell.file_exists(".git"));
 
-    {
-        // First, build the fuzzer separately to exclude compilation from the
-        // recorded timings.
-        args.append_slice_assume_capacity(&.{ "build", "-Drelease" });
-        args.append_slice_assume_capacity(switch (options.fuzzer) {
-            inline else => |f| comptime f.args_build(),
-        });
-        shell.exec_zig("{args}", .{ .args = args.const_slice() }) catch {
-            // Ignore the error, it'll get recorded by the run anyway.
-        };
-    }
-
+    // DevHub displays `./zig/zig build run` invocation which you can paste in your shell directly.
+    // But CFO actually builds and execs in two separate steps such that:
+    // - build time is excluded from overall runtime,
+    // - the exit status of the fuzzer process can be inspected, to determine if OOM happened.
     args.clear();
-    args.append_slice_assume_capacity(&.{ "build", "-Drelease" });
+    args.append_slice_assume_capacity(&.{ "./zig/zig", "build", "-Drelease" });
     args.append_slice_assume_capacity(switch (options.fuzzer) {
         inline else => |f| comptime f.args_run(),
     });
     var seed_buffer: [32]u8 = undefined;
     args.append_assume_capacity(stdx.array_print(32, &seed_buffer, "{d}", .{options.seed}));
-
-    args.insert_assume_capacity(0, "./zig/zig");
     const command = try std.mem.join(shell.arena.allocator(), " ", args.const_slice());
-    _ = args.ordered_remove(0);
+
+    const exe = exe: {
+        args.clear();
+        args.append_slice_assume_capacity(&.{ "build", "-Drelease", "-Dprint-exe" });
+        args.append_slice_assume_capacity(switch (options.fuzzer) {
+            inline else => |f| comptime f.args_build(),
+        });
+        break :exe shell.exec_stdout("{zig} {args}", .{
+            .zig = shell.zig_exe.?,
+            .args = args.const_slice(),
+        }) catch "false"; // Make sure that subsequent run fails if we can't build.
+    };
+    assert(exe.len > 0);
 
     log.debug("will start '{s}'", .{command});
     const process = try shell.spawn(
         .{ .stdin_behavior = .Pipe },
-        "{zig} {args}",
-        .{ .zig = shell.zig_exe.?, .args = args.const_slice() },
+        "{exe} {args} {seed}",
+        .{
+            .exe = exe,
+            .args = switch (options.fuzzer) {
+                inline else => |f| comptime f.args_exec(),
+            },
+            .seed = options.seed,
+        },
     );
 
     // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`

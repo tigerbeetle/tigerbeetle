@@ -146,6 +146,11 @@ pub fn build(b: *std.Build) !void {
             "llvm-objcopy",
             "Use this llvm-objcopy instead of downloading one",
         ),
+        .print_exe = b.option(
+            bool,
+            "print-exe",
+            "Build tasks print the path of the executable",
+        ) orelse false,
     };
     const target = try resolve_target(b, build_options.target);
     const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
@@ -235,6 +240,7 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
+        .print_exe = build_options.print_exe,
         .vopr_state_machine = build_options.vopr_state_machine,
         .vopr_log = build_options.vopr_log,
     });
@@ -247,6 +253,7 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
+        .print_exe = build_options.print_exe,
     });
 
     // zig build scripts -- ci --language=java
@@ -805,6 +812,7 @@ fn build_vopr(
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        print_exe: bool,
         vopr_state_machine: VoprStateMachine,
         vopr_log: VoprLog,
     },
@@ -825,7 +833,7 @@ fn build_vopr(
     vopr.root_module.addOptions("vsr_vopr_options", vopr_options);
     // Ensure that we get stack traces even in release builds.
     vopr.root_module.omit_frame_pointer = false;
-    steps.vopr_build.dependOn(&b.addInstallArtifact(vopr, .{}).step);
+    steps.vopr_build.dependOn(print_or_install(b, vopr, options.print_exe));
 
     const run_cmd = b.addRunArtifact(vopr);
     if (b.args) |args| run_cmd.addArgs(args);
@@ -842,6 +850,7 @@ fn build_fuzz(
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        print_exe: bool,
     },
 ) void {
     const fuzz_exe = b.addExecutable(.{
@@ -852,7 +861,7 @@ fn build_fuzz(
     });
     fuzz_exe.root_module.addOptions("vsr_options", options.vsr_options);
     fuzz_exe.root_module.omit_frame_pointer = false;
-    steps.fuzz_build.dependOn(&b.addInstallArtifact(fuzz_exe, .{}).step);
+    steps.fuzz_build.dependOn(print_or_install(b, fuzz_exe, options.print_exe));
 
     const fuzz_run = b.addRunArtifact(fuzz_exe);
     if (b.args) |args| fuzz_run.addArgs(args);
@@ -1415,6 +1424,37 @@ fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
         &.{ java_home, "\\bin\\server" },
     ) catch unreachable;
     _ = set_dll_directory(java_bin_server_path);
+}
+
+fn print_or_install(b: *std.Build, compile: *std.Build.Step.Compile, print: bool) *std.Build.Step {
+    const PrintStep = struct {
+        step: std.Build.Step,
+        compile: *std.Build.Step.Compile,
+
+        fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
+            _ = prog_node;
+            const print_step: *@This() = @fieldParentPtr("step", step);
+            const path = print_step.compile.getEmittedBin().getPath2(step.owner, step);
+            try std.io.getStdOut().writer().print("{s}\n", .{path});
+        }
+    };
+
+    if (print) {
+        const print_step = b.allocator.create(PrintStep) catch @panic("OOM");
+        print_step.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = "print exe",
+                .owner = b,
+                .makeFn = PrintStep.make,
+            }),
+            .compile = compile,
+        };
+        print_step.step.dependOn(&print_step.compile.step);
+        return &print_step.step;
+    } else {
+        return &b.addInstallArtifact(compile, .{}).step;
+    }
 }
 
 /// Code generation for files which must also be committed to the repository.
