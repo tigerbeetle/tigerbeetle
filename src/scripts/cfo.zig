@@ -252,7 +252,7 @@ fn run_fuzzers(
                         .count = 1,
                         .seed_timestamp_start = seed_timestamp_start,
                         .seed = seed,
-                        .command = child.commandline,
+                        .command = child.command,
 
                         .ok = false,
                         .seed_timestamp_end = 0,
@@ -513,7 +513,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     fuzzer: Fuzzer,
     seed: u64,
 }) !struct {
-    commandline: []const u8, // User-visible string on devhub.
+    command: []const u8, // User-visible string on devhub.
     process: std.process.Child,
 } {
     try shell.pushd(options.working_directory);
@@ -554,10 +554,10 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     args.append_assume_capacity(stdx.array_print(32, &seed_buffer, "{d}", .{options.seed}));
 
     args.insert_assume_capacity(0, "./zig/zig");
-    const commandline = try std.mem.join(shell.arena.allocator(), " ", args.const_slice());
+    const command = try std.mem.join(shell.arena.allocator(), " ", args.const_slice());
     _ = args.ordered_remove(0);
 
-    log.debug("will start '{s}'", .{commandline});
+    log.debug("will start '{s}'", .{command});
     const process = try shell.spawn(
         .{ .stdin_behavior = .Pipe },
         "{zig} {args}",
@@ -574,7 +574,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     );
 
     return .{
-        .commandline = commandline,
+        .command = command,
         .process = process,
     };
 }
