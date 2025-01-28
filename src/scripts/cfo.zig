@@ -230,7 +230,7 @@ fn run_fuzzers(
             if (child_or_null.* == null) {
                 const task_index = random.weightedIndex(u32, tasks.weight);
                 const working_directory = tasks.working_directory[task_index];
-                var seed_record = tasks.seed_record[task_index];
+                const seed_record = tasks.seed_record[task_index];
                 const fuzzer = std.meta.stringToEnum(Fuzzer, seed_record.fuzzer).?;
                 const seed = random.int(u64);
 
@@ -239,13 +239,25 @@ fn run_fuzzers(
                     .fuzzer = fuzzer,
                     .seed = seed,
                 });
-                seed_record.seed = seed;
-                seed_record.seed_timestamp_start = @intCast(std.time.timestamp());
-                seed_record.command = child.commandline;
+                // NB: take timestamp after spawning to exclude build time.
+                const seed_timestamp_start: u64 = @intCast(std.time.timestamp());
 
                 child_or_null.* = .{
                     .child = child.process,
-                    .seed = seed_record,
+                    .seed = .{
+                        .commit_timestamp = seed_record.commit_timestamp,
+                        .commit_sha = seed_record.commit_sha,
+                        .fuzzer = seed_record.fuzzer,
+                        .count = seed_record.count,
+                        .branch = seed_record.branch,
+
+                        .seed_timestamp_start = seed_timestamp_start,
+                        .seed = seed,
+                        .command = child.commandline,
+
+                        .ok = false,
+                        .seed_timestamp_end = 0,
+                    },
                 };
             }
         }
