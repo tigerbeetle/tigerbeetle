@@ -1130,7 +1130,7 @@ pub fn GridType(comptime Storage: type) type {
             // Remove the "root" read so that the address is no longer actively reading / locked.
             grid.read_queue.remove(read);
 
-            const result = read_block_validate(block.*, .{
+            const result = grid.read_block_validate(block.*, .{
                 .address = read.address,
                 .checksum = read.checksum,
             });
@@ -1160,7 +1160,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_block_resolve(read, result);
         }
 
-        fn read_block_validate(block: BlockPtrConst, expect: struct {
+        fn read_block_validate(grid: *const Grid, block: BlockPtrConst, expect: struct {
             address: u64,
             checksum: u128,
         }) ReadBlockResult {
@@ -1180,9 +1180,12 @@ pub fn GridType(comptime Storage: type) type {
             if (header.checksum != expect.checksum) return .unexpected_checksum;
 
             if (constants.verify) {
-                // We wrote the padding as zeroes, but it may have been corrupted, and the padding
-                // is not covered by any checksums.
-                maybe(stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)]));
+                if (!stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)])) {
+                    log.warn("{}: read_block_validate: found corrupted padding for address={}", .{
+                        grid.superblock.replica_index.?,
+                        expect.address,
+                    });
+                }
             }
 
             assert(header.address == expect.address);

@@ -934,6 +934,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             } else {
                 assert(message.header.checksum == checksum);
 
+                const message_padding =
+                    message.buffer[message.header.size..vsr.sector_ceil(message.header.size)];
+                if (!stdx.zeroed(message_padding)) {
+                    @memset(message_padding, 0);
+                    log.warn("{}: read_prepare: found corrupted padding for op={}", .{
+                        journal.replica,
+                        message.header.op,
+                    });
+                }
+
                 callback(replica, message, destination_replica);
             }
         }
