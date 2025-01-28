@@ -1305,29 +1305,47 @@ public class IntegrationTest {
             assertTrue(createAccountErrors.getLength() == 0);
 
             final var tasks = new CompletableFuture[TASKS_COUNT];
-            for (int i = 0; i < TASKS_COUNT; i++) {
+            for (int i = 0; i < TASKS_COUNT; i += 1) {
 
                 final var transfers = new TransferBatch(1);
                 transfers.add();
 
-                transfers.setId(UInt128.id());
-                transfers.setCreditAccountId(account1Id);
-                transfers.setDebitAccountId(account2Id);
-                transfers.setLedger(720);
-                transfers.setCode(1);
-                transfers.setAmount(100);
-
-                tasks[i] = client.createTransfersAsync(transfers);
+                if (i % 2 == 0) {
+                    final var filter = new AccountFilter();
+                    filter.setAccountId(account1Id);
+                    filter.setDebits(true);
+                    filter.setReversed(true);
+                    filter.setLimit(1);
+                    tasks[i] = client.getAccountTransfersAsync(filter);
+                } else {
+                    final var id = UInt128.id();
+                    transfers.setId(id);
+                    transfers.setDebitAccountId(account1Id);
+                    transfers.setCreditAccountId(account2Id);
+                    transfers.setLedger(720);
+                    transfers.setCode(1);
+                    transfers.setAmount(100);
+                    tasks[i] = client.createTransfersAsync(transfers);
+                }
             }
 
             // Wait for all tasks.
             for (int i = 0; i < TASKS_COUNT; i++) {
-                @SuppressWarnings("unchecked")
-                final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
-                final var result = future.get();
-                assertEquals(0, result.getLength());
-                assertNotNull(result.getHeader());
-                assertTrue(result.getHeader().getTimestamp() != 0L);
+                if (i % 2 == 0) {
+                    @SuppressWarnings("unchecked")
+                    final var future = (CompletableFuture<TransferBatch>) tasks[i];
+                    final var result = future.get();
+                    assertTrue(result.getLength() == 0 || result.getLength() == 1);
+                    assertNotNull(result.getHeader());
+                    assertTrue(result.getHeader().getTimestamp() != 0L);
+                } else {
+                    @SuppressWarnings("unchecked")
+                    final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
+                    final var result = future.get();
+                    assertEquals(0, result.getLength());
+                    assertNotNull(result.getHeader());
+                    assertTrue(result.getHeader().getTimestamp() != 0L);
+                }
             }
 
             // Asserting if all transfers were submitted correctly.
@@ -1340,15 +1358,17 @@ public class IntegrationTest {
             assertTrue(lookupAccounts.next());
             assertAccounts(accounts, lookupAccounts);
 
-            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getCreditsPosted());
-            assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
+            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT / 2),
+                    lookupAccounts.getDebitsPosted());
+            assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
 
             assertTrue(accounts.next());
             assertTrue(lookupAccounts.next());
             assertAccounts(accounts, lookupAccounts);
 
-            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getDebitsPosted());
-            assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT / 2),
+                    lookupAccounts.getCreditsPosted());
+            assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
         }
     }
 
@@ -2356,7 +2376,7 @@ public class IntegrationTest {
             }
 
             final var format = Runtime.getRuntime().exec(new String[] {exe, "format", "--cluster=0",
-                    "--replica=0", "--replica-count=1", "--development", tb_file});
+                    "--replica=0", "--replica-count=1", tb_file});
             if (format.waitFor() != 0) {
                 final var reader =
                         new BufferedReader(new InputStreamReader(format.getErrorStream()));
@@ -2365,7 +2385,7 @@ public class IntegrationTest {
             }
 
             this.process = new ProcessBuilder()
-                    .command(new String[] {exe, "start", "--addresses=0", "--development", tb_file})
+                    .command(new String[] {exe, "start", "--addresses=0", tb_file})
                     .redirectOutput(Redirect.PIPE).redirectError(Redirect.INHERIT).start();
 
             final var stdout = process.getInputStream();
