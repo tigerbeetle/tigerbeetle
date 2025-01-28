@@ -506,7 +506,8 @@ pub const SuperBlockHeader = extern struct {
     }
 
     pub fn valid_checksum(superblock: *const SuperBlockHeader) bool {
-        return superblock.checksum == superblock.calculate_checksum();
+        return superblock.checksum == superblock.calculate_checksum() and
+            superblock.checksum_padding == 0;
     }
 
     pub fn checkpoint_id(superblock: *const SuperBlockHeader) u128 {
