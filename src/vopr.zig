@@ -68,7 +68,7 @@ const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
     ticks_max_requests: u32 = 40_000_000,
-    ticks_max_convergence: u32 = 20_000_000,
+    ticks_max_convergence: u32 = 10_000_000,
     positional: struct {
         seed: ?[]const u8 = null,
     },
@@ -641,6 +641,7 @@ pub const Simulator = struct {
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
         simulator.options.replica_crash_probability = 0;
         simulator.options.replica_restart_probability = 0;
+        simulator.options.replica_pause_probability = 0;
         simulator.options.replica_release_advance_probability = 0;
         simulator.options.replica_release_catchup_probability = 0;
     }
