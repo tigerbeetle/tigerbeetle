@@ -398,15 +398,26 @@ pub const Storage = struct {
             storage.fault_faulty_sectors(read.zone, read.offset, read.buffer.len);
         }
 
-        // Fill faulty or uninitialized sectors with random data.
         var sectors = SectorRange.from_zone(read.zone, read.offset, read.buffer.len);
         const sectors_min = sectors.min;
         while (sectors.next()) |sector| {
-            const faulty = storage.faulty and storage.faults.isSet(sector);
-            const uninit = !storage.memory_written.isSet(sector);
-            if (faulty or uninit) {
-                const sector_offset = (sector - sectors_min) * constants.sector_size;
-                const sector_bytes = read.buffer[sector_offset..][0..constants.sector_size];
+            const sector_offset = (sector - sectors_min) * constants.sector_size;
+            const sector_bytes = read.buffer[sector_offset..][0..constants.sector_size];
+            const sector_corrupt = storage.faulty and storage.faults.isSet(sector);
+            const sector_uninitialized = !storage.memory_written.isSet(sector);
+
+            if (sector_corrupt) {
+                // Rather than corrupting the entire sector, inject a localized error.
+                // (In some cases this will just corrupt sector padding.)
+                // Inject the fault at a deterministic position (by using the pristine bytes as
+                // consistent seed) so that read-retries don't resolve the corruption.
+                const corrupt_seed: u64 = @bitCast(sector_bytes[0..@sizeOf(u64)].*);
+                var corrupt_prng = std.rand.DefaultPrng.init(corrupt_seed);
+                const corrupt_byte = corrupt_prng.random().uintLessThan(u32, sector_bytes.len);
+                sector_bytes[corrupt_byte] +%= 1;
+            }
+
+            if (sector_uninitialized) {
                 storage.prng.random().bytes(sector_bytes);
             }
         }
