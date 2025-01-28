@@ -147,7 +147,7 @@ function onSearchInput() {
   searchNotFound.style.display = searchActive && results.length === 0 ? "flex" : "none";
 }
 
-function search(term) {
+function search(term, limit = 100) {
   if (term.length === 0) return [];
   const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(escapedTerm, 'gi');
@@ -158,6 +158,7 @@ function search(term) {
       const firstIndex = match.index;
       const count = section.text.match(regex).length;
       hits.push({ firstIndex, count, section });
+      if (hits.length == limit) break;
     }
   }
   hits.forEach(hit => hit.context = makeContext(hit.section.text, hit.firstIndex, term.length));
