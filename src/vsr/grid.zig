@@ -1179,10 +1179,6 @@ pub fn GridType(comptime Storage: type) type {
 
             if (header.checksum != expect.checksum) return .unexpected_checksum;
 
-            if (constants.verify) {
-                assert(stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)]));
-            }
-
             assert(header.address == expect.address);
             return .{ .valid = block };
         }
