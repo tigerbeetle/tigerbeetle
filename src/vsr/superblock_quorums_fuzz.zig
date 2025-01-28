@@ -277,28 +277,29 @@ pub fn fuzz_quorum_repairs(
 
     const headers_valid = blk: {
         var headers: [superblock_copies]SuperBlockHeader = undefined;
-        for (&headers, 0..) |*header, i| {
-            header.* = std.mem.zeroInit(SuperBlockHeader, .{
-                .copy = @as(u8, @intCast(i)),
-                .version = SuperBlockVersion,
-                .release_format = vsr.Release.minimum,
-                .sequence = 123,
-                .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
-                    .replica_id = members[1],
-                    .members = members,
-                    .replica_count = 6,
-                    .checkpoint = std.mem.zeroInit(SuperBlockHeader.CheckpointState, .{
-                        .header = header: {
-                            var checkpoint_header = vsr.Header.Prepare.root(0);
-                            checkpoint_header.op = 123;
-                            checkpoint_header.set_checksum();
-                            break :header checkpoint_header;
-                        },
-                    }),
+        var header_base = std.mem.zeroInit(SuperBlockHeader, .{
+            .version = SuperBlockVersion,
+            .release_format = vsr.Release.minimum,
+            .sequence = 123,
+            .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
+                .replica_id = members[1],
+                .members = members,
+                .replica_count = 6,
+                .checkpoint = std.mem.zeroInit(SuperBlockHeader.CheckpointState, .{
+                    .header = header: {
+                        var checkpoint_header = vsr.Header.Prepare.root(0);
+                        checkpoint_header.op = 123;
+                        checkpoint_header.set_checksum();
+                        break :header checkpoint_header;
+                    },
                 }),
-            });
+            }),
+        });
+        header_base.set_checksum();
 
-            header.set_checksum();
+        for (&headers, 0..) |*header, i| {
+            header.* = header_base;
+            header.copy = @as(u8, @intCast(i));
         }
         break :blk headers;
     };

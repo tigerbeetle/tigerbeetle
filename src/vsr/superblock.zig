@@ -29,6 +29,7 @@
 //!
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const mem = std.mem;
 const meta = std.meta;
 
@@ -489,7 +490,11 @@ pub const SuperBlockHeader = extern struct {
     }
 
     pub fn set_checksum(superblock: *SuperBlockHeader) void {
+        // `copy` is not covered by the checksum, but for our staging/working superblock headers it
+        // should always be zero.
         assert(superblock.copy < constants.superblock_copies);
+        assert(superblock.copy == 0);
+
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.release_format.value > 0);
         assert(superblock.flags == 0);
@@ -1330,6 +1335,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (superblock.quorums.working(superblock.reading, threshold)) |quorum| {
                 assert(quorum.valid);
                 assert(quorum.copies.count() >= threshold.count());
+                maybe(quorum.header.copy >= constants.superblock_copies); // `copy` may be corrupt.
 
                 const working = quorum.header;
 
@@ -1370,6 +1376,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 superblock.working.* = working.*;
                 superblock.staging.* = working.*;
+
+                // Reset the copies, which may be nonzero due to corruption.
+                superblock.working.copy = 0;
+                superblock.staging.copy = 0;
 
                 const working_checkpoint = &superblock.working.vsr_state.checkpoint;
                 const staging_checkpoint = &superblock.staging.vsr_state.checkpoint;
