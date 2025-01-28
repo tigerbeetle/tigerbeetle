@@ -525,7 +525,9 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
             arg_max = @max(arg_max, fuzzer.args_build().len, fuzzer.args_run().len);
         }
         assert(arg_max > 0);
-        break :arg_count_max arg_max + 3; // + build -Drelease SEED
+
+        // +4: zig/zig build -Drelease SEED
+        break :arg_count_max arg_max + 4;
     };
     var args: stdx.BoundedArrayType([]const u8, arg_count_max) = .{};
 
@@ -551,14 +553,11 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     var seed_buffer: [32]u8 = undefined;
     args.append_assume_capacity(stdx.array_print(32, &seed_buffer, "{d}", .{options.seed}));
 
-    var commandline = std.ArrayList(u8).init(shell.arena.allocator());
-    try commandline.appendSlice("./zig/zig");
-    for (args.const_slice()) |arg| {
-        try commandline.append(' ');
-        try commandline.appendSlice(arg);
-    }
+    args.insert_assume_capacity(0, "./zig/zig");
+    const commandline = try std.mem.join(shell.arena.allocator(), " ", args.const_slice());
+    _ = args.ordered_remove(0);
 
-    log.debug("will start '{s}'", .{commandline.items});
+    log.debug("will start '{s}'", .{commandline});
     const process = try shell.spawn(
         .{ .stdin_behavior = .Pipe },
         "{zig} {args}",
@@ -575,7 +574,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     );
 
     return .{
-        .commandline = commandline.items,
+        .commandline = commandline,
         .process = process,
     };
 }
