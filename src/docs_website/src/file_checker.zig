@@ -4,6 +4,11 @@ const assets = @import("assets.zig");
 
 pub const file_size_max = 900 << 10;
 
+const exceptions = std.StaticStringMap(void).initComptime(.{
+    .{"CNAME"},
+    .{".nojekyll"},
+});
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
@@ -22,6 +27,7 @@ fn check_files(arena: std.mem.Allocator, path: []const u8) !void {
     var walker = try dir.walk(arena);
     while (try walker.next()) |entry| {
         if (entry.kind != .file) continue;
+        if (exceptions.has(std.fs.path.basename(entry.path))) continue;
 
         const stat = dir.statFile(entry.path) catch |err| {
             log.err("unable to stat file '{s}': {s}", .{
@@ -38,8 +44,6 @@ fn check_files(arena: std.mem.Allocator, path: []const u8) !void {
             });
             return error.FileSizeExceeded;
         }
-
-        if (std.mem.eql(u8, entry.path, "CNAME")) continue; // Exception
 
         const file_type = for (assets.supported_file_types) |file_type| {
             if (std.mem.endsWith(u8, entry.path, file_type.extension)) break file_type;
