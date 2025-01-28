@@ -47,7 +47,7 @@ pub const output = std.log.scoped(.cluster);
 const log = std.log.scoped(.simulator);
 
 pub const std_options = .{
-    // The -Dsimulator-log=<full|short> build option selects two logging modes.
+    // The -vopr-log=<full|short> build option selects two logging modes.
     // In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
     // "full" mode is the usual logging according to the level.
     .log_level = if (vsr_vopr_options.log == .short) .info else .debug,
@@ -68,7 +68,7 @@ const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
     ticks_max_requests: u32 = 40_000_000,
-    ticks_max_convergence: u32 = 10_000_000,
+    ticks_max_convergence: u32 = 20_000_000,
     positional: struct {
         seed: ?[]const u8 = null,
     },
@@ -769,8 +769,8 @@ pub const Simulator = struct {
                         )) |op| {
                             if (missing_prepare_op == null or op < missing_prepare_op.?) {
                                 missing_prepare_op = op;
-                                continue;
                             }
+                            continue;
                         }
                     }
                     if (op_repair_min <= replica.commit_min) {

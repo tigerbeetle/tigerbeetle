@@ -88,8 +88,8 @@ pub const Header = extern struct {
             .commit => Commit,
             .start_view_change => StartViewChange,
             .do_view_change => DoViewChange,
+            .start_view_deprecated => StartView,
             .start_view => StartView,
-            .start_view_new => StartView,
             .request_start_view => RequestStartView,
             .request_headers => RequestHeaders,
             .request_prepare => RequestPrepare,
@@ -211,8 +211,6 @@ pub const Header = extern struct {
             .reply => return .unknown,
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
-            // At the current version, start_view_new is completely ignored.
-            .start_view_new => return .unknown,
             // All other messages identify the peer as a replica:
             .ping,
             .pong,
@@ -222,6 +220,7 @@ pub const Header = extern struct {
             .start_view_change,
             .do_view_change,
             .start_view,
+            .start_view_deprecated,
             .request_start_view,
             .request_headers,
             .request_prepare,
@@ -1038,7 +1037,7 @@ pub const Header = extern struct {
         reserved: [88]u8 = [_]u8{0} ** 88,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .start_view or self.command == .start_view_new);
+            assert(self.command == .start_view_deprecated or self.command == .start_view);
             if (self.release.value != 0) return "release != 0";
             if (self.op < self.commit_max) return "op < commit_max";
             if (self.commit_max < self.checkpoint_op) return "commit_max < checkpoint_op";

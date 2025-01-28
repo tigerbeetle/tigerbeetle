@@ -253,6 +253,15 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         reads_commit_count: u6 = 0,
 
         /// Statically allocated write IO operation context data.
+        ///
+        /// Each acquired write in this list is either:
+        /// - executing (`write.range.locked`), or
+        /// - queued (`!write.range.locked`).
+        ///
+        /// Invariants:
+        /// - When there are multiple Writes to the same location, only one of them is executing at
+        ///   any time -- the others are queued behind it.
+        /// - There is at most one Write to a given slot at any time.
         writes: IOPSType(Write, constants.journal_iops_write_max) = .{},
 
         /// Whether an entry is in memory only and needs to be written or is being written:
@@ -1781,7 +1790,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
             assert(journal.has_header(message.header));
-            assert(!journal.writing(message.header.op, message.header.checksum));
+            assert(journal.writing(message.header) == .none);
             if (replica.solo()) assert(journal.writes.executing() == 0);
 
             // The underlying header memory must be owned by the buffer and not by journal.headers:
@@ -1840,6 +1849,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const journal = write.journal;
             const message = write.message;
             assert(journal.status == .recovered);
+            assert(journal.writing(message.header) == .exact);
 
             // `prepare_inhabited[slot.index]` is usually false here, but may be true if two
             // (or more) writes to the same slot were queued concurrently and this is not the
@@ -1952,6 +1962,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // This allows us to enforce journal.writes.len≤1 when replica_count=1, because the
             // callback may immediately start the next write.
             journal.writes.release(write);
+            assert(journal.writing(write_message.header) == .none);
+
             write_callback(replica, wrote, write_trigger);
             replica.message_bus.unref(write_message);
         }
@@ -2021,11 +2033,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var it = journal.writes.iterate();
             while (it.next()) |other| {
                 if (other == write) continue;
+                assert(journal.slot_for_header(write.message.header).index !=
+                    journal.slot_for_header(other.message.header).index);
+
                 if (!other.range.locked) continue;
 
                 if (other.range.overlaps(&write.range)) {
                     assert(other.range.offset == write.range.offset);
                     assert(other.range.buffer.len == write.range.buffer.len);
+                    assert(other.range.ring == write.range.ring);
+                    assert(other.range.ring == .headers);
 
                     var tail = &other.range;
                     while (tail.next) |next| tail = next;
@@ -2142,25 +2159,35 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             return sector;
         }
 
-        pub fn writing(journal: *Journal, op: u64, checksum: u128) bool {
-            const slot = journal.slot_for_op(op);
-            var found: bool = false;
-            var it = journal.writes.iterate();
-            while (it.next()) |write| {
-                const write_slot = journal.slot_for_op(write.message.header.op);
+        const Writing = enum {
+            none,
+            /// Either the prepare or the redundant header of a message with the same slot as the
+            /// given op is being written. It may be a different version of the same op, or a
+            /// different op which shares the prepare slot.
+            slot,
+            /// Either the prepare or the redundant header of a message with the exact op/checksum
+            /// is being written.
+            exact,
+        };
 
-                // It's possible that we might be writing the same op but with a different checksum.
-                // For example, if the op we are writing did not survive the view change and was
-                // replaced by another op. We must therefore do the search primarily on checksum.
-                // However, we compare against the 64-bit op first, since it's a cheap machine word.
-                if (write.message.header.op == op and write.message.header.checksum == checksum) {
-                    // If we truly are writing, then the dirty bit must be set:
-                    assert(journal.dirty.bit(journal.slot_for_op(op)));
-                    found = true;
-                } else if (write_slot.index == slot.index) {
-                    // If the in-progress write of '{op, checksum}' will be overwritten by another
-                    // write to the same slot, writing() must return false.
-                    found = false;
+        pub fn writing(journal: *Journal, header: *const Header.Prepare) Writing {
+            const slot = journal.slot_for_header(header);
+            var found: Writing = .none;
+            var writes = journal.writes.iterate();
+            while (writes.next()) |write| {
+                const write_slot = journal.slot_for_op(write.message.header.op);
+                if (write_slot.index == slot.index) {
+                    assert(found == .none);
+
+                    if (write.message.header.checksum == header.checksum) {
+                        assert(write.message.header.op == header.op);
+                        found = .exact;
+                    } else {
+                        maybe(write.message.header.op == header.op);
+                        found = .slot;
+                    }
+                } else {
+                    assert(write.message.header.op != header.op);
                 }
             }
             return found;
