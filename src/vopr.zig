@@ -177,7 +177,7 @@ pub fn main() !void {
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
-            .fault_granularity = if (random.boolean()) .sector else .byte,
+            .fault_granularity = if (random.boolean()) .sector else .bit,
         },
         .storage_fault_atlas = .{
             .faulty_superblock = true,
