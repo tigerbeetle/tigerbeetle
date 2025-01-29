@@ -18,19 +18,17 @@ pub fn build(b: *std.Build) !void {
 
     const pandoc_bin = get_pandoc_bin(b) orelse return;
 
-    const website = Website.init(b, url_prefix, pandoc_bin);
-
-    const file_checker_exe = b.addExecutable(.{
+    const file_checker_run = b.addRunArtifact(b.addExecutable(.{
         .name = "file_checker",
         .root_source_file = b.path("src/file_checker.zig"),
         .target = b.graph.host,
-    });
-    const file_checker_run = b.addRunArtifact(file_checker_exe);
+    }));
     file_checker_run.addArg("zig-out");
 
     const install_assets = assets.install(b, .{ .source = "assets", .target = "." });
     file_checker_run.step.dependOn(&install_assets.step);
 
+    const website = Website.init(b, url_prefix, pandoc_bin);
     const docs_dir = try docs.build(b, website);
     const install_docs = b.addInstallDirectory(.{
         .source_dir = docs_dir,
@@ -39,12 +37,11 @@ pub fn build(b: *std.Build) !void {
     });
     file_checker_run.step.dependOn(&install_docs.step);
 
-    const service_worker_writer_exe = b.addExecutable(.{
+    const service_worker_writer_run = b.addRunArtifact(b.addExecutable(.{
         .name = "service_worker_writer",
         .root_source_file = b.path("src/service_worker_writer.zig"),
         .target = b.graph.host,
-    });
-    const service_worker_writer_run = b.addRunArtifact(service_worker_writer_exe);
+    }));
     service_worker_writer_run.addArgs(&.{ url_prefix, git_commit, "zig-out" });
     service_worker_writer_run.step.dependOn(&file_checker_run.step);
 
