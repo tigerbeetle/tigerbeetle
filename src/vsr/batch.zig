@@ -303,7 +303,8 @@ pub fn BatchDecoderType(
 
         pub fn pop(self: *BatchDecoder) ?BatchItem {
             const batch_item = self.peek() orelse return null;
-            _ = self.move_next();
+            const moved = self.move_next();
+            assert(moved);
             return batch_item;
         }
 
@@ -363,7 +364,7 @@ pub fn BatchDecoderType(
 
             assert(self.batch_index <= self.trailer_items.len);
             assert(self.payload_index <= self.payload.len);
-            return self.batch_index < self.trailer_items.len;
+            return true;
         }
     };
 }

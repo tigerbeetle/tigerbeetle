@@ -404,10 +404,10 @@ pub const AccountingAuditor = struct {
     pub fn on_create_transfers(
         self: *AccountingAuditor,
         client_index: usize,
+        batch_index: ?u16,
         timestamp: u64,
         transfers: []const tb.Transfer,
         results: []const tb.CreateTransfersResult,
-        batch_index: ?u16,
     ) void {
         assert(transfers.len >= results.len);
         assert(self.timestamp < timestamp or
