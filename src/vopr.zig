@@ -996,7 +996,9 @@ pub const Simulator = struct {
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
         assert(simulator.cluster.client_eviction_reasons[reply_client] == null);
 
-        if (!request.header.operation.vsr_reserved()) {
+        if (request.header.operation == .batched or
+            !request.header.operation.vsr_reserved())
+        {
             simulator.requests_replied += 1;
         }
     }
