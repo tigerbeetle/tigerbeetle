@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.file_checker);
 const assets = @import("assets.zig");
+const assert = std.debug.assert;
 
 pub const file_size_max = 900 << 10;
 
@@ -46,6 +47,7 @@ fn check_files(arena: std.mem.Allocator, path: []const u8) !void {
         }
 
         const file_type = for (assets.supported_file_types) |file_type| {
+            assert(file_type.extension[0] == '.');
             if (std.mem.endsWith(u8, entry.path, file_type.extension)) break file_type;
         } else {
             log.err("file '{s}' has unsupported type '{s}'", .{
