@@ -34,11 +34,13 @@ pub fn write_page(self: Website, options: struct {
 }) LazyPath {
     const b = self.page_writer_exe.step.owner;
     const page_writer_run = b.addRunArtifact(self.page_writer_exe);
-    page_writer_run.addArg(options.title);
-    page_writer_run.addArg(options.author);
-    page_writer_run.addArg(self.url_prefix);
-    page_writer_run.addArg(options.nav);
-    page_writer_run.addArg(options.url_page_source);
+    page_writer_run.addArgs(&.{
+        options.title,
+        options.author,
+        self.url_prefix,
+        options.nav,
+        options.url_page_source,
+    });
     page_writer_run.addFileArg(options.content);
     return page_writer_run.addOutputFileArg("page.html");
 }
