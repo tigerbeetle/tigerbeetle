@@ -1179,13 +1179,13 @@ pub fn GridType(comptime Storage: type) type {
 
             if (header.checksum != expect.checksum) return .unexpected_checksum;
 
-            if (constants.verify) {
-                if (!stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)])) {
-                    log.warn("{}: read_block_validate: found corrupted padding for address={}", .{
-                        grid.superblock.replica_index.?,
-                        expect.address,
-                    });
-                }
+            const block_padding = block[header.size..vsr.sector_ceil(header.size)];
+            if (!stdx.zeroed(block_padding)) {
+                @memset(block_padding, 0);
+                log.warn("{}: read_block_validate: found corrupted padding for address={}", .{
+                    grid.superblock.replica_index.?,
+                    expect.address,
+                });
             }
 
             assert(header.address == expect.address);
