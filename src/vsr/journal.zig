@@ -1218,17 +1218,17 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///
         /// Recovery decision table:
         ///
-        ///   label                   @A  @B  @C  @D  @E  @F  @G  @H  @I  @J  @K  @L  @M  @N
-        ///   header valid             0   1   1   0   0   0   1   1   1   1   1   1   1   1
-        ///   header reserved          _   1   0   _   _   _   1   0   1   0   0   0   0   0
-        ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1   1   1
-        ///   prepare reserved         _   _   _   1   0   0   0   1   1   0   0   0   0   0
-        ///   prepare.op is maximum    _   _   _   _   0   1   _   _   _   _   _   _   _   _
-        ///   match checksum           _   _   _   _   _   _   _   _  !1   0   0   0   0   1
-        ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1   1  !1
-        ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !0  !1
-        ///   prepare.op < checkpoint  _   _   _   _   _   _   _   _   _   _   _   0   1   _
-        ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr nil fix vsr vsr vsr eql
+        ///   label                   @A  @B  @C  @D  @E  @F  @G  @H  @I  @J  @K  @L  @M
+        ///   header valid             0   1   1   0   0   0   1   1   1   1   1   1   1
+        ///   header reserved          _   1   0   _   _   _   1   0   1   0   0   0   0
+        ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1   1
+        ///   prepare reserved         _   _   _   1   0   0   0   1   1   0   0   0   0
+        ///   prepare.op is maximum    _   _   _   _   0   1   _   _   _   _   _   _   _
+        ///   match checksum           _   _   _   _   _   _   _   _  !1   0   0   0   1
+        ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1  !1
+        ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !1
+        ///   prepare.op < checkpoint  _   _   _   _   _   _   _   _   _   _   _   _   _
+        ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr nil fix vsr vsr eql
         ///   decision (replicas=1)              fix fix
         ///
         /// Legend:
@@ -2274,11 +2274,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///
 ///
 /// @L:
-/// The message was rewritten due to a view change, and belongs to the current checkpoint.
+/// Either:
+/// - The message was rewritten due to a view change.
+/// - The prepare write was lost, but the previous prepare had the same op (but a different view).
 ///
-/// Unlike @M (which has decision=fix), this case has decision=vsr.
-/// The prepare and header have different views, but regardless of which is greater, recovery can't
-/// distinguish which is actually *newer*.
+/// The prepare and header have different views, but regardless of which is greater (and in both of
+/// the above cases), recovery can't distinguish which is actually *newer*. Thus, we can't `fix`,
+/// despite having a valid prepare.
 ///
 /// For example, if the header.view=2 and prepare.view=4, any of these scenarios are possible:
 /// - Before crashing, we wrote the view=4 prepare, and then lost/misdirected the write for the
@@ -2289,23 +2291,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///   view=4 header. The view=2 header is left behind from view=2 or view=3.
 ///   (This last case is the most likely.)
 ///
+///
 /// @M:
-///
-/// Either:
-/// - The message was rewritten due to a view change, but belongs to a previous checkpoint.
-///
-///   This exact prepare is not necessarily committed – it might have been rewritten again, and then
-///   the replica skipped past it via state sync. But the replica won't replay this op anyway (since
-///   it precedes the checkpoint) so it doesn't matter.
-///
-/// - The prepare write was lost, leaving behind an outdated prepare and a valid redundant header,
-///   with matching ops but different views. decision=fix would repair the wrong one.
-///
-///   Even though we don't know the exact header, we do know the op, so we can avoid
-///   `status=recovering_head`. (TODO)
-///
-///
-/// @N:
 /// The redundant header matches the message's header.
 /// This is the usual case: both the prepare and header are correct and equivalent.
 const recovery_cases = table: {
@@ -2343,9 +2330,8 @@ const recovery_cases = table: {
         Case.init("@I", .nil, .nil, .{ _1, _1, _1, _1, __, a1, a1, a0, __, a1 }), // normal path: reserved
         Case.init("@J", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _0, _1, __, __ }), // header.op < prepare.op
         Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _0, __, __ }), // header.op > prepare.op
-        Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, _0, a0 }), // header.op ≥ op_checkpoint
-        Case.init("@M", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, _1, a0 }), // header.op < op_checkpoint
-        Case.init("@N", .eql, .eql, .{ _1, _0, _1, _0, __, _1, a1, a0, __, a1 }), // normal path: prepare
+        Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, __, a0 }),
+        Case.init("@M", .eql, .eql, .{ _1, _0, _1, _0, __, _1, a1, a0, __, a1 }), // normal path: prepare
     };
 };
 
