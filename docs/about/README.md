@@ -89,7 +89,7 @@ TigerBeetle's Zig implementation of io_uring was
 
 BetaBeetle, the beta distributed version of TigerBeetle, was developed from January 2021 through
 August 2021, for strict serializability, fault tolerance and automated leader election with the
-pioneering [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus
+pioneering [Viewstamped Replication](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus
 protocol, plus the CTRL protocol from [Protocol-Aware Recovery for Consensus-Based
 Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs).
 
@@ -133,10 +133,10 @@ The collection of papers behind TigerBeetle:
   simple way to curb latency variability is to issue the same request to multiple replicas and use
   the results from whichever replica responds first."
 
-- [Viewstamped Replication Revisited](http://pmg.csail.mit.edu/papers/vr-revisited.pdf)
+- [Viewstamped Replication Revisited](https://pmg.csail.mit.edu/papers/vr-revisited.pdf)
 
 - [Viewstamped Replication: A New Primary Copy Method to Support Highly-Available Distributed
-  Systems](http://pmg.csail.mit.edu/papers/vr.pdf)
+  Systems](https://pmg.csail.mit.edu/papers/vr.pdf)
 
 - [ZFS: The Last Word in File Systems (Jeff Bonwick and Bill
   Moore)](https://www.youtube.com/watch?v=NRoUC9P1PmA) - On disk failure and corruption, the need

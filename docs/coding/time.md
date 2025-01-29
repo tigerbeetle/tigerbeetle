@@ -57,7 +57,7 @@ in seconds, rather than as an absolute timestamp, because it is also managed by 
 ### Timestamps are Totally Ordered
 
 All `timestamp`s within TigerBeetle are unique, immutable and
-[totally ordered](http://book.mixu.net/distsys/time.html). A transfer that is created before another
+[totally ordered](https://book.mixu.net/distsys/time.html). A transfer that is created before another
 transfer is guaranteed to have an earlier `timestamp` (even if they were created in the same
 request).
 

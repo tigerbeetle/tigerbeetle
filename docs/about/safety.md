@@ -29,7 +29,7 @@ as MySQL or an in-memory database such as Redis:
   availability and distributed fault-tolerance.
 
 - TigerBeetle **performs synchronous replication** to a quorum of backup TigerBeetle servers using
-  the pioneering [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf) and
+  the pioneering [Viewstamped Replication](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) and
   consensus protocol for low-latency automated leader election and to eliminate the risk of
   split-brain associated with ad hoc manual failover systems.
 

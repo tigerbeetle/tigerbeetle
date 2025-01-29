@@ -105,7 +105,7 @@ Level 2     b───d e─────h i───k l───n o─p q──�
 
 Links:
 - [`Manifest.compaction_table`](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/lsm/manifest.zig)
-- [Constructing and Analyzing the LSM Compaction Design Space](http://vldb.org/pvldb/vol14/p2216-sarkar.pdf) describes the tradeoffs of various data movement policies. TigerBeetle implements the "least overlapping with parent" policy.
+- [Constructing and Analyzing the LSM Compaction Design Space](https://vldb.org/pvldb/vol14/p2216-sarkar.pdf) describes the tradeoffs of various data movement policies. TigerBeetle implements the "least overlapping with parent" policy.
 - [Option of Compaction Priority](https://rocksdb.org/blog/2016/01/29/compaction_pri.html)
 
 ##### Compaction Move Table
