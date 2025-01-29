@@ -845,7 +845,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     assert(connection.recv_parsed <= connection.recv_progress);
                 }
 
-                if (message.header.command == .request or message.header.command == .prepare) {
+                if (message.header.command == .request or
+                    message.header.command == .prepare or
+                    message.header.command == .block)
+                {
                     const sector_ceil = vsr.sector_ceil(message.header.size);
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);

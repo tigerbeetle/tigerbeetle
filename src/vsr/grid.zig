@@ -1160,7 +1160,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_block_resolve(read, result);
         }
 
-        fn read_block_validate(grid: *const Grid, block: BlockPtrConst, expect: struct {
+        fn read_block_validate(grid: *const Grid, block: BlockPtr, expect: struct {
             address: u64,
             checksum: u128,
         }) ReadBlockResult {
