@@ -7,19 +7,19 @@ const FileType = struct {
 };
 
 pub const supported_file_types = [_]FileType{
-    .{ .extension = "avif", .is_binary = true },
-    .{ .extension = "css", .is_binary = false },
-    .{ .extension = "gif", .is_binary = true },
-    .{ .extension = "html", .is_binary = false },
-    .{ .extension = "jpg", .is_binary = true },
-    .{ .extension = "js", .is_binary = false },
-    .{ .extension = "json", .is_binary = false },
-    .{ .extension = "png", .is_binary = true },
-    .{ .extension = "svg", .is_binary = false },
-    .{ .extension = "ttf", .is_binary = true },
-    .{ .extension = "webp", .is_binary = true },
-    .{ .extension = "woff2", .is_binary = true },
-    .{ .extension = "xml", .is_binary = false },
+    .{ .extension = ".avif", .is_binary = true },
+    .{ .extension = ".css", .is_binary = false },
+    .{ .extension = ".gif", .is_binary = true },
+    .{ .extension = ".html", .is_binary = false },
+    .{ .extension = ".jpg", .is_binary = true },
+    .{ .extension = ".js", .is_binary = false },
+    .{ .extension = ".json", .is_binary = false },
+    .{ .extension = ".png", .is_binary = true },
+    .{ .extension = ".svg", .is_binary = false },
+    .{ .extension = ".ttf", .is_binary = true },
+    .{ .extension = ".webp", .is_binary = true },
+    .{ .extension = ".woff2", .is_binary = true },
+    .{ .extension = ".xml", .is_binary = false },
 };
 
 pub const exclude_extensions = [_][]const u8{

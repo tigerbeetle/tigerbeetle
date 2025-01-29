@@ -14,7 +14,7 @@
   /* change to darker gray for legibility */
   --gray-12: #202020;
 
-  --gray-alpha-5: #00000017;
+  --gray-alpha-3: #0000000E;
 
   --red-10: #E3325E;
   --blue-10: #0588F0;
@@ -57,7 +57,7 @@
     --gray-11: #CCCCCC;
     --gray-12: #EEEEEE;
 
-    --gray-alpha-5: #FFFFFF1A;
+    --gray-alpha-5: #FFFFFF21;
 
     --red-10: #EC5D5E;
     --blue-10: #3B9EFF;
@@ -112,6 +112,35 @@ code {
   }
 }
 
+summary {
+  list-style: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+}
+
+summary::before {
+  content: url('data:image/svg+xml,<svg width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 4.5 10 8 6.5 11.5" stroke="black" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" /></svg>');
+  text-align: center;
+  flex-shrink: 0;
+  /* color: var(--gray-11); */
+  filter: invert(30%);
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  summary::before {
+    filter: invert(80%);
+  }
+}
+
+details[open]>summary::before {
+  transform: rotate(90deg);
+}
+
 nav.left-pane {
   display: flex;
   flex-direction: column;
@@ -132,7 +161,9 @@ nav.left-pane {
       gap: 4px;
     }
 
-    >.glass-edge {
+    &::after {
+      content: "";
+      display: block;
       height: 1px;
       backdrop-filter: blur(20px);
     }
@@ -312,39 +343,12 @@ nav.left-pane {
     list-style: none;
   }
 
-  summary {
-    list-style: none;
-
-    &::-webkit-details-marker {
-      display: none;
-    }
-  }
-
-  summary::before {
-    content: url('data:image/svg+xml,<svg width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 4.5 10 8 6.5 11.5" stroke="black" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" /></svg>');
-    text-align: center;
-    flex-shrink: 0;
-    /* color: var(--gray-11); */
-    filter: invert(30%);
-    display: block;
-    width: 16px;
-    height: 16px;
-  }
-
   summary:has(a.target)::before {
     /* color: var(--gray-0); */
     filter: invert(100%);
   }
 
-  details[open]>summary::before {
-    transform: rotate(90deg);
-  }
-
   @media (prefers-color-scheme: dark) {
-    summary::before {
-      filter: invert(80%);
-    }
-
     summary:has(a.target)::before {
       filter: none;
     }
@@ -603,24 +607,6 @@ body.sidenav-collapsed {
   }
 }
 
-#github-link {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  font-size: 15px;
-  line-height: 20px;
-  font-weight: 400;
-  text-decoration: none;
-  color: var(--gray-11);
-
-  &:hover {
-    color: var(--gray-12);
-  }
-}
-
 article {
   flex: 1;
   height: 100%;
@@ -771,7 +757,7 @@ article {
 
     code {
       color: var(--gray-12);
-      background-color: var(--gray-alpha-5);
+      background-color: var(--gray-alpha-3);
       border-radius: 4px;
       padding: 4px;
     }
@@ -845,6 +831,37 @@ article {
       }
     }
 
+    details {
+      background-color: var(--gray-0);
+      border: 1px solid var(--gray-4);
+      border-radius: 8px;
+      padding: 16px 12px;
+
+      >summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        line-height: 24px;
+        font-weight: 600;
+        background-color: var(--gray-1);
+        border-radius: 8px;
+        padding: 8px 12px;
+        margin: -16px -12px;
+        cursor: pointer;
+
+        &:hover {
+          background-color: var(--gray-3);
+        }
+      }
+
+      &[open]>summary {
+        border-bottom: 1px solid var(--gray-4);
+        border-radius: 8px 8px 0px 0px;
+        margin-bottom: 16px;
+      }
+    }
+
     #footnotes {
       margin-top: 24px;
       font-size: 13px;
@@ -875,6 +892,24 @@ article {
         }
       }
     }
+
+    #edit-link {
+      margin-top: 24px;
+      padding: 12px 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      width: fit-content;
+      font-size: 13px;
+      line-height: 20px;
+      font-weight: 400;
+      text-decoration: none;
+      color: var(--gray-9);
+
+      &:hover {
+        color: var(--gray-11);
+      }
+    }
   }
 }
 
@@ -899,10 +934,6 @@ article {
     z-index: 1;
 
     >.top-wrapper {
-      >.top {
-        padding-right: 16px;
-      }
-
       .menu-button {
         display: block;
 
