@@ -1,7 +1,10 @@
 const std = @import("std");
 const Website = @import("src/website.zig").Website;
-const assets = @import("src/assets.zig");
 const docs = @import("src/docs.zig");
+
+pub const exclude_extensions: []const []const u8 = &.{
+    ".DS_Store",
+};
 
 pub fn build(b: *std.Build) !void {
     const url_prefix: []const u8 = b.option(
@@ -25,7 +28,12 @@ pub fn build(b: *std.Build) !void {
     }));
     file_checker_run.addArg("zig-out");
 
-    const install_assets = assets.install(b, .{ .source = "assets", .target = "." });
+    const install_assets = b.addInstallDirectory(.{
+        .source_dir = b.path("assets"),
+        .install_dir = .prefix,
+        .install_subdir = ".",
+        .exclude_extensions = exclude_extensions,
+    });
     file_checker_run.step.dependOn(&install_assets.step);
 
     const website = Website.init(b, url_prefix, pandoc_bin);

@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const LazyPath = std.Build.LazyPath;
 const log = std.log.scoped(.docs);
 const Website = @import("website.zig").Website;
-const assets = @import("assets.zig");
 const Html = @import("html.zig").Html;
 
 const base_path = "../../docs";
@@ -421,7 +420,7 @@ const Page = struct {
         const page_dir = cut_suffix(self.path_source, ".md").?;
         if (try path_exists(b.pathFromRoot(page_dir))) {
             _ = docs.addCopyDirectory(b.path(page_dir), self.path_target, .{
-                .exclude_extensions = &assets.exclude_extensions,
+                .exclude_extensions = @import("../build.zig").exclude_extensions,
             });
         }
     }
