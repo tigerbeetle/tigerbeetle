@@ -3974,8 +3974,8 @@ pub fn ReplicaType(
 
             // Safety counter: the loop supports fully synchronous commits, but checkpoints must be
             // asynchronous.
-            const op = self.op;
-            while (self.op - op < constants.vsr_checkpoint_ops) {
+            const op_limit: u64 = self.op + constants.vsr_checkpoint_ops;
+            while (self.op < op_limit) {
                 if (self.commit_stage == .idle) {
                     self.commit_stage = .start;
                     assert(self.commit_prepare == null);
