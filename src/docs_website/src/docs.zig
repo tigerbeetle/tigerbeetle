@@ -335,31 +335,27 @@ const Page = struct {
         else
             cut_suffix(path_target, ".md").?;
 
-        var post: Page = .{
+        return .{
             .path_source = path_source,
             .path_target = path_target,
-            .title = undefined,
+            .title = try load_title(arena, path_source),
         };
-        try post.load(arena);
-
-        return post;
     }
 
-    fn load(self: *Page, arena: Allocator) !void {
-        errdefer log.err("error while loading '{s}'", .{self.path_source});
+    fn load_title(arena: Allocator, path_source: []const u8) ![]const u8 {
+        errdefer log.err("error while loading '{s}'", .{path_source});
 
-        const source = try std.fs.cwd().readFileAlloc(
-            arena,
-            self.path_source,
-            Website.file_size_max,
-        );
-        var line_it = std.mem.tokenizeScalar(u8, source, '\n');
+        var buffer: [1024]u8 = undefined;
+        const source = try std.fs.cwd().readFile(path_source, &buffer);
 
-        const title_line = line_it.next().?;
-        if (title_line.len < 3 or !std.mem.eql(u8, title_line[0..2], "# ")) {
+        const newline = std.mem.indexOfScalar(u8, source, '\n') orelse
             return error.TitleInvalid;
-        }
-        self.title = cut_prefix(title_line, "# ").?;
+
+        const title_line = source[0..newline];
+        const title = cut_prefix(title_line, "# ") orelse return error.TitleInvalid;
+        if (title.len < 3) return error.TitleInvalid;
+
+        return try arena.dupe(u8, title);
     }
 
     fn eql(lhs: Page, rhs: Page) bool {
