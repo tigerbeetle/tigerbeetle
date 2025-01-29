@@ -355,7 +355,7 @@ fn WorkloadType(comptime StateMachine: type) type {
             client_index: usize,
             body: []align(@alignOf(vsr.Header)) u8,
         ) struct {
-            operation: StateMachine.Operation,
+            operation: vsr.Operation,
             size: usize,
             batch_count: u16,
         } {
@@ -368,7 +368,7 @@ fn WorkloadType(comptime StateMachine: type) type {
             workload.random.bytes(body[0..size]);
 
             return .{
-                .operation = .echo,
+                .operation = vsr.Operation.from(StateMachine, .echo),
                 .size = size,
                 .batch_count = 0,
             };
@@ -377,20 +377,18 @@ fn WorkloadType(comptime StateMachine: type) type {
         pub fn on_reply(
             workload: *Workload,
             client_index: usize,
-            operation: StateMachine.Operation,
+            operation: vsr.Operation,
             timestamp: u64,
             request_body: []align(@alignOf(vsr.Header)) const u8,
             reply_body: []align(@alignOf(vsr.Header)) const u8,
-            batch_count: u16,
         ) void {
             _ = client_index;
             _ = timestamp;
-            assert(batch_count == 0);
 
             workload.requests_delivered += 1;
             assert(workload.requests_delivered <= workload.requests_sent);
 
-            assert(operation == .echo);
+            assert(operation.cast(StateMachine) == .echo);
             assert(std.mem.eql(u8, request_body, reply_body));
         }
 
