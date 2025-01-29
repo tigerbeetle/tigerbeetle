@@ -1,7 +1,10 @@
 const std = @import("std");
 const Website = @import("src/website.zig").Website;
-const assets = @import("src/assets.zig");
 const docs = @import("src/docs.zig");
+
+pub const exclude_extensions: []const []const u8 = &.{
+    ".DS_Store",
+};
 
 pub fn build(b: *std.Build) !void {
     const url_prefix: []const u8 = b.option(
@@ -18,34 +21,39 @@ pub fn build(b: *std.Build) !void {
 
     const pandoc_bin = get_pandoc_bin(b) orelse return;
 
-    const file_checker_run = b.addRunArtifact(b.addExecutable(.{
-        .name = "file_checker",
-        .root_source_file = b.path("src/file_checker.zig"),
-        .target = b.graph.host,
-    }));
-    file_checker_run.addArg("zig-out");
-
-    const install_assets = assets.install(b, .{ .source = "assets", .target = "." });
-    file_checker_run.step.dependOn(&install_assets.step);
+    const content = b.addWriteFiles();
+    _ = content.addCopyDirectory(b.path("assets"), ".", .{
+        .exclude_extensions = exclude_extensions,
+    });
 
     const website = Website.init(b, url_prefix, pandoc_bin);
-    const docs_dir = try docs.build(b, website);
-    const install_docs = b.addInstallDirectory(.{
-        .source_dir = docs_dir,
-        .install_dir = .prefix,
-        .install_subdir = ".",
-    });
-    file_checker_run.step.dependOn(&install_docs.step);
+    try docs.build(b, content, website);
 
-    const service_worker_writer_run = b.addRunArtifact(b.addExecutable(.{
+    const service_worker_writer = b.addRunArtifact(b.addExecutable(.{
         .name = "service_worker_writer",
         .root_source_file = b.path("src/service_worker_writer.zig"),
         .target = b.graph.host,
     }));
-    service_worker_writer_run.addArgs(&.{ url_prefix, git_commit, "zig-out" });
-    service_worker_writer_run.step.dependOn(&file_checker_run.step);
+    service_worker_writer.addArgs(&.{ url_prefix, git_commit });
+    service_worker_writer.addDirectoryArg(content.getDirectory());
 
-    b.getInstallStep().dependOn(&service_worker_writer_run.step);
+    const service_worker = service_worker_writer.captureStdOut();
+
+    const file_checker = b.addRunArtifact(b.addExecutable(.{
+        .name = "file_checker",
+        .root_source_file = b.path("src/file_checker.zig"),
+        .target = b.graph.host,
+    }));
+    file_checker.addArg("zig-out");
+
+    file_checker.step.dependOn(&b.addInstallDirectory(.{
+        .source_dir = content.getDirectory(),
+        .install_dir = .prefix,
+        .install_subdir = ".",
+    }).step);
+    file_checker.step.dependOn(&b.addInstallFile(service_worker, "service-worker.js").step);
+
+    b.getInstallStep().dependOn(&file_checker.step);
 }
 
 fn get_pandoc_bin(b: *std.Build) ?std.Build.LazyPath {

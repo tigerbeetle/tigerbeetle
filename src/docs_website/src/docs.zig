@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const LazyPath = std.Build.LazyPath;
 const log = std.log.scoped(.docs);
 const Website = @import("website.zig").Website;
-const assets = @import("assets.zig");
 const Html = @import("html.zig").Html;
 
 const base_path = "../../docs";
@@ -17,31 +16,31 @@ const SearchIndex = std.ArrayList(SearchIndexEntry);
 
 pub fn build(
     b: *std.Build,
+    output: *std.Build.Step.WriteFile,
     website: Website,
-) !LazyPath {
+) !void {
     const arena = b.allocator;
-    const docs = b.addWriteFiles();
 
     var search_index = SearchIndex.init(arena);
 
     const root_menu = try create_root_menu(arena);
-    try root_menu.install(b, website, root_menu, docs, &search_index);
+    try root_menu.install(b, website, root_menu, output, &search_index);
 
     const run_search_index_writer = b.addRunArtifact(b.addExecutable(.{
         .name = "search_index_writer",
         .root_source_file = b.path("src/search_index_writer.zig"),
         .target = b.graph.host,
     }));
-    const search_index_output = run_search_index_writer.addOutputFileArg("search-index.json");
-    _ = docs.addCopyFile(search_index_output, "search-index.json");
     for (search_index.items) |entry| {
         run_search_index_writer.addArg(entry.page_path);
         run_search_index_writer.addFileArg(entry.html_path);
     }
+    _ = output.addCopyFile(
+        run_search_index_writer.captureStdOut(),
+        "search-index.json",
+    );
 
-    try write_404_page(b, website, docs);
-
-    return docs.getDirectory();
+    try write_404_page(b, website, output);
 }
 
 fn create_root_menu(arena: std.mem.Allocator) !Menu {
@@ -421,7 +420,7 @@ const Page = struct {
         const page_dir = cut_suffix(self.path_source, ".md").?;
         if (try path_exists(b.pathFromRoot(page_dir))) {
             _ = docs.addCopyDirectory(b.path(page_dir), self.path_target, .{
-                .exclude_extensions = &assets.exclude_extensions,
+                .exclude_extensions = @import("../build.zig").exclude_extensions,
             });
         }
     }
