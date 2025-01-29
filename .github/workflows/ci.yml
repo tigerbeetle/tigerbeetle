@@ -23,6 +23,7 @@ jobs:
       - run: ./zig/download.sh
       - run: ./zig/zig fmt --check .
       - run: ./zig/zig build check
+      - run: ./zig/zig build scripts -- ci --build-docs
       - run: ./.github/ci/docs_check.sh
 
   test_alpine:
