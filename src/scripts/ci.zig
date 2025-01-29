@@ -32,11 +32,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (cli_args.validate_release) {
         try validate_release(shell, gpa, cli_args.language);
     } else if (cli_args.build_docs) {
-        if ((builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) or
-            (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64))
-        {
-            try build_docs(shell);
-        }
+        try build_docs(shell);
     } else {
         try generate_readmes(shell, gpa, cli_args.language);
         try run_tests(shell, gpa, cli_args.language);
