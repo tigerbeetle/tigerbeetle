@@ -429,6 +429,7 @@ pub fn ReplicaType(
             prepare_timestamp: u64,
             reply: ?MessagePool.GetMessageType(.reply) = null,
             encoder: ?BatchReplyEncoder = null,
+            prefetch_pending: bool,
         } = null,
 
         /// Measures the time taken to commit a prepare, across the following stages:
@@ -3906,8 +3907,6 @@ pub fn ReplicaType(
             reply_setup,
             /// Execute state machine logic.
             execute,
-            /// Prefetch the next batch.
-            prefetch_batch,
             /// Every vsr_checkpoint_ops, mark the current checkpoint as durable.
             checkpoint_durable,
             /// Run one beat of LSM compaction.
@@ -3956,7 +3955,8 @@ pub fn ReplicaType(
 
             // Safety counter: the loop supports fully synchronous commits, but checkpoints must be
             // asynchronous.
-            for (0..constants.vsr_checkpoint_ops) |_| {
+            const op = self.op;
+            while (self.op - op < constants.vsr_checkpoint_ops) {
                 if (self.commit_stage == .idle) {
                     self.commit_stage = .start;
                     assert(self.commit_prepare == null);
@@ -3986,7 +3986,12 @@ pub fn ReplicaType(
                         .stage = @tagName(self.commit_stage),
                         .op = self.commit_prepare.?.header.op,
                     });
-                    if (self.commit_reply_setup() == .pending) return;
+                    const prefetch_pending: bool = self.commit_batched != null and
+                        self.commit_batched.?.prefetch_pending;
+
+                    if (!prefetch_pending) {
+                        if (self.commit_reply_setup() == .pending) return;
+                    }
                 }
 
                 if (self.commit_stage == .reply_setup) {
@@ -3998,41 +4003,19 @@ pub fn ReplicaType(
                     });
 
                     self.commit_execute();
-                }
 
-                if (self.commit_stage == .prefetch_batch) {
-                    assert(self.commit_prepare.?.header.operation == .batched);
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
-                    self.commit_stage = .execute;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
-                        .op = self.commit_prepare.?.header.op,
-                    });
-
-                    self.commit_execute();
+                    if (self.commit_batched != null) {
+                        // Prefetching the next batch:
+                        assert(self.commit_prepare.?.header.operation == .batched);
+                        assert(self.commit_batched.?.prefetch_pending);
+                        self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                        self.commit_stage = .check_prepare;
+                        continue;
+                    }
                 }
+                assert(self.commit_batched == null);
 
                 if (self.commit_stage == .execute) {
-                    if (self.commit_batched) |*commit_batched| {
-                        assert(self.commit_prepare.?.header.operation == .batched);
-                        self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
-                        self.commit_stage = .prefetch_batch;
-                        self.commit_completion_timer.reset();
-                        self.trace.start(.replica_commit, .{
-                            .stage = @tagName(self.commit_stage),
-                            .op = self.commit_prepare.?.header.op,
-                            .batch_index = commit_batched.decoder.batch_index,
-                            .batch_count = commit_batched.decoder.batch_count(),
-                        });
-
-                        const result = self.commit_prefetch();
-                        assert(result == .pending);
-                        return;
-                    }
-
-                    assert(self.commit_batched == null);
-                    maybe(self.commit_prepare.?.header.operation == .batched);
-
                     // Compacting.
                     self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
                     self.commit_stage = .checkpoint_durable;
@@ -4299,8 +4282,7 @@ pub fn ReplicaType(
             assert(self.state_machine_opened);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
-            assert(self.commit_stage == .prefetch or
-                self.commit_stage == .prefetch_batch);
+            assert(self.commit_stage == .prefetch);
             assert(self.commit_prepare.?.header.command == .prepare);
             assert(self.commit_prepare.?.header.operation != .root);
             assert(self.commit_prepare.?.header.operation != .reserved);
@@ -4349,7 +4331,7 @@ pub fn ReplicaType(
             };
         }
 
-        fn commit_decode_batch(
+        fn commit_batched_decode(
             self: *Replica,
             prepare: *const Message.Prepare,
         ) void {
@@ -4381,6 +4363,7 @@ pub fn ReplicaType(
             self.commit_batched = .{
                 .decoder = body_decoder,
                 .prepare_timestamp = prepare_timestamp,
+                .prefetch_pending = true,
             };
         }
 
@@ -4388,22 +4371,22 @@ pub fn ReplicaType(
             self: *Replica,
             prepare: *const Message.Prepare,
         ) void {
+            assert(self.commit_stage == .prefetch);
             assert(prepare.header.operation == .batched);
             maybe(self.commit_batched == null);
 
             // It's a batched request, the message body must be decoded to
             // remove the trailer.
             if (self.commit_batched) |*commit_batched| {
-                assert(self.commit_stage == .prefetch_batch);
                 assert(commit_batched.decoder.batch_index > 0);
                 assert(commit_batched.decoder.batch_index < commit_batched.decoder.batch_count());
                 assert(commit_batched.encoder != null);
                 assert(commit_batched.decoder.batch_index == commit_batched.encoder.?.batch_count);
             } else {
-                assert(self.commit_stage == .prefetch);
-                self.commit_decode_batch(prepare);
+                self.commit_batched_decode(prepare);
             }
             assert(self.commit_batched != null);
+            assert(self.commit_batched.?.prefetch_pending);
 
             // Prefetching is performed per operation, although it may be possible
             // to prefetch multiple batches of the same operation together since the
@@ -4432,8 +4415,8 @@ pub fn ReplicaType(
 
                     defer {
                         const moved = body_decoder.move_next();
+                        assert(moved);
                         assert(body_decoder.payload_index == payload_index + length);
-                        maybe(moved);
                     }
 
                     // The next batch starts where the previous one ends.
@@ -4448,6 +4431,9 @@ pub fn ReplicaType(
                 }
                 assert(operation != null);
                 assert(body_decoder.payload.len >= payload_index + length);
+
+                // Check if another prefetch is needed.
+                self.commit_batched.?.prefetch_pending = body_decoder.move_next();
 
                 break :contiguous .{
                     operation.?,
@@ -4468,8 +4454,7 @@ pub fn ReplicaType(
 
         fn commit_prefetch_callback(state_machine: *StateMachine) void {
             const self: *Replica = @alignCast(@fieldParentPtr("state_machine", state_machine));
-            assert(self.commit_stage == .prefetch or
-                self.commit_stage == .prefetch_batch);
+            assert(self.commit_stage == .prefetch);
             assert(self.commit_prepare != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
 
@@ -4498,6 +4483,7 @@ pub fn ReplicaType(
                 .pending => {
                     // Keep processing the rest of the batch.
                     assert(self.commit_prepare.?.header.operation == .batched);
+                    assert(self.commit_batched.?.prefetch_pending);
                     return;
                 },
                 .ready => {
@@ -4909,7 +4895,6 @@ pub fn ReplicaType(
             assert(self.commit_prepare.? == prepare);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
-            assert(self.client_replies.writes.available() > 0);
             assert(self.upgrade_release == null or prepare.header.operation == .upgrade);
             assert(
                 self.superblock.working.vsr_state.checkpoint.release.value == self.release.value,
@@ -5023,6 +5008,7 @@ pub fn ReplicaType(
                     reply.buffer[@sizeOf(Header)..],
                 ),
             };
+            assert(self.client_replies.writes.available() > 0);
             assert(self.commit_batched == null);
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or
                 constants.aof_recovery);
@@ -5281,6 +5267,7 @@ pub fn ReplicaType(
                 );
             }
             assert(self.commit_batched.?.encoder != null);
+            maybe(self.commit_batched.?.prefetch_pending);
 
             const body_decoder: *BatchBodyDecoder = &self.commit_batched.?.decoder;
             const reply_encoder: *BatchReplyEncoder = &self.commit_batched.?.encoder.?;
@@ -5341,13 +5328,14 @@ pub fn ReplicaType(
             }
             assert(current_operation != null);
 
-            const last_batch: bool = reply_encoder.batch_count == body_decoder.batch_count();
-            if (last_batch) {
-                assert(prepare_timestamp == prepare.header.timestamp);
-                return .{ .ready = reply_encoder.finish() };
-            } else {
+            if (self.commit_batched.?.prefetch_pending) {
+                assert(reply_encoder.batch_count < body_decoder.batch_count());
                 assert(prepare_timestamp <= prepare.header.timestamp);
                 return .pending;
+            } else {
+                assert(reply_encoder.batch_count == body_decoder.batch_count());
+                assert(prepare_timestamp == prepare.header.timestamp);
+                return .{ .ready = reply_encoder.finish() };
             }
         }
 
@@ -9826,7 +9814,6 @@ pub fn ReplicaType(
 
                 .idle, // (StateMachine.open() may be running.)
                 .prefetch,
-                .prefetch_batch,
                 .compact,
                 .checkpoint_durable,
                 => self.sync_dispatch(.canceling_grid),

@@ -748,8 +748,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     assert(batch_item.operation == batch_reply.operation);
 
                     defer {
-                        _ = body_decoder.move_next();
-                        _ = reply_decoder.move_next();
+                        assert(body_decoder.move_next());
+                        assert(reply_decoder.move_next());
                     }
 
                     const operation = batch_item.operation.cast(AccountingStateMachine);
@@ -1444,10 +1444,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             self.auditor.on_create_transfers(
                 client_index,
+                batch_index,
                 timestamp,
                 transfers,
                 results_sparse,
-                batch_index,
             );
             if (transfers.len == 0) return;
 
