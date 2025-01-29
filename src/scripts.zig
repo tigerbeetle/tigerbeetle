@@ -39,6 +39,7 @@ const CLIArgs = union(enum) {
         \\  zig build scripts -- cfo [--budget-minutes=<n>] [--hang-minutes=<n>] [--concurrency=<n>]
         \\
         \\  zig build scripts -- ci [--language=<dotnet|go|java|node>] [--validate-release]
+        \\                          [--build-docs]
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
