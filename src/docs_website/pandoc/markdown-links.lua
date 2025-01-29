@@ -20,15 +20,7 @@ function Link (link)
     local _, target_level = link.target:gsub("/", "")
     local is_client_readme = link.target:find("README.md") and target_level == 4
     if is_client_readme then
-      link.target = link.target:sub(6) -- cut "/src/"
-      -- Figure our how deeply we're nested starting from /docs/
-      -- (This breaks if the tigerbeetle repo is in another folder named docs)
-      local _, endindex = PANDOC_STATE.input_files[1]:find("/docs/")
-      local _, source_level = PANDOC_STATE.input_files[1]:sub(endindex):gsub("/", "")
-      if is_readme then source_level = source_level - 1 end
-      for i=1,source_level do
-        link.target = "../" .. link.target
-      end
+      link.target = link.target:sub(5) -- Cut "/src"
     else
       -- Make GitHub link
       link.target = "https://github.com/tigerbeetle/tigerbeetle/blob/main" .. link.target
