@@ -251,6 +251,8 @@ pub const AOF = struct {
     /// like lookup_ and queries, that have no affect on the final state, but take up a lot of time
     /// when replaying.
     pub fn replay_message(header: *Header.Prepare) bool {
+        // TODO: can we inspect the batched request instead?
+        if (header.operation == .batched) return true;
         if (header.operation.vsr_reserved()) return false;
         const state_machine_operation = header.operation.cast(StateMachine);
         switch (state_machine_operation) {
