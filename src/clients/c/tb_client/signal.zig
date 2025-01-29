@@ -41,7 +41,7 @@ pub const Signal = struct {
 
     pub fn deinit(self: *Signal) void {
         assert(self.event != IO.INVALID_EVENT);
-        assert(self.stop_requested());
+        assert(self.status() == .shutdown);
 
         self.io.close_event(self.event);
         self.* = undefined;
@@ -50,15 +50,28 @@ pub const Signal = struct {
     /// Stops the current event.
     /// Further calls to "notify" will not fire the signal.
     /// Safe to call from multiple threads.
-    pub fn stop(self: *Signal) void {
+    pub fn shutdown(self: *Signal) void {
         const listening = self.listening.swap(false, .release);
         if (listening) {
             self.notify();
         }
     }
 
-    pub fn stop_requested(self: *const Signal) bool {
-        return !self.listening.load(.acquire);
+    pub fn status(self: *const Signal) enum {
+        running,
+        stop_requested,
+        shutdown,
+    } {
+        return switch (self.state.load(.acquire)) {
+            .shutdown => .shutdown,
+            .running,
+            .waiting,
+            .notified,
+            => if (self.listening.load(.acquire))
+                .running
+            else
+                .stop_requested,
+        };
     }
 
     /// Schedules the on_signal callback to be invoked on the IO thread.
@@ -86,7 +99,9 @@ pub const Signal = struct {
     }
 
     fn wait(self: *Signal) void {
-        assert(!self.stop_requested());
+        // It is not guaranteed to be `running` here, as another caller might have requested
+        // a stop during the callback.
+        assert(self.status() != .shutdown);
 
         const state = self.state.swap(.waiting, .acquire);
         self.io.event_listen(self.event, &self.completion, on_event);
@@ -105,17 +120,17 @@ pub const Signal = struct {
 
     fn on_event(completion: *IO.Completion) void {
         const self: *Signal = @fieldParentPtr("completion", completion);
-        const stopped = self.stop_requested();
+        const listening: bool = self.listening.load(.acquire);
         const state = self.state.cmpxchgStrong(
             .notified,
-            if (stopped) .shutdown else .running,
+            if (listening) .running else .shutdown,
             .release,
             .acquire,
         ) orelse {
-            if (stopped) return;
-
-            (self.on_signal_fn)(self);
-            self.wait();
+            if (listening) {
+                (self.on_signal_fn)(self);
+                self.wait();
+            }
             return;
         };
 
@@ -160,7 +175,8 @@ test "signal" {
             while (self.count < events_count) try self.io.tick();
 
             // Begin shutdown and keep ticking until it's completed.
-            self.signal.stop();
+            self.signal.shutdown();
+            while (self.signal.status() != .shutdown) try self.io.tick();
             thread.join();
 
             // Notify after shutdown should be ignored.
@@ -176,7 +192,7 @@ test "signal" {
 
         fn notify(self: *Context) void {
             assert(std.Thread.getCurrentId() != self.main_thread_id);
-            while (!self.signal.stop_requested()) {
+            while (self.signal.status() != .shutdown) {
                 std.time.sleep(delay + 1);
 
                 // Triggering the event:
@@ -191,7 +207,7 @@ test "signal" {
         fn on_signal(signal: *Signal) void {
             const self: *Context = @fieldParentPtr("signal", signal);
             assert(std.Thread.getCurrentId() == self.main_thread_id);
-            assert(!self.signal.stop_requested());
+            assert(self.signal.status() != .shutdown);
             assert(self.count < events_count);
 
             self.count += 1;

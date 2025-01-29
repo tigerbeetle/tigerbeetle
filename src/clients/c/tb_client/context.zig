@@ -238,7 +238,7 @@ pub fn ContextType(
         /// Only one thread calls `deinit()`.
         /// Since it frees the Context, any further interaction is undefined behavior.
         pub fn deinit(self: *Context) void {
-            self.signal.stop();
+            self.signal.shutdown();
             self.thread.join();
             self.io.cancel_all();
 
@@ -280,7 +280,7 @@ pub fn ContextType(
             }
         }
         pub fn run(self: *Context) void {
-            while (!self.signal.stop_requested()) {
+            while (self.signal.status() != .shutdown) {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
@@ -382,7 +382,7 @@ pub fn ContextType(
                 packet.data_size,
             );
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
-            if (self.signal.stop_requested()) {
+            if (self.signal.status() != .running) {
                 return self.cancel(packet);
             }
 
@@ -452,7 +452,7 @@ pub fn ContextType(
         fn submit(self: *Context, packet: *Packet) void {
             assert(self.client.request_inflight == null);
             // On shutdown, cancel this packet as well as any others batched onto it.
-            if (self.signal.stop_requested()) {
+            if (self.signal.status() != .running) {
                 return self.cancel(packet);
             }
 
@@ -588,7 +588,7 @@ pub fn ContextType(
             const result = if (self.evicted) |reason|
                 client_eviction_error(reason)
             else reason: {
-                assert(self.signal.stop_requested());
+                assert(self.signal.status() != .running);
                 break :reason error.ClientShutdown;
             };
 
@@ -658,7 +658,7 @@ pub fn ContextType(
                 .reserved = [_]u8{0} ** 7,
             };
             const self = get_context(implementation);
-            assert(!self.signal.stop_requested());
+            assert(self.signal.status() == .running);
 
             self.submitted.push(packet);
             self.signal.notify();
