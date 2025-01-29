@@ -302,7 +302,8 @@ pub const Network = struct {
         });
 
         if (target_message.header.command == .request or
-            target_message.header.command == .prepare)
+            target_message.header.command == .prepare or
+            target_message.header.command == .block)
         {
             const sector_ceil = vsr.sector_ceil(target_message.header.size);
             if (target_message.header.size != sector_ceil) {

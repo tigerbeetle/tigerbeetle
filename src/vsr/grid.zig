@@ -123,6 +123,9 @@ pub fn GridType(comptime Storage: type) type {
             unexpected_command,
             /// The block is valid, but it is not the block we expected.
             unexpected_checksum,
+            /// The block is valid, and it is the block we expected, but the last sector's padding
+            /// is corrupt, so we will repair it just to be safe.
+            invalid_padding,
         };
 
         const ReadPending = struct {
@@ -1179,8 +1182,8 @@ pub fn GridType(comptime Storage: type) type {
 
             if (header.checksum != expect.checksum) return .unexpected_checksum;
 
-            if (constants.verify) {
-                assert(stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)]));
+            if (!stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)])) {
+                return .invalid_padding;
             }
 
             assert(header.address == expect.address);
