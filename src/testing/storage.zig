@@ -86,8 +86,6 @@ pub const Storage = struct {
         /// Does not impact crash faults or manual faults.
         fault_atlas: ?*const ClusterFaultAtlas = null,
 
-        fault_granularity: enum { sector, bit } = .sector,
-
         /// Accessed by the Grid for extra verification of grid coherence.
         grid_checker: ?*GridChecker = null,
     };
@@ -409,23 +407,16 @@ pub const Storage = struct {
             const sector_uninitialized = !storage.memory_written.isSet(sector);
 
             if (sector_corrupt) {
-                switch (storage.options.fault_granularity) {
-                    .bit => {
-                        // Rather than corrupting the entire sector, inject a localized error.
-                        // (In some cases this will just corrupt sector padding.)
-                        // Inject the fault at a deterministic position (by using the pristine bytes
-                        // as consistent seed) so that read-retries don't resolve the corruption.
-                        const corrupt_seed: u64 = @bitCast(sector_bytes[0..@sizeOf(u64)].*);
-                        var corrupt_prng = std.rand.DefaultPrng.init(corrupt_seed);
-                        const corrupt_random = corrupt_prng.random();
-                        const corrupt_byte = corrupt_random.uintLessThan(u32, sector_bytes.len);
-                        const corrupt_bit = corrupt_random.uintAtMost(u3, @bitSizeOf(u8) - 1);
-                        sector_bytes[corrupt_byte] ^= @as(u8, 1) << corrupt_bit;
-                    },
-                    .sector => {
-                        storage.prng.random().bytes(sector_bytes);
-                    },
-                }
+                // Rather than corrupting the entire sector, inject a localized error.
+                // (In some cases this will just corrupt sector padding.)
+                // Inject the fault at a deterministic position (by using the pristine bytes as
+                // consistent seed) so that read-retries don't resolve the corruption.
+                const corrupt_seed: u64 = @bitCast(sector_bytes[0..@sizeOf(u64)].*);
+                var corrupt_prng = std.rand.DefaultPrng.init(corrupt_seed);
+                const corrupt_random = corrupt_prng.random();
+                const corrupt_byte = corrupt_random.uintLessThan(u32, sector_bytes.len);
+                const corrupt_bit = corrupt_random.uintAtMost(u3, @bitSizeOf(u8) - 1);
+                sector_bytes[corrupt_byte] ^= @as(u8, 1) << corrupt_bit;
             }
 
             if (sector_uninitialized) {
