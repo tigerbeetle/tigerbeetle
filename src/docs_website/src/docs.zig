@@ -330,10 +330,10 @@ const Page = struct {
         var path_target = path_source[base_path.len + 1 ..];
         if (std.mem.eql(u8, path_target, "README.md")) {
             path_target = ".";
-        } else if (std.mem.endsWith(u8, path_target, "/README.md")) {
-            path_target = path_target[0 .. path_target.len - "/README.md".len];
+        } else if (cut_suffix(path_target, "/README.md")) |base| {
+            path_target = base;
         } else {
-            path_target = path_target[0 .. path_target.len - ".md".len];
+            path_target = cut_suffix(path_target, ".md").?;
         }
 
         var post: Page = .{
@@ -360,7 +360,7 @@ const Page = struct {
         if (title_line.len < 3 or !std.mem.eql(u8, title_line[0..2], "# ")) {
             return error.TitleInvalid;
         }
-        self.title = title_line[2..];
+        self.title = cut_prefix(title_line, "# ").?;
     }
 
     fn eql(lhs: Page, rhs: Page) bool {
@@ -407,7 +407,12 @@ const Page = struct {
         const nav_html = try Html.create(b.allocator);
         try root_menu.write_links(website, nav_html, self);
 
-        const url_page_source = self.path_source["../../".len..];
+        const url_page_source = if (cut_prefix(self.path_source, "../../")) |base|
+            base
+        else if (cut_prefix(self.path_source, "../")) |base|
+            try std.fmt.allocPrint(b.allocator, "src/{s}", .{base})
+        else
+            @panic("no source url");
 
         const page_path = website.write_page(.{
             .title = page_title,
@@ -418,7 +423,7 @@ const Page = struct {
         _ = docs.addCopyFile(page_path, b.pathJoin(&.{ self.path_target, "index.html" }));
 
         // If it exists, copy the page's asset directory.
-        const page_dir = self.path_source[0 .. self.path_source.len - ".md".len];
+        const page_dir = cut_suffix(self.path_source, ".md").?;
         if (try path_exists(b.pathFromRoot(page_dir))) {
             _ = docs.addCopyDirectory(b.path(page_dir), self.path_target, .{
                 .exclude_extensions = &assets.exclude_extensions,
@@ -433,4 +438,18 @@ fn path_exists(path: []const u8) !bool {
         else => return err,
     };
     return true;
+}
+
+fn cut_prefix(text: []const u8, comptime prefix: []const u8) ?[]const u8 {
+    return if (std.mem.startsWith(u8, text, prefix))
+        text[prefix.len..]
+    else
+        null;
+}
+
+fn cut_suffix(text: []const u8, comptime suffix: []const u8) ?[]const u8 {
+    return if (std.mem.endsWith(u8, text, suffix))
+        text[0 .. text.len - suffix.len]
+    else
+        null;
 }
