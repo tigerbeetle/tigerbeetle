@@ -123,6 +123,9 @@ pub fn GridType(comptime Storage: type) type {
             unexpected_command,
             /// The block is valid, but it is not the block we expected.
             unexpected_checksum,
+            /// The block is valid, and it is the block we expected, but the last sector's padding
+            /// is corrupt, so we will repair it just to be safe.
+            invalid_padding,
         };
 
         const ReadPending = struct {
@@ -1130,7 +1133,7 @@ pub fn GridType(comptime Storage: type) type {
             // Remove the "root" read so that the address is no longer actively reading / locked.
             grid.read_queue.remove(read);
 
-            const result = grid.read_block_validate(block.*, .{
+            const result = read_block_validate(block.*, .{
                 .address = read.address,
                 .checksum = read.checksum,
             });
@@ -1160,7 +1163,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_block_resolve(read, result);
         }
 
-        fn read_block_validate(grid: *const Grid, block: BlockPtr, expect: struct {
+        fn read_block_validate(block: BlockPtrConst, expect: struct {
             address: u64,
             checksum: u128,
         }) ReadBlockResult {
@@ -1179,13 +1182,8 @@ pub fn GridType(comptime Storage: type) type {
 
             if (header.checksum != expect.checksum) return .unexpected_checksum;
 
-            const block_padding = block[header.size..vsr.sector_ceil(header.size)];
-            if (!stdx.zeroed(block_padding)) {
-                @memset(block_padding, 0);
-                log.warn("{}: read_block_validate: found corrupted padding for address={}", .{
-                    grid.superblock.replica_index.?,
-                    expect.address,
-                });
+            if (!stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)])) {
+                return .invalid_padding;
             }
 
             assert(header.address == expect.address);

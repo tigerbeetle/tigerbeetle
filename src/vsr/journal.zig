@@ -916,6 +916,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (!message.header.valid_checksum_body(message.body_used())) {
                     break :reason "corrupt body after read";
                 }
+
+                const message_padding =
+                    message.buffer[message.header.size..vsr.sector_ceil(message.header.size)];
+                if (!stdx.zeroed(message_padding)) {
+                    break :reason "corrupt sector padding";
+                }
                 break :reason null;
             };
 
@@ -933,17 +939,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 callback(replica, null, null);
             } else {
                 assert(message.header.checksum == checksum);
-
-                const message_padding =
-                    message.buffer[message.header.size..vsr.sector_ceil(message.header.size)];
-                if (!stdx.zeroed(message_padding)) {
-                    @memset(message_padding, 0);
-                    log.warn("{}: read_prepare: found corrupted padding for op={}", .{
-                        journal.replica,
-                        message.header.op,
-                    });
-                }
-
                 callback(replica, message, destination_replica);
             }
         }
@@ -1171,7 +1166,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             if (read.message.header.valid_checksum() and
                 read.message.header.valid_checksum_body(read.message.body_used()))
             {
-                journal.headers[slot.index] = read.message.header.*;
+                const message_size = read.message.header.size;
+                const message_padding =
+                    read.message.buffer[message_size..vsr.sector_ceil(message_size)];
+
+                if (stdx.zeroed(message_padding)) {
+                    journal.headers[slot.index] = read.message.header.*;
+                }
             }
 
             replica.message_bus.unref(read.message);
