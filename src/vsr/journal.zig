@@ -1227,7 +1227,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///   match checksum           _   _   _   _   _   _   _   _  !1   0   0   0   1
         ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1  !1
         ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !1
-        ///   prepare.op < checkpoint  _   _   _   _   _   _   _   _   _   _   _   _   _
         ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr nil fix vsr vsr eql
         ///   decision (replicas=1)              fix fix
         ///
@@ -2314,24 +2313,23 @@ const recovery_cases = table: {
         //    op⌈  prepare.op is maximum of all prepare.ops
         //    op=  header.op == prepare.op
         //    op<  header.op  < prepare.op
-        //    op⌊  prepare.op < op_checkpoint
         //   view  header.view == prepare.view
         //
         //        Label  Decision      Header  Prepare Compare
-        //               R>1   R=1     ok  nil ok  nil op⌈ ✓∑  op= op< op⌊ view
-        Case.init("@A", .vsr, .vsr, .{ _0, __, _0, __, __, __, __, __, __, __ }),
-        Case.init("@B", .vsr, .vsr, .{ _1, _1, _0, __, __, __, __, __, __, __ }),
-        Case.init("@C", .vsr, .vsr, .{ _1, _0, _0, __, __, __, __, __, __, __ }),
-        Case.init("@D", .vsr, .fix, .{ _0, __, _1, _1, __, __, __, __, __, __ }),
-        Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, _0, __, __, __, __, __ }),
-        Case.init("@F", .fix, .fix, .{ _0, __, _1, _0, _1, __, __, __, __, __ }),
-        Case.init("@G", .fix, .fix, .{ _1, _1, _1, _0, __, __, __, __, __, __ }),
-        Case.init("@H", .vsr, .vsr, .{ _1, _0, _1, _1, __, __, __, __, __, __ }),
-        Case.init("@I", .nil, .nil, .{ _1, _1, _1, _1, __, a1, a1, a0, __, a1 }), // normal path: reserved
-        Case.init("@J", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _0, _1, __, __ }), // header.op < prepare.op
-        Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _0, __, __ }), // header.op > prepare.op
-        Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, __, a0 }),
-        Case.init("@M", .eql, .eql, .{ _1, _0, _1, _0, __, _1, a1, a0, __, a1 }), // normal path: prepare
+        //               R>1   R=1     ok  nil ok  nil op⌈ ✓∑  op= op< view
+        Case.init("@A", .vsr, .vsr, .{ _0, __, _0, __, __, __, __, __, __ }),
+        Case.init("@B", .vsr, .vsr, .{ _1, _1, _0, __, __, __, __, __, __ }),
+        Case.init("@C", .vsr, .vsr, .{ _1, _0, _0, __, __, __, __, __, __ }),
+        Case.init("@D", .vsr, .fix, .{ _0, __, _1, _1, __, __, __, __, __ }),
+        Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, _0, __, __, __, __ }),
+        Case.init("@F", .fix, .fix, .{ _0, __, _1, _0, _1, __, __, __, __ }),
+        Case.init("@G", .fix, .fix, .{ _1, _1, _1, _0, __, __, __, __, __ }),
+        Case.init("@H", .vsr, .vsr, .{ _1, _0, _1, _1, __, __, __, __, __ }),
+        Case.init("@I", .nil, .nil, .{ _1, _1, _1, _1, __, a1, a1, a0, a1 }), // normal path: reserved
+        Case.init("@J", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _0, _1, __ }), // header.op < prepare.op
+        Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _0, __ }), // header.op > prepare.op
+        Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, a0 }),
+        Case.init("@M", .eql, .eql, .{ _1, _0, _1, _0, __, _1, a1, a0, a1 }), // normal path: prepare
     };
 };
 
@@ -2372,15 +2370,16 @@ const Case = struct {
     /// 5: header.checksum == prepare.checksum
     /// 6: header.op == prepare.op
     /// 7: header.op < prepare.op
-    /// 8: prepare.op < op_checkpoint
-    /// 9: header.view == prepare.view
-    pattern: [10]Matcher,
+    /// 8: header.view == prepare.view
+    pattern: [pattern_size]Matcher,
+
+    const pattern_size = 9;
 
     fn init(
         label: []const u8,
         decision_multiple: RecoveryDecision,
         decision_single: RecoveryDecision,
-        pattern: [10]Matcher,
+        pattern: [pattern_size]Matcher,
     ) Case {
         return .{
             .label = label,
@@ -2390,14 +2389,14 @@ const Case = struct {
         };
     }
 
-    fn check(case: *const Case, parameters: [10]bool) !bool {
-        for (parameters, 0..) |b, i| {
-            switch (case.pattern[i]) {
+    fn check(case: *const Case, parameters: [pattern_size]bool) !bool {
+        for (case.pattern, parameters) |pattern, parameter| {
+            switch (pattern) {
                 .any => {},
-                .is_false => if (b) return false,
-                .is_true => if (!b) return false,
-                .assert_is_false => if (b) return error.ExpectFalse,
-                .assert_is_true => if (!b) return error.ExpectTrue,
+                .is_false => if (parameter) return false,
+                .is_true => if (!parameter) return false,
+                .assert_is_false => if (parameter) return error.ExpectFalse,
+                .assert_is_true => if (!parameter) return error.ExpectTrue,
             }
         }
         return true;
@@ -2426,7 +2425,7 @@ fn recovery_case(
     if (h_ok) assert(header.?.invalid() == null);
     if (p_ok) assert(prepare.?.invalid() == null);
 
-    const parameters = .{
+    const parameters: [Case.pattern_size]bool = .{
         h_ok,
         if (h_ok) header.?.operation == .reserved else false,
         p_ok,
@@ -2435,7 +2434,6 @@ fn recovery_case(
         if (h_ok and p_ok) header.?.checksum == prepare.?.checksum else false,
         if (h_ok and p_ok) header.?.op == prepare.?.op else false,
         if (h_ok and p_ok) header.?.op < prepare.?.op else false,
-        if (h_ok and p_ok) prepare.?.op < data.op_checkpoint else false,
         if (h_ok and p_ok) header.?.view == prepare.?.view else false,
     };
 
@@ -2487,15 +2485,14 @@ fn header_ok(
 }
 
 test "recovery_cases" {
-    const parameters_count = 10;
     // Verify that every pattern matches exactly one case.
     //
     // Every possible combination of parameters must either:
     // * have a matching case
     // * have a case that fails (which would result in a panic).
     var i: usize = 0;
-    while (i < (1 << parameters_count)) : (i += 1) {
-        var parameters: [parameters_count]bool = undefined;
+    while (i < (1 << Case.pattern_size)) : (i += 1) {
+        var parameters: [Case.pattern_size]bool = undefined;
         comptime var j: usize = 0;
         inline while (j < parameters.len) : (j += 1) {
             parameters[j] = i & (1 << j) != 0;
