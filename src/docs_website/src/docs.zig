@@ -328,13 +328,12 @@ const Page = struct {
         assert(std.mem.endsWith(u8, path_source, ".md"));
 
         var path_target = path_source[base_path.len + 1 ..];
-        if (std.mem.eql(u8, path_target, "README.md")) {
-            path_target = ".";
-        } else if (cut_suffix(path_target, "/README.md")) |base| {
-            path_target = base;
-        } else {
-            path_target = cut_suffix(path_target, ".md").?;
-        }
+        path_target = if (std.mem.eql(u8, path_target, "README.md"))
+            "."
+        else if (cut_suffix(path_target, "/README.md")) |base|
+            base
+        else
+            cut_suffix(path_target, ".md").?;
 
         var post: Page = .{
             .path_source = path_source,
