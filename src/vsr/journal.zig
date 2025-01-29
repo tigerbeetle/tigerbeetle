@@ -1515,7 +1515,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(header.?.checksum == prepare.?.checksum);
                     assert(journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == prepare.?.checksum);
-                    journal.headers[slot.index] = header.?.*;
+                    journal.headers[slot.index] = header.?;
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
@@ -1530,13 +1530,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     );
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
-                    journal.headers[slot.index] = header.?.*;
+                    journal.headers[slot.index] = header.?;
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
                 .fix => {
                     assert(prepare.?.command == .prepare);
-                    journal.headers[slot.index] = prepare.?.*;
+                    journal.headers[slot.index] = prepare.?;
                     journal.faulty.clear(slot);
                     assert(journal.dirty.bit(slot));
                     if (replica.solo()) {
@@ -2427,8 +2427,8 @@ const Case = struct {
 };
 
 fn recovery_case(
-    header: ?*const Header.Prepare,
-    prepare: ?*const Header.Prepare,
+    header: ?Header.Prepare,
+    prepare: ?Header.Prepare,
     data: struct {
         prepare_op_max: u64,
         op_checkpoint: u64,
@@ -2482,7 +2482,7 @@ fn header_ok(
     cluster: u128,
     slot: Slot,
     header: *const Header.Prepare,
-) ?*const Header.Prepare {
+) ?Header.Prepare {
     // We must first validate the header checksum before accessing any fields.
     // Otherwise, we may hit undefined data or an out-of-bounds enum and cause a runtime crash.
     if (!header.valid_checksum()) return null;
@@ -2497,7 +2497,7 @@ fn header_ok(
     };
 
     // Do not check the checksum here, because that would run only after the other field accesses.
-    return if (valid_cluster_command_and_slot) header else null;
+    return if (valid_cluster_command_and_slot) header.* else null;
 }
 
 test "recovery_cases" {
