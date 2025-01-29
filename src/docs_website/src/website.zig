@@ -12,16 +12,14 @@ pandoc_bin: LazyPath,
 page_writer_exe: *Compile,
 
 pub fn init(b: *std.Build, url_prefix: []const u8, pandoc_bin: LazyPath) Website {
-    const page_writer_exe = b.addExecutable(.{
-        .name = "page_writer",
-        .root_source_file = b.path("src/page_writer.zig"),
-        .target = b.graph.host,
-    });
-
     return .{
         .url_prefix = url_prefix,
         .pandoc_bin = pandoc_bin,
-        .page_writer_exe = page_writer_exe,
+        .page_writer_exe = b.addExecutable(.{
+            .name = "page_writer",
+            .root_source_file = b.path("src/page_writer.zig"),
+            .target = b.graph.host,
+        }),
     };
 }
 

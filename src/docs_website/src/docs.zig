@@ -27,12 +27,11 @@ pub fn build(
     const root_menu = try create_root_menu(arena);
     try root_menu.install(b, website, root_menu, docs, &search_index);
 
-    const search_index_writer_exe = b.addExecutable(.{
+    const run_search_index_writer = b.addRunArtifact(b.addExecutable(.{
         .name = "search_index_writer",
         .root_source_file = b.path("src/search_index_writer.zig"),
         .target = b.graph.host,
-    });
-    const run_search_index_writer = b.addRunArtifact(search_index_writer_exe);
+    }));
     const search_index_output = run_search_index_writer.addOutputFileArg("search-index.json");
     _ = docs.addCopyFile(search_index_output, "search-index.json");
     for (search_index.items) |entry| {
