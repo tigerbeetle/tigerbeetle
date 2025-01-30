@@ -773,11 +773,24 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
         \\  versions:set -DnewVersion={tag}
     , .{ .tag = info.tag });
 
-    try shell.exec(
-        \\mvn --batch-mode --quiet --file src/clients/java/pom.xml
-        \\  -Dmaven.test.skip -Djacoco.skip
-        \\  deploy
-    , .{});
+    // Retrying in case of timeout:
+    const attempts_max = 5;
+    for (0..attempts_max) |index| {
+        const timeout_ns: u64 = 5 * std.time.ns_per_min;
+        return shell.exec_options(.{ .timeout_ns = timeout_ns },
+            \\mvn --batch-mode --quiet --file src/clients/java/pom.xml
+            \\  -Dmaven.test.skip -Djacoco.skip
+            \\  deploy
+        , .{}) catch |err| switch (err) {
+            error.ExecTimeout => {
+                const attempt = index + 1;
+                log.warn("java deploy timed out. Attempt={}", .{attempt});
+                if (attempt == attempts_max) return err;
+                continue;
+            },
+            else => err,
+        };
+    } else unreachable;
 }
 
 fn publish_node(shell: *Shell, info: VersionInfo) !void {
