@@ -260,43 +260,30 @@ const Link = struct {
 };
 
 const LinkIterator = struct {
-    line_number: u32 = 0,
-    line_iterator: std.mem.TokenIterator(u8, .scalar),
-    href_iterator: std.mem.TokenIterator(u8, .sequence),
+    line_number: u32 = 1,
+    remaining: []const u8,
 
     const href_prefix = "href=\"";
 
     fn init(html: []const u8) LinkIterator {
-        return .{
-            .line_iterator = std.mem.tokenizeScalar(u8, html, '\n'),
-            .href_iterator = std.mem.tokenizeSequence(u8, "", href_prefix),
-        };
+        return .{ .remaining = html };
     }
 
     fn next(self: *LinkIterator) ?Link {
-        const href = self.next_href() orelse return null;
-        return Link.parse(href);
-    }
+        const index = std.mem.indexOf(u8, self.remaining, href_prefix) orelse
+            return null;
+        const uri_start = index + href_prefix.len;
+        const uri_len = std.mem.indexOfScalar(u8, self.remaining[uri_start..], '"') orelse
+            return null;
+        const uri_end = uri_start + uri_len;
+        const uri_text = self.remaining[uri_start..][0..uri_len];
 
-    fn next_href(self: *LinkIterator) ?[]const u8 {
-        while (true) {
-            if (self.href_iterator.next()) |href| {
-                return std.mem.sliceTo(href, '"');
-            } else {
-                const line = self.next_line() orelse return null;
-
-                self.href_iterator = std.mem.tokenizeSequence(u8, line, href_prefix);
-                if (!std.mem.startsWith(u8, line, href_prefix)) {
-                    _ = self.href_iterator.next(); // Skip.
-                }
-            }
+        for (self.remaining[0..uri_start]) |c| {
+            if (c == '\n') self.line_number += 1;
         }
-    }
+        self.remaining = self.remaining[uri_end..];
 
-    fn next_line(self: *LinkIterator) ?[]const u8 {
-        const line = self.line_iterator.next() orelse return null;
-        self.line_number += 1;
-        return line;
+        return Link.parse(uri_text);
     }
 };
 
