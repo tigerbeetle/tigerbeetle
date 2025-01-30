@@ -6,9 +6,12 @@ const assert = std.debug.assert;
 
 pub const file_size_max = 900 * 1024;
 
+var file_cache: std.StringHashMap([]const u8) = undefined;
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
+    file_cache = std.StringHashMap([]const u8).init(allocator);
     var args = std.process.args();
     _ = args.skip();
     const path = args.next().?;
@@ -114,13 +117,22 @@ fn validate_text_file(context: FileValidationContext) !void {
     }
 }
 
+fn read_file_cached(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) ![]const u8 {
+    if (file_cache.get(path)) |content| return content;
+
+    const content = try dir.readFileAlloc(arena, path, file_size_max);
+    try file_cache.put(try arena.dupe(u8, path), content);
+
+    return content;
+}
+
 // These links don't work with https.
 const http_exceptions = std.StaticStringMap(void).initComptime(.{
     .{"http://www.bailis.org/blog/linearizability-versus-serializability/"},
 });
 
 fn check_links(context: FileValidationContext) !void {
-    const html = try context.dir.readFileAlloc(context.arena, context.path, file_size_max);
+    const html = try read_file_cached(context.arena, context.dir, context.path);
 
     var link_iterator = LinkIterator.init(html);
     errdefer log.err("[link checker] error in {s}:{}", .{
@@ -181,7 +193,7 @@ fn check_external_link(link: Link) !void {
 fn check_anchor(context: FileValidationContext, target_path: []const u8, anchor: []const u8) !void {
     assert(std.mem.endsWith(u8, target_path, ".html"));
 
-    const html = try context.dir.readFileAlloc(context.arena, target_path, file_size_max);
+    const html = try read_file_cached(context.arena, context.dir, target_path);
     const needle = try std.mem.concat(context.arena, u8, &.{ "id=\"", anchor, "\"" });
     if (std.ascii.indexOfIgnoreCase(html, needle) == null) {
         log.err("link target ({s}) does not contain anchor: {s}", .{ target_path, anchor });
