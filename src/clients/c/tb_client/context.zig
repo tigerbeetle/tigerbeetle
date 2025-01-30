@@ -238,7 +238,7 @@ pub fn ContextType(
         /// Only one thread calls `deinit()`.
         /// Since it frees the Context, any further interaction is undefined behavior.
         pub fn deinit(self: *Context) void {
-            self.signal.shutdown();
+            self.signal.stop();
             self.thread.join();
             self.io.cancel_all();
 
@@ -280,7 +280,7 @@ pub fn ContextType(
             }
         }
         pub fn run(self: *Context) void {
-            while (self.signal.status() != .shutdown) {
+            while (self.signal.status() != .stopped) {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{

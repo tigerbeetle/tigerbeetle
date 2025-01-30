@@ -7,21 +7,21 @@ const IO = vsr.io.IO;
 
 const Atomic = std.atomic.Value;
 
-/// A Signal is a way to trigger a registered callback on a tigerbeetle IO instance
-/// when notification occurs from another thread.
+/// A Signal is a way to trigger a registered callback on a IO instance when notification
+/// occurs from another thread.
 pub const Signal = struct {
     io: *IO,
-    event: IO.Event,
-    listening: Atomic(bool),
     completion: IO.Completion,
-
-    on_signal_fn: *const fn (*Signal) void,
-    state: Atomic(enum(u8) {
+    event: IO.Event,
+    event_state: Atomic(enum(u8) {
         running,
         waiting,
         notified,
         shutdown,
     }),
+
+    listening: Atomic(bool),
+    on_signal_fn: *const fn (*Signal) void,
 
     pub fn init(self: *Signal, io: *IO, on_signal_fn: *const fn (*Signal) void) !void {
         const event = try io.open_event();
@@ -29,11 +29,11 @@ pub const Signal = struct {
 
         self.* = .{
             .io = io,
-            .event = event,
-            .listening = Atomic(bool).init(true),
             .completion = undefined,
+            .event = event,
+            .event_state = @TypeOf(self.event_state).init(.running),
+            .listening = Atomic(bool).init(true),
             .on_signal_fn = on_signal_fn,
-            .state = @TypeOf(self.state).init(.running),
         };
 
         self.wait();
@@ -41,29 +41,36 @@ pub const Signal = struct {
 
     pub fn deinit(self: *Signal) void {
         assert(self.event != IO.INVALID_EVENT);
-        assert(self.status() == .shutdown);
+        assert(self.status() == .stopped);
 
         self.io.close_event(self.event);
         self.* = undefined;
     }
 
-    /// Stops the current event.
-    /// Further calls to "notify" will not fire the signal.
+    /// Requests to stop listening for notifications.
+    /// The caller must continue processing `IO.tick()` until `state() == .stopped`.
     /// Safe to call from multiple threads.
-    pub fn shutdown(self: *Signal) void {
+    pub fn stop(self: *Signal) void {
         const listening = self.listening.swap(false, .release);
         if (listening) {
             self.notify();
         }
     }
 
+    /// Returns the current state.
+    /// Safe to call from multiple threads.
     pub fn status(self: *const Signal) enum {
+        /// Listening for event notifications.
+        /// Call `notify()` to trigger the callback.
         running,
+        /// `stop()` was called, but the event listener is still waiting for the IO operation
+        /// to complete. Further calls to `notify()` have no effect.
         stop_requested,
-        shutdown,
+        /// No pending listening events. It is safe to call `deinit()`.
+        stopped,
     } {
-        return switch (self.state.load(.acquire)) {
-            .shutdown => .shutdown,
+        return switch (self.event_state.load(.acquire)) {
+            .shutdown => .stopped,
             .running,
             .waiting,
             .notified,
@@ -74,13 +81,14 @@ pub const Signal = struct {
         };
     }
 
-    /// Schedules the on_signal callback to be invoked on the IO thread.
+    /// Schedules the `on_signal` callback to be invoked on the IO thread.
+    /// Calling `notify()` when `state() != .running` has no effect.
     /// Safe to call from multiple threads.
     pub fn notify(self: *Signal) void {
         // Try to transition from `waiting` to `notified`.
         // If it fails, analyze the current state to determine if a notification is needed.
-        var state: @TypeOf(self.state.raw) = .waiting;
-        while (self.state.cmpxchgStrong(
+        var state: @TypeOf(self.event_state.raw) = .waiting;
+        while (self.event_state.cmpxchgStrong(
             state,
             .notified,
             .release,
@@ -101,9 +109,9 @@ pub const Signal = struct {
     fn wait(self: *Signal) void {
         // It is not guaranteed to be `running` here, as another caller might have requested
         // a stop during the callback.
-        assert(self.status() != .shutdown);
+        assert(self.status() != .stopped);
 
-        const state = self.state.swap(.waiting, .acquire);
+        const state = self.event_state.swap(.waiting, .acquire);
         self.io.event_listen(self.event, &self.completion, on_event);
         switch (state) {
             // We should be the only ones who could've started waiting.
@@ -121,7 +129,7 @@ pub const Signal = struct {
     fn on_event(completion: *IO.Completion) void {
         const self: *Signal = @fieldParentPtr("completion", completion);
         const listening: bool = self.listening.load(.acquire);
-        const state = self.state.cmpxchgStrong(
+        const state = self.event_state.cmpxchgStrong(
             .notified,
             if (listening) .running else .shutdown,
             .release,
@@ -175,8 +183,8 @@ test "signal" {
             while (self.count < events_count) try self.io.tick();
 
             // Begin shutdown and keep ticking until it's completed.
-            self.signal.shutdown();
-            while (self.signal.status() != .shutdown) try self.io.tick();
+            self.signal.stop();
+            while (self.signal.status() != .stopped) try self.io.tick();
             thread.join();
 
             // Notify after shutdown should be ignored.
@@ -192,7 +200,7 @@ test "signal" {
 
         fn notify(self: *Context) void {
             assert(std.Thread.getCurrentId() != self.main_thread_id);
-            while (self.signal.status() != .shutdown) {
+            while (self.signal.status() != .stopped) {
                 std.time.sleep(delay + 1);
 
                 // Triggering the event:
@@ -207,10 +215,14 @@ test "signal" {
         fn on_signal(signal: *Signal) void {
             const self: *Context = @fieldParentPtr("signal", signal);
             assert(std.Thread.getCurrentId() == self.main_thread_id);
-            assert(self.signal.status() != .shutdown);
-            assert(self.count < events_count);
-
-            self.count += 1;
+            switch (self.signal.status()) {
+                .running => {
+                    assert(self.count < events_count);
+                    self.count += 1;
+                },
+                .stop_requested => assert(self.count == events_count),
+                .stopped => unreachable,
+            }
         }
     }.run_test();
 }
