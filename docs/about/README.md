@@ -106,7 +106,7 @@ The collection of papers behind TigerBeetle:
   a relational database is not the right solution.
 
 - [The LMAX Exchange Architecture - High Throughput, Low Latency and Plain Old Java -
-  2014](https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java)
+  2014](https://web.archive.org/web/20230403112934/https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java)
 
   - Sam Adams on the high-level design of LMAX.
 
