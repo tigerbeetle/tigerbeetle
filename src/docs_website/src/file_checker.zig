@@ -57,6 +57,12 @@ fn validate_dir(arena: std.mem.Allocator, path: []const u8) !void {
     };
 }
 
+const FileValidationConext = struct {
+    arena: std.mem.Allocator,
+    dir: std.fs.Dir,
+    path: []const u8,
+};
+
 fn validate_file(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) !void {
     const stat = dir.statFile(path) catch |err| {
         log.err("unable to stat file '{s}': {s}", .{
@@ -107,53 +113,134 @@ fn validate_text_file(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u
 }
 
 // These links don't work with https.
-const https_exceptions = std.StaticStringMap(void).initComptime(.{
+const http_exceptions = std.StaticStringMap(void).initComptime(.{
     .{"http://www.bailis.org/blog/linearizability-versus-serializability/"},
 });
 
 fn check_links(arena: std.mem.Allocator, dir: std.fs.Dir, html_path: []const u8) !void {
     const html = try dir.readFileAlloc(arena, html_path, file_size_max);
 
-    var line_it = std.mem.tokenizeScalar(u8, html, '\n');
-    var line_number: usize = 1;
-    while (line_it.next()) |line| {
-        defer line_number += 1;
-        errdefer log.err("[link checker] error in {s}:{}", .{ html_path, line_number });
+    var link_iterator = find_links(html);
+    errdefer log.err("[link checker] error in {s}:{}", .{
+        dir.realpathAlloc(arena, html_path) catch unreachable,
+        link_iterator.line_number,
+    });
 
-        var link_it = std.mem.tokenizeSequence(u8, line, "href=\"");
-        if (!std.mem.startsWith(u8, line, "href=\"")) _ = link_it.next(); // Skip prefix
-        while (link_it.next()) |chunk| {
-            var url = std.mem.sliceTo(chunk, '"');
+    while (link_iterator.next()) |link| {
+        try check_link(arena, dir, html_path, link);
+    }
+}
 
-            // Strip anchor
-            if (std.mem.lastIndexOfScalar(u8, url, '#')) |i| url = url[0..i];
-            if (url.len == 0) continue;
+fn check_link(arena: std.mem.Allocator, dir: std.fs.Dir, html_path: []const u8, link: Link) !void {
+    // Check schema.
+    {
+        if (std.mem.startsWith(u8, link.base, "mailto:")) return;
 
-            if (std.mem.startsWith(u8, url, "http://")) {
-                if (https_exceptions.has(url)) continue;
-                log.err("Found insecure link: {s}", .{url});
+        if (std.mem.startsWith(u8, link.base, "https://")) return check_external_link(link);
+
+        if (std.mem.startsWith(u8, link.base, "http://")) {
+            if (!http_exceptions.has(link.base)) {
+                log.err("Found insecure link: {s}", .{link.base});
                 return error.InsecureLink;
             }
 
-            // Skip external link
-            if (std.mem.startsWith(u8, url, "https://")) continue;
-            if (std.mem.startsWith(u8, url, "mailto:")) continue;
+            return check_external_link(link);
+        }
+    }
 
-            const target = if (url[0] == '/')
-                url[1..]
-            else if (std.fs.path.dirname(html_path)) |dirname|
-                try std.fs.path.join(arena, &.{ dirname, url })
-            else
-                url;
-            if (target.len == 0) continue;
+    var target = link.base;
+    const is_absolute = target.len > 0 and target[0] == '/';
+    if (is_absolute) {
+        target = target[1..];
+    } else if (std.fs.path.dirname(html_path)) |dirname| {
+        target = try std.fs.path.join(arena, &.{ dirname, target });
+    }
 
-            if (!try path_exists(dir, target)) {
-                log.err("Link (\"{s}\") target not found: {s}", .{ url, target });
-                return error.TargetNotFound;
+    const is_directory = std.fs.path.extension(target).len == 0;
+    if (is_directory) {
+        target = try std.fs.path.join(arena, &.{ target, "index.html" });
+    }
+
+    if (!try path_exists(dir, target)) {
+        log.err("Link target not found: {s}", .{target});
+        return error.TargetNotFound;
+    }
+
+    if (link.fragment) |anchor| {
+        try check_anchor(target, anchor);
+    }
+}
+
+fn check_external_link(link: Link) !void {
+    // TODO: use http client
+    _ = link;
+}
+
+fn check_anchor(target_path: []const u8, anchor: []const u8) !void {
+    // TODO
+    log.info("anchor {s} {s}", .{ target_path, anchor });
+}
+
+fn find_links(html: []const u8) LinkIterator {
+    return LinkIterator.init(html);
+}
+
+const Link = struct {
+    // line_number: u32,
+    base: []const u8,
+    fragment: ?[]const u8 = null,
+
+    fn parse(text: []const u8) Link {
+        if (std.mem.lastIndexOfScalar(u8, text, '#')) |index| {
+            return .{
+                .base = text[0..index],
+                .fragment = text[index + 1 ..],
+            };
+        }
+        return .{ .base = text };
+    }
+};
+
+const LinkIterator = struct {
+    line_number: u32 = 0,
+    line_iterator: std.mem.TokenIterator(u8, .scalar),
+    href_iterator: std.mem.TokenIterator(u8, .sequence),
+
+    const href_prefix = "href=\"";
+
+    fn init(html: []const u8) LinkIterator {
+        return .{
+            .line_iterator = std.mem.tokenizeScalar(u8, html, '\n'),
+            .href_iterator = std.mem.tokenizeSequence(u8, "", href_prefix),
+        };
+    }
+
+    fn next(self: *LinkIterator) ?Link {
+        const href = self.next_href() orelse return null;
+        return Link.parse(href);
+    }
+
+    fn next_href(self: *LinkIterator) ?[]const u8 {
+        while (true) {
+            if (self.href_iterator.next()) |href| {
+                return std.mem.sliceTo(href, '"');
+            } else {
+                const line = self.next_line() orelse return null;
+
+                self.href_iterator = std.mem.tokenizeSequence(u8, line, href_prefix);
+                if (!std.mem.startsWith(u8, line, href_prefix)) {
+                    _ = self.href_iterator.next(); // Skip
+                }
             }
         }
     }
-}
+
+    fn next_line(self: *LinkIterator) ?[]const u8 {
+        const line = self.line_iterator.next() orelse return null;
+        self.line_number += 1;
+        return line;
+    }
+};
 
 fn path_exists(dir: std.fs.Dir, path: []const u8) !bool {
     dir.access(path, .{}) catch |err| switch (err) {
