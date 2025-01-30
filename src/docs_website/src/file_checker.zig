@@ -7,7 +7,7 @@ const assert = std.debug.assert;
 pub const file_size_max = 900 * 1024;
 
 // If this is set to true, we check if we get a 200 response for any external links.
-const check_external_links: bool = false;
+const check_links_external: bool = false;
 
 var file_cache: std.StringHashMap([]const u8) = undefined;
 
@@ -167,12 +167,12 @@ fn check_link(context: FileValidationContext, link: Link) !void {
         }
 
         if (std.mem.startsWith(u8, link.base, "https://")) {
-            return check_external_link(context.arena, link);
+            return check_link_external(context.arena, link);
         }
 
         if (std.mem.startsWith(u8, link.base, "http://")) {
             if (http_exceptions.has(link.base)) {
-                return check_external_link(context.arena, link);
+                return check_link_external(context.arena, link);
             }
 
             log.err("found insecure link: '{s}'", .{link.base});
@@ -199,13 +199,13 @@ fn check_link(context: FileValidationContext, link: Link) !void {
         return error.TargetNotFound;
     }
 
-    if (link.fragment) |anchor| {
-        try check_anchor(context, target, anchor);
+    if (link.fragment) |fragment| {
+        try check_link_fragment(context, target, fragment);
     }
 }
 
-fn check_external_link(arena: std.mem.Allocator, link: Link) !void {
-    if (!check_external_links) return;
+fn check_link_external(arena: std.mem.Allocator, link: Link) !void {
+    if (!check_links_external) return;
     if (https_exceptions.has(link.base)) return;
 
     errdefer |err| log.err("got {} while checking external link '{s}'", .{ err, link.base });
@@ -229,13 +229,17 @@ fn check_external_link(arena: std.mem.Allocator, link: Link) !void {
     }
 }
 
-fn check_anchor(context: FileValidationContext, target_path: []const u8, anchor: []const u8) !void {
+fn check_link_fragment(
+    context: FileValidationContext,
+    target_path: []const u8,
+    fragment: []const u8,
+) !void {
     assert(std.mem.endsWith(u8, target_path, ".html"));
 
     const html = try read_file_cached(context.arena, context.dir, target_path);
-    const needle = try std.mem.concat(context.arena, u8, &.{ "id=\"", anchor, "\"" });
+    const needle = try std.mem.concat(context.arena, u8, &.{ "id=\"", fragment, "\"" });
     if (std.ascii.indexOfIgnoreCase(html, needle) == null) {
-        log.err("link target '{s}'' does not contain anchor: '{s}'", .{ target_path, anchor });
+        log.err("link target '{s}'' does not contain anchor: '{s}'", .{ target_path, fragment });
         return error.AnchorNotFound;
     }
 }
