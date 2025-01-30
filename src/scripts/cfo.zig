@@ -90,6 +90,7 @@ const Fuzzer = enum {
     vsr_journal_format,
     vsr_superblock_quorums,
     vsr_superblock,
+    signal,
 
     fn args_build(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
