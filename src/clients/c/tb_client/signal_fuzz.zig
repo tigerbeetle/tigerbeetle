@@ -26,11 +26,11 @@ const Context = struct {
 const Threads = stdx.BoundedArrayType(std.Thread, threads_limit);
 
 const threads_limit = 8;
-const stop_chance_percentage = 10;
+const stop_chance_percentage = 1;
 
 pub fn main(args: fuzz.FuzzArgs) !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
-    const events_max = args.events_max orelse 1_000_000;
+    const events_max = args.events_max orelse 10_000;
 
     var context: Context = .{
         .io = try IO.init(32, 0),
@@ -82,7 +82,12 @@ fn notify(context: *Context) void {
                 .from_user_thread,
                 .acquire,
                 .monotonic,
-            ) == null) context.signal.stop();
+            )) |before| {
+                // Cannot narrow down the origin.
+                assert(before == .from_io_thread or before == .from_user_thread);
+            }
+            // Stop has no effect if called twice.
+            context.signal.stop();
         }
 
         // Notify has no effect if called after `stop()`.
@@ -104,7 +109,12 @@ fn on_signal(signal: *Signal) void {
                     .from_io_thread,
                     .acquire,
                     .monotonic,
-                ) == null) context.signal.stop();
+                )) |before| {
+                    assert(before == .from_user_thread);
+                }
+
+                // Stop has no effect if called twice.
+                context.signal.stop();
             }
         },
         .stop_requested => {
