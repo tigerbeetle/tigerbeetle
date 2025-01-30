@@ -138,7 +138,11 @@ const http_exceptions = std.StaticStringMap(void).initComptime(.{
 const https_exceptions = std.StaticStringMap(void).initComptime(.{
     .{"https://www.eecg.utoronto.ca/~yuan/papers/failure_analysis_osdi14.pdf"},
     .{"https://pmg.csail.mit.edu/papers/vr-revisited.pdf"},
+    .{"https://pmg.csail.mit.edu/papers/vr.pdf"},
     .{"https://www.infoq.com/presentations/LMAX/"},
+    .{"https://kernel.dk/io_uring.pdf"},
+    .{"https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf"},
+    .{"https://security.googleblog.com/2023/06/learnings-from-kctf-vrps-42-linux.html"},
 });
 
 fn check_links(context: FileValidationContext) !void {
@@ -204,7 +208,7 @@ fn check_external_link(arena: std.mem.Allocator, link: Link) !void {
     if (!check_external_links) return;
     if (https_exceptions.has(link.base)) return;
 
-    errdefer |err| log.err("error {} while checking external link '{s}'", .{ err, link.base });
+    errdefer |err| log.err("got {} while checking external link '{s}'", .{ err, link.base });
 
     log.info("checking external link '{s}'", .{link.base});
 
