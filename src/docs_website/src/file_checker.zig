@@ -6,6 +6,9 @@ const assert = std.debug.assert;
 
 pub const file_size_max = 900 * 1024;
 
+// If this is set to true, we check if we get a 200 response for any external links.
+const check_external_links: bool = false;
+
 var file_cache: std.StringHashMap([]const u8) = undefined;
 
 pub fn main() !void {
@@ -131,6 +134,13 @@ const http_exceptions = std.StaticStringMap(void).initComptime(.{
     .{"http://www.bailis.org/blog/linearizability-versus-serializability/"},
 });
 
+// These links cause TLS errors with std.http.Client.
+const https_exceptions = std.StaticStringMap(void).initComptime(.{
+    .{"https://www.eecg.utoronto.ca/~yuan/papers/failure_analysis_osdi14.pdf"},
+    .{"https://pmg.csail.mit.edu/papers/vr-revisited.pdf"},
+    .{"https://www.infoq.com/presentations/LMAX/"},
+});
+
 fn check_links(context: FileValidationContext) !void {
     const html = try read_file_cached(context.arena, context.dir, context.path);
 
@@ -148,20 +158,25 @@ fn check_links(context: FileValidationContext) !void {
 fn check_link(context: FileValidationContext, link: Link) !void {
     // Check schema.
     {
-        if (std.mem.startsWith(u8, link.base, "mailto:")) return;
+        if (std.mem.startsWith(u8, link.base, "mailto:")) {
+            return; // Ignore.
+        }
 
-        if (std.mem.startsWith(u8, link.base, "https://")) return check_external_link(link);
+        if (std.mem.startsWith(u8, link.base, "https://")) {
+            return check_external_link(context.arena, link);
+        }
 
         if (std.mem.startsWith(u8, link.base, "http://")) {
-            if (!http_exceptions.has(link.base)) {
-                log.err("found insecure link: {s}", .{link.base});
-                return error.InsecureLink;
+            if (http_exceptions.has(link.base)) {
+                return check_external_link(context.arena, link);
             }
 
-            return check_external_link(link);
+            log.err("found insecure link: '{s}'", .{link.base});
+            return error.InsecureLink;
         }
     }
 
+    // Locate local link target.
     var target = link.base;
     const is_absolute = target.len > 0 and target[0] == '/';
     if (is_absolute) {
@@ -176,7 +191,7 @@ fn check_link(context: FileValidationContext, link: Link) !void {
     }
 
     if (!try path_exists(context.dir, target)) {
-        log.err("link target not found: {s}", .{target});
+        log.err("link target not found: '{s}'", .{target});
         return error.TargetNotFound;
     }
 
@@ -185,9 +200,29 @@ fn check_link(context: FileValidationContext, link: Link) !void {
     }
 }
 
-fn check_external_link(link: Link) !void {
-    // TODO: use http client
-    _ = link;
+fn check_external_link(arena: std.mem.Allocator, link: Link) !void {
+    if (!check_external_links) return;
+    if (https_exceptions.has(link.base)) return;
+
+    errdefer |err| log.err("error {} while checking external link '{s}'", .{ err, link.base });
+
+    log.info("checking external link '{s}'", .{link.base});
+
+    var client = std.http.Client{ .allocator = arena };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse(link.base);
+    var header_buffer: [512 * 1024]u8 = undefined;
+    var request = try client.open(.GET, uri, .{ .server_header_buffer = &header_buffer });
+    defer request.deinit();
+
+    try request.send();
+    try request.finish();
+    try request.wait();
+
+    if (request.response.status != std.http.Status.ok) {
+        return error.WrongStatusResponse;
+    }
 }
 
 fn check_anchor(context: FileValidationContext, target_path: []const u8, anchor: []const u8) !void {
@@ -196,7 +231,7 @@ fn check_anchor(context: FileValidationContext, target_path: []const u8, anchor:
     const html = try read_file_cached(context.arena, context.dir, target_path);
     const needle = try std.mem.concat(context.arena, u8, &.{ "id=\"", anchor, "\"" });
     if (std.ascii.indexOfIgnoreCase(html, needle) == null) {
-        log.err("link target ({s}) does not contain anchor: {s}", .{ target_path, anchor });
+        log.err("link target '{s}'' does not contain anchor: '{s}'", .{ target_path, anchor });
         return error.AnchorNotFound;
     }
 }
