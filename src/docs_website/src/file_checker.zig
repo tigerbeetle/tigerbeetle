@@ -46,7 +46,7 @@ fn validate_dir(arena: std.mem.Allocator, path: []const u8) !void {
 
     var walker = try dir.walk(arena);
     while (try walker.next()) |entry| switch (entry.kind) {
-        .file => try validate_file(arena, dir, entry.path),
+        .file => try validate_file(.{ .arena = arena, .dir = dir, .path = entry.path }),
         .directory => {},
         else => {
             log.err("unexpected file type: '{s}'", .{
@@ -57,58 +57,60 @@ fn validate_dir(arena: std.mem.Allocator, path: []const u8) !void {
     };
 }
 
-const FileValidationConext = struct {
+const FileValidationContext = struct {
     arena: std.mem.Allocator,
     dir: std.fs.Dir,
     path: []const u8,
 };
 
-fn validate_file(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) !void {
-    const stat = dir.statFile(path) catch |err| {
+fn validate_file(context: FileValidationContext) !void {
+    const stat = context.dir.statFile(context.path) catch |err| {
         log.err("unable to stat file '{s}': {s}", .{
-            try dir.realpathAlloc(arena, path),
+            try context.dir.realpathAlloc(context.arena, context.path),
             @errorName(err),
         });
         return err;
     };
     if (stat.size > file_size_max) {
         log.err("file '{s}' with size {:.2} exceeds max file size of {:.2}", .{
-            try dir.realpathAlloc(arena, path),
+            try context.dir.realpathAlloc(context.arena, context.path),
             std.fmt.fmtIntSizeBin(stat.size),
             std.fmt.fmtIntSizeBin(file_size_max),
         });
         return error.FileSizeExceeded;
     }
 
-    switch (classify_file(path)) {
-        .text => try validate_text_file(arena, dir, path),
+    switch (classify_file(context.path)) {
+        .text => try validate_text_file(context),
         .binary => {}, // Nothing to validate.
         .exception => {}, // Nothing to validate.
         .unexpected => {
             log.err("file '{s}' has unsupported type '{s}'", .{
-                try dir.realpathAlloc(arena, path),
-                std.fs.path.extension(path),
+                try context.dir.realpathAlloc(context.arena, context.path),
+                std.fs.path.extension(context.path),
             });
             return error.UnsupportedFileType;
         },
     }
 }
 
-fn validate_text_file(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) !void {
-    assert(classify_file(path) == .text);
+fn validate_text_file(context: FileValidationContext) !void {
+    assert(classify_file(context.path) == .text);
 
-    const file = try dir.openFile(path, .{});
+    const file = try context.dir.openFile(context.path, .{});
     defer file.close();
 
     try file.seekFromEnd(-1);
     const last_byte = try file.reader().readByte();
     if (last_byte != '\n') {
-        log.err("file '{s}' doesn't end with a newline", .{try dir.realpathAlloc(arena, path)});
+        log.err("file '{s}' doesn't end with a newline", .{
+            try context.dir.realpathAlloc(context.arena, context.path),
+        });
         return error.MissingNewline;
     }
 
-    if (std.mem.endsWith(u8, path, ".html")) {
-        try check_links(arena, dir, path);
+    if (std.mem.endsWith(u8, context.path, ".html")) {
+        try check_links(context);
     }
 }
 
@@ -117,21 +119,21 @@ const http_exceptions = std.StaticStringMap(void).initComptime(.{
     .{"http://www.bailis.org/blog/linearizability-versus-serializability/"},
 });
 
-fn check_links(arena: std.mem.Allocator, dir: std.fs.Dir, html_path: []const u8) !void {
-    const html = try dir.readFileAlloc(arena, html_path, file_size_max);
+fn check_links(context: FileValidationContext) !void {
+    const html = try context.dir.readFileAlloc(context.arena, context.path, file_size_max);
 
-    var link_iterator = find_links(html);
+    var link_iterator = LinkIterator.init(html);
     errdefer log.err("[link checker] error in {s}:{}", .{
-        dir.realpathAlloc(arena, html_path) catch unreachable,
+        context.dir.realpathAlloc(context.arena, context.path) catch unreachable,
         link_iterator.line_number,
     });
 
     while (link_iterator.next()) |link| {
-        try check_link(arena, dir, html_path, link);
+        try check_link(context, link);
     }
 }
 
-fn check_link(arena: std.mem.Allocator, dir: std.fs.Dir, html_path: []const u8, link: Link) !void {
+fn check_link(context: FileValidationContext, link: Link) !void {
     // Check schema.
     {
         if (std.mem.startsWith(u8, link.base, "mailto:")) return;
@@ -140,7 +142,7 @@ fn check_link(arena: std.mem.Allocator, dir: std.fs.Dir, html_path: []const u8, 
 
         if (std.mem.startsWith(u8, link.base, "http://")) {
             if (!http_exceptions.has(link.base)) {
-                log.err("Found insecure link: {s}", .{link.base});
+                log.err("found insecure link: {s}", .{link.base});
                 return error.InsecureLink;
             }
 
@@ -152,22 +154,22 @@ fn check_link(arena: std.mem.Allocator, dir: std.fs.Dir, html_path: []const u8, 
     const is_absolute = target.len > 0 and target[0] == '/';
     if (is_absolute) {
         target = target[1..];
-    } else if (std.fs.path.dirname(html_path)) |dirname| {
-        target = try std.fs.path.join(arena, &.{ dirname, target });
+    } else if (std.fs.path.dirname(context.path)) |dirname| {
+        target = try std.fs.path.join(context.arena, &.{ dirname, target });
     }
 
     const is_directory = std.fs.path.extension(target).len == 0;
     if (is_directory) {
-        target = try std.fs.path.join(arena, &.{ target, "index.html" });
+        target = try std.fs.path.join(context.arena, &.{ target, "index.html" });
     }
 
-    if (!try path_exists(dir, target)) {
-        log.err("Link target not found: {s}", .{target});
+    if (!try path_exists(context.dir, target)) {
+        log.err("link target not found: {s}", .{target});
         return error.TargetNotFound;
     }
 
     if (link.fragment) |anchor| {
-        try check_anchor(target, anchor);
+        try check_anchor(context, target, anchor);
     }
 }
 
@@ -176,17 +178,18 @@ fn check_external_link(link: Link) !void {
     _ = link;
 }
 
-fn check_anchor(target_path: []const u8, anchor: []const u8) !void {
-    // TODO
-    log.info("anchor {s} {s}", .{ target_path, anchor });
-}
+fn check_anchor(context: FileValidationContext, target_path: []const u8, anchor: []const u8) !void {
+    assert(std.mem.endsWith(u8, target_path, ".html"));
 
-fn find_links(html: []const u8) LinkIterator {
-    return LinkIterator.init(html);
+    const html = try context.dir.readFileAlloc(context.arena, target_path, file_size_max);
+    const needle = try std.mem.concat(context.arena, u8, &.{ "id=\"", anchor, "\"" });
+    if (std.ascii.indexOfIgnoreCase(html, needle) == null) {
+        log.err("link target ({s}) does not contain anchor: {s}", .{ target_path, anchor });
+        return error.AnchorNotFound;
+    }
 }
 
 const Link = struct {
-    // line_number: u32,
     base: []const u8,
     fragment: ?[]const u8 = null,
 
@@ -229,7 +232,7 @@ const LinkIterator = struct {
 
                 self.href_iterator = std.mem.tokenizeSequence(u8, line, href_prefix);
                 if (!std.mem.startsWith(u8, line, href_prefix)) {
-                    _ = self.href_iterator.next(); // Skip
+                    _ = self.href_iterator.next(); // Skip.
                 }
             }
         }
