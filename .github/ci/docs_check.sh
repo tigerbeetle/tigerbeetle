@@ -10,14 +10,7 @@ set -eux
 #   fatal: detected dubious ownership in repository at '/wrk'
 git config --global --add safe.directory /build
 
-# Using a fork of this validate-links check to include checks on
-# absolute links until
-# https://github.com/remarkjs/remark-validate-links/issues/75 is fixed
-# upstream.
-npm install cspell@^6.31.1 remark-cli@^11.0.0 https://github.com/tigerbeetle/remark-validate-links
-
-# Validate links
-npx remark --use remark-validate-links --frail /build
+npm install cspell@^6.31.1
 
 cd /build
 

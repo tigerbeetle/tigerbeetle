@@ -1,22 +1,26 @@
 is_readme = PANDOC_STATE.input_files[1]:sub(-9) == "README.md"
 
 function Link (link)
-  local is_external = link.target:sub(1, 8) == "https://"
+  local is_external = link.target:sub(1, 8) == "https://" or link.target:sub(1, 7) == "http://"
+  local is_mailto = link.target:sub(1, 7) == "mailto:"
+  local is_absolute = link.target:sub(1, 1) == "/"
+  local is_anchor = link.target:sub(1, 1) == "#"
 
-  if not is_readme then
-    -- We have to adjust relative links to go up one more level.
+  -- We have to adjust relative links to go up one more level.
+  if not (is_readme or is_external or is_mailto or is_absolute or is_anchor) then
     if link.target:sub(1, 2) == "./"  then
       link.target = "." .. link.target
-    elseif link.target:sub(1, 3) == "../" then
+    else
       link.target = "../" .. link.target
     end
   end
 
   -- Links to client documentation
   if link.target:sub(1, 12) == "/src/clients" then
-    if link.target:find("README.md") then
-      -- Coming from 'reference/requests/page'
-      link.target = "../../.." .. link.target:sub(5)
+    local _, target_level = link.target:gsub("/", "")
+    local is_client_readme = link.target:find("README.md") and target_level == 4
+    if is_client_readme then
+      link.target = link.target:sub(5) -- Cut "/src"
     else
       -- Make GitHub link
       link.target = "https://github.com/tigerbeetle/tigerbeetle/blob/main" .. link.target

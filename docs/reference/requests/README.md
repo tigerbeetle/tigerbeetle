@@ -34,14 +34,14 @@ Each request has a corresponding _event_ and _result_ type:
 
 | Request Type            | Event                                               | Result                                                          |
 | ----------------------- | --------------------------------------------------- | --------------------------------------------------------------- |
-| `create_accounts`       | [`Account`](./create_accounts.md#Event)             | [`CreateAccountResult`](./create_accounts.md#Result)            |
-| `create_transfers`      | [`Transfer`](./create_transfers.md#Event)           | [`CreateTransferResult`](./create_transfers.md#Result)          |
-| `lookup_accounts`       | [`Account.id`](./lookup_accounts.md#Event)          | [`Account`](./lookup_accounts.md#Result) or nothing             |
-| `lookup_transfers`      | [`Transfer.id`](./lookup_transfers.md#Event)        | [`Transfer`](./lookup_transfers.md#Result) or nothing           |
-| `get_account_transfers` | [`AccountFilter`](../account-filter.md)             | [`Transfer`](./get_account_transfers.md#Result) or nothing      |
-| `get_account_balances`  | [`AccountFilter`](../account-filter.md)             | [`AccountBalance`](./get_account_balances.md#Result) or nothing |
-| `query_accounts`        | [`QueryFilter`](../query-filter.md)                 | [`Account`](./lookup_accounts.md#Result) or nothing             |
-| `query_transfers`       | [`QueryFilter`](../query-filter.md)                 | [`Transfer`](./lookup_transfers.md#Result) or nothing           |
+| `create_accounts`       | [`Account`](./create_accounts.md#event)             | [`CreateAccountResult`](./create_accounts.md#result)            |
+| `create_transfers`      | [`Transfer`](./create_transfers.md#event)           | [`CreateTransferResult`](./create_transfers.md#result)          |
+| `lookup_accounts`       | [`Account.id`](./lookup_accounts.md#event)          | [`Account`](./lookup_accounts.md#result) or nothing             |
+| `lookup_transfers`      | [`Transfer.id`](./lookup_transfers.md#event)        | [`Transfer`](./lookup_transfers.md#result) or nothing           |
+| `get_account_transfers` | [`AccountFilter`](../account-filter.md)             | [`Transfer`](./get_account_transfers.md#result) or nothing      |
+| `get_account_balances`  | [`AccountFilter`](../account-filter.md)             | [`AccountBalance`](./get_account_balances.md#result) or nothing |
+| `query_accounts`        | [`QueryFilter`](../query-filter.md)                 | [`Account`](./lookup_accounts.md#result) or nothing             |
+| `query_transfers`       | [`QueryFilter`](../query-filter.md)                 | [`Transfer`](./lookup_transfers.md#result) or nothing           |
 
 ### Idempotency
 
