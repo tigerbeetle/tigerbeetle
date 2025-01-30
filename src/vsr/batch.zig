@@ -456,7 +456,7 @@ pub fn BatchEncoderType(
             assert(padding == 0 or self.buffer_index > 0);
 
             if (buffer.len <= self.buffer_index + padding + trailer_size) {
-                // Insuficient space for one more batch.
+                // Insufficient space for one more batch.
                 return &.{};
             }
 
@@ -484,7 +484,7 @@ pub fn BatchEncoderType(
             return aligned[0..size];
         }
 
-        /// Records how many bytes were writen in the slice previously acquired by `writable()`.
+        /// Records how many bytes were written in the slice previously acquired by `writable()`.
         /// The same operation must be used in both functions.
         pub fn add(self: *BatchEncoder, operation: vsr.Operation, bytes_written: usize) void {
             maybe(self.batch_count == 0);

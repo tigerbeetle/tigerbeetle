@@ -604,7 +604,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                                     Event,
                                     action_comptime,
                                     writable,
-                                ) orelse break; // Insuficient space.
+                                ) orelse break; // Insufficient space.
 
                                 self.build_get_account_filter(filter, results_max);
                                 break :size .{
@@ -617,7 +617,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                                     Event,
                                     action_comptime,
                                     writable,
-                                ) orelse break; // Insuficient space.
+                                ) orelse break; // Insufficient space.
 
                                 self.build_query_filter(action_comptime, filter, results_max);
                                 break :size .{
