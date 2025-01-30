@@ -7,7 +7,7 @@ balances.** This is off by default.
 
 - Each balance returned has a corresponding transfer with the same
   [`timestamp`](../transfer.md#timestamp). See the
-  [`get_account_transfers`](get_account_transfers.md) operation for more details.
+  [`get_account_transfers`](../get_account_transfers.md) operation for more details.
 
 - The amounts refer to the account balance recorded _after_ the transfer execution.
 
