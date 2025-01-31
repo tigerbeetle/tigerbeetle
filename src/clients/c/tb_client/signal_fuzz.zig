@@ -1,92 +1,85 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.fuzz_signal);
 
 const Signal = @import("./signal.zig").Signal;
 const IO = @import("../../../io.zig").IO;
 const stdx = @import("../../../stdx.zig");
 const fuzz = @import("../../../testing/fuzz.zig");
 
-const Context = struct {
-    const Atomic = std.atomic.Value(enum(u8) {
-        none,
-        from_io_thread,
-        from_user_thread,
-    });
+const threads_limit = 8;
+const Threads = stdx.BoundedArrayType(std.Thread, threads_limit);
 
-    io: IO,
+const StopRequest = enum(u8) {
+    none,
+    io_thread,
+    user_thread,
+};
+
+const Context = struct {
+    const Atomic = std.atomic.Value(StopRequest);
+
     main_thread_id: std.Thread.Id,
     signal: Signal,
-
-    random: std.Random,
     running_count: u32 = 0,
     stop_request: Atomic = Atomic.init(.none),
 };
 
-const Threads = stdx.BoundedArrayType(std.Thread, threads_limit);
-
-const threads_limit = 8;
-const stop_chance_percentage = 1;
-
 pub fn main(args: fuzz.FuzzArgs) !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
-    const events_max = args.events_max orelse 10_000;
+    const random = prng.random();
+    const events_max = args.events_max orelse 100;
 
-    var context: Context = .{
-        .io = try IO.init(32, 0),
-        .main_thread_id = std.Thread.getCurrentId(),
-        .signal = undefined,
-        .random = prng.random(),
-    };
-    defer context.io.deinit();
+    for (0..events_max) |_| {
+        var io = try IO.init(32, 0);
+        defer io.deinit();
 
-    try Signal.init(&context.signal, &context.io, on_signal);
-    defer context.signal.deinit();
+        var context: Context = .{
+            .main_thread_id = std.Thread.getCurrentId(),
+            .signal = undefined,
+        };
 
-    const threads_max = context.random.intRangeAtMost(u32, 1, threads_limit);
-    var threads: Threads = .{};
-    for (0..threads_max) |_| {
-        const thread: *std.Thread = threads.add_one_assume_capacity();
-        thread.* = try std.Thread.spawn(.{}, notify, .{&context});
-    }
+        try Signal.init(&context.signal, &io, on_signal);
+        defer context.signal.deinit();
 
-    while (context.signal.status() != .stopped) {
-        if (context.running_count >= events_max) {
-            if (context.stop_request.cmpxchgStrong(
-                .none,
-                .from_io_thread,
-                .acquire,
-                .monotonic,
-            ) == null) context.signal.stop();
+        const threads_max = random.intRangeAtMost(u32, 1, threads_limit);
+        var threads: Threads = .{};
+        for (0..threads_max) |_| {
+            const thread: *std.Thread = threads.add_one_assume_capacity();
+            thread.* = try std.Thread.spawn(.{}, notify, .{&context});
         }
-        try context.io.tick();
-    }
 
-    for (threads.slice()) |*thread| {
-        thread.join();
-    }
+        while (context.signal.status() != .stopped) {
+            if (context.running_count > 0) {
+                // Setting a random `stop_request`.
+                _ = context.stop_request.cmpxchgStrong(
+                    .none,
+                    random.enumValue(StopRequest),
+                    .acquire,
+                    .monotonic,
+                );
+            }
 
-    assert(context.stop_request.load(.monotonic) != .none);
+            const tick_us = 10;
+            try io.run_for_ns(tick_us * std.time.ns_per_us);
+        }
+
+        for (threads.slice()) |*thread| {
+            thread.join();
+        }
+
+        assert(context.running_count > 0);
+        assert(context.stop_request.load(.monotonic) != .none);
+    }
 }
 
 fn notify(context: *Context) void {
-    const delay = 10 * std.time.ns_per_us;
     assert(std.Thread.getCurrentId() != context.main_thread_id);
     while (context.signal.status() != .stopped) {
-        std.time.sleep(delay);
+        const delay_us = 1; // Shorter than `tick_us`.
+        std.time.sleep(delay_us * std.time.ns_per_us);
 
-        // Chance to stop the signal between notifications.
-        if (chance(context.random, stop_chance_percentage)) {
-            if (context.stop_request.cmpxchgStrong(
-                .none,
-                .from_user_thread,
-                .acquire,
-                .monotonic,
-            )) |before| {
-                // Cannot narrow down the origin.
-                assert(before == .from_io_thread or before == .from_user_thread);
-            }
-            // Stop has no effect if called twice.
+        if (context.stop_request.load(.monotonic) == .user_thread) {
+            // Stop can be called by multiple threads.
             context.signal.stop();
         }
 
@@ -101,35 +94,18 @@ fn on_signal(signal: *Signal) void {
     switch (context.signal.status()) {
         .running => {
             context.running_count += 1;
-
-            // Chance to stop the signal while the notification is running.
-            if (chance(context.random, stop_chance_percentage)) {
-                if (context.stop_request.cmpxchgStrong(
-                    .none,
-                    .from_io_thread,
-                    .acquire,
-                    .monotonic,
-                )) |before| {
-                    assert(before == .from_user_thread);
-                }
-
-                // Stop has no effect if called twice.
+            if (context.stop_request.load(.monotonic) == .io_thread) {
+                // Stop the signal while the notification is running.
                 context.signal.stop();
             }
         },
         .stop_requested => {
             // It's not possible if `stop` was called from the IO thread.
-            assert(context.stop_request.load(.monotonic) == .from_user_thread);
+            assert(context.stop_request.load(.monotonic) == .user_thread);
 
             // Requested while running, so still counts as one event.
             context.running_count += 1;
         },
         .stopped => unreachable,
     }
-}
-
-/// Returns true, `p` percent of the time, else false.
-fn chance(random: std.rand.Random, p: u8) bool {
-    assert(p <= 100);
-    return random.uintLessThanBiased(u8, 100) < p;
 }
