@@ -27,7 +27,6 @@ pub fn write_page(self: Website, options: struct {
     title: []const u8 = "TigerBeetle",
     author: []const u8 = "TigerBeetle Team",
     nav: []const u8,
-    url_page_source: []const u8,
     content: LazyPath,
 }) LazyPath {
     const b = self.page_writer_exe.step.owner;
@@ -37,7 +36,6 @@ pub fn write_page(self: Website, options: struct {
         options.author,
         self.url_prefix,
         options.nav,
-        options.url_page_source,
     });
     page_writer_run.addFileArg(options.content);
     return page_writer_run.addOutputFileArg("page.html");
