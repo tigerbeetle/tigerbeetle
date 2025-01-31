@@ -22,9 +22,20 @@ pub fn build(b: *std.Build) !void {
     const pandoc_bin = get_pandoc_bin(b) orelse return;
 
     const content = b.addWriteFiles();
-    _ = content.addCopyDirectory(b.path("assets"), ".", .{
-        .exclude_extensions = exclude_extensions,
-    });
+    { //TODO(Zig 0.14.0): https://github.com/ziglang/zig/issues/20571
+        var dir = try b.build_root.handle.openDir("assets", .{ .iterate = true });
+        defer dir.close();
+
+        var walker = try dir.walk(b.allocator);
+        defer walker.deinit();
+
+        while (try walker.next()) |entry| {
+            if (entry.kind == .file) {
+                const source = b.path("assets").path(b, entry.path);
+                _ = content.addCopyFile(source, entry.path);
+            }
+        }
+    }
 
     const website = Website.init(b, url_prefix, pandoc_bin);
     try docs.build(b, content, website);
