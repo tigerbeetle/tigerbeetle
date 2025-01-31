@@ -20,8 +20,13 @@ fn collect_files(
     search_path: []const u8,
 ) ![]const []const u8 {
     var file_paths = std.ArrayList([]const u8).init(arena);
-    const dir = try std.fs.cwd().openDir(search_path, .{ .iterate = true });
+
+    var dir = try std.fs.cwd().openDir(search_path, .{ .iterate = true });
+    defer dir.close();
+
     var walker = try dir.walk(arena);
+    defer walker.deinit();
+
     while (try walker.next()) |entry| {
         if (entry.kind == .file) {
             // Normalize requests by using directory with trailing slash instead of index.html.
@@ -33,6 +38,7 @@ fn collect_files(
             }
         }
     }
+
     return file_paths.toOwnedSlice();
 }
 

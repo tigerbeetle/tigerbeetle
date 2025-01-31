@@ -51,6 +51,8 @@ fn validate_dir(arena: std.mem.Allocator, path: []const u8) !void {
     defer dir.close();
 
     var walker = try dir.walk(arena);
+    defer walker.deinit();
+
     while (try walker.next()) |entry| switch (entry.kind) {
         .file => try validate_file(.{ .arena = arena, .dir = dir, .path = entry.path }),
         .directory => {},
