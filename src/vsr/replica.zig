@@ -7891,6 +7891,20 @@ pub fn ReplicaType(
             self.send_prepare_oks_from(self.commit_max + 1);
         }
 
+        fn send_prepare_oks_after_syncing_tables(self: *Replica) void {
+            assert(self.status == .normal or self.status == .view_change or
+                self.status == .recovering_head);
+            assert(self.syncing == .idle);
+            assert(self.sync_tables == null);
+
+            const op_checkpoint_trigger =
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+            self.send_prepare_oks_from(@max(
+                self.commit_max + 1,
+                op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1,
+            ));
+        }
+
         fn send_prepare_oks_after_checkpoint(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
@@ -9748,6 +9762,9 @@ pub fn ReplicaType(
                 });
 
                 self.sync_tables = null;
+
+                // Send prepare_oks that may have been withheld by virtue of `op_prepare_ok_max`.
+                self.send_prepare_oks_after_syncing_tables();
             }
         }
 
