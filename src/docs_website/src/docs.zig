@@ -270,11 +270,11 @@ const Menu = struct {
                             .url_prefix = website.url_prefix,
                             .url = page.path_target,
                             // Fabio: index page titles are too long
-                            .title = try html.from_md(menu.title),
+                            .title = menu.title,
                         });
                     } else {
                         try html.write("$title", .{
-                            .title = try html.from_md(menu.title),
+                            .title = menu.title,
                         });
                     }
                     try html.write("</summary>", .{});
@@ -288,7 +288,7 @@ const Menu = struct {
                         .url_prefix = website.url_prefix,
                         .url = page.path_target,
                         .target_page = if (page.eql(target_page)) " class=\"target\"" else "",
-                        .title = try html.from_md(page.title),
+                        .title = page.title,
                     });
                 },
             }
@@ -351,7 +351,8 @@ const Page = struct {
             return error.TitleInvalid;
 
         const title_line = source[0..newline];
-        const title = cut_prefix(title_line, "# ") orelse return error.TitleInvalid;
+        var title = cut_prefix(title_line, "# ") orelse return error.TitleInvalid;
+        title = std.mem.trim(u8, title, "`");
         if (title.len < 3) return error.TitleInvalid;
 
         return try arena.dupe(u8, title);
