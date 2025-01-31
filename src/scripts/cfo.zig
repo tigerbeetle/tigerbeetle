@@ -211,33 +211,40 @@ fn run_fuzzers(
             iteration_last;
 
         // Note that tasks are allocated by the arena, so they accumulate over the lifetime of CFO.
-        if (iteration_pull) tasks_cache = null;
-        const tasks = tasks_cache orelse tasks: {
-            // TODO: This is a race -- run_fuzzers_prepare_tasks() removes the working directory,
-            // which may still be in use by a running fuzzer.
-            const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
+        const tasks = tasks: {
+            if (iteration_pull) {
+                // TODO: This is a race -- run_fuzzers_prepare_tasks() modifies the working
+                // directory, which may still be in use by a running fuzzer.
+                const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
+                if (tasks_cache) |cache| run_fuzzers_prepare_tasks_runtime(tasks, cache);
 
-            log.info("fuzzing {} tasks", .{tasks.seed_template.len});
-            for (tasks.seed_template, tasks.weight) |seed_template, weight| {
-                log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
-                    seed_template.commit_sha[0..7],
-                    seed_template.commit_timestamp,
-                    @tagName(seed_template.fuzzer),
-                    seed_template.branch,
-                    weight,
-                });
+                log.info("fuzzing {} tasks", .{tasks.seed_template.len});
+                for (tasks.seed_template, tasks.weight) |seed_template, weight| {
+                    log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
+                        seed_template.commit_sha[0..7],
+                        seed_template.commit_timestamp,
+                        @tagName(seed_template.fuzzer),
+                        seed_template.branch,
+                        weight,
+                    });
+                }
+                break :tasks tasks;
+            } else {
+                break :tasks tasks_cache.?;
             }
-            break :tasks tasks;
         };
         tasks_cache = tasks;
 
         // Start new fuzzer processes.
         for (children) |*child_or_null| {
             if (child_or_null.* == null) {
-                const task_index = random.weightedIndex(u32, tasks.weight);
+                const task_index = run_fuzzers_tasks_sample(tasks);
                 const working_directory = tasks.working_directory[task_index];
                 const seed_template = tasks.seed_template[task_index];
                 const seed = random.int(u64);
+
+                // Ensure that multiple fuzzers spawned in the same tick are spread out over tasks.
+                tasks.runtimes[task_index] += 1;
 
                 const child = try run_fuzzers_start_fuzzer(shell, .{
                     .working_directory = working_directory,
@@ -264,6 +271,20 @@ fn run_fuzzers(
                         .seed_timestamp_end = 0,
                     },
                 };
+            }
+        }
+
+        // Increment the runtime of running tasks.
+        for (children) |*fuzzer_or_null| {
+            if (fuzzer_or_null.*) |*fuzzer| {
+                if (tasks.map.get(.{
+                    .fuzzer = std.meta.stringToEnum(Fuzzer, fuzzer.seed.fuzzer).?,
+                    .commit = fuzzer.seed.commit_sha,
+                })) |task_index| {
+                    tasks.runtimes[task_index] += 1;
+                } else {
+                    // This is a leftover fuzzer from a now-cancelled task.
+                }
             }
         }
 
@@ -336,12 +357,26 @@ fn run_fuzzers(
         }
     }
     assert(seeds.items.len == 0);
+
+    for (tasks_cache.?.seed_template, tasks_cache.?.runtimes) |template, runtime| {
+        log.debug("commit={s} fuzzer={s:<24} runtime={}", .{
+            template.commit_sha[0..7],
+            @tagName(template.fuzzer),
+            runtime,
+        });
+    }
 }
 
 const Tasks = struct {
+    /// Map value is the index within the task arrays.
+    const Map = std.AutoHashMap(struct { fuzzer: Fuzzer, commit: [40]u8 }, usize);
+
+    map: Map,
     working_directory: [][]const u8,
     seed_template: []SeedRecord.Template,
     weight: []u32,
+    /// Estimated cumulative runtime of the corresponding task.
+    runtimes: []u64,
 };
 
 fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
@@ -467,11 +502,79 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
         }
     }
 
+    const runtimes = try shell.arena.allocator().alloc(u64, working_directory.items.len);
+    @memset(runtimes, 1);
+
+    var map = Tasks.Map.init(shell.arena.allocator());
+    for (seed_template.items, 0..) |template, i| {
+        try map.putNoClobber(.{
+            .fuzzer = template.fuzzer,
+            .commit = template.commit_sha,
+        }, i);
+    }
+
     return .{
+        .map = map,
         .working_directory = working_directory.items,
         .seed_template = seed_template.items,
         .weight = weight,
+        .runtimes = runtimes,
     };
+}
+
+/// Initialize the runtime of each task in `tasks`.
+fn run_fuzzers_prepare_tasks_runtime(tasks: Tasks, tasks_cache: Tasks) void {
+    assert(tasks.runtimes.len == tasks.weight.len);
+    assert(tasks.runtimes.len > 0);
+    assert(tasks_cache.runtimes.len == tasks_cache.weight.len);
+    assert(tasks_cache.runtimes.len > 0);
+
+    const runtime_min = runtime_min: {
+        var runtime_min: u64 = std.math.maxInt(u64);
+        for (tasks_cache.runtimes) |task_cached_runtime| {
+            runtime_min = @min(runtime_min, task_cached_runtime);
+        }
+        assert(runtime_min < std.math.maxInt(u64));
+        assert(runtime_min > 0);
+        break :runtime_min runtime_min;
+    };
+
+    for (tasks.seed_template, tasks.runtimes) |*task, *task_runtime| {
+        if (tasks_cache.map.get(.{
+            .fuzzer = task.fuzzer,
+            .commit = task.commit_sha,
+        })) |task_cached_index| {
+            // Tasks that were already being fuzzed inherit their original runtime.
+            task_runtime.* = tasks_cache.runtimes[task_cached_index];
+        } else {
+            // Brand-new tasks are assigned the smallest existing task's runtime, to ensure that the
+            // new tasks don't starve old tasks.
+            task_runtime.* = runtime_min;
+        }
+    }
+}
+
+/// Returns the index of the task with the minimal `runtime / weight`.
+fn run_fuzzers_tasks_sample(tasks: Tasks) usize {
+    assert(tasks.runtimes.len == tasks.weight.len);
+    assert(tasks.runtimes.len > 0);
+
+    var task_best_runtime_weighted: ?u64 = null;
+    var task_best_index: ?usize = null;
+    for (tasks.runtimes, tasks.weight, 0..) |task_runtime, task_weight, i| {
+        assert(task_runtime > 0);
+        assert(task_weight > 0);
+
+        // Multiply by a large (arbitrary) constant to avoid rounding errors.
+        const task_runtime_weighted = @divFloor(task_runtime * 1024, task_weight);
+        if (task_best_runtime_weighted == null or
+            task_best_runtime_weighted.? > task_runtime_weighted)
+        {
+            task_best_runtime_weighted = task_runtime_weighted;
+            task_best_index = i;
+        }
+    }
+    return task_best_index.?;
 }
 
 const Commit = struct {
