@@ -86,3 +86,16 @@ function syncSideNavWithLocation() {
 }
 
 syncSideNavWithLocation();
+
+function copyCode(button) {
+  let codeBlock = button.nextElementSibling;
+  navigator.clipboard.writeText(codeBlock.innerText).then(() => {
+    const before = button.innerHTML;
+    button.innerText = "Copied!";
+    setTimeout(() => button.innerHTML = before, 1000);
+  });
+}
+
+document.querySelectorAll("button.copy").forEach(button =>
+  button.addEventListener("click", () => copyCode(button))
+);

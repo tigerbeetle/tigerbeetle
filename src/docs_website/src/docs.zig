@@ -384,6 +384,8 @@ const Page = struct {
         pandoc_step.addFileArg(b.path("pandoc/anchor-links.lua"));
         pandoc_step.addArg("--lua-filter");
         pandoc_step.addFileArg(b.path("pandoc/table-wrapper.lua"));
+        pandoc_step.addArg("--lua-filter");
+        pandoc_step.addFileArg(b.path("pandoc/code-block-buttons.lua"));
         pandoc_step.addArg("--output");
         const pandoc_out = pandoc_step.addOutputFileArg("pandoc-out.html");
         pandoc_step.addFileArg(b.path(self.path_source));

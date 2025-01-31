@@ -4,7 +4,7 @@ const std = @import("std");
 const log = std.log.scoped(.validate);
 const assert = std.debug.assert;
 
-pub const file_size_max = 900 * 1024;
+pub const file_size_max = 915 * 1024;
 
 // If this is set to true, we check if we get a 200 response for any external links.
 const check_links_external: bool = false;
