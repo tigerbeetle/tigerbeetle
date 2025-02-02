@@ -150,9 +150,9 @@ pub fn GrooveType(
     ///     An anonymous struct which maps each of the groove's trees to a stable, forest-unique,
     ///     tree identifier.
     ///
-    /// - batch_value_count_max: { .field = usize }:
+    /// - value_count_max: { .field = usize }:
     ///     An anonymous struct which contains, for each field of `Object`,
-    ///     the maximum number of values per table per batch for the corresponding index tree.
+    ///     the maximum number of values per table per request for the corresponding index tree.
     ///
     /// - ignored: [][]const u8:
     ///     An array of fields on the Object type that should not be given index trees
@@ -200,7 +200,7 @@ pub fn GrooveType(
 
         if (!ignored) {
             const table_value_count_max = constants.lsm_compaction_ops *
-                @field(groove_options.batch_value_count_max, field.name);
+                @field(groove_options.value_count_max, field.name);
             const IndexTree = IndexTreeType(Storage, field.type, table_value_count_max);
             index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
@@ -245,7 +245,7 @@ pub fn GrooveType(
 
         const DerivedType = derive_return_type.Optional.child;
         const table_value_count_max = constants.lsm_compaction_ops *
-            @field(groove_options.batch_value_count_max, field.name);
+            @field(groove_options.value_count_max, field.name);
         const IndexTree = IndexTreeType(Storage, DerivedType, table_value_count_max);
 
         index_fields = index_fields ++ [_]std.builtin.Type.StructField{
@@ -284,7 +284,7 @@ pub fn GrooveType(
 
     const _ObjectTree = blk: {
         const table_value_count_max = constants.lsm_compaction_ops *
-            groove_options.batch_value_count_max.timestamp;
+            groove_options.value_count_max.timestamp;
         const Table = TableType(
             u64, // key = timestamp
             Object,
@@ -300,7 +300,7 @@ pub fn GrooveType(
 
     const _IdTree = if (!has_id) void else blk: {
         const table_value_count_max = constants.lsm_compaction_ops *
-            groove_options.batch_value_count_max.id;
+            groove_options.value_count_max.id;
         const Table = TableType(
             u128,
             IdTreeValue,
@@ -1484,7 +1484,7 @@ test "Groove" {
                 .amount = 9,
             },
             // Doesn't matter for this test.
-            .batch_value_count_max = .{
+            .value_count_max = .{
                 .timestamp = 1,
                 .id = 1,
                 .debit_account_id = 1,

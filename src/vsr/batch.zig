@@ -109,7 +109,7 @@ fn EncoderCountingType(
             const trailer_size: usize = trailer_total_size(options.current_batch_count + 1);
             return .{
                 .payload_size = @intCast(payload_size),
-                .trailer_size = @intCast(trailer_padding + trailer_size),
+                .trailer_size = @intCast(trailer_size + trailer_padding),
             };
         }
     };
@@ -438,8 +438,10 @@ pub fn BatchEncoderType(
         }
 
         /// Returns a writable slice aligned and sized appropriately for the current operation.
-        /// May return an empty slice if there isn't sufficient space in the buffer.
-        pub fn writable(self: *const BatchEncoder, operation: vsr.Operation) []u8 {
+        /// May return `null` if there isn't enough space in the buffer to add a new element
+        /// to the trailer. The returned slice may have a length of zero if the remaining buffer
+        /// isn't large enough to hold at least one element of the current operation.
+        pub fn writable(self: *const BatchEncoder, operation: vsr.Operation) ?[]u8 {
             maybe(self.batch_count == 0);
 
             // Takes into account extra trailer bytes that will need to be included.
@@ -455,9 +457,9 @@ pub fn BatchEncoderType(
             // The first batch must not include padding since the buffer is expected to be aligned.
             assert(padding == 0 or self.buffer_index > 0);
 
-            if (buffer.len <= self.buffer_index + padding + trailer_size) {
-                // Insuficient space for one more batch.
-                return &.{};
+            if (buffer.len < self.buffer_index + trailer_size) {
+                // Insufficient space for one more batch.
+                return null;
             }
 
             if (constants.verify) {
@@ -474,6 +476,10 @@ pub fn BatchEncoderType(
                 };
             }
 
+            if (buffer.len < self.buffer_index + padding + trailer_size) {
+                return &.{};
+            }
+
             // Get an aligned slice.
             const aligned: []u8 = buffer[self.buffer_index + padding .. buffer.len - trailer_size];
 
@@ -484,7 +490,7 @@ pub fn BatchEncoderType(
             return aligned[0..size];
         }
 
-        /// Records how many bytes were writen in the slice previously acquired by `writable()`.
+        /// Records how many bytes were written in the slice previously acquired by `writable()`.
         /// The same operation must be used in both functions.
         pub fn add(self: *BatchEncoder, operation: vsr.Operation, bytes_written: usize) void {
             maybe(self.batch_count == 0);
@@ -685,96 +691,121 @@ const test_batch = struct {
         }
     };
 
-    fn run(options: struct {
+    const BatchEncoder = BatchEncoderType(Context, .{
+        .is_valid = Adapter.is_valid,
+        .element_size = Adapter.element_size,
+        .alignment = Adapter.alignment,
+    });
+
+    const BatchDecoder = BatchDecoderType(Context, .{
+        .is_valid = Adapter.is_valid,
+        .element_size = Adapter.element_size,
+        .alignment = Adapter.alignment,
+    });
+
+    fn run(allocator: std.mem.Allocator, options: struct {
         random: std.rand.Random,
         buffer: []u8,
     }) !void {
-        const BatchEncoder = BatchEncoderType(Context, .{
-            .is_valid = Adapter.is_valid,
-            .element_size = Adapter.element_size,
-            .alignment = Adapter.alignment,
-        });
-
-        var encoder = BatchEncoder.init(Context.empty, options.buffer);
-        var expected: [8190]struct { operation: Operation, elements_count: usize } = undefined;
-        const batch_count_max: u16 = options.random.intRangeAtMostBiased(
-            u16,
-            1,
-            expected.len,
-        );
-
-        var batch_count: u16 = 0;
+        // Generate the batch plan.
+        const batch_count_max = options.random.intRangeAtMost(usize, 1, options.buffer.len);
+        const Batch = struct { operation: Operation, size: u32 };
+        var batches = stdx.BoundedArrayType(Batch, 8190){};
+        var expect_payload_size: u32 = 0;
+        var expect_trailer_size: u32 = 0;
         for (0..batch_count_max) |_| {
-            const operation = options.random.enumValue(Operation);
-            switch (operation) {
+            const batch_operation = options.random.enumValue(Operation);
+            const batch_element_size = Adapter.element_size(.{}, batch_operation.to_vsr());
+            const batch_element_count_max: u32 = @intCast(@divFloor(
+                options.buffer.len - expect_payload_size - expect_trailer_size,
+                batch_element_size,
+            ));
+            const batch_element_count: u32 =
+                switch (options.random.enumValue(enum { zero, one, random })) {
+                .zero => 0,
+                .one => 1,
+                .random => options.random.intRangeAtMost(u32, 1, batch_element_count_max + 1),
+            };
+
+            const total_size = BatchEncoder.encoded_total_size(.{
+                .context = .{},
+                .current_payload_size = expect_payload_size,
+                .current_batch_count = @intCast(batches.count()),
+                .next_operation = batch_operation.to_vsr(),
+                .next_payload_size = batch_element_count * batch_element_size,
+            });
+
+            if (total_size.payload_size + total_size.trailer_size <= options.buffer.len) {
+                batches.append_assume_capacity(.{
+                    .operation = batch_operation,
+                    .size = @intCast(batch_element_count * batch_element_size),
+                });
+                expect_payload_size = total_size.payload_size;
+                expect_trailer_size = total_size.trailer_size;
+            } else {
+                break;
+            }
+        }
+        assert(batches.count() > 0);
+        assert(expect_payload_size + expect_trailer_size <= options.buffer.len);
+
+        var payloads_encoded: u32 = 0;
+        var payloads_decoded: u32 = 0;
+        var payloads_bytes = try allocator.alloc(u8, options.buffer.len);
+        defer allocator.free(payloads_bytes);
+        options.random.bytes(payloads_bytes);
+
+        // Encoder will ignore and overwrite any existing content in the target buffer.
+        options.random.bytes(options.buffer);
+
+        // Encode.
+        var encoder = BatchEncoder.init(.{}, options.buffer);
+        for (batches.const_slice()) |batch| {
+            const writable = encoder.writable(batch.operation.to_vsr()) orelse break;
+            const batch_payload_target = writable[0..batch.size];
+            const batch_payload_source = payloads_bytes[payloads_encoded..][0..batch.size];
+            encoder.add(batch.operation.to_vsr(), batch.size);
+            stdx.copy_disjoint(.exact, u8, batch_payload_target, batch_payload_source);
+            payloads_encoded += batch.size;
+        }
+        const encoder_bytes_written = encoder.finish();
+        assert(encoder_bytes_written == expect_payload_size + expect_trailer_size);
+
+        // Decode.
+        var decoder = try BatchDecoder.init(.{}, options.buffer[0..encoder_bytes_written]);
+        for (batches.const_slice()) |batch| {
+            const expect_batch_bytes = payloads_bytes[payloads_decoded..][0..batch.size];
+            payloads_decoded += batch.size;
+
+            const decoded_batch = decoder.pop().?;
+            const decoded_batch_bytes = decoded_batch.batched;
+            const batch_element_size = Adapter.element_size(.{}, batch.operation.to_vsr());
+            try testing.expectEqual(batch.operation, Operation.from_vsr(decoded_batch.operation));
+            try testing.expectEqual(batch.size, decoded_batch_bytes.len);
+            try testing.expect(decoded_batch_bytes.len % batch_element_size == 0);
+            try testing.expect(std.mem.eql(u8, expect_batch_bytes, decoded_batch_bytes));
+            if (decoded_batch_bytes.len > 0) {
+                try testing.expect(std.mem.isAligned(
+                    @intFromPtr(decoded_batch_bytes.ptr),
+                    Adapter.alignment(.{}, batch.operation.to_vsr()),
+                ));
+            }
+
+            switch (batch.operation) {
                 inline else => |operation_comptime| {
                     const Element = ElementType(operation_comptime);
-
-                    // Assert the slice is aligned:
-                    const writable: []u8 = encoder.writable(operation.to_vsr());
-                    const elements: []Element = @alignCast(std.mem.bytesAsSlice(
+                    const slice: []const Element = @alignCast(std.mem.bytesAsSlice(
                         Element,
-                        writable,
+                        decoded_batch_bytes,
                     ));
-                    if (elements.len == 0) {
-                        break;
-                    }
-
-                    const elements_count: usize =
-                        switch (options.random.enumValue(enum { zero, one, random })) {
-                        .zero => 0,
-                        .one => 1,
-                        .random => options.random.intRangeAtMost(usize, 1, @intCast(elements.len)),
-                    };
-                    for (elements[0..elements_count]) |*element| {
-                        @memset(&element.value, @intCast(batch_count % 255));
-                    }
-
-                    encoder.add(operation.to_vsr(), elements_count * @sizeOf(Element));
-                    expected[batch_count] = .{
-                        .operation = operation,
-                        .elements_count = elements_count,
-                    };
-                    batch_count += 1;
+                    try testing.expectEqual(
+                        @as(usize, @divExact(decoded_batch.batched.len, batch_element_size)),
+                        slice.len,
+                    );
                 },
             }
         }
-        try testing.expectEqual(encoder.batch_count, batch_count);
-        const bytes_written = encoder.finish();
-
-        const BatchDecoder = BatchDecoderType(Context, .{
-            .is_valid = Adapter.is_valid,
-            .element_size = Adapter.element_size,
-            .alignment = Adapter.alignment,
-        });
-        var decoder = try BatchDecoder.init(
-            Context.empty,
-            options.buffer[0..bytes_written],
-        );
-        var index: u16 = 0;
-        while (decoder.pop()) |batch_item| {
-            const operation = Operation.from_vsr(batch_item.operation);
-            try testing.expectEqual(expected[index].operation, operation);
-            switch (operation) {
-                inline else => |operation_comptime| {
-                    const Element = ElementType(operation_comptime);
-                    const elements: []const Element = @alignCast(std.mem.bytesAsSlice(
-                        Element,
-                        batch_item.batched,
-                    ));
-                    try testing.expectEqual(expected[index].elements_count, elements.len);
-                    for (elements) |element| {
-                        try testing.expect(std.mem.allEqual(
-                            u8,
-                            &element.value,
-                            @intCast(index % 255),
-                        ));
-                    }
-                    index += 1;
-                },
-            }
-        }
-        try testing.expectEqual(batch_count, index);
+        assert(decoder.pop() == null);
     }
 };
 
@@ -796,7 +827,7 @@ test "batch: encode/decode" {
             message_body_size_min,
             message_body_size_max,
         );
-        _ = try test_batch.run(.{
+        try test_batch.run(testing.allocator, .{
             .random = random,
             .buffer = buffer[0..buffer_size],
         });

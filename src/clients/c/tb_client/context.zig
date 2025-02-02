@@ -129,6 +129,7 @@ pub fn ContextType(
             operation: StateMachine.Operation,
             input: []const u8,
         ) error{InvalidDataSize}!u32 {
+            _ = self;
             switch (operation) {
                 .pulse => unreachable,
                 inline .get_account_transfers,
@@ -153,11 +154,14 @@ pub fn ContextType(
                         input,
                     );
 
-                    return @min(
-                        filter.limit,
-                        // TODO: Should we err with `TooMuchData` if the `limit` is too high?
-                        @divFloor(self.batch_size_limit.?, @sizeOf(Result)),
-                    ) * @sizeOf(Result);
+                    // TODO: Should we err with `TooMuchData` if the `limit` is too high?
+                    const results_max: u32 =
+                        @divFloor(constants.message_body_size_max, @sizeOf(Result));
+                    maybe(filter.limit == 0);
+                    maybe(filter.limit > results_max);
+
+                    const events: u32 = @min(filter.limit, results_max);
+                    return events * @sizeOf(Result);
                 },
                 inline else => |operation_comptime| {
                     comptime assert(StateMachine.event_is_slice(operation_comptime));
@@ -172,9 +176,9 @@ pub fn ContextType(
                     // and even the simulator can generate requests with no events.
                     maybe(input.len == 0);
                     if (input.len % @sizeOf(Event) != 0) return error.InvalidDataSize;
-                    const events: u32 = @intCast(@divExact(input.len, @sizeOf(Event)));
 
-                    return @sizeOf(Result) * events;
+                    const events: u32 = @intCast(@divExact(input.len, @sizeOf(Event)));
+                    return events * @sizeOf(Result);
                 },
             }
         }
@@ -474,7 +478,9 @@ pub fn ContextType(
                 self.notify_completion(packet, err);
                 return;
             };
-            if (results_size > self.batch_size_limit.?) {
+            // While the request size is constrained by `batch_size_limit`,
+            // the reply size is only limited by `message_body_size_max`.
+            if (results_size > constants.message_body_size_max) {
                 self.notify_completion(packet, error.TooMuchData);
                 return;
             }
@@ -511,8 +517,10 @@ pub fn ContextType(
                     .next_operation = vsr.Operation.from(StateMachine, operation),
                     .next_payload_size = results_size,
                 });
-                if (self.batch_size_limit.? <
-                    encoded_results.payload_size + encoded_results.trailer_size) continue;
+                // While the request size is constrained by `batch_size_limit`,
+                // the reply size is only limited by `message_body_size_max`.
+                if (encoded_results.payload_size + encoded_results.trailer_size >
+                    constants.message_body_size_max) continue;
 
                 if (root.batch_count == 0) {
                     assert(root.batch_next == null);
@@ -580,8 +588,10 @@ pub fn ContextType(
                     .next_operation = operation,
                     .next_payload_size = next.batch_results_size,
                 });
-                if (self.batch_size_limit.? <
-                    encoded_results.payload_size + encoded_results.trailer_size) break;
+                // While the request size is constrained by `batch_size_limit`,
+                // the reply size is only limited by `message_body_size_max`.
+                if (encoded_results.payload_size + encoded_results.trailer_size >
+                    constants.message_body_size_max) break;
 
                 assert(next == self.pending.pop().?);
                 if (root.batch_count == 0) {
@@ -663,7 +673,7 @@ pub fn ContextType(
                         const operation = operation_from_int(batched.operation).?;
                         const vsr_operation = vsr.Operation.from(StateMachine, operation);
                         const source: []const u8 = batched.slice();
-                        const target: []u8 = encoder.writable(vsr_operation);
+                        const target: []u8 = encoder.writable(vsr_operation) orelse break;
                         assert(source.len <= target.len);
                         stdx.copy_disjoint(.inexact, u8, target, source);
                         encoder.add(vsr_operation, source.len);

@@ -87,7 +87,7 @@ pub fn StateMachineType(
                     .id = 2,
                     .value = 3,
                 },
-                .batch_value_count_max = .{
+                .value_count_max = .{
                     .timestamp = 1,
                     .id = 1,
                     .value = 1,

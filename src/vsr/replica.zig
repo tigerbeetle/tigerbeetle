@@ -5329,7 +5329,7 @@ pub fn ReplicaType(
                     prepare_timestamp,
                     operation,
                     batch_item.batched,
-                    reply_encoder.writable(batch_item.operation),
+                    reply_encoder.writable(batch_item.operation).?,
                 );
                 reply_encoder.add(batch_item.operation, bytes_written);
 
@@ -5994,12 +5994,17 @@ pub fn ReplicaType(
 
             if (message.header.operation == .batched) {
                 const input_valid: bool = input_valid: {
+                    // `State_machine.input_valid()` asserts each batch's size,
+                    // but the entire request must also conform to `batch_size_limit`.
+                    assert(message.header.size - @sizeOf(Header) <=
+                        self.state_machine.batch_size_limit);
                     var decoder = BatchBodyDecoder.init(
                         message.header.release,
                         message.body_used(),
                     ) catch |err| switch (err) {
                         error.BatchInvalid => break :input_valid false,
                     };
+                    var result_size: u32 = 0;
                     while (decoder.pop()) |batch_item| {
                         const operation = StateMachine.operation_from_vsr(
                             batch_item.operation,
@@ -6010,6 +6015,22 @@ pub fn ReplicaType(
                             operation,
                             batch_item.batched,
                         )) break :input_valid false;
+
+                        const encoded_results = BatchReplyEncoder.encoded_total_size(.{
+                            .context = message.header.release,
+                            .current_payload_size = result_size,
+                            .current_batch_count = decoder.batch_index - 1,
+                            .next_operation = batch_item.operation,
+                            .next_payload_size = batch_item.batched.len,
+                        });
+                        // The request size is constrained by `batch_size_limit`,
+                        // while the reply size is only limited by `message_body_size_max`.
+                        if (encoded_results.payload_size + encoded_results.trailer_size >
+                            constants.message_body_size_max)
+                        {
+                            break :input_valid false;
+                        }
+                        result_size = encoded_results.payload_size;
                     }
 
                     break :input_valid true;

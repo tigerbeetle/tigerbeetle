@@ -124,14 +124,13 @@ pub fn StateMachineType(
             };
         };
 
-        const batch_value_count_max = batch_value_counts_limit(config.message_body_size_max);
-
+        const tree_values_count_limit = tree_values_count_max(config.message_body_size_max);
         const AccountsGroove = GrooveType(
             Storage,
             Account,
             .{
                 .ids = constants.tree_ids.accounts,
-                .batch_value_count_max = batch_value_count_max.accounts,
+                .value_count_max = tree_values_count_limit.accounts,
                 .ignored = &[_][]const u8{
                     "debits_posted",
                     "debits_pending",
@@ -166,7 +165,7 @@ pub fn StateMachineType(
             Transfer,
             .{
                 .ids = constants.tree_ids.transfers,
-                .batch_value_count_max = batch_value_count_max.transfers,
+                .value_count_max = tree_values_count_limit.transfers,
                 .ignored = &[_][]const u8{ "timeout", "flags" },
                 .optional = &[_][]const u8{
                     "pending_id",
@@ -207,7 +206,7 @@ pub fn StateMachineType(
             TransferPending,
             .{
                 .ids = constants.tree_ids.transfers_pending,
-                .batch_value_count_max = batch_value_count_max.transfers_pending,
+                .value_count_max = tree_values_count_limit.transfers_pending,
                 .ignored = &[_][]const u8{"padding"},
                 .optional = &[_][]const u8{"status"},
                 .derived = .{},
@@ -232,7 +231,7 @@ pub fn StateMachineType(
             AccountBalancesGrooveValue,
             .{
                 .ids = constants.tree_ids.account_balances,
-                .batch_value_count_max = batch_value_count_max.account_balances,
+                .value_count_max = tree_values_count_limit.account_balances,
                 .ignored = &[_][]const u8{
                     "dr_account_id",
                     "dr_debits_pending",
@@ -2954,76 +2953,101 @@ pub fn StateMachineType(
         }
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
-            const batch_values_limit = batch_value_counts_limit(options.batch_size_limit);
+            const prefetch_create_accounts_limit: u32 = operation_batch_max(
+                .create_accounts,
+                options.batch_size_limit,
+            );
+            assert(prefetch_create_accounts_limit > 0);
+            assert(prefetch_create_accounts_limit <= constants.batch_max.create_accounts);
+            assert(prefetch_create_accounts_limit <= constants.batch_max.lookup_accounts);
 
-            const batch_accounts_limit: u32 =
-                @divFloor(options.batch_size_limit, @sizeOf(Account));
-            const batch_transfers_limit: u32 =
-                @divFloor(options.batch_size_limit, @sizeOf(Transfer));
-            assert(batch_accounts_limit > 0);
-            assert(batch_transfers_limit > 0);
-            assert(batch_accounts_limit <= constants.batch_max.create_accounts);
-            assert(batch_accounts_limit <= constants.batch_max.lookup_accounts);
-            assert(batch_transfers_limit <= constants.batch_max.create_transfers);
-            assert(batch_transfers_limit <= constants.batch_max.lookup_transfers);
+            const prefetch_create_transfers_limit: u32 = operation_batch_max(
+                .create_transfers,
+                options.batch_size_limit,
+            );
+            assert(prefetch_create_transfers_limit > 0);
+            assert(prefetch_create_transfers_limit <= constants.batch_max.create_transfers);
+            assert(prefetch_create_transfers_limit <= constants.batch_max.lookup_transfers);
+
+            const prefetch_lookup_accounts_limit: u32 = operation_batch_max(
+                .lookup_accounts,
+                options.batch_size_limit,
+            );
+            assert(prefetch_lookup_accounts_limit > 0);
+            assert(prefetch_create_accounts_limit <= constants.batch_max.lookup_accounts);
+
+            const prefetch_lookup_transfers_limit: u32 = operation_batch_max(
+                .lookup_transfers,
+                options.batch_size_limit,
+            );
+            assert(prefetch_lookup_transfers_limit > 0);
+            assert(prefetch_create_accounts_limit <= constants.batch_max.lookup_transfers);
 
             if (options.batch_size_limit == config.message_body_size_max) {
-                assert(batch_accounts_limit == constants.batch_max.create_accounts);
-                assert(batch_accounts_limit == constants.batch_max.lookup_accounts);
-                assert(batch_transfers_limit == constants.batch_max.create_transfers);
-                assert(batch_transfers_limit == constants.batch_max.lookup_transfers);
+                assert(prefetch_create_accounts_limit == constants.batch_max.create_accounts);
+                assert(prefetch_create_accounts_limit == constants.batch_max.lookup_accounts);
+                assert(prefetch_create_transfers_limit == constants.batch_max.create_transfers);
+                assert(prefetch_create_transfers_limit == constants.batch_max.lookup_transfers);
+                assert(prefetch_lookup_accounts_limit == constants.batch_max.lookup_transfers);
+                assert(prefetch_create_transfers_limit == constants.batch_max.lookup_transfers);
             }
 
+            const tree_values_count = tree_values_count_max(options.batch_size_limit);
             return .{
                 .accounts = .{
-                    // lookup_account() looks up 1 Account per item.
-                    .prefetch_entries_for_read_max = batch_accounts_limit,
+                    // `lookup_account()` looks up 1 Account per item.
+                    .prefetch_entries_for_read_max = prefetch_lookup_accounts_limit,
                     .prefetch_entries_for_update_max = @max(
-                        batch_accounts_limit, // create_account()
-                        2 * batch_transfers_limit, // create_transfer(), debit and credit accounts
+                        // `create_account()` looks up 1 Account.:
+                        // `create_transfer()` looks up the debit and credit accounts.
+                        prefetch_create_accounts_limit,
+                        2 * prefetch_create_transfers_limit,
                     ),
                     .cache_entries_max = options.cache_entries_accounts,
                     .tree_options_object = .{
-                        .batch_value_count_limit = batch_values_limit.accounts.timestamp,
+                        .batch_value_count_limit = tree_values_count.accounts.timestamp,
                     },
                     .tree_options_id = .{
-                        .batch_value_count_limit = batch_values_limit.accounts.id,
+                        .batch_value_count_limit = tree_values_count.accounts.id,
                     },
                     .tree_options_index = index_tree_options(
                         AccountsGroove.IndexTreeOptions,
-                        batch_values_limit.accounts,
+                        tree_values_count.accounts,
                     ),
                 },
                 .transfers = .{
-                    // lookup_transfer() looks up 1 Transfer.
-                    // create_transfer() looks up at most 1 Transfer for posting/voiding.
-                    .prefetch_entries_for_read_max = batch_transfers_limit,
-                    // create_transfer() updates a single Transfer.
-                    .prefetch_entries_for_update_max = batch_transfers_limit,
+                    // `lookup_transfer()` looks up 1 Transfer.
+                    // `create_transfer()` looks up at most 1 Transfer for posting/voiding.
+                    .prefetch_entries_for_read_max = @max(
+                        prefetch_lookup_transfers_limit,
+                        prefetch_create_transfers_limit,
+                    ),
+                    // `create_transfer()` updates a single Transfer.
+                    .prefetch_entries_for_update_max = prefetch_create_transfers_limit,
                     .cache_entries_max = options.cache_entries_transfers,
                     .tree_options_object = .{
-                        .batch_value_count_limit = batch_values_limit.transfers.timestamp,
+                        .batch_value_count_limit = tree_values_count.transfers.timestamp,
                     },
                     .tree_options_id = .{
-                        .batch_value_count_limit = batch_values_limit.transfers.id,
+                        .batch_value_count_limit = tree_values_count.transfers.id,
                     },
                     .tree_options_index = index_tree_options(
                         TransfersGroove.IndexTreeOptions,
-                        batch_values_limit.transfers,
+                        tree_values_count.transfers,
                     ),
                 },
                 .transfers_pending = .{
-                    .prefetch_entries_for_read_max = batch_transfers_limit,
-                    // create_transfer() posts/voids at most one transfer.
-                    .prefetch_entries_for_update_max = batch_transfers_limit,
+                    .prefetch_entries_for_read_max = prefetch_create_transfers_limit,
+                    // `create_transfer()` posts/voids at most one transfer.
+                    .prefetch_entries_for_update_max = prefetch_create_transfers_limit,
                     .cache_entries_max = options.cache_entries_posted,
                     .tree_options_object = .{
-                        .batch_value_count_limit = batch_values_limit.transfers_pending.timestamp,
+                        .batch_value_count_limit = tree_values_count.transfers_pending.timestamp,
                     },
                     .tree_options_id = {},
                     .tree_options_index = index_tree_options(
                         TransfersPendingGroove.IndexTreeOptions,
-                        batch_values_limit.transfers_pending,
+                        tree_values_count.transfers_pending,
                     ),
                 },
                 .account_balances = .{
@@ -3032,7 +3056,7 @@ pub fn StateMachineType(
                     .prefetch_entries_for_update_max = 0,
                     .cache_entries_max = options.cache_entries_account_balances,
                     .tree_options_object = .{
-                        .batch_value_count_limit = batch_values_limit.account_balances.timestamp,
+                        .batch_value_count_limit = tree_values_count.account_balances.timestamp,
                     },
                     .tree_options_id = {},
                     .tree_options_index = .{},
@@ -3051,7 +3075,7 @@ pub fn StateMachineType(
             return result;
         }
 
-        fn batch_value_counts_limit(batch_size_limit: u32) struct {
+        fn tree_values_count_max(batch_size_limit: u32) struct {
             accounts: struct {
                 id: u32,
                 user_data_128: u32,
@@ -3090,8 +3114,9 @@ pub fn StateMachineType(
             assert(batch_size_limit <= constants.message_body_size_max);
 
             const batch_create_accounts = operation_batch_max(.create_accounts, batch_size_limit);
-            const batch_create_transfers = operation_batch_max(.create_transfers, batch_size_limit);
             assert(batch_create_accounts > 0);
+
+            const batch_create_transfers = operation_batch_max(.create_transfers, batch_size_limit);
             assert(batch_create_transfers > 0);
 
             return .{
