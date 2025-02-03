@@ -3,6 +3,75 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.26
+
+Released: 2025-02-03
+
+### Safety And Performance
+
+- [#2681](https://github.com/tigerbeetle/tigerbeetle/pull/2681)
+
+  Consider blocks and prepares with nonzero padding to be corrupt.
+  Previously blocks asserted zero padding, which can fail due to bitrot.
+
+  Also fix a similar bug in the superblock copy index handling. The copy index is not covered
+  by a checksum, so we must treat it carefully to avoid propagating bad data if it is corrupt.
+
+  VOPR now injects single-bit errors into storage rather than whole-sector errors.
+
+- [#2600](https://github.com/tigerbeetle/tigerbeetle/pull/2600)
+
+  The current checkpoint process immediately frees all blocks released in the previous checkpoint.
+  This can lead to cluster unavailability by prematurely freeing and overwriting released blocks.
+
+  To fix this, delay freeing blocks until the checkpoint is durable on a commit-quorum, ensuring
+  data integrity and preventing single-replica failures (in a 3 node cluster) from impacting
+  availability.
+
+- [#2692](https://github.com/tigerbeetle/tigerbeetle/pull/2692)
+
+  When state syncing, replicas would send prepare_oks only up to a point, to ensure they don't
+  falsely contribute to the durability of a non-durable checkpoint they've synced to.
+
+  However, the logic to send these prepare_oks after state sync has finished was missing, which
+  could lead to a situation where a primary was unavailable to advance. Add in the ability to send
+  these prepare_oks after syncing.
+
+- [#2689](https://github.com/tigerbeetle/tigerbeetle/pull/2689)
+
+  Recently, tb_client was reworked to use OS native signals instead of a socket for delivering
+  cross thread events.
+
+  Fix some incorrect asserts, and add a fuzz test.
+
+### Features
+
+- [#2694](https://github.com/tigerbeetle/tigerbeetle/pull/2694),
+  [#2695](https://github.com/tigerbeetle/tigerbeetle/pull/2695),
+  [#2686](https://github.com/tigerbeetle/tigerbeetle/pull/2686),
+  [#2688](https://github.com/tigerbeetle/tigerbeetle/pull/2688),
+  [#2685](https://github.com/tigerbeetle/tigerbeetle/pull/2685),
+  [#2676](https://github.com/tigerbeetle/tigerbeetle/pull/2676),
+  [#2684](https://github.com/tigerbeetle/tigerbeetle/pull/2684)
+
+  A few fixes and an "Edit this page" button for our new docs!
+
+### Internals
+
+- [#2674](https://github.com/tigerbeetle/tigerbeetle/pull/2674)
+
+  Allocate the reply buffer in the Go client once the reply has been received. This can save up to
+  1MB of memory.
+
+- [#2680](https://github.com/tigerbeetle/tigerbeetle/pull/2680)
+
+  Refactor parts of our CFO, the process responsible for running fuzzers and the VOPR and sending
+  the results to devhub, to better handle OOM in subprocesses and reduce false fuzz failures.
+
+### TigerTracks 🎧
+
+- [Like a Prayer](https://open.spotify.com/track/1z3ugFmUKoCzGsI6jdY4Ci)
+
 ## TigerBeetle 0.16.25
 
 Released: 2025-01-27
