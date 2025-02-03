@@ -2497,7 +2497,12 @@ const TestClients = struct {
 
                         const body_size = 123;
                         @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
-                        t.cluster.request(c, .echo, message, body_size);
+                        t.cluster.request(
+                            c,
+                            vsr.Operation.from(Cluster.StateMachine, .echo),
+                            message,
+                            body_size,
+                        );
                     }
                 }
             }

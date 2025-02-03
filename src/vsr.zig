@@ -25,6 +25,7 @@ pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
 pub const repl = @import("repl.zig");
 pub const statsd = @import("statsd.zig");
+pub const batch = @import("vsr/batch.zig");
 pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .groove = @import("lsm/groove.zig"),
@@ -266,6 +267,8 @@ pub const Operation = enum(u8) {
     pulse = 4,
     /// The value 5 is is reserved for release-upgrade requests.
     upgrade = 5,
+    /// Batched message that includes multiple state machine operations. See `vsr.batch`.
+    batched = constants.vsr_operations_reserved - 1,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.

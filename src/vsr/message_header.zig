@@ -540,15 +540,21 @@ pub const Header = extern struct {
                     if (self.parent != 0) return "upgrade: parent != 0";
                     if (self.session != 0) return "upgrade: session != 0";
                     if (self.request != 0) return "upgrade: request != 0";
-
                     if (self.size != @sizeOf(Header) + @sizeOf(vsr.UpgradeRequest)) {
                         return "upgrade: size != @sizeOf(Header) + @sizeOf(vsr.UpgradeRequest)";
                     }
                 },
+                .batched => {
+                    if (self.replica != 0) return "replica != 0";
+                    if (self.client == 0) return "client == 0";
+                    if (self.session == 0) return "session == 0";
+                    if (self.request == 0) return "request == 0";
+                },
                 else => {
                     if (self.operation == .reconfigure) {
                         if (self.size != @sizeOf(Header) + @sizeOf(vsr.ReconfigurationRequest)) {
-                            return "size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)";
+                            return "reconfigure: size != @sizeOf(Header)" ++
+                                " + @sizeOf(ReconfigurationRequest)";
                         }
                     } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
                         return "operation is reserved";

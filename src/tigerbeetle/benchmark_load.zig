@@ -675,9 +675,9 @@ const Benchmark = struct {
 
     fn request_complete(
         user_data: u128,
-        operation: StateMachine.Operation,
+        operation: vsr.Operation,
         timestamp: u64,
-        result: []u8,
+        result: []const u8,
     ) void {
         const context: RequestContext = @bitCast(user_data);
         const client = context.client_index;
@@ -692,7 +692,7 @@ const Benchmark = struct {
         const duration_ms = @divTrunc(duration_ns, std.time.ns_per_ms);
         b.request_latency_histogram[@min(duration_ms, b.request_latency_histogram.len - 1)] += 1;
 
-        switch (operation) {
+        switch (operation.cast(StateMachine)) {
             .create_accounts => b.create_accounts_callback(client, result),
             .create_transfers => b.create_transfers_callback(client, result),
             .lookup_accounts => b.validate_accounts_callback(client, @alignCast(result)),

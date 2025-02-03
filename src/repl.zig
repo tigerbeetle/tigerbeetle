@@ -850,13 +850,13 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
         fn client_request_callback(
             user_data: u128,
-            operation: StateMachine.Operation,
+            operation: vsr.Operation,
             timestamp: u64,
-            result: []u8,
+            result: []const u8,
         ) void {
             client_request_callback_error(
                 user_data,
-                operation,
+                operation.cast(StateMachine),
                 timestamp,
                 result,
             ) catch |err| {

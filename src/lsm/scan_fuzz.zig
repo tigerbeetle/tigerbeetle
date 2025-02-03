@@ -84,7 +84,7 @@ const ThingsGroove = GrooveType(
             .index_13 = 14,
             .timestamp = 15,
         },
-        .batch_value_count_max = .{
+        .value_count_max = .{
             .id = batch_objects_max,
             .index_01 = batch_objects_max,
             .index_02 = batch_objects_max,

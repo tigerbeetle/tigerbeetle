@@ -31,11 +31,6 @@ pub fn StateMachineType(
             pub const message_body_size_max = config.message_body_size_max;
         };
 
-        pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
-            // Batching not supported by test StateMachine.
-            .echo = false,
-        });
-
         pub fn EventType(comptime _: Operation) type {
             return u8; // Must be non-zero-sized for sliceAsBytes().
         }
@@ -44,36 +39,50 @@ pub fn StateMachineType(
             return u8; // Must be non-zero-sized for sliceAsBytes().
         }
 
-        /// Empty demuxer to be compatible with vsr.Client batching.
-        pub fn DemuxerType(comptime operation: Operation) type {
-            return struct {
-                const Demuxer = @This();
-
-                reply: []ResultType(operation),
-                offset: u32 = 0,
-
-                pub fn init(reply: []u8) Demuxer {
-                    return .{
-                        .reply = @alignCast(std.mem.bytesAsSlice(
-                            ResultType(operation),
-                            reply,
-                        )),
-                    };
-                }
-
-                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
-                    assert(self.offset == event_offset);
-                    assert(event_offset + event_count <= self.reply.len);
-                    defer self.offset += event_count;
-                    return std.mem.sliceAsBytes(self.reply[self.offset..][0..event_count]);
-                }
-            };
-        }
-
         pub const Options = struct {
             batch_size_limit: u32,
             lsm_forest_node_count: u32,
         };
+
+        pub fn event_size_bytes(
+            _: vsr.Release,
+            _: Operation,
+        ) u32 {
+            return @sizeOf(u8);
+        }
+
+        pub fn result_size_bytes(
+            _: vsr.Release,
+            _: Operation,
+        ) u32 {
+            return @sizeOf(u8);
+        }
+
+        pub fn event_is_slice(_: Operation) bool {
+            return true;
+        }
+
+        pub fn event_alignment(
+            _: vsr.Release,
+            _: Operation,
+        ) u32 {
+            return 1;
+        }
+
+        pub fn result_alignment(
+            _: vsr.Release,
+            _: Operation,
+        ) u32 {
+            return 1;
+        }
+
+        pub fn batch_result_expected_size(
+            _: vsr.Release,
+            _: Operation,
+            input: []const u8,
+        ) u32 {
+            return @intCast(input.len);
+        }
 
         pub const Forest = ForestType(Storage, .{ .things = ThingGroove });
 
@@ -86,7 +95,7 @@ pub fn StateMachineType(
                     .id = 2,
                     .value = 3,
                 },
-                .batch_value_count_max = .{
+                .value_count_max = .{
                     .timestamp = 1,
                     .id = 1,
                     .value = 1,
@@ -187,7 +196,7 @@ pub fn StateMachineType(
             state_machine: *const StateMachine,
             client_release: vsr.Release,
             operation: Operation,
-            input: []align(16) const u8,
+            input: []const u8,
         ) bool {
             _ = state_machine;
             _ = client_release;
@@ -196,16 +205,17 @@ pub fn StateMachineType(
             return true;
         }
 
-        pub fn prepare(
+        pub fn prepare_nanoseconds(
             state_machine: *StateMachine,
             client_release: vsr.Release,
             operation: Operation,
-            input: []align(16) const u8,
-        ) void {
+            input: []const u8,
+        ) u64 {
             _ = state_machine;
             _ = client_release;
             _ = operation;
             _ = input;
+            return 0;
         }
 
         pub fn prefetch(
@@ -214,7 +224,7 @@ pub fn StateMachineType(
             client_release: vsr.Release,
             op: u64,
             operation: Operation,
-            input: []align(16) const u8,
+            input: []const u8,
         ) void {
             _ = client_release;
             _ = operation;
@@ -247,9 +257,9 @@ pub fn StateMachineType(
             op: u64,
             timestamp: u64,
             operation: Operation,
-            input: []align(16) const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
-        ) usize {
+            input: []const u8,
+            output: []u8,
+        ) u32 {
             assert(op != 0);
 
             switch (operation) {
@@ -271,7 +281,7 @@ pub fn StateMachineType(
                     });
 
                     stdx.copy_disjoint(.inexact, u8, output, input);
-                    return input.len;
+                    return @intCast(input.len);
                 },
             }
         }
@@ -353,8 +363,9 @@ fn WorkloadType(comptime StateMachine: type) type {
             client_index: usize,
             body: []align(@alignOf(vsr.Header)) u8,
         ) struct {
-            operation: StateMachine.Operation,
+            operation: vsr.Operation,
             size: usize,
+            batch_count: u16,
         } {
             _ = client_index;
 
@@ -365,15 +376,16 @@ fn WorkloadType(comptime StateMachine: type) type {
             workload.random.bytes(body[0..size]);
 
             return .{
-                .operation = .echo,
+                .operation = vsr.Operation.from(StateMachine, .echo),
                 .size = size,
+                .batch_count = 0,
             };
         }
 
         pub fn on_reply(
             workload: *Workload,
             client_index: usize,
-            operation: StateMachine.Operation,
+            operation: vsr.Operation,
             timestamp: u64,
             request_body: []align(@alignOf(vsr.Header)) const u8,
             reply_body: []align(@alignOf(vsr.Header)) const u8,
@@ -384,7 +396,7 @@ fn WorkloadType(comptime StateMachine: type) type {
             workload.requests_delivered += 1;
             assert(workload.requests_delivered <= workload.requests_sent);
 
-            assert(operation == .echo);
+            assert(operation.cast(StateMachine) == .echo);
             assert(std.mem.eql(u8, request_body, reply_body));
         }
 
@@ -406,6 +418,7 @@ fn WorkloadType(comptime StateMachine: type) type {
 
             pub fn generate(random: std.rand.Random, options: struct {
                 batch_size_limit: u32,
+                batch_per_request_limit: u32,
                 client_count: usize,
                 in_flight_max: usize,
             }) Options {
