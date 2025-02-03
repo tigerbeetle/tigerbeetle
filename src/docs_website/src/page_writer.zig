@@ -10,14 +10,13 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
     const args = try std.process.argsAlloc(allocator);
-    assert(args.len == 8);
+    assert(args.len == 7);
     const title = args[1];
     const author = args[2];
     const url_prefix = args[3];
     const nav = args[4];
-    const url_page_source = args[5];
-    const source_file_path = args[6];
-    const target_file_path = args[7];
+    const source_file_path = args[5];
+    const target_file_path = args[6];
 
     var script = try Html.create(allocator);
     try script.write(script_template, .{ .url_prefix = url_prefix });
@@ -41,7 +40,6 @@ pub fn main() !void {
         .url_prefix = url_prefix,
         .nav = nav,
         .content = content,
-        .url_page_source = url_page_source,
         .page_script = script,
     });
     try std.fs.cwd().writeFile(.{ .sub_path = target_file_path, .data = html.string() });

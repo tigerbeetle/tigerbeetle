@@ -4,7 +4,8 @@ const std = @import("std");
 const log = std.log.scoped(.validate);
 const assert = std.debug.assert;
 
-pub const file_size_max = 900 * 1024;
+const file_size_max = 166 * 1024;
+const search_index_size_max = 950 * 1024;
 
 // If this is set to true, we check if we get a 200 response for any external links.
 const check_links_external: bool = false;
@@ -51,6 +52,8 @@ fn validate_dir(arena: std.mem.Allocator, path: []const u8) !void {
     defer dir.close();
 
     var walker = try dir.walk(arena);
+    defer walker.deinit();
+
     while (try walker.next()) |entry| switch (entry.kind) {
         .file => try validate_file(.{ .arena = arena, .dir = dir, .path = entry.path }),
         .directory => {},
@@ -77,11 +80,15 @@ fn validate_file(context: FileValidationContext) !void {
         });
         return err;
     };
-    if (stat.size > file_size_max) {
+    const size_max: u64 = if (std.mem.eql(u8, context.path, "search-index.json"))
+        search_index_size_max
+    else
+        file_size_max;
+    if (stat.size > size_max) {
         log.err("file '{s}' with size {:.2} exceeds max file size of {:.2}", .{
             try context.dir.realpathAlloc(context.arena, context.path),
             std.fmt.fmtIntSizeBin(stat.size),
-            std.fmt.fmtIntSizeBin(file_size_max),
+            std.fmt.fmtIntSizeBin(size_max),
         });
         return error.FileSizeExceeded;
     }

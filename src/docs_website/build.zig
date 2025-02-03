@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) !void {
 
         while (try walker.next()) |entry| {
             if (entry.kind == .file) {
+                if (std.mem.eql(u8, entry.basename, ".DS_Store")) continue;
                 const source = b.path("assets").path(b, entry.path);
                 _ = content.addCopyFile(source, entry.path);
             }

@@ -7,6 +7,7 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
 }
 
+const content = document.querySelector("article>.content");
 const leftPane = document.querySelector(".left-pane");
 const resizer = document.querySelector(".resizer");
 resizer.addEventListener("mousedown", () => {
@@ -76,9 +77,7 @@ function syncSideNavWithLocation() {
       if (a.href.endsWith(path)) {
         a.classList.add("target");
         for (let parent = a.parentElement; parent; parent = parent.parentElement) {
-          if (parent.tagName === "DETAILS") {
-            parent.open = true;
-          }
+          if (parent.tagName === "DETAILS") parent.open = true;
         }
       }
     });
@@ -86,3 +85,20 @@ function syncSideNavWithLocation() {
 }
 
 syncSideNavWithLocation();
+
+function addContentEventHandlers() {
+  function copyCode(button) {
+    let codeBlock = button.nextElementSibling;
+    navigator.clipboard.writeText(codeBlock.innerText).then(() => {
+      const before = button.innerHTML;
+      button.innerText = "Copied!";
+      setTimeout(() => button.innerHTML = before, 1000);
+    });
+  }
+
+  content.querySelectorAll("button.copy").forEach(button =>
+    button.addEventListener("click", () => copyCode(button))
+  );
+}
+
+addContentEventHandlers();

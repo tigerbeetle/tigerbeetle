@@ -270,11 +270,11 @@ const Menu = struct {
                             .url_prefix = website.url_prefix,
                             .url = page.path_target,
                             // Fabio: index page titles are too long
-                            .title = try html.from_md(menu.title),
+                            .title = menu.title,
                         });
                     } else {
                         try html.write("$title", .{
-                            .title = try html.from_md(menu.title),
+                            .title = menu.title,
                         });
                     }
                     try html.write("</summary>", .{});
@@ -288,7 +288,7 @@ const Menu = struct {
                         .url_prefix = website.url_prefix,
                         .url = page.path_target,
                         .target_page = if (page.eql(target_page)) " class=\"target\"" else "",
-                        .title = try html.from_md(page.title),
+                        .title = page.title,
                     });
                 },
             }
@@ -351,7 +351,8 @@ const Page = struct {
             return error.TitleInvalid;
 
         const title_line = source[0..newline];
-        const title = cut_prefix(title_line, "# ") orelse return error.TitleInvalid;
+        var title = cut_prefix(title_line, "# ") orelse return error.TitleInvalid;
+        title = std.mem.trim(u8, title, "`");
         if (title.len < 3) return error.TitleInvalid;
 
         return try arena.dupe(u8, title);
@@ -378,14 +379,12 @@ const Page = struct {
         const pandoc_step = std.Build.Step.Run.create(b, "run pandoc");
         pandoc_step.addFileArg(website.pandoc_bin);
         pandoc_step.addArgs(&.{ "--from", "gfm+smart", "--to", "html5" });
-        pandoc_step.addArg("--lua-filter");
-        pandoc_step.addFileArg(b.path("pandoc/markdown-links.lua"));
-        pandoc_step.addArg("--lua-filter");
-        pandoc_step.addFileArg(b.path("pandoc/anchor-links.lua"));
-        pandoc_step.addArg("--lua-filter");
-        pandoc_step.addFileArg(b.path("pandoc/table-wrapper.lua"));
-        pandoc_step.addArg("--output");
-        const pandoc_out = pandoc_step.addOutputFileArg("pandoc-out.html");
+        pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/markdown-links.lua"));
+        pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/anchor-links.lua"));
+        pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/table-wrapper.lua"));
+        pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/code-block-buttons.lua"));
+        pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/edit-link-footer.lua"));
+        const pandoc_out = pandoc_step.addPrefixedOutputFileArg("--output=", "pandoc-out.html");
         pandoc_step.addFileArg(b.path(self.path_source));
 
         try search_index.append(.{ .page_path = self.path_target, .html_path = pandoc_out });
@@ -401,17 +400,9 @@ const Page = struct {
         const nav_html = try Html.create(b.allocator);
         try root_menu.write_links(website, nav_html, self);
 
-        const url_page_source = if (cut_prefix(self.path_source, "../../")) |base|
-            base
-        else if (cut_prefix(self.path_source, "../")) |base|
-            try std.fmt.allocPrint(b.allocator, "src/{s}", .{base})
-        else
-            @panic("no source url");
-
         const page_path = website.write_page(.{
             .title = page_title,
             .nav = nav_html.string(),
-            .url_page_source = url_page_source,
             .content = pandoc_out,
         });
         _ = docs.addCopyFile(page_path, b.pathJoin(&.{ self.path_target, "index.html" }));

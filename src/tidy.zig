@@ -717,6 +717,8 @@ test "tidy extensions" {
         .{"anchor-links.lua"},
         .{"markdown-links.lua"},
         .{"table-wrapper.lua"},
+        .{"code-block-buttons.lua"},
+        .{"edit-link-footer.lua"},
         .{"zig/download.sh"},
         .{"src/scripts/cfo_supervisor.sh"},
         .{".github/ci/docs_check.sh"},

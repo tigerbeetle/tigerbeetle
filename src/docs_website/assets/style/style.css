@@ -607,6 +607,24 @@ body.sidenav-collapsed {
   }
 }
 
+#github-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 400;
+  text-decoration: none;
+  color: var(--gray-11);
+
+  &:hover {
+    color: var(--gray-12);
+  }
+}
+
 article {
   flex: 1;
   height: 100%;
@@ -760,6 +778,30 @@ article {
       background-color: var(--gray-alpha-3);
       border-radius: 4px;
       padding: 4px;
+    }
+
+    .code-wrapper {
+      position: relative;
+
+      button {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background-color: var(--gray-1);
+        color: var(--gray-10);
+        border: none;
+        border-radius: 4px;
+        padding: 8px;
+
+        svg {
+          display: block;
+        }
+
+        &:hover {
+          background-color: var(--gray-3);
+          cursor: pointer;
+        }
+      }
     }
 
     img {

@@ -7,7 +7,6 @@ const searchNotFound = document.querySelector(".search-notfound");
 const searchStats = document.querySelector(".search-stats");
 const searchHotkey = document.querySelector(".search-box>.hotkey");
 const searchClearButton = document.querySelector(".search-box>.clear-button");
-const content = document.querySelector("article>.content");
 
 let sidenavWasCollapsed = false;
 document.addEventListener("keydown", event => {
@@ -196,6 +195,7 @@ function selectResult(node) {
   // Preview result
   const page = pages[node.pageIndex];
   content.innerHTML = page.html;
+  addContentEventHandlers();
   const state = { pageIndex: node.pageIndex };
   if (history.state) {
     history.replaceState(state, page.title, node.href);
@@ -233,6 +233,7 @@ window.addEventListener("popstate", (e) => {
   if (e.state) {
     const page = pages[e.state.pageIndex];
     content.innerHTML = page.html;
+    addContentEventHandlers();
     syncSideNavWithLocation();
   } else {
     if (location.pathname != statePathname) {
