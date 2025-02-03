@@ -15,11 +15,10 @@ const Postamble = packed struct(u32) {
 };
 
 const TrailerItem = packed struct(u32) {
-    /// The size in bytes of each batch.
+    /// The size in bytes of each batch, which may include padding at the beginning.
     /// The size of each element is operation-specific, and padding bytes may be added
-    /// at the beginning of the batch to maintain alignment.
-    /// Use `std.mem.alignForward` to compute the correct starting position for the required
-    /// alignment. Padding bytes are zeroed.
+    /// to maintain alignment. Use `std.mem.alignForward` to compute the correct starting
+    /// position for the required alignment. Padding bytes are zeroed.
     size: u24,
 
     /// The batch operation.
@@ -34,27 +33,30 @@ const TrailerItem = packed struct(u32) {
 /// The trailer is a `[]BatchItem` containing the operation and the number of elements
 /// in each batch. To encode the trailer, `batch_count * @sizeOf(BatchItem)` bytes are
 /// needed, plus a `Postamble`.
-fn trailer_total_size(batch_count: u16) usize {
-    return (@as(usize, batch_count) * @sizeOf(TrailerItem)) + @sizeOf(Postamble);
+fn trailer_unpadded_size(batch_count: u16) u32 {
+    return (@as(u32, batch_count) * @sizeOf(TrailerItem)) + @sizeOf(Postamble);
 }
 
-fn align_padding(target: anytype, alignment: usize) u16 {
-    const address: usize = switch (@TypeOf(target)) {
-        []u8, []const u8 => @intFromPtr(target.ptr),
-        usize => target,
-        else => unreachable,
-    };
-    assert(alignment > 0);
+/// Returns the number of bytes needed for padding to satisfy element alignment.
+fn alignment_padding(options: struct {
+    /// The index of the element within the message body,
+    /// assuming the first element is always aligned.
+    index: u32,
+    /// The alignment of the element.
+    alignment: u32,
+}) u16 {
+    maybe(options.index == 0);
+    assert(options.alignment > 0);
 
-    const aligned_address: usize = std.mem.alignForward(
-        usize,
-        address,
-        alignment,
+    const aligned_index: usize = std.mem.alignForward(
+        u32,
+        options.index,
+        options.alignment,
     );
-    if (aligned_address == address) return 0;
-    assert(aligned_address > address);
+    if (aligned_index == options.index) return 0;
+    assert(aligned_index > options.index);
 
-    const padding: u16 = @intCast(aligned_address - address);
+    const padding: u16 = @intCast(aligned_index - options.index);
     return padding;
 }
 
@@ -63,37 +65,43 @@ fn EncoderCountingType(
     comptime Context: type,
     comptime adapter: struct {
         is_valid: fn (Context, vsr.Operation) bool,
-        element_size: fn (Context, vsr.Operation) usize,
-        alignment: fn (Context, vsr.Operation) usize,
+        element_size: fn (Context, vsr.Operation) u32,
+        alignment: fn (Context, vsr.Operation) u32,
     },
 ) type {
     return struct {
         fn total_size(options: struct {
             context: Context,
-            current_payload_size: usize,
+            current_payload_size: u32,
             current_batch_count: u16,
-            next_operation: vsr.Operation,
-            next_payload_size: usize,
+            next_batch_operation: vsr.Operation,
+            next_batch_size: u32,
         }) struct {
             payload_size: u32,
             trailer_size: u32,
         } {
-            assert(adapter.is_valid(options.context, options.next_operation));
+            assert(adapter.is_valid(options.context, options.next_batch_operation));
             maybe(options.current_payload_size == 0);
             maybe(options.current_batch_count == 0);
-            maybe(options.next_payload_size == 0);
+            maybe(options.next_batch_size == 0);
 
-            const element_size = adapter.element_size(options.context, options.next_operation);
-            assert(element_size > 0 or options.next_payload_size == 0);
-            assert(element_size == 0 or options.next_payload_size % element_size == 0);
+            const element_size = adapter.element_size(
+                options.context,
+                options.next_batch_operation,
+            );
+            assert(element_size > 0 or options.next_batch_size == 0);
+            assert(element_size == 0 or options.next_batch_size % element_size == 0);
 
-            const alignment: usize = adapter.alignment(options.context, options.next_operation);
+            const alignment: u32 = adapter.alignment(
+                options.context,
+                options.next_batch_operation,
+            );
             const padding: u16 = padding: {
-                if (options.next_payload_size == 0) break :padding 0;
-                const padding: u16 = align_padding(
-                    options.current_payload_size,
-                    alignment,
-                );
+                if (options.next_batch_size == 0) break :padding 0;
+                const padding: u16 = alignment_padding(.{
+                    .index = options.current_payload_size,
+                    .alignment = alignment,
+                });
                 // Assuming aligned buffers, so the first batch will not require padding.
                 assert(padding == 0 or options.current_payload_size > 0);
                 assert(std.mem.isAligned(
@@ -103,10 +111,13 @@ fn EncoderCountingType(
                 break :padding padding;
             };
 
-            const payload_size: usize = options.current_payload_size +
-                options.next_payload_size + padding;
-            const trailer_padding: u16 = align_padding(payload_size, @alignOf(TrailerItem));
-            const trailer_size: usize = trailer_total_size(options.current_batch_count + 1);
+            const payload_size: u32 = options.current_payload_size +
+                options.next_batch_size + padding;
+            const trailer_padding: u16 = alignment_padding(.{
+                .index = payload_size,
+                .alignment = @alignOf(TrailerItem),
+            });
+            const trailer_size: u32 = trailer_unpadded_size(options.current_batch_count + 1);
             return .{
                 .payload_size = @intCast(payload_size),
                 .trailer_size = @intCast(trailer_size + trailer_padding),
@@ -119,8 +130,8 @@ pub fn BatchDecoderType(
     comptime Context: type,
     comptime adapter: struct {
         is_valid: fn (Context, vsr.Operation) bool,
-        element_size: fn (Context, vsr.Operation) usize,
-        alignment: fn (Context, vsr.Operation) usize,
+        element_size: fn (Context, vsr.Operation) u32,
+        alignment: fn (Context, vsr.Operation) u32,
     },
 ) type {
     return struct {
@@ -138,7 +149,7 @@ pub fn BatchDecoderType(
 
         context: Context,
         batch_index: u16,
-        payload_index: usize,
+        payload_index: u32,
 
         /// Calculates the total size required to encode the payload and the trailer of a batch.
         pub const encoded_total_size = EncoderCountingType(Context, .{
@@ -168,15 +179,15 @@ pub fn BatchDecoderType(
             if (postamble.batch_count == 0) return error.BatchInvalid;
             if (postamble.reserved != 0) return error.BatchInvalid;
 
-            const trailer_size = trailer_total_size(postamble.batch_count);
+            const trailer_size = trailer_unpadded_size(postamble.batch_count);
             if (body.len < trailer_size) return error.BatchInvalid;
 
-            const payload_end = body.len - trailer_size;
-            const payload: []const u8 = body[0..payload_end];
-            const trailer: []const u8 = body[payload_end..];
-            assert(body.len == payload.len + trailer.len);
+            const payload_with_padding_size = body.len - trailer_size;
+            const payload_with_padding: []const u8 = body[0..payload_with_padding_size];
+            const trailer: []const u8 = body[payload_with_padding.len..];
+            assert(body.len == payload_with_padding.len + trailer.len);
             assert(trailer.len == trailer_size);
-            maybe(payload.len == 0);
+            maybe(payload_with_padding.len == 0);
             if (!std.mem.isAligned(@intFromPtr(trailer.ptr), @alignOf(TrailerItem))) {
                 return error.BatchInvalid;
             }
@@ -188,7 +199,7 @@ pub fn BatchDecoderType(
                 return error.BatchInvalid;
             }
 
-            var elements_size_total: usize = 0;
+            var elements_size_total: u32 = 0;
             for (0..trailer_items.len) |index| {
                 // Batch metadata is stacked from the end of the message, so the last element
                 // of the array corresponds to the first batch added.
@@ -203,7 +214,7 @@ pub fn BatchDecoderType(
 
                 // Validate the batch `size`:
                 maybe(trailer_item.size == 0);
-                if (elements_size_total + trailer_item.size > payload.len) {
+                if (elements_size_total + trailer_item.size > payload_with_padding.len) {
                     return error.BatchInvalid;
                 }
 
@@ -211,18 +222,18 @@ pub fn BatchDecoderType(
                 const alignment = adapter.alignment(context, trailer_item.operation);
                 const batch_padding: u16 = padding: {
                     if (trailer_item.size == 0) break :padding 0;
-                    const batch_padding: u16 = align_padding(
-                        payload[elements_size_total..],
-                        alignment,
-                    );
+                    const batch_padding: u16 = alignment_padding(.{
+                        .index = elements_size_total,
+                        .alignment = alignment,
+                    });
                     if (batch_padding >= trailer_item.size) {
                         return error.BatchInvalid;
                     }
-                    if (payload.len <= elements_size_total + batch_padding) {
+                    if (payload_with_padding.len <= elements_size_total + batch_padding) {
                         return error.BatchInvalid;
                     }
                     if (!std.mem.isAligned(
-                        @intFromPtr(&payload[elements_size_total + batch_padding]),
+                        @intFromPtr(&payload_with_padding[elements_size_total + batch_padding]),
                         alignment,
                     )) {
                         return error.BatchInvalid;
@@ -231,7 +242,7 @@ pub fn BatchDecoderType(
                 };
 
                 // Validate the padding bytes:
-                if (!stdx.zeroed(payload[elements_size_total..][0..batch_padding])) {
+                if (!stdx.zeroed(payload_with_padding[elements_size_total..][0..batch_padding])) {
                     return error.BatchInvalid;
                 }
 
@@ -243,24 +254,26 @@ pub fn BatchDecoderType(
 
                 elements_size_total += trailer_item.size;
             }
-            if (elements_size_total > payload.len) {
+            if (elements_size_total > payload_with_padding.len) {
                 return error.BatchInvalid;
             }
 
-            const trailer_padding: usize = align_padding(
-                elements_size_total,
-                @alignOf(TrailerItem),
-            );
-            if (elements_size_total + trailer_padding != payload.len) {
+            const trailer_padding: usize = alignment_padding(.{
+                .index = elements_size_total,
+                .alignment = @alignOf(TrailerItem),
+            });
+            if (elements_size_total + trailer_padding != payload_with_padding.len) {
                 return error.BatchInvalid;
             }
-            if (trailer_padding > 0 and !stdx.zeroed(payload[payload.len - trailer_padding ..])) {
+            if (trailer_padding > 0 and
+                !stdx.zeroed(payload_with_padding[payload_with_padding.len - trailer_padding ..]))
+            {
                 return error.BatchInvalid;
             }
 
             return .{
                 .context = context,
-                .payload = payload[0 .. payload.len - trailer_padding],
+                .payload = payload_with_padding[0 .. payload_with_padding.len - trailer_padding],
                 .trailer_items = trailer_items,
                 .batch_index = 0,
                 .payload_index = 0,
@@ -330,18 +343,21 @@ pub fn BatchDecoderType(
 
                 assert(self.payload_index < self.payload.len);
                 assert(self.payload_index + trailer_item.size <= self.payload.len);
-                const alignment: usize = adapter.alignment(self.context, trailer_item.operation);
-                const padding: u16 = align_padding(
-                    self.payload[self.payload_index..],
-                    alignment,
-                );
+                const alignment: u32 = adapter.alignment(self.context, trailer_item.operation);
+                const padding: u16 = alignment_padding(.{
+                    .index = self.payload_index,
+                    .alignment = alignment,
+                });
                 assert(padding < trailer_item.size);
 
                 const slice: []const u8 =
                     self.payload[self.payload_index + padding ..][0 .. trailer_item.size - padding];
                 assert(std.mem.isAligned(@intFromPtr(slice.ptr), alignment));
 
-                const element_size = adapter.element_size(self.context, trailer_item.operation);
+                const element_size: u32 = adapter.element_size(
+                    self.context,
+                    trailer_item.operation,
+                );
                 assert(slice.len > 0);
                 assert(slice.len % element_size == 0);
                 break :slice slice;
@@ -373,8 +389,8 @@ pub fn BatchEncoderType(
     comptime Context: type,
     comptime adapter: struct {
         is_valid: fn (Context, vsr.Operation) bool,
-        element_size: fn (Context, vsr.Operation) usize,
-        alignment: fn (Context, vsr.Operation) usize,
+        element_size: fn (Context, vsr.Operation) u32,
+        alignment: fn (Context, vsr.Operation) u32,
     },
 ) type {
     return struct {
@@ -384,7 +400,7 @@ pub fn BatchEncoderType(
         buffer: ?[]u8,
 
         batch_count: u16,
-        buffer_index: usize,
+        buffer_index: u32,
 
         /// Calculates the total size required to encode the payload and the trailer of a batch.
         pub const encoded_total_size = EncoderCountingType(Context, .{
@@ -417,7 +433,7 @@ pub fn BatchEncoderType(
             ));
 
             // The buffer must be large enough for at least one batch.
-            assert(buffer.len - trimming_bytes >= trailer_total_size(1));
+            assert(buffer.len - trimming_bytes >= trailer_unpadded_size(1));
 
             return .{
                 .context = context,
@@ -445,15 +461,15 @@ pub fn BatchEncoderType(
             maybe(self.batch_count == 0);
 
             // Takes into account extra trailer bytes that will need to be included.
-            const trailer_size: usize = trailer_total_size(
+            const trailer_size: usize = trailer_unpadded_size(
                 self.batch_count + 1,
             );
 
             const buffer: []u8 = self.buffer.?;
-            const padding: u16 = align_padding(
-                buffer[self.buffer_index..],
-                adapter.alignment(self.context, operation),
-            );
+            const padding: u16 = alignment_padding(.{
+                .index = self.buffer_index,
+                .alignment = adapter.alignment(self.context, operation),
+            });
             // The first batch must not include padding since the buffer is expected to be aligned.
             assert(padding == 0 or self.buffer_index > 0);
 
@@ -492,7 +508,7 @@ pub fn BatchEncoderType(
 
         /// Records how many bytes were written in the slice previously acquired by `writable()`.
         /// The same operation must be used in both functions.
-        pub fn add(self: *BatchEncoder, operation: vsr.Operation, bytes_written: usize) void {
+        pub fn add(self: *BatchEncoder, operation: vsr.Operation, bytes_written: u32) void {
             maybe(self.batch_count == 0);
             assert(adapter.is_valid(self.context, operation));
 
@@ -501,13 +517,13 @@ pub fn BatchEncoderType(
             assert(element_size == 0 or bytes_written % element_size == 0);
 
             const buffer: []u8 = self.buffer.?;
-            const alignment: usize = adapter.alignment(self.context, operation);
+            const alignment: u32 = adapter.alignment(self.context, operation);
             const padding: u16 = padding: {
                 if (bytes_written == 0) break :padding 0;
-                const padding: u16 = align_padding(
-                    buffer[self.buffer_index..],
-                    alignment,
-                );
+                const padding: u16 = alignment_padding(.{
+                    .index = self.buffer_index,
+                    .alignment = alignment,
+                });
                 assert(std.mem.isAligned(
                     @intFromPtr(&buffer[self.buffer_index + padding]),
                     alignment,
@@ -519,7 +535,7 @@ pub fn BatchEncoderType(
             self.batch_count += 1;
             self.buffer_index += bytes_written + padding;
 
-            const trailer_size = trailer_total_size(self.batch_count);
+            const trailer_size = trailer_unpadded_size(self.batch_count);
             assert(buffer.len >= self.buffer_index + trailer_size);
 
             const trailer: []u8 = buffer[buffer.len - trailer_size ..];
@@ -552,16 +568,16 @@ pub fn BatchEncoderType(
             assert(buffer.len > self.buffer_index);
             maybe(self.buffer_index == 0);
 
-            const trailer_size = trailer_total_size(self.batch_count);
+            const trailer_size = trailer_unpadded_size(self.batch_count);
             assert(buffer.len >= self.buffer_index + trailer_size);
 
             // While batches are being encoded, the trailer is written at the end of the buffer.
             // Once all batches are encoded, the trailer needs to be moved closer to the last
             // element written.
-            const trailer_padding: u16 = align_padding(
-                buffer[self.buffer_index..],
-                @alignOf(TrailerItem),
-            );
+            const trailer_padding: u16 = alignment_padding(.{
+                .index = self.buffer_index,
+                .alignment = @alignOf(TrailerItem),
+            });
             assert(buffer.len >= self.buffer_index + trailer_padding + trailer_size);
             assert(std.mem.isAligned(
                 @intFromPtr(&buffer[self.buffer_index + trailer_padding]),
@@ -669,13 +685,13 @@ const test_batch = struct {
             return pow >= 1 and pow <= 8; // Test sizes between 2^1 and 2^8.
         }
 
-        fn element_size(context: Context, vsr_operation: vsr.Operation) usize {
+        fn element_size(context: Context, vsr_operation: vsr.Operation) u32 {
             assert(is_valid(context, vsr_operation));
             const pow = @intFromEnum(vsr_operation) - vsr.constants.vsr_operations_reserved;
-            return std.math.pow(usize, 2, pow);
+            return std.math.pow(u32, 2, pow);
         }
 
-        fn alignment(context: Context, vsr_operation: vsr.Operation) usize {
+        fn alignment(context: Context, vsr_operation: vsr.Operation) u32 {
             assert(is_valid(context, vsr_operation));
             const operation: Operation = @enumFromInt(@intFromEnum(vsr_operation));
             return switch (operation) {
@@ -731,8 +747,8 @@ const test_batch = struct {
                 .context = .{},
                 .current_payload_size = expect_payload_size,
                 .current_batch_count = @intCast(batches.count()),
-                .next_operation = batch_operation.to_vsr(),
-                .next_payload_size = batch_element_count * batch_element_size,
+                .next_batch_operation = batch_operation.to_vsr(),
+                .next_batch_size = batch_element_count * batch_element_size,
             });
 
             if (total_size.payload_size + total_size.trailer_size <= options.buffer.len) {

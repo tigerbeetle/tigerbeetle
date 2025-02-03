@@ -47,14 +47,14 @@ pub fn StateMachineType(
         pub fn event_size_bytes(
             _: vsr.Release,
             _: Operation,
-        ) usize {
+        ) u32 {
             return @sizeOf(u8);
         }
 
         pub fn result_size_bytes(
             _: vsr.Release,
             _: Operation,
-        ) usize {
+        ) u32 {
             return @sizeOf(u8);
         }
 
@@ -65,15 +65,23 @@ pub fn StateMachineType(
         pub fn event_alignment(
             _: vsr.Release,
             _: Operation,
-        ) usize {
+        ) u32 {
             return 1;
         }
 
         pub fn result_alignment(
             _: vsr.Release,
             _: Operation,
-        ) usize {
+        ) u32 {
             return 1;
+        }
+
+        pub fn batch_result_expected_size(
+            _: vsr.Release,
+            _: Operation,
+            input: []const u8,
+        ) u32 {
+            return @intCast(input.len);
         }
 
         pub const Forest = ForestType(Storage, .{ .things = ThingGroove });
@@ -251,7 +259,7 @@ pub fn StateMachineType(
             operation: Operation,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             assert(op != 0);
 
             switch (operation) {
@@ -273,7 +281,7 @@ pub fn StateMachineType(
                     });
 
                     stdx.copy_disjoint(.inexact, u8, output, input);
-                    return input.len;
+                    return @intCast(input.len);
                 },
             }
         }

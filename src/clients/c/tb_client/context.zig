@@ -68,7 +68,7 @@ pub fn ContextType(
                 }
             }.is_valid,
             .element_size = struct {
-                fn element_size(_: void, vsr_operation: vsr.Operation) usize {
+                fn element_size(_: void, vsr_operation: vsr.Operation) u32 {
                     const operation = StateMachine.operation_from_vsr(vsr_operation).?;
                     return switch (operation) {
                         .pulse => unreachable,
@@ -79,7 +79,7 @@ pub fn ContextType(
                 }
             }.element_size,
             .alignment = struct {
-                fn alignment(_: void, vsr_operation: vsr.Operation) usize {
+                fn alignment(_: void, vsr_operation: vsr.Operation) u32 {
                     const operation = StateMachine.operation_from_vsr(vsr_operation).?;
                     return switch (operation) {
                         .pulse => unreachable,
@@ -101,7 +101,7 @@ pub fn ContextType(
                 }
             }.is_valid,
             .element_size = struct {
-                fn element_size(_: void, vsr_operation: vsr.Operation) usize {
+                fn element_size(_: void, vsr_operation: vsr.Operation) u32 {
                     const operation = StateMachine.operation_from_vsr(vsr_operation).?;
                     return switch (operation) {
                         .pulse => unreachable,
@@ -112,7 +112,7 @@ pub fn ContextType(
                 }
             }.element_size,
             .alignment = struct {
-                fn alignment(_: void, vsr_operation: vsr.Operation) usize {
+                fn alignment(_: void, vsr_operation: vsr.Operation) u32 {
                     const operation = StateMachine.operation_from_vsr(vsr_operation).?;
                     return switch (operation) {
                         .pulse => unreachable,
@@ -504,8 +504,8 @@ pub fn ContextType(
                     .context = {},
                     .current_payload_size = root.batch_events_size,
                     .current_batch_count = @max(1, root.batch_count) + 1,
-                    .next_operation = vsr.Operation.from(StateMachine, operation),
-                    .next_payload_size = packet.data_size,
+                    .next_batch_operation = vsr.Operation.from(StateMachine, operation),
+                    .next_batch_size = packet.data_size,
                 });
                 if (self.batch_size_limit.? <
                     encoded_events.payload_size + encoded_events.trailer_size) continue;
@@ -514,8 +514,8 @@ pub fn ContextType(
                     .context = {},
                     .current_payload_size = root.batch_results_size,
                     .current_batch_count = @max(1, root.batch_count) + 1,
-                    .next_operation = vsr.Operation.from(StateMachine, operation),
-                    .next_payload_size = results_size,
+                    .next_batch_operation = vsr.Operation.from(StateMachine, operation),
+                    .next_batch_size = results_size,
                 });
                 // While the request size is constrained by `batch_size_limit`,
                 // the reply size is only limited by `message_body_size_max`.
@@ -575,8 +575,8 @@ pub fn ContextType(
                     .context = {},
                     .current_payload_size = root.batch_events_size,
                     .current_batch_count = @max(1, root.batch_count) + 1,
-                    .next_operation = operation,
-                    .next_payload_size = next.batch_events_size,
+                    .next_batch_operation = operation,
+                    .next_batch_size = next.batch_events_size,
                 });
                 if (self.batch_size_limit.? <
                     encoded_events.payload_size + encoded_events.trailer_size) break;
@@ -585,8 +585,8 @@ pub fn ContextType(
                     .context = {},
                     .current_payload_size = root.batch_results_size,
                     .current_batch_count = @max(1, root.batch_count) + 1,
-                    .next_operation = operation,
-                    .next_payload_size = next.batch_results_size,
+                    .next_batch_operation = operation,
+                    .next_batch_size = next.batch_results_size,
                 });
                 // While the request size is constrained by `batch_size_limit`,
                 // the reply size is only limited by `message_body_size_max`.
@@ -676,7 +676,7 @@ pub fn ContextType(
                         const target: []u8 = encoder.writable(vsr_operation) orelse break;
                         assert(source.len <= target.len);
                         stdx.copy_disjoint(.inexact, u8, target, source);
-                        encoder.add(vsr_operation, source.len);
+                        encoder.add(vsr_operation, @intCast(source.len));
                     }
                     assert(encoder.batch_count == packet.batch_count);
                     assert(encoder.buffer_index == packet.batch_events_size);

@@ -385,7 +385,7 @@ pub fn StateMachineType(
         pub fn event_size_bytes(
             client_release: vsr.Release,
             operation: Operation,
-        ) usize {
+        ) u32 {
             return switch (operation) {
                 .pulse => unreachable,
                 .get_account_transfers,
@@ -401,7 +401,7 @@ pub fn StateMachineType(
         pub fn event_alignment(
             client_release: vsr.Release,
             operation: Operation,
-        ) usize {
+        ) u32 {
             return switch (operation) {
                 .pulse => unreachable,
                 .get_account_transfers,
@@ -417,7 +417,7 @@ pub fn StateMachineType(
         pub fn result_size_bytes(
             client_release: vsr.Release,
             operation: Operation,
-        ) usize {
+        ) u32 {
             _ = client_release;
             return switch (operation) {
                 .pulse => unreachable,
@@ -428,12 +428,81 @@ pub fn StateMachineType(
         pub fn result_alignment(
             client_release: vsr.Release,
             operation: Operation,
-        ) usize {
+        ) u32 {
             _ = client_release;
             return switch (operation) {
                 .pulse => unreachable,
                 inline else => |comptime_operation| @alignOf(ResultType(comptime_operation)),
             };
+        }
+
+        pub fn batch_result_expected_size(
+            client_release: vsr.Release,
+            operation: Operation,
+            input: []const u8,
+        ) u32 {
+            switch (operation) {
+                .pulse => unreachable,
+                inline .get_account_transfers,
+                .get_account_balances,
+                => |operation_comptime| {
+                    comptime assert(!StateMachine.event_is_slice(operation_comptime));
+
+                    const Result = StateMachine.ResultType(operation_comptime);
+                    comptime assert(@sizeOf(Result) > 0);
+
+                    const filter = account_filter_from_input(client_release, input);
+                    const results_max: u32 =
+                        @divFloor(constants.message_body_size_max, @sizeOf(Result));
+                    maybe(filter.limit == 0);
+                    maybe(filter.limit > results_max);
+
+                    const events: u32 = @min(filter.limit, results_max);
+                    return events * @sizeOf(Result);
+                },
+                inline .query_accounts,
+                .query_transfers,
+                => |operation_comptime| {
+                    comptime assert(!StateMachine.event_is_slice(operation_comptime));
+
+                    const Filter = StateMachine.EventType(operation_comptime);
+                    comptime assert(@sizeOf(Filter) > 0);
+
+                    const Result = StateMachine.ResultType(operation_comptime);
+                    comptime assert(@sizeOf(Result) > 0);
+
+                    assert(input.len == @sizeOf(Filter));
+                    const filter: *const Filter = @alignCast(std.mem.bytesAsValue(
+                        Filter,
+                        input,
+                    ));
+
+                    const results_max: u32 =
+                        @divFloor(constants.message_body_size_max, @sizeOf(Result));
+                    maybe(filter.limit == 0);
+                    maybe(filter.limit > results_max);
+
+                    const events: u32 = @min(filter.limit, results_max);
+                    return events * @sizeOf(Result);
+                },
+                inline else => |operation_comptime| {
+                    comptime assert(StateMachine.event_is_slice(operation_comptime));
+
+                    const Event = StateMachine.EventType(operation_comptime);
+                    comptime assert(@sizeOf(Event) > 0);
+
+                    const Result = StateMachine.ResultType(operation_comptime);
+                    comptime assert(@sizeOf(Result) > 0);
+
+                    // Clients do not validate batch size == 0,
+                    // and even the simulator can generate requests with no events.
+                    maybe(input.len == 0);
+                    assert(input.len % @sizeOf(Event) == 0);
+
+                    const events: u32 = @intCast(@divExact(input.len, @sizeOf(Event)));
+                    return events * @sizeOf(Result);
+                },
+            }
         }
 
         pub const Options = struct {
@@ -592,7 +661,7 @@ pub fn StateMachineType(
             }
         };
 
-        batch_size_limit: u32,
+        options: Options,
         prefetch_timestamp: u64,
         prepare_timestamp: u64,
         commit_timestamp: u64,
@@ -600,6 +669,7 @@ pub fn StateMachineType(
 
         prefetch_input: ?[]const u8 = null,
         prefetch_callback: ?*const fn (*StateMachine) void = null,
+        prefetch_client_release: ?vsr.Release = null,
         prefetch_context: PrefetchContext = .null,
 
         scan_lookup: ScanLookup = .null,
@@ -628,7 +698,7 @@ pub fn StateMachineType(
             }
 
             self.* = .{
-                .batch_size_limit = options.batch_size_limit,
+                .options = options,
                 .prefetch_timestamp = 0,
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
@@ -668,7 +738,7 @@ pub fn StateMachineType(
             self.forest.reset();
 
             self.* = .{
-                .batch_size_limit = self.batch_size_limit,
+                .options = self.options,
                 .prefetch_timestamp = 0,
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
@@ -703,7 +773,7 @@ pub fn StateMachineType(
             operation: Operation,
             input: []const u8,
         ) bool {
-            assert(input.len <= self.batch_size_limit);
+            assert(input.len <= self.options.batch_size_limit);
 
             switch (operation) {
                 .pulse => {
@@ -739,7 +809,7 @@ pub fn StateMachineType(
 
                     const batch_limit: u32 = operation_batch_max(
                         comptime_operation,
-                        self.batch_size_limit,
+                        self.options.batch_size_limit,
                     );
                     assert(batch_limit > 0);
 
@@ -772,7 +842,7 @@ pub fn StateMachineType(
             input: []const u8,
         ) u64 {
             assert(self.input_valid(client_release, operation, input));
-            assert(input.len <= self.batch_size_limit);
+            assert(input.len <= self.options.batch_size_limit);
 
             return switch (operation) {
                 .pulse => 0,
@@ -806,11 +876,13 @@ pub fn StateMachineType(
             _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
+            assert(self.prefetch_client_release == null);
             assert(self.input_valid(client_release, operation, input));
-            assert(input.len <= self.batch_size_limit);
+            assert(input.len <= self.options.batch_size_limit);
 
             self.prefetch_input = input;
             self.prefetch_callback = callback;
+            self.prefetch_client_release = client_release;
 
             // TODO(Snapshots) Pass in the target snapshot.
             self.forest.grooves.accounts.prefetch_setup(null);
@@ -842,10 +914,16 @@ pub fn StateMachineType(
                     self.prefetch_lookup_transfers(batch);
                 },
                 .get_account_transfers => {
-                    self.prefetch_get_account_transfers(account_filter_from_input(input));
+                    self.prefetch_get_account_transfers(account_filter_from_input(
+                        client_release,
+                        input,
+                    ));
                 },
                 .get_account_balances => {
-                    self.prefetch_get_account_balances(account_filter_from_input(input));
+                    self.prefetch_get_account_balances(account_filter_from_input(
+                        client_release,
+                        input,
+                    ));
                 },
                 .query_accounts => {
                     self.prefetch_query_accounts(mem.bytesToValue(QueryFilter, input));
@@ -864,6 +942,7 @@ pub fn StateMachineType(
             const callback = self.prefetch_callback.?;
             self.prefetch_input = null;
             self.prefetch_callback = null;
+            self.prefetch_client_release = null;
 
             callback(self);
         }
@@ -1105,7 +1184,10 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
-            const filter = account_filter_from_input(self.prefetch_input.?);
+            const filter = account_filter_from_input(
+                self.prefetch_client_release.?,
+                self.prefetch_input.?,
+            );
             self.prefetch_get_account_balances_scan(filter);
         }
 
@@ -1177,10 +1259,16 @@ pub fn StateMachineType(
         }
 
         fn account_filter_from_input(
+            client_release: vsr.Release,
             input: []const u8,
         ) AccountFilter {
-            if (input.len == @sizeOf(AccountFilterFormer)) {
-                const filter = mem.bytesAsValue(AccountFilterFormer, input);
+            if (AccountFilterFormer.required(client_release)) {
+                assert(input.len == @sizeOf(AccountFilterFormer));
+                const filter: *const AccountFilterFormer = @alignCast(mem.bytesAsValue(
+                    AccountFilterFormer,
+                    input,
+                ));
+
                 return .{
                     .account_id = filter.account_id,
                     .user_data_128 = 0,
@@ -1540,7 +1628,7 @@ pub fn StateMachineType(
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @divFloor(
-                self.batch_size_limit,
+                self.options.batch_size_limit,
                 @sizeOf(Transfer),
             ) * @sizeOf(Transfer);
 
@@ -1641,11 +1729,11 @@ pub fn StateMachineType(
             operation: Operation,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             _ = client;
             assert(op != 0);
             assert(self.input_valid(client_release, operation, input));
-            assert(input.len <= self.batch_size_limit);
+            assert(input.len <= self.options.batch_size_limit);
             assert(global_constants.aof_recovery or
                 // For operations that don't increment `commit_timestamp` (e.g., lookups),
                 // the `timestamp` will match the last commit if batched within the same message.
@@ -1654,7 +1742,7 @@ pub fn StateMachineType(
             maybe(self.scan_lookup_result_count != null);
             defer assert(self.scan_lookup_result_count == null);
 
-            const result = switch (operation) {
+            const result: u32 = switch (operation) {
                 .pulse => self.execute_expire_pending_transfers(timestamp),
                 .create_accounts => self.execute_create(
                     .create_accounts,
@@ -1672,8 +1760,16 @@ pub fn StateMachineType(
                 ),
                 .lookup_accounts => self.execute_lookup_accounts(input, output),
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
-                .get_account_transfers => self.execute_get_account_transfers(input, output),
-                .get_account_balances => self.execute_get_account_balances(input, output),
+                .get_account_transfers => self.execute_get_account_transfers(
+                    client_release,
+                    input,
+                    output,
+                ),
+                .get_account_balances => self.execute_get_account_balances(
+                    client_release,
+                    input,
+                    output,
+                ),
                 .query_accounts => self.execute_query_accounts(input, output),
                 .query_transfers => self.execute_query_transfers(input, output),
             };
@@ -1794,7 +1890,7 @@ pub fn StateMachineType(
             timestamp: u64,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             comptime assert(operation == .create_accounts or operation == .create_transfers);
 
             const Event = EventType(operation);
@@ -1803,7 +1899,7 @@ pub fn StateMachineType(
             const events: []const Event = @alignCast(mem.bytesAsSlice(Event, input));
             var results: []Result = @alignCast(mem.bytesAsSlice(Result, output));
             assert(events.len <= results.len);
-            var count: usize = 0;
+            var count: u32 = 0;
 
             var chain: ?usize = null;
             var chain_broken = false;
@@ -1942,12 +2038,12 @@ pub fn StateMachineType(
             self: *StateMachine,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             const batch: []const u128 = @alignCast(mem.bytesAsSlice(u128, input));
             const results: []Account = @alignCast(mem.bytesAsSlice(Account, output));
             assert(results.len >= batch.len);
 
-            var results_count: usize = 0;
+            var results_count: u32 = 0;
             for (batch) |id| {
                 if (self.get_account(id)) |account| {
                     results[results_count] = account.*;
@@ -1962,12 +2058,12 @@ pub fn StateMachineType(
             self: *StateMachine,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             const batch: []const u128 = @alignCast(mem.bytesAsSlice(u128, input));
             const results: []Transfer = @alignCast(mem.bytesAsSlice(Transfer, output));
             assert(results.len >= batch.len);
 
-            var results_count: usize = 0;
+            var results_count: u32 = 0;
             for (batch) |id| {
                 if (self.get_transfer(id)) |result| {
                     results[results_count] = result.*;
@@ -1979,17 +2075,19 @@ pub fn StateMachineType(
 
         fn execute_get_account_transfers(
             self: *StateMachine,
+            client_release: vsr.Release,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             _ = input;
+            _ = client_release;
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
             assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_transfers);
 
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const result_size: usize = self.scan_lookup_result_count.? * @sizeOf(Transfer);
+            const result_size: u32 = self.scan_lookup_result_count.? * @sizeOf(Transfer);
             assert(result_size <= output.len);
             assert(result_size <= self.scan_lookup_buffer.len);
             stdx.copy_disjoint(
@@ -2004,16 +2102,17 @@ pub fn StateMachineType(
 
         fn execute_get_account_balances(
             self: *StateMachine,
+            client_release: vsr.Release,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
             assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_balances);
 
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const filter = account_filter_from_input(input);
+            const filter = account_filter_from_input(client_release, input);
 
             const scan_results: []const AccountBalancesGrooveValue = mem.bytesAsSlice(
                 AccountBalancesGrooveValue,
@@ -2026,7 +2125,7 @@ pub fn StateMachineType(
                 output,
             ));
 
-            var output_count: usize = 0;
+            var output_count: u32 = 0;
             for (scan_results) |*result| {
                 assert(result.dr_account_id != result.cr_account_id);
 
@@ -2058,7 +2157,7 @@ pub fn StateMachineType(
             self: *StateMachine,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             _ = input;
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
             assert(self.scan_lookup_result_count.? <= constants.batch_max.query_accounts);
@@ -2066,7 +2165,7 @@ pub fn StateMachineType(
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const result_size: usize = self.scan_lookup_result_count.? * @sizeOf(Account);
+            const result_size: u32 = self.scan_lookup_result_count.? * @sizeOf(Account);
             assert(result_size <= output.len);
             assert(result_size <= self.scan_lookup_buffer.len);
             stdx.copy_disjoint(
@@ -2082,7 +2181,7 @@ pub fn StateMachineType(
             self: *StateMachine,
             input: []const u8,
             output: []u8,
-        ) usize {
+        ) u32 {
             _ = input;
             if (self.scan_lookup_result_count == null) return 0; // invalid filter
             assert(self.scan_lookup_result_count.? <= constants.batch_max.query_transfers);
@@ -2090,7 +2189,7 @@ pub fn StateMachineType(
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const result_size: usize = self.scan_lookup_result_count.? * @sizeOf(Transfer);
+            const result_size: u32 = self.scan_lookup_result_count.? * @sizeOf(Transfer);
             assert(result_size <= output.len);
             assert(result_size <= self.scan_lookup_buffer.len);
             stdx.copy_disjoint(
@@ -2867,7 +2966,7 @@ pub fn StateMachineType(
             });
         }
 
-        fn execute_expire_pending_transfers(self: *StateMachine, timestamp: u64) usize {
+        fn execute_expire_pending_transfers(self: *StateMachine, timestamp: u64) u32 {
             assert(self.scan_lookup_result_count != null);
             assert(self.scan_lookup_result_count.? <= constants.batch_max.create_transfers);
 

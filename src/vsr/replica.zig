@@ -112,13 +112,13 @@ pub fn ReplicaType(
             }
         }.is_valid,
         .element_size = struct {
-            fn element_size(release: vsr.Release, vsr_operation: vsr.Operation) usize {
+            fn element_size(release: vsr.Release, vsr_operation: vsr.Operation) u32 {
                 const operation = StateMachine.operation_from_vsr(vsr_operation).?;
                 return StateMachine.event_size_bytes(release, operation);
             }
         }.element_size,
         .alignment = struct {
-            fn alignment(release: vsr.Release, vsr_operation: vsr.Operation) usize {
+            fn alignment(release: vsr.Release, vsr_operation: vsr.Operation) u32 {
                 const operation = StateMachine.operation_from_vsr(vsr_operation).?;
                 return StateMachine.event_alignment(release, operation);
             }
@@ -133,13 +133,13 @@ pub fn ReplicaType(
             }
         }.is_valid,
         .element_size = struct {
-            fn element_size(release: vsr.Release, vsr_operation: vsr.Operation) usize {
+            fn element_size(release: vsr.Release, vsr_operation: vsr.Operation) u32 {
                 const operation = StateMachine.operation_from_vsr(vsr_operation).?;
                 return StateMachine.result_size_bytes(release, operation);
             }
         }.element_size,
         .alignment = struct {
-            fn alignment(release: vsr.Release, vsr_operation: vsr.Operation) usize {
+            fn alignment(release: vsr.Release, vsr_operation: vsr.Operation) u32 {
                 const operation = StateMachine.operation_from_vsr(vsr_operation).?;
                 return StateMachine.result_alignment(release, operation);
             }
@@ -5322,7 +5322,7 @@ pub fn ReplicaType(
                     operation,
                     batch_item.batched,
                 );
-                const bytes_written = self.state_machine.commit(
+                const bytes_written: u32 = self.state_machine.commit(
                     prepare.header.client,
                     prepare.header.release,
                     prepare.header.op,
@@ -5997,7 +5997,7 @@ pub fn ReplicaType(
                     // `State_machine.input_valid()` asserts each batch's size,
                     // but the entire request must also conform to `batch_size_limit`.
                     assert(message.header.size - @sizeOf(Header) <=
-                        self.state_machine.batch_size_limit);
+                        self.state_machine.options.batch_size_limit);
                     var decoder = BatchBodyDecoder.init(
                         message.header.release,
                         message.body_used(),
@@ -6020,8 +6020,12 @@ pub fn ReplicaType(
                             .context = message.header.release,
                             .current_payload_size = result_size,
                             .current_batch_count = decoder.batch_index - 1,
-                            .next_operation = batch_item.operation,
-                            .next_payload_size = batch_item.batched.len,
+                            .next_batch_operation = batch_item.operation,
+                            .next_batch_size = StateMachine.batch_result_expected_size(
+                                message.header.release,
+                                operation,
+                                batch_item.batched,
+                            ),
                         });
                         // The request size is constrained by `batch_size_limit`,
                         // while the reply size is only limited by `message_body_size_max`.

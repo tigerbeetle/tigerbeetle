@@ -189,7 +189,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }.is_valid,
         .element_size = struct {
-            fn element_size(_: void, vsr_operation: vsr.Operation) usize {
+            fn element_size(_: void, vsr_operation: vsr.Operation) u32 {
                 const operation = AccountingStateMachine.operation_from_vsr(vsr_operation).?;
                 return switch (operation) {
                     .pulse => unreachable,
@@ -200,7 +200,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }.element_size,
         .alignment = struct {
-            fn alignment(_: void, vsr_operation: vsr.Operation) usize {
+            fn alignment(_: void, vsr_operation: vsr.Operation) u32 {
                 const operation = AccountingStateMachine.operation_from_vsr(vsr_operation).?;
                 return switch (operation) {
                     .pulse => unreachable,
@@ -222,7 +222,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }.is_valid,
         .element_size = struct {
-            fn element_size(_: void, vsr_operation: vsr.Operation) usize {
+            fn element_size(_: void, vsr_operation: vsr.Operation) u32 {
                 const operation = AccountingStateMachine.operation_from_vsr(vsr_operation).?;
                 return switch (operation) {
                     .pulse => unreachable,
@@ -233,7 +233,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }.element_size,
         .alignment = struct {
-            fn alignment(_: void, vsr_operation: vsr.Operation) usize {
+            fn alignment(_: void, vsr_operation: vsr.Operation) u32 {
                 const operation = AccountingStateMachine.operation_from_vsr(vsr_operation).?;
                 return switch (operation) {
                     .pulse => unreachable,
@@ -255,7 +255,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }.is_valid,
         .element_size = struct {
-            fn element_size(_: void, vsr_operation: vsr.Operation) usize {
+            fn element_size(_: void, vsr_operation: vsr.Operation) u32 {
                 const operation = AccountingStateMachine.operation_from_vsr(vsr_operation).?;
                 return switch (operation) {
                     .pulse => unreachable,
@@ -266,7 +266,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }.element_size,
         .alignment = struct {
-            fn alignment(_: void, vsr_operation: vsr.Operation) usize {
+            fn alignment(_: void, vsr_operation: vsr.Operation) u32 {
                 const operation = AccountingStateMachine.operation_from_vsr(vsr_operation).?;
                 return switch (operation) {
                     .pulse => unreachable,
@@ -503,7 +503,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(body.len == self.options.batch_size_limit);
 
             var encoder = BodyBatchEncoder.init({}, body);
-            var reply_size_total: usize = 0;
+            var reply_size_total: u32 = 0;
             var action_previous: ?Action = null;
             while (encoder.batch_count < self.options.batch_per_request_limit) {
                 // Random action per batch:
@@ -543,8 +543,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                                 .current_payload_size = reply_size_total,
                                 .current_batch_count = encoder.batch_count,
                                 // Adding a single extra event to account for potential padding.
-                                .next_payload_size = @sizeOf(Result),
-                                .next_operation = vsr_operation,
+                                .next_batch_size = @sizeOf(Result),
+                                .next_batch_operation = vsr_operation,
                             });
                             const reply_size_used = encoded.payload_size + encoded.trailer_size;
                             if (reply_size_used > constants.message_body_size_max) break;
@@ -560,7 +560,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                         // The actual size of the batch and the estimated worst-case
                         // size of the reply.
-                        const batch_size: usize, const reply_size: usize =
+                        const batch_size: u32, const reply_size: u32 =
                             switch (action_comptime) {
                             .create_accounts,
                             .create_transfers,
@@ -576,7 +576,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                                 };
                                 assert(limit <= writable.len);
 
-                                const count: usize = switch (action_comptime) {
+                                const count: u32 = switch (action_comptime) {
                                     .create_accounts => self.build_create_accounts(
                                         client_index,
                                         encoder.batch_count,
@@ -632,8 +632,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                                 .context = {},
                                 .current_payload_size = reply_size_total,
                                 .current_batch_count = encoder.batch_count,
-                                .next_payload_size = reply_size,
-                                .next_operation = vsr_operation,
+                                .next_batch_size = reply_size,
+                                .next_batch_operation = vsr_operation,
                             });
                             assert(encoded.payload_size + encoded.trailer_size <=
                                 constants.message_body_size_max);
@@ -855,7 +855,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             client_index: usize,
             batch_index: ?u16,
             accounts: []tb.Account,
-        ) usize {
+        ) u32 {
             const results = self.auditor.expect_create_accounts(client_index, batch_index);
             for (accounts, 0..) |*account, i| {
                 const account_index =
@@ -882,7 +882,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
                 assert(results[i].count() > 0);
             }
-            return accounts.len;
+            return @intCast(accounts.len);
         }
 
         fn build_create_transfers(
@@ -890,11 +890,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             client_index: usize,
             batch_index: ?u16,
             transfers: []tb.Transfer,
-        ) usize {
+        ) u32 {
             const results = self.auditor.expect_create_transfers(client_index, batch_index);
             assert(results.len >= transfers.len);
-            var transfers_count: usize = transfers.len;
-            var i: usize = 0;
+            var transfers_count: u32 = @intCast(transfers.len);
+            var i: u32 = 0;
             while (i < transfers_count) {
                 const transfer_index = self.transfers_sent;
                 const transfer_plan = self.transfer_index_to_plan(transfer_index);
@@ -1004,7 +1004,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }
 
-        fn build_lookup_accounts(self: *Workload, lookup_ids: []u128) usize {
+        fn build_lookup_accounts(self: *Workload, lookup_ids: []u128) u32 {
             for (lookup_ids) |*id| {
                 if (chance(self.random, self.options.lookup_account_invalid_probability)) {
                     // Pick an account with valid index (rather than "random.int(u128)") because the
@@ -1016,10 +1016,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     id.* = self.auditor.accounts[account_index].id;
                 }
             }
-            return lookup_ids.len;
+            return @intCast(lookup_ids.len);
         }
 
-        fn build_lookup_transfers(self: *const Workload, lookup_ids: []u128) usize {
+        fn build_lookup_transfers(self: *const Workload, lookup_ids: []u128) u32 {
             const delivered = self.transfers_delivered_past;
             const lookup_window = sample_distribution(self.random, self.options.lookup_transfer);
             const lookup_window_start = switch (lookup_window) {
@@ -1049,7 +1049,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     lookup_window_start + self.random.uintLessThanBiased(usize, lookup_window_size),
                 );
             }
-            return lookup_ids.len;
+            return @intCast(lookup_ids.len);
         }
 
         fn build_get_account_filter(
