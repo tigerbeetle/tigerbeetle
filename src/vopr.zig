@@ -389,6 +389,8 @@ pub fn main() !void {
             output.warn("no liveness, op={} is not available in core", .{header.op});
         } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
             output.warn("no liveness, {} blocks are not available in core", .{blocks});
+        } else if (simulator.core_missing_reply()) |header| {
+            output.warn("no liveness, reply op={} is not available in core", .{header.op});
         } else {
             output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
@@ -897,6 +899,44 @@ pub const Simulator = struct {
         } else {
             return blocks_missing.items.len;
         }
+    }
+
+    /// Check whether the cluster is stuck because the entire core is missing the same reply[s].
+    pub fn core_missing_reply(simulator: *const Simulator) ?vsr.Header.Reply {
+        assert(simulator.core.count() > 0);
+
+        var replies_latest = [_]?vsr.Header.Reply{null} ** constants.clients_max;
+        for (simulator.cluster.replicas) |replica| {
+            for (replica.client_sessions.entries, 0..) |entry, entry_slot| {
+                if (entry.session != 0) {
+                    if (replies_latest[entry_slot] == null or
+                        replies_latest[entry_slot].?.op < entry.header.op)
+                    {
+                        replies_latest[entry_slot] = entry.header;
+                    }
+                }
+            }
+        }
+
+        for (replies_latest, 0..) |reply_or_empty, reply_slot| {
+            const reply = reply_or_empty orelse continue;
+            var reply_in_core: bool = false;
+            for (simulator.cluster.replicas) |replica| {
+                const storage = &simulator.cluster.storages[replica.replica];
+                const storage_replies = storage.client_replies();
+                const storage_reply = storage_replies[reply_slot];
+
+                if (simulator.core.isSet(replica.replica) and !replica.standby()) {
+                    if (storage_reply.header.checksum == reply.checksum and
+                        !storage.area_faulty(.{ .client_replies = .{ .slot = reply_slot } }))
+                    {
+                        reply_in_core = true;
+                    }
+                }
+            }
+            if (!reply_in_core) return reply;
+        }
+        return null;
     }
 
     fn core_release_max(simulator: *const Simulator) vsr.Release {
