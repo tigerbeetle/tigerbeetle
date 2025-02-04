@@ -355,16 +355,6 @@ nav.left-pane {
     summary.selected::before {
       filter: none;
     }
-
-    .search-results {
-      summary::before {
-        filter: invert(48%);
-      }
-
-      summary:hover::before {
-        filter: invert(93%);
-      }
-    }
   }
 }
 
@@ -391,6 +381,10 @@ nav.left-pane {
     &::before {
       /* color: var(--gray-10); */
       filter: invert(51%);
+
+      @media (prefers-color-scheme: dark) {
+        filter: invert(48%);
+      }
     }
 
     p {
@@ -406,6 +400,10 @@ nav.left-pane {
       &::before {
         /* color: var(--gray-12); */
         filter: invert(12%);
+
+        @media (prefers-color-scheme: dark) {
+          filter: invert(93%);
+        }
       }
     }
 
