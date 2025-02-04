@@ -343,13 +343,16 @@ nav.left-pane {
     list-style: none;
   }
 
-  summary:has(a.target)::before {
+  summary:has(a.target)::before,
+  summary.selected::before {
     /* color: var(--gray-0); */
     filter: invert(100%);
   }
 
   @media (prefers-color-scheme: dark) {
-    summary:has(a.target)::before {
+
+    summary:has(a.target)::before,
+    summary.selected::before {
       filter: none;
     }
 
@@ -403,6 +406,16 @@ nav.left-pane {
       &::before {
         /* color: var(--gray-12); */
         filter: invert(12%);
+      }
+    }
+
+    &.selected {
+      background-color: var(--primary-9);
+      color: var(--gray-1);
+
+      .highlight {
+        background-color: var(--highlight-active);
+        color: var(--gray-0);
       }
     }
   }

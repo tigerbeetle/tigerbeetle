@@ -32,9 +32,15 @@ document.addEventListener("keydown", event => {
       event.preventDefault();
     } else if (event.key === "Enter") {
       const selected = searchResults.querySelector(".selected");
-      if (!selected) selectNextResult();
-      closeSearch();
-      event.preventDefault();
+      if (selected) {
+        if (selected.tagName == "SUMMARY") {
+          const details = selected.parentElement;
+          details.open = !details.open;
+        } else {
+          closeSearch();
+          event.preventDefault();
+        }
+      }
     }
   }
 })
@@ -194,25 +200,27 @@ function selectResult(node) {
   searchResults.querySelectorAll(".selected").forEach(r => r.classList.remove("selected"));
   node.classList.add("selected");
   scrollIntoViewIfNeeded(node, searchResults.parentNode);
-  // Preview result
-  const page = pages[node.pageIndex];
-  content.innerHTML = page.html;
-  addContentEventHandlers();
-  const state = { pageIndex: node.pageIndex };
-  if (history.state) {
-    history.replaceState(state, page.title, node.href);
-  } else {
-    history.pushState(state, page.title, node.href);
+
+  if (node.pageIndex) { // Show page preview.
+    const page = pages[node.pageIndex];
+    content.innerHTML = page.html;
+    addContentEventHandlers();
+    const state = { pageIndex: node.pageIndex };
+    if (history.state) {
+      history.replaceState(state, page.title, node.href);
+    } else {
+      history.pushState(state, page.title, node.href);
+    }
+    statePathname = location.pathname;
+    if (page.title === "TigerBeetle Docs") {
+      document.title = page.title;
+    } else {
+      document.title = "TigerBeetle Docs | " + page.title;
+    }
+    handleAnchor();
+    highlightText(searchInput.value, content);
+    markActiveHighlight(content);
   }
-  statePathname = location.pathname;
-  if (page.title === "TigerBeetle Docs") {
-    document.title = page.title;
-  } else {
-    document.title = "TigerBeetle Docs | " + page.title;
-  }
-  handleAnchor();
-  highlightText(searchInput.value, content);
-  markActiveHighlight(content);
 }
 
 function markActiveHighlight(container) {
@@ -261,7 +269,7 @@ window.addEventListener("load", () => {
 });
 
 function selectNextResult() {
-  const nodes = [...searchResults.querySelectorAll("details[open] a")];
+  const nodes = [...searchResults.querySelectorAll("summary, details[open] a")];
   if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
   const i = selected ? nodes.indexOf(selected) + 1 : 0;
@@ -269,7 +277,7 @@ function selectNextResult() {
 }
 
 function selectPreviousResult() {
-  const nodes = [...searchResults.querySelectorAll("details[open] a")];
+  const nodes = [...searchResults.querySelectorAll("summary, details[open] a")];
   if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
   const i = selected ? nodes.indexOf(selected) - 1 : -1;
