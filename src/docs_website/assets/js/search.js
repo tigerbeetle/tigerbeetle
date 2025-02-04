@@ -110,6 +110,8 @@ function onSearchInput() {
     details.open = true;
     const summary = document.createElement("summary");
     details.appendChild(summary);
+    summary.pageIndex = group.pageIndex;
+    summary.href = urlPrefix + "/" + group.results[0].section.path + "/";
     const p = document.createElement("p");
     summary.appendChild(p);
     p.innerText = pages[group.pageIndex].title;
@@ -201,26 +203,25 @@ function selectResult(node) {
   node.classList.add("selected");
   scrollIntoViewIfNeeded(node, searchResults.parentNode);
 
-  if (node.pageIndex) { // Show page preview.
-    const page = pages[node.pageIndex];
-    content.innerHTML = page.html;
-    addContentEventHandlers();
-    const state = { pageIndex: node.pageIndex };
-    if (history.state) {
-      history.replaceState(state, page.title, node.href);
-    } else {
-      history.pushState(state, page.title, node.href);
-    }
-    statePathname = location.pathname;
-    if (page.title === "TigerBeetle Docs") {
-      document.title = page.title;
-    } else {
-      document.title = "TigerBeetle Docs | " + page.title;
-    }
-    handleAnchor();
-    highlightText(searchInput.value, content);
-    markActiveHighlight(content);
+  // Show page preview.
+  const page = pages[node.pageIndex];
+  content.innerHTML = page.html;
+  addContentEventHandlers();
+  const state = { pageIndex: node.pageIndex };
+  if (history.state) {
+    history.replaceState(state, page.title, node.href);
+  } else {
+    history.pushState(state, page.title, node.href);
   }
+  statePathname = location.pathname;
+  if (page.title === "TigerBeetle Docs") {
+    document.title = page.title;
+  } else {
+    document.title = "TigerBeetle Docs | " + page.title;
+  }
+  handleAnchor();
+  highlightText(searchInput.value, content);
+  markActiveHighlight(content);
 }
 
 function markActiveHighlight(container) {
