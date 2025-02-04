@@ -196,7 +196,7 @@ function selectResult(node) {
   if (isMobileView()) {
     closeSearch();
     document.body.classList.remove("mobile-expanded");
-    if (node.href) location.href = node.href;
+    location.href = node.href;
     return;
   }
   searchResults.querySelectorAll(".selected").forEach(r => r.classList.remove("selected"));
@@ -221,7 +221,7 @@ function selectResult(node) {
   }
   handleAnchor();
   highlightText(searchInput.value, content);
-  markActiveHighlight(content);
+  if (node.tagName == "A") markActiveHighlight(content);
 }
 
 function markActiveHighlight(container) {
