@@ -186,6 +186,8 @@ function makeContext(text, i, length) {
 
 function selectResult(node) {
   if (isMobileView()) {
+    closeSearch();
+    document.body.classList.remove("mobile-expanded");
     location.href = node.href;
     return;
   }
