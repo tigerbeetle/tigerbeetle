@@ -194,7 +194,7 @@ function selectResult(node) {
   if (isMobileView()) {
     closeSearch();
     document.body.classList.remove("mobile-expanded");
-    location.href = node.href;
+    if (node.href) location.href = node.href;
     return;
   }
   searchResults.querySelectorAll(".selected").forEach(r => r.classList.remove("selected"));
