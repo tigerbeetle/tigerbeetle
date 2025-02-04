@@ -38,8 +38,8 @@ document.addEventListener("keydown", event => {
           details.open = !details.open;
         } else {
           closeSearch();
-          event.preventDefault();
         }
+        event.preventDefault();
       }
     }
   }
@@ -263,6 +263,8 @@ function handleAnchor() {
       anchor.classList.add("target");
       scrollIntoViewIfNeeded(anchor, content.parentNode);
     }
+  } else {
+    content.parentNode.scrollTop = 0;
   }
 }
 window.addEventListener("load", () => {
