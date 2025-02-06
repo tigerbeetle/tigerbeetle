@@ -819,7 +819,7 @@ const ClockSimulator = struct {
     network: PacketSimulatorType(Packet),
     times: []DeterministicTime,
     clocks: []DeterministicClock,
-    prng: std.rand.DefaultPrng,
+    prng: std.Random.DefaultPrng,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) !ClockSimulator {
         var network = try PacketSimulatorType(Packet).init(allocator, options.network_options);
@@ -831,7 +831,7 @@ const ClockSimulator = struct {
         var clocks = try allocator.alloc(DeterministicClock, options.clock_count);
         errdefer allocator.free(clocks);
 
-        var prng = std.rand.DefaultPrng.init(options.network_options.seed);
+        var prng = std.Random.DefaultPrng.init(options.network_options.seed);
 
         for (clocks, 0..) |*clock, replica| {
             errdefer for (clocks[0..replica]) |*c| c.deinit(allocator);

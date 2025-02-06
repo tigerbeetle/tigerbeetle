@@ -140,7 +140,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     );
 
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     var replicas: [constants.replica_count]*Replica = undefined;

@@ -12,7 +12,7 @@ const allocator = fuzz.allocator;
 const cluster = 0;
 
 pub fn main(args: fuzz.FuzzArgs) !void {
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = std.Random.DefaultPrng.init(args.seed);
 
     // +10 to occasionally test formatting into a buffer larger than the total data size.
     const write_sectors_max = @divExact(constants.journal_size_headers, constants.sector_size);

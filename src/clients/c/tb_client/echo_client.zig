@@ -238,7 +238,7 @@ test "Echo Demuxer" {
     const Time = vsr.time.Time;
     const Client = EchoClientType(StateMachine, MessageBus, Time);
 
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = std.Random.DefaultPrng.init(42);
     inline for ([_]StateMachine.Operation{
         .create_accounts,
         .create_transfers,

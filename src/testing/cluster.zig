@@ -163,7 +163,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const node_count = options.replica_count + options.standby_count;
 
-            var prng = std.rand.DefaultPrng.init(options.seed);
+            var prng = std.Random.DefaultPrng.init(options.seed);
             const random = prng.random();
 
             // TODO(Zig) Client.init()'s MessagePool.Options require a reference to the network.

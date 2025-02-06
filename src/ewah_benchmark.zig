@@ -29,7 +29,7 @@ const configs = [_]BitSetConfig{
     .{ .words = 640, .run_length_e = 1, .literals_length_e = 100 },
 };
 
-var prng = std.rand.DefaultPrng.init(42);
+var prng = std.Random.DefaultPrng.init(42);
 
 test "benchmark: ewah" {
     for (configs) |config| {

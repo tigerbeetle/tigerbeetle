@@ -10,7 +10,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
-        var prng = std.rand.DefaultPrng.init(args.seed);
+        var prng = std.Random.DefaultPrng.init(args.seed);
         const random = prng.random();
 
         const decoded_size_max = @divExact(1024 * 1024, @sizeOf(Word));
@@ -60,7 +60,7 @@ pub fn fuzz_encode_decode(
 
 /// Modify `data` such that it has exactly `bits_set_total` randomly-chosen bits set,
 /// with the remaining bits unset.
-fn generate_bits(random: std.rand.Random, data: []u8, bits_set_total: usize) void {
+fn generate_bits(random: std.Random, data: []u8, bits_set_total: usize) void {
     const bits_total = data.len * @bitSizeOf(u8);
     assert(bits_set_total <= bits_total);
 
@@ -86,7 +86,7 @@ fn generate_bits(random: std.rand.Random, data: []u8, bits_set_total: usize) voi
     }
 }
 
-fn ContextType(comptime Word: type) type {
+pub fn ContextType(comptime Word: type) type {
     return struct {
         const Context = @This();
         const Codec = ewah.ewah(Word);
@@ -116,7 +116,7 @@ fn ContextType(comptime Word: type) type {
             allocator.free(context.encoded_actual);
         }
 
-        const TestOptions = struct {
+        pub const TestOptions = struct {
             encode_chunk_words_count: usize,
             decode_chunk_words_count: usize,
         };

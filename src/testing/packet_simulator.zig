@@ -118,7 +118,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         const Recorded = std.ArrayListUnmanaged(RecordedPacket);
 
         options: PacketSimulatorOptions,
-        prng: std.rand.DefaultPrng,
+        prng: std.Random.DefaultPrng,
         ticks: u64 = 0,
 
         /// A send and receive path between each node in the network.
@@ -168,7 +168,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             return PacketSimulator{
                 .options = options,
-                .prng = std.rand.DefaultPrng.init(options.seed),
+                .prng = std.Random.DefaultPrng.init(options.seed),
                 .links = links,
 
                 .recorded = recorded,
@@ -338,7 +338,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
                 while (to < self.process_count()) : (to += 1) {
-                    const path = .{ .source = from, .target = to };
+                    const path = Path{ .source = from, .target = to };
                     const enabled =
                         from >= self.options.node_count or
                         to >= self.options.node_count or
@@ -377,7 +377,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
                 while (to < self.process_count()) : (to += 1) {
-                    const path = .{ .source = from, .target = to };
+                    const path = Path{ .source = from, .target = to };
                     if (self.is_clogged(path)) continue;
 
                     const queue = &self.links[self.path_index(path)].queue;

@@ -12,7 +12,7 @@ const fuzz = @import("../testing/fuzz.zig");
 pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
 
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = std.Random.DefaultPrng.init(args.seed);
 
     const blocks_count = FreeSet.shard_bits * (1 + prng.random().uintLessThan(usize, 10));
     const events_count = @min(
@@ -30,7 +30,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 
 fn run_fuzz(
     allocator: std.mem.Allocator,
-    random: std.rand.Random,
+    random: std.Random,
     blocks_count: usize,
     events: []const FreeSetEvent,
 ) !void {
@@ -121,7 +121,7 @@ const FreeSetEvent = union(enum) {
     checkpoint: void,
 };
 
-fn generate_events(allocator: std.mem.Allocator, random: std.rand.Random, options: struct {
+fn generate_events(allocator: std.mem.Allocator, random: std.Random, options: struct {
     blocks_count: usize,
     events_count: usize,
 }) ![]const FreeSetEvent {

@@ -374,7 +374,7 @@ pub fn QuorumsType(comptime options: Options) type {
 }
 
 test "Quorums.working" {
-    var prng = std.rand.DefaultPrng.init(123);
+    var prng = std.Random.DefaultPrng.init(123);
 
     // Don't print warnings from the Quorums.
     const level = std.testing.log_level;
@@ -385,7 +385,7 @@ test "Quorums.working" {
 }
 
 test "Quorum.repairs" {
-    var prng = std.rand.DefaultPrng.init(123);
+    var prng = std.Random.DefaultPrng.init(123);
 
     // Don't print warnings from the Quorums.
     const level = std.testing.log_level;

@@ -35,7 +35,9 @@ const mem = std.mem;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const Aegis128LMac_128 = std.crypto.auth.aegis.Aegis128LMac_128;
+const stdx = @import("../stdx.zig");
+
+const Aegis128LMac_128 = stdx.aegis.Aegis128LMac_128;
 
 var seed_once = std.once(seed_init);
 var seed_state: Aegis128LMac_128 = undefined;
@@ -122,7 +124,7 @@ test "checksum test vectors" {
 }
 
 test "checksum simple fuzzing" {
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = std.Random.DefaultPrng.init(42);
 
     const msg_min = 1;
     const msg_max = 1 * 1024 * 1024;
@@ -180,7 +182,7 @@ test "checksum stability" {
     }
 
     // Pseudo-random data from a specific PRNG of various lengths.
-    var prng = std.rand.Xoshiro256.init(92);
+    var prng = std.Random.Xoshiro256.init(92);
     subcase = 0;
     while (subcase < 256) : (subcase += 1) {
         const message = buf[0 .. subcase + 13];
