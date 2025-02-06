@@ -9,17 +9,23 @@ const AesBlock = crypto.core.aes.Block;
 const AuthenticationError = crypto.errors.AuthenticationError;
 
 /// AEGIS-128L with a 128-bit authentication tag.
-const Aegis128L = Aegis128LGeneric(128);
+const Aegis128L = Aegis128LGenericType(128);
 
 /// AEGIS-128L with a 256-bit authentication tag.
-const Aegis128L_256 = Aegis128LGeneric(256);
+const Aegis128L_256 = Aegis128LGenericType(256);
 
 const State128L = struct {
     blocks: [8]AesBlock,
 
     fn init(key: [16]u8, nonce: [16]u8) State128L {
-        const c1 = AesBlock.fromBytes(&[16]u8{ 0xdb, 0x3d, 0x18, 0x55, 0x6d, 0xc2, 0x2f, 0xf1, 0x20, 0x11, 0x31, 0x42, 0x73, 0xb5, 0x28, 0xdd });
-        const c2 = AesBlock.fromBytes(&[16]u8{ 0x0, 0x1, 0x01, 0x02, 0x03, 0x05, 0x08, 0x0d, 0x15, 0x22, 0x37, 0x59, 0x90, 0xe9, 0x79, 0x62 });
+        const c1 = AesBlock.fromBytes(&[16]u8{
+            0xdb, 0x3d, 0x18, 0x55, 0x6d, 0xc2, 0x2f, 0xf1,
+            0x20, 0x11, 0x31, 0x42, 0x73, 0xb5, 0x28, 0xdd,
+        });
+        const c2 = AesBlock.fromBytes(&[16]u8{
+            0x0,  0x1,  0x01, 0x02, 0x03, 0x05, 0x08, 0x0d,
+            0x15, 0x22, 0x37, 0x59, 0x90, 0xe9, 0x79, 0x62,
+        });
         const key_block = AesBlock.fromBytes(&key);
         const nonce_block = AesBlock.fromBytes(&nonce);
         const blocks = [8]AesBlock{
@@ -112,16 +118,16 @@ const State128L = struct {
 /// - Recovering the secret key from the state would require ~2^128 attempts,
 ///   which is infeasible for any practical adversary.
 /// - It has a large security margin against internal collisions.
-pub const Aegis128LMac = AegisMac(Aegis128L_256);
+pub const Aegis128LMac = AegisMacType(Aegis128L_256);
 
 /// Aegis128L MAC with a 128-bit output.
 /// A MAC with a 128-bit output is not safe unless the number of messages
 /// authenticated with the same key remains small.
 /// After 2^48 messages, the probability of a collision is already ~ 2^-33.
 /// If unsure, use the  Aegis128LMac type, that has a 256 bit output.
-pub const Aegis128LMac_128 = AegisMac(Aegis128L);
+pub const Aegis128LMac_128 = AegisMacType(Aegis128L);
 
-fn Aegis128LGeneric(comptime tag_bits: u9) type {
+fn Aegis128LGenericType(comptime tag_bits: u9) type {
     comptime assert(tag_bits == 128 or tag_bits == 256); // tag must be 128 or 256 bits
 
     return struct {
@@ -138,7 +144,14 @@ fn Aegis128LGeneric(comptime tag_bits: u9) type {
         /// ad: Associated Data
         /// npub: public nonce
         /// k: private key
-        pub fn encrypt(c: []u8, tag: *[tag_length]u8, m: []const u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) void {
+        pub fn encrypt(
+            c: []u8,
+            tag: *[tag_length]u8,
+            m: []const u8,
+            ad: []const u8,
+            npub: [nonce_length]u8,
+            key: [key_length]u8,
+        ) void {
             assert(c.len == m.len);
             var state = State128L.init(key, npub);
             var src: [32]u8 align(16) = undefined;
@@ -174,7 +187,14 @@ fn Aegis128LGeneric(comptime tag_bits: u9) type {
         /// Asserts `c.len == m.len`.
         ///
         /// Contents of `m` are undefined if an error is returned.
-        pub fn decrypt(m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) AuthenticationError!void {
+        pub fn decrypt(
+            m: []u8,
+            c: []const u8,
+            tag: [tag_length]u8,
+            ad: []const u8,
+            npub: [nonce_length]u8,
+            key: [key_length]u8,
+        ) AuthenticationError!void {
             assert(c.len == m.len);
             var state = State128L.init(key, npub);
             var src: [32]u8 align(16) = undefined;
@@ -213,9 +233,9 @@ fn Aegis128LGeneric(comptime tag_bits: u9) type {
     };
 }
 
-fn AegisMac(comptime T: type) type {
+fn AegisMacType(comptime T: type) type {
     return struct {
-        const Self = @This();
+        const AegisMac = @This();
 
         pub const mac_length = T.tag_length;
         pub const key_length = T.key_length;
@@ -227,15 +247,15 @@ fn AegisMac(comptime T: type) type {
         msg_len: usize = 0,
 
         /// Initialize a state for the MAC function
-        pub fn init(key: *const [key_length]u8) Self {
+        pub fn init(key: *const [key_length]u8) AegisMac {
             const nonce = [_]u8{0} ** T.nonce_length;
-            return Self{
+            return AegisMac{
                 .state = T.State.init(key.*, nonce),
             };
         }
 
         /// Add data to the state
-        pub fn update(self: *Self, b: []const u8) void {
+        pub fn update(self: *AegisMac, b: []const u8) void {
             self.msg_len += b.len;
 
             const len_partial = @min(b.len, block_length - self.off);
@@ -258,7 +278,7 @@ fn AegisMac(comptime T: type) type {
         }
 
         /// Return an authentication tag for the current state
-        pub fn final(self: *Self, out: *[mac_length]u8) void {
+        pub fn final(self: *AegisMac, out: *[mac_length]u8) void {
             if (self.off > 0) {
                 var pad = [_]u8{0} ** block_length;
                 @memcpy(pad[0..self.off], self.buf[0..self.off]);
@@ -269,20 +289,20 @@ fn AegisMac(comptime T: type) type {
 
         /// Return an authentication tag for a message and a key
         pub fn create(out: *[mac_length]u8, msg: []const u8, key: *const [key_length]u8) void {
-            var ctx = Self.init(key);
+            var ctx = AegisMac.init(key);
             ctx.update(msg);
             ctx.final(out);
         }
 
         pub const Error = error{};
-        pub const Writer = std.io.Writer(*Self, Error, write);
+        pub const Writer = std.io.Writer(*AegisMac, Error, write);
 
-        fn write(self: *Self, bytes: []const u8) Error!usize {
+        fn write(self: *AegisMac, bytes: []const u8) Error!usize {
             self.update(bytes);
             return bytes.len;
         }
 
-        pub fn writer(self: *Self) Writer {
+        pub fn writer(self: *AegisMac) Writer {
             return .{ .context = self };
         }
     };
@@ -295,7 +315,12 @@ test "Aegis128L test vector 1" {
     const key: [Aegis128L.key_length]u8 = [_]u8{ 0x10, 0x01 } ++ [_]u8{0x00} ** 14;
     const nonce: [Aegis128L.nonce_length]u8 = [_]u8{ 0x10, 0x00, 0x02 } ++ [_]u8{0x00} ** 13;
     const ad = [8]u8{ 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07 };
-    const m = [32]u8{ 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f };
+    const m = [32]u8{
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+    };
     var c: [m.len]u8 = undefined;
     var m2: [m.len]u8 = undefined;
     var tag: [Aegis128L.tag_length]u8 = undefined;
@@ -308,10 +333,16 @@ test "Aegis128L test vector 1" {
     try assertEqual("cc6f3372f6aa1bb82388d695c3962d9a", &tag);
 
     c[0] +%= 1;
-    try testing.expectError(error.AuthenticationFailed, Aegis128L.decrypt(&m2, &c, tag, &ad, nonce, key));
+    try testing.expectError(
+        error.AuthenticationFailed,
+        Aegis128L.decrypt(&m2, &c, tag, &ad, nonce, key),
+    );
     c[0] -%= 1;
     tag[0] +%= 1;
-    try testing.expectError(error.AuthenticationFailed, Aegis128L.decrypt(&m2, &c, tag, &ad, nonce, key));
+    try testing.expectError(
+        error.AuthenticationFailed,
+        Aegis128L.decrypt(&m2, &c, tag, &ad, nonce, key),
+    );
 }
 
 test "Aegis128L test vector 2" {
