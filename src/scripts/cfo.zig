@@ -204,45 +204,46 @@ fn run_fuzzers(
         }
     };
 
-    var tasks_cache: ?Tasks = null;
+    var tasks = Tasks.init(shell.arena.allocator());
+    defer tasks.deinit();
+
     for (0..options.budget_seconds) |second| {
         const iteration_last = second == options.budget_seconds - 1;
         const iteration_pull = second % options.refresh_seconds == 0;
         const iteration_push = (second % options.refresh_seconds == 0 and second > 0) or
             iteration_last;
 
-        // Note that tasks are allocated by the arena, so they accumulate over the lifetime of CFO.
-        if (iteration_pull) tasks_cache = null;
-        const tasks = tasks_cache orelse tasks: {
-            // TODO: This is a race -- run_fuzzers_prepare_tasks() removes the working directory,
-            // which may still be in use by a running fuzzer.
-            const tasks = try run_fuzzers_prepare_tasks(shell, gh_token);
+        if (iteration_pull) {
+            try run_fuzzers_prepare_tasks(&tasks, shell, gh_token);
 
-            log.info("fuzzing {} tasks", .{tasks.seed_template.len});
-            for (tasks.seed_template, tasks.weight) |seed_template, weight| {
-                log.info("fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}", .{
-                    seed_template.commit_sha[0..7],
-                    seed_template.commit_timestamp,
-                    @tagName(seed_template.fuzzer),
-                    seed_template.branch,
-                    weight,
-                });
+            for (tasks.list.items) |*task| {
+                if (task.generation == tasks.generation) {
+                    log.info(
+                        "fuzzing commit={s} timestamp={} fuzzer={s} branch='{s}' weight={}",
+                        .{
+                            task.seed_template.commit_sha[0..7],
+                            task.seed_template.commit_timestamp,
+                            @tagName(task.seed_template.fuzzer),
+                            task.seed_template.branch_url,
+                            task.weight,
+                        },
+                    );
+                }
             }
-            break :tasks tasks;
-        };
-        tasks_cache = tasks;
+        }
 
         // Start new fuzzer processes.
         for (children) |*child_or_null| {
             if (child_or_null.* == null) {
-                const task_index = random.weightedIndex(u32, tasks.weight);
-                const working_directory = tasks.working_directory[task_index];
-                const seed_template = tasks.seed_template[task_index];
+                const task = tasks.sample();
                 const seed = random.int(u64);
 
+                // Ensure that multiple fuzzers spawned in the same tick are spread out over tasks.
+                task.runtime_virtual += 1;
+
                 const child = try run_fuzzers_start_fuzzer(shell, .{
-                    .working_directory = working_directory,
-                    .fuzzer = seed_template.fuzzer,
+                    .working_directory = task.working_directory,
+                    .fuzzer = task.seed_template.fuzzer,
                     .seed = seed,
                 });
                 // NB: take timestamp after spawning to exclude build time.
@@ -251,10 +252,10 @@ fn run_fuzzers(
                 child_or_null.* = .{
                     .child = child.process,
                     .seed = .{
-                        .commit_timestamp = seed_template.commit_timestamp,
-                        .commit_sha = seed_template.commit_sha,
-                        .fuzzer = @tagName(seed_template.fuzzer),
-                        .branch = seed_template.branch,
+                        .commit_timestamp = task.seed_template.commit_timestamp,
+                        .commit_sha = task.seed_template.commit_sha,
+                        .fuzzer = @tagName(task.seed_template.fuzzer),
+                        .branch = task.seed_template.branch_url,
 
                         .count = 1,
                         .seed_timestamp_start = seed_timestamp_start,
@@ -265,6 +266,21 @@ fn run_fuzzers(
                         .seed_timestamp_end = 0,
                     },
                 };
+            }
+        }
+
+        // Increment the runtime of running tasks.
+        for (children) |*fuzzer_or_null| {
+            if (fuzzer_or_null.*) |*fuzzer| {
+                const task = tasks.get(
+                    std.meta.stringToEnum(Fuzzer, fuzzer.seed.fuzzer).?,
+                    fuzzer.seed.commit_sha,
+                ).?;
+                task.runtime += 1;
+                // Us a large (arbitrary) constant as the numerator to avoid rounding errors.
+                // Also this ensures that the initial +=1 when starting the process has relatively
+                // little impact, to avoid biasing scheduling in favor of long-running fuzzers.
+                task.runtime_virtual += @divFloor(1000, task.weight);
             }
         }
 
@@ -291,10 +307,12 @@ fn run_fuzzers(
                 const seed_expired = !fuzzer_done and seed_duration > options.timeout_seconds;
 
                 if (fuzzer_done or seed_expired or iteration_last) {
-                    log.debug(
-                        "will reap '{s}'{s}",
-                        .{ fuzzer.seed.command, if (fuzzer_done) "" else " (timeout)" },
-                    );
+                    log.debug("will reap '{s}' after {}s{s}", .{
+                        fuzzer.seed.command,
+                        seed_duration,
+                        if (fuzzer_done) "" else " (timeout)",
+                    });
+
                     const term = try if (fuzzer_done) fuzzer.child.wait() else fuzzer.child.kill();
                     if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL })) {
                         // Something killed the fuzzer. This is likely OOM, so count this seed
@@ -337,17 +355,171 @@ fn run_fuzzers(
         }
     }
     assert(seeds.items.len == 0);
+
+    for (tasks.list.items) |*task| {
+        log.info("commit={s} fuzzer={s:<24} runtime={}s (active={})", .{
+            task.seed_template.commit_sha[0..7],
+            @tagName(task.seed_template.fuzzer),
+            task.runtime,
+            task.generation == tasks.generation,
+        });
+    }
 }
 
 const Tasks = struct {
-    working_directory: [][]const u8,
-    seed_template: []SeedRecord.Template,
-    weight: []u32,
+    /// Map values index into `list`.
+    const Map = std.AutoHashMap(struct { fuzzer: Fuzzer, commit: [40]u8 }, usize);
+    const List = std.ArrayList(Task);
+
+    const Task = struct {
+        // Immutable:
+
+        working_directory: []const u8,
+        seed_template: SeedRecord.Template,
+
+        // Mutable:
+
+        /// Higher weight fuzzers are given more runtime.
+        weight: u32,
+        /// Active tasks have `task.generation == tasks.generation`.
+        /// Inactive tasks have `task.generation < tasks.generation`.
+        generation: u64,
+        /// This is just used for logging, not scheduling.
+        runtime: u64,
+        /// Weight-adjusted runtime used for scheduling. Always positive and finite.
+        /// Cumulative `runtime / weight`, but since `weight` can change over time, this is more
+        /// precise.
+        runtime_virtual: u64,
+    };
+
+    generation: u64 = 1,
+    runtime_init: u64 = 1,
+
+    list: List,
+    map: Map,
+
+    pub fn init(allocator: std.mem.Allocator) Tasks {
+        return .{
+            .list = Tasks.List.init(allocator),
+            .map = Tasks.Map.init(allocator),
+        };
+    }
+
+    pub fn deinit(tasks: *Tasks) void {
+        tasks.map.deinit();
+        tasks.list.deinit();
+        tasks.* = undefined;
+    }
+
+    pub fn verify(tasks: *const Tasks) void {
+        assert(tasks.list.items.len == tasks.map.count());
+
+        var map_iterator = tasks.map.iterator();
+        while (map_iterator.next()) |map_entry| {
+            const task_index = map_entry.value_ptr.*;
+            const task = &tasks.list.items[task_index];
+            assert(@intFromPtr(task) >= @intFromPtr(tasks.list.items.ptr));
+            assert(@intFromPtr(task) < @intFromPtr(tasks.list.items.ptr) +
+                @sizeOf(Task) * tasks.list.items.len);
+            assert(task.seed_template.fuzzer == map_entry.key_ptr.fuzzer);
+            assert(std.mem.eql(u8, &task.seed_template.commit_sha, &map_entry.key_ptr.commit));
+        }
+
+        for (tasks.list.items) |*task| {
+            assert(task.generation <= tasks.generation);
+            assert(task.weight > 0);
+            assert(task.runtime_virtual >= 1);
+        }
+    }
+
+    /// Pick a task to run next.
+    /// Returns the task with the minimal virtual runtime.
+    pub fn sample(tasks: *const Tasks) *Task {
+        assert(tasks.list.items.len == tasks.map.count());
+        assert(tasks.list.items.len > 0);
+
+        var task_best_runtime_virtual: ?u64 = null;
+        var task_best: ?*Task = null;
+        for (tasks.list.items) |*task| {
+            assert(task.runtime_virtual > 0);
+            assert(task.generation <= tasks.generation);
+
+            if (task.generation == tasks.generation) {
+                if (task_best_runtime_virtual == null or
+                    task_best_runtime_virtual.? > task.runtime_virtual)
+                {
+                    task_best_runtime_virtual = task.runtime_virtual;
+                    task_best = task;
+                }
+            }
+        }
+        return task_best.?;
+    }
+
+    pub fn get(tasks: *const Tasks, fuzzer: Fuzzer, commit: [40]u8) ?*Task {
+        const task_index = tasks.map.get(.{
+            .fuzzer = fuzzer,
+            .commit = commit,
+        }) orelse return null;
+        return &tasks.list.items[task_index];
+    }
+
+    /// Either:
+    /// - If the specified task does not already exist, create it.
+    /// - Is the specified task does already exist, activate it for the new generation.
+    pub fn put(
+        tasks: *Tasks,
+        working_directory: []const u8,
+        seed_template: SeedRecord.Template,
+    ) !void {
+        if (tasks.map.get(.{
+            .fuzzer = seed_template.fuzzer,
+            .commit = seed_template.commit_sha,
+        })) |task_existing_index| {
+            const task_existing = &tasks.list.items[task_existing_index];
+            assert(task_existing.generation < tasks.generation);
+            assert(task_existing.seed_template.fuzzer == seed_template.fuzzer);
+            assert(std.mem.eql(u8, task_existing.working_directory, working_directory));
+
+            if (tasks.runtime_init < task_existing.runtime_virtual) {
+                tasks.runtime_init = task_existing.runtime_virtual;
+            } else {
+                if (task_existing.generation == tasks.generation - 1) {
+                    // For tasks that were already active, leave their low `runtime_virtual`
+                    // unmodified, to ensure they get some runtime soon.
+                } else {
+                    // For tasks which were active in the past, but not in the latest generation,
+                    // ensure that they are not starved in the new generation.
+                    task_existing.runtime_virtual = tasks.runtime_init;
+                }
+            }
+            task_existing.generation = tasks.generation;
+        } else {
+            try tasks.list.append(.{
+                .working_directory = working_directory,
+                .seed_template = seed_template,
+                .generation = tasks.generation,
+                .weight = 0, // To be initialized later.
+                .runtime = 0,
+                .runtime_virtual = tasks.runtime_init,
+            });
+
+            try tasks.map.putNoClobber(.{
+                .fuzzer = seed_template.fuzzer,
+                .commit = seed_template.commit_sha,
+            }, tasks.list.items.len - 1);
+        }
+    }
+
+    pub fn soft_remove_all(tasks: *Tasks) void {
+        tasks.verify();
+        tasks.generation += 1;
+    }
 };
 
-fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
-    var working_directory = std.ArrayList([]const u8).init(shell.arena.allocator());
-    var seed_template = std.ArrayList(SeedRecord.Template).init(shell.arena.allocator());
+fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8) !void {
+    tasks.soft_remove_all();
+    defer tasks.verify();
 
     { // Main branch fuzzing.
         const commit = if (gh_token == null)
@@ -365,16 +537,16 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
         };
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
-            try working_directory.append(if (gh_token == null) "." else "./working/main");
-            try seed_template.append(.{
+            const working_directory = if (gh_token == null) "." else "./working/main";
+            _ = try tasks.put(working_directory, .{
                 .commit_timestamp = commit.timestamp,
                 .commit_sha = commit.sha,
                 .fuzzer = fuzzer,
-                .branch = "https://github.com/tigerbeetle/tigerbeetle",
+                .branch = .main,
+                .branch_url = "https://github.com/tigerbeetle/tigerbeetle",
             });
         }
     }
-    const task_main_count: u32 = @intCast(seed_template.items.len);
 
     if (gh_token != null) {
         // Any PR labeled like 'fuzz lsm_tree'
@@ -427,12 +599,12 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
 
                 if (labeled or fuzzer == .canary) {
                     pr_fuzzers_count += 1;
-                    try working_directory.append(pr_directory);
-                    try seed_template.append(.{
+                    try tasks.put(pr_directory, .{
                         .commit_timestamp = commit.timestamp,
                         .commit_sha = commit.sha,
                         .fuzzer = fuzzer,
-                        .branch = try shell.fmt(
+                        .branch = .{ .pull = pr.number },
+                        .branch_url = try shell.fmt(
                             "https://github.com/tigerbeetle/tigerbeetle/pull/{d}",
                             .{pr.number},
                         ),
@@ -442,37 +614,52 @@ fn run_fuzzers_prepare_tasks(shell: *Shell, gh_token: ?[]const u8) !Tasks {
             assert(pr_fuzzers_count >= 2); // The canary and at least one different fuzzer.
         }
     }
-    const task_pr_count: u32 = @intCast(seed_template.items.len - task_main_count);
+
+    const task_main_count, const task_pull_count = counts: {
+        var task_main_count: u32 = 0;
+        var task_pull_count: u32 = 0;
+        for (tasks.list.items) |*task| {
+            if (task.generation == tasks.generation) {
+                task_main_count += @intFromBool(task.seed_template.branch == .main);
+                task_pull_count += @intFromBool(task.seed_template.branch == .pull);
+            }
+        }
+        break :counts .{ task_main_count, task_pull_count };
+    };
 
     // Split time 50:50 between fuzzing main and fuzzing labeled PRs.
-    const weight = try shell.arena.allocator().alloc(u32, working_directory.items.len);
-    var weight_main_total: usize = 0;
-    var weight_pr_total: usize = 0;
-    for (weight[0..task_main_count]) |*weight_main| {
-        weight_main.* = @max(task_pr_count, 1);
-        weight_main_total += weight_main.*;
-    }
-    for (weight[task_main_count..]) |*weight_pr| {
-        weight_pr.* = @max(task_main_count, 1);
-        weight_pr_total += weight_pr.*;
-    }
-    if (weight_main_total > 0 and weight_pr_total > 0) {
-        assert(weight_main_total == weight_pr_total);
-    }
-
-    for (weight, seed_template.items) |*weight_ptr, seed| {
-        if (seed.fuzzer == .vopr or seed.fuzzer == .vopr_lite or
-            seed.fuzzer == .vopr_testing or seed.fuzzer == .vopr_testing_lite)
-        {
-            weight_ptr.* *= 2; // Bump relative priority of VOPR runs.
+    var weight_main_total: u32 = 0;
+    var weight_pull_total: u32 = 0;
+    for (tasks.list.items) |*task| {
+        if (task.generation == tasks.generation) {
+            switch (task.seed_template.branch) {
+                .main => {
+                    task.weight = @max(task_pull_count, 1);
+                    weight_main_total += task.weight;
+                },
+                .pull => {
+                    task.weight = @max(task_main_count, 1);
+                    weight_pull_total += task.weight;
+                },
+            }
         }
     }
+    if (weight_main_total > 0 and weight_pull_total > 0) {
+        assert(weight_main_total == weight_pull_total);
+    }
 
-    return .{
-        .working_directory = working_directory.items,
-        .seed_template = seed_template.items,
-        .weight = weight,
-    };
+    for (tasks.list.items) |*task| {
+        if (task.generation == tasks.generation) {
+            const fuzzer = task.seed_template.fuzzer;
+            if (fuzzer == .vopr or fuzzer == .vopr_lite or
+                fuzzer == .vopr_testing or fuzzer == .vopr_testing_lite)
+            {
+                task.weight = 2; // Bump relative priority of VOPR runs.
+            } else {
+                task.weight = 1;
+            }
+        }
+    }
 }
 
 const Commit = struct {
@@ -669,7 +856,8 @@ const SeedRecord = struct {
     branch: []const u8,
 
     const Template = struct {
-        branch: []const u8,
+        branch: union(enum) { main, pull: u32 },
+        branch_url: []const u8,
         commit_timestamp: u64,
         commit_sha: [40]u8,
         fuzzer: Fuzzer,
