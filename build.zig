@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
-const CrossTarget = std.zig.CrossTarget;
+const Query = std.Target.Query;
 const Mode = std.builtin.Mode;
 
 const config = @import("./src/config.zig");
@@ -35,7 +35,7 @@ fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.Resol
         std.log.err("unsupported target: '{s}'", .{target});
         return error.UnsupportedTarget;
     };
-    const query = try CrossTarget.parse(.{
+    const query = try Query.parse(.{
         .arch_os_abi = arch_os,
         .cpu_features = cpu,
     });
@@ -44,15 +44,18 @@ fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.Resol
 
 const zig_version = std.SemanticVersion{
     .major = 0,
-    .minor = 13,
+    .minor = 14,
     .patch = 0,
 };
 
 comptime {
+    // TODO(zig): Remove when zig 0.14 is released.
+    const is_master = true;
+
     // Compare versions while allowing different pre/patch metadata.
     const zig_version_eq = zig_version.major == builtin.zig_version.major and
         zig_version.minor == builtin.zig_version.minor and
-        zig_version.patch == builtin.zig_version.patch;
+        (zig_version.patch == builtin.zig_version.patch or is_master);
     if (!zig_version_eq) {
         @compileError(std.fmt.comptimePrint(
             "unsupported zig version: expected {}, found {}",
@@ -1005,11 +1008,11 @@ fn build_go_client(
         else
             platform[0];
 
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = name,
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
         const lib = b.addStaticLibrary(.{
             .name = "tb_client",
@@ -1056,11 +1059,11 @@ fn build_java_client(
     });
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
         const lib = b.addSharedLibrary(.{
             .name = "tb_jniclient",
@@ -1111,11 +1114,11 @@ fn build_dotnet_client(
     });
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
         const lib = b.addSharedLibrary(.{
             .name = "tb_client",
@@ -1201,11 +1204,11 @@ fn build_node_client(
     run_dll_tool.cwd = b.path("./src/clients/node");
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
         const lib = b.addSharedLibrary(.{
             .name = "tb_nodeclient",
@@ -1265,11 +1268,11 @@ fn build_python_client(
     });
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
         const shared_lib = b.addSharedLibrary(.{
             .name = "tb_client",
@@ -1313,11 +1316,11 @@ fn build_c_client(
     step_clients_c.dependOn(&options.tb_client_header.step);
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
         const shared_lib = b.addSharedLibrary(.{
             .name = "tb_client",
@@ -1426,7 +1429,7 @@ const FailStep = struct {
         return result;
     }
 
-    fn make(step: *std.Build.Step, _: std.Progress.Node) anyerror!void {
+    fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
         const self: *FailStep = @fieldParentPtr("step", step);
         std.log.err("{s}", .{self.message});
         return error.FailStep;
@@ -1465,8 +1468,7 @@ fn print_or_install(b: *std.Build, compile: *std.Build.Step.Compile, print: bool
         step: std.Build.Step,
         compile: *std.Build.Step.Compile,
 
-        fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
-            _ = prog_node;
+        fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
             const print_step: *@This() = @fieldParentPtr("step", step);
             const path = print_step.compile.getEmittedBin().getPath2(step.owner, step);
             try std.io.getStdOut().writer().print("{s}\n", .{path});
@@ -1572,8 +1574,7 @@ const Generated = struct {
         return result;
     }
 
-    fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
-        _ = prog_node;
+    fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
         const b = step.owner;
         const generated: *Generated = @fieldParentPtr("step", step);
         const ci = try std.process.hasEnvVar(b.allocator, "CI");
