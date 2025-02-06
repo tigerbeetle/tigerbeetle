@@ -194,7 +194,7 @@ const ConfigCluster = struct {
     /// Fingerprint of the cluster-wide configuration.
     /// It is used to assert that all cluster members share the same config.
     pub fn checksum(comptime config: ConfigCluster) u128 {
-        @setEvalBranchQuota(10_000);
+        @setEvalBranchQuota(2_000);
         comptime var config_bytes: []const u8 = &.{};
         comptime for (std.meta.fields(ConfigCluster)) |field| {
             const value = @field(config, field.name);
