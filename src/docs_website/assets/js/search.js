@@ -32,9 +32,15 @@ document.addEventListener("keydown", event => {
       event.preventDefault();
     } else if (event.key === "Enter") {
       const selected = searchResults.querySelector(".selected");
-      if (!selected) selectNextResult();
-      closeSearch();
-      event.preventDefault();
+      if (selected) {
+        if (selected.tagName == "SUMMARY") {
+          const details = selected.parentElement;
+          details.open = !details.open;
+        } else {
+          closeSearch();
+        }
+        event.preventDefault();
+      }
     }
   }
 })
@@ -104,6 +110,8 @@ function onSearchInput() {
     details.open = true;
     const summary = document.createElement("summary");
     details.appendChild(summary);
+    summary.pageIndex = group.pageIndex;
+    summary.href = urlPrefix + "/" + group.results[0].section.path + "/";
     const p = document.createElement("p");
     summary.appendChild(p);
     p.innerText = pages[group.pageIndex].title;
@@ -186,13 +194,16 @@ function makeContext(text, i, length) {
 
 function selectResult(node) {
   if (isMobileView()) {
+    closeSearch();
+    document.body.classList.remove("mobile-expanded");
     location.href = node.href;
     return;
   }
   searchResults.querySelectorAll(".selected").forEach(r => r.classList.remove("selected"));
   node.classList.add("selected");
   scrollIntoViewIfNeeded(node, searchResults.parentNode);
-  // Preview result
+
+  // Show page preview.
   const page = pages[node.pageIndex];
   content.innerHTML = page.html;
   addContentEventHandlers();
@@ -210,7 +221,7 @@ function selectResult(node) {
   }
   handleAnchor();
   highlightText(searchInput.value, content);
-  markActiveHighlight(content);
+  if (node.tagName == "A") markActiveHighlight(content);
 }
 
 function markActiveHighlight(container) {
@@ -252,6 +263,8 @@ function handleAnchor() {
       anchor.classList.add("target");
       scrollIntoViewIfNeeded(anchor, content.parentNode);
     }
+  } else {
+    content.parentNode.scrollTop = 0;
   }
 }
 window.addEventListener("load", () => {
@@ -259,7 +272,7 @@ window.addEventListener("load", () => {
 });
 
 function selectNextResult() {
-  const nodes = [...searchResults.querySelectorAll("details[open] a")];
+  const nodes = [...searchResults.querySelectorAll("summary, details[open] a")];
   if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
   const i = selected ? nodes.indexOf(selected) + 1 : 0;
@@ -267,7 +280,7 @@ function selectNextResult() {
 }
 
 function selectPreviousResult() {
-  const nodes = [...searchResults.querySelectorAll("details[open] a")];
+  const nodes = [...searchResults.querySelectorAll("summary, details[open] a")];
   if (nodes.length === 0) return;
   const selected = searchResults.querySelector(".selected");
   const i = selected ? nodes.indexOf(selected) - 1 : -1;
