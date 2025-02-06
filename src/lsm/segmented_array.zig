@@ -55,7 +55,7 @@ fn SegmentedArrayBaseType(
     comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.Inline) K) else void,
     comptime options: Options,
 ) type {
-    comptime assert(Key == null or @typeInfo(Key.?) == .Int or @typeInfo(Key.?) == .ComptimeInt);
+    comptime assert(Key == null or @typeInfo(Key.?) == .int or @typeInfo(Key.?) == .comptime_int);
 
     return struct {
         const SegmentedArray = @This();
@@ -1067,7 +1067,7 @@ fn FuzzContextType(
             .unsorted => SegmentedArrayType(T, TestPool, element_count_max, options),
         };
 
-        random: std.rand.Random,
+        random: std.Random,
 
         pool: TestPool,
         array: TestArray,
@@ -1080,7 +1080,7 @@ fn FuzzContextType(
         fn init(
             context: *FuzzContext,
             allocator: std.mem.Allocator,
-            random: std.rand.Random,
+            random: std.Random,
         ) !void {
             context.* = .{
                 .random = random,
@@ -1391,7 +1391,7 @@ fn FuzzContextType(
 }
 
 pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Options) !void {
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     const CompositeKey = @import("composite_key.zig").CompositeKeyType(u64);

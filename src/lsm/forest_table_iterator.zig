@@ -36,18 +36,20 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             fields = fields ++ &[_]StructField{.{
                 .name = @ptrCast(tree_info.tree_name),
                 .type = TreeTableIteratorType(tree_info.Tree),
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(TreeTableIteratorType(tree_info.Tree)),
             }};
         }
 
-        break :iterator @Type(.{ .Struct = .{
-            .layout = .auto,
-            .fields = fields,
-            .decls = &.{},
-            .is_tuple = false,
-        } });
+        break :iterator @Type(.{
+            .@"struct" = .{
+                .layout = .auto,
+                .fields = fields,
+                .decls = &.{},
+                .is_tuple = false,
+            },
+        });
     };
     assert(std.meta.fields(TreeTableIterators).len > 0);
 

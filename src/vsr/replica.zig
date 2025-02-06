@@ -558,7 +558,7 @@ pub fn ReplicaType(
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
-        prng: std.rand.DefaultPrng,
+        prng: std.Random.DefaultPrng,
 
         /// Used by `Cluster` in the simulator.
         test_context: ?*anyopaque,
@@ -1645,7 +1645,7 @@ pub fn ReplicaType(
                     return;
                 };
 
-            const request = .{
+            const request = Request{
                 .message = message.ref(),
                 .realtime = realtime,
             };
@@ -8140,8 +8140,8 @@ pub fn ReplicaType(
 
         /// `message` is a `*MessageType(command)`.
         fn send_message_to_other_replicas(self: *Replica, message: anytype) void {
-            assert(@typeInfo(@TypeOf(message)) == .Pointer);
-            assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+            assert(@typeInfo(@TypeOf(message)) == .pointer);
+            assert(!@typeInfo(@TypeOf(message)).pointer.is_const);
 
             self.send_message_to_other_replicas_base(message.base());
         }
@@ -8166,8 +8166,8 @@ pub fn ReplicaType(
 
         /// `message` is a `*MessageType(command)`.
         fn send_message_to_replica(self: *Replica, replica: u8, message: anytype) void {
-            assert(@typeInfo(@TypeOf(message)) == .Pointer);
-            assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+            assert(@typeInfo(@TypeOf(message)) == .pointer);
+            assert(!@typeInfo(@TypeOf(message)).pointer.is_const);
 
             self.send_message_to_replica_base(replica, message.base());
         }

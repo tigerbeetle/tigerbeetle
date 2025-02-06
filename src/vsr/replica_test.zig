@@ -14,6 +14,7 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
+const Release = @import("../testing/cluster.zig").Release;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
 
@@ -33,7 +34,7 @@ const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_pr
 
 const log_level = std.log.Level.err;
 
-const releases = .{
+const releases = [_]Release{
     .{
         .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
         .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
@@ -1852,7 +1853,7 @@ const TestContext = struct {
     }) !*TestContext {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
-        var prng = std.rand.DefaultPrng.init(options.seed);
+        var prng = std.Random.DefaultPrng.init(options.seed);
         const random = prng.random();
 
         const cluster = try Cluster.init(allocator, .{

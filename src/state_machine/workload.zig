@@ -100,7 +100,7 @@ const TransferBatch = struct {
 
 /// Indexes: [valid:bool][limit:bool][method]
 const transfer_templates = table: {
-    @setEvalBranchQuota(2_000);
+    @setEvalBranchQuota(16_000);
 
     const SNGL = @intFromEnum(TransferPlan.Method.single_phase);
     const PEND = @intFromEnum(TransferPlan.Method.pending);
@@ -109,7 +109,12 @@ const transfer_templates = table: {
     const Result = accounting_auditor.CreateTransferResultSet;
     const result = Result.init;
 
-    const two_phase_ok = .{
+    const InitValues = std.enums.EnumFieldStruct(
+        tb.CreateTransferResult.Ordered,
+        bool,
+        false,
+    );
+    const two_phase_ok = InitValues{
         .ok = true,
         .pending_transfer_already_posted = true,
         .pending_transfer_already_voided = true,
@@ -184,7 +189,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         pub const Options = OptionsType(AccountingStateMachine, Action);
 
-        random: std.rand.Random,
+        random: std.Random,
         auditor: Auditor,
         options: Options,
 
@@ -213,7 +218,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            random: std.rand.Random,
+            random: std.Random,
             options: Options,
         ) !Workload {
             assert(options.create_account_invalid_probability <= 100);
@@ -984,7 +989,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         /// * `Workload.transfer_plan_seed`, and
         /// * the transfer `index`.
         fn transfer_index_to_plan(self: *const Workload, index: usize) TransferPlan {
-            var prng = std.rand.DefaultPrng.init(self.transfer_plan_seed ^ @as(u64, index));
+            var prng = std.Random.DefaultPrng.init(self.transfer_plan_seed ^ @as(u64, index));
             const random = prng.random();
             const method: TransferPlan.Method = blk: {
                 if (chance(random, self.options.create_transfer_pending_probability)) {
@@ -1474,7 +1479,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         /// Maximum number of failed transfer IDs to retry in the next request.
         transfer_transient_errors_max: usize,
 
-        pub fn generate(random: std.rand.Random, options: struct {
+        pub fn generate(random: std.Random, options: struct {
             batch_size_limit: u32,
             client_count: usize,
             in_flight_max: usize,
@@ -1555,7 +1560,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
 /// Sample from a discrete distribution.
 /// Use integers instead of floating-point numbers to avoid nondeterminism on different hardware.
 fn sample_distribution(
-    random: std.rand.Random,
+    random: std.Random,
     distribution: anytype,
 ) std.meta.FieldEnum(@TypeOf(distribution)) {
     const SampleSpace = std.meta.FieldEnum(@TypeOf(distribution));
@@ -1584,7 +1589,7 @@ fn sample_distribution(
 }
 
 /// Returns true, `p` percent of the time, else false.
-fn chance(random: std.rand.Random, p: u8) bool {
+fn chance(random: std.Random, p: u8) bool {
     assert(p <= 100);
     return random.uintLessThanBiased(u8, 100) < p;
 }

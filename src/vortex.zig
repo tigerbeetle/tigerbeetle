@@ -19,7 +19,7 @@ const assert = std.debug.assert;
 
 const log = std.log.scoped(.vortex);
 
-pub const std_options = .{
+pub const std_options = std.Options{
     .log_level = .info,
     .logFn = stdx.log_with_timestamp,
 };
@@ -79,7 +79,7 @@ fn start_driver(allocator: std.mem.Allocator, args: DriverArgs) !std.process.Chi
     defer argv.deinit();
 
     assert(std.mem.indexOf(u8, args.@"driver-command", "\"") == null);
-    var cmd_parts = std.mem.split(u8, args.@"driver-command", " ");
+    var cmd_parts = std.mem.splitScalar(u8, args.@"driver-command", ' ');
 
     while (cmd_parts.next()) |part| {
         try argv.append(part);

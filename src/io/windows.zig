@@ -246,7 +246,7 @@ pub const IO = struct {
         comptime callback: anytype,
         completion: *Completion,
         comptime op_tag: std.meta.Tag(Completion.Operation),
-        op_data: anytype,
+        op_data: std.meta.TagPayload(Completion.Operation, op_tag),
         comptime OperationImpl: type,
     ) void {
         const Callback = struct {
