@@ -20,7 +20,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
     const storage_size = sector_count * sector_size;
     const iterations = args.events_max orelse 10_000;
 
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = std.Random.DefaultPrng.init(args.seed);
     const random = prng.random();
 
     for (0..iterations) |_| {

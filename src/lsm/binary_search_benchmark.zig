@@ -32,7 +32,7 @@ test "benchmark: binary search" {
     log.info("UT: utime time/search", .{});
 
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
 
     // Allocate on the heap just once.
     // All page allocations reuse this buffer to speed up the run time.
@@ -54,7 +54,7 @@ test "benchmark: binary search" {
     }
 }
 
-fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !void {
+fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.Random) !void {
     assert(blob.len == layout.blob_size);
     const V = ValueType(layout);
     const K = V.Key;
@@ -183,13 +183,13 @@ const Benchmark = struct {
         }
 
         const utime_tv = std.posix.getrusage(std.posix.rusage.SELF).utime;
-        return (@as(u128, @intCast(utime_tv.tv_sec)) * std.time.ns_per_s) +
-            (@as(u32, @intCast(utime_tv.tv_usec)) * std.time.ns_per_us);
+        return (@as(u128, @intCast(utime_tv.sec)) * std.time.ns_per_s) +
+            (@as(u32, @intCast(utime_tv.usec)) * std.time.ns_per_us);
     }
 };
 
 // shuffle([0,1,…,n-1])
-fn shuffled_index(comptime n: usize, rand: std.rand.Random) [n]usize {
+fn shuffled_index(comptime n: usize, rand: std.Random) [n]usize {
     var indices: [n]usize = undefined;
     for (&indices, 0..) |*i, j| i.* = j;
     rand.shuffle(usize, indices[0..]);

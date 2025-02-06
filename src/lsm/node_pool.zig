@@ -101,7 +101,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
         const TestContext = @This();
 
         node_count: u32,
-        random: std.rand.Random,
+        random: std.Random,
         sentinel: u64,
         node_pool: TestPool,
         node_map: std.AutoArrayHashMap(TestPool.Node, u64),
@@ -109,7 +109,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
         acquires: u64 = 0,
         releases: u64 = 0,
 
-        fn init(context: *TestContext, random: std.rand.Random, node_count: u32) !void {
+        fn init(context: *TestContext, random: std.Random, node_count: u32) !void {
             context.* = .{
                 .node_count = node_count,
                 .random = random,
@@ -222,7 +222,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
 test "NodePool" {
     const seed = 42;
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     const Tuple = struct {

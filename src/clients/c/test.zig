@@ -131,7 +131,7 @@ test "tb_client echo" {
     );
 
     defer client.deinit() catch unreachable;
-    var prng = std.rand.DefaultPrng.init(tb_context);
+    var prng = std.Random.DefaultPrng.init(tb_context);
 
     const requests: []RequestContext = try testing.allocator.alloc(RequestContext, concurrency_max);
     defer testing.allocator.free(requests);

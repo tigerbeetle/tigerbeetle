@@ -142,7 +142,7 @@ pub const Storage = struct {
 
     size: u64,
     options: Options,
-    prng: std.rand.DefaultPrng,
+    prng: std.Random.DefaultPrng,
 
     /// `memory` always contains the pristine data as-written -- it does not include storage faults.
     memory: []align(constants.sector_size) u8,
@@ -202,7 +202,7 @@ pub const Storage = struct {
         assert(options.write_misdirect_probability <= 100);
         assert(options.crash_fault_probability <= 100);
 
-        const prng = std.rand.DefaultPrng.init(options.seed);
+        const prng = std.Random.DefaultPrng.init(options.seed);
         const sector_count = @divExact(size, constants.sector_size);
         const memory = try allocator.alignedAlloc(u8, constants.sector_size, size);
         errdefer allocator.free(memory);
@@ -458,7 +458,7 @@ pub const Storage = struct {
                 // Inject the fault at a deterministic position (by using the pristine bytes as
                 // consistent seed) so that read-retries don't resolve the corruption.
                 const corrupt_seed: u64 = @bitCast(sector_bytes[0..@sizeOf(u64)].*);
-                var corrupt_prng = std.rand.DefaultPrng.init(corrupt_seed);
+                var corrupt_prng = std.Random.DefaultPrng.init(corrupt_seed);
                 const corrupt_random = corrupt_prng.random();
                 const corrupt_byte = corrupt_random.uintLessThan(u32, sector_bytes.len);
                 const corrupt_bit = corrupt_random.uintAtMost(u3, @bitSizeOf(u8) - 1);
@@ -964,7 +964,7 @@ const SectorRange = struct {
         };
     }
 
-    fn random(range: SectorRange, rand: std.rand.Random) usize {
+    fn random(range: SectorRange, rand: std.Random) usize {
         return range.min + rand.uintLessThan(usize, range.max - range.min);
     }
 
@@ -1011,7 +1011,7 @@ pub const ClusterFaultAtlas = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         replica_count: u8,
-        random: std.rand.Random,
+        random: std.Random,
         options: Options,
     ) !ClusterFaultAtlas {
         if (replica_count == 1) {

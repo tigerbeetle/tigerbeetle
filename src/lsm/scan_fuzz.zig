@@ -260,12 +260,12 @@ const QuerySpec = struct {
 /// - Cannot repeat fields, while `(a=1 OR a=2)` is valid, this limitation avoids
 ///   always false conditions such as `(a=1 AND a=2)`.
 const QuerySpecFuzzer = struct {
-    random: std.rand.Random,
+    random: std.Random,
     index_cardinality: [thing_index_count]u64,
     indexes_used: std.EnumSet(Index) = std.EnumSet(Index).initEmpty(),
 
     fn generate_fuzz_query_specs(
-        random: std.rand.Random,
+        random: std.Random,
         index_cardinality: [thing_index_count]u64,
     ) [query_spec_max]QuerySpec {
         var query_specs: [query_spec_max]QuerySpec = undefined;
@@ -488,7 +488,7 @@ const Environment = struct {
         grid_checkpoint_durable,
     };
 
-    random: std.rand.Random,
+    random: std.Random,
     state: State,
 
     storage: *Storage,
@@ -511,7 +511,7 @@ const Environment = struct {
     fn init(
         env: *Environment,
         storage: *Storage,
-        random: std.rand.Random,
+        random: std.Random,
     ) !void {
         env.trace = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
         errdefer env.trace.deinit(allocator);
@@ -558,7 +558,7 @@ const Environment = struct {
 
     pub fn run(
         storage: *Storage,
-        random: std.rand.Random,
+        random: std.Random,
         commits_max: u32,
     ) !void {
         assert(commits_max > 0);
@@ -923,7 +923,7 @@ const Environment = struct {
 };
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
+    var rng = std.Random.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
     // Init mocked storage.

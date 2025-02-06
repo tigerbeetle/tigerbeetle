@@ -314,7 +314,7 @@ fn TestContextType(comptime streams_max: u32) type {
             try testing.expectEqualSlices(Value, expect, actual.items);
         }
 
-        fn fuzz(random: std.rand.Random, stream_key_count_max: u32) !void {
+        fn fuzz(random: std.Random, stream_key_count_max: u32) !void {
             if (log) std.debug.print("\n", .{});
             const allocator = testing.allocator;
 
@@ -386,7 +386,7 @@ fn TestContextType(comptime streams_max: u32) type {
             }
         }
 
-        fn fuzz_stream_len(random: std.rand.Random, stream_key_count_max: u32) u32 {
+        fn fuzz_stream_len(random: std.Random, stream_key_count_max: u32) u32 {
             return switch (random.uintLessThanBiased(u8, 100)) {
                 0...4 => 0,
                 5...9 => stream_key_count_max,
@@ -394,7 +394,7 @@ fn TestContextType(comptime streams_max: u32) type {
             };
         }
 
-        fn fuzz_stream_keys(random: std.rand.Random, stream: []u32) void {
+        fn fuzz_stream_keys(random: std.Random, stream: []u32) void {
             const key_max = random.intRangeLessThanBiased(u32, 512, 1024);
             switch (random.uintLessThanBiased(u8, 100)) {
                 0...4 => {
@@ -493,7 +493,7 @@ test "k_way_merge: fuzz" {
     const seed = std.crypto.random.int(u64);
     errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     try TestContextType(32).fuzz(random, 256);

@@ -6617,7 +6617,7 @@ test "StateMachine: Demuxer" {
         global_constants.state_machine_config,
     );
 
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = std.Random.DefaultPrng.init(42);
     inline for ([_]StateMachine.Operation{
         .create_accounts,
         .create_transfers,

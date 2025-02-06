@@ -39,7 +39,7 @@ const manifest_log_compaction_pace = ManifestLogPace.init(.{
 pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
 
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = std.Random.DefaultPrng.init(args.seed);
 
     const events_count = @min(
         args.events_max orelse @as(usize, 1e7),
@@ -55,10 +55,10 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 
 fn run_fuzz(
     allocator: std.mem.Allocator,
-    random: std.rand.Random,
+    random: std.Random,
     events: []const ManifestEvent,
 ) !void {
-    const storage_options = .{
+    const storage_options = Storage.Options{
         .seed = random.int(u64),
         .read_latency_min = 1,
         .read_latency_mean = 1 + random.uintLessThan(u64, 40),
@@ -126,7 +126,7 @@ const ManifestEvent = union(enum) {
 
 fn generate_events(
     allocator: std.mem.Allocator,
-    random: std.rand.Random,
+    random: std.Random,
     events_count: usize,
 ) ![]const ManifestEvent {
     var events = std.ArrayList(ManifestEvent).init(allocator);

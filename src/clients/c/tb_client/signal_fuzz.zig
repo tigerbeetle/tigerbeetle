@@ -25,7 +25,7 @@ const Context = struct {
 };
 
 pub fn main(args: fuzz.FuzzArgs) !void {
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = std.Random.DefaultPrng.init(args.seed);
     const random = prng.random();
     const events_max = args.events_max orelse 100;
 
