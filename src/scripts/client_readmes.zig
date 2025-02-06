@@ -584,7 +584,7 @@ const Context = struct {
             }
             assert(indent_min < 18);
 
-            lines = std.mem.split(u8, section, '\n');
+            lines = std.mem.splitScalar(u8, section, '\n');
             while (lines.next()) |line| {
                 if (line.len > 0) {
                     assert(line.len > indent_min);
