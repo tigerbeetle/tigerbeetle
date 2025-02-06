@@ -173,7 +173,7 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
 
 fn tidy_long_line(file: SourceFile) !?u32 {
     if (std.mem.endsWith(u8, file.path, "low_level_hash_vectors.zig")) return null;
-    var line_iterator = mem.split(u8, file.text, "\n");
+    var line_iterator = mem.splitScalar(u8, file.text, '\n');
     var line_index: u32 = 0;
     while (line_iterator.next()) |line| : (line_index += 1) {
         const line_length = try std.unicode.utf8CountCodepoints(line);
@@ -405,7 +405,7 @@ fn tidy_long_functions(
         const function_body_first_token = tree.firstToken(@intCast(function_body_node));
         const function_body_last_token = tree.lastToken(@intCast(function_body_node));
 
-        const innermost_function = .{
+        const innermost_function = Function{
             .fn_decl_line = tree.tokenLocation(0, function_decl_first_token).line,
             .first_token_location = tree.tokenLocation(0, function_body_first_token),
             .last_token_location = tree.tokenLocation(0, function_body_last_token),
@@ -459,7 +459,7 @@ fn tidy_generic_functions(
     name: []const u8,
 } {
     var line_count: u32 = 0;
-    var it = std.mem.split(u8, file.text, "\n");
+    var it = std.mem.splitScalar(u8, file.text, '\n');
     while (it.next()) |line| {
         line_count += 1;
         // Zig fmt enforces that the pattern `fn Foo(` is not split across multiple lines.
@@ -513,7 +513,7 @@ fn tidy_markdown_title(text: []const u8) !void {
     var fenced_block = false; // Avoid interpreting `# ` shell comments as titles.
     var heading_count: u32 = 0;
     var line_count: u32 = 0;
-    var it = std.mem.split(u8, text, "\n");
+    var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
         line_count += 1;
         if (mem.startsWith(u8, line, "```")) fenced_block = !fenced_block;
@@ -631,7 +631,7 @@ test "tidy changelog" {
     const changelog = try fs.cwd().readFileAlloc(allocator, "CHANGELOG.md", changelog_size_max);
     defer allocator.free(changelog);
 
-    var line_iterator = mem.split(u8, changelog, "\n");
+    var line_iterator = mem.splitScalar(u8, changelog, '\n');
     var line_index: usize = 0;
     while (line_iterator.next()) |line| : (line_index += 1) {
         if (std.mem.endsWith(u8, line, " ")) {
@@ -671,7 +671,7 @@ test "tidy no large blobs" {
     );
 
     var has_large_blobs = false;
-    var lines = std.mem.split(u8, objects, "\n");
+    var lines = std.mem.splitScalar(u8, objects, '\n');
     while (lines.next()) |line| {
         // Parsing lines like
         //     blob 1032 client/package.json

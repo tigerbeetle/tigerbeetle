@@ -139,10 +139,10 @@ const type_mappings = .{
 
 fn dotnet_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Enum, .Struct => return comptime get_mapped_type_name(Type) orelse
+        .@"enum", .@"struct" => return comptime get_mapped_type_name(Type) orelse
             @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
-        .Bool => return "byte",
-        .Int => |info| {
+        .bool => return "byte",
+        .int => |info| {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "byte",
@@ -153,12 +153,12 @@ fn dotnet_type(comptime Type: type) []const u8 {
                 else => @compileError("invalid int type"),
             };
         },
-        .Optional => |info| switch (@typeInfo(info.child)) {
-            .Pointer => return dotnet_type(info.child),
+        .optional => |info| switch (@typeInfo(info.child)) {
+            .pointer => return dotnet_type(info.child),
             else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
         },
-        .Pointer => |info| {
-            std.debug.assert(info.size != .Slice);
+        .pointer => |info| {
+            std.debug.assert(info.size != .slice);
             std.debug.assert(!info.is_allowzero);
 
             return if (comptime get_mapped_type_name(info.child)) |name|
@@ -166,7 +166,7 @@ fn dotnet_type(comptime Type: type) []const u8 {
             else
                 dotnet_type(info.child);
         },
-        .Void, .Opaque => return "IntPtr",
+        .void, .@"opaque" => return "IntPtr",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
     }
 }
@@ -185,7 +185,7 @@ fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []
     return comptime blk: {
         var len: usize = 0;
         var output: [input.len]u8 = undefined;
-        var iterator = std.mem.tokenize(u8, input, "_");
+        var iterator = std.mem.tokenizeScalar(u8, input, '_');
         while (iterator.next()) |word| {
             _ = std.ascii.lowerString(output[len..], word);
             output[len] = std.ascii.toUpper(output[len]);
@@ -208,7 +208,7 @@ fn emit_enum(
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
 ) !void {
-    const is_packed_struct = @TypeOf(type_info) == std.builtin.Type.Struct;
+    const is_packed_struct: bool = @TypeOf(type_info) == std.builtin.Type.Struct;
     if (is_packed_struct) {
         assert(type_info.layout == .@"packed");
         // Packed structs represented as Enum needs a Flags attribute:
@@ -285,7 +285,7 @@ fn emit_struct(
     // [MarshalAs(UnmanagedType.ByValArray)] attribute.
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
-            .Array => |array| {
+            .array => |array| {
                 try buffer.writer().print(
                     \\    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
                     \\    private unsafe struct {s}Data
@@ -332,7 +332,7 @@ fn emit_struct(
         const is_private = comptime mapping.is_private(field.name);
 
         switch (@typeInfo(field.type)) {
-            .Array => try buffer.writer().print(
+            .array => try buffer.writer().print(
                 \\    {s} {s}Data {s};
                 \\
                 \\
@@ -367,7 +367,7 @@ fn emit_struct(
             const is_read_only = comptime mapping.is_read_only(field.name);
 
             switch (@typeInfo(field.type)) {
-                .Array => try buffer.writer().print(
+                .array => try buffer.writer().print(
                     \\    {s} byte[] {s} {{ get => {s}.GetData(); {s}set => {s}.SetData(value); }}
                     \\
                     \\
@@ -438,7 +438,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         const mapping = type_mapping[1];
 
         switch (@typeInfo(ZigType)) {
-            .Struct => |info| switch (info.layout) {
+            .@"struct" => |info| switch (info.layout) {
                 .auto => @compileError(
                     "Only packed or extern structs are supported: " ++ @typeName(ZigType),
                 ),
@@ -458,7 +458,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                     @sizeOf(ZigType),
                 ),
             },
-            .Enum => |info| try emit_enum(
+            .@"enum" => |info| try emit_enum(
                 buffer,
                 ZigType,
                 info,

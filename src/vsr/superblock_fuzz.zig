@@ -40,7 +40,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 }
 
 fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: usize) !void {
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     var storage_fault_atlas = try StorageFaultAtlas.init(allocator, 1, random, .{
@@ -52,7 +52,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     });
     defer storage_fault_atlas.deinit(allocator);
 
-    const storage_options = .{
+    const storage_options = Storage.Options{
         .replica_index = 0,
         .seed = random.int(u64),
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.

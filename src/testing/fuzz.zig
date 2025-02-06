@@ -10,11 +10,11 @@ pub const allocator = gpa.allocator();
 
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
-pub fn random_int_exponential(random: std.rand.Random, comptime T: type, avg: T) T {
+pub fn random_int_exponential(random: std.Random, comptime T: type, avg: T) T {
     comptime {
         const info = @typeInfo(T);
-        assert(info == .Int);
-        assert(info.Int.signedness == .unsigned);
+        assert(info == .int);
+        assert(info.int.signedness == .unsigned);
     }
     const exp = random.floatExp(f64) * @as(f64, @floatFromInt(avg));
     return std.math.lossyCast(T, exp);
@@ -26,10 +26,10 @@ pub fn DistributionType(comptime Enum: type) type {
 
 /// Return a distribution for use with `random_enum`.
 pub fn random_enum_distribution(
-    random: std.rand.Random,
+    random: std.Random,
     comptime Enum: type,
 ) DistributionType(Enum) {
-    const fields = @typeInfo(DistributionType(Enum)).Struct.fields;
+    const fields = @typeInfo(DistributionType(Enum)).@"struct".fields;
     var distribution: DistributionType(Enum) = undefined;
     var total: f64 = 0;
     inline for (fields) |field| {
@@ -46,11 +46,11 @@ pub fn random_enum_distribution(
 
 /// Generate a random `Enum`, given a distribution over the fields of the enum.
 pub fn random_enum(
-    random: std.rand.Random,
+    random: std.Random,
     comptime Enum: type,
     distribution: DistributionType(Enum),
 ) Enum {
-    const fields = @typeInfo(Enum).Enum.fields;
+    const fields = @typeInfo(Enum).@"enum".fields;
     var total: f64 = 0;
     inline for (fields) |field| {
         total += @field(distribution, field.name);

@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const vsr = @import("vsr.zig");
 const tb = vsr.tb_client;
 
-pub const std_options = .{
+pub const std_options = std.Options{
     .log_level = .debug,
     .logFn = tb.Logging.application_logger,
 };
@@ -17,14 +17,17 @@ comptime {
     }
 
     @export(
-        tb.register_log_callback,
+        &tb.register_log_callback,
         .{ .name = "tb_client_register_log_callback", .linkage = .strong },
     );
-    @export(init, .{ .name = "tb_client_init", .linkage = .strong });
-    @export(init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
-    @export(tb.completion_context, .{ .name = "tb_client_completion_context", .linkage = .strong });
-    @export(tb.submit, .{ .name = "tb_client_submit", .linkage = .strong });
-    @export(tb.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
+    @export(&init, .{ .name = "tb_client_init", .linkage = .strong });
+    @export(&init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
+    @export(
+        &tb.completion_context,
+        .{ .name = "tb_client_completion_context", .linkage = .strong },
+    );
+    @export(&tb.submit, .{ .name = "tb_client_submit", .linkage = .strong });
+    @export(&tb.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
 }
 
 fn init(

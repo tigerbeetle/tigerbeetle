@@ -49,8 +49,8 @@ fn launder_type(comptime T: type, comptime value: anytype) T {
     {
         return value;
     }
-    if (@typeInfo(T) == .Enum) {
-        assert(@typeInfo(@TypeOf(value)) == .Enum);
+    if (@typeInfo(T) == .@"enum") {
+        assert(@typeInfo(@TypeOf(value)) == .@"enum");
         return @field(T, @tagName(value));
     }
     unreachable;
