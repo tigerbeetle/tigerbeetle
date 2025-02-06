@@ -11,6 +11,7 @@
 //!   This is a special case of the following rule-of-thumb: length of `build.zig` should be O(1).
 const std = @import("std");
 
+const stdx = @import("stdx.zig");
 const flags = @import("flags.zig");
 const Shell = @import("shell.zig");
 
@@ -20,6 +21,18 @@ const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const changelog = @import("./scripts/changelog.zig");
 const antithesis = @import("./scripts/antithesis.zig");
+
+pub fn log_fn(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (comptime !std.log.logEnabled(message_level, scope)) return;
+    stdx.log_with_timestamp(message_level, scope, format, args);
+}
+
+pub const std_options = .{ .logFn = log_fn };
 
 const CLIArgs = union(enum) {
     cfo: cfo.CLIArgs,
