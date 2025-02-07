@@ -607,12 +607,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// A break is a missing header or a header not connected to the next header by hash chain.
         /// On finding the highest break, extends the range downwards to cover as much as possible.
         ///
-        /// We expect that `op_max` (`replica.op`) must exist.
-        /// `op_min` may exist or not.
-        ///
-        /// A range will never include `op_max` because this must be up to date as the latest op.
-        /// A range may include `op_min`.
-        /// We must therefore first resolve any op uncertainty so that we can trust `op_max` here.
+        /// Both `op_min` and `op_max` may or may not exist. So the HeaderRange returned may include
+        /// `op_min`/`op_max`.
         ///
         /// For example: If ops 3, 9 and 10 are missing, returns: `{ .op_min = 9, .op_max = 10 }`.
         ///
@@ -624,7 +620,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             op_max: u64,
         ) ?HeaderRange {
             assert(journal.status == .recovered);
-            assert(journal.header_with_op(op_max) != null);
             assert(op_max >= op_min);
             assert(op_max - op_min + 1 <= slot_count);
             var range: ?HeaderRange = null;
@@ -691,7 +686,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         }
                     }
                 } else {
-                    assert(op < op_max);
+                    assert(op <= op_max);
 
                     // A does not exist, or A has an older (or newer if reordered) op number:
                     if (range) |*r| {
@@ -700,7 +695,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         r.op_min = op;
                     } else {
                         // Open range:
-                        assert(B != null);
                         range = .{ .op_min = op, .op_max = op };
                     }
                 }
@@ -712,7 +706,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(r.op_min >= op_min);
                 // We can never repair op_max (replica.op) since that is the latest op:
                 // We can assume this because any existing view jump barrier must first be resolved.
-                assert(r.op_max < op_max);
+                assert(r.op_max <= op_max);
             }
 
             return range;
