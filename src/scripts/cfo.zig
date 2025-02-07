@@ -207,11 +207,17 @@ fn run_fuzzers(
     var tasks = Tasks.init(shell.arena.allocator());
     defer tasks.deinit();
 
-    for (0..options.budget_seconds) |second| {
-        const iteration_last = second == options.budget_seconds - 1;
-        const iteration_pull = second % options.refresh_seconds == 0;
-        const iteration_push = (second % options.refresh_seconds == 0 and second > 0) or
-            iteration_last;
+    // Some fuzzers may complete in under a second.
+    // Ticking only once per second would leave the CPU idle.
+    const second_ticks = 2;
+
+    for (0..options.budget_seconds * second_ticks) |tick| {
+        const second = @divFloor(tick, second_ticks);
+        const tick_first = tick % second_ticks == 0;
+        const tick_final = tick % second_ticks == second_ticks - 1;
+        const iteration_last = tick_final and second == options.budget_seconds - 1;
+        const iteration_pull = tick_first and second % options.refresh_seconds == 0;
+        const iteration_push = (iteration_pull and second > 0) or iteration_last;
 
         if (iteration_pull) {
             try run_fuzzers_prepare_tasks(&tasks, shell, gh_token);
@@ -276,7 +282,7 @@ fn run_fuzzers(
                     std.meta.stringToEnum(Fuzzer, fuzzer.seed.fuzzer).?,
                     fuzzer.seed.commit_sha,
                 ).?;
-                task.runtime += 1;
+                task.runtime_ticks += 1;
                 // Us a large (arbitrary) constant as the numerator to avoid rounding errors.
                 // Also this ensures that the initial +=1 when starting the process has relatively
                 // little impact, to avoid biasing scheduling in favor of long-running fuzzers.
@@ -284,8 +290,8 @@ fn run_fuzzers(
             }
         }
 
-        // Wait for a second before polling for completion.
-        std.time.sleep(1 * std.time.ns_per_s);
+        // Wait a tick before polling for completion.
+        std.time.sleep(@divFloor(1 * std.time.ns_per_s, second_ticks));
 
         var running_count: u32 = 0;
         for (children) |*fuzzer_or_null| {
@@ -360,7 +366,7 @@ fn run_fuzzers(
         log.info("commit={s} fuzzer={s:<24} runtime={}s (active={})", .{
             task.seed_template.commit_sha[0..7],
             @tagName(task.seed_template.fuzzer),
-            task.runtime,
+            @divFloor(task.runtime_ticks, second_ticks),
             task.generation == tasks.generation,
         });
     }
@@ -385,7 +391,7 @@ const Tasks = struct {
         /// Inactive tasks have `task.generation < tasks.generation`.
         generation: u64,
         /// This is just used for logging, not scheduling.
-        runtime: u64,
+        runtime_ticks: u64,
         /// Weight-adjusted runtime used for scheduling. Always positive and finite.
         /// Cumulative `runtime / weight`, but since `weight` can change over time, this is more
         /// precise.
@@ -500,7 +506,7 @@ const Tasks = struct {
                 .seed_template = seed_template,
                 .generation = tasks.generation,
                 .weight = 0, // To be initialized later.
-                .runtime = 0,
+                .runtime_ticks = 0,
                 .runtime_virtual = tasks.runtime_init,
             });
 
