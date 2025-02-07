@@ -1439,7 +1439,6 @@ pub fn ReplicaType(
                 .commit => |m| self.on_commit(m),
                 .start_view_change => |m| self.on_start_view_change(m),
                 .do_view_change => |m| self.on_do_view_change(m),
-                .start_view_deprecated => |m| self.on_start_view(m),
                 .start_view => |m| self.on_start_view(m),
                 .request_start_view => |m| self.on_request_start_view(m),
                 .request_prepare => |m| self.on_request_prepare(m),
@@ -2281,8 +2280,7 @@ pub fn ReplicaType(
         // haven’t executed previously, advance their commit number, and update the information in
         // their client table.
         fn on_start_view(self: *Replica, message: *Message.StartView) void {
-            assert(message.header.command == .start_view or
-                message.header.command == .start_view_deprecated);
+            assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message.base_const())) return;
 
             if (self.status == .recovering_head) {
@@ -2373,16 +2371,6 @@ pub fn ReplicaType(
         }
 
         fn on_start_view_set_checkpoint(self: *Replica, message: *Message.StartView) bool {
-            // Accept SV messages for state sync only from replicas that are on the new
-            // CheckpointState.
-            if (message.header.command == .start_view_deprecated) {
-                log.warn("{}: on_start_view_set_checkpoint: ignoring {s}", .{
-                    self.replica,
-                    @tagName(message.header.command),
-                });
-                return false;
-            }
-
             const view_checkpoint = start_view_message_checkpoint(message);
 
             if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
@@ -2487,14 +2475,7 @@ pub fn ReplicaType(
                             break;
                         }
                     }
-                } else {
-                    assert(message.header.command == .start_view_deprecated);
-                    log.warn("{}: on_start_view_set_journal: {s} headers too far ahead", .{
-                        self.replica,
-                        @tagName(message.header.command),
-                    });
-                    return;
-                }
+                } else unreachable;
 
                 for (view_headers) |*header| {
                     if (header.op <= self.op_prepare_max_sync()) {
@@ -2567,24 +2548,16 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
             assert(self.primary());
 
-            const start_view_messages = self.create_start_view_message(message.header.nonce);
-            defer self.message_bus.unref(start_view_messages.deprecated);
-            defer self.message_bus.unref(start_view_messages.next);
+            const start_view_message = self.create_start_view_message(message.header.nonce);
+            defer self.message_bus.unref(start_view_message);
 
-            assert(start_view_messages.deprecated.header.command == .start_view_deprecated);
-            assert(start_view_messages.next.header.command == .start_view);
-
-            for ([_]*Message.StartView{
-                start_view_messages.deprecated,
-                start_view_messages.next,
-            }) |start_view_message| {
-                assert(start_view_message.references == 1);
-                assert(start_view_message.header.view == self.view);
-                assert(start_view_message.header.op == self.op);
-                assert(start_view_message.header.commit_max == self.commit_max);
-                assert(start_view_message.header.nonce == message.header.nonce);
-                self.send_message_to_replica(message.header.replica, start_view_message);
-            }
+            assert(start_view_message.header.command == .start_view);
+            assert(start_view_message.references == 1);
+            assert(start_view_message.header.view == self.view);
+            assert(start_view_message.header.op == self.op);
+            assert(start_view_message.header.commit_max == self.commit_max);
+            assert(start_view_message.header.nonce == message.header.nonce);
+            self.send_message_to_replica(message.header.replica, start_view_message);
         }
 
         /// If the requested prepare has been guaranteed by this replica:
@@ -5123,10 +5096,7 @@ pub fn ReplicaType(
 
         /// Construct a SV message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_start_view_message(self: *Replica, nonce: u128) struct {
-            deprecated: *Message.StartView,
-            next: *Message.StartView,
-        } {
+        fn create_start_view_message(self: *Replica, nonce: u128) *Message.StartView {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.syncing != .updating_checkpoint);
             assert(self.replica == self.primary_index(self.view));
@@ -5180,68 +5150,8 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
-            const message_deprecated = self.message_bus.get_message(.start_view_deprecated);
-            defer self.message_bus.unref(message_deprecated);
-
-            message_deprecated.header.* = message.header.*;
-            message_deprecated.header.command = .start_view_deprecated;
-
-            const checkpoint_new: *const vsr.CheckpointState =
-                &self.superblock.working.vsr_state.checkpoint;
-            const checkpoint_old: vsr.CheckpointStateOld = vsr.CheckpointStateOld{
-                .header = checkpoint_new.header,
-                .parent_checkpoint_id = checkpoint_new.parent_checkpoint_id,
-                .grandparent_checkpoint_id = checkpoint_new.grandparent_checkpoint_id,
-
-                .free_set_checksum = checkpoint_new.free_set_blocks_acquired_checksum,
-                .free_set_last_block_checksum = checkpoint_new
-                    .free_set_blocks_acquired_last_block_checksum,
-                .free_set_last_block_address = checkpoint_new
-                    .free_set_blocks_acquired_last_block_address,
-                .free_set_size = checkpoint_new.free_set_blocks_acquired_size,
-
-                .client_sessions_checksum = checkpoint_new.client_sessions_checksum,
-                .client_sessions_last_block_checksum = checkpoint_new
-                    .client_sessions_last_block_checksum,
-                .client_sessions_last_block_address = checkpoint_new
-                    .client_sessions_last_block_address,
-                .client_sessions_size = checkpoint_new.client_sessions_size,
-
-                .manifest_oldest_checksum = checkpoint_new.manifest_oldest_checksum,
-                .manifest_oldest_address = checkpoint_new.manifest_oldest_address,
-                .manifest_newest_checksum = checkpoint_new.manifest_newest_checksum,
-                .manifest_newest_address = checkpoint_new.manifest_newest_address,
-                .manifest_block_count = checkpoint_new.manifest_block_count,
-
-                .snapshots_block_checksum = checkpoint_new.snapshots_block_checksum,
-                .snapshots_block_address = checkpoint_new.snapshots_block_address,
-
-                .storage_size = checkpoint_new.storage_size,
-                .release = checkpoint_new.release,
-            };
-            assert(@sizeOf(vsr.CheckpointState) == @sizeOf(vsr.CheckpointStateOld));
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                message_deprecated.body_used()[0..@sizeOf(vsr.CheckpointState)],
-                std.mem.asBytes(&checkpoint_old),
-            );
-
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                message_deprecated.body_used()[@sizeOf(vsr.CheckpointState)..],
-                message.body_used()[@sizeOf(vsr.CheckpointState)..],
-            );
-            message_deprecated.header.set_checksum_body(message_deprecated.body_used());
-            message_deprecated.header.set_checksum();
-
             assert(message.header.invalid() == null);
-            assert(message_deprecated.header.invalid() == null);
-            return .{
-                .deprecated = message_deprecated.ref(),
-                .next = message.ref(),
-            };
+            return message.ref();
         }
 
         fn update_start_view_headers(self: *Replica) void {
@@ -6061,8 +5971,7 @@ pub fn ReplicaType(
 
         fn ignore_view_change_message(self: *const Replica, message: *const Message) bool {
             assert(message.header.command == .do_view_change or
-                message.header.command == .start_view or
-                message.header.command == .start_view_deprecated);
+                message.header.command == .start_view);
             assert(self.status != .recovering); // Single node clusters don't have view changes.
             assert(message.header.replica < self.replica_count);
 
@@ -6074,7 +5983,7 @@ pub fn ReplicaType(
             }
 
             switch (message.header.into_any()) {
-                .start_view, .start_view_deprecated => |message_header| {
+                .start_view => |message_header| {
                     // This may be caused by faults in the network topology.
                     if (message.header.replica == self.replica) {
                         log.warn("{}: on_{s}: misdirected message (self)", .{
@@ -8311,7 +8220,7 @@ pub fn ReplicaType(
                     assert(header.checkpoint_op == self.op_checkpoint());
                     assert(header.log_view == self.log_view);
                 },
-                .start_view, .start_view_deprecated => |header| {
+                .start_view => |header| {
                     assert(!self.standby());
                     assert(self.status == .normal or self.status == .view_change);
                     assert(self.replica == self.primary_index(self.view));
@@ -8415,7 +8324,6 @@ pub fn ReplicaType(
                 // - A SV or a prepare_ok imply the log_view.
                 if (message.header.command == .do_view_change or
                     message.header.command == .start_view or
-                    message.header.command == .start_view_deprecated or
                     message.header.command == .prepare_ok)
                 {
                     if (self.log_view_durable() < self.log_view) {
@@ -8594,17 +8502,13 @@ pub fn ReplicaType(
             // to guarantee freshness of the message.
             const nonce = 0;
 
-            const start_view_messages = self.create_start_view_message(nonce);
-            defer self.message_bus.unref(start_view_messages.deprecated);
-            defer self.message_bus.unref(start_view_messages.next);
+            const start_view_message = self.create_start_view_message(nonce);
+            defer self.message_bus.unref(start_view_message);
 
-            assert(start_view_messages.deprecated.header.command == .start_view_deprecated);
-            assert(start_view_messages.next.header.command == .start_view);
-            assert(start_view_messages.deprecated.header.nonce == 0);
-            assert(start_view_messages.next.header.nonce == 0);
+            assert(start_view_message.header.command == .start_view);
+            assert(start_view_message.header.nonce == 0);
 
-            self.send_message_to_other_replicas(start_view_messages.deprecated);
-            self.send_message_to_other_replicas(start_view_messages.next);
+            self.send_message_to_other_replicas(start_view_message);
         }
 
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
@@ -10003,7 +9907,7 @@ pub fn ReplicaType(
                 => if (self.status == .recovering_head) Status.normal else .view_change,
                 // on_start_view() handles the (possible) transition to view-change manually, before
                 // transitioning to normal.
-                .start_view, .start_view_deprecated => return,
+                .start_view => return,
                 else => return,
             };
 
@@ -10903,8 +10807,7 @@ fn start_view_message_checkpoint(message: *const Message.StartView) *const vsr.C
 }
 
 fn start_view_message_headers(message: *const Message.StartView) []const Header.Prepare {
-    assert(message.header.command == .start_view or
-        message.header.command == .start_view_deprecated);
+    assert(message.header.command == .start_view);
 
     // Body must contain at least one header.
     assert(message.header.size > @sizeOf(Header) + @sizeOf(vsr.CheckpointState));
