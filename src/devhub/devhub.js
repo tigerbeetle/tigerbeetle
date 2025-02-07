@@ -142,7 +142,7 @@ async function mainSeeds() {
           <td><code>${record.command}</code></td>
           <td><time>${seedDuration}</time></td>
           <td><time>${seedFreshness} ago</time></td>
-          <td>${record.count}</td>
+          <td>${record.count.toLocaleString('en-US').replace(/,/g, '&nbsp;')}</td>
       `;
     tableDom.appendChild(rowDom);
   }
