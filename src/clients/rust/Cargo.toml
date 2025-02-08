@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 bitflags = "2.6.0"
 futures = "0.3.31"
-thiserror = "2.0.3"
 
 [build-dependencies]
 anyhow = "1.0.93"

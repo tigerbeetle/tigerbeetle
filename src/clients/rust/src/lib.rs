@@ -395,251 +395,343 @@ bitflags! {
     }
 }
 
-#[derive(thiserror::Error, Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[non_exhaustive]
 pub enum CreateAccountResult {
-    #[error("linked event failed")]
     LinkedEventFailed,
-    #[error("linked event chain open")]
     LinkedEventChainOpen,
-    #[error("imported event expected")]
     ImportedEventExpected,
-    #[error("imported event not expected")]
     ImportedEventNotExpected,
-    #[error("timestamp must be zero")]
     TimestampMustBeZero,
-    #[error("imported event timestamp out of range")]
     ImportedEventTimestampOutOfRange,
-    #[error("imported event timestamp must not advance")]
     ImportedEventTimestampMustNotAdvance,
-    #[error("reserved field")]
     ReservedField,
-    #[error("reserved flag")]
     ReservedFlag,
-    #[error("id must not be zero")]
     IdMustNotBeZero,
-    #[error("id must not be int max")]
     IdMustNotBeIntMax,
-    #[error("exists with different flags")]
     ExistsWithDifferentFlags,
-    #[error("exists with different user_data_128")]
     ExistsWithDifferentUserData128,
-    #[error("exists with different user_data_64")]
     ExistsWithDifferentUserData64,
-    #[error("exists with different user_data_32")]
     ExistsWithDifferentUserData32,
-    #[error("exists with different ledger")]
     ExistsWithDifferentLedger,
-    #[error("exists with different code")]
     ExistsWithDifferentCode,
-    #[error("exists")]
     Exists,
-    #[error("flags are mutually exclusive")]
     FlagsAreMutuallyExclusive,
-    #[error("debits_pending must be zero")]
     DebitsPendingMustBeZero,
-    #[error("debits_posted must be zero")]
     DebitsPostedMustBeZero,
-    #[error("credits_pending must be zero")]
     CreditsPendingMustBeZero,
-    #[error("credit_posted must zero")]
     CreditsPostedMustBeZero,
-    #[error("ledger must not be zero")]
     LedgerMustNotBeZero,
-    #[error("code must not be zero")]
     CodeMustNotBeZero,
-    #[error("imported event timestamp must not regress")]
     ImportedEventTimestampMustNotRegress,
-    #[error("unknown {0}")]
     Unknown(u32),
 }
 
-#[derive(thiserror::Error, Debug, Copy, Clone)]
+impl std::error::Error for CreateAccountResult {}
+impl core::fmt::Display for CreateAccountResult {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            Self::LinkedEventFailed => f.write_str("linked event failed"),
+            Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
+            Self::ImportedEventExpected => f.write_str("imported event expected"),
+            Self::ImportedEventNotExpected => f.write_str("imported event not expected"),
+            Self::TimestampMustBeZero => f.write_str("timestamp must be zero"),
+            Self::ImportedEventTimestampOutOfRange => {
+                f.write_str("imported event timestamp out of range")
+            }
+            Self::ImportedEventTimestampMustNotAdvance => {
+                f.write_str("imported event timestamp must not advance")
+            }
+            Self::ReservedField => f.write_str("reserved field"),
+            Self::ReservedFlag => f.write_str("reserved flag"),
+            Self::IdMustNotBeZero => f.write_str("id must not be zero"),
+            Self::IdMustNotBeIntMax => f.write_str("id must not be int max"),
+            Self::ExistsWithDifferentFlags => f.write_str("exists with different flags"),
+            Self::ExistsWithDifferentUserData128 => {
+                f.write_str("exists with different user_data_128")
+            }
+            Self::ExistsWithDifferentUserData64 => {
+                f.write_str("exists with different user_data_64")
+            }
+            Self::ExistsWithDifferentUserData32 => {
+                f.write_str("exists with different user_data_32")
+            }
+            Self::ExistsWithDifferentLedger => f.write_str("exists with different ledger"),
+            Self::ExistsWithDifferentCode => f.write_str("exists with different code"),
+            Self::Exists => f.write_str("exists"),
+            Self::FlagsAreMutuallyExclusive => f.write_str("flags are mutually exclusive"),
+            Self::DebitsPendingMustBeZero => f.write_str("debits_pending must be zero"),
+            Self::DebitsPostedMustBeZero => f.write_str("debits_posted must be zero"),
+            Self::CreditsPendingMustBeZero => f.write_str("credits_pending must be zero"),
+            Self::CreditsPostedMustBeZero => f.write_str("credit_posted must zero"),
+            Self::LedgerMustNotBeZero => f.write_str("ledger must not be zero"),
+            Self::CodeMustNotBeZero => f.write_str("code must not be zero"),
+            Self::ImportedEventTimestampMustNotRegress => {
+                f.write_str("imported event timestamp must not regress")
+            }
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 #[non_exhaustive]
 pub enum CreateTransferResult {
-    #[error("link event failed")]
     LinkedEventFailed,
-    #[error("linked event chain open")]
     LinkedEventChainOpen,
-    #[error("imported event expected")]
     ImportedEventExpected,
-    #[error("imported event not expected")]
     ImportedEventNotExpected,
-    #[error("timestamp must be zero")]
     TimestampMustBeZero,
-    #[error("imported event timestamp out of range")]
     ImportedEventTimestampOutOfRange,
-    #[error("imported event timestamp must not advance")]
     ImportedEventTimestampMustNotAdvance,
-    #[error("reserved flag")]
     ReservedFlag,
-    #[error("id must not be zero")]
     IdMustNotBeZero,
-    #[error("id must not be int max")]
     IdMustNotBeIntMax,
-    #[error("exists with different flags")]
     ExistsWithDifferentFlags,
-    #[error("exists with different pending_id")]
     ExistsWithDifferentPendingId,
-    #[error("exists with different timeout")]
     ExistsWithDifferentTimeout,
-    #[error("exists with different debit_account_id")]
     ExistsWithDifferentDebitAccountId,
-    #[error("exists with different credit_account_id")]
     ExistsWithDifferentCreditAccountId,
-    #[error("exists with different amount")]
     ExistsWithDifferentAmount,
-    #[error("exists with different user_data_128")]
     ExistsWithDifferentUserData128,
-    #[error("exists with different user_data_64")]
     ExistsWithDifferentUserData64,
-    #[error("exists with different user_data_32")]
     ExistsWithDifferentUserData32,
-    #[error("exists with different ledger")]
     ExistsWithDifferentLedger,
-    #[error("exists with different code")]
     ExistsWithDifferentCode,
-    #[error("exists")]
     Exists,
-    #[error("id already failed")]
     IdAlreadyFailed,
-    #[error("flags are mutually exclusive")]
     FlagsAreMutuallyExclusive,
-    #[error("debit_account_id must not be zero")]
     DebitAccountIdMustNotBeZero,
-    #[error("debit_account_id must not be int max")]
     DebitAccountIdMustNotBeIntMax,
-    #[error("credit_account_id must not be zero")]
     CreditAccountIdMustNotBeZero,
-    #[error("credit_account_id must not be int max")]
     CreditAccountIdMustNotBeIntMax,
-    #[error("accounts must be different")]
     AccountsMustBeDifferent,
-    #[error("pending_id must be zero")]
     PendingIdMustBeZero,
-    #[error("pending_id must not be zero")]
     PendingIdMustNotBeZero,
-    #[error("pending_id must not be int max")]
     PendingIdMustNotBeIntMax,
-    #[error("pending_id must be different")]
     PendingIdMustBeDifferent,
-    #[error("timeout reserved for pending transfer")]
     TimeoutReservedForPendingTransfer,
-    #[error("closing transfers must be pending")]
     ClosingTransferMustBePending,
-    #[error("amount must not be zero")]
     AmountMustNotBeZero,
-    #[error("ledger must not be zero")]
     LedgerMustNotBeZero,
-    #[error("code must not be zero")]
     CodeMustNotBeZero,
-    #[error("debit account not found")]
     DebitAccountNotFound,
-    #[error("credit account not found")]
     CreditAccountNotFound,
-    #[error("accounts must have the same ledger")]
     AccountsMustHaveTheSameLedger,
-    #[error("transfer must have the same ledger as accounts")]
     TransferMustHaveTheSameLedgerAsAccounts,
-    #[error("pending transfer not found")]
     PendingTransferNotFound,
-    #[error("pending transfer not pending")]
     PendingTransferNotPending,
-    #[error("pending transfer has different debit_account_id")]
     PendingTransferHasDifferentDebitAccountId,
-    #[error("pending transfer has different credit_account_id")]
     PendingTransferHasDifferentCreditAccountId,
-    #[error("pending transfer has different ledger")]
     PendingTransferHasDifferentLedger,
-    #[error("pending transefer has different code")]
     PendingTransferHasDifferentCode,
-    #[error("exceeds pending transfer amount")]
     ExceedsPendingTransferAmount,
-    #[error("pending transfer has different amount")]
     PendingTransferHasDifferentAmount,
-    #[error("pending transfer already posted")]
     PendingTransferAlreadyPosted,
-    #[error("pending transfer already voided")]
     PendingTransferAlreadyVoided,
-    #[error("pending transfer expired")]
     PendingTransferExpired,
-    #[error("imported event timestamp must not regress")]
     ImportedEventTimestampMustNotRegress,
-    #[error("imported event timestamp must postdate debit account")]
     ImportedEventTimestampMustPostdateDebitAccount,
-    #[error("imported event timestamp must postdate credit account")]
     ImportedEventTimestampMustPostdateCreditAccount,
-    #[error("imported event timeout must be zero")]
     ImportedEventTimeoutMustBeZero,
-    #[error("debit account already closed")]
     DebitAccountAlreadyClosed,
-    #[error("credit account alreday closed")]
     CreditAccountAlreadyClosed,
-    #[error("overflows debits_pending")]
     OverflowsDebitsPending,
-    #[error("overflows credits_pending")]
     OverflowsCreditsPending,
-    #[error("overflows debits_posted")]
     OverflowsDebitsPosted,
-    #[error("overflows credits_posted")]
     OverflowsCreditsPosted,
-    #[error("overflows debits")]
     OverflowsDebits,
-    #[error("overflows credits")]
     OverflowsCredits,
-    #[error("overflows timeout")]
     OverflowsTimeout,
-    #[error("exceeds credits")]
     ExceedsCredits,
-    #[error("exceeds debits")]
     ExceedsDebits,
-    #[error("unknown {0}")]
     Unknown(u32),
 }
 
-#[derive(thiserror::Error, Debug, Copy, Clone)]
+impl std::error::Error for CreateTransferResult {}
+impl core::fmt::Display for CreateTransferResult {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            Self::LinkedEventFailed => f.write_str("link event failed"),
+            Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
+            Self::ImportedEventExpected => f.write_str("imported event expected"),
+            Self::ImportedEventNotExpected => f.write_str("imported event not expected"),
+            Self::TimestampMustBeZero => f.write_str("timestamp must be zero"),
+            Self::ImportedEventTimestampOutOfRange => {
+                f.write_str("imported event timestamp out of range")
+            }
+            Self::ImportedEventTimestampMustNotAdvance => {
+                f.write_str("imported event timestamp must not advance")
+            }
+            Self::ReservedFlag => f.write_str("reserved flag"),
+            Self::IdMustNotBeZero => f.write_str("id must not be zero"),
+            Self::IdMustNotBeIntMax => f.write_str("id must not be int max"),
+            Self::ExistsWithDifferentFlags => f.write_str("exists with different flags"),
+            Self::ExistsWithDifferentPendingId => f.write_str("exists with different pending_id"),
+            Self::ExistsWithDifferentTimeout => f.write_str("exists with different timeout"),
+            Self::ExistsWithDifferentDebitAccountId => {
+                f.write_str("exists with different debit_account_id")
+            }
+            Self::ExistsWithDifferentCreditAccountId => {
+                f.write_str("exists with different credit_account_id")
+            }
+            Self::ExistsWithDifferentAmount => f.write_str("exists with different amount"),
+            Self::ExistsWithDifferentUserData128 => {
+                f.write_str("exists with different user_data_128")
+            }
+            Self::ExistsWithDifferentUserData64 => {
+                f.write_str("exists with different user_data_64")
+            }
+            Self::ExistsWithDifferentUserData32 => {
+                f.write_str("exists with different user_data_32")
+            }
+            Self::ExistsWithDifferentLedger => f.write_str("exists with different ledger"),
+            Self::ExistsWithDifferentCode => f.write_str("exists with different code"),
+            Self::Exists => f.write_str("exists"),
+            Self::IdAlreadyFailed => f.write_str("id already failed"),
+            Self::FlagsAreMutuallyExclusive => f.write_str("flags are mutually exclusive"),
+            Self::DebitAccountIdMustNotBeZero => f.write_str("debit_account_id must not be zero"),
+            Self::DebitAccountIdMustNotBeIntMax => {
+                f.write_str("debit_account_id must not be int max")
+            }
+            Self::CreditAccountIdMustNotBeZero => f.write_str("credit_account_id must not be zero"),
+            Self::CreditAccountIdMustNotBeIntMax => {
+                f.write_str("credit_account_id must not be int max")
+            }
+            Self::AccountsMustBeDifferent => f.write_str("accounts must be different"),
+            Self::PendingIdMustBeZero => f.write_str("pending_id must be zero"),
+            Self::PendingIdMustNotBeZero => f.write_str("pending_id must not be zero"),
+            Self::PendingIdMustNotBeIntMax => f.write_str("pending_id must not be int max"),
+            Self::PendingIdMustBeDifferent => f.write_str("pending_id must be different"),
+            Self::TimeoutReservedForPendingTransfer => {
+                f.write_str("timeout reserved for pending transfer")
+            }
+            Self::ClosingTransferMustBePending => f.write_str("closing transfers must be pending"),
+            Self::AmountMustNotBeZero => f.write_str("amount must not be zero"),
+            Self::LedgerMustNotBeZero => f.write_str("ledger must not be zero"),
+            Self::CodeMustNotBeZero => f.write_str("code must not be zero"),
+            Self::DebitAccountNotFound => f.write_str("debit account not found"),
+            Self::CreditAccountNotFound => f.write_str("credit account not found"),
+            Self::AccountsMustHaveTheSameLedger => {
+                f.write_str("accounts must have the same ledger")
+            }
+            Self::TransferMustHaveTheSameLedgerAsAccounts => {
+                f.write_str("transfer must have the same ledger as accounts")
+            }
+            Self::PendingTransferNotFound => f.write_str("pending transfer not found"),
+            Self::PendingTransferNotPending => f.write_str("pending transfer not pending"),
+            Self::PendingTransferHasDifferentDebitAccountId => {
+                f.write_str("pending transfer has different debit_account_id")
+            }
+            Self::PendingTransferHasDifferentCreditAccountId => {
+                f.write_str("pending transfer has different credit_account_id")
+            }
+            Self::PendingTransferHasDifferentLedger => {
+                f.write_str("pending transfer has different ledger")
+            }
+            Self::PendingTransferHasDifferentCode => {
+                f.write_str("pending transefer has different code")
+            }
+            Self::ExceedsPendingTransferAmount => f.write_str("exceeds pending transfer amount"),
+            Self::PendingTransferHasDifferentAmount => {
+                f.write_str("pending transfer has different amount")
+            }
+            Self::PendingTransferAlreadyPosted => f.write_str("pending transfer already posted"),
+            Self::PendingTransferAlreadyVoided => f.write_str("pending transfer already voided"),
+            Self::PendingTransferExpired => f.write_str("pending transfer expired"),
+            Self::ImportedEventTimestampMustNotRegress => {
+                f.write_str("imported event timestamp must not regress")
+            }
+            Self::ImportedEventTimestampMustPostdateDebitAccount => {
+                f.write_str("imported event timestamp must postdate debit account")
+            }
+            Self::ImportedEventTimestampMustPostdateCreditAccount => {
+                f.write_str("imported event timestamp must postdate credit account")
+            }
+            Self::ImportedEventTimeoutMustBeZero => {
+                f.write_str("imported event timeout must be zero")
+            }
+            Self::DebitAccountAlreadyClosed => f.write_str("debit account already closed"),
+            Self::CreditAccountAlreadyClosed => f.write_str("credit account alreday closed"),
+            Self::OverflowsDebitsPending => f.write_str("overflows debits_pending"),
+            Self::OverflowsCreditsPending => f.write_str("overflows credits_pending"),
+            Self::OverflowsDebitsPosted => f.write_str("overflows debits_posted"),
+            Self::OverflowsCreditsPosted => f.write_str("overflows credits_posted"),
+            Self::OverflowsDebits => f.write_str("overflows debits"),
+            Self::OverflowsCredits => f.write_str("overflows credits"),
+            Self::OverflowsTimeout => f.write_str("overflows timeout"),
+            Self::ExceedsCredits => f.write_str("exceeds credits"),
+            Self::ExceedsDebits => f.write_str("exceeds debits"),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 #[non_exhaustive]
 pub enum Status {
-    #[error("unexpected")]
     Unexpected,
-    #[error("out of memory")]
     OutOfMemory,
-    #[error("address invalid")]
     AddressInvalid,
-    #[error("address limit exceeded")]
     AddressLimitExceeded,
-    #[error("system resources")]
     SystemResources,
-    #[error("network subsystem")]
     NetworkSubsystem,
-    #[error("unknown {0}")]
     Unknown(u32),
 }
 
-#[derive(thiserror::Error, Debug, Copy, Clone)]
+impl std::error::Error for Status {}
+impl core::fmt::Display for Status {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            Self::Unexpected => f.write_str("unexpected"),
+            Self::OutOfMemory => f.write_str("out of memory"),
+            Self::AddressInvalid => f.write_str("address invalid"),
+            Self::AddressLimitExceeded => f.write_str("address limit exceeded"),
+            Self::SystemResources => f.write_str("system resources"),
+            Self::NetworkSubsystem => f.write_str("network subsystem"),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 #[non_exhaustive]
 pub enum PacketStatus {
-    #[error("too much data")]
     TooMuchData,
-    #[error("client evicted")]
     ClientEvicted,
-    #[error("client release too low")]
     ClientReleaseTooLow,
-    #[error("client release too high")]
     ClientReleaseTooHigh,
-    #[error("client shutdown")]
     ClientShutdown,
-    #[error("invalid operation")]
     InvalidOperation,
-    #[error("invalid data size")]
     InvalidDataSize,
-    #[error("unknown {0}")]
     Unknown(u32),
 }
 
-#[derive(thiserror::Error, Debug, Copy, Clone)]
-#[error("not found")]
+impl std::error::Error for PacketStatus {}
+impl core::fmt::Display for PacketStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            Self::TooMuchData => f.write_str("too much data"),
+            Self::ClientEvicted => f.write_str("client evicted"),
+            Self::ClientReleaseTooLow => f.write_str("client release too low"),
+            Self::ClientReleaseTooHigh => f.write_str("client release too high"),
+            Self::ClientShutdown => f.write_str("client shutdown"),
+            Self::InvalidOperation => f.write_str("invalid operation"),
+            Self::InvalidDataSize => f.write_str("invalid data size"),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub struct NotFound;
+
+impl std::error::Error for NotFound {}
+impl core::fmt::Display for NotFound {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.write_str("not found")
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct Reserved<const N: usize>([u8; N]);
